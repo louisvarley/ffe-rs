@@ -1,0 +1,26 @@
+﻿# Git LFS: the upscale pack is the only large binary we accept in git.
+# See README.md for the workflow.
+upscaled.bin filter=lfs diff=lfs merge=lfs -text
+
+# Text files: normalise to LF in the repository, native on checkout.
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+LICENSE text eol=lf
+ci/*.py text eol=lf
+*.json text eol=lf
+*.ron text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.py text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+# Binary formats that may legitimately be generated/tested, never game assets.
+*.png binary
+*.zip binary
+*.glb binary
+*.wav binary
+*.mid binary

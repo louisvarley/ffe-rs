@@ -1,0 +1,13 @@
+# LICENSE — PLACEHOLDER, NOT A LICENCE
+
+Copyright (c) 2026 [PROJECT OWNER: INSERT NAME / ORGANISATION]. All rights reserved.
+
+**This file is intentionally a placeholder. It does not grant any licence.**
+
+The project owner must choose and insert the actual licence text before distributing the Rust code publicly. No licence has been selected by the AI. Until this placeholder is replaced by the owner:
+
+- do not assume permission to copy, modify, redistribute, sublicense or sell the Rust code in this repository;
+- the original game, its data and the unlicensed reverse-engineering reference are **not** covered by this file and remain the property of their respective rights-holders;
+- `upscaled.bin`, if present, is derived from original art and is subject to the rights-holder's terms (see `docs/LEGAL.md`).
+
+Suggested next step for the owner: choose a licence compatible with your goals (for example, a permissive licence for the Rust code only, with a clear statement that it does not cover the game or reference source), replace this file, and update `README.md`/`docs/LEGAL.md`. Do not use a licence that purports to cover Frontier Developments' game or the FFED3D reference.

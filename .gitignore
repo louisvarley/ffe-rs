@@ -1,0 +1,85 @@
+# ---------------------------------------------------------------------------
+# Player-supplied game files and unlicensed reference source — NEVER commit.
+# ---------------------------------------------------------------------------
+/game/
+/legacy/
+legacy/Elite 3/
+legacy/Elite3/
+legacy/ffed3d/
+legacy/ffed3d-master/
+
+# Converted original content and working art.
+/data.bin
+/to-be-upscaled/
+/upscaled/
+/extracted/
+*upscaled/working/
+*.ffe-cache
+
+# The upscale pack itself IS tracked (Git LFS). Do not ignore upscaled.bin.
+# upscaled.bin is intentionally absent from this ignore list.
+
+# ---------------------------------------------------------------------------
+# Build and tool output.
+# ---------------------------------------------------------------------------
+/target/
+**/target/
+/build/
+**/build/
+*.pdb
+*.ilk
+*.exp
+*.obj
+*.o
+*.lib
+*.dll
+*.exe
+*.dSYM/
+.cache/
+.direnv/
+
+# ---------------------------------------------------------------------------
+# Tests, captures and derived frames (never commit frames/screenshots).
+# ---------------------------------------------------------------------------
+/tests/frames/
+/tests/screenshots/
+/tests/golden/frames/
+/tests/golden/screenshots/
+/frames/
+/screenshots/
+/shots/
+*.bmp
+*.tga
+*.dds
+*.raw
+*.hmp
+*.sav
+*.sve
+*.fs
+frame_*.png
+shot_*.png
+screenshot*.png
+classic_*.png
+enhanced_*.png
+baseline_*.png
+comparison_*.png
+
+# Local trace dumps (hashes/numeric dumps under tests/golden are allowed).
+/traces/
+*.trace
+*.trace.gz
+
+# ---------------------------------------------------------------------------
+# Editor / OS / local config.
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+.env
+.env.*
+ffe-rs.toml.local
+*.log
