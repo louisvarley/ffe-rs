@@ -804,14 +804,20 @@ fn execute_inner(
             // variable count (F1473). Cached vertices are not invalidated either way.
             30 => {
                 if code == 0x801e {
-                    return Err(format!("Light-point command at {offset:#x} is not ported."));
-                }
-                if code & 0x8000 == 0 {
+                    // F1769 loops over the count in global word 4 (+0xa4); each point
+                    // needs the original DATA_007820..7828 tables, not imported yet.
+                    if working.globals[4] != 0 {
+                        return Err(format!(
+                            "Light points at {offset:#x} need the original point tables."
+                        ));
+                    }
+                } else if code & 0x8000 == 0 {
                     return Err(format!(
                         "Vertex base offset command {code:#06x} at {offset:#x} is not ported."
                     ));
+                } else {
+                    working.matrix = working.basis;
                 }
-                working.matrix = working.basis;
                 Some(command.size as i32)
             }
             31 => {

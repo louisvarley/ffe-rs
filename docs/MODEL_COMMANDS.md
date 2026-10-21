@@ -42,7 +42,7 @@ explicit unsupported-command error.
 | 27 | `F1748` | coloured child-model call (via `F1750`) | 8 or 12 | yes | yes | v0.24: model `code >> 5`, byte +0 vertex, word +0 frame, byte +3 scale (signed high nibble, or local `>> 4` with bit 3), word +4 child material; extras at +6 when byte 1 bit 7. Operand event; child not executed. |
 | 28 | `F1741` | `0x9c` matrix transformation | 4 (6 for `0xc000`) | yes | yes | `0x8000` local rotation (v0.6); `0x0000`/`0x4000` base-relative F1739 + optional F1743 verified v0.16 (6,048 cases); `0xc000` (v0.33): basis from object vertices +2, +3, +4 (A, B, C): z = norm(B − A), x = norm((C − A) × z), y = z × x, norm through F1466/F1502/F1523 |
 | 29 | `F1758` | arithmetic (second entry) | 4 | yes | yes | same helper as 13 |
-| 30 | `F1767` | 2 | — | bit 15 only | no | bit 15: vertex frame := basis (F1768); `0x801e` light points (F1769) and the variable vertex-base offset (F1473) are errors |
+| 30 | `F1767` | 2 | — | bit 15 only | no | bit 15: vertex frame := basis (F1768); `0x801e` light points (F1769) run with a zero count in global word 4 (v0.35) and are errors otherwise (point tables not imported); the variable vertex-base offset (F1473) is an error |
 | 31 | `F1874` | curved surface (via `F1876`) | 16 + 16n | yes | yes | v0.25: word +0, origin vertex +2 (view), axis vertices +3..+5 (object), words +6/+8/+10, then 16-byte entries to a zero word (F1823). Operand event; F1876 rendering not ported. |
 
 ## Verified so far
@@ -90,14 +90,13 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.34: **437 of 466** execute, and all that the original completes match
+v0.35: **438 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
 | decode: model 89 release program runs past the JJFFE extent (data differs) | 1 |
 | vertices: vertex opcode 0xd (13) | 2 |
-| execute: opcode 30 light points (`0x801e`) | 1 |
 | other vertex/normal/reference validation errors | ~24 |
 
 Some declaration blocks hold data after the final terminator; the decoder takes

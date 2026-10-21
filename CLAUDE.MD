@@ -34,8 +34,8 @@ command order. V0.21 adds complex polygons (opcode 5) and v0.22 jittered vertice
 (opcode 21), v0.27 trailing declaration data, v0.28 opcodes 17/24/25, v0.29 curve vertices
 (0x15/0x16) and a whole-table vertex oracle, v0.30 opcode 30 frame restore, v0.31
 opcode 22 curves, v0.32 offset curve vertices, v0.33 vertex-defined basis (opcode 28
-`0xc000`), v0.34 screen labels (opcode 18): 437 models now execute and all 432
-the original completes match.
+`0xc000`), v0.34 screen labels (opcode 18), v0.35 empty light points: 438 models now
+execute and all 433 the original completes match.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.

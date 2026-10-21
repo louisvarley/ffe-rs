@@ -1070,7 +1070,20 @@ fn opcode_30_restores_the_vertex_frame_from_the_basis() {
     .unwrap();
     assert_eq!(context.matrix, [3; 9]);
     assert_eq!(context.basis, [3; 9]);
-    // Light points (0x801e) and the variable vertex-base offset are not ported.
+    // Light points (0x801e) with a zero count (global word 4) change nothing.
+    let before = context.clone();
+    execute(
+        &bytes(&[0x801e, 0]),
+        8,
+        &mut context,
+        &visibility(),
+        None,
+        8,
+    )
+    .unwrap();
+    assert_eq!(context, before);
+    // A non-zero count needs the point tables; the vertex-base offset is not ported.
+    context.globals[4] = 1;
     let before = context.clone();
     for code in [0x801e, 0x003e] {
         assert!(execute(&bytes(&[code, 0]), 8, &mut context, &visibility(), None, 8).is_err());

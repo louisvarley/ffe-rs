@@ -4,6 +4,17 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Opcode 30 light points with no points (v0.35)
+
+F1769 (opcode 30 `0x801e`) loops over the count in global word 4 (+0xa4 of the
++0x14c block). Each point index i takes entry byte `+0xa6 + 2i` (low nibble) to
+select DATA_007820/7821/7828 materials for an F1699 point at vertex 2i, an
+optional F1703 line 2i..2i+1 (global word 1 bit 5), and an F1764 label (string
+0x8400, pick id from global dword 2 with i in its top byte) when vertex 0's view
+z is at most DATA_007822[b]. Those tables are not imported, so a non-zero count
+is an explicit error; a zero count returns at once, as the original does.
+Census: **438 of 466** execute; 433 compared, 0 mismatched (trace unchanged).
+
 ## 2026-10-21 — Opcode 18 screen labels (v0.34)
 
 F1763 (opcode 18, four bytes) calls F1764 with vertex `code >> 5`, the word at
