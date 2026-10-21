@@ -4,6 +4,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Opcode 30 vertex-frame restore (v0.30)
+
+F1767 (opcode 30, two bytes) has three forms. With bit 15 set it calls F1768 with
+`(i16)code >> 4`: `0x801e` draws the object's light points (F1769, through the
+point/line emitters and F1764), and every other value copies the current basis
+(+0x9c) over the vertex frame (+0x14), nine dwords. Without bit 15 it advances
+the vertex record base (+0x150) by 6·n and the vertex cache base by 72·n, where
+n = F1473(byte `code >> 5`). Nine models use `0xc01e` (restore), one uses
+`0x801e`; no executed path reaches the offset form.
+
+The restore is ported; already cached vertices stay cached, as in the original.
+The light-point and offset forms are explicit errors (context unchanged).
+Census: **413 of 466** execute; `verify-station-models.py` compares 408 models
+with 0 mismatches (trace `1c46a942…`, Linux LF). One synthetic test added; 171
+`#[test]`, 25 ignored, one Unix-only (145 runnable on Windows).
+
 ## 2026-10-21 — Curve vertices and a whole-table vertex oracle (v0.29)
 
 Vertex opcodes 0x15/0x16 (F1478 -> F1477 with a zero extra parameter) compute a

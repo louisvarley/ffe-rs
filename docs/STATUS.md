@@ -73,13 +73,14 @@ capture produced by two repeat runs of the local reference.
 | v0.27 trailing declaration data | `model_commands::decode` (longest self-contained prefix), `Program::trailing` | `model_commands.rs` (+1) | `verify-station-models.py` | — | 368 of 466 models execute; all the original completes match |
 | v0.28 opcodes 17/24/25 | `Beam`, `Chain`, `VertexContext::direction`, opcode 25 basis reset | `model_execute.rs` (+1) | `verify-station-models.py` | — | 403 of 466 models execute; all the original completes match; opcode 25 rotation needs the sqrt table |
 | v0.29 curve vertices; vertex oracle | vertex opcodes 0x15/0x16 in `model::ObjectCache` | `model.rs` (+1), `vertex_program_reference.rs` (1, ignored) | `verify-vertex-programs.py` (445 slots) | `b3ed1b7d…` (Linux LF) | every supported vertex program matches; model 361 data differs between JJFFE and floppy 1.02; 405 of 466 models execute |
+| v0.30 opcode 30 frame restore | `model_execute` opcode 30 (bit 15) | `model_execute.rs` (+1) | `verify-station-models.py` (408 models) | `1c46a942…` (Linux LF) | 413 of 466 models execute; all 408 the original completes match; light points and vertex-base offsets remain errors |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 170 `#[test]` functions total; 25 are
+- `cargo test --workspace --locked` passes. 171 `#[test]` functions total; 25 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **144 runnable synthetic tests** (145 on Linux).
-- `verify-station-models.py`: all 400 models that both sides complete match the
+  that is **145 runnable synthetic tests** (146 on Linux).
+- `verify-station-models.py`: all 408 models that both sides complete match the
   original command flow and final state; `verify-vertex-programs.py`: all 445
   comparable vertex programs match.
 - `ffe-tools model-census --game game` (floppy 1.02): 180 of 466 slots execute
@@ -104,8 +105,8 @@ Facts verified on 2026-10-21:
 Stations are verified for command flow (v0.17) and face draw queues (v0.18);
 the v0.19 census ranks what blocks the other models. Next, in order:
 
-1. The remaining census blockers (see `docs/MODEL_COMMANDS.md`): opcodes 30,
-   22, 18, vertex opcodes 3/4, 0xd and 23/24; import the F1467 square-root table
+1. The remaining census blockers (see `docs/MODEL_COMMANDS.md`): opcodes 22,
+   28 (remaining forms), 18, 30 light points, vertex opcodes 3/4, 0xd and 23/24; import the F1467 square-root table
    (cache v7) for opcode 25 rotations.
 2. Extend the queue oracle (`--station-queue`) to any model so nested blocks,
    polygons and their sort order are compared with the original queue.

@@ -272,7 +272,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             6 => crate::model_depth::decode(&bytes[offset..])?.1,
             9 => 8,
             17 => 14,
-            25 => 2,
+            25 | 30 => 2,
             // Material, size, then 2-byte pairs through the first one holding 0x7f.
             24 => {
                 let mut end = offset + 6;

@@ -684,6 +684,22 @@ fn execute_inner(
                 }
                 Some(command.size as i32)
             }
+            // F1767: bit 15 set -> F1768, which restores the vertex frame (+0x14) from
+            // the current basis (+0x9c); `0x801e` instead draws the object's light
+            // points (F1769). Otherwise the vertex record and cache bases advance by a
+            // variable count (F1473). Cached vertices are not invalidated either way.
+            30 => {
+                if code == 0x801e {
+                    return Err(format!("Light-point command at {offset:#x} is not ported."));
+                }
+                if code & 0x8000 == 0 {
+                    return Err(format!(
+                        "Vertex base offset command {code:#06x} at {offset:#x} is not ported."
+                    ));
+                }
+                working.matrix = working.basis;
+                Some(command.size as i32)
+            }
             31 => {
                 for surface in program.surfaces.iter().filter(|s| s.offset == offset) {
                     // F1874 resolves the origin (view) and three axis vertices (object).

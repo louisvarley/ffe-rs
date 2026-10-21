@@ -1050,3 +1050,30 @@ fn beams_chains_and_direction_alignment() {
         assert_eq!(aimed, before);
     }
 }
+
+#[test]
+fn opcode_30_restores_the_vertex_frame_from_the_basis() {
+    // Bit 15: F1768 copies the basis (+0x9c) over the vertex frame (+0x14).
+    let mut context = VertexContext {
+        matrix: [7; 9],
+        basis: [3; 9],
+        ..Default::default()
+    };
+    execute(
+        &bytes(&[0xc01e, 0]),
+        8,
+        &mut context,
+        &visibility(),
+        None,
+        8,
+    )
+    .unwrap();
+    assert_eq!(context.matrix, [3; 9]);
+    assert_eq!(context.basis, [3; 9]);
+    // Light points (0x801e) and the variable vertex-base offset are not ported.
+    let before = context.clone();
+    for code in [0x801e, 0x003e] {
+        assert!(execute(&bytes(&[code, 0]), 8, &mut context, &visibility(), None, 8).is_err());
+        assert_eq!(context, before);
+    }
+}
