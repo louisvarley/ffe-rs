@@ -14,6 +14,7 @@ legacy/ffed3d-master/
 # Local export bundle: contains game data and reference binaries. NEVER commit.
 /export.zip
 /export.zip.tmp
+/EXPORT_MANIFEST.txt
 
 # Converted original content and working art.
 /data.bin
