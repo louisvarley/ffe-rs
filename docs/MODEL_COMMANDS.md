@@ -86,6 +86,33 @@ explicit unsupported-command error.
   vertex-a key, interleaved with depth groups. Points/lines queueing, glyph/child
   execution and pixels are not covered.
 
+## Coverage across all models (v0.19 census)
+
+`ffe-tools model-census --game <dir>` runs every model table slot through the
+native importer, decoder and executor with synthetic inputs. Floppy 1.02:
+
+| Blocker (floppy 1.02, first failing stage) | Models |
+|---|---:|
+| decode: opcode 5 (complex polygon) | 69 |
+| vertices: vertex opcode 0x7 | 59 |
+| decode: opcode 31 | 39 |
+| decode: opcode 27 | 26 |
+| vertices: vertex opcode 0x15 | 13 |
+| decode: opcodes 17 / 24 / 25 | 10 each |
+| decode: opcode 22 (spline) | 7 |
+| decode: opcode 30 | 5 |
+| decode: stream lacks a final terminator | 5 |
+| other vertex-record errors | 10 |
+| decode: opcode 21 (nested block) | 3 |
+| normals: invalid count | 3 |
+| decode: out-of-range vertex in face/line/submodel | 7 |
+| decode: opcodes 0 (non-zero word), 4 (flags), 9, 18 | 7 |
+| vertices: vertex opcode 0xd | 2 |
+| null table entry (slot 149) | 1 |
+| **Executed to completion** | **180 of 466** |
+
+Use it to choose the next opcode; re-run it after each one.
+
 ## Next: executing glyphs and children
 
 Text and child-model calls are operand events (v0.14). Running them needs, in

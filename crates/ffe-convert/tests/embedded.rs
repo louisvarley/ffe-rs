@@ -1,6 +1,6 @@
 use ffe_convert::embedded::{
     decode_bitmaps, decode_font, decode_model_commands, decode_model_normals,
-    decode_model_vertices, decode_sine_table, BitmapLayout,
+    decode_model_vertices, decode_sine_table, model_command_bytes, BitmapLayout,
 };
 
 #[test]
@@ -10,7 +10,10 @@ fn command_import_uses_descriptor_pointer_and_verified_extent_not_first_return()
     put32(&mut bytes, 0x108, 0x1e00);
     put32(&mut bytes, 0x200 + 74 * 4, 0x401600);
     put32(&mut bytes, 0x800, 0x401800);
-    put32(&mut bytes, 0x808, 6);
+    // Model 74's declared shape: 54 vertices, 18 normals, scale 13.
+    put32(&mut bytes, 0x808, 54);
+    put32(&mut bytes, 0x810, 18);
+    put32(&mut bytes, 0x814, 13);
     bytes[0xa02..0xa0a].copy_from_slice(&[3, 0, 0x23, 0x01, 0, 2, 4, 3]);
     let commands = decode_model_commands(&bytes, 0x1000, 74).unwrap();
     assert_eq!(
@@ -20,10 +23,10 @@ fn command_import_uses_descriptor_pointer_and_verified_extent_not_first_return()
             commands.vertex_count,
             commands.bytes.len()
         ),
-        (0x800, 0xa00, 6, 516)
+        (0x800, 0xa00, 54, 516)
     );
     assert_eq!(
-        ffe_core::model_commands::decode(&commands.bytes, 6)
+        ffe_core::model_commands::decode(&commands.bytes, 54)
             .unwrap()
             .faces
             .len(),
@@ -34,6 +37,9 @@ fn command_import_uses_descriptor_pointer_and_verified_extent_not_first_return()
         (0x800, 0),
         (0x800, 0x402fff),
         (0x808, 129),
+        // A descriptor that differs from the declaration cannot borrow its extent.
+        (0x814, 12),
+        (0x810, 20),
     ] {
         let mut bad = bytes.clone();
         put32(&mut bad, offset, value);
@@ -44,6 +50,29 @@ fn command_import_uses_descriptor_pointer_and_verified_extent_not_first_return()
     assert!(decode_model_commands(&bytes, 0x1000, 73).is_err());
     bytes[0xa00] = 5;
     assert!(decode_model_commands(&bytes, 0x1000, 74).is_err());
+}
+
+#[test]
+fn null_table_entries_and_implicit_only_normal_programs() {
+    let mut bytes = executable();
+    // Slot 149 is declared as a null pointer in the original table.
+    assert!(model_command_bytes(&bytes, 0x1000, 149)
+        .unwrap_err()
+        .contains("null table entry"));
+    assert!(model_command_bytes(&bytes, 0x1000, 466).is_err());
+    // Two normals means only the implicit pair; the original leaves the pointer null.
+    put32(&mut bytes, 0x200 + 74 * 4, 0x401600);
+    put32(&mut bytes, 0x804, 0x401780);
+    put32(&mut bytes, 0x808, 2);
+    put32(&mut bytes, 0x80c, 0);
+    put32(&mut bytes, 0x810, 2);
+    put32(&mut bytes, 0x814, 13);
+    bytes[0x980..0x986].copy_from_slice(&[1, 0, 2, 3, 4, 0]);
+    let normals = decode_model_normals(&bytes, 0x1000, 74).unwrap();
+    assert_eq!((normals.normal_count, normals.bytes.len()), (2, 0));
+    // A null pointer with explicit records is still rejected.
+    put32(&mut bytes, 0x810, 4);
+    assert!(decode_model_normals(&bytes, 0x1000, 74).is_err());
 }
 
 #[test]

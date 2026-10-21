@@ -4,6 +4,53 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Model census across the whole table (v0.19)
+
+The original model table (`DATA_004681`, "Ship object table") has **466 slots**,
+not 465: slot 149 is declared as four zero bytes (a null entry), which a
+reference-only parse skips, shifting every later index. The floppy 1.02
+executable's table matches the JJFFE declarations slot for slot once that is
+read as raw 4-byte slots: every non-null descriptor's vertex count, normal count
+and scale agree.
+
+`tools/reference/model-extents.py` generates `ffe-convert::model_extents`
+(committed): each slot's physical command-program extent (programs have no
+length field) and its declared (vertices, normals, scale). These are layout
+numbers only; stations still give 516 and 758 bytes. `model_command_bytes`
+imports any slot's raw program and refuses an extent when the executable's
+descriptor differs from the declaration; `decode_model_commands` adds the
+decoder check. Normal programs with only the implicit pair (count 2) may have a
+null pointer, as the original leaves it; they now import as empty. The cache
+build is byte-identical (SHA-256 prefix `173d9f93…`).
+
+`ffe-tools model-census` reports, read-only, how far each slot gets through
+native import, decode and `execute_live` (identity frame, position z 2000,
+every normal visible; glyphs/children recorded only). On floppy 1.02:
+
+| Blocker (floppy 1.02, first failing stage) | Models |
+|---|---:|
+| decode: opcode 5 (complex polygon) | 69 |
+| vertices: vertex opcode 0x7 | 59 |
+| decode: opcode 31 | 39 |
+| decode: opcode 27 | 26 |
+| vertices: vertex opcode 0x15 | 13 |
+| decode: opcodes 17 / 24 / 25 | 10 each |
+| decode: opcode 22 (spline) | 7 |
+| decode: opcode 30 | 5 |
+| decode: stream lacks a final terminator | 5 |
+| other vertex-record errors | 10 |
+| decode: opcode 21 (nested block) | 3 |
+| normals: invalid count | 3 |
+| decode: out-of-range vertex in face/line/submodel | 7 |
+| decode: opcodes 0 (non-zero word), 4 (flags), 9, 18 | 7 |
+| vertices: vertex opcode 0xd | 2 |
+| null table entry (slot 149) | 1 |
+| **Executed to completion** | **180 of 466** |
+
+This is a coverage map, not verification: only stations 74/75 are compared
+with the original. The CD 1.01 executable was not available in this session;
+its table RVA differs (0x0d0cf8) and should be checked with the same census.
+
 ## 2026-10-21 — Face draw queue (v0.18)
 
 The original queues faces inside its raster path. F1708 (triangle) and F1712

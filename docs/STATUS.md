@@ -62,12 +62,15 @@ capture produced by two repeat runs of the local reference.
 | v0.16 base transforms; stations complete | `model_math::rotate_command` (base forms), `VertexContext::{basis, base_handedness, handedness}`, top-level group close in `execute_live` | `model_math.rs`, `model_execute.rs` (updated), `base_transform_reference.rs` (1, ignored) | `verify-base-transform.py` (6,048 cases, 8 tamper fields) | `c9a87a6d023bacf3900dc0587285ac7522abc6353a80b9b6b62db43088c4a29c` (CRLF; Linux LF `03070a9b…`) | F1741/F1739; real stations 74/75 run to completion on synthetic inputs, not yet compared whole-program |
 | v0.17 whole-station oracle | (no new core code) | `station_reference.rs` (1, ignored) | `verify-station.py` (models 74/75, 10 tamper fields) | `0ea8f4a7b9df2616dc6537a032b8527ab3ca0fde89e63856c260d23392f722b2` (CRLF; Linux LF `b9e3c831…`) | real station streams through original F1772; command-order events and final state match; render order/glyphs/children/pixels not covered |
 | v0.18 face draw queue | `model_execute` (face queue rule, `Execution.queue`, `InstanceContext::textures`) | `model_execute.rs` (+1), `station_reference.rs` (+1, ignored) | `verify-station-queue.py` (12 cases, 7 tamper fields) | `35e55a26689eb1e520dffa6b4c36f4a25dff36066d1b4c9ba969c7345425fb56` (CRLF; Linux LF `350b6d2c…`) | F1708/F1712/F1709/F1713/F1714 queueing; faces in `ordered` now match the original draw order; points/lines not yet |
+| v0.19 model census | `ffe-convert::model_extents` (generated), `model_command_bytes`, `ffe-tools model-census` | `embedded.rs` (+1, updated) | descriptor shapes cross-checked for all 466 slots (floppy 1.02) | — | 180 of 466 models execute natively (synthetic inputs, unverified); ranked blockers in `docs/MODEL_COMMANDS.md` |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 156 `#[test]` functions total; 22 are
+- `cargo test --workspace --locked` passes. 157 `#[test]` functions total; 22 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **133 runnable synthetic tests** (134 on Linux).
+  that is **134 runnable synthetic tests** (135 on Linux).
+- `ffe-tools model-census --game game` (floppy 1.02): 180 of 466 slots execute
+  natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
 - `tools/reference/build-linux.sh` builds `jjffe-smoke`/`jjffe-commands` under
   `.cache/jjffe-reference-linux/`; their traces, hashed with CRLF endings, match
   every Windows hash in the table above.
@@ -85,20 +88,22 @@ Facts verified on 2026-10-21:
 
 ## Next task
 
-Face command flow (v0.17) and face draw queues (v0.18) match the original for
-both stations. Next, in order:
+Stations are verified for command flow (v0.17) and face draw queues (v0.18);
+the v0.19 census ranks what blocks the other models. Next, in order:
 
-1. **Point and line queueing**: F1700 (projected discs with a radius from the
-   F1474 operand and instance scale) and F1704; probe their allocations the same
-   way and port them.
-2. **Primitive colour**: the F1693/F1691 colour each queued face carries
-   (instance colour, normal lighting, the runtime texture colour table for
-   textured faces) and the final DPal32to16 palette mapping.
-3. **Rasterisation** of the queued records (flat/textured triangles and quads,
-   clipped polygons) for a first original-pixel station in the F4 lab, behind an
-   owner-approved switch.
-4. **Vertex-defined basis** (opcode 28 `0xc000`) and remaining opcodes as real
-   models reach them; **glyph and child execution** (cache v7).
+1. **Opcode 5 (complex polygon, F1721)** — the largest decode blocker (69
+   models). Probe its operands and record size, port it, and extend the station
+   queue oracle with a model that uses it.
+2. **Vertex opcode 0x7** (59 models) and **0x15** (13): extend
+   `ffe-core::model` with oracle cases like v0.3's.
+3. **Opcodes 31 and 27** (39 and 26 models), then 17/24/25/22.
+4. Generalise the station oracles (`--station`, `--station-queue`) to any model
+   index so each newly unblocked model can be compared with the original.
+5. Primitive colour, point/line queueing (F1700/F1704), rasterisation, and
+   glyph/child execution as before.
+
+Run the census after each step; check the CD 1.01 executable with it when
+available.
 
 ## Known stale spots
 

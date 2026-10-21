@@ -72,32 +72,56 @@ pub struct EmbeddedModelCommands {
     pub bytes: Vec<u8>,
 }
 
-pub fn decode_model_commands(
+/// A model's raw command program, bounded by its declared extent, without decoding.
+/// The descriptor's vertex count, normal count and scale must equal the declarations
+/// the extents came from, so a differently ordered table cannot borrow an extent.
+pub fn model_command_bytes(
     bytes: &[u8],
     table_rva: u32,
     index: u32,
 ) -> Result<EmbeddedModelCommands, String> {
-    // Descriptor programs have no length field. These physical extents are verified for
-    // both supported, exact-hash releases; never infer length from an early branch return.
-    let size = match index {
-        74 => 516,
-        75 => 758,
-        _ => return Err("Only station command programs 74/75 have verified extents.".to_owned()),
-    };
+    // Descriptor programs have no length field; never infer length from a return.
+    let size = *crate::model_extents::COMMAND_EXTENTS
+        .get(index as usize)
+        .ok_or("Model index is outside the declared model table.")? as usize;
+    if size == 0 {
+        return Err(format!("Model {index} is a null table entry."));
+    }
     let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
     let vertex_count = dword(bytes, descriptor_offset + 8)?;
+    let shape = (
+        vertex_count,
+        dword(bytes, descriptor_offset + 16)?,
+        dword(bytes, descriptor_offset + 20)?,
+    );
+    let (vertices, normals, scale) = crate::model_extents::DESCRIPTOR_SHAPES[index as usize];
+    if shape != (u32::from(vertices), u32::from(normals), u32::from(scale)) {
+        return Err(format!(
+            "Model {index} descriptor {shape:?} differs from its declaration; extent not trusted."
+        ));
+    }
     let command_rva = dword(bytes, descriptor_offset)?
         .checked_sub(section.image_base)
         .ok_or("Command pointer precedes image base")?;
     let source_offset = section.offset(command_rva, size)?;
     let records = range(bytes, source_offset, size)?;
-    ffe_core::model_commands::decode(records, vertex_count)?;
     Ok(EmbeddedModelCommands {
         descriptor_offset,
         source_offset,
         vertex_count,
         bytes: records.to_vec(),
     })
+}
+
+/// [`model_command_bytes`] that also requires every physical record to decode.
+pub fn decode_model_commands(
+    bytes: &[u8],
+    table_rva: u32,
+    index: u32,
+) -> Result<EmbeddedModelCommands, String> {
+    let commands = model_command_bytes(bytes, table_rva, index)?;
+    ffe_core::model_commands::decode(&commands.bytes, commands.vertex_count)?;
+    Ok(commands)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -121,16 +145,25 @@ pub fn decode_model_normals(
     table_rva: u32,
     index: u32,
 ) -> Result<EmbeddedModelNormals, String> {
-    if !matches!(index, 74 | 75) {
-        return Err("Only station normal programs 74/75 are supported.".to_owned());
-    }
     let vertices = decode_model_vertices(bytes, table_rva, index)?;
     let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
     let normal_count = dword(bytes, descriptor_offset + 16)?;
     if !(2..=256).contains(&normal_count) || normal_count % 2 != 0 {
         return Err("Invalid bounded model normal count.".to_owned());
     }
-    let rva = dword(bytes, descriptor_offset + 12)?
+    let pointer = dword(bytes, descriptor_offset + 12)?;
+    if normal_count == 2 && pointer == 0 {
+        // Only the implicit pair: no explicit records, and the original leaves the
+        // pointer null.
+        return Ok(EmbeddedModelNormals {
+            descriptor_offset,
+            source_offset: 0,
+            vertex_count: vertices.vertex_count,
+            normal_count,
+            bytes: Vec::new(),
+        });
+    }
+    let rva = pointer
         .checked_sub(section.image_base)
         .ok_or("Normal pointer precedes image base")?;
     let source_offset = section.offset(rva, (normal_count as usize / 2 - 1) * 6)?;

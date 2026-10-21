@@ -5,6 +5,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 pub mod cache;
+pub mod census;
 pub mod external;
 pub mod reference;
 

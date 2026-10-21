@@ -10,6 +10,15 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+/// Model table and sine table RVAs for an exact-hash release.
+pub(crate) fn model_layout(profile: &str) -> Result<(u32, u32), String> {
+    match profile {
+        "ffe-floppy-1.02-en" => Ok((0x0d0cfc, 0x106390)),
+        "ffe-cd-1.01-en" => Ok((0x0d0cf8, 0x105334)),
+        _ => Err("no verified model layout for this source profile".to_owned()),
+    }
+}
+
 pub fn inspect_data(path: &Path) -> Result<Manifest, String> {
     let bytes = read_bounded(path, ffe_content::MAX_CACHE_BYTES as u64)?;
     Ok(ffe_content::read(&bytes)?.into_manifest())
@@ -56,16 +65,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         "ffe-cd-1.01-en" => 0x1003d0,
         _ => return Err("no verified font layout for this source profile".to_owned()),
     };
-    let model_table_rva = match profile.id {
-        "ffe-floppy-1.02-en" => 0x0d0cfc,
-        "ffe-cd-1.01-en" => 0x0d0cf8,
-        _ => return Err("no verified model layout for this source profile".to_owned()),
-    };
-    let sine_table_rva = match profile.id {
-        "ffe-floppy-1.02-en" => 0x106390,
-        "ffe-cd-1.01-en" => 0x105334,
-        _ => return Err("no verified sine table layout for this source profile".to_owned()),
-    };
+    let (model_table_rva, sine_table_rva) = model_layout(profile.id)?;
     let mut assets = Vec::new();
     for record in &inspection.files {
         if record.path == "FIRSTENC.EXE" {

@@ -1,6 +1,7 @@
 use std::io::Write;
 
 pub mod embedded;
+pub mod model_extents;
 
 const MAX_DIMENSION: u32 = 8192;
 const MAX_PIXELS: u64 = 16 * 1024 * 1024;
