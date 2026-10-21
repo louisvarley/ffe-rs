@@ -265,6 +265,9 @@ high byte 255 continues, any other high byte terminates the list. Mode 7 uses:
   consuming one word.
 
 Key scale is instance +0x130; operand scale is +0x148. Do not conflate them.
+Likewise the instance frame at +0x14 (`VertexContext::matrix`, used by vertex
+evaluation) is distinct from the current basis at +0x9c
+(`VertexContext::basis`, changed by opcode 28 and read by child/text frames).
 Resolution accepts explicit already evaluated view-space points. Missing or
 negative/external indices fail; this is not the original lazy vertex resolver.
 The original handler comparison primes its vertex cache with synthetic points

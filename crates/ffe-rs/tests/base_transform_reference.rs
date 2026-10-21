@@ -72,8 +72,8 @@ fn executed_reference_base_transforms() {
         );
         assert_eq!(case.advance, 2, "record is 4 bytes");
         let mut context = VertexContext {
-            matrix: std::array::from_fn(|i| (0xdead_0000u32 + i as u32) as i32),
-            base: BASES[base],
+            basis: std::array::from_fn(|i| (0xdead_0000u32 + i as u32) as i32),
+            matrix: BASES[base],
             base_handedness: HANDS[hand],
             ..Default::default()
         };
@@ -85,7 +85,7 @@ fn executed_reference_base_transforms() {
             .rotate_command(&mut context, code, operand as i16)
             .unwrap();
         let label = format!("code {code:#06x} operand {operand:#06x} base {base} hand {hand}");
-        assert_eq!(context.matrix, case.matrix, "{label}");
+        assert_eq!(context.basis, case.matrix, "{label}");
         assert_eq!(context.handedness, case.handedness, "{label}");
     }
 }

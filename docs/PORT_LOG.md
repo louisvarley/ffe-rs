@@ -4,6 +4,26 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Correction: vertex frame vs current basis
+
+`VertexContext::matrix` had stood for two different instance fields. Vertex
+evaluation (F1478 via F1671) multiplies by the instance frame at **+0x14**;
+the rotation commands (F1742/F1744, opcode 28) change the current basis at
+**+0x9c**, which child-model and text frames (F1740) read and vertex
+evaluation never does. Each earlier oracle exercised only one side (model
+vertices set +0x14; execution/rotation-operand oracles fingerprinted +0x9c), so
+they all passed while `execute`/`execute_live` would have moved a model's own
+vertices after a rotation command.
+
+Fix: `matrix` is now documented as +0x14 (vertex evaluation, and the source of
+opcode 28's base forms); a new `basis` field holds +0x9c (rotation target,
+default identity). The v0.16 `base` field is folded into `matrix`. Rotation
+commands and F1739 now write `basis`; vertex evaluation still reads `matrix`.
+The execution, rotation-operand, base-transform, model-vertex and live-instance
+comparisons were rerun against the original and pass unchanged; their trace
+hashes are unaffected (the captures did not change). Real stations still
+complete with the same primitive counts.
+
 ## 2026-10-21 — Base-relative transforms; stations run to completion (v0.16)
 
 **Opcode 28 base forms.** F1741 has three forms by `code & 0xc000`: `0x8000`
@@ -11,12 +31,13 @@ local-basis rotation (v0.6), `0xc000` vertex-defined basis (6 bytes, still
 unsupported and rejected by the decoder), and `0x0000`/`0x4000`, which both
 stations use (`0x0c3c` at `0x1da` in 74, `0x06bc` at `0x2ec` in 75). The base
 form calls F1739 then, only for a non-zero operand word, F1743 (F1474 angle,
-axis `code >> 5 & 3`). F1739 copies the instance base frame (+0x14) into the
+axis `code >> 5 & 3`). F1739 copies the instance frame (+0x14) into the
 current basis (+0x9c): code bits 7..9 permute the rows (0/6 identity, 1..5 the
 other five; 7 is undefined in the original and errors here), bits 12/11/10
 negate source rows 0/1/2, and the handedness word (+0xf8 in, +0xfc out) is
 complemented for permutations 3..5 and once per negation.
-`VertexContext` gains `base`, `base_handedness` and `handedness`.
+`VertexContext` gains `base_handedness` and `handedness` (and, after the
+correction above, `basis`).
 
 `--base-transform` calls the original F1741 directly for 6,048 cases (two base
 frames, three handedness seeds, both base forms, permutations 0..6, all

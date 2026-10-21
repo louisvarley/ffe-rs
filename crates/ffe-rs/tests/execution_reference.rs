@@ -86,7 +86,7 @@ fn executed_reference_composed_command_programs() {
             normals: &normals,
         };
         let mut context = VertexContext {
-            matrix: IDENTITY,
+            basis: IDENTITY,
             ..Default::default()
         };
         for n in 0..8 {
@@ -110,7 +110,7 @@ fn executed_reference_composed_command_programs() {
                     .iter()
                     .flat_map(|x| x.to_le_bytes()),
             );
-            emitted.extend(event.context.matrix.into_iter().flat_map(i32::to_le_bytes));
+            emitted.extend(event.context.basis.into_iter().flat_map(i32::to_le_bytes));
         }
         assert_eq!(hash(emitted), v.emissions, "emission order/state case {i}");
         assert_eq!(
@@ -119,7 +119,7 @@ fn executed_reference_composed_command_programs() {
             "locals case {i}"
         );
         assert_eq!(
-            hash(context.matrix.into_iter().flat_map(i32::to_le_bytes)),
+            hash(context.basis.into_iter().flat_map(i32::to_le_bytes)),
             v.matrix,
             "matrix case {i}"
         );

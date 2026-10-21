@@ -137,7 +137,7 @@ fn execution_captures_rotated_context_at_face_emission_without_changing_visibili
     let mut context = VertexContext::default();
     context.locals[9] = 12345;
     let mut expected = context.clone();
-    table.rotate(&mut expected.matrix, 1, 12345).unwrap();
+    table.rotate(&mut expected.basis, 1, 12345).unwrap();
     let stream = bytes(&[0x803c, 0xc9, 4, 0x234, 0x0200, 0x0604, 0, 0]);
     let result = execute(&stream, 8, &mut context, &visibility(), Some(&table), 3).unwrap();
     assert_eq!(context, expected);

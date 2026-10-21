@@ -89,18 +89,18 @@ impl SineTable {
                 base_basis(&mut working, code)?;
                 if operand != 0 {
                     let angle = angle_operand(operand, &working);
-                    self.rotate(&mut working.matrix, axis, angle)?;
+                    self.rotate(&mut working.basis, axis, angle)?;
                 }
                 *context = working;
                 return Ok(());
             }
         }
         let angle = angle_operand(operand, context);
-        self.rotate(&mut context.matrix, axis, angle)
+        self.rotate(&mut context.basis, axis, angle)
     }
 }
 
-/// F1739: copy the base frame's rows into a permutation of the current basis rows
+/// F1739: copy the instance frame's rows into a permutation of the current basis rows
 /// (code bits 7..9), negating source rows 0/1/2 on bits 12/11/10. Odd permutations (3..5) and each
 /// negation flip the handedness word; permutation 7 is undefined in the original.
 fn base_basis(context: &mut VertexContext, code: u16) -> Result<(), String> {
@@ -120,8 +120,8 @@ fn base_basis(context: &mut VertexContext, code: u16) -> Result<(), String> {
     for (row, destination) in destinations.into_iter().enumerate() {
         let negate = code & (0x1000 >> row) != 0;
         for component in 0..3 {
-            let value = context.base[row * 3 + component];
-            context.matrix[destination * 3 + component] =
+            let value = context.matrix[row * 3 + component];
+            context.basis[destination * 3 + component] =
                 if negate { value.wrapping_neg() } else { value };
         }
         if negate {

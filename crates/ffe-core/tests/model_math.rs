@@ -22,31 +22,37 @@ fn packed_angles_and_rotation_command_validation_preserve_context_on_error() {
     ] {
         assert_eq!(angle_operand(encoded, &context), expected);
     }
-    let matrix = context.matrix;
+    let matrix = context.basis;
     // Not opcode 28, vertex-defined basis, axis 3 (both forms), undefined permutation 7.
     for code in [0, 0xc01c, 0x801d, 0x807c, 0x007c, 0x039c] {
         assert!(table.rotate_command(&mut context, code, 1).is_err());
-        assert_eq!(context.matrix, matrix);
+        assert_eq!(context.basis, matrix);
         assert_eq!(context.handedness, 0);
     }
     table.rotate_command(&mut context, 0x801c, 0xc8).unwrap();
     let mut expected = matrix;
     table.rotate(&mut expected, 0, -65537).unwrap();
-    assert_eq!(context.matrix, expected);
+    assert_eq!(context.basis, expected);
+    assert_eq!(
+        context.matrix,
+        ffe_core::model::IDENTITY,
+        "vertex frame is untouched"
+    );
     assert_eq!(context.locals[8], -65537);
     assert_eq!(context.globals[0], 12345);
     assert!(ffe_core::model_commands::decode(&[0x1c, 0x80, 0xc8, 0, 0, 0], 2).is_ok());
 
     // Base-relative form: permutation 1 with source row 0 negated, no rotation.
     let mut based = VertexContext {
-        base: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        matrix: [1, 2, 3, 4, 5, 6, 7, 8, 9],
         base_handedness: 0x1234,
         ..Default::default()
     };
     table
         .rotate_command(&mut based, 0x1000 | 1 << 7 | 28, 0)
         .unwrap();
-    assert_eq!(based.matrix, [7, 8, 9, -1, -2, -3, 4, 5, 6]);
+    assert_eq!(based.basis, [7, 8, 9, -1, -2, -3, 4, 5, 6]);
+    assert_eq!(based.matrix, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     assert_eq!(based.handedness, !0x1234);
     assert!(ffe_core::model_commands::decode(&[0x1c, 0xc0, 0, 0], 2).is_err());
 }

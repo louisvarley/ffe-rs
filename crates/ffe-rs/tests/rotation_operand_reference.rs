@@ -81,7 +81,7 @@ fn executed_reference_packed_angles_and_rotation_commands() {
                     (n / 45, (n / 15 % 3) as u8, operands[n % 15])
                 );
                 let mut context = VertexContext {
-                    matrix: matrices[matrix],
+                    basis: matrices[matrix],
                     globals,
                     ..Default::default()
                 };
@@ -95,7 +95,7 @@ fn executed_reference_packed_angles_and_rotation_commands() {
                     )
                     .unwrap();
                 let actual = context
-                    .matrix
+                    .basis
                     .into_iter()
                     .flat_map(i32::to_le_bytes)
                     .fold(14695981039346656037u64, |h, b| {

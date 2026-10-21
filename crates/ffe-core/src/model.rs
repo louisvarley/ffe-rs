@@ -4,15 +4,18 @@ pub const IDENTITY: [i32; 9] = [i32::MAX, 0, 0, 0, i32::MAX, 0, 0, 0, i32::MAX];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VertexContext {
+    /// Instance frame at +0x14: vertex evaluation (F1478) uses it, and opcode 28's
+    /// base-relative forms copy it into [`Self::basis`].
     pub matrix: [i32; 9],
     pub scale: u32,
     pub globals: [u16; 64],
     pub locals: [i32; 64],
     /// Instance colour at +0xf4..+0xf6, set by opcode 26 and passed to child models.
     pub colour: [u8; 3],
-    /// Instance base frame at +0x14, which opcode 28's base-relative forms reload.
-    pub base: [i32; 9],
-    /// Base frame handedness word at +0xf8.
+    /// Current basis at +0x9c: opcode 28 rotates or reloads it; child models and
+    /// text frames (F1740) read it. Vertex evaluation does not.
+    pub basis: [i32; 9],
+    /// Frame handedness word at +0xf8.
     pub base_handedness: u32,
     /// Current basis handedness word at +0xfc, written by those forms.
     pub handedness: u32,
@@ -26,7 +29,7 @@ impl Default for VertexContext {
             globals: [0; 64],
             locals: [0; 64],
             colour: [0; 3],
-            base: IDENTITY,
+            basis: IDENTITY,
             base_handedness: 0,
             handedness: 0,
         }
