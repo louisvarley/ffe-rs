@@ -6,10 +6,11 @@
 //! [`crate::model_instance`], and returns a render-ordered face stream in
 //! [`Execution::ordered`]. Both variants are transactional: an error leaves the
 //! caller's context and vertex cache unchanged.
+use crate::model::variable;
 use crate::model::VertexContext;
 use crate::model_commands::{
-    arithmetic_with_table, bit_branch, decode, visibility_branch, Face, Submodel, Text,
-    VisibilityContext,
+    arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Submodel,
+    Text, VisibilityContext,
 };
 use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
@@ -64,6 +65,39 @@ pub struct SubmodelEmission {
     pub context: VertexContext,
 }
 
+/// Where an opcode 26 colour was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColourTarget {
+    /// Instance colour (+0xf4..+0xf6), kept in [`VertexContext::colour`].
+    Instance,
+    /// Normal entry 0's colour, seen by later lighting through normal 0.
+    NormalZero,
+}
+
+/// An executed F1762 colour command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColourEmission {
+    pub colour: Colour,
+    /// The selected material word.
+    pub material: u16,
+    pub target: ColourTarget,
+    pub rgb: [u8; 3],
+}
+
+/// F1692/F1693 colour resolution: nibble RGB (zero when textured), plus the instance
+/// colour for local materials, plus the normal's colour unless unlit or textured.
+fn resolve_colour(value: u16, instance: [u8; 3], normal: [u8; 3]) -> [u8; 3] {
+    let decoded = material(value);
+    let mut rgb = decoded.rgb;
+    if decoded.local_colour {
+        rgb = std::array::from_fn(|i| rgb[i].wrapping_add(instance[i]));
+    }
+    if !decoded.unlit && decoded.texture == 0 {
+        rgb = std::array::from_fn(|i| rgb[i].wrapping_add(normal[i]));
+    }
+    rgb
+}
+
 /// One render-order entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primitive {
@@ -86,6 +120,10 @@ pub struct Execution {
     pub texts: Vec<TextEmission>,
     /// Child-model call operand events in command order; never in [`Self::ordered`].
     pub submodels: Vec<SubmodelEmission>,
+    /// Executed colour commands in command order.
+    pub colours: Vec<ColourEmission>,
+    /// Final normal entry 0 colour if a colour command wrote it during this run.
+    pub normal_zero_colour: Option<[u8; 3]>,
     /// All emitted primitives in original render order. Populated only by
     /// [`execute_live`]; empty for [`execute`], which has no live vertex keys.
     pub ordered: Vec<Primitive>,
@@ -292,6 +330,8 @@ fn execute_inner(
         lines: Vec::new(),
         texts: Vec::new(),
         submodels: Vec::new(),
+        colours: Vec::new(),
+        normal_zero_colour: None,
         ordered: Vec::new(),
         ordered_keys: Vec::new(),
     };
@@ -425,6 +465,55 @@ fn execute_inner(
                     result.submodels.push(SubmodelEmission {
                         submodel: submodel.clone(),
                         context: working.clone(),
+                    });
+                }
+                Some(command.size as i32)
+            }
+            26 => {
+                for colour in program.colours.iter().filter(|c| c.offset == offset) {
+                    let index = if colour.selector == 0 {
+                        0
+                    } else {
+                        selector(colour.selector)?;
+                        (variable(colour.selector, &working) & 7) as usize
+                    };
+                    let value = colour
+                        .materials
+                        .get(index)
+                        .copied()
+                        .unwrap_or(colour.materials[0]);
+                    let lighting = match (colour.normal, result.normal_zero_colour) {
+                        (0, Some(rgb)) => rgb,
+                        _ => {
+                            visibility
+                                .normals
+                                .get(usize::from(colour.normal))
+                                .ok_or_else(|| {
+                                    format!(
+                                        "Colour at {offset:#x} references an out-of-range normal."
+                                    )
+                                })?
+                                .colour
+                        }
+                    };
+                    let rgb = resolve_colour(value, working.colour, lighting);
+                    let target = if colour.to_normal_zero {
+                        if material(value).texture != 0 {
+                            return Err(format!(
+                                "Colour at {offset:#x} needs the runtime texture colour table."
+                            ));
+                        }
+                        result.normal_zero_colour = Some(rgb);
+                        ColourTarget::NormalZero
+                    } else {
+                        working.colour = rgb;
+                        ColourTarget::Instance
+                    };
+                    result.colours.push(ColourEmission {
+                        colour: colour.clone(),
+                        material: value,
+                        target,
+                        rgb,
                     });
                 }
                 Some(command.size as i32)

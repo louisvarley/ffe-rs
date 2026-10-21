@@ -4,6 +4,41 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Colour command (v0.15)
+
+Opcode 26 (F1762) sets colour state. Layout: word +0 material, byte +2 low 7 bits
+normal index (lighting source), bit 7 target, byte +3 F1473 selector. When byte
++3 is non-zero the record is **20 bytes, not 6**: the low 3 bits of the selected
+variable pick word +0 (k = 0) or one of seven alternatives at +2+2k. The v0.4
+decoder's fixed 6 was wrong for that form; it is corrected.
+
+Colour = F1692 nibble RGB (zero when textured), plus the instance colour
+(+0xf4..+0xf6) when the material's 0x1000 bit is set, plus the normal's colour
+unless the material is unlit (0x2000) or textured. Byte additions wrap. Bit 7
+of byte +2 writes the result to normal entry 0's colour through F1691; otherwise
+it becomes the instance colour that text (F1693) and child-model calls (passed
+as the child's colour) use.
+
+`VertexContext` gains `colour` (instance +0xf4..+0xf6), committed
+transactionally like locals. `Execution` gains `colours` (selected material,
+target, RGB) and `normal_zero_colour`; a later command lit through normal 0 sees
+that override. A textured write to normal 0 needs F1691's runtime texture colour
+table (`DATA_007812`, zero in the static data) and errors explicitly.
+
+`--colour` runs 7 synthetic programs through the original F1772 (32 cases:
+both instance colours, selector locals 0..9, normal-0 write then read, byte
+wrap). `verify-colour.py` passes with repeat, 9 tamper fields and an empty trace
+rejected. Trace SHA-256 `7d23226568032c92b4f062d4553cee39f4c89f8e51b742e9f958fb48ddaaa4b4`
+(CRLF); Linux LF `95383fff…`.
+
+Model 75 now passes `0x001a`/`0x234`; both stations stop at an unsupported
+opcode 28 transform form. Two synthetic tests added, one updated (opcode 5 is
+the unsupported example); 152 `#[test]`, 19 ignored, one Unix-only (132
+runnable on Windows). F4, synthetic flight and cache v6/385 are unchanged.
+
+Not covered: colour application to faces/points/lines (their handlers'
+F1692/F1693 use), textured normal-0 writes, palette mapping and pixels.
+
 ## 2026-10-21 — Linux reference build; text and submodel operands (v0.14)
 
 **Linux oracle.** `tools/reference/build-linux.sh` builds the same local-only

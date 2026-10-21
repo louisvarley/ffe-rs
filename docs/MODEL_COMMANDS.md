@@ -38,7 +38,7 @@ explicit unsupported-command error.
 | 23 | `F1765` | — | — | **no** | no | unsupported record form |
 | 24 | `F1766` | — | — | **no** | no | unsupported record form |
 | 25 | `F1771` | — | — | **no** | no | unsupported record form |
-| 26 | `F1762` | — | 6 | yes | no | structurally decoded; purpose not yet documented. Likely a submodel/aux call; do not guess. |
+| 26 | `F1762` | set colour | 6 or 20 | yes | yes | verified v0.15: word +0 material, byte +2 normal (low 7) / normal-0 target (bit 7), byte +3 selector; non-zero selector adds seven alternative words (20 bytes). Updates instance colour or normal 0. |
 | 27 | `F1748` | — | — | **no** | no | unsupported record form |
 | 28 | `F1741` | `0x9c` matrix transformation | 4+ | partial | partial | only the pure `0x8000` local-basis form executes; base/object-relative and vertex-defined forms error |
 | 29 | `F1758` | arithmetic (second entry) | 4 | yes | yes | same helper as 13 |
@@ -66,8 +66,11 @@ explicit unsupported-command error.
 - Text (10) and child-model call (14) operands match the original F1747 and
   F1749/F1750 with nested calls recorded (`verify-text-submodel.py`, 7 cases,
   trace `5ba06002…`): decoded fields, the text normal skip, submodel extra-vertex
-  order, and the handlers' own cursor advance. Real stations now stop at
-  opcode 28 (model 74) and opcode 26 at `0x234` (model 75).
+  order, and the handlers' own cursor advance.
+- Colour (26) results match the original F1762 through F1772
+  (`verify-colour.py`, 32 cases, trace `7d232265…`): material selection, local
+  and lighting additions, unlit/textured rules, normal-0 writes, byte wrap and
+  the 6/20-byte record sizes. Both real stations now stop at opcode 28.
 
 ## Next: executing glyphs and children
 

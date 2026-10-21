@@ -75,6 +75,20 @@ impl Submodel {
     }
 }
 
+/// F1762 colour operands: 6 bytes, or 20 when byte 3 selects an alternative.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Colour {
+    pub offset: usize,
+    /// Word +0, then the seven alternative words at +4..+17 when a selector is present.
+    pub materials: Vec<u16>,
+    /// Low 7 bits of byte 2: the normal whose colour lights an unlit-clear material.
+    pub normal: u8,
+    /// Bit 7 of byte 2: write normal entry 0's colour instead of the instance colour.
+    pub to_normal_zero: bool,
+    /// Byte 3: F1473 variable whose low 3 bits pick `materials[k]` (0 keeps word +0).
+    pub selector: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
     pub offset: usize,
@@ -90,6 +104,7 @@ pub struct Program {
     pub lines: Vec<Line>,
     pub texts: Vec<Text>,
     pub submodels: Vec<Submodel>,
+    pub colours: Vec<Colour>,
 }
 
 fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
@@ -117,6 +132,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     let mut lines = Vec::new();
     let mut texts = Vec::new();
     let mut submodels = Vec::new();
+    let mut colours = Vec::new();
     let mut branches = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -143,7 +159,13 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                     4
                 }
             }
-            26 => 6,
+            26 => {
+                if *bytes.get(offset + 5).ok_or("Truncated colour command.")? == 0 {
+                    6
+                } else {
+                    20
+                }
+            }
             28 if code & 0xc000 != 0xc000 => 4,
             _ => return Err(format!("Unsupported command {code:#06x} at {offset:#x}.")),
         };
@@ -221,6 +243,19 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                 ));
             }
             submodels.push(submodel);
+        }
+        if opcode == 26 {
+            let payload = &bytes[offset + 2..offset + size];
+            colours.push(Colour {
+                offset,
+                materials: std::iter::once(0)
+                    .chain(if size == 20 { 2..9 } else { 0..0 })
+                    .map(|index| word(payload, index * 2))
+                    .collect::<Result<_, _>>()?,
+                normal: payload[2] & 0x7f,
+                to_normal_zero: payload[2] & 0x80 != 0,
+                selector: payload[3],
+            });
         }
         if matches!(opcode, 3 | 4 | 7 | 8) {
             if code != opcode {
@@ -303,6 +338,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         lines,
         texts,
         submodels,
+        colours,
     })
 }
 

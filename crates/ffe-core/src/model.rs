@@ -8,6 +8,8 @@ pub struct VertexContext {
     pub scale: u32,
     pub globals: [u16; 64],
     pub locals: [i32; 64],
+    /// Instance colour at +0xf4..+0xf6, set by opcode 26 and passed to child models.
+    pub colour: [u8; 3],
 }
 
 impl Default for VertexContext {
@@ -17,6 +19,7 @@ impl Default for VertexContext {
             scale: 0,
             globals: [0; 64],
             locals: [0; 64],
+            colour: [0; 3],
         }
     }
 }

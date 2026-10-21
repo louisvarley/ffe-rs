@@ -1,6 +1,8 @@
 use ffe_core::model::VertexContext;
 use ffe_core::model_commands::VisibilityContext;
-use ffe_core::model_execute::{execute, execute_live, Emission, InstanceContext, Primitive};
+use ffe_core::model_execute::{
+    execute, execute_live, ColourTarget, Emission, InstanceContext, Primitive,
+};
 use ffe_core::model_instance::Vertices;
 use ffe_core::model_math::{angle_operand, SineTable};
 use ffe_core::model_normals::Normal;
@@ -75,9 +77,9 @@ fn execution_is_transactional_for_budget_arithmetic_unsupported_alias_and_rotati
             "unsigned division by zero",
         ),
         (
-            vec![13, 0x00c8, 26, 0, 0, 0],
+            vec![13, 0x00c8, 5, 0],
             8,
-            "Unsupported executed command 0x001a at 0x4",
+            "Unsupported command 0x0005 at 0x4",
         ),
         (
             vec![13, 0x00c8, 13, 0x00d2, 0],
@@ -607,4 +609,82 @@ fn live_text_and_submodels_stay_out_of_render_order_and_errors_are_transactional
     assert!(execute(&external, 8, &mut context, &visibility(), None, 8)
         .unwrap_err()
         .contains("Submodel references external/out-of-range vertex"));
+}
+
+#[test]
+fn colour_commands_update_instance_or_normal_zero_colour_and_select_alternatives() {
+    let lighting: Vec<Normal> = (0..4u8)
+        .map(|i| Normal {
+            culled: false,
+            colour: [i * 10, 1, 255],
+        })
+        .collect();
+    let inputs = VisibilityContext {
+        normals: &lighting,
+        ..visibility()
+    };
+    // Lit nibble colour plus normal 2, wrapping per byte; then local + instance colour.
+    let stream = bytes(&[26, 0x0123, 0x0002, 26, 0x3010, 0x0001, 0]);
+    let mut context = VertexContext::default();
+    let result = execute(&stream, 8, &mut context, &inputs, None, 8).unwrap();
+    assert_eq!(result.commands, [0, 6, 12]);
+    assert_eq!(result.colours[0].rgb, [21, 3, 2]);
+    assert_eq!(
+        result.colours[1].rgb,
+        [21, 4, 2],
+        "unlit: no lighting added"
+    );
+    assert_eq!(context.colour, [21, 4, 2]);
+
+    // A selector makes the record 20 bytes; local 8 & 7 picks the alternative word.
+    let mut stream = vec![26, 0x2111, 0xc800];
+    stream.extend((2..=8).map(|k| 0x2000 | (k * 0x111)));
+    stream.extend([2, 0x0456, 0x0201, 0]);
+    for (local, rgb) in [(0, [1, 1, 1]), (3, [4, 4, 4]), (15, [8, 8, 8])] {
+        let mut context = VertexContext::default();
+        context.locals[8] = local;
+        let result = execute(&bytes(&stream), 8, &mut context, &inputs, None, 8).unwrap();
+        assert_eq!(result.commands, [0, 20, 26]);
+        assert_eq!(context.colour, rgb, "local {local}");
+    }
+
+    // Bit 7 writes normal 0, which then lights a later command through normal 0.
+    let stream = bytes(&[26, 0x2123, 0x0080, 26, 0x0000, 0x0000, 0]);
+    let mut context = VertexContext::default();
+    let result = execute(&stream, 8, &mut context, &inputs, None, 8).unwrap();
+    assert_eq!(result.colours[0].target, ColourTarget::NormalZero);
+    assert_eq!(result.normal_zero_colour, Some([1, 2, 3]));
+    assert_eq!(context.colour, [1, 2, 3]);
+}
+
+#[test]
+fn colour_errors_are_transactional() {
+    let lighting = normals(&[]);
+    let inputs = VisibilityContext {
+        normals: &lighting,
+        ..visibility()
+    };
+    let mut context = VertexContext {
+        colour: [7, 8, 9],
+        ..Default::default()
+    };
+    let before = context.clone();
+    for (words, expected) in [
+        (
+            vec![26, 0x0010, 0x0000, 26, 0x4001, 0x0080, 0],
+            "texture colour table",
+        ),
+        (
+            vec![26, 0x0010, 0x0000, 26, 0x0010, 0x0009, 0],
+            "out-of-range normal",
+        ),
+        (
+            vec![26, 0x0010, 0xd200, 0, 0, 0, 0, 0, 0, 0, 0],
+            "alias legacy instance",
+        ),
+    ] {
+        let error = execute(&bytes(&words), 8, &mut context, &inputs, None, 8).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+        assert_eq!(context, before);
+    }
 }

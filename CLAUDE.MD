@@ -22,8 +22,8 @@ slots in `model_execute::execute_live`, returning a depth-ordered stream.
 V0.12 adds a composed-order oracle; V0.13 adds point (1) and line (2) operand
 decoding/emission in the same ordered `Primitive` stream. V0.14 adds verified
 text (10) and child-model call (14) operand events and a Linux build of the
-reference adapter. Glyph/child execution, other transform forms (28), opcode 26
-and colour remain next.
+reference adapter. V0.15 adds the verified opcode 26 colour command. Glyph/child
+execution, other transform forms (28) and face/point/line colour remain next.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.
@@ -800,9 +800,9 @@ are verified against original F1698/F1702 via generated-copy F1699/F1703
 probes. See docs/PORT_LOG.md, docs/FORMATS.md and docs/MODEL_COMMANDS.md.
 V0.14 (2026-10-21) adds verified text (10) and child-model call (14) operand
 events; opcode 14 is the F1749/F1750 child-model call, not text. See
-docs/PORT_LOG.md. The next single task is the opcode 28 transform forms and
-opcode 26 that now stop the real stations, then colour state and glyph/child
-execution. For each, first add an original handler probe and
+docs/PORT_LOG.md. V0.15 adds the verified opcode 26 colour command (6- or
+20-byte record). The next single task is the opcode 28 transform forms that now
+stop both real stations, then primitive colour and glyph/child execution. For each, first add an original handler probe and
 document the payload; do not infer fields from record size. Do not claim static
 resolved points remain valid through transform or animation changes. Preserve
 the catalogue-vs-execution distinction and keep errors transactional; F4,

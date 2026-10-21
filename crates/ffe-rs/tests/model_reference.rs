@@ -59,6 +59,7 @@ fn executed_reference_station_vertex_programs() {
             scale: v.scale,
             globals: std::array::from_fn(|i| (v.animation as u16).wrapping_add(i as u16 * 257)),
             locals: std::array::from_fn(|i| v.animation ^ (i as i32 * 0x10203)),
+            colour: [0; 3],
         };
         let points = evaluate(cache.asset(&id).unwrap(), vertices, &context).unwrap();
         let hash = points

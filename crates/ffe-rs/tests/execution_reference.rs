@@ -164,10 +164,10 @@ fn executed_reference_station_depth_composition_advances() {
     )
     .unwrap();
     let table = SineTable::from_bytes(cache.asset("base:math/sine").unwrap()).unwrap();
-    // Offsets: first depth command, then the text/submodel record each model reached in v0.13.
-    for (index, offset, nested, vertex_count) in [
-        (74u32, 0xcusize, "0x000a at 0xf4", 54u32),
-        (75, 0x8, "0x1c6e at 0x1c8", 88),
+    // Offsets: first depth command, then the records each model stopped at before v0.14/v0.15.
+    for (index, offset, earlier, vertex_count) in [
+        (74u32, 0xcusize, &["0x000a at 0xf4"][..], 54u32),
+        (75, 0x8, &["0x1c6e at 0x1c8", "0x001a at 0x234"][..], 88),
     ] {
         let bytes = cache
             .asset(&format!("base:model-commands/{index:03}"))
@@ -211,10 +211,12 @@ fn executed_reference_station_depth_composition_advances() {
                 !error.contains(&format!("0x0006 at {offset:#x}")),
                 "model {index} still stopped at opcode 6: {error}"
             );
-            assert!(
-                !error.contains(nested),
-                "model {index} still stopped at its text/submodel record: {error}"
-            );
+            for stop in earlier {
+                assert!(
+                    !error.contains(stop),
+                    "model {index} still stopped at an earlier record: {error}"
+                );
+            }
             assert_eq!(context, before, "model {index} mutated context on error");
         }
     }

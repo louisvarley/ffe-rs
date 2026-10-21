@@ -817,6 +817,48 @@ static int text_submodel_vectors(void)
 #endif
 }
 
+static int colour_vectors(void)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--colour requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static const unsigned short lit[]={26,0x0123,0x0002,2,0x0456,0x0201,0};
+    static const unsigned short local[]={26,0x1abc,0x0001,2,0x0456,0x0201,0};
+    static const unsigned short unlit[]={26,0x3abc,0x0003,2,0x0456,0x0201,0};
+    static const unsigned short textured[]={26,0x5005,0x0002,2,0x0456,0x0201,0};
+    static const unsigned short selected[]={26,0x1111,0xc802,0x0222,0x0333,0x0444,0x0555,0x0666,0x0777,0x1888,2,0x0456,0x0201,0};
+    static const unsigned short normal_zero[]={26,0x1123,0x0082,26,0x0010,0x0000,2,0x0456,0x0201,0};
+    static const unsigned short wrapped[]={26,0x1fff,0x0007,2,0x0456,0x0201,0};
+    static const unsigned short *programs[]={lit,local,unlit,textured,selected,normal_zero,wrapped};
+    static const unsigned char colours[][3]={{0,0,0},{5,9,250}};
+    unsigned long instance[0x160/4],globals[0x120/4],normals[8*8/4],p,c,l,i;
+    unsigned char *bytes;
+    fprintf(stderr,"JJFFE colour-v1: original F1762 colour command through F1772 with F1692/F1693/F1691; untextured normal-0 writes only, synthetic normals, not face shading or pixels.\n");
+    for(p=0;p<7;++p) for(c=0;c<2;++c) for(l=0;l<(p==4?10u:1u);++l) {
+        memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));memset(normals,0,sizeof(normals));
+        instance[0x14c/4]=(unsigned long)globals;
+        ((long *)((char *)instance+0x54))[8]=(long)l;
+        bytes=(unsigned char *)instance+0xf4;
+        bytes[0]=colours[c][0];bytes[1]=colours[c][1];bytes[2]=colours[c][2];
+        ref_normal_buffer=(unsigned char *)normals;
+        for(i=0;i<8;++i) {
+            ref_normal_buffer[i*8]=(unsigned char)(i*40+7);
+            ref_normal_buffer[i*8+1]=(unsigned char)(i*3);
+            ref_normal_buffer[i*8+2]=(unsigned char)(255-i);
+        }
+        point_line_count=0;ref_command_alive=1;
+        ref_execute(instance,(void *)programs[p]);
+        printf("{\"program\":%lu,\"instance\":%lu,\"local\":%lu,\"colour\":[%u,%u,%u],\"normal0\":[%u,%u,%u],\"lines\":[",
+               p,c,l,bytes[0],bytes[1],bytes[2],ref_normal_buffer[0],ref_normal_buffer[1],ref_normal_buffer[2]);
+        for(i=0;i<point_line_count;++i)
+            printf("%s[%lu,%lu,%lu]",i?",":"",point_line_a[i],point_line_b[i],point_line_c[i]);
+        printf("],\"alive\":%lu}\n",ref_command_alive);
+    }
+    return 0;
+#endif
+}
+
 static void visibility_case(unsigned long *instance,unsigned long number,short operand)
 {
     static const unsigned short codes[]={11,12,0x8b,0x8c,0xff8b,0xff8c};
@@ -1010,6 +1052,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--execution")) return execution_vectors();
     if (argc == 2 && !strcmp(argv[1], "--point-line")) return point_line_vectors();
     if (argc == 2 && !strcmp(argv[1], "--text-submodel")) return text_submodel_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--colour")) return colour_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();
     if (argc == 2 && !strcmp(argv[1], "--order")) return order_vectors();
