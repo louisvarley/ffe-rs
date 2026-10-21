@@ -19,6 +19,8 @@ pub struct VertexContext {
     pub base_handedness: u32,
     /// Current basis handedness word at +0xfc, written by those forms.
     pub handedness: u32,
+    /// Instance vector at +0x38..+0x40 that opcode 25 aligns the basis with.
+    pub direction: [i32; 3],
 }
 
 impl Default for VertexContext {
@@ -32,6 +34,7 @@ impl Default for VertexContext {
             basis: IDENTITY,
             base_handedness: 0,
             handedness: 0,
+            direction: [0; 3],
         }
     }
 }

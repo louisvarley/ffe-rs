@@ -656,6 +656,34 @@ fn execute_inner(
                 result.blocks.push(BlockEmission { offset, key });
                 Some(command.size as i32)
             }
+            // Beams (17) and vertex-pair chains (24): operand records only; their
+            // drawing is not ported and they are absent from `ordered`.
+            17 | 24 => Some(command.size as i32),
+            25 => {
+                if code & 0x8000 != 0 {
+                    // F1770 resets the current basis to identity.
+                    working.basis = crate::model::IDENTITY;
+                } else {
+                    let d = working.direction;
+                    let (a, b) = match code >> 5 & 3 {
+                        0 => (d[1], d[2]),
+                        1 => (d[2], d[0]),
+                        2 => (d[0], d[1]),
+                        _ => {
+                            return Err(format!(
+                                "Direction alignment at {offset:#x} uses undefined axis 3."
+                            ))
+                        }
+                    };
+                    // F1771: rotate by (a, b) / sqrt(a^2 + b^2); a zero length is skipped.
+                    if a.wrapping_mul(a).wrapping_add(b.wrapping_mul(b)) != 0 {
+                        return Err(format!(
+                            "Direction alignment at {offset:#x} needs the original square-root table."
+                        ));
+                    }
+                }
+                Some(command.size as i32)
+            }
             31 => {
                 for surface in program.surfaces.iter().filter(|s| s.offset == offset) {
                     // F1874 resolves the origin (view) and three axis vertices (object).

@@ -29,15 +29,15 @@ explicit unsupported-command error.
 | 14 | `F1749` | child-model call (via `F1750`) | 4 or 8 | yes | yes | verified v0.14: model `code >> 5`, +0 vertex, word +0 frame; byte 1 bit 7 adds +2..+5 extra vertices (order +4,+2,+3,+5, `0x7f` ends). Operand event; child not executed. Earlier "text (second form)" label was wrong. |
 | 15 | `F1759` | — | — | **no** | no | unsupported record form |
 | 16 | `F1815` | — | — | **no** | no | unsupported record form |
-| 17 | `F1760` | — | — | **no** | no | unsupported record form |
+| 17 | `F1760` | two-vertex shape (`Beam`) | 14 | yes | yes | v0.28: word +0 material, word +2 vertices (low/high byte), words +4..+10 to F1761. Operand record; drawing not ported. |
 | 18 | `F1763` | — | — | **no** | no | unsupported record form |
 | 19 | `F1756` | bit branch | 4 | yes | yes | zero-mask branch |
 | 20 | `F1757` | inverse bit branch | 4 | yes | yes | inverse |
 | 21 | `F1697` | nested depth block start/end | 2 | yes | yes (live) | v0.26: without bit 15, F1781 block keyed by F1777 of vertex `code >> 5`'s view; with bit 15, F1782 end. Both close the group. `Order::nested`. |
 | 22 | `F1737` | spline | — | **no** | no | unsupported record form |
 | 23 | `F1765` | — | — | **no** | no | unsupported record form |
-| 24 | `F1766` | — | — | **no** | no | unsupported record form |
-| 25 | `F1771` | — | — | **no** | no | unsupported record form |
+| 24 | `F1766` | vertex-pair chain (`Chain`) | 6 + 2k | yes | yes | v0.28: material, F1474 size, 2-byte pairs through the first holding 0x7f. Operand record; drawing not ported. |
+| 25 | `F1771` | align basis with instance direction | 2 | yes | partial | v0.28: bit 15 resets the basis (F1770); otherwise rotation from `VertexContext::direction` via F1467/F1523/F1744 — zero pairs exact, non-zero needs the sqrt table. |
 | 26 | `F1762` | set colour | 6 or 20 | yes | yes | verified v0.15: word +0 material, byte +2 normal (low 7) / normal-0 target (bit 7), byte +3 selector; non-zero selector adds seven alternative words (20 bytes). Updates instance colour or normal 0. |
 | 27 | `F1748` | coloured child-model call (via `F1750`) | 8 or 12 | yes | yes | v0.24: model `code >> 5`, byte +0 vertex, word +0 frame, byte +3 scale (signed high nibble, or local `>> 4` with bit 3), word +4 child material; extras at +6 when byte 1 bit 7. Operand event; child not executed. |
 | 28 | `F1741` | `0x9c` matrix transformation | 4 (6 for `0xc000`) | partial | partial | `0x8000` local rotation (v0.6); `0x0000`/`0x4000` base-relative F1739 + optional F1743 verified v0.16 (6,048 cases); `0xc000` vertex-defined basis unsupported |
@@ -90,18 +90,17 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.27: **368 of 466** execute, and all that the original completes match
-(`verify-station-models.py`). Top remaining blockers:
+v0.28: **403 of 466** execute, and all that the original completes match
+(`verify-station-models.py`). Remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| decode: opcode 17 | 16 |
-| decode: opcode 25 | 15 |
 | vertices: vertex opcode 0x15 (21) | 13 |
-| decode: opcode 24 | 10 |
+| decode: opcode 30 | 10 |
 | decode: opcode 22 (spline) | 9 |
-| decode: opcode 30 | 5 |
-| other vertex-record errors | ~10 |
+| decode: opcode 18 | 3 |
+| vertices: vertex opcode 0xd (13) | 2 |
+| other vertex/normal/reference validation errors | ~15 |
 
 Some declaration blocks hold data after the final terminator; the decoder takes
 the longest self-contained prefix (`Program::trailing`, v0.27).

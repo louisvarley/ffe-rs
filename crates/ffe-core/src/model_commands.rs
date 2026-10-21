@@ -134,6 +134,28 @@ pub struct Surface {
     pub entries: Vec<[u8; 16]>,
 }
 
+/// F1760/F1761 operands: a shape between two projected vertices. Only operands
+/// are decoded; F1761's drawing is not ported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Beam {
+    pub offset: usize,
+    pub material: u16,
+    /// Low and high bytes of word +2, each projected (F1471) with a near test.
+    pub vertices: [u8; 2],
+    /// Words +4..+10 passed to F1761.
+    pub parameters: [i16; 4],
+}
+
+/// F1766 operands: a material, an F1474 size operand and vertex pairs up to the
+/// first pair holding 0x7f (inclusive). Drawing is not ported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chain {
+    pub offset: usize,
+    pub material: u16,
+    pub size: u16,
+    pub pairs: Vec<[u8; 2]>,
+}
+
 /// F1762 colour operands: 6 bytes, or 20 when byte 3 selects an alternative.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Colour {
@@ -167,6 +189,8 @@ pub struct Program {
     pub polygons: Vec<Polygon>,
     pub thrusters: Vec<Thruster>,
     pub surfaces: Vec<Surface>,
+    pub beams: Vec<Beam>,
+    pub chains: Vec<Chain>,
     /// Bytes after the program's final terminator that belong to the model's
     /// declaration block but are not commands.
     pub trailing: usize,
@@ -230,6 +254,8 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     let mut polygons = Vec::new();
     let mut thrusters = Vec::new();
     let mut surfaces = Vec::new();
+    let mut beams = Vec::new();
+    let mut chains = Vec::new();
     let mut branches = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -245,6 +271,22 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             4 | 8 => 10,
             6 => crate::model_depth::decode(&bytes[offset..])?.1,
             9 => 8,
+            17 => 14,
+            25 => 2,
+            // Material, size, then 2-byte pairs through the first one holding 0x7f.
+            24 => {
+                let mut end = offset + 6;
+                loop {
+                    let pair = bytes
+                        .get(end..end + 2)
+                        .ok_or("Truncated vertex-pair command.")?;
+                    end += 2;
+                    if pair.contains(&0x7f) {
+                        break;
+                    }
+                }
+                end - offset
+            }
             // F1697: start a nested depth block keyed by vertex `code >> 5`, or (bit 15)
             // end it. Two bytes either way.
             21 => {
@@ -425,6 +467,43 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             }
             thrusters.push(thruster);
         }
+        if opcode == 17 {
+            let payload = &bytes[offset + 2..offset + 14];
+            let beam = Beam {
+                offset,
+                material: word(payload, 0)?,
+                vertices: [payload[2], payload[3]],
+                parameters: std::array::from_fn(|i| {
+                    i16::from_le_bytes([payload[4 + i * 2], payload[5 + i * 2]])
+                }),
+            };
+            if beam.vertices.iter().any(|v| u32::from(*v) >= vertex_count) {
+                return Err(format!(
+                    "Beam references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            beams.push(beam);
+        }
+        if opcode == 24 {
+            let payload = &bytes[offset + 2..offset + size];
+            let chain = Chain {
+                offset,
+                material: word(payload, 0)?,
+                size: word(payload, 2)?,
+                pairs: payload[4..].chunks_exact(2).map(|p| [p[0], p[1]]).collect(),
+            };
+            if chain
+                .pairs
+                .iter()
+                .flatten()
+                .any(|v| *v != 0x7f && u32::from(*v) >= vertex_count)
+            {
+                return Err(format!(
+                    "Vertex-pair command references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            chains.push(chain);
+        }
         if opcode == 31 {
             let payload = &bytes[offset + 2..offset + size];
             let surface = Surface {
@@ -550,6 +629,8 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         polygons,
         thrusters,
         surfaces,
+        beams,
+        chains,
         trailing: 0,
     })
 }

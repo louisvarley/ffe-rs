@@ -4,6 +4,28 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Opcodes 17, 24 and 25 (v0.28)
+
+- **17 (F1760 -> F1761)**: 14 bytes; word +0 material, word +2 two vertices
+  (low/high byte, each projected with a near-plane test), words +4..+10 passed
+  to F1761, which only writes queue records. Decoded as `Beam`; drawing not
+  ported.
+- **24 (F1766)**: word +0 material, word +2 an F1474 size operand, then 2-byte
+  vertex pairs up to and including the first pair holding 0x7f (both the drawn
+  and skipped paths stop there). Decoded as `Chain`; drawing not ported.
+- **25 (F1771)**: 2 bytes. With bit 15, F1770 resets the current basis to
+  identity. Otherwise it takes two components of the instance vector at
+  +0x38..+0x40 (axis 0: +0x3c/+0x40, 1: +0x40/+0x38, 2: +0x38/+0x3c; axis 3
+  reads uninitialised registers), normalises them with F1467 (a 2,048-entry
+  square-root table, `DATA_007977`) and F1523, and rotates the basis with F1744.
+  `VertexContext::direction` holds the vector. A zero pair is a no-op
+  (`DATA_007977[0]` is 0); a non-zero pair errors until the table is imported.
+
+Census: **403 of 466** execute natively; all 398 that the original completes
+match. One synthetic test added (168 `#[test]`, 24 ignored, one Unix-only; 143
+runnable on Windows). Remaining blockers: vertex opcode 0x15 (13), opcode 30
+(10), 22 (9), 18 (3), vertex 0xd (2), and a handful of validation errors.
+
 ## 2026-10-21 — Data after the final terminator (v0.27)
 
 18 models failed with "lacks a final terminator" and 8 with "opcode 0": their

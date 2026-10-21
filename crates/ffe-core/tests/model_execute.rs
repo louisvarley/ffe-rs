@@ -999,3 +999,54 @@ fn live_nested_blocks_key_by_vertex_depth_and_must_close() {
     .contains("Nested depth block is still open"));
     assert_eq!(context, before);
 }
+
+#[test]
+fn beams_chains_and_direction_alignment() {
+    // Beam (17): 14 bytes. Chain (24): material, size, pairs through the first
+    // pair holding 0x7f. Then a line on 1/2.
+    let words = [
+        17, 0x0123, 0x0201, 1, 2, 3, 4, // beam
+        24, 0x0456, 0x0010, 0x0102, 0x7f03, // chain: pairs [2,1], [3,0x7f]
+        2, 0x0456, 0x0201, 0,
+    ];
+    let result = execute(
+        &bytes(&words),
+        8,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        8,
+    )
+    .unwrap();
+    assert_eq!(result.commands, [0, 14, 24, 30]);
+    let program = ffe_core::model_commands::decode(&bytes(&words), 8).unwrap();
+    assert_eq!(program.beams[0].vertices, [1, 2]);
+    assert_eq!(program.beams[0].parameters, [1, 2, 3, 4]);
+    assert_eq!(program.chains[0].pairs, [[2, 1], [3, 0x7f]]);
+
+    // Opcode 25 with bit 15 resets the basis; a zero direction pair rotates nothing.
+    let mut context = VertexContext {
+        basis: [1; 9],
+        ..Default::default()
+    };
+    execute(
+        &bytes(&[0x8019, 0x0019, 0]),
+        8,
+        &mut context,
+        &visibility(),
+        None,
+        8,
+    )
+    .unwrap();
+    assert_eq!(context.basis, ffe_core::model::IDENTITY);
+    // A non-zero pair needs the original square-root table; axis 3 is undefined.
+    let mut aimed = VertexContext {
+        direction: [0, 3, 4],
+        ..Default::default()
+    };
+    let before = aimed.clone();
+    for code in [0x0019, 0x0079] {
+        assert!(execute(&bytes(&[code, 0]), 8, &mut aimed, &visibility(), None, 8).is_err());
+        assert_eq!(aimed, before);
+    }
+}
