@@ -151,3 +151,14 @@ These are logged as-is. They are not fixed by default.
 Use a short ID, affected subsystem, exact source reference, baseline/build,
 reproduction steps, expected vs observed, and planned correction. Add a failing
 test first and record any intentional behavior change; default fixes are allowed.
+
+## F1476 state shared between vertex jitter and other code (open)
+
+The original's vertex opcodes 7/8 draw from F1476 (`DATA_008818`/`DATA_008820`),
+whose state other game code also reads. Rendering therefore can affect
+non-rendering behaviour in the original. The port keeps this state in the
+vertex cache, owned by the caller, so presentation cannot disturb simulation.
+Before porting flight/AI, identify every reader of that state and decide
+(with the owner) whether gameplay needs a faithful shared stream or the
+isolation is an approved deviation.
+

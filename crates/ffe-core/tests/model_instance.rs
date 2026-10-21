@@ -101,8 +101,8 @@ fn literal_pairs_memoize_until_cleared_and_projection_stamps_one_slot() {
 
 #[test]
 fn live_vertices_reject_unsupported_forms_indices_scales_and_cycles_atomically() {
-    for screen_or_random in [[3, 0, 0, 0, 0, 0], [7, 0, 0, 0, 0, 0], [13, 0, 0, 0, 0, 0]] {
-        assert!(Vertices::new(&screen_or_random, 2).is_err());
+    for unsupported in [[3, 0, 0, 0, 0, 0], [21, 0, 0, 0, 0, 0], [13, 0, 0, 0, 0, 0]] {
+        assert!(Vertices::new(&unsupported, 2).is_err());
     }
     let records = [1, 0, 4, 0, 0, 0, 17, 0, 0, 0, 2, 0];
     let mut cache = Vertices::new(&records, 4).unwrap();

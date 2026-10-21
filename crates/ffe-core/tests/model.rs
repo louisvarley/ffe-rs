@@ -96,3 +96,36 @@ fn remaining_supported_vector_operations_and_maximum_count_are_bounded() {
     let maximum = [1, 0, 0, 0, 0, 0].repeat(64);
     assert_eq!(evaluate(&maximum, 128, &context).unwrap().len(), 128);
 }
+
+#[test]
+fn jittered_pairs_draw_three_offsets_once_and_swap_them_for_the_mirror() {
+    use ffe_core::model::{evaluate_with_jitter, jitter, JITTER_SEED};
+    // Pair 0: literal (0, 0, 10) and its reflection. Pair 1: opcode 7 on vertex 0,
+    // offsets shifted right by 20 bits.
+    let records = [1, 0, 0, 0, 10, 0, 7, 0, 20, 0, 0, 0];
+    let context = VertexContext::default();
+    let mut state = JITTER_SEED;
+    let points = evaluate_with_jitter(&records, 4, &context, &mut state).unwrap();
+    let mut expected_state = JITTER_SEED;
+    let offsets: [i32; 3] = std::array::from_fn(|_| jitter(&mut expected_state) >> 20);
+    assert_eq!(state, expected_state, "exactly three draws for the pair");
+    let [x, y, z] = offsets;
+    assert_eq!(
+        points[2],
+        [points[0][0] + x, points[0][1] + y, points[0][2] + z]
+    );
+    assert_eq!(
+        points[3],
+        [points[1][0] + z, points[1][1] + y, points[1][2] + x],
+        "the mirror takes z, y, x"
+    );
+    // The default evaluation starts from the original seed and leaves no state behind.
+    assert_eq!(
+        ffe_core::model::evaluate(&records, 4, &context).unwrap(),
+        points
+    );
+    // Generator: a = s0; s0 += s1; s1 = rotl16(a).
+    let mut s = [1, 2];
+    assert_eq!(jitter(&mut s), 0x0001_0000);
+    assert_eq!(s, [3, 0x0001_0000]);
+}

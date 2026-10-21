@@ -71,6 +71,16 @@ impl<'a> Vertices<'a> {
             .collect()
     }
 
+    /// F1476 state that jittered vertices (opcodes 7/8) will draw from next.
+    pub fn jitter(&self) -> [u32; 2] {
+        self.objects.jitter
+    }
+
+    /// Set the F1476 state, e.g. from the original's `DATA_008818`/`DATA_008820`.
+    pub fn set_jitter(&mut self, state: [u32; 2]) {
+        self.objects.jitter = state;
+    }
+
     /// Expanded vertex count (including mirrored partners).
     pub fn vertex_count(&self) -> usize {
         self.objects.slots.len()

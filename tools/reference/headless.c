@@ -48,6 +48,7 @@ extern void ref_order_group(long active,unsigned long key);
 extern unsigned long *ref_order_allocate(long words,unsigned long key,long force);
 extern void ref_order_flush(void);
 extern long *ref_view_vertex(void *instance,int index);
+extern unsigned long ref_jitter_a, ref_jitter_b;
 extern long *ref_project_vertex(void *instance,int index);
 extern long ref_project_point(void *output,const long *point);
 
@@ -487,6 +488,47 @@ static int model_vectors(void)
         }
     }
     if (fflush(stdout)) fail("cannot flush model vectors");
+    return 0;
+}
+
+static int jitter_vertex_vectors(int only)
+{
+    static const unsigned long seeds[][2]={{0x12345678UL,0x456789abUL},{0x9e3779b9UL,0x7f4a7c15UL}};
+    unsigned long instance[0x160/4], globals[0x120/4];
+    long vertices[256*9], coordinates[128*3];
+    unsigned long m,s,i;
+    fprintf(stderr,"JJFFE jitter-vertices-v1: F1472/F1478 over every model with opcode 7/8 vertex records, two F1476 seeds; object coordinates and final generator state, no commands or projection.\n");
+    for (m=0;m<466;++m) {
+        unsigned long *model=ref_model((int)m);
+        const unsigned char *records;
+        int jittered=0;
+        if(only>=0 && (int)m!=only) continue;
+        if(!model || model[2]==0 || model[2]>128) continue;
+        records=(const unsigned char *)model[1];
+        for(i=0;i<model[2]/2;++i) if(records[i*6]==7 || records[i*6]==8) jittered=1;
+        if(!jittered) continue;
+        for (s=0;s<2;++s) {
+            memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));memset(vertices,0,sizeof(vertices));
+            ref_vertex_buffer=vertices+128*9;
+            instance[0x14/4]=2147483647;instance[0x24/4]=2147483647;instance[0x34/4]=2147483647;
+            instance[0xf0/4]=1;
+            instance[0x148/4]=model[5];
+            instance[0x14c/4]=(unsigned long)globals;
+            instance[0x150/4]=model[1];
+            ref_jitter_a=seeds[s][0];ref_jitter_b=seeds[s][1];
+            /* Like every command caller, evaluate only on a cache miss: F1472 itself
+               re-evaluates (and re-draws a jittered pair) on every call. */
+            for (i=0;i<model[2];++i) {
+                long *vertex=ref_vertex_buffer+i*9;
+                if(!vertex[5]) vertex=ref_vertex(instance,(int)i);
+                memcpy(coordinates+i*3,vertex+6,12);
+            }
+            fflush(stdout);
+            if(getenv("FFE_JITTER_DUMP")) for(i=0;i<model[2];++i) fprintf(stderr,"v%lu %ld %ld %ld\n",i,coordinates[i*3],coordinates[i*3+1],coordinates[i*3+2]);
+            printf("{\"model\":%lu,\"seed\":%lu,\"vertices\":%lu,\"coordinates\":\"%016llx\",\"state\":[%lu,%lu]}\n",
+                m,s,model[2],(unsigned long long)fingerprint((unsigned char *)coordinates,model[2]*12),ref_jitter_a,ref_jitter_b);
+        }
+    }
     return 0;
 }
 
@@ -991,6 +1033,8 @@ static int station_model_vector(int index)
         memset(model_queue,0,sizeof(model_queue));
         ref_order_base=model_queue;ref_order_active=0;ref_order_state=0;
         ref_order_init(model_queue);
+        /* The game seeds F1476 at start-up; this adapter does not run that code. */
+        ref_jitter_a=0x12345678UL;ref_jitter_b=0x456789abUL;
         nested_station=1;nested_count=0;point_line_count=0;
         execution_probe=1;execution_faces=0;execution_hash=UINT64_C(14695981039346656037);
         ref_command_alive=1;
@@ -1310,6 +1354,8 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--font")) return font_vectors();
     if (argc == 2 && !strcmp(argv[1], "--blit")) return blit_vectors();
     if (argc == 2 && !strcmp(argv[1], "--models")) return model_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(-1);
+    if (argc == 3 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(atoi(argv[2]));
     state_mode = argc == 3 && !strcmp(argv[1], "--state");
     if (argc != 2 && !state_mode)
         fail("usage: jjffe-smoke <frames> | --state <frames> | --vectors | --font | --blit | --models");

@@ -4,6 +4,41 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Jittered vertices (vertex opcodes 7/8, v0.22)
+
+F1478 dispatches vertex opcodes in pairs through `DATA_000044`/`DATA_000045`
+(0-2, 3/4, 5/6, 7/8, 9/10, 11/12, 13/14, 15/16, 17/18, 19/20, 21/22, 23/24;
+21/22 and anything above 0x18 go to F1477). Opcodes 7/8 evaluate the whole pair
+at once: base vertex byte 4, then three F1476 draws each arithmetically shifted
+right by byte 2 (offsets ox, oy, oz), then the mirror (byte 4 XOR 1). Vertex 0
+is base + (ox, oy, oz); vertex 1 is mirror + (oz, oy, ox) — the offsets are
+applied in swapped order, exactly as the original does.
+
+F1476: a = s0; s0 += s1; s1 = rotate-left-16(a); return s1, with state
+`DATA_008818`/`DATA_008820` seeded 0x12345678/0x456789ab at start-up. **Open
+question:** that state is also read by other game code, so in the original,
+drawing a jittered vertex can influence non-rendering code. The port keeps the
+state inside the vertex cache (`Vertices::jitter`/`set_jitter`,
+`model::evaluate_with_jitter`), owned by the caller and never shared with the
+gameplay RNG; whether any gameplay path depends on it must be checked before
+the flight simulation is ported (see KNOWN_ISSUES.md).
+
+Oracle note: F1472 has no cache check, so calling it once per index (as
+`--models` does) re-evaluates a jittered pair for its second half with fresh
+draws. Real callers check the cache first; `--jitter-vertices` now does the
+same. It evaluates every model with opcode 7/8 records with two seeds and
+compares coordinates and the final generator state: 118 evaluations (59
+models) match, 3 models are skipped for other vertex forms, 2 slots crash the
+original in this setup. `verify-jitter.py`: repeat, three tamper fields and an
+empty trace rejected; Linux LF trace `0fc5445f…`. `--station-model` now seeds
+F1476 explicitly, as the game's start-up would.
+
+Census: 232 of 466 execute natively and all 232 match the original (most of
+the 59 newly decodable vertex programs stop at command opcodes). Top blockers:
+opcode 9 (49), 31 (39), 27 (38), vertex opcode 0x15 (13), 24/25 (11), 17 (10),
+21 (9), 22 (8). One synthetic test added, one updated. 161 `#[test]`, 24
+ignored, one Unix-only (136 runnable on Windows).
+
 ## 2026-10-21 — Complex polygons (opcode 5, v0.21)
 
 F1721 layout: word +0 material; byte +2 low 7 bits normal, bit 7 a flag; byte

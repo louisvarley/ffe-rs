@@ -41,6 +41,18 @@ pub fn multiply(a: i32, b: i32) -> i32 {
     ((i64::from(a) * i64::from(b)) >> 31) as i32
 }
 
+/// Initial state of the F1476 generator (`DATA_008818`, `DATA_008820`).
+pub const JITTER_SEED: [u32; 2] = [0x1234_5678, 0x4567_89ab];
+
+/// F1476: a = s0; s0 += s1; s1 = rotate-left-16(a); return s1. The original shares
+/// this state with other code; callers own it here (see vertex opcodes 7/8).
+pub fn jitter(state: &mut [u32; 2]) -> i32 {
+    let a = state[0];
+    state[0] = a.wrapping_add(state[1]);
+    state[1] = a.rotate_left(16);
+    state[1] as i32
+}
+
 pub fn variable(selector: u8, context: &VertexContext) -> i32 {
     let index = usize::from(selector & 63);
     match selector >> 6 {
@@ -58,7 +70,7 @@ pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
     for (index, record) in records.chunks_exact(6).enumerate() {
         let references: &[u8] = match record[0] {
             0..=2 | 9 | 10 => &[],
-            5 | 6 => &record[4..5],
+            5..=8 => &record[4..5],
             11 | 12 | 17..=20 => &record[3..5],
             15 | 16 => &record[2..5],
             opcode => {
@@ -77,19 +89,33 @@ pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
 }
 
 /// Each evaluation has a fresh memo table: animation/matrix changes never reuse stale vertices.
+/// Jittered vertices (opcodes 7/8) draw from [`JITTER_SEED`]; see [`evaluate_with_jitter`].
 pub fn evaluate(
     records: &[u8],
     count: u32,
     context: &VertexContext,
+) -> Result<Vec<[i32; 3]>, String> {
+    evaluate_with_jitter(records, count, context, &mut JITTER_SEED.clone())
+}
+
+/// [`evaluate`] in index order with caller-owned F1476 state, advanced only on success.
+pub fn evaluate_with_jitter(
+    records: &[u8],
+    count: u32,
+    context: &VertexContext,
+    jitter: &mut [u32; 2],
 ) -> Result<Vec<[i32; 3]>, String> {
     validate_records(records, count)?;
     if context.scale > 31 {
         return Err("Vertex scale must be in 0..31.".to_owned());
     }
     let mut evaluator = ObjectCache::new(records, count)?;
-    (0..count as u8)
+    evaluator.jitter = *jitter;
+    let vertices = (0..count as u8)
         .map(|index| evaluator.vertex(index, context, 0))
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    *jitter = evaluator.jitter;
+    Ok(vertices)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -105,6 +131,8 @@ pub(crate) struct ObjectCache<'a> {
     records: &'a [u8],
     pub slots: Vec<CachedVertex>,
     visiting: Vec<bool>,
+    /// F1476 state consumed by jittered vertices, in evaluation order.
+    pub jitter: [u32; 2],
 }
 
 impl<'a> ObjectCache<'a> {
@@ -114,6 +142,7 @@ impl<'a> ObjectCache<'a> {
             records,
             slots: vec![CachedVertex::default(); count as usize],
             visiting: vec![false; count as usize],
+            jitter: JITTER_SEED,
         })
     }
 
@@ -176,6 +205,22 @@ impl<'a> ObjectCache<'a> {
                 self.slots[pair + 1].stamp = 1;
                 self.slots[slot].object
             }
+            7 | 8 => {
+                // Base vertex, three draws shifted by byte 2, then the mirror; the mirror
+                // takes the offsets in z, y, x order, exactly as the original does.
+                let pair = slot & !1;
+                let base = self.vertex(r[4], context, depth + 1)?;
+                let shift = u32::from(r[2] & 31);
+                let offsets: [i32; 3] = std::array::from_fn(|_| jitter(&mut self.jitter) >> shift);
+                let ordinary = std::array::from_fn(|i| base[i].wrapping_add(offsets[i]));
+                let mirror = self.vertex(r[4] ^ 1, context, depth + 1)?;
+                let reflected = std::array::from_fn(|i| mirror[i].wrapping_add(offsets[2 - i]));
+                self.slots[pair].object = ordinary;
+                self.slots[pair + 1].object = reflected;
+                self.slots[pair].stamp = 1;
+                self.slots[pair + 1].stamp = 1;
+                self.slots[slot].object
+            }
             11 | 12 | 15..=20 => {
                 let a = self.vertex(r[3] ^ mirror, context, depth + 1)?;
                 let b = self.vertex(r[4] ^ mirror, context, depth + 1)?;
@@ -199,7 +244,7 @@ impl<'a> ObjectCache<'a> {
             _ => unreachable!("records validated before evaluation"),
         };
         self.visiting[slot] = false;
-        if !matches!(r[0], 0..=2 | 5 | 6 | 9 | 10) {
+        if !matches!(r[0], 0..=2 | 5..=10) {
             self.slots[slot].object = value;
             self.slots[slot].stamp = 1;
         }

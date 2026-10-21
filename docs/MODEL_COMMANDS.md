@@ -90,19 +90,23 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.21: **229 of 466** execute, and all 229 match the original
+v0.22: **232 of 466** execute, and all 232 match the original
 (`verify-station-models.py`). Top remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| vertices: vertex opcode 0x7 | 59 |
+| decode: opcode 9 (thrusters) | 49 |
 | decode: opcode 31 | 39 |
-| decode: opcode 27 | 35 |
-| vertices: vertex opcode 0x15 | 13 |
-| decode: opcodes 17 / 24 / 25 | 10 each |
-| decode: opcodes 21 / 22 | 8 each |
+| decode: opcode 27 | 38 |
+| vertices: vertex opcode 0x15 (21) | 13 |
+| decode: opcodes 24 / 25 | 11 each |
+| decode: opcode 17 | 10 |
+| decode: opcodes 21 / 22 | 9 / 8 |
 | decode: stream lacks a final terminator | 6 |
 | decode: opcode 30 | 5 |
+
+Vertex opcodes supported: 0-2, 5-12, 15-20 (7/8 since v0.22). Not yet: 3/4,
+13/14 (screen-space midpoints), 21/22 and 23/24 (F1477 forms).
 
 Use it to choose the next opcode; re-run it after each one. Every model that
 executes natively is compared with the original F1772 by
