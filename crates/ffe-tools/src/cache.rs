@@ -67,6 +67,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     };
     let (model_table_rva, sine_table_rva) = model_layout(profile.id)?;
     let mut assets = Vec::new();
+    let mut models = 0;
     for record in &inspection.files {
         if record.path == "FIRSTENC.EXE" {
             let bytes = recorded_bytes(&root, record)?;
@@ -79,8 +80,21 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                 },
                 bytes: table.bytes,
             });
-            for index in [74, 75] {
-                let normals = decode_model_normals(&bytes, model_table_rva, index)?;
+            // Every table slot whose normals, commands and vertices all decode (v7).
+            // Stations 74/75 must decode; other slots that cannot are skipped.
+            for index in 0..ffe_convert::model_extents::MODEL_COUNT as u32 {
+                let decoded =
+                    decode_model_normals(&bytes, model_table_rva, index).and_then(|normals| {
+                        let commands = decode_model_commands(&bytes, model_table_rva, index)?;
+                        let model = decode_model_vertices(&bytes, model_table_rva, index)?;
+                        Ok((normals, commands, model))
+                    });
+                let (normals, commands, model) = match decoded {
+                    Ok(decoded) => decoded,
+                    Err(error) if matches!(index, 74 | 75) => return Err(error),
+                    Err(_) => continue,
+                };
+                models += 1;
                 assets.push(Asset {
                     id: format!("base:model-normals/{index:03}"),
                     path: format!("models/{index:03}.nrm"),
@@ -93,7 +107,6 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     },
                     bytes: normals.bytes,
                 });
-                let commands = decode_model_commands(&bytes, model_table_rva, index)?;
                 assets.push(Asset {
                     id: format!("base:model-commands/{index:03}"),
                     path: format!("models/{index:03}.cmd"),
@@ -105,7 +118,6 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     },
                     bytes: commands.bytes,
                 });
-                let model = decode_model_vertices(&bytes, model_table_rva, index)?;
                 assets.push(Asset {
                     id: format!("base:model-vertices/{index:03}"),
                     path: format!("models/{index:03}.vtx"),
@@ -192,21 +204,22 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             });
         }
     }
-    if assets.len() != 385 {
+    // 379 non-model assets plus vertices, commands and normals per imported model.
+    if models < 2 || assets.len() != 379 + 3 * models {
         return Err(format!(
-            "unexpected imported asset count {}; no cache written",
+            "unexpected imported asset count {} ({models} models); no cache written",
             assets.len()
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 6,
+        format: "ffe-content-cache".to_owned(), format_version: 7,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,
         }).collect(),
         complete_game_assets: false,
         unresolved: vec![
-            "Only two station vertex/command/normal programs, the two bitmap tables, main bitmap font, fixed low palette, external cabins and PCM effects are imported.".to_owned(),
+            format!("{models} of {} model vertex/command/normal programs (those that decode), the two bitmap tables, main bitmap font, fixed low palette, external cabins and PCM effects are imported.", ffe_convert::model_extents::MODEL_COUNT),
             "Upper 128 palette colours are runtime state; bitmap RGBA previews and upscale eligibility are not inferred.".to_owned(),
             "Station commands are structurally decoded, not fully executed; submodels, other fonts, gameplay tables, journal, music and optional CD media remain unconverted.".to_owned(),
             "Not a playable game cache or installable graphics pack; patch-output layouts are unsupported.".to_owned(),

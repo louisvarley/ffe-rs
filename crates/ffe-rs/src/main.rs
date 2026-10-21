@@ -1,6 +1,7 @@
 use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
+use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::saves;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
@@ -147,6 +148,7 @@ fn run() -> Result<(), String> {
     let mut help = true;
     let mut scenarios = false;
     let mut model_lab = None;
+    let mut model_viewer: Option<ModelViewer> = None;
     let mut paused = false;
     let mut message = String::from("Welcome. F1 closes help; F2 selects a playtest.");
     let mut last = Instant::now();
@@ -162,7 +164,12 @@ fn run() -> Result<(), String> {
         held_controls.update(
             &keys_down,
             &window.get_keys_pressed(KeyRepeat::No),
-            active && !help && !scenarios && !paused && model_lab.is_none(),
+            active
+                && !help
+                && !scenarios
+                && !paused
+                && model_lab.is_none()
+                && model_viewer.is_none(),
         );
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
         if active {
@@ -170,12 +177,14 @@ fn run() -> Result<(), String> {
                 help = !help;
                 scenarios = false;
                 model_lab = None;
+                model_viewer = None;
                 held_controls.disarm(&keys_down);
             }
             if pressed(Key::F2) {
                 scenarios = !scenarios;
                 help = false;
                 model_lab = None;
+                model_viewer = None;
                 held_controls.disarm(&keys_down);
             }
             if pressed(Key::F4) {
@@ -185,6 +194,7 @@ fn run() -> Result<(), String> {
                 } else {
                     help = false;
                     scenarios = false;
+                    model_viewer = None;
                     match ModelLab::new(&cache) {
                         Ok(lab) => model_lab = Some(lab),
                         Err(error) => {
@@ -194,15 +204,53 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
+            if pressed(Key::F6) {
+                held_controls.disarm(&keys_down);
+                if model_viewer.is_some() {
+                    model_viewer = None;
+                } else {
+                    help = false;
+                    scenarios = false;
+                    model_lab = None;
+                    match ModelViewer::new(&cache) {
+                        Ok(viewer) => model_viewer = Some(viewer),
+                        Err(error) => {
+                            eprintln!("MODEL VIEWER ERROR: {error}");
+                            message = format!("MODEL VIEWER ERROR: {error}");
+                        }
+                    }
+                }
+            }
             if pressed(Key::F3) {
                 modern = !modern;
                 held_controls.disarm(&keys_down);
             }
-            if pressed(Key::P) && model_lab.is_none() {
+            if pressed(Key::P) && model_lab.is_none() && model_viewer.is_none() {
                 paused = !paused;
                 held_controls.disarm(&keys_down);
             }
-            if let Some(lab) = model_lab.as_mut() {
+            if let Some(viewer) = model_viewer.as_mut() {
+                let repeated = |key| i32::from(window.is_key_pressed(key, KeyRepeat::Yes));
+                viewer.step(repeated(Key::PageDown) - repeated(Key::PageUp));
+                viewer.turn(
+                    repeated(Key::Right) - repeated(Key::Left),
+                    repeated(Key::Up) - repeated(Key::Down),
+                );
+                viewer.zoom(
+                    repeated(Key::Equal) + repeated(Key::NumPadPlus)
+                        - repeated(Key::Minus)
+                        - repeated(Key::NumPadMinus),
+                );
+                if pressed(Key::Key0) {
+                    viewer.set_animation(0);
+                }
+                if pressed(Key::Key5) {
+                    viewer.set_animation(32768);
+                }
+                if pressed(Key::Key9) {
+                    viewer.set_animation(65535);
+                }
+            } else if let Some(lab) = model_lab.as_mut() {
                 if pressed(Key::Tab) {
                     lab.cycle_view();
                 }
@@ -293,7 +341,8 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        if active && !help && !scenarios && !paused && model_lab.is_none() {
+        if active && !help && !scenarios && !paused && model_lab.is_none() && model_viewer.is_none()
+        {
             let axis = |positive, negative| {
                 f64::from(u8::from(held_controls.contains(&positive)))
                     - f64::from(u8::from(held_controls.contains(&negative)))
@@ -324,7 +373,9 @@ fn run() -> Result<(), String> {
             accumulator = 0.0;
         }
         screen.draw(&state, help, modern, &message);
-        if let Some(lab) = &model_lab {
+        if let Some(viewer) = &model_viewer {
+            screen.draw_model_viewer(viewer);
+        } else if let Some(lab) = &model_lab {
             screen.draw_model_lab(lab)?;
         } else if scenarios {
             screen.overlay(

@@ -80,12 +80,13 @@ capture produced by two repeat runs of the local reference.
 | v0.34 screen labels | opcode 18, `Primitive::Label` | `model_execute.rs` (+1) | `verify-station-models.py` (432 models) | `a80247eb…` (Linux LF) | label key and screen point match (1 queued); model 89 release data differs; 437 of 466 models execute |
 | v0.35 empty light points | opcode 30 `0x801e` with a zero count | `model_execute.rs` (extended) | `verify-station-models.py` (433 models) | `a80247eb…` (Linux LF) | non-zero counts need DATA_007820..7828; 438 of 466 models execute |
 | v0.36 sound requests | opcode 15, `SoundEmission` | `model_execute.rs` (+1) | `verify-station-models.py` (434 models) | `4bcf902e…` (Linux LF) | sample and volume match; playback not ported; 439 of 466 models execute |
+| v0.37 cache v7; F6 model viewer | `ffe-tools build-data` (all decodable models), `ffe_rs::model_viewer`, `Screen::draw_model_viewer` | `model_viewer.rs` (1), cache/sine version tests | executor output only (diagnostic camera/colours) | — | first visible models: 420 of 439 render; textures grey; polygons/surfaces/text/children not drawn |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 177 `#[test]` functions total; 25 are
+- `cargo test --workspace --locked` passes. 178 `#[test]` functions total; 25 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **151 runnable synthetic tests** (152 on Linux).
+  that is **152 runnable synthetic tests** (153 on Linux).
 - `verify-station-models.py`: all 434 models that both sides complete match the
   original command flow and final state; `verify-vertex-programs.py`: all 452
   comparable vertex programs match.

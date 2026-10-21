@@ -4,6 +4,33 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Cache v7 and the F6 model viewer (v0.37)
+
+The first visible use of the ported model executor. **Cache v7** imports the
+vertices, commands and normals of every model table slot whose three blocks
+decode: 439 of 466 on floppy 1.02 (1696 assets). Stations 74/75 must decode;
+other failures are skipped. `ffe-content` accepts model assets for any slot
+below 466 from v7, and only 74/75 before.
+
+**F6** opens `ModelViewer` (game paused): Page Up/Down through the models,
+arrows to turn, +/- to zoom, 0/5/9 test input. Each frame runs `execute_live`
+with a camera frame (also the basis), full-detail visibility (depth 1), normals
+from `model_normals::evaluate` with the camera and a light in object space, and
+draws `Execution::ordered` in order: faces filled (scanline, even-odd) in
+`resolve_colour` (now public) colours, lines, points, and curves as a cubic
+through their four entry points (F1811 not ported). Polygons and labels are
+counted as not drawn. A first pass measures the drawn extent and the second
+fits it on screen.
+
+Diagnostic choices, not the faithful renderer: floating-point camera, light
+direction, nibble-to-RGB mapping, textured faces as lit grey, dark blue
+backdrop. 420 of the 439 models render; 18 planet/star-sized objects exceed the
+32-bit view space and one stops on an executor error. Models that only call
+child models show nothing yet. Oracles are unchanged with the v7 cache
+(`verify-station-models.py` 434 compared, 0 mismatched). One test added;
+version-rejection tests move from 7 to 8. 178 `#[test]`, 25 ignored, one
+Unix-only (152 runnable on Windows).
+
 ## 2026-10-21 — Opcode 15 sound requests (v0.36)
 
 F1759 (opcode 15, two bytes) sums the absolute instance position components

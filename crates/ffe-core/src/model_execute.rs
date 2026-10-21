@@ -152,7 +152,7 @@ pub struct ColourEmission {
 
 /// F1692/F1693 colour resolution: nibble RGB (zero when textured), plus the instance
 /// colour for local materials, plus the normal's colour unless unlit or textured.
-fn resolve_colour(value: u16, instance: [u8; 3], normal: [u8; 3]) -> [u8; 3] {
+pub fn resolve_colour(value: u16, instance: [u8; 3], normal: [u8; 3]) -> [u8; 3] {
     let decoded = material(value);
     let mut rgb = decoded.rgb;
     if decoded.local_colour {

@@ -67,7 +67,7 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         read(&bytes).unwrap().asset("base:model-commands/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 7] {
+    for version in [1, 2, 3, 8] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
 
@@ -103,7 +103,7 @@ fn normal_payloads_require_v5_and_validate_counts_and_anchor_bounds() {
         read(&bytes).unwrap().asset("base:model-normals/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 7] {
+    for version in [1, 2, 3, 4, 8] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for count in [0, 1, 3, 6, 258, u32::MAX] {
@@ -134,7 +134,7 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
         read(&bytes).unwrap().asset("base:model-vertices/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 7] {
+    for version in [1, 2, 8] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for (program, count, scale, index) in [
@@ -146,6 +146,10 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
     ] {
         assert!(build(m.clone(), vec![make(program, count, scale, index)]).is_err());
     }
+    // v7 imports any original table slot (0..466), not only stations 74/75.
+    m.format_version = 7;
+    assert!(build(m.clone(), vec![make(good.clone(), 2, 13, 73)]).is_ok());
+    assert!(build(m, vec![make(good, 2, 13, 466)]).is_err());
 }
 
 fn rewrite(bytes: &[u8], change: impl FnOnce(&mut Vec<(String, Vec<u8>)>)) -> Vec<u8> {
@@ -215,7 +219,7 @@ fn stored_cache_is_deterministic_sorted_and_loads_by_stable_id() {
 fn malformed_manifests_cannot_claim_complete_content_or_escape_paths() {
     let bytes = build(manifest(), assets()).unwrap();
     for (key, value) in [
-        ("format_version", serde_json::json!(7)),
+        ("format_version", serde_json::json!(8)),
         ("format", serde_json::json!("other")),
         ("complete_game_assets", serde_json::json!(true)),
         ("unresolved", serde_json::json!([])),

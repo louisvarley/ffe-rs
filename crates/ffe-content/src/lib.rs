@@ -147,8 +147,11 @@ fn valid_digest(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+/// Original model table slots (DATA_004681).
+const MODEL_TABLE_SLOTS: u32 = 466;
+
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=6) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=7) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -175,6 +178,18 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
     let mut ids = BTreeSet::new();
     let mut previous = "";
     for record in &manifest.files {
+        let model_index = match record.asset {
+            AssetKind::ModelVertices { index, .. }
+            | AssetKind::ModelCommands { index, .. }
+            | AssetKind::ModelNormals { index, .. } => Some(index),
+            _ => None,
+        };
+        // Up to v6 only stations 74/75 are imported; v7 imports any table slot.
+        if model_index.is_some_and(|index| {
+            index >= MODEL_TABLE_SLOTS || (manifest.format_version < 7 && !matches!(index, 74 | 75))
+        }) {
+            return Err("model programs outside stations 74/75 require cache v7".to_owned());
+        }
         if manifest.format_version < 6 && matches!(record.asset, AssetKind::SineTable { .. }) {
             return Err("Sine tables require cache v6 or later.".to_owned());
         }
@@ -259,14 +274,10 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
             }
         }
         AssetKind::ModelVertices {
-            index,
             vertex_count,
             scale,
             ..
         } => {
-            if !matches!(index, 74 | 75) {
-                return Err("Only verified station vertex programs 74/75 are supported.".to_owned());
-            }
             ffe_core::model::evaluate(
                 bytes,
                 *vertex_count,
@@ -276,28 +287,17 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
                 },
             )?;
         }
-        AssetKind::ModelCommands {
-            index,
-            vertex_count,
-            ..
-        } => {
-            if !matches!(index, 74 | 75) {
-                return Err("Only station command programs 74/75 are supported.".to_owned());
-            }
+        AssetKind::ModelCommands { vertex_count, .. } => {
             ffe_core::model_commands::decode(bytes, *vertex_count)?;
         }
         AssetKind::SineTable { .. } => {
             ffe_core::model_math::SineTable::from_bytes(bytes)?;
         }
         AssetKind::ModelNormals {
-            index,
             vertex_count,
             normal_count,
             ..
         } => {
-            if !matches!(index, 74 | 75) {
-                return Err("Only station normals 74/75 are supported.".to_owned());
-            }
             ffe_core::model_normals::validate_records(bytes, *normal_count, *vertex_count)?;
         }
         AssetKind::TextureBlock {

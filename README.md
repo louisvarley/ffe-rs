@@ -12,6 +12,10 @@ the current experimental example is not that faithful renderer.
 > Original cabin, proportional bitmap font and console artwork are imported.
 > Version 0.4 extends the **F4 station model lab** with original declared
 > triangle/quad outlines and individual-face inspection, not finished models.
+> The **F6 model viewer** (cache v7) runs every imported ship, station and object
+> program through the verified model executor and draws its faces, lines, points
+> and curves in the original render order. Textures show as grey; polygons,
+> curved surfaces, text, labels and child models are not drawn yet.
 > The flight view still has placeholder geometry. No legacy runtime is linked.
 > Complete content, JJFFE-equivalent gameplay and graphics packs remain unfinished.
 > [CLAUDE.MD](CLAUDE.MD) records the owner's answers and current plan.
@@ -60,6 +64,8 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 |---|---|
 | Help / named reset scenarios / input preset | F1 / F2 / F3 |
 | Station model lab (pauses gameplay) / return | F4 |
+| Model viewer, every imported model (pauses gameplay) / return | F6 |
+| Viewer: previous / next model; turn; zoom; test input | Page Up / Page Down; arrows; + / -; 0 / 5 / 9 |
 | Launch / request or cancel docking | L / D |
 | Classic-like thrust / reverse; yaw; pitch | Enter / Left Shift; comma / period; A / Z |
 | Modern thrust / reverse; yaw; pitch | W / S; Left / Right; Up / Down |
@@ -293,6 +299,15 @@ It does not produce `data.bin` or `upscaled.bin`.
 cargo run --locked -p ffe-tools -- build-data --game .\game --out .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
+```
+
+**Cache v7** imports every model that decodes (439 of 466 on floppy 1.02) for the
+F6 viewer. `build-data` refuses an existing destination, so build to a new file,
+then replace your old `data.bin` with it:
+
+```powershell
+.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v7.bin
+Move-Item -Force .\data-v7.bin .\data.bin
 ```
 
 The local cache has been generated on this checkout. It is ignored and must

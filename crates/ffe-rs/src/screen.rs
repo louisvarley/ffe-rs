@@ -1,6 +1,7 @@
 use crate::flight::{Flight, Mode};
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::model_lab::{LabView, ModelLab};
+use crate::model_viewer::{ModelViewer, Shape};
 use ffe_content::{AssetKind, VerifiedCache};
 use std::io::Cursor;
 
@@ -115,6 +116,12 @@ impl Screen {
     }
 
     fn line(&mut self, start: (i32, i32), end: (i32, i32), colour: u8) {
+        let value = self.palette[usize::from(colour)];
+        self.line_value(start, end, value);
+    }
+
+    /// Bresenham in the 320x158 view, bounded to 4096 steps.
+    fn line_value(&mut self, start: (i32, i32), end: (i32, i32), value: u32) {
         let (mut x, mut y) = start;
         let (end_x, end_y) = end;
         let dx = (end_x - x).abs();
@@ -123,8 +130,8 @@ impl Screen {
         let sy = if y < end_y { 1 } else { -1 };
         let mut error = dx + dy;
         for _ in 0..4096 {
-            if y < VIEW_HEIGHT as i32 {
-                self.pixel(x, y, colour);
+            if (0..VIEW_HEIGHT as i32).contains(&y) && (0..320).contains(&x) {
+                self.frame[y as usize * 320 + x as usize] = value;
             }
             if x == end_x && y == end_y {
                 break;
@@ -138,6 +145,39 @@ impl Screen {
                 error += dx;
                 y += sy;
             }
+        }
+    }
+
+    /// Even-odd scanline fill at pixel centres, clipped to the 320x158 view.
+    fn fill_value(&mut self, points: &[(i32, i32)], value: u32) {
+        let Some(top) = points.iter().map(|p| p.1).min() else {
+            return;
+        };
+        let bottom = points.iter().map(|p| p.1).max().unwrap_or(top);
+        let mut crossings = Vec::with_capacity(points.len());
+        for y in top.max(0)..=bottom.min(VIEW_HEIGHT as i32 - 1) {
+            let centre = f64::from(y) + 0.5;
+            crossings.clear();
+            for (i, a) in points.iter().enumerate() {
+                let b = points[(i + 1) % points.len()];
+                let (ay, by) = (f64::from(a.1), f64::from(b.1));
+                if (ay <= centre) != (by <= centre) {
+                    let t = (centre - ay) / (by - ay);
+                    crossings.push(f64::from(a.0) + t * f64::from(b.0 - a.0));
+                }
+            }
+            crossings.sort_by(f64::total_cmp);
+            for pair in crossings.chunks_exact(2) {
+                let start = (pair[0] - 0.5).ceil().max(0.0) as i32;
+                let end = ((pair[1] - 0.5).floor() as i32).min(319);
+                for x in start..=end {
+                    self.frame[y as usize * 320 + x as usize] = value;
+                }
+            }
+        }
+        // Edges as well, so thin and edge-on faces stay visible.
+        for (i, a) in points.iter().enumerate() {
+            self.line_value(*a, points[(i + 1) % points.len()], value);
         }
     }
 
@@ -319,7 +359,7 @@ impl Screen {
                 "CLASSIC-LIKE: Enter/Shift thrust; ,/. yaw; A/Z pitch",
                 "X brake   D request dock   L launch   B buy   N sell",
                 "Dock: range <80, speed <20, aim at station.",
-                "F3 input. F4 station model lab. P pause. Esc quit.",
+                "F3 input. F4 lab. F6 models. P pause. Esc quit.",
                 "F5 new save snapshot; F9 load newest snapshot.",
                 "F2 scenarios: 1 Docked / 2 Approach / 3 Free Flight",
                 "Scenarios RESET progress, but keep saved snapshots.",
@@ -342,6 +382,62 @@ impl Screen {
         for (index, line) in lines.iter().enumerate() {
             self.text(20, 47 + index * 13, line, 15);
         }
+        self.present();
+    }
+
+    /// F6: every imported model executed by the verified port, in original order.
+    pub fn draw_model_viewer(&mut self, viewer: &ModelViewer) {
+        // Dark blue backdrop so black (unlit) faces stay visible as silhouettes.
+        self.frame[..320 * VIEW_HEIGHT].fill(0x00_00_10_28);
+        let model = viewer.model();
+        let frame = viewer.render();
+        let value = |[r, g, b]: [u8; 3]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
+        let status = match &frame {
+            Ok(frame) => {
+                for shape in &frame.shapes {
+                    match shape {
+                        Shape::Fill(points, rgb) => self.fill_value(points, value(*rgb)),
+                        Shape::Line(a, b, rgb) => self.line_value(*a, *b, value(*rgb)),
+                        Shape::Point((x, y), rgb) => {
+                            if (0..VIEW_HEIGHT as i32).contains(y) && (0..320).contains(x) {
+                                self.frame[*y as usize * 320 + *x as usize] = value(*rgb);
+                            }
+                        }
+                    }
+                }
+                if frame.skipped > 0 {
+                    format!(
+                        "{} SHAPES, {} NOT DRAWN YET",
+                        frame.shapes.len(),
+                        frame.skipped
+                    )
+                } else {
+                    format!("{} SHAPES", frame.shapes.len())
+                }
+            }
+            Err(error) => {
+                // Shown on screen, not logged: this runs every frame.
+                self.text(3, 23, "CANNOT SHOW THIS MODEL YET:", 12);
+                let words: String = error.to_ascii_uppercase().chars().take(60).collect();
+                self.text(3, 34, &words, 12);
+                "NOT DRAWN".to_owned()
+            }
+        };
+        self.text(
+            3,
+            1,
+            &format!(
+                "MODEL VIEWER {}/{}  MODEL {}  INPUT {}",
+                viewer.selected() + 1,
+                viewer.len(),
+                model.index,
+                viewer.animation()
+            ),
+            18,
+        );
+        self.text(3, 12, &status, 15);
+        self.text(3, 137, "PGUP/PGDN MODEL  ARROWS TURN  +/- ZOOM", 15);
+        self.text(3, 148, "0/5/9 INPUT  F6 RETURN - GAME PAUSED", 18);
         self.present();
     }
 

@@ -30,9 +30,10 @@ fn sine_table_requires_v6_and_validated_quarter_wave_payload() {
         ffe_content::read(&bytes).unwrap().asset("base:math/sine"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 5, 7] {
+    for version in [1, 2, 3, 4, 5, 8] {
         assert!(ffe_content::build(manifest(version), vec![asset(good.clone())]).is_err());
     }
+    assert!(ffe_content::build(manifest(7), vec![asset(good.clone())]).is_ok());
     for bad in [vec![0; 65535], vec![0xff; 65536]] {
         assert!(ffe_content::build(manifest(6), vec![asset(bad)]).is_err());
     }
