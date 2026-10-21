@@ -24,8 +24,9 @@ v0.11 design record and follow-ups.
 **READY for the next model task.** The v0.10 projection/live-slot work, v0.11
 depth composition, v0.12 composed-order oracle, v0.13 point/line emission and
 v0.14 text/child-model operand events, v0.15 colour commands and v0.16
-base-relative transforms are implemented; both real station programs now run to
-completion, tested and recorded. The
+base-relative transforms are implemented; both real station programs run to
+completion and, since v0.17, match the original F1772 run of the same programs
+event for event in command order, tested and recorded. The
 reference adapter now also builds on Linux (`tools/reference/build-linux.sh`)
 and reproduces every recorded trace hash. The next task (text, submodels, other transform
 forms and colour) is scoped in `docs/MODEL_EXECUTION_PLAN.md` §8 and
@@ -59,10 +60,11 @@ capture produced by two repeat runs of the local reference.
 | v0.14 text/submodel operands | `model_commands` (`Text`/`Submodel`), `model_execute` (`texts`/`submodels`) | `model_execute.rs` (+3), `text_submodel_reference.rs` (1, ignored) | `verify-text-submodel.py` (7 cases, 11 tamper fields) | `5ba06002572b4395481a3651d84c588dbdec4285a210b8fe7e4b0d1a8041f73d` (CRLF; Linux LF `b095c38c…`) | F1747 text; F1749/F1750 child-model call (opcode 14 is **not** text); operand events, not in `ordered`; glyphs/children not executed |
 | v0.15 colour command | `model_commands::Colour`, `model_execute` (`colours`, `normal_zero_colour`), `VertexContext::colour` | `model_execute.rs` (+2), `colour_reference.rs` (1, ignored) | `verify-colour.py` (32 cases, 9 tamper fields) | `7d23226568032c92b4f062d4553cee39f4c89f8e51b742e9f958fb48ddaaa4b4` (CRLF; Linux LF `95383fff…`) | F1762; 6- or 20-byte record (decoder size fixed); instance or normal-0 colour; textured normal-0 writes error |
 | v0.16 base transforms; stations complete | `model_math::rotate_command` (base forms), `VertexContext::{basis, base_handedness, handedness}`, top-level group close in `execute_live` | `model_math.rs`, `model_execute.rs` (updated), `base_transform_reference.rs` (1, ignored) | `verify-base-transform.py` (6,048 cases, 8 tamper fields) | `c9a87a6d023bacf3900dc0587285ac7522abc6353a80b9b6b62db43088c4a29c` (CRLF; Linux LF `03070a9b…`) | F1741/F1739; real stations 74/75 run to completion on synthetic inputs, not yet compared whole-program |
+| v0.17 whole-station oracle | (no new core code) | `station_reference.rs` (1, ignored) | `verify-station.py` (models 74/75, 10 tamper fields) | `0ea8f4a7b9df2616dc6537a032b8527ab3ca0fde89e63856c260d23392f722b2` (CRLF; Linux LF `b9e3c831…`) | real station streams through original F1772; command-order events and final state match; render order/glyphs/children/pixels not covered |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 153 `#[test]` functions total; 20 are
+- `cargo test --workspace --locked` passes. 154 `#[test]` functions total; 21 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
   that is **132 runnable synthetic tests** (133 on Linux).
 - `tools/reference/build-linux.sh` builds `jjffe-smoke`/`jjffe-commands` under
@@ -82,15 +84,21 @@ Facts verified on 2026-10-21:
 
 ## Next task
 
-Compare a **whole station program** with the original: run model 74/75's real
-command stream through the original F1772 in the instrumented adapter, with the
-same synthetic instance inputs the Rust test uses, text/submodel nested calls
-recorded (as in `--text-submodel`) and face/point/line handlers probed (as in
-`--execution`/`--point-line`). Match the ordered primitive stream and the final
-context. This replaces the helper-composition evidence. After that: primitive
-colour (face/point/line F1692/F1693 use), the `0xc000` vertex-defined basis,
-then glyph/child execution (cache v7). F4, synthetic flight and cache v6 stay
-unchanged until a rendering step is approved.
+Command flow for real stations is verified (v0.17). Next, in order:
+
+1. **Render order**: the original queues faces inside the F1708/F1712 raster
+   path (after normal culling, projection and screen-range checks). Probe that
+   queueing (key and allocation per face) and compare with `Execution.ordered`,
+   which currently keys a face by its first view vertex.
+2. **Primitive colour**: the face/point/line F1692/F1693 colour use (instance
+   colour, normal lighting), building on v0.15.
+3. **Vertex-defined basis** (opcode 28 `0xc000`) and the remaining unsupported
+   opcodes, as real models reach them.
+4. **Glyph and child execution** (cache v7 child descriptors, F1740 frames,
+   F1687 culling, nested F1772 without the top-level group close).
+
+F4, synthetic flight and cache v6 stay unchanged until a rendering step is
+approved.
 
 ## Known stale spots
 

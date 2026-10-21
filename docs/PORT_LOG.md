@@ -4,6 +4,44 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Whole-station command-order oracle (v0.17)
+
+`--station` runs the real model 74/75 command streams (from the reference
+binary's own model table) through the original F1772 in the instrumented
+adapter. Depth commands, vertex resolution (F1470/F1471/F1478), colour,
+visibility and transforms run as original code; the face/point/line emitters
+are recorded with the locals and current basis at each emission (as in
+`--execution`), and text/child calls are recorded with their vertices resolved
+through the real F1470/F1471. In this mode text reports no glyph-buffer room
+after F1745 and every child culls (negative descriptor radius), so neither
+glyphs nor children execute.
+
+Inputs are consistent between both sides: identity frame (+0x14) and basis
+(+0x9c), position (0, 0, 100) — +0xc is both position z and the visibility
+depth — generation 2, zero scales/globals/locals, every normal visible with
+zero colour. (The older local station check used depth 100 with position z 0,
+which the original cannot represent; it stays as a completion check only.)
+
+`station_reference.rs` matches, for both models: face count and the FNV-1a
+stream of every face's arguments with locals and basis at emission (20 and 69
+faces), all five points per model with flags, every text and child-call event
+in command order, final locals, basis, colour (model 75 ends at 2,2,2) and
+handedness. `verify-station.py` passes with repeat, 10 tamper fields and an
+empty trace rejected. Trace SHA-256
+`0ea8f4a7b9df2616dc6537a032b8527ab3ca0fde89e63856c260d23392f722b2` (CRLF);
+Linux LF `b9e3c831…`. The probe's face cap rose from 64 to 256; earlier traces
+are unchanged.
+
+This is the first end-to-end evidence for real models, replacing the
+helper-composition-only evidence for command flow. Not covered: render order
+(the original's face queueing happens inside the hooked F1708/F1712 raster
+path), glyph and child execution, primitive colour, clipping and pixels.
+
+Also fixed a pre-existing Linux-only flake: the `ffe-tools` CLI test that runs
+a freshly copied binary could hit ETXTBSY when another test thread forked; it
+now retries only that error. 154 `#[test]`, 21 ignored, one Unix-only (132
+runnable on Windows).
+
 ## 2026-10-21 — Correction: vertex frame vs current basis
 
 `VertexContext::matrix` had stood for two different instance fields. Vertex

@@ -75,8 +75,11 @@ explicit unsupported-command error.
   (`verify-base-transform.py`, 6,048 cases, trace `c9a87a6d…`): row
   permutation, negation, handedness and the conditional rotation.
 - With the top-level F1780(0,0) close after return (F1683/F1684), both real
-  station programs run to completion in `execute_live` (synthetic inputs). Not
-  yet compared with the original running the same station.
+  station programs run to completion in `execute_live`.
+- Whole real stations match the original F1772 in command order
+  (`verify-station.py`, models 74/75, trace `0ea8f4a7…`): every face with its
+  locals/basis, points, text/child calls, and final locals/basis/colour/
+  handedness. Render order, glyph/child execution and pixels are not covered.
 
 ## Next: executing glyphs and children
 
