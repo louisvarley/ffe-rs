@@ -9,8 +9,8 @@
 use crate::model::variable;
 use crate::model::VertexContext;
 use crate::model_commands::{
-    arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Submodel,
-    Text, VisibilityContext,
+    arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Polygon,
+    Submodel, Text, VisibilityContext,
 };
 use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
@@ -65,6 +65,15 @@ pub struct SubmodelEmission {
     pub context: VertexContext,
 }
 
+/// A complex-polygon operand event (F1721). `key` is the depth key it was queued
+/// with, or `None` when its normal is culled (the original then skips it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolygonEmission {
+    pub polygon: Polygon,
+    pub key: Option<u32>,
+    pub context: VertexContext,
+}
+
 /// Where an opcode 26 colour was written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColourTarget {
@@ -105,6 +114,7 @@ pub enum QueueEvent {
     /// Close the current group and open one with this key, or none.
     Group(Option<u32>),
     Face(u32),
+    Polygon(u32),
     Point(u32),
     Line(u32),
 }
@@ -113,6 +123,7 @@ pub enum QueueEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primitive {
     Face(Emission),
+    Polygon(PolygonEmission),
     Point(PointEmission),
     Line(LineEmission),
 }
@@ -133,6 +144,8 @@ pub struct Execution {
     pub submodels: Vec<SubmodelEmission>,
     /// Executed colour commands in command order.
     pub colours: Vec<ColourEmission>,
+    /// Complex polygons in command order ([`execute_live`] only).
+    pub polygons: Vec<PolygonEmission>,
     /// Final normal entry 0 colour if a colour command wrote it during this run.
     pub normal_zero_colour: Option<[u8; 3]>,
     /// Depth-queue operations in program order ([`execute_live`] only), excluding the
@@ -425,6 +438,7 @@ fn execute_inner(
         texts: Vec::new(),
         submodels: Vec::new(),
         colours: Vec::new(),
+        polygons: Vec::new(),
         normal_zero_colour: None,
         queue: Vec::new(),
         ordered: Vec::new(),
@@ -511,6 +525,46 @@ fn execute_inner(
                             queue.push(key, Primitive::Face(emission))?;
                             result.queue.push(QueueEvent::Face(key));
                         }
+                    }
+                }
+                Some(command.size as i32)
+            }
+            5 => {
+                let Some(live) = working_vertices.as_mut() else {
+                    return Err(format!(
+                        "Unsupported executed command {code:#06x} at {offset:#x}."
+                    ));
+                };
+                for polygon in program.polygons.iter().filter(|p| p.offset == offset) {
+                    let culled = visibility
+                        .normals
+                        .get(usize::from(polygon.normal))
+                        .ok_or_else(|| {
+                            format!("Polygon at {offset:#x} references an out-of-range normal.")
+                        })?
+                        .culled;
+                    // F1721 keys the outline by its first vertex's view (F1470).
+                    let key = if culled {
+                        None
+                    } else {
+                        let vertex = live.resolve(
+                            polygon.vertex as i8,
+                            &working,
+                            instance.position,
+                            instance.generation,
+                            false,
+                        )?;
+                        Some(model_depth::key(vertex.view, instance.key_scale))
+                    };
+                    let emission = PolygonEmission {
+                        polygon: polygon.clone(),
+                        key,
+                        context: working.clone(),
+                    };
+                    result.polygons.push(emission.clone());
+                    if let (Some(key), Some(queue)) = (key, order.as_mut()) {
+                        queue.push(key, Primitive::Polygon(emission))?;
+                        result.queue.push(QueueEvent::Polygon(key));
                     }
                 }
                 Some(command.size as i32)

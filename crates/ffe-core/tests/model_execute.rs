@@ -83,9 +83,9 @@ fn execution_is_transactional_for_budget_arithmetic_unsupported_alias_and_rotati
             "unsigned division by zero",
         ),
         (
-            vec![13, 0x00c8, 5, 0],
+            vec![13, 0x00c8, 15, 0],
             8,
-            "Unsupported command 0x0005 at 0x4",
+            "Unsupported command 0x000f at 0x4",
         ),
         (
             vec![13, 0x00c8, 13, 0x00d2, 0],
@@ -765,4 +765,65 @@ fn live_faces_are_queued_by_the_original_cull_guard_and_outcode_rules() {
     .unwrap();
     assert!(result.ordered.is_empty());
     assert!(result.queue.is_empty());
+}
+
+#[test]
+fn live_polygons_skip_by_their_length_and_queue_by_their_first_segment_vertex() {
+    // Polygon: material 0x0123, normal 1 (bit 7 flag set), L = 4 segment bytes whose
+    // first byte (vertex 2, high bit masked) keys it; then a line on vertices 1/2.
+    let words = [5, 0x0123, 0x0481, 0x0082, 0x0000, 2, 0x0456, 0x0201, 0];
+    let stream = bytes(&words);
+    for (culled, queued) in [(false, true), (true, false)] {
+        let mut normals = vec![VISIBLE_NORMAL; 2];
+        normals[1].culled = culled;
+        let inputs = VisibilityContext {
+            normals: &normals,
+            ..visibility()
+        };
+        let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+        let result = execute_live(
+            &stream,
+            &mut vertices,
+            &mut VertexContext::default(),
+            &inputs,
+            None,
+            live_instance([0, 0, 100], 0, 0),
+            8,
+        )
+        .unwrap();
+        assert_eq!(result.commands, [0, 10, 16], "6 + L bytes, culled or not");
+        let polygon = &result.polygons[0].polygon;
+        assert_eq!(
+            (
+                polygon.material,
+                polygon.normal,
+                polygon.flag,
+                polygon.vertex
+            ),
+            (0x0123, 1, true, 2)
+        );
+        assert_eq!(polygon.segments, [0x82, 0x00, 0x00, 0x00]);
+        assert_eq!(result.polygons[0].key.is_some(), queued);
+        assert_eq!(
+            result
+                .ordered
+                .iter()
+                .filter(|p| matches!(p, Primitive::Polygon(_)))
+                .count(),
+            usize::from(queued)
+        );
+        assert_eq!(result.lines[0].vertices, [1, 2]);
+    }
+    // The key vertex must be a model vertex.
+    let external = bytes(&[5, 0x0123, 0x0201, 0x0009, 0x0000, 0]);
+    assert!(execute(
+        &external,
+        4,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        8
+    )
+    .unwrap_err()
+    .contains("Polygon references external/out-of-range vertex"));
 }

@@ -17,7 +17,7 @@ explicit unsupported-command error.
 | 2 | `F1702` | line | 6 | yes | yes | payload verified against F1703: material word, vertices `[byte2, byte3]`. Operand event only; no clipping/pixels. |
 | 3 | `F1707` | non-reflected triangle | 8 | yes | yes | material, A/B, normal byte, C; perimeter B/A/C |
 | 4 | `F1711` | non-reflected quad | 10 | yes | yes | material, A/B/C/D, normal word; perimeter C/A/D/B |
-| 5 | `F1721` | complex polygon | — | **no** | no | unsupported record form |
+| 5 | `F1721` | complex polygon | 6 + L | yes | yes | v0.21: word +0 material, byte +2 normal (low 7) / flag (bit 7), byte +3 segment length L, then L segment bytes (`DATA_007817`, 7 handlers). Culled: skipped. Otherwise keyed by F1777 of the first segment vertex's view. Segments not executed. |
 | 6 | `F1696` | unified-z block start/end | variable | yes | yes | composed in v0.11; modes 0/4/5/6 close, 1/3 max/min, 2 vertex, 7 position/first/offset |
 | 7 | `F1706` | reflected triangle | 8 | yes | yes | emits XOR-1 mirrored face then ordinary face |
 | 8 | `F1710` | reflected quad | 10 | yes | yes | same reflection rule |
@@ -86,30 +86,23 @@ explicit unsupported-command error.
   vertex-a key, interleaved with depth groups. Points/lines queueing, glyph/child
   execution and pixels are not covered.
 
-## Coverage across all models (v0.19 census)
+## Coverage across all models (census)
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
-native importer, decoder and executor with synthetic inputs. Floppy 1.02:
+native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
+v0.21: **229 of 466** execute, and all 229 match the original
+(`verify-station-models.py`). Top remaining blockers:
 
-| Blocker (floppy 1.02, first failing stage) | Models |
+| Blocker (first failing stage) | Models |
 |---|---:|
-| decode: opcode 5 (complex polygon) | 69 |
 | vertices: vertex opcode 0x7 | 59 |
 | decode: opcode 31 | 39 |
-| decode: opcode 27 | 26 |
+| decode: opcode 27 | 35 |
 | vertices: vertex opcode 0x15 | 13 |
 | decode: opcodes 17 / 24 / 25 | 10 each |
-| decode: opcode 22 (spline) | 7 |
+| decode: opcodes 21 / 22 | 8 each |
+| decode: stream lacks a final terminator | 6 |
 | decode: opcode 30 | 5 |
-| decode: stream lacks a final terminator | 5 |
-| other vertex-record errors | 10 |
-| decode: opcode 21 (nested block) | 3 |
-| normals: invalid count | 3 |
-| decode: out-of-range vertex in face/line/submodel | 7 |
-| decode: opcodes 0 (non-zero word), 4 (flags), 9, 18 | 7 |
-| vertices: vertex opcode 0xd | 2 |
-| null table entry (slot 149) | 1 |
-| **Executed to completion** | **180 of 466** |
 
 Use it to choose the next opcode; re-run it after each one. Every model that
 executes natively is compared with the original F1772 by

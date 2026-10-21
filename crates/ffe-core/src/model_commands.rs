@@ -75,6 +75,22 @@ impl Submodel {
     }
 }
 
+/// F1721 complex-polygon operands. The outline segments (DATA_007817 handlers) are
+/// kept raw; they build the outline and are not executed here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Polygon {
+    pub offset: usize,
+    pub material: u16,
+    /// Low 7 bits of byte 2: the normal whose culled flag skips the polygon.
+    pub normal: u8,
+    /// Bit 7 of byte 2.
+    pub flag: bool,
+    /// Low 7 bits of the first segment byte: the vertex that keys the polygon.
+    pub vertex: u8,
+    /// Segment bytes (byte 3 gives their length).
+    pub segments: Vec<u8>,
+}
+
 /// F1762 colour operands: 6 bytes, or 20 when byte 3 selects an alternative.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Colour {
@@ -105,6 +121,7 @@ pub struct Program {
     pub texts: Vec<Text>,
     pub submodels: Vec<Submodel>,
     pub colours: Vec<Colour>,
+    pub polygons: Vec<Polygon>,
 }
 
 fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
@@ -133,6 +150,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     let mut texts = Vec::new();
     let mut submodels = Vec::new();
     let mut colours = Vec::new();
+    let mut polygons = Vec::new();
     let mut branches = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -141,6 +159,8 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         let size = match opcode {
             0 if code == 0 => 2,
             1 => 8,
+            // Word, normal byte, segment length L, then L segment bytes.
+            5 => 6 + usize::from(*bytes.get(offset + 5).ok_or("Truncated polygon command.")?),
             2 => 6,
             3 | 7 => 8,
             4 | 8 => 10,
@@ -244,6 +264,26 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             }
             submodels.push(submodel);
         }
+        if opcode == 5 {
+            let payload = &bytes[offset + 2..offset + size];
+            if size < 8 {
+                return Err(format!("Polygon at {offset:#x} has no segments."));
+            }
+            let polygon = Polygon {
+                offset,
+                material: word(payload, 0)?,
+                normal: payload[2] & 0x7f,
+                flag: payload[2] & 0x80 != 0,
+                vertex: payload[4] & 0x7f,
+                segments: payload[4..].to_vec(),
+            };
+            if u32::from(polygon.vertex) >= vertex_count {
+                return Err(format!(
+                    "Polygon references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            polygons.push(polygon);
+        }
         if opcode == 26 {
             let payload = &bytes[offset + 2..offset + size];
             colours.push(Colour {
@@ -339,6 +379,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         texts,
         submodels,
         colours,
+        polygons,
     })
 }
 

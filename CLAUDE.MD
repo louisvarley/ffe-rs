@@ -28,8 +28,8 @@ programs run to completion; v0.17 matches both against the original F1772 run of
 the same programs, event for event in command order; v0.18 matches their face
 draw queues. V0.19 adds a whole-table model census: 180 of 466 models already
 execute natively, and v0.20 matches all 180 against the original F1772 in
-command order; opcode 5, vertex opcode 7 and opcodes 31/27 block most of the
-rest.
+command order. V0.21 adds complex polygons (opcode 5): 229 models now execute
+and all match; vertex opcode 7 and opcodes 31/27 block most of the rest.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.
@@ -813,8 +813,9 @@ whole-program in command order, and v0.18 ports the F1708/F1712 face queueing
 (cull, textured guard, outcode rejection, vertex-a key) verified against the
 original's queue. V0.19 imports any model slot (generated extents, 466 slots
 including the null slot 149) and adds `ffe-tools model-census`. The next single
-task is the largest census blocker, opcode 5 (complex polygon), then vertex
-opcode 7 and opcodes 31/27, generalising the station oracles to those models. For each, first add an original handler probe and
+task is the largest census blocker: vertex opcode 7, then opcodes 31/27 and
+the rest of the census list (v0.21 ported opcode 5; the whole-table oracle
+checks every newly executable model). For each, first add an original handler probe and
 document the payload; do not infer fields from record size. Do not claim static
 resolved points remain valid through transform or animation changes. Preserve
 the catalogue-vs-execution distinction and keep errors transactional; F4,

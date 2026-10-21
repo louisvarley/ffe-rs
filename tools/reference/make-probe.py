@@ -33,6 +33,10 @@ SCOPED_HOOKS = [
     ("FUNC_001708", "FUNC_001715", [
         ("FUNC_001778", "trace_alloc", 5),                # face queue allocations
     ]),
+    ("FUNC_001721", "FUNC_001722", [
+        ("FUNC_001777", "trace_polygon_key", 1),          # polygon depth key
+        ("FUNC_001778", "trace_polygon_alloc", 1),        # polygon queue allocation
+    ]),
     ("FUNC_001749", "FUNC_001751", [
         ("near [DATA_007727]", "trace_submodel_vertex", 5),  # F1471 projected vertex
         ("near [DATA_007756]", "trace_submodel_model", 1),   # F1538 model descriptor

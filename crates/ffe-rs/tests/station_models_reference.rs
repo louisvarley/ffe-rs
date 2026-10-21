@@ -131,7 +131,7 @@ fn executed_reference_station_models() {
             );
             emitted.extend(event.context.basis.into_iter().flat_map(i32::to_le_bytes));
         }
-        let (mut p, mut l, mut t, mut s) = (0, 0, 0, 0);
+        let (mut p, mut l, mut t, mut s, mut g) = (0, 0, 0, 0, 0);
         let (mut points, mut nested) = (Vec::new(), Vec::new());
         let mut projected = std::collections::HashSet::new();
         for offset in &result.commands {
@@ -154,6 +154,16 @@ fn executed_reference_station_models() {
                     0,
                 ]);
                 l += 1;
+            }
+            if let Some(polygon) = result
+                .polygons
+                .get(g)
+                .filter(|e| e.polygon.offset == *offset)
+            {
+                if let Some(key) = polygon.key {
+                    nested.push([11, key, 0, 0]);
+                }
+                g += 1;
             }
             if let Some(text) = result.texts.get(t).filter(|e| e.text.offset == *offset) {
                 if !text.culled {
@@ -181,11 +191,22 @@ fn executed_reference_station_models() {
                 s += 1;
             }
         }
+        // Vertex-lookup events (1: text F1470, 7: child F1471) fire only on a cache
+        // miss, and polygon segment handlers (not executed natively yet) project
+        // vertices; compare every other nested event.
+        let lookups = |events: &[[u32; 4]]| -> Vec<[u32; 4]> {
+            events
+                .iter()
+                .copied()
+                .filter(|event| !matches!(event[0], 1 | 7))
+                .collect()
+        };
+        let nested_matches = lookups(&nested) == lookups(&original.nested);
         let checks = [
             ("faces", result.emissions.len() == original.faces),
             ("face stream", hash(emitted) == original.emissions),
             ("points/lines", points == original.points),
-            ("text/submodel calls", nested == original.nested),
+            ("text/submodel/polygon calls", nested_matches),
             (
                 "locals",
                 hash(context.locals[..8].iter().flat_map(|x| x.to_le_bytes())) == original.locals,

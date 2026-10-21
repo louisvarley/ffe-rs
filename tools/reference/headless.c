@@ -79,6 +79,11 @@ unsigned long *trace_alloc(long words, unsigned long key, long force)
     if (queue_mode) queue_event(1,0,key);
     return ref_order_allocate(words,key,force);
 }
+unsigned long *trace_polygon_alloc(long words, unsigned long key, long force)
+{
+    if (queue_mode) queue_event(3,0,key);
+    return ref_order_allocate(words,key,force);
+}
 static unsigned long probe_faces[2][6];
 static int execution_probe;
 static unsigned long execution_faces;
@@ -154,6 +159,13 @@ static void nested_event(unsigned long kind, unsigned long a, unsigned long b, u
     nested_kind[nested_count]=kind;
     nested_value[nested_count][0]=a; nested_value[nested_count][1]=b; nested_value[nested_count][2]=c;
     nested_count++;
+}
+extern unsigned long ref_depth_key(void *instance,const long *point);
+unsigned long trace_polygon_key(void *instance, const long *view)
+{
+    unsigned long key=ref_depth_key(instance,view);
+    nested_event(11,key,0,0);
+    return key;
 }
 long *trace_text_vertex(void *instance, long index) { nested_event(1,(unsigned char)index,0,0); return nested_station ? ref_view_vertex(instance,(signed char)index) : nested_vertex; }
 long *trace_text_font(long selector) { nested_event(2,(unsigned long)selector,0,0); return nested_descriptor; }

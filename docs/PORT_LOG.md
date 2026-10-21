@@ -4,6 +4,38 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Complex polygons (opcode 5, v0.21)
+
+F1721 layout: word +0 material; byte +2 low 7 bits normal, bit 7 a flag; byte
++3 the segment length L; then L bytes of outline segments. The record is
+**6 + L** bytes whether or not the polygon is drawn: a culled normal returns
+past the segments at once. Otherwise F1721 keys the polygon by F1777 of the
+view (F1470) of the first segment byte's vertex (low 7 bits), allocates one
+queue record, and runs the segments through `DATA_007817` (seven entries,
+indexed by `word >> 9`: 0 terminator, then F1734, F1724, F1730, F1733, F1723,
+F1736). The segment handlers only build outline state in the instance and the
+queue; they do not touch the parent program's variables.
+
+`ffe-core` decodes `Polygon` (segments kept raw) and `execute_live` emits
+`PolygonEmission` with its key (or `None` when culled), queues it as
+`Primitive::Polygon` and logs `QueueEvent::Polygon`. Segment execution, and the
+vertex projections it performs, are not ported yet.
+
+The probe now records the F1777 key call inside F1721 (event 11) and its F1778
+allocation (queue kind 3). The whole-table comparison therefore checks every
+polygon key in command order. Because segment handlers project vertices in the
+original, the probe's cache-miss vertex events (1, 7) can no longer be
+predicted without segment execution; `station_models_reference.rs` compares
+all other nested events (the station 74/75 test, which has no polygons, still
+checks them exactly).
+
+Census: **229 of 466** models now execute natively (was 180), and all 229 match
+the original. Remaining top blockers: vertex opcode 0x7 (59), opcodes 31 (39)
+and 27 (35), vertex opcode 0x15 (13), opcodes 17/24/25 (10 each), 21/22 (8
+each). One synthetic test added; the unsupported-opcode example moved to 15.
+159 `#[test]`, 23 ignored, one Unix-only (135 runnable on Windows). Earlier
+probe traces are unchanged.
+
 ## 2026-10-21 — Whole-table comparison with the original (v0.20)
 
 `--station-model N` runs any model slot through the original F1772 as

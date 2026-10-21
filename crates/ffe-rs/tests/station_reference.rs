@@ -110,7 +110,7 @@ fn executed_reference_station_programs() {
 
         // Points and lines in command order, as the probe records them.
         let mut points = Vec::new();
-        let (mut p, mut l, mut t, mut s) = (0, 0, 0, 0);
+        let (mut p, mut l, mut t, mut s, mut g) = (0, 0, 0, 0, 0);
         let mut nested = Vec::new();
         let mut projected = std::collections::HashSet::new();
         for offset in &result.commands {
@@ -133,6 +133,16 @@ fn executed_reference_station_programs() {
                     0,
                 ]);
                 l += 1;
+            }
+            if let Some(polygon) = result
+                .polygons
+                .get(g)
+                .filter(|e| e.polygon.offset == *offset)
+            {
+                if let Some(key) = polygon.key {
+                    nested.push([11, key, 0, 0]);
+                }
+                g += 1;
             }
             if let Some(text) = result.texts.get(t).filter(|e| e.text.offset == *offset) {
                 if !text.culled {
@@ -292,6 +302,7 @@ fn executed_reference_station_queues() {
             .filter_map(|event| match event {
                 QueueEvent::Group(key) => Some([2, u32::from(key.is_some()), key.unwrap_or(0)]),
                 QueueEvent::Face(key) => Some([1, 0, *key]),
+                QueueEvent::Polygon(key) => Some([3, 0, *key]),
                 // Points and lines stay hooked in the probe and are not queued there.
                 QueueEvent::Point(_) | QueueEvent::Line(_) => None,
             })

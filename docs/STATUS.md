@@ -64,13 +64,14 @@ capture produced by two repeat runs of the local reference.
 | v0.18 face draw queue | `model_execute` (face queue rule, `Execution.queue`, `InstanceContext::textures`) | `model_execute.rs` (+1), `station_reference.rs` (+1, ignored) | `verify-station-queue.py` (12 cases, 7 tamper fields) | `35e55a26689eb1e520dffa6b4c36f4a25dff36066d1b4c9ba969c7345425fb56` (CRLF; Linux LF `350b6d2c…`) | F1708/F1712/F1709/F1713/F1714 queueing; faces in `ordered` now match the original draw order; points/lines not yet |
 | v0.19 model census | `ffe-convert::model_extents` (generated), `model_command_bytes`, `ffe-tools model-census` | `embedded.rs` (+1, updated) | descriptor shapes cross-checked for all 466 slots (floppy 1.02) | — | 180 of 466 models execute natively (synthetic inputs, unverified); ranked blockers in `docs/MODEL_COMMANDS.md` |
 | v0.20 whole-table comparison | (no new core code) | `station_models_reference.rs` (1, ignored) | `verify-station-models.py` (all 466 slots; 4 tamper fields) | `3e04ba2e…` (Linux LF) | all 180 natively executed models match the original F1772 in command order; 13 slots crash the original in the synthetic setup |
+| v0.21 complex polygons | `model_commands::Polygon`, `model_execute` (`PolygonEmission`, `Primitive::Polygon`) | `model_execute.rs` (+1) | `verify-station-models.py` (polygon keys, event 11) | — | opcode 5 decoded/keyed/queued; segments not executed; 229 of 466 models execute and match |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 158 `#[test]` functions total; 23 are
+- `cargo test --workspace --locked` passes. 159 `#[test]` functions total; 23 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **134 runnable synthetic tests** (135 on Linux).
-- `verify-station-models.py`: all 180 natively executed models match the
+  that is **135 runnable synthetic tests** (136 on Linux).
+- `verify-station-models.py`: all 229 natively executed models match the
   original command flow and final state.
 - `ffe-tools model-census --game game` (floppy 1.02): 180 of 466 slots execute
   natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
@@ -94,12 +95,11 @@ Facts verified on 2026-10-21:
 Stations are verified for command flow (v0.17) and face draw queues (v0.18);
 the v0.19 census ranks what blocks the other models. Next, in order:
 
-1. **Opcode 5 (complex polygon, F1721)** — the largest decode blocker (69
-   models). Probe its operands and record size, port it, and extend the station
-   queue oracle with a model that uses it.
-2. **Vertex opcode 0x7** (59 models) and **0x15** (13): extend
+1. **Vertex opcode 0x7** (59 models) and **0x15** (13): extend
    `ffe-core::model` with oracle cases like v0.3's.
-3. **Opcodes 31 and 27** (39 and 26 models), then 17/24/25/22.
+2. **Opcodes 31 and 27** (39 and 35 models), then 17/24/25 and 21/22.
+3. **Polygon segments** (F1734/F1724/F1730/F1733/F1723/F1736 and their curve
+   helpers) — needed for outline rasterising and for exact vertex-cache events.
 4. The command-order oracle covers every slot since v0.20
    (`verify-station-models.py`); extend the queue oracle the same way.
 5. Primitive colour, point/line queueing (F1700/F1704), rasterisation, and
