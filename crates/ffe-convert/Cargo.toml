@@ -1,0 +1,11 @@
+[package]
+name = "ffe-convert"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Bounds-checked local asset decoders for the First Encounters reimplementation"
+
+[dependencies]
+ffe-core = { path = "../ffe-core" }
+png = "0.17"

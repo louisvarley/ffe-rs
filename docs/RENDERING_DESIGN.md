@@ -1,6 +1,10 @@
 # Rendering design proposal (Phase 0)
 
-Status: **proposal — awaiting approval.** No renderer code has been written.
+Status: **design; no renderer code written.** The owner approved original-style
+Classic graphics, 4:3 presentation and live switching to image-based Enhanced
+graphics. [CLAUDE.MD](../CLAUDE.MD) is authoritative. Prioritize native resolution,
+HD images, filtering and MSAA, then modest bloom; advanced effects below are a
+backlog, not first-slice requirements. JJFFE 2.8a7 is the gameplay reference.
 
 This document defines the Classic target, the Enhanced feature set and build order, the performance budget, dependency/capability rules, the master Enhanced button, the render-description contract, large-scene strategy, and the test plan. It is based on `docs/INVENTORY.md` and `docs/FFED3D_RENDERING_NOTES.md`.
 
@@ -24,7 +28,7 @@ This document defines the Classic target, the Enhanced feature set and build ord
 | Internal framebuffer | 320 × 200, 8-bit palette indices |
 | 3D viewport | 320 × 158 (top), HUD/console 42 rows |
 | Palette | 256 × 6-bit RGB (0–63); display expansion per approved rule |
-| Aspect | Original 4:3 (non-square pixels) — **pending approval**; FFED3D's 16:10 is not Classic |
+| Aspect | Original 4:3 (non-square pixels), approved target; FFED3D's 16:10 is not Classic |
 | Scaling | Nearest-neighbour; integer scale where possible; letterbox/pillarbox; no filtering |
 | 3D projection | Original FFE projection (35° vertical FOV, aspect 2.0 for 320×158); derive exact coefficients from the original code |
 | Text | Original proportional bitmap font, palette colours, one-pixel shadow, clipping/wrap |
@@ -43,7 +47,10 @@ The exact presentation of the 6-bit palette and 4:3 vs 16:10 is an open question
 ### 2.1 Classic renderer paths
 
 - **Software reference renderer (`--software`, test oracle):** CPU port of the original rasteriser, text, sprites, model interpreter and planet LOD. Outputs a 320×200 `Vec<u8>` of palette indices plus the palette. Exact golden hashes.
-- **GPU Classic (`wgpu`, default):** projects/transforms on the CPU with the same fixed-point math, snaps to the original 320×158 coordinate grid, submits triangles/sprites in original order, samples indexed textures with nearest filtering, looks up the palette, and writes an RGBA8 320×200 target (or a palette-index target if the backend supports it). Upscales with nearest/integer scaling. No depth buffer effects, no MSAA, no filtering, no tone mapping.
+- **Initial default:** present the CPU's indexed Classic framebuffer through
+  wgpu with nearest scaling and 4:3 correction. A separate GPU Classic rasterizer
+  is optional/deferred, not a prerequisite for the first playable slice.
+- **GPU Classic alternative:** projects/transforms on the CPU with the same fixed-point math, snaps to the original 320×158 coordinate grid, submits triangles/sprites in original order, samples indexed textures with nearest filtering, looks up the palette, and writes an RGBA8 320×200 target (or a palette-index target if the backend supports it). Upscales with nearest/integer scaling. No depth buffer effects, no MSAA, no filtering, no tone mapping.
 - **Comparison:** GPU Classic is compared to the software reference with documented tolerances (§7). Where a pixel differs, the reason must be a known GPU rasterisation rule (edge inclusion, half-pixel centre, interpolation), not a shading/texture/content difference.
 
 A single `RenderFeatures` struct selects the path; `Classic = all false`. The master button sets/restores it atomically.
@@ -100,7 +107,10 @@ The menu labels this group “Gameplay-affecting — changes how the game plays�
 
 - **Classic mode:** every presentation-only feature is off. This is the default on first run and on `--classic`.
 - **Enhanced mode:** the saved `EnhancedSelection` is applied. On first use, the selection defaults to every presentation-only feature the adapter supports (dependencies resolved), with the capability explanation shown for anything unavailable.
-- **Master toggle:** flips between Classic and the saved selection instantly, mid-flight, with no restart, no state reload and no simulation step. It does not change gameplay-affecting options.
+- **Master toggle:** switches live between Classic and the saved selection with
+  no restart or simulation reset. Prepare resources before the atomic swap and
+  display loading/failure status while simulation continues. No zero-latency
+  promise before measurement. It does not change gameplay-affecting options.
 - **Reset to Classic:** sets master off and clears the selection to “none” (the next master-on starts from the default selection again). It does not change gameplay-affecting options.
 - **On-screen confirmation:** a short, non-blocking message (“Classic” / “Enhanced”) in the game's own style, with the hotkey/menu path.
 - **Persistence:** saved to the config file immediately on change; CLI flags override for the run.
@@ -335,7 +345,7 @@ This is the implementation checklist for the GPU Classic path and the software r
 | Starfield | Procedural points with original colours | Starfield test |
 | HUD panel/cockpit | Original bitmap assets at 320×200 coords | HUD test |
 | Mouse pointer | Software pointer overlay in logical coords | Pointer test |
-| 4:3/non-square pixels | Presentation transform (pending approval) | Aspect test |
+| 4:3/non-square pixels | Presentation transform (approved target) | Aspect test |
 | 50 Hz pacing | Simulation fixed 20 ms; render uses latest state | Timing test |
 
 If a GPU Classic feature cannot reproduce a quirk exactly, the software reference remains the authoritative Classic output; the GPU path must document the divergence and tolerance.
@@ -368,7 +378,9 @@ trait Renderer {
 }
 ```
 
-`set_features` must be instantaneous and must not reset simulation. The Classic GPU path is just `RenderFeatures::classic()`; there is no separate “mode” that reloads state.
+`set_features` must swap prepared resources atomically without resetting
+simulation; asynchronous preparation may precede it. Classic uses the original
+framebuffer/presentation settings, not a separate simulation or reloaded save.
 
 ---
 
@@ -385,14 +397,17 @@ trait Renderer {
 
 ---
 
-## 12. Approval gates
+## 12. Implementation verification gates
 
-Before writing rendering code:
+The owner approved original-style Classic and live image-based enhancements.
+Do not request those decisions again. Before declaring the renderer complete:
 
-- Approve the feature list and build order (§3).
-- Approve the master-button semantics and config/CLI shape (§4).
-- Approve the render-description contract (§5), especially that text expansion/model command interpretation stays in core/content and renderers only draw.
-- Approve the Classic target (4:3 vs 16:10, palette expansion, exact 320×200) (§2, `INVENTORY.md` §10).
-- Approve the performance budgets and the “software reference is the oracle” policy (§7–8).
+- Implement the selected v1 subset; advanced features remain deferred.
+- Test the live master switch and config against [CLAUDE.MD](../CLAUDE.MD).
+- Validate the one-way render contract and shared semantic interpretation.
+- Measure palette/projection/raster behavior against JJFFE; keep exact CPU
+  Classic pixels as the first presentation baseline.
+- Measure budgets on identified hardware; do not turn proposed numbers into
+  evidence or require a separate GPU Classic rasterizer for the first slice.
 
-If approved, Phase 4 implements the render description and software reference; Phase 5 the GPU Classic path; Phase 6 the Enhanced framework, master button and HD textures.
+Follow the current phase gates in [CLAUDE.MD](../CLAUDE.MD).

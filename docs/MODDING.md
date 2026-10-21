@@ -1,6 +1,9 @@
 # Modding (design; implementation starts in Phase 8)
 
-Status: **design only.** The mod system is not implemented yet. This document records the contract so the core/content design does not bake in assumptions that would make mods impossible. Worked, tested examples will replace the sketches below in Phase 8.
+Status: **deferred design, not v1 scope.** The owner selected image-only graphics
+packs first; no gameplay data mods, mesh packs or scripting are approved for v1.
+The broader registry/mod sketches below are future research, not implementation
+requirements. Follow [CLAUDE.MD](../CLAUDE.MD) for current scope.
 
 ---
 

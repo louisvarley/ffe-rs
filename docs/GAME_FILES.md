@@ -27,7 +27,103 @@ FIRSTENC.EXE
 
 ### CD version
 
-Not yet available. The source contains code paths/strings for an external `bmp_8\*.bmp` asset directory and `%s%smission.dat`, which is consistent with a CD layout that externalises art/data. We will not guess its hashes. When a CD copy is supplied, add its `FIRSTENC.EXE` hash and file list here, and only then add a detector. Unrecognised versions must produce a specific diagnostic, never a best-effort load.
+Now supplied as a BIN/CUE image and inspected read-only; see the current release
+matrix below. Installed CD inputs support the partial bitmap/cabin/PCM cache;
+direct disc-image importing and gameplay are not implemented. Do not equate
+the source's `bmp_8` paths with a verified directory on this disc.
+Unrecognized versions must produce a specific diagnostic, never a best-effort load.
+
+## Current release matrix (2026-10-20)
+
+Implementation update: `ffe-tools inspect-game` now recognizes both executable
+hashes below and checks 48 required external/core input files. It is an inspector,
+not itself a converter. Separate `build-data` now imports verified embedded
+bitmap tables/palette, cabins and PCM into a partial cache for both exact
+profiles. All table payloads were checked against JJFFE source bytes, including
+the two special zero-height texture blocks. Inspector audio checks are structural,
+optional media is counted only,
+and patch outputs/raw image ingestion remain unsupported. See
+[README.md](../README.md) for actual commands.
+
+The owner wants installed CD/floppy releases in different patch states to work.
+An executable's embedded release string, installer package label and gameplay
+baseline are different identities. Detect by validated hashes/layouts, not folder
+names, file sizes alone or just the human-readable string.
+
+| Input | Observed state | Verified fingerprint / status |
+|---|---|---|
+| `game/FIRSTENC.EXE` | English 1.02, 21/04/95; 2,097,152 bytes | `d919566140abfc298bc9929bc9141d92526586821f017be1336253a04bca1e72` |
+| Additional floppy `Elite3/FIRSTENC.EXE` | Same bytes as `game/`, despite the owner's unpatched label | Same SHA-256 above; not a second executable profile. |
+| CD `FIRSTENC.EXE` | English 1.01, 13/04/95; 2,093,056 bytes | `9957dc34aa9ef93d9a69c5f5be8e13d243046e758ad83c8a35241e31b7e6e616` |
+| CD patch labeled 1.06 | Installer plus compressed payload, not an installed patched EXE | Output executable/version not yet verified. |
+| Floppy patch labeled 1.06d | Installer plus compressed payload, not an installed patched EXE | Output executable/version not yet verified. |
+
+### Supplied floppy installation
+
+[The additional floppy folder](../Frontier-First-Encounters_DOS_EN_Floppy-version/Elite3/)
+has 69 files. All its paths exist in `game/`; only `BLD_INFO.CFG`, `IMAGE.DAT`,
+`LANGRC.RES` and `MEMORY.TXT` differ on common paths. `game/` additionally has
+`GAMETEK.1` and `INSTALL.EXE`. The added installation's decoded build directory
+is `s:\elite3\floppy`; this installer metadata does not change the executable's
+1.02 identity or prove patch status.
+
+### Supplied CD image
+
+[The CD input folder](../Frontier-First-Encounters_DOS_EN_ISO-Version/) contains
+`Frontier First Encounters - ISO/First_Encounters.bin` and its CUE.
+The CUE describes one MODE1/2352 track. The image is 623,021,280 bytes, SHA-256:
+
+```text
+05457f008526bc2a248454060bd88c3faf49690bcadbde466a9955c8732e770c
+```
+
+Reading ISO9660 directory records at the track's data-sector offsets found:
+
+- Volume label `1STENC_US`; 713 files; `DATA/`, `FX/` and `MUSIC/` directories.
+- `DATA/`: 323 AVI clips and 323 BMP companion images. Six cabin BMPs at the
+  root bring the total to 329 BMPs. These are not a `bmp_8/` texture library.
+- `FX/`: 23 RAW effects; `MUSIC/`: 17 HMP tracks. Root test files bring the disc
+  totals to 24 RAW and 18 HMP, respectively.
+- All six cabin images, all 23 effects, all 17 music tracks and `MISSION.DAT`
+  are byte-identical to `game/`. The journal SHA-256 remains
+  `3cf36755c7420f12281ca8a55f11dbc9787bacaeef49edc4584338f77dc94afc`.
+- 58 common paths match `game/`; six differ: `32RTM.EXE`, `DPMI32VM.OVL`,
+  `EDPMI.SWP`, `FIRSTENC.EXE`, `HMIMDRV.386` and `INSTALL.EXE`.
+- Sample `DATA/BB1.BMP`: 120 x 120, 24-bit. Sample `DATA/BB1.AVI`: RIFF AVI,
+  video handler `DIB ` plus an audio stream. This is only a sample, not a full
+  codec/loop/timing audit.
+
+Thus the disc is **not just the supplied floppy executable plus video files**.
+Its executable and several platform files differ, though the checked common
+external content matches. Optional CD media must be detected explicitly; an
+absent video needs a documented still-image path, not a claim of full video support.
+Include eligible companion BMPs in the eventual image exporter, not video frames.
+
+This inspection read headers, directory records and file bytes for comparison.
+It did not mount/extract the disc, execute game instructions, or decompile code.
+For the initial runtime, the player supplies installed/extracted files in `game/`;
+supporting raw disc images directly is a separate, deferred importer feature.
+
+### Patch packages
+
+| Package | `GAMETEK.1` bytes | Payload SHA-256 | Decoded build directory |
+|---|---:|---|---|
+| [CD patch](../Frontier-First-Encounters_DOS_EN_Patch-106-for-CD-Version/) | 740,201 | `5bbed7792d03ca4cdb3b66e15603db4ee9020b3e9f64784ec8c9910396ddd10d` | `c:\games\firstenc\patches\eng-cd` |
+| [Floppy patch](../Frontier-First-Encounters_Patch_DOS_EN_Patch-106d-for-Floppy-Version/) | 739,463 | `c422886d0f7f091a3865cdf0699802c833fda720acc93a7f884eac5754d5ecf5` | `c:\games\firstenc\patches\eng-fp` |
+
+Both plain `IMAGE.DAT` files name `FIRSTENC.EXE` and report 2,101,248 installed
+bytes. `BLD_INFO.CFG` uses the byte-minus-one encoding; `IMAGE.DAT` in these
+packages is plain text, not the same obfuscation.
+The floppy payload hash matches `game/GAMETEK.1`; this does not prove the patch
+was applied to `game/FIRSTENC.EXE`. The exact relationship between that installed
+size and the current 2,097,152-byte file remains unverified; do not assume rounding.
+
+Next: unpack/install patches only in disposable local working copies, fingerprint
+the resulting executables and external data, then validate each importer profile
+against JJFFE content expectations. Never run an installer over `game/` or
+automatically patch a player's installation. Unknown/mixed installations should
+report detected hashes and missing/mismatched content, not be rejected solely
+because unrelated installer files differ.
 
 ## Complete file manifest
 | File | Bytes | SHA-256 |
@@ -103,4 +199,3 @@ Not yet available. The source contains code paths/strings for an external `bmp_8
 | `TEST.HMP` | 18,643 | `f812a7578d6fb431976b66addbf4cfed2d4b9cb92f0581f5910e2034d8a227a3` |
 | `TEST.RAW` | 22,313 | `179f643745c8512e94a6e016f5b45917f501143869ade9409ef0a93e53115597` |
 | `dos4gw.exe` | 254,556 | `580f164bd05b438262267a7e03984529b56e3096ee158d5d2b0e6f159520d4c3` |
-

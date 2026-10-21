@@ -16,6 +16,8 @@ import sys
 FORBIDDEN_PREFIXES = (
     "game/",
     "legacy/",
+    "jjffe-master/",
+    "ffed3d-master/",
     "to-be-upscaled/",
     "upscaled/",
     "extracted/",
@@ -27,16 +29,20 @@ FORBIDDEN_PREFIXES = (
     "tests/golden/frames/",
     "tests/golden/screenshots/",
     "traces/",
+    "saves/",
 )
+
+FORBIDDEN_ROOT_GLOBS = ("frontier-first-encounters*",)
 
 FORBIDDEN_EXACT = {
     "data.bin",
+    "data.bin.tmp",
+    "upscaled.bin",
     "upscaled.bin.tmp",
 }
 
 # Suffixes that are either original game assets, unlicensed reference
-# binaries, or captures derived from them.  upscaled.bin is deliberately not
-# listed (it is an accepted LFS pack; see .gitattributes).
+# binaries, or captures derived from them.
 FORBIDDEN_SUFFIXES = (
     ".bmp",
     ".tga",
@@ -85,18 +91,23 @@ def tracked_files() -> list[str]:
 
 
 def violation(path: str) -> str | None:
+    path = path.replace("\\", "/")
     if path in ALLOWED:
         return None
-    if path in FORBIDDEN_EXACT:
+    low = path.lower()
+    if low in FORBIDDEN_EXACT:
         return "exact forbidden path"
     for prefix in FORBIDDEN_PREFIXES:
-        if path == prefix.rstrip("/") or path.startswith(prefix):
+        if low == prefix.rstrip("/") or low.startswith(prefix):
             return f"under forbidden directory '{prefix}'"
-    low = path.lower()
+    root = low.split("/", 1)[0]
+    for pattern in FORBIDDEN_ROOT_GLOBS:
+        if fnmatch.fnmatchcase(root, pattern):
+            return f"under local release/patch directory '{root}'"
     for suffix in FORBIDDEN_SUFFIXES:
         if low.endswith(suffix):
             return f"forbidden file type '{suffix}'"
-    base = path.rsplit("/", 1)[-1]
+    base = low.rsplit("/", 1)[-1]
     for pattern in FORBIDDEN_GLOBS:
         if fnmatch.fnmatchcase(base, pattern):
             return f"frame/screenshot name '{pattern}'"

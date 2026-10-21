@@ -1,0 +1,104 @@
+; Adapter-only symbol aliases. Preincluded by NASM, never patched into legacy files.
+GLOBAL _ref_state
+GLOBAL _ref_rng
+GLOBAL _ref_timer_advance
+GLOBAL _ref_system_counter
+GLOBAL _ref_accel_counter
+GLOBAL _ref_time_accel
+GLOBAL _ref_timer_last
+GLOBAL _ref_timer_next
+GLOBAL _ref_timer_min
+GLOBAL _ref_framebuffer
+GLOBAL _ref_draw_char
+GLOBAL _ref_char_width
+GLOBAL _ref_blit_index
+GLOBAL _ref_model
+GLOBAL _ref_vertex
+GLOBAL _ref_vertex_buffer
+GLOBAL _ref_command_math
+GLOBAL _ref_command_clear
+GLOBAL _ref_command_set
+GLOBAL _ref_command_alive
+GLOBAL _ref_material
+GLOBAL _ref_triangle
+GLOBAL _ref_mirror_triangle
+GLOBAL _ref_quad
+GLOBAL _ref_mirror_quad
+GLOBAL _ref_normal
+GLOBAL _ref_normal_init
+GLOBAL _ref_normal_buffer
+GLOBAL _ref_sin32
+GLOBAL _ref_rotate
+GLOBAL _ref_angle
+GLOBAL _ref_rotate_command
+GLOBAL _ref_visibility
+GLOBAL _ref_visibility_branch
+GLOBAL _ref_visibility_inverse
+GLOBAL _ref_detail_primary
+GLOBAL _ref_detail_secondary
+GLOBAL _ref_execute
+GLOBAL _ref_depth_key
+GLOBAL _ref_depth_command
+GLOBAL _ref_order_base
+GLOBAL _ref_order_cursor
+GLOBAL _ref_order_active
+GLOBAL _ref_order_state
+GLOBAL _ref_order_init
+GLOBAL _ref_order_group
+GLOBAL _ref_order_allocate
+GLOBAL _ref_order_flush
+GLOBAL _ref_view_vertex
+GLOBAL _ref_project_vertex
+GLOBAL _ref_project_point
+
+_ref_state equ DATA_008804
+_ref_rng equ FUNC_001530
+_ref_timer_advance equ FUNC_001418_TimerAdvance
+_ref_system_counter equ DATA_009157
+_ref_accel_counter equ DATA_009156
+_ref_time_accel equ DATA_007706
+_ref_timer_last equ tmLastTime
+_ref_timer_next equ tmNext50Hz
+_ref_timer_min equ tmMinFrame
+_ref_framebuffer equ DATA_007773
+_ref_draw_char equ FUNC_001598_DrawChar
+_ref_char_width equ FUNC_001597_CharAdvanceWidth
+_ref_blit_index equ FUNC_001623_BlitIndex
+_ref_model equ FUNC_001538
+_ref_vertex equ FUNC_001472
+_ref_vertex_buffer equ DATA_009200
+_ref_command_math equ FUNC_001758
+_ref_command_clear equ FUNC_001756
+_ref_command_set equ FUNC_001757
+_ref_command_alive equ DATA_007824
+_ref_material equ FUNC_001692
+_ref_triangle equ FUNC_001707
+_ref_mirror_triangle equ FUNC_001706
+_ref_quad equ FUNC_001711
+_ref_mirror_quad equ FUNC_001710
+_ref_normal equ FUNC_001481
+_ref_normal_init equ FUNC_001480
+_ref_normal_buffer equ DATA_009201
+_ref_sin32 equ FUNC_001914_Sin32
+_ref_rotate equ FUNC_001744
+_ref_angle equ FUNC_001474
+_ref_rotate_command equ FUNC_001742
+_ref_visibility equ FUNC_001751
+_ref_visibility_branch equ FUNC_001752
+_ref_visibility_inverse equ FUNC_001755
+_ref_detail_primary equ DATA_008812
+_ref_detail_secondary equ DATA_008813
+_ref_execute equ FUNC_001772
+_ref_depth_key equ FUNC_001777
+_ref_depth_command equ FUNC_001696
+_ref_order_base equ DATA_007829
+_ref_order_cursor equ DATA_007830
+_ref_order_active equ DATA_007833
+_ref_order_state equ DATA_007834
+_ref_order_init equ FUNC_001785
+_ref_order_group equ FUNC_001780
+_ref_order_allocate equ FUNC_001778
+_ref_order_flush equ FUNC_001789
+_ref_view_vertex equ FUNC_001470
+_ref_project_vertex equ FUNC_001471
+_ref_project_point equ FUNC_001479

@@ -14,10 +14,8 @@ jobs:
     name: Forbidden files and repository hygiene
     runs-on: ubuntu-latest
     steps:
-      - name: Check out (with LFS)
+      - name: Check out
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,23 +25,38 @@ jobs:
       - name: Fail if game data, legacy source, original art or frames are tracked
         run: python ci/check_forbidden.py
 
-      - name: Check that upscaled.bin is routed through Git LFS
-        run: |
-          set -euo pipefail
-          attr="$(git check-attr filter -- upscaled.bin)"
-          echo "$attr"
-          case "$attr" in
-            *": lfs") ;;
-            *) echo "upscaled.bin is not marked filter=lfs in .gitattributes" >&2; exit 1 ;;
-          esac
-          if git lfs ls-files 2>/dev/null | grep -q 'upscaled.bin'; then
-            echo "upscaled.bin is an LFS object"
-          else
-            echo "note: upscaled.bin is not present yet (Phase 6); attribute is configured"
-          fi
+      - name: Test forbidden-file rules and local input exclusions
+        run: python -m unittest ci.test_check_forbidden
 
-  # Phase 1+ will add:
-  # - rust: cargo fmt --check, cargo clippy -- -D warnings, cargo test
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test with synthetic inputs only
+        run: cargo test --workspace --locked
+
+      - name: Build tool and experimental playable binary
+        run: cargo build --release --locked -p ffe-tools -p ffe-rs
+
+  # Later phases will add:
   # - golden: deterministic traces on the base game only
   # - docs: link/documentation checks
   # - release: tag-triggered ffe-rs-<tag>-windows-x64.zip (no game data, no data.bin)

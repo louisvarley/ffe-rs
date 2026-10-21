@@ -1,6 +1,36 @@
 # Data formats (`data.bin`, `upscaled.bin`, mods)
 
-Status: **proposal — awaiting approval.** This document justifies the chosen formats and defines the serialization rules needed for deterministic conversion and stable modding.
+Status: **partial base cache implemented; full archive/pack design below remains proposed.**
+A separate partial external
+export now exists (see [README.md](../README.md)); its manifest is not the
+`data.bin` or upscale-pack schema below. It decodes uncompressed 8-bit BMPs,
+including the original zero `bfSize` cabins, preserves their 8-bit RGB palettes
+and indices in PNG, and wraps signed 16-bit mono 22050 Hz PCM in WAV.
+Owner answers in [CLAUDE.MD](../CLAUDE.MD)
+take precedence. Use deterministic local `data.bin` plus optional image-only
+`upscaled.bin`; both stay untracked. Meshes, material maps and gameplay mods below
+are deferred. The export must include explicit per-image UHD guidance and a
+contact sheet; correct image sizes are validated rather than silently changed.
+
+---
+
+## Implemented experimental save format (not legacy/native-final saves)
+
+The playable example writes `saves/prototype-00000001.json` and increasing
+eight-digit numbers. JSON has `format: "ffe-rs-experimental"`, `version: 1` and
+`state`. State records mode, position/velocity vectors, yaw/pitch, integer credits/
+cargo/stock/ticks and the docking-request flag. Unknown/duplicate fields, wrong
+versions, non-finite/out-of-range values and inconsistent docked state fail.
+Reads are limited to 16 KiB. `serde_json` float-roundtrip parsing preserves the
+binary floating-point state exactly on save/load.
+
+Each F5 creates a new file exclusively, writes and syncs it; previous snapshots
+are never overwritten. A failed/interrupted write can leave a partial newest
+snapshot. F9 loads only the highest number and reports invalid data without
+changing live state, never silently falling back to an older snapshot. Scenario
+reset does not delete snapshots. No legacy commander import/export, migrations
+or compatibility promise for this development-only format. No original game
+files are used as save destinations. Final crash-atomic saves remain planned.
 
 ---
 
@@ -41,6 +71,292 @@ The writer is covered by a build-twice byte-equality test. If a future `ron` ver
 ---
 
 ## 2. `data.bin` layout
+
+### Implemented precursor: `ffe-content-cache` versions 1 through 6
+
+The runnable `build-data`/`inspect-data` commands use the following **partial**
+contract, not the full schema/examples in sections 2.1 onward.
+
+- ZIP, stored/uncompressed entries only, manifest first; remaining entries sorted
+  by ASCII path, fixed 1980-01-01 timestamp, no comments. Stored mode avoids an
+  unnecessary decompressor for this small initial cache; full-cache compression
+  is deferred. Identical inputs/tool versions produce identical bytes.
+- Compact JSON plus final newline, with deterministic struct field order (not
+  the proposed lexicographically sorted-key writer). Unknown fields/versions
+  are rejected. `format = "ffe-content-cache"`, `format_version` in `1..=6`,
+  `complete_game_assets = false`, and nonempty `unresolved` are mandatory.
+- Manifest includes tool version, source profile, 48 inspected source records,
+  and sorted `files` with stable IDs, paths, byte sizes, SHA-256 and typed `asset`
+  descriptors. It does not hash itself; all other entries are covered.
+- `bitmaps/primary/000.idx` ... `095.idx`, and
+  `bitmaps/secondary/000.idx` ... `250.idx`. IDs are
+  `base:bitmap/<table>/<three-digit-slot>`; aliases keep distinct slot identities.
+  Ordinary payloads are top-down indices without headers, width*height bytes.
+  Metadata preserves width, height, signed x/y drawing offsets, mask-zero bit,
+  table, index and original executable header offset.
+- Primary slots 94/95 have type `texture_block`, width 64 and exactly 32768
+  payload bytes each. The zero header height is not converted to an invented
+  image height. These blocks are not yet eligible for upscale export.
+- `palettes/low.rgb6`, ID `base:palette/low`, contains the fixed low 128 RGB
+  colours: 384 six-bit components. The upper 128 colours are runtime state,
+  not a second guessed static palette. Preview colour expansion is not baked in.
+- `cockpits/cabin0.png` ... `cabin5.png`, IDs `base:cockpit/cabinN`, are indexed
+  320x158 PNGs retaining each BMP's separate 8-bit RGB palette. No alpha guessed.
+- `audio/fx/<name>.wav`, IDs `base:effect/<name>`, contains all 23 original PCM
+  effects with canonical WAV headers, including the empty `nowt` sentinel.
+- V2 adds `fonts/main.fnt`, ID `base:font/main`, type `bitmap_font`, descriptor
+  `first_code:32`, `glyph_count:116`, `rows:9`, original `source_offset`.
+  The 1160-byte payload is 116 ten-byte records: nine row masks (MSB is left),
+  then an advance in 1..9. Glyph codes are original bytes 32..147, not Unicode.
+  V1 rejects this new asset kind; old tool versions reject v2 entirely.
+- V3 adds `models/074.vtx` and `075.vtx`, IDs `base:model-vertices/074` and `/075`,
+  type `model_vertices`. Descriptor fields: `index`, `vertex_count`, `scale`,
+  `descriptor_offset`, `source_offset`. Count includes mirrored vertices: 54/88,
+  hence 27/44 six-byte records (162/264 bytes). Original scales are 13/14.
+  Record byte 0 selects the operation; bytes 2..4 contain signed coordinates,
+  vertex references or a variable selector depending on that operation.
+  Raw records remain byte-exact, not expanded into a guessed static mesh.
+  V1/v2 reject this new kind. Counts, scale, references, cycles and unsupported
+  operations are checked before exposing a payload.
+- V4 adds `models/074.cmd` and `075.cmd`, IDs `base:model-commands/074` and `/075`,
+  type `model_commands`, with `index`, `vertex_count`, `descriptor_offset`,
+  `source_offset`. Payloads are byte-exact physical programs, 516/758 bytes.
+  These extents are verified for both exact-hash releases, not inferred from an
+  early conditional return or an adjacent pointer. V1..v3 reject the new kind.
+  The shared core decoder walks all physical records (including alternate
+  branches), rejects unknown forms/truncation, validates branch targets as
+  record boundaries and bounds face vertex references. It does not execute
+  visibility, transforms, submodels, render ordering or a full command VM.
+- V5 adds `models/074.nrm` and `075.nrm`, IDs `base:model-normals/074` and `/075`,
+  type `model_normals`, with `index`, `vertex_count`, `normal_count`,
+  `descriptor_offset`, `source_offset`. Payloads contain 48/258 original bytes;
+  expanded counts 18/88 include two implicit normals and mirrored pairs.
+  V1..v4 reject this kind. Six-byte record shape and anchor bounds are validated;
+  importer/lab additionally validate literal vertex anchors and face normal IDs.
+- V6 adds `math/sine.i32`, ID `base:math/sine`, type `sine_table` with
+  `source_offset`. Exactly 16,384 little-endian signed 32-bit entries (65,536
+  bytes), nonnegative/nondecreasing from zero. V1..v5 reject the new kind.
+  Full bytes match JJFFE `DATA_007975` in both exact-hash original executables.
+  RVA is `0x106390` (floppy) / `0x105334` (CD); do not extrapolate the font delta.
+- Total: v1 has 377 assets/378 ZIP entries; v2 has 378/379; v3 has 380/381;
+  v4 has 382/383; v5 has 384/385; v6 has 385/386. Tools read all six. The playable requires v2 font content;
+  F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps
+  points-only inspection; v4 adds declared-face inspection. The lab requires
+  matching command/vertex model indices, counts and descriptor offsets.
+  V5 adds a fourth, normal-filtered outline view, requiring matching normal/vertex
+  model indices, vertex counts and descriptor offsets.
+  No submodels, gameplay tables, other font data,
+  journal, music, CD media or replacement art. No version can
+  label any archive as complete game content.
+- Reader limits: 64 MiB archive/aggregate payload, 2048 assets, 4 MiB manifest.
+  Unsafe/duplicate/unsorted paths, duplicate IDs, symlinks, extra/missing entries,
+  unsupported compression/version, CRC/digest mismatch and invalid basic typed
+  shapes fail explicitly. Entries are read in memory, never extracted by path.
+  SHA-256 is an integrity check, not an authenticity signature; source freshness
+  is not automatically compared to the installation by `inspect-data`.
+- Builds never overwrite an existing output or write into the supplied game
+  directory. Interrupted writes are reported; retry with a new destination.
+  Cache files stay local and ignored; no source/assets are bundled with tools.
+
+Verified PE DATA layouts, selected only after exact executable hash/size:
+
+| Profile | Primary RVA | Secondary RVA | Low palette RVA | Main font RVA |
+|---|---|---|---|---|
+| English floppy 1.02 | `0x1b069c` | `0x1b081c` | `0x101990` | `0x1013b0` |
+| English CD 1.01 | `0x1af640` | `0x1af7c0` | `0x1009b0` | `0x1003d0` |
+
+The model pointer table is at RVA `0x0d0cfc` (floppy) / `0x0d0cf8` (CD),
+not a guessed offset from the bitmap/font layout difference. Slots 74/75 map
+to JJFFE `DATA_002907`/`DATA_002912`. Descriptor +4 points to the six-byte
+vertex records, +8 is the expanded vertex count, +20 is the scale. The importer
+follows both pointers only through file-backed DATA and preserves both raw offsets.
+The payloads match `DATA_002905`/`DATA_002910` exactly in both releases.
+Descriptor +0 points to commands `DATA_002903`/`DATA_002908`, now imported in v4.
+Descriptor +12 points to normals `DATA_002906`/`DATA_002911`, imported in v5;
++16 gives the expanded normal count. Child models are not yet imported.
+
+Normal evaluation follows F1480/F1481: entries 0/1 use shade slots 3/4 and remain
+visible. Other entries use signed normal components shifted eight bits, mirrored
+X components/anchors, scale-difference shifts masked to five bits, and wrapping
+32-bit products/sums. A nonnegative observer dot culls; a nonnegative light dot
+returns black, otherwise `(dot >> 27) & 7` selects the supplied shade triplet.
+This is not a wide-dot or floating-point approximation. The lab uses its own
+observer/light/shade inputs, not original gameplay instance state.
+
+The command word's low five bits dispatch the operation. This bounded decoder
+supports the record forms encountered in these two root programs: return,
+point/line, triangle/quad (ordinary/reflected), unified-z blocks/lists, text,
+conditional visibility/bit branches, arithmetic, submodel call, colour and basic
+matrix transform. Recognition is structural, not a promise those operations
+execute. Triangle payloads are material word, vertex bytes A/B, **normal byte**,
+vertex C; perimeter is B/A/C. Quad payloads are material, A/B/C/D, normal word;
+perimeter is C/A/D/B. Reflected commands emit XOR-1 vertex/normal IDs first, then
+the ordinary face. Material descriptors retain raw nibble RGB, texture index,
+unlit and local-colour flags; no guessed DOS shading/palette is baked in.
+
+Separate native F1758 helpers implement 14 arithmetic operations and F1753/1756/
+1757 bit-branch outcomes. Signed/wrapping/unsigned arithmetic, x86 shift masking,
+16-bit destination writes and signed branch offsets are explicit. Legacy signed
+division by zero preserves its numerator; signed overflow and unsigned divide
+by zero report errors without committing locals. Global lookup is bounded to
+the context's 64 slots. V0.6 adds sine/cosine using an explicitly supplied
+`SineTable`; the earlier no-table arithmetic entry point still errors for them.
+Lookup masks angles to 16 bits and reflects index `0x3fff - index` in odd
+quadrants, not a guessed extra endpoint. F1744 rotation uses per-term Q31
+truncation/wrapped addition and negates the source before multiplication.
+Axis 3 reports an error; original undefined pointer use is not reproduced.
+The packed signed angle operand (F1474) preserves its split/reordered literal
+bits; selectors `0x80..bf` read unsigned global words and `0xc0..ff` signed local
+values, with higher encoded bits ignored for selectors. The pure `0x8000`
+transform form resolves this operand and updates the local basis via F1742/F1743
+semantics. Other transform forms explicitly error in this helper; structural
+decoding is not a full transform dispatcher. These helpers are verified separately,
+not used to approximate full-program execution in the diagnostic catalogue.
+
+F1751 normal/LOD visibility is also implemented as a bounded helper. Negative
+operands select the evaluated normal's cull flag by the low 15 bits. Nonnegative
+operands compare a signed depth against a shifted threshold, preserving the
+legacy shift round-trip overflow check and x86 count masking. Primary detail
+bit 0 selects the secondary detail value; nonpositive combined scale leaves
+the threshold unshifted. F1752/F1755 use the condition/inverse with the same
+relative offsets/conditional return as bit branches. Out-of-range normal IDs
+fail explicitly. These helpers do not execute a complete station program or
+manage the original lazy-normal buffer.
+
+V0.7's bounded executor consumes the validated physical stream and follows actual
+control flow for return, arithmetic, bit/visibility branches, pure local-basis
+rotation and triangle/quad operand emissions. It records repeated instruction
+visits and emission-time context snapshots. Budget is 1..4096 executed commands,
+including the terminating command. Outputs and context changes are committed
+only after an unconditional or conditional return; failures expose no partial
+emissions and leave the caller's context unchanged.
+Local selectors 18..63 are rejected when reached: those legacy local slots alias
+matrix/other instance fields, which are not interchangeable with independent
+native variables. At that milestone, point/line/text, depth-order blocks,
+submodels, colour state and other transform forms were explicit execution errors.
+Structurally known but unreached operations may be skipped by a branch. Normal
+predicates consume supplied evaluated flags, not a managed original lazy cache;
+face events preserve operand order without evaluating vertices, culling, shading
+or rasterizing. Both actual station roots stopped at opcode 6 (offset 0xc/0x8);
+v0.11 later composes that stateful operation. Skipping it would not have
+constituted original station execution. No cache schema or payload changes are
+needed for this milestone.
+
+V0.8 adds the standalone F1777 render-order key helper. A view-space signed
+`[x, y, z]` point and instance scale at `+0x130` produce a `u32` key. Nonpositive
+z returns 1. Otherwise wrapping absolute x/y magnitudes are added, arithmetically
+shifted by three and added to z. The scale-adjusted shift preserves x86 count
+masking. If a left shift would reach the original unsigned overflow threshold,
+the key packs the shift, high-bit flag and arithmetic `z >> 7` instead of
+saturating a distance. Do not use a generic distance replacement here.
+The 17,303-case comparison
+validates only this key helper, not opcode 6, sorting, group allocation or pixels.
+
+V0.9 adds F1696 depth-command decoding/resolution, shared by the physical record
+decoder. Modes 0/4/5/6 close the active group; mode 2 uses one signed-byte vertex
+index; modes 1/3 select signed maximum/minimum keys from the header vertex and
+at least one operand pair. A pair's low byte is another signed vertex index;
+high byte 255 continues, any other high byte terminates the list. Mode 7 uses:
+
+- Header `word >> 5 == 0x7ff`: instance position at +4.
+- `0x7fe`: key `0xffffffff`.
+- `0x7fd`: point `[0, 0, signed_operand << operand_scale]`, consuming one word.
+- Other forms: selected vertex plus the same wrapping shifted z offset,
+  consuming one word.
+
+Key scale is instance +0x130; operand scale is +0x148. Do not conflate them.
+Resolution accepts explicit already evaluated view-space points. Missing or
+negative/external indices fail; this is not the original lazy vertex resolver.
+The original handler comparison primes its vertex cache with synthetic points
+and verifies 11,700 mode/scale/shift/point/initial-group combinations, including
+operand consumption, resulting active flag, key and original allocation size.
+
+`model_order::Order` models flat F1778/F1780 groups and F1788 ordering as owned
+primitive tokens, not executable function pointers or serialized cache bytes.
+An active group absorbs member tokens without using their individual keys.
+Opening another group closes the preceding one; empty groups are valid.
+Finalization requires explicit closure. Sort groups/standalone tokens by
+descending **unsigned** key; ties prefer the earlier allocation. Member order
+is unchanged. This differs from the **signed** extrema comparisons above.
+128 synthetic sequences match the original allocator/sorter/group dispatcher.
+The native 1..4096-operation budget counts group changes and pushes, not
+the original 50,000-word arena. Budget errors leave queue state unchanged.
+Nested child-model lists, forced-header records, real primitive storage,
+lazy instance state and rasterization remain outside this helper. Consequently
+the composed model executor still rejects reached opcode 6; no static-point
+fallback is substituted for animation/transform-aware vertex resolution.
+
+V0.10 adds F1479 integer projection and bounded live view-space vertex/instance
+slots (`ffe-core::model_instance`). `project([x,y,z])` rejects `z < 64`, divides
+by `z >> 8` when `z > 65536` and `value << 8 / z` otherwise, adds the 160/79 view
+centre, then arithmetically shrinks x/y while their wrapped magnitude exceeds
+`0x1f00`, returning the 320x158 logical viewport pair. Rejected points leave the
+caller's screen words untouched; callers that require a value use `NEAR_SENTINEL`
+`[-32766, -32766]`. `Vertices` holds bounded object/view/screen/stamp slots; a
+zero stamp re-evaluates the object program (F1478), translation (F1470) computes
+view but does not advance the stamp, and projection (F1471) stamps the slot with
+the caller's generation. A matching stamp short-circuits evaluation exactly as
+the original command callers do. Generation 0 and scale > 31 are explicit errors;
+no external, screen-derived or random vertex forms are evaluated. This is not
+submodel, clipping or rasterization.
+
+V0.11 composes these helpers in `model_execute::execute_live`: depth commands
+resolve vertices through the live view-space slots, compute F1777 keys, and drive
+F1780/F1788 groups; face emissions stay command-ordered in `Execution::emissions`
+and are also returned render-ordered in `Execution::ordered`. Standalone faces key
+from their first emitted view vertex (F1470 view only; projection is not needed
+for ordering). `execute_live` derives the vertex count from
+the live cache, resolves depth vertices with F1470 (view only), and commits
+context/slots/queue only after a real return and a closed queue. It still does not
+evaluate geometry, normals, clipping or pixels; point/text (1/2/10/14), child
+models (26), other transform forms and colour state remain explicit unsupported
+commands, and the abstract `Order` token queue is not the original 50,000-word
+arena.
+
+V0.12 adds `Execution.ordered_keys` and `model_order::Order::finish_with_keys`
+so effective group/standalone keys are inspectable. The local `--composed-order`
+mode drives original F1696/F1777/F1778/F1780/F1788 with marker callbacks; Rust
+matches order `[2,3,1]`, keys `[9,9,0]`. This is a helper composition, not the
+original dispatcher or face handlers. See `docs/MODEL_COMMANDS.md` for the full
+F1772 opcode map and the probe-first plan for point/line/text/submodel.
+
+V0.13 decodes and emits opcode 1 (point source) and opcode 2 (line). Point
+records carry material, a raw F1474 packed angle, `payload[4] & 0x80` and the
+vertex byte; line records carry material and two vertex bytes. Both validate
+vertex references. `execute_live` puts them into the same `Order` stream as
+faces; `Execution.ordered` is now `Vec<Primitive>` (`Face`/`Point`/`Line`) with
+aligned `ordered_keys`, while `emissions` stays face-only command order.
+Standalone points/lines key from their first view vertex. This is operand
+emission, not geometry, clipping or rasterization. Text (10/14), submodels
+(21/26), other transforms (28) and colour remain unsupported; see
+`docs/MODEL_COMMANDS.md`.
+
+Pointers are mapped through the original PE32 image base and file-backed DATA
+section, never through offsets from the newly linked JJFFE binary. Both layouts
+match all 347 full table records and the low palette in the JJFFE declarations.
+JJFFE counts are 96/251; historical FFED3D counts elsewhere must not be reused.
+The main font bytes are identical in both releases and match concatenated
+JJFFE `DATA_007750`/`DATA_007751`. Rust glyph pixels/advances match executed
+F1598/F1597 in 696 cases; masked/opaque clipping matches F1623 in 28 cases.
+The low palette expands by left shift 2 (max 252), not by normalizing to 255.
+Cabin palettes are separate 8-bit colours. No guessed runtime upper palette is
+used. RGB composition is still a development presentation boundary, not a
+complete original dynamic-palette implementation.
+
+The bounded vertex interpreter lives in `ffe-core::model`; no I/O or floats.
+Supported operations include literal/reflected pairs, negation, midpoint,
+vector add/subtract and variable interpolation. Unsupported screen-space,
+random or curve forms and external references fail explicitly rather than
+returning zero. Signed Q31 multiplication truncates per term exactly as F1521,
+then adds with 32-bit wrapping. A nominal identity uses `0x7fffffff`, not a
+mathematically exact +1; preserve its low-bit asymmetry. Midpoints wrap the
+sum before truncating towards zero. Variable selectors choose literals, scaled
+literals, global u16 or local i32 values. Interpolation uses the original
+shift/Q31 sequence, not floating lerp or division by 65535.
+Local differential validation covers both station programs, 192 contexts and
+13,632 evaluated vertices. It is not a claim of original drawing/projection.
+
+### Proposed full-content layout (not implemented)
 
 ```
 manifest.json
@@ -212,6 +528,12 @@ Two representations per model:
 - Music: `audio/music/<id>.mid`, Standard MIDI File type 1, 480 PPQN (or the HMP’s native division if it is musically meaningful; document the choice), track names preserved. Conversion from HMP via `hmp.cpp` semantics is deterministic; the converter is tested by re-parsing the SMF and comparing events to the HMP track data.
 - Optional Enhanced audio (e.g. OGG) would be a separate pack/feature; Classic uses WAV/MIDI.
 - No game audio is committed; `data.bin` is generated from the player's files.
+- Initial Windows playback may synthesize the MIDI locally. If pre-rendered
+  playback is simpler, render through a local synth/SoundFont to PCM, then
+  optionally FLAC/Ogg/MP3. MIDI-to-MP3 is synthesis, not direct event conversion.
+  Preserve loop/trigger timing, account for encoder delay, and include synth,
+  SoundFont hash and rendering settings in cache provenance. No new audio is
+  bundled without rights review; retain lossless effects and original event data.
 
 ### 2.7 Text and FF codes
 
@@ -313,6 +635,24 @@ assets/<asset>.emissive.png
 
 ### 3.2 Export manifest (`to-be-upscaled/manifest.json`)
 
+Owner workflow: write eligible RGBA images under `images/`, plus this manifest,
+`sizes.csv`, `excluded.json`, and a local offline `index.html` contact sheet.
+The owner returns images under `upscaled/images/` with the same names. Inventory
+embedded and external images; do not label a cabin-only export complete.
+
+The manifest/CSV must also carry source hash, category, logical rectangle/atlas
+region, intended display coverage, recommendation basis, warnings/caps and
+explicit recommended width/height. The initial profile is 3840 x 2160. Use
+`ceil(max(display_width/source_width, display_height/source_height))` as an
+aspect-preserving scale estimate for a known view, then optionally round up to an
+upscaler-friendly factor. Mark scene-dependent estimates and retain overrides.
+The Classic 4:3 image occupies 2880 x 2160 on a UHD display; full-canvas art may
+need 11x or a convenient 12x, while a 64 x 64 image used at 256 x 256 needs 4x.
+There is no universal "4K texture size." See [CLAUDE.MD](../CLAUDE.MD).
+
+The example below is illustrative; extend the implemented schema with those
+fields before the exporter is considered complete.
+
 ```json
 {
   "format_version": 1,
@@ -351,10 +691,14 @@ assets/<asset>.emissive.png
 `pack-upscaled`:
 
 1. Load `data.bin` asset list (upscalable assets and their original sizes).
-2. Read `upscaled/manifest.json` if present; otherwise match filenames to the export manifest.
-3. Check missing/extra files; unknown IDs are errors; extra files are errors unless `--allow-extra` (still not packed).
-4. Check aspect ratio: `out_w/out_h` vs `target_w/target_h` within `max(1 px, 0.5%)`; otherwise error.
-5. Resize to exact target with Lanczos3 if dimensions differ; preserve alpha; log `(id, from, to, method)`.
+2. Read the returned manifest or original export manifest and match stable IDs to
+   files under `upscaled/images/`.
+3. Allow partial packs, reporting omitted IDs; unknown IDs and unexpected extra
+   images are errors. A partial pack is not a claim of complete coverage.
+4. Require the declared target dimensions to match decoded PNG dimensions and
+   the source aspect/layout contract. Never silently stretch image or atlas data.
+5. Reject wrong-sized images with expected/actual dimensions. Provide a separate
+   explicitly requested resize operation with alpha preservation and a report.
 6. Verify every output has the expected dimensions and alpha mode; write canonical PNG.
 7. Write deterministic ZIP + canonical `manifest.json`; compute `asset_id_list_hash` from `data.bin`.
 8. Refuse to pack if `provenance` missing or invalid.
@@ -419,7 +763,11 @@ Determinism tests:
 - `text_escape_roundtrip`: every string in `text/` and `journal/` round-trips to the original bytes.
 - `ffp_roundtrip`: FFP `{m,e}` values convert to/from the legacy 32-bit pair exactly.
 - `upscaled_manifest_hash`: changing `data.bin` ZIP layout but not asset IDs/sizes leaves `asset_id_list_hash` unchanged; changing an asset size changes it.
-- `pack_resizes`: synthetic images with mismatched output sizes are resized to exact targets; alpha preserved; logs recorded.
+- `pack_dimensions`: wrong dimensions are rejected; explicit resize is separate,
+  preserves alpha and reports every change.
+- `export_uhd_guidance`: known screen-coverage cases produce explicit aspect-
+  preserving sizes; atlas/alpha metadata, caps, exclusions and partial coverage
+  are represented accurately in manifest/CSV/contact sheet.
 - `mod_validation`: precise file/line/field errors; base-asset hash collision rejected.
 - `galaxy_isolation`: adding one system/planet does not change any other system (see `ARCHITECTURE.md` §3.4).
 
@@ -436,9 +784,11 @@ Determinism tests:
 
 ---
 
-## 7. Approval
+## 7. Detailed design checklist
 
-Please approve:
+These are design topics to validate during implementation, not a repeat request
+for owner approval. Follow [CLAUDE.MD](../CLAUDE.MD); GLB/material/gameplay-mod
+parts are future scope, not requirements for the first image exporter.
 
 1. RON for content, TOML for mod/config, JSON for manifests/schema.
 2. Indexed PNG + palette sidecar for Classic; RGBA export for upscaling.

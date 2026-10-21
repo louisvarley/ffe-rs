@@ -1,6 +1,85 @@
 # Proposed workspace architecture and data pipeline
 
-Status: **proposal — awaiting approval.** No workspace has been created yet.
+Status: **design; owner-approved direction recorded in [CLAUDE.MD](../CLAUDE.MD).**
+The workspace contains `ffe-tools` with read-only inspection and partial external
+export/cache commands, `ffe-convert` with verified PE bitmap tables, BMP/PNG,
+PCM/WAV and sizing helpers, and `ffe-content` with a partial cache writer/reader.
+`ffe-core` now has independently testable RNG, timer-counter and day-fraction
+primitives and bounded original model vertex interpretation (`model`).
+`tools/reference/` provides startup smoke, bounded new-game selected
+state traces and executed numeric vectors; `ffe-tools verify-reference` compares
+them to Rust. These are not a full flight/gameplay oracle.
+The `ffe-rs` crate now provides an isolated experimental playable loop: synthetic
+flight/market in `flight`, bounded versioned snapshots in `saves`, software
+presentation in `screen`, and minifb window/input/fixed-step scheduling in `main`.
+V0.2 adds `indexed` with original proportional glyph masks/advances and
+bounds-safe indexed blits. `screen` reads cabin0, main font, low palette and
+console panel via `ffe-content`, composes a 320x200 logical frame and presents
+nearest-scaled 4:3 output. Cabin RGB and low-palette content still compose in RGB;
+this is not the complete original dynamic-palette pipeline.
+No reference runtime is linked.
+V0.3 adds `model_lab`: two imported station vertex programs are evaluated by
+the pure integer `ffe-core::model`, then shown as points by a separate diagnostic
+orthographic view. V0.4 adds `ffe-core::model_commands` for bounded physical
+record decoding, original triangle/quad perimeters and standalone arithmetic/
+bit-branch/material helpers. The lab can display all declared root faces or one
+face, explicitly not executing branches, transforms or child programs.
+Content/conversion share that structural decoder. A separate local probe
+instruments exactly four emission calls in a generated JJFFE copy; the ordinary
+startup/font/vertex oracle still builds unchanged supplied assembly.
+F4 pauses simulation and disables trade/save/load actions;
+arrows and test variables affect only the inspection view. No arbitrary edges,
+visibility, submodel omission or captured mesh is presented as a faithful model.
+Content/conversion use the same core vertex validator rather than duplicating it.
+It deliberately does not reuse or replace the verified core as if its mechanics
+were faithful. Splitting renderer/platform crates is deferred until warranted.
+V0.5 adds an exact integer normal evaluator and optional normal-filtered outlines
+in the lab. Diagnostic observer/light/shade inputs are separate from gameplay;
+the filter still catalogues alternate branch faces, not executed primitives.
+V0.6 adds the original quarter-wave table and exact Sin32, Q31 basis rotation
+and trig arithmetic helpers. These do not yet execute complete model programs;
+the lab camera remains diagnostic rather than the original transform dispatcher.
+Packed angle operands and the pure local-basis rotation command form are also
+verified independently; base/object-relative frame reconstruction is not.
+F1751/F1752/F1755 normal/LOD visibility and branch helpers consume explicit
+depth/detail/scale/evaluated-normal inputs. They share branch-offset handling
+with bit branches; no implicit game globals or lazy pointers enter the core.
+V0.7 adds `ffe-core::model_execute`, combining those helpers in a bounded
+instruction-pointer loop. It returns visited command offsets and ordered face
+operand emissions with context snapshots, committing final context only after a
+real return. Unsupported reached operations, aliased instance selectors, invalid
+inputs and exhausted budgets fail without partial output/state mutation.
+These events are not evaluated geometry, shaded primitives or render-order
+records. Normal flags are explicit evaluated inputs. The existing F4 catalogue
+and synthetic flight renderer remain separate and unchanged.
+V0.8 adds `ffe-core::model_depth::key`, an exact original F1777 integer depth-key
+helper with explicit view-space point and instance scale inputs. It preserves
+the overflow encoding rather than substituting a distance or z-buffer value.
+V0.9 extends this module with F1696 command decoding/resolution, and adds
+`ffe-core::model_order` for flat group lifetime and original sorting. The physical
+command decoder reuses the new depth decoder, avoiding two record-size rules.
+Depth context contains already resolved view-space points, object position,
+key scale and operand scale, not implicit cache pointers. Negative/external
+point indices fail explicitly. Native group entries own their primitive tokens;
+opening another group closes the preceding group, including empty groups.
+Sort descending unsigned keys, stably by allocation order on ties; primitives
+inside a group retain insertion order and ignore their own keys. An open group
+cannot be finalized. A separate 1..4096-operation budget bounds this abstraction;
+it does not emulate original allocator words or nested child-model queues.
+These helpers are now composed in `model_execute::execute_live` (v0.11), including
+live view-space vertex state (v0.10) and the abstract `Order` token queue. The
+executor still stops at point/text, submodels, other transform forms and colour;
+see `docs/MODEL_EXECUTION_PLAN.md` §8 for the next task.
+Experimental input now uses a release-to-rearm latch: blocked keys cannot become
+flight controls merely because focus or a modal state changes. Modern is the
+owner-selected startup input preset; F3 retains the Classic-like alternative.
+The actual v1/v2/v3/v4/v5/v6 partial cache
+contract and its incomplete scope are in
+[FORMATS.md](FORMATS.md). Full content, startup conversion and the remaining crates below are
+planned, not present apart from the experimental `ffe-rs` crate. Current scope is Windows x64, JJFFE 2.8a7
+gameplay, documented bug fixes, live image packs and one-way legacy save import.
+Gameplay mods/mesh replacements below are deferred. The owner approved a local
+base cache and separate image pack, not redistribution of either archive.
 
 This document proposes the Rust workspace, crate responsibilities, the `data.bin`/`upscaled.bin` contracts, version detection, startup auto-conversion, mod layering, and the Phase 0 scripting recommendation. The data format is justified in `docs/FORMATS.md`.
 
@@ -44,8 +123,9 @@ Reasons:
 ```
 ffe-rs -> ffe-platform, ffe-render, ffe-content, ffe-core
 ffe-render -> ffe-render-desc, ffe-content, ffe-core (read-only types)
-ffe-content -> ffe-convert (readers) / no ffe-core logic
-ffe-core -> ffe-content (registry trait only), ffe-render-desc (emission)
+ffe-content -> ffe-core (pure bounded vertex validation, no simulation state)
+ffe-convert -> ffe-core (same vertex validator)
+ffe-core -> no other workspace crate (future registry/emission interfaces remain design)
 ffe-tools -> ffe-convert, ffe-content
 ```
 
@@ -237,12 +317,18 @@ The exact directory layout is versioned by `manifest.format_version`; readers re
 
 ### 4.5 Version detection and staleness
 
+Implemented precursor: `ffe-tools inspect-game` recognizes the two exact supplied
+executable hashes and checks required files. It does not build/read a cache or
+validate importer offsets. The conversion/startup behavior below remains planned.
+
 `ffe-tools build-data --game ./game --out data.bin`:
 
 1. Locate `FIRSTENC.EXE` (and required files) under `--game`.
 2. Hash/detect version. Known versions:
    - `ffe-floppy-1.02-en` (this snapshot): `FIRSTENC.EXE` SHA-256 `d919...`, `English Release 1.02 - 21/04/95`, `BLD_INFO.CFG` build `eng-fp`.
-   - `ffe-cd-...` (to be added when the user supplies a CD; hashes unknown).
+   - Observed CD English 1.01: SHA-256 `9957dc34...`, 2,093,056 bytes.
+     This needs a validated importer profile before claiming support.
+   - Patch output profiles remain unknown; package names are not executable IDs.
 3. If unknown: fail with a specific message listing the expected executable name, size, hash prefix, and the supported versions; do not guess.
 4. Convert to a temp file, validate the manifest and per-file hashes, atomically rename to `data.bin`.
 5. `--force` rebuilds; `--check` only verifies; `--jobs` parallelises.
@@ -256,11 +342,19 @@ At startup, `ffe-rs.exe`:
 
 ### 4.6 CD version
 
-Design for it now, but do not guess:
+The supplied CD has now been inspected; see [GAME_FILES.md](GAME_FILES.md).
+It has an English 1.01 executable and `DATA/` with 323 AVIs and 323 companion
+BMPs, not a verified `bmp_8/` directory. Its common cabins/effects/music/journal
+match the floppy installation. Source release detection remains independent
+from the selected JJFFE simulation behavior.
 
-- A version descriptor includes the executable hash, the list of required files, optional external directories (`bmp_8/`, `DATA/`), and a converter layout. The converter reads external indexed BMPs/AVI if present.
-- `ffe-floppy-1.02-en` uses the embedded EXE data; `ffe-cd-*` may externalise art/data. The manifest's `game_version` and per-file hashes make packs version-specific.
-- Document the differences in `docs/GAME_FILES.md` when known. Until then, an unrecognised CD copy produces the “unsupported version” message.
+- Each profile needs an executable hash, content requirements and verified layout.
+  Missing optional videos are different from missing required gameplay content.
+- Initially read an installed/extracted directory in `game/`; raw BIN/CUE import
+  is deferred. Do not execute installers or modify player files at startup.
+- Mixed/unknown layouts must explain detected hashes and missing content. Match
+  content identities, not unrelated installer metadata. Patch-derived profiles
+  are added only after their installed output is examined.
 
 ---
 
@@ -318,8 +412,15 @@ assets/<asset_id>.emissive.png
 
 1. `ffe-tools export-upscale --game ./game --data data.bin --out to-be-upscaled` writes RGBA PNGs (palette applied, transparency handled) for every asset that benefits, plus `manifest.json` with ID, original size, target size, scale, transparency mode. It writes `excluded.json` explaining exclusions.
 2. The player runs an external upscaler over `to-be-upscaled/` into `upscaled/` with the same filenames. `ffe-tools upscale --cmd "<template>"` can drive an installed tool (template placeholders `{in}`, `{out}`, `{scale}`).
-3. `ffe-tools pack-upscaled --data data.bin --upscaled upscaled --out upscaled.bin` validates missing/extra files and aspect ratio, resizes each image to its exact target size with Lanczos3 when needed, preserves alpha, logs every resize, writes `upscaled.bin`.
-4. `upscaled.bin` is committed via Git LFS; `to-be-upscaled/` and `upscaled/` are never committed.
+3. Export `images/`, manifest, `sizes.csv`, offline contact sheet and exclusions.
+   Recommend explicit sizes for a 3840 x 2160 display profile using asset screen
+   coverage; do not make every asset 4K. See [CLAUDE.MD](../CLAUDE.MD).
+4. `pack-upscaled` validates IDs, dimensions, aspect/alpha and checksums. Missing
+   overrides are allowed and reported; invalid images are errors. Resizing is an
+   explicit separate step, not a silent correction.
+5. Both archives and working art stay local and untracked. Image replacement
+   never changes collision, ship stats or other gameplay content. V1 packs do not
+   include meshes, scripts or material maps; later schema versions may add them.
 
 **Exclusion rule:** exclude assets that are not sampled as colour or whose values are data, not appearance:
 
@@ -350,29 +451,37 @@ Include textures/sprites/HUD/fonts/backgrounds that are displayed. The manifest 
 
 ---
 
-## 7. Mod system (Phase 8 design)
+## 7. Mod system (deferred; not v1)
 
 - All content is data, never code. The core loads it into a registry with stable IDs.
 - Mods can add, override, patch. Load order deterministic; conflicts reported with both sources.
 - Procedural galaxy safety test as §3.4.
 - `ffe-tools validate-mod` validates types/fields, dependencies, asset collisions, schema; `new-mod` scaffolds; dev-mode hot reload.
 - `docs/MODDING.md` will include tested examples: add a ship, a star system, a planet/station, a trade good, a mission template.
-- No scripting in v1. **Phase 0 recommendation:** Rust-native data + templates are sufficient for v1; if scripting is added later, use **Rhai** (small, sandboxable, deterministic) over Lua. Lua is already in FFED3D, but it is not deterministic/sandboxed by default and would make mods able to change simulation. Leave extension points: `EventHook`/`Action` data types, `MissionTemplate` conditions/actions, a `ScriptHost` trait not implemented in v1. Any scripting must be opt-in and clearly gameplay-affecting, never Enhanced.
+- No gameplay mods or scripting in v1. Earlier template/script-host sketches are
+  future research only; do not build these abstractions for image replacement.
+  Any future gameplay customization must remain separate from Enhanced graphics.
 
 ---
 
 ## 8. Packaging and CI
 
-- Windows `.exe` with static CRT (`+crt-static`), 64-bit; Linux if straightforward.
+- Windows x64 first. CRT/build choices need verification; Linux is later scope.
 - GitHub Actions:
   - CI: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `python ci/check_forbidden.py`.
-  - Release on tag: build, package `ffe-rs-<tag>-windows-x64.zip` containing exe, `upscaled.bin` (LFS checkout), empty `game/` + README, `mods/` + README, `README.txt`, `LICENSE`. No `data.bin`, no game data.
-- LFS: `.gitattributes` marks `upscaled.bin`; README explains `git lfs install`, checkout, and that CI must use `lfs: true`.
-- Forbidden-file check runs before build and fails if any path in `game/`, `legacy/`, `data.bin`, `to-be-upscaled/`, `upscaled/`, `extracted/`, or frame dumps is tracked.
+  - Future release ZIP: engine/tools, input-placement instructions and applicable
+    licenses. No original content, converted caches, derived image/music packs,
+    reference source or private saves. Create `game/` locally for player files.
+- The historical `upscaled.bin` LFS attribute is not a distribution contract.
+- CI rejects local game/reference/release folders, caches, packs and captures;
+  `python -m unittest ci.test_check_forbidden` tests the guardrails.
 
 ---
 
-## 9. Phase 0 decisions requested
+## 9. Historical detailed proposals
+
+The following list is retained as design topics, not blocking questions.
+Owner decisions and scope are recorded in [CLAUDE.MD](../CLAUDE.MD).
 
 1. Approve the crate layout and dependency direction.
 2. Approve RON for content tables/text with canonical serialization, `mod.toml` for mods, JSON for manifests/schemas (see `docs/FORMATS.md`).
@@ -383,4 +492,5 @@ Include textures/sprites/HUD/fonts/backgrounds that are displayed. The manifest 
 7. Approve no scripting in v1 and Rhai as the future option, or choose Lua.
 8. Approve the mod layering and galaxy-safety test design.
 
-No production code will be written until Phase 0 and `docs/RENDERING_DESIGN.md` are approved.
+Technical implementation of the first slice is approved; no design sketch
+below a deferred heading expands that scope or authorizes redistribution.

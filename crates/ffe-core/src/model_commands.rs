@@ -1,0 +1,421 @@
+//! Structural station-program decoding and verified command helpers, not a full executor.
+use crate::model::{variable, VertexContext};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Face {
+    pub offset: usize,
+    pub material: u16,
+    pub normal: u16,
+    pub vertices: Vec<u8>,
+    pub reflected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Point {
+    pub offset: usize,
+    pub material: u16,
+    /// Raw F1474 packed-angle operand.
+    pub angle: i16,
+    /// `payload[4] & 0x80`; the remaining bits are not used by the handler.
+    pub flag: bool,
+    pub vertex: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Line {
+    pub offset: usize,
+    pub material: u16,
+    pub vertices: [u8; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Command {
+    pub offset: usize,
+    pub word: u16,
+    pub size: usize,
+}
+
+#[derive(Debug)]
+pub struct Program {
+    pub commands: Vec<Command>,
+    pub faces: Vec<Face>,
+    pub points: Vec<Point>,
+    pub lines: Vec<Line>,
+}
+
+fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
+    let data = bytes
+        .get(offset..offset + 2)
+        .ok_or_else(|| format!("Truncated model command at {offset:#x}."))?;
+    Ok(u16::from_le_bytes([data[0], data[1]]))
+}
+
+/// Decode every physical record, including records after conditional/block terminators.
+/// Only known station-stream forms are accepted; no byte scanning for "likely" polygons.
+pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
+    if bytes.is_empty()
+        || bytes.len() > 16384
+        || bytes.len() % 2 != 0
+        || vertex_count == 0
+        || vertex_count > 128
+        || vertex_count % 2 != 0
+    {
+        return Err("Invalid bounded model command stream/count.".to_owned());
+    }
+    let mut commands = Vec::new();
+    let mut faces = Vec::new();
+    let mut points = Vec::new();
+    let mut lines = Vec::new();
+    let mut branches = Vec::new();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let code = word(bytes, offset)?;
+        let opcode = code & 31;
+        let size = match opcode {
+            0 if code == 0 => 2,
+            1 => 8,
+            2 => 6,
+            3 | 7 => 8,
+            4 | 8 => 10,
+            6 => crate::model_depth::decode(&bytes[offset..])?.1,
+            10 => 10,
+            11..=14 | 19 | 20 | 29 => {
+                if matches!(opcode, 11 | 12 | 19 | 20) && code >> 5 != 0 {
+                    let target = (offset as i32 + 4)
+                        .checked_add(((code as i16) >> 5) as i32 * 2)
+                        .ok_or("Model branch overflow.")?;
+                    branches.push((offset, target));
+                }
+                if opcode == 14 && word(bytes, offset + 2)? & 0x8000 != 0 {
+                    8
+                } else {
+                    4
+                }
+            }
+            26 => 6,
+            28 if code & 0xc000 != 0xc000 => 4,
+            _ => return Err(format!("Unsupported command {code:#06x} at {offset:#x}.")),
+        };
+        if offset + size > bytes.len() {
+            return Err(format!("Truncated command {code:#06x} at {offset:#x}."));
+        }
+        if opcode == 1 {
+            let payload = &bytes[offset + 2..offset + 8];
+            let point = Point {
+                offset,
+                material: word(payload, 0)?,
+                angle: word(payload, 2)? as i16,
+                flag: payload[4] & 0x80 != 0,
+                vertex: payload[5],
+            };
+            if u32::from(point.vertex) >= vertex_count {
+                return Err(format!(
+                    "Point source references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            points.push(point);
+        }
+        if opcode == 2 {
+            let payload = &bytes[offset + 2..offset + 6];
+            let line = Line {
+                offset,
+                material: word(payload, 0)?,
+                vertices: [payload[2], payload[3]],
+            };
+            if line
+                .vertices
+                .iter()
+                .any(|index| u32::from(*index) >= vertex_count)
+            {
+                return Err(format!(
+                    "Line references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            lines.push(line);
+        }
+        if matches!(opcode, 3 | 4 | 7 | 8) {
+            if code != opcode {
+                return Err(format!("Unexpected face command flags at {offset:#x}."));
+            }
+            let payload = &bytes[offset + 2..offset + size];
+            let (vertices, normal) = if matches!(opcode, 3 | 7) {
+                // F1707 passes byte3, byte2, byte5 (normal at byte4, not byte5).
+                // F1711 passes byte4, byte2, byte5, byte3.
+                (
+                    vec![payload[3], payload[2], payload[5]],
+                    u16::from(payload[4]),
+                )
+            } else {
+                (
+                    vec![payload[4], payload[2], payload[5], payload[3]],
+                    word(payload, 6)?,
+                )
+            };
+            if vertices
+                .iter()
+                .any(|index| u32::from(*index) >= vertex_count)
+            {
+                return Err(format!(
+                    "Face references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            let material = word(payload, 0)?;
+            if matches!(opcode, 7 | 8) {
+                let mirrored_vertices: Vec<_> = vertices.iter().map(|v| *v ^ 1).collect();
+                if mirrored_vertices
+                    .iter()
+                    .any(|index| u32::from(*index) >= vertex_count)
+                {
+                    return Err(format!(
+                        "Reflected face references out-of-range vertex at {offset:#x}."
+                    ));
+                }
+                faces.push(Face {
+                    offset,
+                    material,
+                    normal: normal ^ 1,
+                    vertices: mirrored_vertices,
+                    reflected: true,
+                });
+            }
+            faces.push(Face {
+                offset,
+                material,
+                normal,
+                vertices,
+                reflected: false,
+            });
+        }
+        commands.push(Command {
+            offset,
+            word: code,
+            size,
+        });
+        offset += size;
+    }
+    if commands.last().is_none_or(|c| c.word != 0) {
+        return Err("Model command stream lacks a final terminator.".to_owned());
+    }
+    for (source, target) in branches {
+        if target < 0
+            || !commands
+                .iter()
+                .any(|command| command.offset == target as usize)
+        {
+            return Err(format!(
+                "Model branch at {source:#x} targets outside a record boundary."
+            ));
+        }
+    }
+    Ok(Program {
+        commands,
+        faces,
+        points,
+        lines,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Material {
+    pub rgb: [u8; 3],
+    pub texture: u16,
+    pub unlit: bool,
+    pub local_colour: bool,
+}
+
+/// F1692 descriptor decoding only, not runtime palette/shading or texture sampling.
+pub fn material(value: u16) -> Material {
+    let textured = value >> 14 != 0;
+    Material {
+        rgb: if textured {
+            [0; 3]
+        } else {
+            [
+                (value >> 8 & 15) as u8,
+                (value >> 4 & 15) as u8,
+                (value & 15) as u8,
+            ]
+        },
+        texture: if textured { value & 4095 } else { 0 },
+        unlit: value & 0x2000 != 0,
+        local_colour: value & 0x1000 != 0,
+    }
+}
+
+/// F1758 arithmetic without a supplied table. Trig operations report a missing-table error.
+pub fn arithmetic(
+    code: u16,
+    operands: [u8; 2],
+    context: &mut VertexContext,
+) -> Result<u16, String> {
+    arithmetic_with_table(code, operands, context, None)
+}
+
+/// Commit the 16-bit result only on success, including table-based sine/cosine.
+pub fn arithmetic_with_table(
+    code: u16,
+    operands: [u8; 2],
+    context: &mut VertexContext,
+    table: Option<&crate::model_math::SineTable>,
+) -> Result<u16, String> {
+    if !matches!(code & 31, 13 | 29) {
+        return Err("Not a model arithmetic command.".to_owned());
+    }
+    let a = variable(operands[0], context);
+    let b = variable(operands[1], context);
+    let value = match code >> 4 & 15 {
+        0 => a.wrapping_add(b),
+        1 => a.wrapping_sub(b),
+        2 => a.wrapping_mul(b),
+        3 => {
+            if b == 0 {
+                a
+            } else {
+                a.checked_div(b).ok_or("Model signed division overflow.")?
+            }
+        }
+        4 => (a as u32).wrapping_shr(b as u32) as i32,
+        5 => a.wrapping_shl(b as u32),
+        6 => {
+            if b as u32 >= a as u32 {
+                b
+            } else {
+                a
+            }
+        }
+        7 => {
+            if b as u32 <= a as u32 {
+                b.wrapping_sub(1)
+            } else {
+                a
+            }
+        }
+        8 => (a as u32)
+            .wrapping_shl(16)
+            .checked_div(b as u32)
+            .ok_or("Model unsigned division by zero.")? as i32,
+        9 => a.wrapping_shr(b as u32),
+        10 => {
+            let index = a.wrapping_add(b);
+            i32::from(
+                *context
+                    .globals
+                    .get(index as usize)
+                    .ok_or("Model global lookup outside 0..63.")?,
+            )
+        }
+        11 => {
+            if b as u32 > a as u32 {
+                0
+            } else {
+                a
+            }
+        }
+        12 => {
+            if (b as u32) < a as u32 {
+                0
+            } else {
+                a
+            }
+        }
+        13 | 14 => {
+            let table =
+                table.ok_or("Model sine/cosine arithmetic needs the original trig table.")?;
+            let angle = if code >> 4 & 15 == 14 {
+                b.wrapping_add(0x4000)
+            } else {
+                b
+            };
+            crate::model::multiply(a, table.sin32(angle))
+        }
+        _ => a & b,
+    } as u16;
+    context.locals[usize::from(code >> 8 & 7)] = i32::from(value);
+    Ok(value)
+}
+
+/// F1753/1756/1757: byte offsets relative to the physical command, or None for a return.
+pub fn bit_branch(
+    code: u16,
+    operands: [u8; 2],
+    context: &VertexContext,
+) -> Result<Option<i32>, String> {
+    let opcode = code & 31;
+    if !matches!(opcode, 19 | 20) {
+        return Err("Not a model bit-branch command.".to_owned());
+    }
+    let value = variable(operands[0], context);
+    let mask = if operands[1] == 0 {
+        -1
+    } else {
+        1i32.wrapping_shl(u32::from(operands[1] - 1))
+    };
+    let take = (value & mask == 0) == (opcode == 19);
+    Ok(branch_offset(code, take))
+}
+
+fn branch_offset(code: u16, take: bool) -> Option<i32> {
+    if take && code >> 5 == 0 {
+        return None;
+    }
+    Some(
+        4 + if take {
+            i32::from((code as i16) >> 5) * 2
+        } else {
+            0
+        },
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct VisibilityContext<'a> {
+    pub depth: i32,
+    pub scale: i32,
+    pub detail: [i32; 2],
+    pub normals: &'a [crate::model_normals::Normal],
+}
+
+/// F1751; callers supply evaluated normals, not lazy legacy buffer pointers.
+pub fn visibility(operand: i16, context: &VisibilityContext<'_>) -> Result<bool, String> {
+    if operand < 0 {
+        return context
+            .normals
+            .get(usize::from(operand as u16 & 0x7fff))
+            .map(|n| n.culled)
+            .ok_or_else(|| "Visibility branch references an out-of-range normal.".to_owned());
+    }
+    if context.depth < 0 {
+        return Ok(false);
+    }
+    let detail = if context.detail[0] & 1 != 0 {
+        context.detail[1]
+    } else {
+        context.detail[0]
+    };
+    let shift = context.scale.wrapping_add(detail);
+    let value = i32::from(operand);
+    let threshold = if shift > 0 {
+        let shifted = value.wrapping_shl(shift as u32);
+        if shifted.wrapping_shr(shift as u32) != value {
+            return Ok(false);
+        }
+        shifted
+    } else {
+        value
+    };
+    Ok(threshold < context.depth)
+}
+
+/// F1752/F1755 with F1753 return/relative-offset semantics.
+pub fn visibility_branch(
+    code: u16,
+    operand: i16,
+    context: &VisibilityContext<'_>,
+) -> Result<Option<i32>, String> {
+    let opcode = code & 31;
+    if !matches!(opcode, 11 | 12) {
+        return Err("Not a model visibility-branch command.".to_owned());
+    }
+    let take = visibility(operand, context)? == (opcode == 11);
+    Ok(branch_offset(code, take))
+}

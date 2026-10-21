@@ -230,6 +230,14 @@ Exact named entry points that matter for the port are listed in the source comme
 
 ### 3.4 Indexed bitmaps
 
+**JJFFE implementation update:** the counts below are from the historical
+FFED3D study, not the current JJFFE 2.8a7 baseline. Direct source/original-file
+verification finds **96 primary and 251 secondary** slots in JJFFE: 345 ordinary
+images plus two 32768-byte texture blocks (primary 94/95, zero encoded height).
+All payload bytes match both supplied floppy/CD executables. Header words at
+4/6 are signed drawing offsets, not merely padding; flag bit 0 masks index zero.
+The actual partial Rust cache/layout contract is in [FORMATS.md](FORMATS.md).
+
 The bitmap index table is `DATA_008240` (96 entries) followed by `DATA_008241` (261 entries) in `ffebmp.asm`. `F1620_BmpIndexToPtr` returns `DATA_008240[index]`; `DATA_008241` is the second sprite set used by `F1609_DrawSprite` (flag switch).
 
 Bitmap blob layout (from `C_BlitClipInternal`):
@@ -438,11 +446,23 @@ The reference's RNG use is **order-sensitive**; any extra call (e.g., a renderin
 2. Read `TimerGetTimeStamp` (milliseconds). Sleep until `tmMinFrame` (default `1000/50 = 20 ms`; `[TIMER] maxfps` configurable, minimum 5 ms).
 3. Run the 50 Hz input/timer callback for each elapsed 20 ms (`tmNext50Hz += 20`): key-repeat counters, mouse-button accumulators, splash timeout.
 4. Accumulate elapsed time into two counters:
-   - `DATA_009156 += elapsed_ms * 0x3e2 / 20` (0x3e2 = 994), the game-tics accumulator.
-   - `DATA_009157 += elapsed_ms * DATA_007706 / 20`, the frame/real-time counter (0x3e2 during the intro, set by the game).
-5. The main loop copies `DATA_009156` into `DATA_009155`, subtracts it from the accumulator, adds it to `GameTics` (`[ebx]`), and carries into `GameDays` (`[ebx+4]`) when it overflows `0xc22e` (49,710 tics).
+   - `DATA_009157 += elapsed_ms * 0x3e2 / 20` (0x3e2 = 994), the system counter.
+   - `DATA_009156 += elapsed_ms * DATA_007706 / 20`, the accelerated game counter.
+     Products are unsigned 64-bit; each quotient truncates independently to a
+     32-bit result. Counter additions wrap; division overflow traps in legacy.
+5. The main loop copies `DATA_009156` into `DATA_009155`, subtracts it from the accumulator, adds it to `GameTics` (`[ebx]`), and carries into `GameDays` (`[ebx+4]`) on **32-bit word overflow**, not at 49,710.
 
-At 1× time, 20 ms of real time = 994 tics, and 49,710 tics = 1 day; hence **1 real second ≈ 1 game day** at 1×. Time acceleration multiplies the tics; the game exposes 1×–10,000×. The start state is `GameTics = 0x80000000`, `GameDays = 0x121cf7` (the date shown is 3250-ish; `F1357` converts days to day/month/year). Day rollover fires event 2 (`0xf`), every 7 days event 2 (`0x10`), and a rollback event `0x15`.
+**JJFFE runtime verification update:** the previous 49,710-ticks-per-day and
+one-real-second-per-game-day interpretation was incorrect. `GameTics` is the
+32-bit day fraction, with 2^32 units per day. At a controlled 20 ms step and
+acceleration 994 there are 49,700 fraction units per second (approximately a real
+day per game day); do not convert this to a frame-count time model. The short
+headless trace uses a synthetic per-read clock and 21 ms updates, not faithful
+wall-clock pacing. `ffe-core` preserves the counter arithmetic and day carry,
+not yet the complete timer/input scheduling or acceleration policy.
+The start state is `GameTics = 0x80000000`, `GameDays = 0x121cf7`.
+Day rollover fires event 2 (`0xf`), every 7 days event 2 (`0x10`), and a rollback
+event `0x15`; those events have not been ported.
 
 The simulation is frame-driven with an integer tics delta, not a fixed 50 Hz simulation tick. For deterministic tracing we will drive fixed 20 ms frames, inject scripted input, and accumulate exactly as above. This is also the natural place for Enhanced frame interpolation: render between the previous and current simulation states without changing the simulation.
 
@@ -588,7 +608,7 @@ Result: `ffed3d_test.exe` (2.47 MB) builds and runs. It displays the JJFFE/Aniso
 - Exact journal bit-permutation/round-trip and the `MISSION.DAT` entry count (the offset table parse is ambiguous; verify against a legacy journal view).
 - Exact save-file subset/compression/scramble and the save-name extension scheme.
 - Exact original x87 rounding/order in `rotateobject`, `F1519_fp`, market/sysgen and any other trace-sensitive expression.
-- The original 3D projection parameters and rasteriser edge rules (F1602/F1603/F1604, F1645/F1646) — needed for the software reference.
+- The original rasteriser edge rules (F1602/F1603/F1604, F1645/F1646) — needed for the software reference. The F1479 integer projection is now ported and verified (see `docs/STATUS.md`, v0.10).
 - The original palette-to-RGB mapping and the DOS aspect/pixel mapping.
 - Which `FIX:` changes actually affect a given trace (some may be unreachable in normal play). Trace diffing will tell us.
 - CD layout/version hashes and whether it externalises `bmp_8` art and AVI data.
@@ -598,6 +618,6 @@ Result: `ffed3d_test.exe` (2.47 MB) builds and runs. It displays the JJFFE/Aniso
 
 ## 13. Phase 0 conclusion
 
-The source is a complete, working 32-bit Windows program with a reverse-engineered assembly core and a substantial C++/D3D9 layer. The game logic, content tables, models and most art are embedded in `FIRSTENC.EXE`; the floppy also supplies cabin art, samples, music and the journal archive. The simulation is integer/fixed-point and event/frame driven, with a 50 Hz input cadence and a 49,710-tic day. The largest risks are (a) FFED3D's behavioural changes relative to DOS 1.02, (b) x87/fixed-point exactness, and (c) reconstructing the original software renderer and palette look.
+The source is a complete, working 32-bit Windows program with a reverse-engineered assembly core and a substantial C++/D3D9 layer. The game logic, content tables, models and most art are embedded in `FIRSTENC.EXE`; the floppy also supplies cabin art, samples, music and the journal archive. The simulation is integer/fixed-point and event/frame driven, with a 50 Hz input cadence and a wrapping 32-bit day fraction (see the corrected timing section). The largest risks are (a) FFED3D's behavioural changes relative to DOS 1.02, (b) x87/fixed-point exactness, and (c) reconstructing the original software renderer and palette look.
 
 The recommended next step is Phase 1: add a deterministic trace harness to a local copy of the reference engine, record golden traces against `legacy/Elite3/`, and use those to pin the numeric model before writing `ffe-core`. **Do not start the port until the questions in §10 are answered and the rendering design in `docs/RENDERING_DESIGN.md` is approved.**

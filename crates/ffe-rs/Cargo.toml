@@ -1,0 +1,18 @@
+[package]
+name = "ffe-rs"
+version = "0.9.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Experimental playable native Rust First Encounters development slice"
+
+[dependencies]
+ffe-core = { path = "../ffe-core" }
+ffe-content = { path = "../ffe-content" }
+serde.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+minifb = { version = "0.28", default-features = false, features = ["x11"] }
+png = "0.17"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,6 +1,12 @@
 # Phase 0 summary — stop and review
 
-Status: **Phase 0 complete. Port not started. Waiting for your approval.**
+Status: **historical FFED3D study; current direction and first slice approved.**
+The owner selected the separate JJFFE 2.8a7 reference, Windows x64, original
+visuals, allowed bug fixes, live image-only packs, legacy save import and short
+owner tests. See [CLAUDE.MD](../CLAUDE.MD) and the latest
+[PORT_LOG.md](PORT_LOG.md) entry. Historical recommendations below are not current
+instructions or implemented features. New CD/floppy inputs have since been
+inspected; the reference build described here was not reproduced in that work.
 
 This is the short version. Details are in `docs/INVENTORY.md`, `docs/FFED3D_RENDERING_NOTES.md`, `docs/RENDERING_DESIGN.md`, `docs/ARCHITECTURE.md` and `docs/FORMATS.md`.
 
@@ -58,4 +64,5 @@ I did **not** write Rust game code, commit game data, or commit any legacy/FFED3
 
 Then Phase 2 (`ffe-convert` + `build-data`) and Phase 3 (`ffe-core`).
 
-**Please reply with approval or changes to the decisions above.** I will not write the port or the rendering code until you approve Phase 0 and `docs/RENDERING_DESIGN.md`.
+The owner has now answered the questions. Follow [CLAUDE.MD](../CLAUDE.MD),
+not the superseded approval request or FFED3D oracle recommendation above.

@@ -3,21 +3,32 @@
 # ---------------------------------------------------------------------------
 /game/
 /legacy/
+/jjffe-master/
+/ffed3d-master/
+/Frontier-First-Encounters*/
 legacy/Elite 3/
 legacy/Elite3/
 legacy/ffed3d/
 legacy/ffed3d-master/
 
+# Local export bundle: contains game data and reference binaries. NEVER commit.
+/export.zip
+/export.zip.tmp
+
 # Converted original content and working art.
 /data.bin
+/data.bin.tmp
+/upscaled.bin
+/upscaled.bin.tmp
 /to-be-upscaled/
 /upscaled/
 /extracted/
+/saves/
 *upscaled/working/
 *.ffe-cache
 
-# The upscale pack itself IS tracked (Git LFS). Do not ignore upscaled.bin.
-# upscaled.bin is intentionally absent from this ignore list.
+# Derived art stays local until distribution rights are resolved.
+# The existing LFS attribute does not grant permission to publish a pack.
 
 # ---------------------------------------------------------------------------
 # Build and tool output.
@@ -36,6 +47,7 @@ legacy/ffed3d-master/
 *.exe
 *.dSYM/
 .cache/
+__pycache__/
 .direnv/
 
 # ---------------------------------------------------------------------------

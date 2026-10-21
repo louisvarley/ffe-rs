@@ -1,0 +1,500 @@
+use ffe_core::model::VertexContext;
+use ffe_core::model_commands::VisibilityContext;
+use ffe_core::model_execute::{execute, execute_live, Emission, InstanceContext, Primitive};
+use ffe_core::model_instance::Vertices;
+use ffe_core::model_math::{angle_operand, SineTable};
+use ffe_core::model_normals::Normal;
+
+fn bytes(words: &[u16]) -> Vec<u8> {
+    words.iter().flat_map(|w| w.to_le_bytes()).collect()
+}
+
+fn visibility() -> VisibilityContext<'static> {
+    VisibilityContext {
+        depth: 100,
+        scale: 0,
+        detail: [0, 0],
+        normals: &[],
+    }
+}
+
+#[test]
+fn execution_follows_loops_records_repeated_emissions_and_commits_low_word_locals() {
+    let stream = bytes(&[
+        13, 0x00c8, 7, 0x0123, 0x0200, 0x0402, 0x1d, 0x01c0, 0xff14, 0x00c0, 0,
+    ]);
+    let mut context = VertexContext::default();
+    context.locals[8] = 3;
+    let result = execute(&stream, 8, &mut context, &visibility(), None, 32).unwrap();
+    assert_eq!(context.locals[0], 0);
+    assert_eq!(context.locals[8], 3);
+    assert_eq!(result.commands, [0, 4, 12, 16, 4, 12, 16, 4, 12, 16, 20]);
+    assert_eq!(result.emissions.len(), 6);
+    assert_eq!(
+        result
+            .emissions
+            .iter()
+            .map(|e| e.context.locals[0])
+            .collect::<Vec<_>>(),
+        [3, 3, 2, 2, 1, 1]
+    );
+    assert_eq!(result.emissions[0].face.vertices, [3, 1, 5]);
+    assert_eq!(result.emissions[1].face.vertices, [2, 0, 4]);
+    assert_eq!(result.emissions[0].face.normal, 3);
+    let mut short = VertexContext::default();
+    short.locals[8] = 3;
+    let before = short.clone();
+    assert!(execute(&stream, 8, &mut short, &visibility(), None, 10)
+        .unwrap_err()
+        .contains("exceeded its 10-command budget"));
+    assert_eq!(short, before);
+    assert_eq!(
+        execute(&stream, 8, &mut short, &visibility(), None, 11)
+            .unwrap()
+            .commands
+            .len(),
+        11
+    );
+}
+
+#[test]
+fn execution_is_transactional_for_budget_arithmetic_unsupported_alias_and_rotation_errors() {
+    let mut context = VertexContext::default();
+    context.locals[8] = 9;
+    context.locals[9] = 0;
+    let original = context.clone();
+    for (words, budget, expected) in [
+        (
+            vec![13, 0x00c8, 0xffd4, 0x00c8, 0],
+            8,
+            "exceeded its 8-command budget",
+        ),
+        (
+            vec![13, 0x00c8, 0x8d, 0xc9c8, 0],
+            8,
+            "unsigned division by zero",
+        ),
+        (
+            vec![13, 0x00c8, 10, 0, 0, 0, 0, 0],
+            8,
+            "Unsupported executed command 0x000a at 0x4",
+        ),
+        (
+            vec![13, 0x00c8, 13, 0x00d2, 0],
+            8,
+            "alias legacy instance fields",
+        ),
+        (
+            vec![13, 0x00c8, 0x801c, 1, 0],
+            8,
+            "needs the original sine table",
+        ),
+        (vec![13, 0x00c8, 0], 1, "exceeded its 1-command budget"),
+    ] {
+        assert!(
+            execute(&bytes(&words), 8, &mut context, &visibility(), None, budget)
+                .unwrap_err()
+                .contains(expected)
+        );
+        assert_eq!(context, original);
+    }
+    for budget in [0, 4097, usize::MAX] {
+        assert!(execute(&bytes(&[0]), 8, &mut context, &visibility(), None, budget).is_err());
+        assert_eq!(context, original);
+    }
+}
+
+#[test]
+fn execution_skips_unreached_unsupported_records_and_handles_conditional_returns() {
+    let stream = bytes(&[0x93, 0, 1, 0, 0, 0, 0]);
+    let mut context = VertexContext::default();
+    let result = execute(&stream, 8, &mut context, &visibility(), None, 2).unwrap();
+    assert_eq!(result.commands, [0, 12]);
+    let normals = [Normal {
+        culled: true,
+        colour: [0; 3],
+    }];
+    let inputs = VisibilityContext {
+        normals: &normals,
+        ..visibility()
+    };
+    let result = execute(&bytes(&[11, 0x8000, 0]), 8, &mut context, &inputs, None, 1).unwrap();
+    assert_eq!(result.commands, [0]);
+    assert!(execute(&bytes(&[11, 0x8001, 0]), 8, &mut context, &inputs, None, 1).is_err());
+    assert!(execute(&bytes(&[0x13, 0, 3, 0]), 8, &mut context, &inputs, None, 2).is_err());
+}
+
+#[test]
+fn execution_captures_rotated_context_at_face_emission_without_changing_visibility_inputs() {
+    let table = SineTable::from_bytes(
+        &(0..16384i32)
+            .flat_map(|i| (i * 65536).to_le_bytes())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let mut context = VertexContext::default();
+    context.locals[9] = 12345;
+    let mut expected = context.clone();
+    table.rotate(&mut expected.matrix, 1, 12345).unwrap();
+    let stream = bytes(&[0x803c, 0xc9, 4, 0x234, 0x0200, 0x0604, 0, 0]);
+    let result = execute(&stream, 8, &mut context, &visibility(), Some(&table), 3).unwrap();
+    assert_eq!(context, expected);
+    assert_eq!(result.emissions[0].context, expected);
+    assert_eq!(result.emissions[0].face.vertices, [4, 0, 6, 2]);
+}
+
+// Two literal vertex pairs. Under the nominal 0x7fffffff identity, z=8/80 resolve
+// to object z=7/79, so the low/high depth keys are 0/9 (not 1/10).
+const LIVE_RECORDS: [u8; 12] = [1, 0, 0, 0, 8, 0, 1, 0, 0, 0, 80, 0];
+
+fn live_instance(position: [i32; 3], key_scale: i32, operand_scale: i32) -> InstanceContext {
+    InstanceContext {
+        position,
+        generation: 2,
+        key_scale,
+        operand_scale,
+    }
+}
+
+/// Ordinary triangle record with emitted vertex order [a, b, c].
+fn triangle(material: u16, vertices: [u8; 3]) -> [u16; 4] {
+    let [a, b, c] = vertices;
+    [
+        3,
+        material,
+        u16::from_le_bytes([b, a]),
+        u16::from_le_bytes([0, c]),
+    ]
+}
+
+fn depth_vertex(index: u8) -> u16 {
+    (2 << 13) | (u16::from(index) << 5) | 6
+}
+
+fn depth_list(mode: u16, header: u8, list: &[u8]) -> Vec<u16> {
+    let mut words = vec![(mode << 13) | (u16::from(header) << 5) | 6];
+    for (index, vertex) in list.iter().enumerate() {
+        let continuation = if index + 1 == list.len() { 0 } else { 255 };
+        words.push(u16::from(*vertex) | (continuation << 8));
+    }
+    words
+}
+
+fn depth_offset_vertex(index: u8, amount: i16) -> Vec<u16> {
+    vec![(7 << 13) | (u16::from(index) << 5) | 6, amount as u16]
+}
+
+const DEPTH_CLOSE: u16 = 0x0006;
+const DEPTH_POSITION: u16 = 0xffe6;
+const DEPTH_FIRST: u16 = 0xffc6;
+
+fn face_emission(primitive: &Primitive) -> &Emission {
+    match primitive {
+        Primitive::Face(emission) => emission,
+        other => panic!("expected a face primitive, got {other:?}"),
+    }
+}
+
+#[test]
+fn live_execution_orders_grouped_faces_by_group_key() {
+    let mut words = Vec::new();
+    words.push(depth_vertex(0));
+    words.extend_from_slice(&triangle(0x0123, [1, 0, 2]));
+    words.push(depth_vertex(2));
+    words.extend_from_slice(&triangle(0x0456, [3, 2, 0]));
+    words.push(DEPTH_CLOSE);
+    words.push(0);
+    let stream = bytes(&words);
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        32,
+    )
+    .unwrap();
+    assert_eq!(result.emissions.len(), 2);
+    assert_eq!(result.emissions[0].face.material, 0x0123);
+    assert_eq!(result.ordered.len(), 2);
+    // Group key 9 (v2) sorts before group key 0 (v0).
+    assert_eq!(face_emission(&result.ordered[0]).face.material, 0x0456);
+    assert_eq!(face_emission(&result.ordered[1]).face.material, 0x0123);
+    assert_eq!(result.ordered_keys, [9, 0]);
+}
+
+#[test]
+fn live_execution_orders_standalone_faces_by_first_view_vertex() {
+    let mut words = Vec::new();
+    words.extend_from_slice(&triangle(0x0123, [0, 1, 2])); // first vertex key 0
+    words.extend_from_slice(&triangle(0x0456, [2, 3, 1])); // first vertex key 9
+    words.push(0);
+    let stream = bytes(&words);
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert_eq!(result.emissions.len(), 2);
+    assert_eq!(face_emission(&result.ordered[0]).face.material, 0x0456);
+    assert_eq!(face_emission(&result.ordered[1]).face.material, 0x0123);
+    assert_eq!(result.ordered_keys, [9, 0]);
+}
+
+#[test]
+fn live_execution_resolves_depth_lists_and_offsets() {
+    let mut words = Vec::new();
+    words.extend(depth_list(1, 0, &[2])); // max(key 0, key 9) = 9
+    words.extend_from_slice(&triangle(1, [0, 1, 2]));
+    words.extend(depth_list(3, 0, &[2])); // min = 0
+    words.extend_from_slice(&triangle(2, [0, 1, 2]));
+    words.extend(depth_offset_vertex(0, 8)); // z 7 + 8 = 15 -> key 1
+    words.extend_from_slice(&triangle(3, [0, 1, 2]));
+    words.push(DEPTH_CLOSE);
+    words.push(0);
+    let stream = bytes(&words);
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        32,
+    )
+    .unwrap();
+    let materials: Vec<_> = result
+        .ordered
+        .iter()
+        .map(|primitive| face_emission(primitive).face.material)
+        .collect();
+    assert_eq!(materials, [1, 3, 2]);
+    assert_eq!(result.ordered_keys, [9, 1, 0]);
+}
+
+#[test]
+fn live_execution_handles_position_and_first_depth_forms() {
+    let mut words = vec![DEPTH_POSITION];
+    words.extend_from_slice(&triangle(1, [0, 1, 2]));
+    words.push(DEPTH_FIRST);
+    words.extend_from_slice(&triangle(2, [0, 1, 2]));
+    words.push(DEPTH_CLOSE);
+    words.push(0);
+    let stream = bytes(&words);
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0, 0, 32], 0, 0),
+        8,
+    )
+    .unwrap();
+    let materials: Vec<_> = result
+        .ordered
+        .iter()
+        .map(|primitive| face_emission(primitive).face.material)
+        .collect();
+    assert_eq!(materials, [2, 1]);
+    assert_eq!(result.ordered_keys, [u32::MAX, 4]);
+}
+
+#[test]
+fn live_execution_drops_empty_replaced_groups_and_keeps_members() {
+    let mut words = Vec::new();
+    words.push(depth_vertex(0)); // empty group key 0
+    words.push(depth_vertex(2)); // closes it, opens group key 9
+    words.extend_from_slice(&triangle(0x0123, [0, 1, 2]));
+    words.push(DEPTH_CLOSE);
+    words.push(0);
+    let stream = bytes(&words);
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert_eq!(result.ordered.len(), 1);
+    assert_eq!(face_emission(&result.ordered[0]).face.material, 0x0123);
+    assert_eq!(result.ordered_keys, [9]);
+}
+
+#[test]
+fn live_execution_is_transactional_for_bad_vertices_open_groups_and_budget() {
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let before_context = context.clone();
+    let before_slots = vertices.slots();
+
+    let out_of_range = bytes(&[depth_vertex(4), 0]);
+    assert!(execute_live(
+        &out_of_range,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        8,
+    )
+    .is_err());
+    assert_eq!(context, before_context);
+    assert_eq!(vertices.slots(), before_slots);
+
+    let mut words = Vec::new();
+    words.push(depth_vertex(0));
+    words.extend_from_slice(&triangle(0x0123, [0, 1, 2]));
+    words.push(0);
+    let open_group = bytes(&words);
+    assert!(execute_live(
+        &open_group,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        8,
+    )
+    .is_err());
+    assert_eq!(context, before_context);
+    assert_eq!(vertices.slots(), before_slots);
+
+    assert!(execute_live(
+        &open_group,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        2,
+    )
+    .is_err());
+    assert_eq!(context, before_context);
+    assert_eq!(vertices.slots(), before_slots);
+}
+
+#[test]
+fn live_execution_commits_and_reuses_the_vertex_cache() {
+    let stream = bytes(&[depth_vertex(0), DEPTH_CLOSE, 0]);
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([10, 20, 30], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert_eq!(vertices.slots()[0].view, [10, 20, 37]);
+    assert_eq!(vertices.slots()[0].stamp, 1);
+    execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([100, 200, 300], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert_eq!(vertices.slots()[0].view, [100, 200, 307]);
+    assert_eq!(vertices.slots()[0].object, [0, 0, 7]);
+    assert_eq!(vertices.slots()[0].stamp, 1);
+}
+
+#[test]
+fn legacy_execute_still_rejects_depth_commands_and_leaves_ordered_empty() {
+    let stream = bytes(&[depth_vertex(0), 0]);
+    let mut context = VertexContext::default();
+    let error = execute(&stream, 4, &mut context, &visibility(), None, 8).unwrap_err();
+    assert_eq!(error, "Unsupported executed command 0x4006 at 0x0.");
+    let result = execute(&bytes(&[0]), 4, &mut context, &visibility(), None, 8).unwrap();
+    assert!(result.ordered.is_empty());
+    assert!(result.ordered_keys.is_empty());
+}
+
+#[test]
+fn live_execution_emits_points_and_lines_in_command_and_render_order() {
+    let words = vec![1, 0x0123, 0x4000, 0x0080, 2, 0x0456, 0x0201, 0];
+    let stream = bytes(&words);
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert_eq!(result.points.len(), 1);
+    assert_eq!(result.points[0].material, 0x0123);
+    assert_eq!(result.points[0].encoded_angle, 0x4000);
+    assert_eq!(
+        result.points[0].angle,
+        angle_operand(0x4000, &VertexContext::default())
+    );
+    assert!(result.points[0].flag);
+    assert_eq!(result.points[0].vertex, 0);
+    assert_eq!(result.lines.len(), 1);
+    assert_eq!(result.lines[0].material, 0x0456);
+    assert_eq!(result.lines[0].vertices, [1, 2]);
+    assert!(result.emissions.is_empty());
+    // Point vertex 0 and line first vertex 1 both resolve to key 0; the earlier
+    // point allocation wins the tie.
+    assert!(matches!(result.ordered[0], Primitive::Point(_)));
+    assert!(matches!(result.ordered[1], Primitive::Line(_)));
+    assert_eq!(result.ordered_keys, [0, 0]);
+}
+
+#[test]
+fn live_execution_orders_points_and_lines_with_depth_groups() {
+    let words = vec![
+        0x4046, // depth vertex 2 -> group key 9
+        2, 0x0456, 0x0201, // line in the group
+        0x0006, // close
+        1, 0x0123, 0x4000, 0x0080, // standalone point, vertex 0 -> key 0
+        0,
+    ];
+    let stream = bytes(&words);
+    let mut context = VertexContext::default();
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert!(matches!(result.ordered[0], Primitive::Line(_)));
+    assert!(matches!(result.ordered[1], Primitive::Point(_)));
+    assert_eq!(result.ordered_keys, [9, 0]);
+}
