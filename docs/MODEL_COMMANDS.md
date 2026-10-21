@@ -40,7 +40,7 @@ explicit unsupported-command error.
 | 25 | `F1771` | — | — | **no** | no | unsupported record form |
 | 26 | `F1762` | set colour | 6 or 20 | yes | yes | verified v0.15: word +0 material, byte +2 normal (low 7) / normal-0 target (bit 7), byte +3 selector; non-zero selector adds seven alternative words (20 bytes). Updates instance colour or normal 0. |
 | 27 | `F1748` | — | — | **no** | no | unsupported record form |
-| 28 | `F1741` | `0x9c` matrix transformation | 4+ | partial | partial | only the pure `0x8000` local-basis form executes; base/object-relative and vertex-defined forms error |
+| 28 | `F1741` | `0x9c` matrix transformation | 4 (6 for `0xc000`) | partial | partial | `0x8000` local rotation (v0.6); `0x0000`/`0x4000` base-relative F1739 + optional F1743 verified v0.16 (6,048 cases); `0xc000` vertex-defined basis unsupported |
 | 29 | `F1758` | arithmetic (second entry) | 4 | yes | yes | same helper as 13 |
 | 30 | `F1767` | — | — | **no** | no | unsupported record form |
 | 31 | `F1874` | — | — | **no** | no | unsupported record form |
@@ -70,7 +70,13 @@ explicit unsupported-command error.
 - Colour (26) results match the original F1762 through F1772
   (`verify-colour.py`, 32 cases, trace `7d232265…`): material selection, local
   and lighting additions, unlit/textured rules, normal-0 writes, byte wrap and
-  the 6/20-byte record sizes. Both real stations now stop at opcode 28.
+  the 6/20-byte record sizes.
+- Opcode 28 base-relative forms match the original F1741 directly
+  (`verify-base-transform.py`, 6,048 cases, trace `c9a87a6d…`): row
+  permutation, negation, handedness and the conditional rotation.
+- With the top-level F1780(0,0) close after return (F1683/F1684), both real
+  station programs run to completion in `execute_live` (synthetic inputs). Not
+  yet compared with the original running the same station.
 
 ## Next: executing glyphs and children
 

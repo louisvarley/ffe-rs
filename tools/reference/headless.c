@@ -33,6 +33,7 @@ extern long ref_sin32(long angle);
 extern void ref_rotate(void *instance, long axis, long cosine, long sine);
 extern long ref_angle(void *instance, long encoded);
 extern unsigned char *ref_rotate_command(void *instance, void *operands, unsigned long code);
+extern unsigned char *ref_transform_command(void *instance, void *operands, unsigned long code);
 extern long ref_visibility(void *instance,long operand);
 extern unsigned char *ref_visibility_branch(void *instance,void *operands,unsigned long code);
 extern unsigned char *ref_visibility_inverse(void *instance,void *operands,unsigned long code);
@@ -934,6 +935,40 @@ static int rotation_operand_vectors(void)
     return 0;
 }
 
+static int base_transform_vectors(void)
+{
+    static const long bases[][9]={
+        {2147483647,0,0,0,2147483647,0,0,0,2147483647},
+        {123456789,-987654321,5,-6,7,(-2147483647-1),2147483647,-1,65536}
+    };
+    static const unsigned long hands[]={0,0xffffffffUL,0x12345678UL};
+    static const unsigned short operands[]={0,0x1234,0xffff};
+    unsigned long instance[0x160/4],globals[0x120/4],*locals,b,h,form,sel,neg,axis,o,i,code;
+    unsigned short operand;
+    unsigned char *next;
+    memset(globals,0,sizeof(globals));
+    for(i=0;i<64;++i) ((unsigned short *)((char *)globals+0x9c))[i]=(unsigned short)(i*257+19);
+    fprintf(stderr,"JJFFE base-transform-v1: original F1741 base-relative forms (F1739 row permutation/negation/handedness, then F1743), not vertex-defined bases or model execution.\n");
+    for(b=0;b<2;++b) for(h=0;h<3;++h) for(form=0;form<2;++form) for(sel=0;sel<7;++sel)
+    for(neg=0;neg<8;++neg) for(axis=0;axis<3;++axis) for(o=0;o<3;++o) {
+        memset(instance,0,sizeof(instance));
+        instance[0x14c/4]=(unsigned long)globals;
+        locals=(unsigned long *)((char *)instance+0x54);
+        for(i=0;i<8;++i) locals[i]=i*0x01010101UL;
+        for(i=0;i<9;++i) instance[0x9c/4+i]=0xdead0000UL+i;
+        memcpy((char *)instance+0x14,bases[b],36);
+        instance[0xf8/4]=hands[h];
+        code=(form<<14)|(neg<<10)|(sel<<7)|(axis<<5)|28;
+        operand=operands[o];
+        next=ref_transform_command(instance,&operand,code);
+        printf("{\"base\":%lu,\"hand\":%lu,\"code\":%lu,\"operand\":%u,\"advance\":%ld,\"matrix\":[",
+               b,h,code,operand,(long)(next-(unsigned char *)&operand));
+        for(i=0;i<9;++i) printf("%s%ld",i?",":"",(long)instance[0x9c/4+i]);
+        printf("],\"handedness\":%lu}\n",instance[0xfc/4]);
+    }
+    return 0;
+}
+
 static int transform_vectors(void)
 {
     static const long angles[]={0,1,0x3fff,0x4000,0x4001,0x7fff,0x8000,0xbfff,0xc000,0xffff,-1,-65536,65536,(-2147483647-1),2147483647};
@@ -1053,6 +1088,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--point-line")) return point_line_vectors();
     if (argc == 2 && !strcmp(argv[1], "--text-submodel")) return text_submodel_vectors();
     if (argc == 2 && !strcmp(argv[1], "--colour")) return colour_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();
     if (argc == 2 && !strcmp(argv[1], "--order")) return order_vectors();

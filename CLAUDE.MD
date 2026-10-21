@@ -22,8 +22,10 @@ slots in `model_execute::execute_live`, returning a depth-ordered stream.
 V0.12 adds a composed-order oracle; V0.13 adds point (1) and line (2) operand
 decoding/emission in the same ordered `Primitive` stream. V0.14 adds verified
 text (10) and child-model call (14) operand events and a Linux build of the
-reference adapter. V0.15 adds the verified opcode 26 colour command. Glyph/child
-execution, other transform forms (28) and face/point/line colour remain next.
+reference adapter. V0.15 adds the verified opcode 26 colour command; v0.16 the
+verified opcode 28 base-relative transforms, after which both real station
+programs run to completion (synthetic inputs, not yet compared whole-program).
+A whole-station oracle, primitive colour and glyph/child execution remain next.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.
@@ -801,8 +803,10 @@ probes. See docs/PORT_LOG.md, docs/FORMATS.md and docs/MODEL_COMMANDS.md.
 V0.14 (2026-10-21) adds verified text (10) and child-model call (14) operand
 events; opcode 14 is the F1749/F1750 child-model call, not text. See
 docs/PORT_LOG.md. V0.15 adds the verified opcode 26 colour command (6- or
-20-byte record). The next single task is the opcode 28 transform forms that now
-stop both real stations, then primitive colour and glyph/child execution. For each, first add an original handler probe and
+20-byte record). V0.16 adds the opcode 28 base-relative forms and the top-level
+group close (F1683/F1684), so both stations complete. The next single task is a
+whole-station comparison against the original F1772, then primitive colour and
+glyph/child execution. For each, first add an original handler probe and
 document the payload; do not infer fields from record size. Do not claim static
 resolved points remain valid through transform or animation changes. Preserve
 the catalogue-vs-execution distinction and keep errors transactional; F4,

@@ -23,7 +23,9 @@ v0.11 design record and follow-ups.
 
 **READY for the next model task.** The v0.10 projection/live-slot work, v0.11
 depth composition, v0.12 composed-order oracle, v0.13 point/line emission and
-v0.14 text/child-model operand events and v0.15 colour commands are implemented, tested and recorded. The
+v0.14 text/child-model operand events, v0.15 colour commands and v0.16
+base-relative transforms are implemented; both real station programs now run to
+completion, tested and recorded. The
 reference adapter now also builds on Linux (`tools/reference/build-linux.sh`)
 and reproduces every recorded trace hash. The next task (text, submodels, other transform
 forms and colour) is scoped in `docs/MODEL_EXECUTION_PLAN.md` §8 and
@@ -56,10 +58,11 @@ capture produced by two repeat runs of the local reference.
 | v0.13 point/line emission | `model_commands` (1/2), `model_execute::Primitive` | `model_commands.rs` (6), `model_execute.rs` (14), `point_line_reference.rs` (1, ignored) | `verify-point-line.py` (2 events) | `afa955be148192eaf2be79fb0b818386eafbc8d008e67e3fc56c3b7dd3e758a3` | operand events from original F1698/F1702; ordered with faces; not geometry/pixels |
 | v0.14 text/submodel operands | `model_commands` (`Text`/`Submodel`), `model_execute` (`texts`/`submodels`) | `model_execute.rs` (+3), `text_submodel_reference.rs` (1, ignored) | `verify-text-submodel.py` (7 cases, 11 tamper fields) | `5ba06002572b4395481a3651d84c588dbdec4285a210b8fe7e4b0d1a8041f73d` (CRLF; Linux LF `b095c38c…`) | F1747 text; F1749/F1750 child-model call (opcode 14 is **not** text); operand events, not in `ordered`; glyphs/children not executed |
 | v0.15 colour command | `model_commands::Colour`, `model_execute` (`colours`, `normal_zero_colour`), `VertexContext::colour` | `model_execute.rs` (+2), `colour_reference.rs` (1, ignored) | `verify-colour.py` (32 cases, 9 tamper fields) | `7d23226568032c92b4f062d4553cee39f4c89f8e51b742e9f958fb48ddaaa4b4` (CRLF; Linux LF `95383fff…`) | F1762; 6- or 20-byte record (decoder size fixed); instance or normal-0 colour; textured normal-0 writes error |
+| v0.16 base transforms; stations complete | `model_math::rotate_command` (base forms), `VertexContext::{base, base_handedness, handedness}`, top-level group close in `execute_live` | `model_math.rs`, `model_execute.rs` (updated), `base_transform_reference.rs` (1, ignored) | `verify-base-transform.py` (6,048 cases, 8 tamper fields) | `c9a87a6d023bacf3900dc0587285ac7522abc6353a80b9b6b62db43088c4a29c` (CRLF; Linux LF `03070a9b…`) | F1741/F1739; real stations 74/75 run to completion on synthetic inputs, not yet compared whole-program |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 152 `#[test]` functions total; 19 are
+- `cargo test --workspace --locked` passes. 153 `#[test]` functions total; 20 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
   that is **132 runnable synthetic tests** (133 on Linux).
 - `tools/reference/build-linux.sh` builds `jjffe-smoke`/`jjffe-commands` under
@@ -67,10 +70,11 @@ Facts verified on 2026-10-21:
   every Windows hash in the table above.
 - `python tools/reference/verify-instance.py --reference .cache/jjffe-reference/jjffe-smoke.exe`
   passes both scenarios (repeat/tamper/empty all behave as expected).
-- The local-only real-station composition test advances past opcode 6 and past
-  the v0.13 text/submodel and v0.14 colour stops: both models now stop at an
-  unsupported opcode 28 transform form; context, vertex slots and queue are
-  unchanged on those errors.
+- The local-only real-station test now requires both programs to complete:
+  model 74 runs 77 commands (25 ordered primitives, 4 texts, 5 submodel calls),
+  model 75 runs 100 (74 ordered, 1 text, 2 submodel calls, 2 colours), with
+  descending render keys. Inputs are synthetic (identity basis, visible
+  normals, zero position).
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
@@ -78,14 +82,15 @@ Facts verified on 2026-10-21:
 
 ## Next task
 
-Both real stations are now blocked by **other transform forms (opcode 28,
-`F1741`)**. Probe the original handler and document each form's payload before
-porting; do not infer fields from record size. Colour application to faces,
-points and lines (their F1692/F1693 use) is still open. Executing glyph programs and child models (cache v7 with real child
-descriptors, F1740 frames, F1687 culling, nested F1772) is the larger follow-up;
-see `docs/MODEL_COMMANDS.md`. Acceptance stays as before: synthetic tests per
-family, an executed-JJFFE trace, transactional errors, F4/synthetic flight/cache
-v6 unchanged.
+Compare a **whole station program** with the original: run model 74/75's real
+command stream through the original F1772 in the instrumented adapter, with the
+same synthetic instance inputs the Rust test uses, text/submodel nested calls
+recorded (as in `--text-submodel`) and face/point/line handlers probed (as in
+`--execution`/`--point-line`). Match the ordered primitive stream and the final
+context. This replaces the helper-composition evidence. After that: primitive
+colour (face/point/line F1692/F1693 use), the `0xc000` vertex-defined basis,
+then glyph/child execution (cache v7). F4, synthetic flight and cache v6 stay
+unchanged until a rendering step is approved.
 
 ## Known stale spots
 

@@ -197,7 +197,7 @@ fn executed_reference_station_depth_composition_advances() {
             key_scale: 0,
             operand_scale: 0,
         };
-        if let Err(error) = execute_live(
+        let result = match execute_live(
             bytes,
             &mut vertices,
             &mut context,
@@ -206,18 +206,40 @@ fn executed_reference_station_depth_composition_advances() {
             instance,
             4096,
         ) {
-            eprintln!("model {index}: {error}");
-            assert!(
-                !error.contains(&format!("0x0006 at {offset:#x}")),
-                "model {index} still stopped at opcode 6: {error}"
-            );
-            for stop in earlier {
+            Ok(result) => result,
+            Err(error) => {
+                assert_eq!(context, before, "model {index} mutated context on error");
                 assert!(
-                    !error.contains(stop),
-                    "model {index} still stopped at an earlier record: {error}"
+                    !error.contains(&format!("0x0006 at {offset:#x}")),
+                    "model {index} still stopped at opcode 6: {error}"
                 );
+                for stop in earlier {
+                    assert!(
+                        !error.contains(stop),
+                        "model {index} still stopped at an earlier record: {error}"
+                    );
+                }
+                panic!("model {index} no longer runs to completion: {error}");
             }
-            assert_eq!(context, before, "model {index} mutated context on error");
-        }
+        };
+        eprintln!(
+            "model {index}: {} commands, {} faces, {} points, {} lines, {} texts, {} submodels, {} colours, {} ordered",
+            result.commands.len(),
+            result.emissions.len(),
+            result.points.len(),
+            result.lines.len(),
+            result.texts.len(),
+            result.submodels.len(),
+            result.colours.len(),
+            result.ordered.len()
+        );
+        assert!(!result.ordered.is_empty(), "model {index} drew nothing");
+        assert!(
+            result
+                .ordered_keys
+                .windows(2)
+                .all(|pair| pair[0] >= pair[1]),
+            "model {index} render order is not descending by key"
+        );
     }
 }

@@ -4,6 +4,48 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Base-relative transforms; stations run to completion (v0.16)
+
+**Opcode 28 base forms.** F1741 has three forms by `code & 0xc000`: `0x8000`
+local-basis rotation (v0.6), `0xc000` vertex-defined basis (6 bytes, still
+unsupported and rejected by the decoder), and `0x0000`/`0x4000`, which both
+stations use (`0x0c3c` at `0x1da` in 74, `0x06bc` at `0x2ec` in 75). The base
+form calls F1739 then, only for a non-zero operand word, F1743 (F1474 angle,
+axis `code >> 5 & 3`). F1739 copies the instance base frame (+0x14) into the
+current basis (+0x9c): code bits 7..9 permute the rows (0/6 identity, 1..5 the
+other five; 7 is undefined in the original and errors here), bits 12/11/10
+negate source rows 0/1/2, and the handedness word (+0xf8 in, +0xfc out) is
+complemented for permutations 3..5 and once per negation.
+`VertexContext` gains `base`, `base_handedness` and `handedness`.
+
+`--base-transform` calls the original F1741 directly for 6,048 cases (two base
+frames, three handedness seeds, both base forms, permutations 0..6, all
+negation masks, three axes, operands 0/0x1234/0xffff). `verify-base-transform.py`
+passes with repeat, 8 tamper fields and an empty trace rejected. Trace SHA-256
+`c9a87a6d023bacf3900dc0587285ac7522abc6353a80b9b6b62db43088c4a29c` (CRLF);
+Linux LF `03070a9b…`.
+
+**Open group at return.** Both stations then returned with a depth group
+open, which `Order::finish` rejects. The original flush (F1788) crashes on an
+open group, so that rejection stays. What closes it: the top-level object-draw
+routines F1683/F1684 call F1780(0,0) right after the model run (F1773/F1774);
+nested child and glyph runs do not. `execute_live` is the top-level entry, so
+it now closes a group left open at return before finishing. (A probe flushing
+the order-v1 sequences without the close segfaulted; it was removed.)
+
+**Result.** With the existing synthetic station inputs (identity basis, all
+normals visible, position zero), both station programs now run to completion:
+model 74 executes 77 commands (20 faces, 5 points, 4 texts, 5 submodel calls;
+25 ordered primitives), model 75 executes 100 (69 faces, 5 points, 1 text, 2
+submodel calls, 2 colour commands; 74 ordered). The local station test now
+requires completion and descending render keys. This is not yet compared with
+the original running the same station; that whole-program trace is next.
+
+One synthetic test updated for the top-level close and one for the base forms;
+153 `#[test]`, 20 ignored, one Unix-only (132 runnable on Windows). Every
+earlier reference trace hash is unchanged. F4, synthetic flight and cache
+v6/385 are unchanged.
+
 ## 2026-10-21 — Colour command (v0.15)
 
 Opcode 26 (F1762) sets colour state. Layout: word +0 material, byte +2 low 7 bits

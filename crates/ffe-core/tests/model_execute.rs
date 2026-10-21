@@ -343,7 +343,7 @@ fn live_execution_drops_empty_replaced_groups_and_keeps_members() {
 }
 
 #[test]
-fn live_execution_is_transactional_for_bad_vertices_open_groups_and_budget() {
+fn live_execution_is_transactional_and_closes_a_group_left_open_at_return() {
     let mut context = VertexContext::default();
     let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
     let before_context = context.clone();
@@ -368,18 +368,20 @@ fn live_execution_is_transactional_for_bad_vertices_open_groups_and_budget() {
     words.extend_from_slice(&triangle(0x0123, [0, 1, 2]));
     words.push(0);
     let open_group = bytes(&words);
-    assert!(execute_live(
+    // F1683/F1684 close the group after a top-level model returns.
+    let mut closing = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
         &open_group,
-        &mut vertices,
-        &mut context,
+        &mut closing,
+        &mut context.clone(),
         &visibility(),
         None,
         live_instance([0; 3], 0, 0),
         8,
     )
-    .is_err());
-    assert_eq!(context, before_context);
-    assert_eq!(vertices.slots(), before_slots);
+    .unwrap();
+    assert_eq!(result.ordered.len(), 1);
+    assert_eq!(result.ordered_keys, [0]);
 
     assert!(execute_live(
         &open_group,

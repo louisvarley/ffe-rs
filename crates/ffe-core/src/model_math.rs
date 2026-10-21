@@ -66,17 +66,68 @@ impl SineTable {
         Ok(())
     }
 
-    /// F1741's 0x8000 form -> F1742/F1743; other transform forms remain unsupported.
+    /// F1741: the 0x8000 local-basis rotation (F1742/F1743), or the 0x0000/0x4000
+    /// base-relative forms (F1739, then F1743 only for a non-zero operand). The
+    /// 0xc000 vertex-defined basis is not supported.
     pub fn rotate_command(
         &self,
         context: &mut VertexContext,
         code: u16,
         operand: i16,
     ) -> Result<(), String> {
-        if code & 31 != 28 || code & 0xc000 != 0x8000 {
-            return Err("Only local-basis rotation transform commands are supported.".to_owned());
+        if code & 31 != 28 {
+            return Err("Not a model transform command.".to_owned());
+        }
+        let axis = ((code >> 5) & 3) as u8;
+        match code & 0xc000 {
+            0x8000 => {}
+            0xc000 => {
+                return Err("Vertex-defined basis transform commands are not supported.".to_owned())
+            }
+            _ => {
+                let mut working = context.clone();
+                base_basis(&mut working, code)?;
+                if operand != 0 {
+                    let angle = angle_operand(operand, &working);
+                    self.rotate(&mut working.matrix, axis, angle)?;
+                }
+                *context = working;
+                return Ok(());
+            }
         }
         let angle = angle_operand(operand, context);
-        self.rotate(&mut context.matrix, ((code >> 5) & 3) as u8, angle)
+        self.rotate(&mut context.matrix, axis, angle)
     }
+}
+
+/// F1739: copy the base frame's rows into a permutation of the current basis rows
+/// (code bits 7..9), negating source rows 0/1/2 on bits 12/11/10. Odd permutations (3..5) and each
+/// negation flip the handedness word; permutation 7 is undefined in the original.
+fn base_basis(context: &mut VertexContext, code: u16) -> Result<(), String> {
+    let destinations: [usize; 3] = match code >> 7 & 7 {
+        0 | 6 => [0, 1, 2],
+        1 => [1, 2, 0],
+        2 => [2, 0, 1],
+        3 => [2, 1, 0],
+        4 => [1, 0, 2],
+        5 => [0, 2, 1],
+        _ => return Err("Base transform row permutation 7 is undefined.".to_owned()),
+    };
+    let mut handedness = context.base_handedness;
+    if matches!(code >> 7 & 7, 3..=5) {
+        handedness = !handedness;
+    }
+    for (row, destination) in destinations.into_iter().enumerate() {
+        let negate = code & (0x1000 >> row) != 0;
+        for component in 0..3 {
+            let value = context.base[row * 3 + component];
+            context.matrix[destination * 3 + component] =
+                if negate { value.wrapping_neg() } else { value };
+        }
+        if negate {
+            handedness = !handedness;
+        }
+    }
+    context.handedness = handedness;
+    Ok(())
 }

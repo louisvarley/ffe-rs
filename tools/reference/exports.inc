@@ -31,6 +31,7 @@ GLOBAL _ref_sin32
 GLOBAL _ref_rotate
 GLOBAL _ref_angle
 GLOBAL _ref_rotate_command
+GLOBAL _ref_transform_command
 GLOBAL _ref_visibility
 GLOBAL _ref_visibility_branch
 GLOBAL _ref_visibility_inverse
@@ -83,6 +84,7 @@ _ref_sin32 equ FUNC_001914_Sin32
 _ref_rotate equ FUNC_001744
 _ref_angle equ FUNC_001474
 _ref_rotate_command equ FUNC_001742
+_ref_transform_command equ FUNC_001741
 _ref_visibility equ FUNC_001751
 _ref_visibility_branch equ FUNC_001752
 _ref_visibility_inverse equ FUNC_001755

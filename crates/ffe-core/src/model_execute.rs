@@ -569,11 +569,13 @@ fn execute_inner(
                 if payload[0] & 0xc0 == 0xc0 {
                     selector(payload[0])?;
                 }
-                table.rotate_command(
-                    &mut working,
-                    code,
-                    i16::from_le_bytes([payload[0], payload[1]]),
-                )?;
+                table
+                    .rotate_command(
+                        &mut working,
+                        code,
+                        i16::from_le_bytes([payload[0], payload[1]]),
+                    )
+                    .map_err(|error| format!("{error} ({code:#06x} at {offset:#x})"))?;
                 Some(command.size as i32)
             }
             _ => {
@@ -594,9 +596,12 @@ fn execute_inner(
             "Model execution exceeded its {budget}-command budget; context unchanged."
         ));
     }
-    // Finalize before committing: an open group must not mutate caller state.
+    // Finalize before committing. Like the top-level object-draw callers (F1683/F1684
+    // call F1780(0,0) after the model returns), close a group the program left open;
+    // nested child/glyph runs, which do not close it, are not executed here.
     let (ordered, ordered_keys) = match order {
-        Some(order) => {
+        Some(mut order) => {
+            order.group(None)?;
             let pairs = order.finish_with_keys()?;
             let mut ordered = Vec::with_capacity(pairs.len());
             let mut ordered_keys = Vec::with_capacity(pairs.len());
