@@ -26,7 +26,9 @@ The Windows executable is built in this checkout. From the repository root:
 .\target\release\ffe-rs.exe --root .
 ```
 
-To rebuild: `cargo build --release --locked -p ffe-rs`.
+To rebuild: `cargo build --release --locked -p ffe-rs`, or run `build.bat` on
+Windows to build debug and release `ffe-rs.exe` and `ffe-tools.exe` into
+`target\debug` and `target\release`.
 The root directory must contain your locally generated **v6** `data.bin` (build command
 below). The game verifies it before opening a window. Without `--root`, it looks
 beside its own executable. Startup does **not** yet auto-import missing/stale
