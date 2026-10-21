@@ -252,11 +252,24 @@ fn cli_default_directory_is_beside_executable_not_working_directory() {
     fs::create_dir(executable.parent().unwrap()).unwrap();
     fs::copy(env!("CARGO_BIN_EXE_ffe-tools"), &executable).unwrap();
     fs::create_dir(temp.path().join("game")).unwrap();
-    let output = Command::new(&executable)
-        .arg("inspect-game")
-        .current_dir(temp.path())
-        .output()
-        .unwrap();
+    // On Linux, a test thread forking while the copy's write handle is open can make
+    // the fresh executable briefly "Text file busy"; retry only that error.
+    let mut attempts = 0;
+    let output = loop {
+        match Command::new(&executable)
+            .arg("inspect-game")
+            .current_dir(temp.path())
+            .output()
+        {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 100 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            result => break result.unwrap(),
+        }
+    };
     assert_eq!(output.status.code(), Some(2));
     let error = String::from_utf8_lossy(&output.stderr);
     let expected = executable.parent().unwrap().join("game");
