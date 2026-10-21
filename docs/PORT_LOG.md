@@ -4,6 +4,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Thrusters (opcode 9, v0.23)
+
+F1738 records are always 8 bytes: word +0 material, bytes +2/+3 vertices A and
+B, word +4 a signed width. Every exit returns past the record. When drawn, F1738
+projects A (F1471) and gives up if A's view z is at most 0x200; otherwise it
+projects B with the same test, scales the width by `+0x148 - 6` and A's depth
+(F1666), and either queues a line (F1704, width at most 4) or one or two glow
+quads keyed by F1777 of A's view, depending on the screen length (F1467).
+
+Rust decodes `Thruster` and emits `ThrusterEmission` in command order,
+performing the same projections (B only when A is deeper than 0x200). Glow and
+line queueing need F1666/F1467/F1704 and stay out of `ordered`, like text and
+child calls. Census: **245 of 466** models execute natively and all 245 match
+the original in command order. One synthetic test added (162 `#[test]`, 24
+ignored, one Unix-only; 137 runnable on Windows).
+
 ## 2026-10-21 — Jittered vertices (vertex opcodes 7/8, v0.22)
 
 F1478 dispatches vertex opcodes in pairs through `DATA_000044`/`DATA_000045`

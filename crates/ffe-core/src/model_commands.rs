@@ -91,6 +91,17 @@ pub struct Polygon {
     pub segments: Vec<u8>,
 }
 
+/// F1738 thruster operands: an exhaust glow between two vertices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Thruster {
+    pub offset: usize,
+    pub material: u16,
+    /// Vertices A (byte 2) and B (byte 3); A keys the glow.
+    pub vertices: [u8; 2],
+    /// Signed word +4, scaled by the instance scale and A's depth.
+    pub width: i16,
+}
+
 /// F1762 colour operands: 6 bytes, or 20 when byte 3 selects an alternative.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Colour {
@@ -122,6 +133,7 @@ pub struct Program {
     pub submodels: Vec<Submodel>,
     pub colours: Vec<Colour>,
     pub polygons: Vec<Polygon>,
+    pub thrusters: Vec<Thruster>,
 }
 
 fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
@@ -151,6 +163,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     let mut submodels = Vec::new();
     let mut colours = Vec::new();
     let mut polygons = Vec::new();
+    let mut thrusters = Vec::new();
     let mut branches = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -165,6 +178,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             3 | 7 => 8,
             4 | 8 => 10,
             6 => crate::model_depth::decode(&bytes[offset..])?.1,
+            9 => 8,
             10 => 10,
             11..=14 | 19 | 20 | 29 => {
                 if matches!(opcode, 11 | 12 | 19 | 20) && code >> 5 != 0 {
@@ -284,6 +298,25 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             }
             polygons.push(polygon);
         }
+        if opcode == 9 {
+            let payload = &bytes[offset + 2..offset + 8];
+            let thruster = Thruster {
+                offset,
+                material: word(payload, 0)?,
+                vertices: [payload[2], payload[3]],
+                width: word(payload, 4)? as i16,
+            };
+            if thruster
+                .vertices
+                .iter()
+                .any(|index| u32::from(*index) >= vertex_count)
+            {
+                return Err(format!(
+                    "Thruster references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            thrusters.push(thruster);
+        }
         if opcode == 26 {
             let payload = &bytes[offset + 2..offset + size];
             colours.push(Colour {
@@ -380,6 +413,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         submodels,
         colours,
         polygons,
+        thrusters,
     })
 }
 

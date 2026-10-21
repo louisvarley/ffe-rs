@@ -21,7 +21,7 @@ explicit unsupported-command error.
 | 6 | `F1696` | unified-z block start/end | variable | yes | yes | composed in v0.11; modes 0/4/5/6 close, 1/3 max/min, 2 vertex, 7 position/first/offset |
 | 7 | `F1706` | reflected triangle | 8 | yes | yes | emits XOR-1 mirrored face then ordinary face |
 | 8 | `F1710` | reflected quad | 10 | yes | yes | same reflection rule |
-| 9 | `F1738` | thruster effects | — | **no** | no | unsupported record form |
+| 9 | `F1738` | thruster glow | 8 | yes | yes | v0.23: word +0 material, bytes +2/+3 vertices A/B, word +4 signed width. Operand event; A (and B if A is deeper than 0x200) projected; glow/line queueing not ported. |
 | 10 | `F1747` | 3D text string | 10 | yes | yes | verified v0.14: +0 material, +2 normal (culled skips), +3 hi nibble glyph set / lo nibble size, +4 vertex, word +4 frame, word +6 string ID. Operand event; glyph programs not executed. |
 | 11 | `F1752` | visibility branch | 4 | yes | yes | F1751 predicate |
 | 12 | `F1755` | inverse visibility branch | 4 | yes | yes | F1751 inverse |
@@ -90,18 +90,17 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.22: **232 of 466** execute, and all 232 match the original
+v0.23: **245 of 466** execute, and all 245 match the original
 (`verify-station-models.py`). Top remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| decode: opcode 9 (thrusters) | 49 |
+| decode: opcode 27 | 53 |
 | decode: opcode 31 | 39 |
-| decode: opcode 27 | 38 |
+| decode: opcode 21 (nested block) | 29 |
 | vertices: vertex opcode 0x15 (21) | 13 |
-| decode: opcodes 24 / 25 | 11 each |
-| decode: opcode 17 | 10 |
-| decode: opcodes 21 / 22 | 9 / 8 |
+| decode: opcodes 17 / 24 / 25 | 11 each |
+| decode: opcode 22 (spline) | 8 |
 | decode: stream lacks a final terminator | 6 |
 | decode: opcode 30 | 5 |
 

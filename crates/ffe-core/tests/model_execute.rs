@@ -827,3 +827,43 @@ fn live_polygons_skip_by_their_length_and_queue_by_their_first_segment_vertex() 
     .unwrap_err()
     .contains("Polygon references external/out-of-range vertex"));
 }
+
+#[test]
+fn thrusters_are_eight_byte_operand_events_outside_render_order() {
+    // Thruster: material 0x0123, vertices 2/3, width -5; then a line on 1/2.
+    let words = [9, 0x0123, 0x0302, 0xfffb, 2, 0x0456, 0x0201, 0];
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &bytes(&words),
+        &mut vertices,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        live_instance([0, 0, 1000], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert_eq!(result.commands, [0, 8, 14]);
+    let thruster = &result.thrusters[0].thruster;
+    assert_eq!(
+        (thruster.material, thruster.vertices, thruster.width),
+        (0x0123, [2, 3], -5)
+    );
+    assert!(result
+        .ordered
+        .iter()
+        .all(|p| matches!(p, Primitive::Line(_))));
+    // Both ends are projected when the first is deeper than 0x200.
+    assert!(vertices.slots()[2].stamp == 2 && vertices.slots()[3].stamp == 2);
+    let external = bytes(&[9, 0x0123, 0x0902, 0, 0]);
+    assert!(execute(
+        &external,
+        4,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        8
+    )
+    .unwrap_err()
+    .contains("Thruster references external/out-of-range vertex"));
+}

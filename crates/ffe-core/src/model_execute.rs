@@ -10,7 +10,7 @@ use crate::model::variable;
 use crate::model::VertexContext;
 use crate::model_commands::{
     arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Polygon,
-    Submodel, Text, VisibilityContext,
+    Submodel, Text, Thruster, VisibilityContext,
 };
 use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
@@ -71,6 +71,14 @@ pub struct SubmodelEmission {
 pub struct PolygonEmission {
     pub polygon: Polygon,
     pub key: Option<u32>,
+    pub context: VertexContext,
+}
+
+/// A thruster operand event (F1738). Its glow/line queueing (depth-scaled width,
+/// F1467 screen length, F1704) is not ported, so it is absent from `ordered`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThrusterEmission {
+    pub thruster: Thruster,
     pub context: VertexContext,
 }
 
@@ -146,6 +154,8 @@ pub struct Execution {
     pub colours: Vec<ColourEmission>,
     /// Complex polygons in command order ([`execute_live`] only).
     pub polygons: Vec<PolygonEmission>,
+    /// Thrusters in command order; never in [`Self::ordered`].
+    pub thrusters: Vec<ThrusterEmission>,
     /// Final normal entry 0 colour if a colour command wrote it during this run.
     pub normal_zero_colour: Option<[u8; 3]>,
     /// Depth-queue operations in program order ([`execute_live`] only), excluding the
@@ -439,6 +449,7 @@ fn execute_inner(
         submodels: Vec::new(),
         colours: Vec::new(),
         polygons: Vec::new(),
+        thrusters: Vec::new(),
         normal_zero_colour: None,
         queue: Vec::new(),
         ordered: Vec::new(),
@@ -566,6 +577,35 @@ fn execute_inner(
                         queue.push(key, Primitive::Polygon(emission))?;
                         result.queue.push(QueueEvent::Polygon(key));
                     }
+                }
+                Some(command.size as i32)
+            }
+            9 => {
+                for thruster in program.thrusters.iter().filter(|t| t.offset == offset) {
+                    // F1738 projects A, and B only when A is more than 0x200 deep.
+                    if let Some(live) = working_vertices.as_mut() {
+                        let [a, b] = thruster.vertices;
+                        let near = live.resolve(
+                            a as i8,
+                            &working,
+                            instance.position,
+                            instance.generation,
+                            true,
+                        )?;
+                        if near.view[2] > 0x200 {
+                            live.resolve(
+                                b as i8,
+                                &working,
+                                instance.position,
+                                instance.generation,
+                                true,
+                            )?;
+                        }
+                    }
+                    result.thrusters.push(ThrusterEmission {
+                        thruster: thruster.clone(),
+                        context: working.clone(),
+                    });
                 }
                 Some(command.size as i32)
             }

@@ -66,13 +66,14 @@ capture produced by two repeat runs of the local reference.
 | v0.20 whole-table comparison | (no new core code) | `station_models_reference.rs` (1, ignored) | `verify-station-models.py` (all 466 slots; 4 tamper fields) | `3e04ba2e…` (Linux LF) | all 180 natively executed models match the original F1772 in command order; 13 slots crash the original in the synthetic setup |
 | v0.21 complex polygons | `model_commands::Polygon`, `model_execute` (`PolygonEmission`, `Primitive::Polygon`) | `model_execute.rs` (+1) | `verify-station-models.py` (polygon keys, event 11) | — | opcode 5 decoded/keyed/queued; segments not executed; 229 of 466 models execute and match |
 | v0.22 jittered vertices | `model::{jitter, evaluate_with_jitter}`, opcodes 7/8, `Vertices::{jitter, set_jitter}` | `model.rs` (+1), `jitter_reference.rs` (1, ignored) | `verify-jitter.py` (118 evaluations, 59 models) | `0fc5445f…` (Linux LF) | F1476 state caller-owned (open question in KNOWN_ISSUES); 232 of 466 models execute and match |
+| v0.23 thrusters | `model_commands::Thruster`, `ThrusterEmission` | `model_execute.rs` (+1) | `verify-station-models.py` (command flow after thrusters) | — | opcode 9 operand events; glow queueing not ported; 245 of 466 models execute and match |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 161 `#[test]` functions total; 24 are
+- `cargo test --workspace --locked` passes. 162 `#[test]` functions total; 24 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **136 runnable synthetic tests** (137 on Linux).
-- `verify-station-models.py`: all 232 natively executed models match the
+  that is **137 runnable synthetic tests** (138 on Linux).
+- `verify-station-models.py`: all 245 natively executed models match the
   original command flow and final state.
 - `ffe-tools model-census --game game` (floppy 1.02): 180 of 466 slots execute
   natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
@@ -96,8 +97,9 @@ Facts verified on 2026-10-21:
 Stations are verified for command flow (v0.17) and face draw queues (v0.18);
 the v0.19 census ranks what blocks the other models. Next, in order:
 
-1. **Opcode 9 (thrusters, F1738)** — now the largest blocker (49 models).
-2. **Opcodes 31 and 27** (39 and 38 models), then 24/25/17 and 21/22.
+1. **Opcode 27** (53 models) and **31** (39), then 21 (29; nested blocks),
+   24/25/17 (11 each) and 22.
+2. Thruster glow queueing (F1666/F1467/F1704) with point/line queueing.
 3. **Vertex opcode 0x15** (13 models; F1477 forms) and 3/4, 13/14, 23/24.
 4. **Polygon segments** (F1734/F1724/F1730/F1733/F1723/F1736 and their curve
    helpers) — needed for outline rasterising and for exact vertex-cache events.
