@@ -30,7 +30,7 @@ explicit unsupported-command error.
 | 15 | `F1759` | — | — | **no** | no | unsupported record form |
 | 16 | `F1815` | — | — | **no** | no | unsupported record form |
 | 17 | `F1760` | two-vertex shape (`Beam`) | 14 | yes | yes | v0.28: word +0 material, word +2 vertices (low/high byte), words +4..+10 to F1761. Operand record; drawing not ported. |
-| 18 | `F1763` | — | — | **no** | no | unsupported record form |
+| 18 | `F1763` | screen label (`Label`) | 4 | yes | yes (live) | v0.34: vertex `code >> 5`, word +0 string. F1764 projects the vertex (F1471) and, inside x 2..=317 / y 4..=149, queues a 4-word F1812 entry (string, screen point, pick id 0) keyed by its view. Text drawing and the pointer pick test are not ported. |
 | 19 | `F1756` | bit branch | 4 | yes | yes | zero-mask branch |
 | 20 | `F1757` | inverse bit branch | 4 | yes | yes | inverse |
 | 21 | `F1697` | nested depth block start/end | 2 | yes | yes (live) | v0.26: without bit 15, F1781 block keyed by F1777 of vertex `code >> 5`'s view; with bit 15, F1782 end. Both close the group. `Order::nested`. |
@@ -90,12 +90,12 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.33: **435 of 466** execute, and all that the original completes match
+v0.34: **437 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| decode: opcode 18 | 3 |
+| decode: model 89 release program runs past the JJFFE extent (data differs) | 1 |
 | vertices: vertex opcode 0xd (13) | 2 |
 | execute: opcode 30 light points (`0x801e`) | 1 |
 | other vertex/normal/reference validation errors | ~24 |

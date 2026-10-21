@@ -168,6 +168,18 @@ unsigned long trace_polygon_key(void *instance, const long *view)
     nested_event(11,key,0,0);
     return key;
 }
+/* F1764 (opcode 18 labels): key with the projected screen dword just before the view. */
+unsigned long trace_label_key(void *instance, const long *view)
+{
+    unsigned long key=ref_depth_key(instance,view);
+    nested_event(17,key,(unsigned long)view[-1],0);
+    return key;
+}
+unsigned long *trace_label_alloc(long words, unsigned long key, long force)
+{
+    if (queue_mode) queue_event(6,0,key);
+    return ref_order_allocate(words,key,force);
+}
 /* F1737 (opcode 22): key, allocation, then the filled entry when F1326 converts its
    colour. Screen words are packed x | y << 16; the palette value is not modelled. */
 static unsigned long *spline_entry;

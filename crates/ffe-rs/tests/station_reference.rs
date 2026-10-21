@@ -312,6 +312,7 @@ fn executed_reference_station_queues() {
                 QueueEvent::Polygon(key) => Some([3, 0, *key]),
                 QueueEvent::Nested(key) => Some([4, u32::from(key.is_some()), key.unwrap_or(0)]),
                 QueueEvent::Spline(key) => Some([5, 0, *key]),
+                QueueEvent::Label(key) => Some([6, 0, *key]),
                 // Points and lines stay hooked in the probe and are not queued there.
                 QueueEvent::Point(_) | QueueEvent::Line(_) => None,
             })

@@ -132,6 +132,7 @@ fn executed_reference_station_models() {
             emitted.extend(event.context.basis.into_iter().flat_map(i32::to_le_bytes));
         }
         let (mut p, mut l, mut t, mut s, mut g, mut b, mut c) = (0, 0, 0, 0, 0, 0, 0);
+        let mut labels = 0;
         let (mut points, mut nested) = (Vec::new(), Vec::new());
         let mut projected = std::collections::HashSet::new();
         for offset in &result.commands {
@@ -171,6 +172,18 @@ fn executed_reference_station_models() {
                     nested.push([11, key, 0, 0]);
                 }
                 g += 1;
+            }
+            // F1764 label entries: key and the screen dword (x | y << 16).
+            if let Some(label) = result
+                .labels
+                .get(labels)
+                .filter(|e| e.label.offset == *offset)
+            {
+                if let Some(key) = label.key {
+                    let [x, y] = label.screen;
+                    nested.push([17, key, u32::from(x as u16) | u32::from(y as u16) << 16, 0]);
+                }
+                labels += 1;
             }
             // F1737 curve entries: key, then the screen points packed x | y << 16 and
             // the colour as F1326 receives it.

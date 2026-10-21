@@ -1151,3 +1151,36 @@ fn opcode_28_0xc000_builds_the_basis_from_three_object_vertices() {
     // A vertex beyond the model is rejected when decoding.
     assert!(ffe_core::model_commands::decode(&bytes(&[0xc01c, 0x0204, 0x0001, 0]), 4).is_err());
 }
+
+#[test]
+fn opcode_18_queues_a_label_only_inside_the_screen_window() {
+    // Vertex 2 (code >> 5), string 0x1234.
+    let stream = bytes(&[(2 << 5) | 18, 0x1234, 0]);
+    let program = ffe_core::model_commands::decode(&stream, 4).unwrap();
+    assert_eq!(program.labels[0].string, 0x1234);
+    let run = |position: [i32; 3]| {
+        let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+        execute_live(
+            &stream,
+            &mut vertices,
+            &mut VertexContext::default(),
+            &visibility(),
+            None,
+            live_instance(position, 0, 0),
+            8,
+        )
+        .unwrap()
+    };
+    let visible = run([0, 0, 100]);
+    let label = &visible.labels[0];
+    let [x, y] = label.screen.map(i32::from);
+    assert!((2..=317).contains(&x) && (4..=149).contains(&y));
+    assert_eq!(visible.ordered_keys, [label.key.unwrap()]);
+    assert!(matches!(visible.ordered[0], Primitive::Label(_)));
+    // Far to the side, the point is projected but not queued.
+    let aside = run([100_000, 0, 100]);
+    assert_eq!(aside.labels[0].key, None);
+    assert!(aside.ordered.is_empty());
+    // A vertex beyond the model is rejected.
+    assert!(ffe_core::model_commands::decode(&bytes(&[(4 << 5) | 18, 0, 0]), 4).is_err());
+}

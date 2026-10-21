@@ -41,6 +41,10 @@ SCOPED_HOOKS = [
         ("FUNC_001777", "trace_polygon_key", 1),          # polygon depth key
         ("FUNC_001778", "trace_polygon_alloc", 1),        # polygon queue allocation
     ]),
+    ("FUNC_001764", "FUNC_001765", [
+        ("FUNC_001777", "trace_label_key", 1),            # label depth key
+        ("FUNC_001778", "trace_label_alloc", 1),          # label queue allocation
+    ]),
     ("FUNC_001737", "FUNC_001738", [
         ("FUNC_001777", "trace_spline_key", 1),           # curve depth key
         ("FUNC_001778", "trace_spline_alloc", 1),         # curve queue allocation

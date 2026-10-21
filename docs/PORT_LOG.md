@@ -4,6 +4,27 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Opcode 18 screen labels (v0.34)
+
+F1763 (opcode 18, four bytes) calls F1764 with vertex `code >> 5`, the word at
++2 and a zero pick id. F1764 projects the vertex through F1471 (generation
+check) and, when the screen point lies within x 2..=317 and y 4..=149 (unsigned
+range tests), queues a 4-word entry for F1812, which expands the word as a
+string (F1344) and writes it at that point. It then compares the point with the
+pointer when `DATA_008949` bit 1 is set and stores the pick id; that test is not
+modelled. `Label`/`LabelEmission`/`Primitive::Label` carry it.
+
+The probe hooks F1777/F1778 inside F1764 (nested event 17: key and the screen
+dword; queue event 6). F1764 is also the light-point routine's emitter (opcode
+30 `0x801e`). Census: **437 of 466** execute; `verify-station-models.py`
+compares 432 with 0 mismatched (trace `a80247eb…`, Linux LF). Only model 66
+queues a label in this setup (others are off-screen); it matches. Model 89 now
+stops at a truncated command: its floppy 1.02 program differs from the JJFFE
+declaration from +0x12 and runs past the JJFFE extent, like model 361's vertex
+data. Station, station-queue and text/submodel traces are unchanged. One
+synthetic test added; 176 `#[test]`, 25 ignored, one Unix-only (150 runnable on
+Windows).
+
 ## 2026-10-21 — Vertex-defined basis, opcode 28 `0xc000` (v0.33)
 
 F1741's `0xc000` form is six bytes: vertices A, B, C at bytes +2..+4, each read

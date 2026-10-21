@@ -9,8 +9,8 @@
 use crate::model::variable;
 use crate::model::VertexContext;
 use crate::model_commands::{
-    arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Polygon,
-    Spline, Submodel, Surface, Text, Thruster, VisibilityContext,
+    arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Label,
+    Polygon, Spline, Submodel, Surface, Text, Thruster, VisibilityContext,
 };
 use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
@@ -72,6 +72,16 @@ pub struct PolygonEmission {
     pub polygon: Polygon,
     pub key: Option<u32>,
     pub context: VertexContext,
+}
+
+/// A label (opcode 18, F1763/F1764). The vertex is projected (F1471); `key` is
+/// `None` unless its screen point lies within x 2..=317, y 4..=149, when F1764
+/// queues a 4-word F1812 text entry. F1764's pointer pick test is not modelled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabelEmission {
+    pub label: Label,
+    pub key: Option<u32>,
+    pub screen: [i16; 2],
 }
 
 /// A curve queued by F1737 (opcode 22). `points` are the screen points of vertex
@@ -157,6 +167,7 @@ pub enum QueueEvent {
     Point(u32),
     Line(u32),
     Spline(u32),
+    Label(u32),
 }
 
 /// One render-order entry.
@@ -167,6 +178,7 @@ pub enum Primitive {
     Point(PointEmission),
     Line(LineEmission),
     Spline(SplineEmission),
+    Label(LabelEmission),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -193,6 +205,8 @@ pub struct Execution {
     pub surfaces: Vec<SurfaceEmission>,
     /// Curves in command order ([`execute_live`] only).
     pub splines: Vec<SplineEmission>,
+    /// Labels in command order ([`execute_live`] only).
+    pub labels: Vec<LabelEmission>,
     /// Nested depth block boundaries in command order ([`execute_live`] only).
     pub blocks: Vec<BlockEmission>,
     /// Final normal entry 0 colour if a colour command wrote it during this run.
@@ -491,6 +505,7 @@ fn execute_inner(
         thrusters: Vec::new(),
         surfaces: Vec::new(),
         splines: Vec::new(),
+        labels: Vec::new(),
         blocks: Vec::new(),
         normal_zero_colour: None,
         queue: Vec::new(),
@@ -619,6 +634,36 @@ fn execute_inner(
                         queue.push(key, Primitive::Polygon(emission))?;
                         result.queue.push(QueueEvent::Polygon(key));
                     }
+                }
+                Some(command.size as i32)
+            }
+            18 => {
+                let Some(live) = working_vertices.as_mut() else {
+                    return Err(format!(
+                        "Unsupported executed command {code:#06x} at {offset:#x}."
+                    ));
+                };
+                for label in program.labels.iter().filter(|e| e.offset == offset) {
+                    let vertex = live.resolve(
+                        label.vertex as i8,
+                        &working,
+                        instance.position,
+                        instance.generation,
+                        true,
+                    )?;
+                    let [x, y] = vertex.screen.map(i32::from);
+                    let key = ((2..=317).contains(&x) && (4..=149).contains(&y))
+                        .then(|| model_depth::key(vertex.view, instance.key_scale));
+                    let emission = LabelEmission {
+                        label: label.clone(),
+                        key,
+                        screen: vertex.screen,
+                    };
+                    if let (Some(key), Some(queue)) = (key, order.as_mut()) {
+                        queue.push(key, Primitive::Label(emission.clone()))?;
+                        result.queue.push(QueueEvent::Label(key));
+                    }
+                    result.labels.push(emission);
                 }
                 Some(command.size as i32)
             }
