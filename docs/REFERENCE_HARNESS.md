@@ -14,6 +14,12 @@ supplied `jjffe-master/` sources are **never edited**.
   into `ffe.asm`.
 - `tools/reference/build-smoke.ps1` — builds `jjffe-smoke.exe` (and the
   instrumented `jjffe-commands.exe`) from the unchanged sources plus `headless.c`.
+- `tools/reference/build-linux.sh` — the same two binaries as 32-bit ELF
+  (`nasm`, `gcc -m32`) under `.cache/jjffe-reference-linux/`. Linux traces are
+  LF-terminated; hash them with CRLF endings to compare with recorded hashes.
+- `tools/reference/make-probe.py` — writes the instrumented `ffe-command-probe.asm`
+  for both builds: whole-file emitter hooks plus hooks scoped to one routine's
+  range (each with an exact expected site count).
 - `tools/reference/verify-<x>.py` — runs the mode twice, checks repeat/line
   count, drives the ignored Rust test, tampers each result field, and rejects
   empty traces.

@@ -22,11 +22,11 @@ explicit unsupported-command error.
 | 7 | `F1706` | reflected triangle | 8 | yes | yes | emits XOR-1 mirrored face then ordinary face |
 | 8 | `F1710` | reflected quad | 10 | yes | yes | same reflection rule |
 | 9 | `F1738` | thruster effects | — | **no** | no | unsupported record form |
-| 10 | `F1747` | text string | 10 | yes | no | payload includes text/position state; not yet documented/verified |
+| 10 | `F1747` | 3D text string | 10 | yes | yes | verified v0.14: +0 material, +2 normal (culled skips), +3 hi nibble glyph set / lo nibble size, +4 vertex, word +4 frame, word +6 string ID. Operand event; glyph programs not executed. |
 | 11 | `F1752` | visibility branch | 4 | yes | yes | F1751 predicate |
 | 12 | `F1755` | inverse visibility branch | 4 | yes | yes | F1751 inverse |
 | 13 | `F1758` | arithmetic | 4 | yes | yes | 16 operations; trig needs the sine table |
-| 14 | `F1749` | text (second form) | 4 or 8 | yes | no | size depends on `word(&2) & 0x8000`; semantics not documented |
+| 14 | `F1749` | child-model call (via `F1750`) | 4 or 8 | yes | yes | verified v0.14: model `code >> 5`, +0 vertex, word +0 frame; byte 1 bit 7 adds +2..+5 extra vertices (order +4,+2,+3,+5, `0x7f` ends). Operand event; child not executed. Earlier "text (second form)" label was wrong. |
 | 15 | `F1759` | — | — | **no** | no | unsupported record form |
 | 16 | `F1815` | — | — | **no** | no | unsupported record form |
 | 17 | `F1760` | — | — | **no** | no | unsupported record form |
@@ -63,8 +63,21 @@ explicit unsupported-command error.
 - Point (1) and line (2) operands match the original F1699/F1703 handler
   arguments: `verify-point-line.py`, 2 events, trace `afa955be…`, six tamper
   fields plus empty trace rejected. This is operand emission, not geometry.
+- Text (10) and child-model call (14) operands match the original F1747 and
+  F1749/F1750 with nested calls recorded (`verify-text-submodel.py`, 7 cases,
+  trace `5ba06002…`): decoded fields, the text normal skip, submodel extra-vertex
+  order, and the handlers' own cursor advance. Real stations now stop at
+  opcode 28 (model 74) and opcode 26 at `0x234` (model 75).
 
-## What must be done before implementing text/submodel
+## Next: executing glyphs and children
+
+Text and child-model calls are operand events (v0.14). Running them needs, in
+order: the F1538/F1539 model lookups and real child descriptors (cache v7),
+F1740 child frames, F1687 child culling with the descriptor radius, nested
+F1772 execution with its own vertex/normal frame, and F1344 string expansion
+(which reads game state). Probe each step as below before porting it.
+
+## Probe discipline (applied to text/submodel in v0.14)
 
 Text and submodel handling need the same discipline used for triangles/quads and
 point/line: extend the local instrumented probe to capture the **original handler

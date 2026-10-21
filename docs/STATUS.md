@@ -22,8 +22,10 @@ v0.11 design record and follow-ups.
 ## Verdict on handoff readiness
 
 **READY for the next model task.** The v0.10 projection/live-slot work, v0.11
-depth composition, v0.12 composed-order oracle and v0.13 point/line emission are
-implemented, tested and recorded. The next task (text, submodels, other transform
+depth composition, v0.12 composed-order oracle, v0.13 point/line emission and
+v0.14 text/child-model operand events are implemented, tested and recorded. The
+reference adapter now also builds on Linux (`tools/reference/build-linux.sh`)
+and reproduces every recorded trace hash. The next task (text, submodels, other transform
 forms and colour) is scoped in `docs/MODEL_EXECUTION_PLAN.md` §8 and
 `docs/MODEL_COMMANDS.md`. Remaining gaps are explicit below.
 
@@ -52,17 +54,22 @@ capture produced by two repeat runs of the local reference.
 | v0.11 depth composition | `ffe-core::model_execute::execute_live` | `model_execute.rs` (12), `execution_reference.rs` (+1, ignored) | local `executed_reference_station_depth_composition_advances`; existing depth/order/executor traces | — (no new composed trace) | composes F1696/F1780/F1788 with `model_instance`; `Execution.ordered`; real stations advance past opcode 6 |
 | v0.12 composed-order oracle | `model_execute::ordered_keys`, `model_order::finish_with_keys` | `order_reference.rs` (+1, ignored) | `verify-order.py` composed-order (1 program, order `[2,3,1]`, keys `[9,9,0]`) | `ce0d1b4fc55e2ac5533aa848dbe4642da8d0c00161de7959b561e184af021d2a` | composition of original F1696/F1777/F1780/F1788 with markers; not F1772/face handlers/pixels |
 | v0.13 point/line emission | `model_commands` (1/2), `model_execute::Primitive` | `model_commands.rs` (6), `model_execute.rs` (14), `point_line_reference.rs` (1, ignored) | `verify-point-line.py` (2 events) | `afa955be148192eaf2be79fb0b818386eafbc8d008e67e3fc56c3b7dd3e758a3` | operand events from original F1698/F1702; ordered with faces; not geometry/pixels |
+| v0.14 text/submodel operands | `model_commands` (`Text`/`Submodel`), `model_execute` (`texts`/`submodels`) | `model_execute.rs` (+3), `text_submodel_reference.rs` (1, ignored) | `verify-text-submodel.py` (7 cases, 11 tamper fields) | `5ba06002572b4395481a3651d84c588dbdec4285a210b8fe7e4b0d1a8041f73d` (CRLF; Linux LF `b095c38c…`) | F1747 text; F1749/F1750 child-model call (opcode 14 is **not** text); operand events, not in `ordered`; glyphs/children not executed |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 145 `#[test]` functions total; 17 are
+- `cargo test --workspace --locked` passes. 149 `#[test]` functions total; 18 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **127 runnable synthetic tests**.
+  that is **130 runnable synthetic tests** (131 on Linux).
+- `tools/reference/build-linux.sh` builds `jjffe-smoke`/`jjffe-commands` under
+  `.cache/jjffe-reference-linux/`; their traces, hashed with CRLF endings, match
+  every Windows hash in the table above.
 - `python tools/reference/verify-instance.py --reference .cache/jjffe-reference/jjffe-smoke.exe`
   passes both scenarios (repeat/tamper/empty all behave as expected).
-- The local-only real-station composition test advances past opcode 6: model 74
-  stops at unsupported `0x000a`/`0xf4`, model 75 at `0x1c6e`/`0x1c8`; context,
-  vertex slots and queue are unchanged on those errors.
+- The local-only real-station composition test advances past opcode 6 and past
+  the v0.13 text/submodel stops: model 74 now stops at an unsupported opcode 28
+  transform form, model 75 at `0x001a`/`0x234` (opcode 26); context, vertex
+  slots and queue are unchanged on those errors.
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
@@ -70,16 +77,16 @@ Facts verified on 2026-10-21:
 
 ## Next task
 
-Extend the composed executor through **text (opcodes 10/14), child models
-(21/26), other transform forms (28) and colour state**. Point (1) and line (2)
-are now operand events; see `docs/MODEL_COMMANDS.md`. Before implementing each
-remaining family, extend the local probe to capture the original handler
-arguments and document the payload; do not infer fields from record size.
-Acceptance: at least one synthetic program per added command family; an
-executed-JJFFE ordered trace once the face/primitive handlers are probed; errors
-remain transactional; F4, synthetic flight and cache v6 stay unchanged. The
-abstract `Order` queue remains the approved default; exact F1778 arena emulation
-and real child-model content (cache v7) are later, separate steps.
+Real stations are now blocked by **other transform forms (opcode 28)** for
+model 74 and **opcode 26** (6-byte record, purpose unknown) at `0x234` for
+model 75. Probe each original handler (`F1741`, `F1762`) with scoped hooks in
+`tools/reference/make-probe.py` and document the payload before porting; do not
+infer fields from record size. Colour state (material/F1692-F1693) is still
+open. Executing glyph programs and child models (cache v7 with real child
+descriptors, F1740 frames, F1687 culling, nested F1772) is the larger follow-up;
+see `docs/MODEL_COMMANDS.md`. Acceptance stays as before: synthetic tests per
+family, an executed-JJFFE trace, transactional errors, F4/synthetic flight/cache
+v6 unchanged.
 
 ## Known stale spots
 

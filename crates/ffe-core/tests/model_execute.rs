@@ -75,9 +75,9 @@ fn execution_is_transactional_for_budget_arithmetic_unsupported_alias_and_rotati
             "unsigned division by zero",
         ),
         (
-            vec![13, 0x00c8, 10, 0, 0, 0, 0, 0],
+            vec![13, 0x00c8, 26, 0, 0, 0],
             8,
-            "Unsupported executed command 0x000a at 0x4",
+            "Unsupported executed command 0x001a at 0x4",
         ),
         (
             vec![13, 0x00c8, 13, 0x00d2, 0],
@@ -497,4 +497,114 @@ fn live_execution_orders_points_and_lines_with_depth_groups() {
     assert!(matches!(result.ordered[0], Primitive::Line(_)));
     assert!(matches!(result.ordered[1], Primitive::Point(_)));
     assert_eq!(result.ordered_keys, [9, 0]);
+}
+
+fn normals(culled: &[usize]) -> Vec<Normal> {
+    (0..4)
+        .map(|index| Normal {
+            culled: culled.contains(&index),
+            colour: [0; 3],
+        })
+        .collect()
+}
+
+#[test]
+fn execution_emits_text_operands_and_the_normal_skip_in_command_order() {
+    let stream = bytes(&[10, 0x0123, 0x5a02, 0x8104, 0x1234, 2, 0x0456, 0x0201, 0]);
+    for (culled, expected) in [(vec![], false), (vec![2], true)] {
+        let normals = normals(&culled);
+        let inputs = VisibilityContext {
+            normals: &normals,
+            ..visibility()
+        };
+        let mut context = VertexContext::default();
+        let result = execute(&stream, 8, &mut context, &inputs, None, 8).unwrap();
+        assert_eq!(result.commands, [0, 10, 16]);
+        assert_eq!(result.texts.len(), 1);
+        let text = &result.texts[0];
+        assert_eq!(text.culled, expected);
+        assert_eq!(
+            (
+                text.text.material,
+                text.text.normal,
+                text.text.size,
+                text.text.glyphs
+            ),
+            (0x0123, 2, 0xa, 5)
+        );
+        assert_eq!(
+            (text.text.vertex, text.text.frame, text.text.string),
+            (4, 0x8104, 0x1234)
+        );
+        assert_eq!(result.lines[0].vertices, [1, 2]);
+    }
+}
+
+#[test]
+fn execution_emits_submodel_calls_with_original_extra_vertex_order() {
+    let plain = bytes(&[0x1c6e, 0x0305, 2, 0x0456, 0x0201, 0]);
+    let mut context = VertexContext::default();
+    let result = execute(&plain, 8, &mut context, &visibility(), None, 8).unwrap();
+    assert_eq!(result.commands, [0, 4, 10]);
+    let call = &result.submodels[0].submodel;
+    assert_eq!((call.model, call.vertex, call.frame), (227, 5, 0x0305));
+    assert_eq!(call.extra, None);
+    assert!(call.extra_vertices().is_empty());
+
+    for (extra, order) in [(0x0201u16, vec![3u8, 1, 2, 4]), (0x7f01, vec![3, 1])] {
+        let stream = bytes(&[0x002e, 0x8306, extra, 0x0403, 2, 0x0456, 0x0201, 0]);
+        let result = execute(&stream, 8, &mut context, &visibility(), None, 8).unwrap();
+        assert_eq!(result.commands, [0, 8, 14]);
+        let call = &result.submodels[0].submodel;
+        assert_eq!((call.model, call.vertex, call.frame), (1, 6, 0x8306));
+        assert_eq!(call.extra_vertices(), order);
+        assert_eq!(result.lines[0].vertices, [1, 2]);
+    }
+}
+
+#[test]
+fn live_text_and_submodels_stay_out_of_render_order_and_errors_are_transactional() {
+    let stream = bytes(&[10, 0x0123, 0x5a02, 0x8104, 0x1234, 0x002e, 0x0001, 0]);
+    let records: Vec<u8> = (0..4).flat_map(|_| [1, 0, 0, 0, 80, 0]).collect();
+    let mut vertices = Vertices::new(&records, 8).unwrap();
+    let normals = normals(&[]);
+    let inputs = VisibilityContext {
+        normals: &normals,
+        ..visibility()
+    };
+    let mut context = VertexContext::default();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &inputs,
+        None,
+        live_instance([0; 3], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert_eq!((result.texts.len(), result.submodels.len()), (1, 1));
+    assert!(result.ordered.is_empty());
+    assert_eq!(vertices.slots()[1].stamp, 2, "submodel vertex is projected");
+
+    let before = context.clone();
+    let mut fresh = Vertices::new(&records, 8).unwrap();
+    let error = execute_live(
+        &stream,
+        &mut fresh,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0; 3], 0, 0),
+        8,
+    )
+    .unwrap_err();
+    assert!(error.contains("out-of-range normal"), "{error}");
+    assert_eq!(context, before);
+    assert_eq!(fresh.slots(), Vertices::new(&records, 8).unwrap().slots());
+
+    let external = bytes(&[0x002e, 0x8306, 0x0201, 0x0409, 0]);
+    assert!(execute(&external, 8, &mut context, &visibility(), None, 8)
+        .unwrap_err()
+        .contains("Submodel references external/out-of-range vertex"));
 }

@@ -28,6 +28,53 @@ pub struct Line {
     pub vertices: [u8; 2],
 }
 
+/// F1747 text operands. The glyph programs and expanded string are not executed here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Text {
+    pub offset: usize,
+    pub material: u16,
+    /// Normal entry whose culled flag skips the whole text.
+    pub normal: u8,
+    /// Low nibble of byte 3; stored by the handler, not read before glyph execution.
+    pub size: u8,
+    /// High nibble of byte 3, passed to F1539 to select the glyph model set.
+    pub glyphs: u8,
+    /// Position vertex, resolved through F1470.
+    pub vertex: u8,
+    /// Word at +4 (position vertex plus orientation byte), passed to F1740.
+    pub frame: u16,
+    /// String identifier passed to F1344 string expansion.
+    pub string: u16,
+}
+
+/// F1749/F1750 child-model call operands. The child program is not executed here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Submodel {
+    pub offset: usize,
+    /// `code >> 5`, passed to F1538.
+    pub model: u16,
+    /// Position vertex, projected through F1471.
+    pub vertex: u8,
+    /// Word at +0, passed to F1740.
+    pub frame: u16,
+    /// Raw bytes at +2..+6, present when bit 7 of byte 1 is set.
+    pub extra: Option<[u8; 4]>,
+}
+
+impl Submodel {
+    /// Extra vertices in the original F1750 resolution order (+4, +2, +3, +5),
+    /// ending at the first 0x7f. The original resolves them only for a visible child.
+    pub fn extra_vertices(&self) -> Vec<u8> {
+        let Some(extra) = self.extra else {
+            return Vec::new();
+        };
+        [extra[2], extra[0], extra[1], extra[3]]
+            .into_iter()
+            .take_while(|index| *index != 0x7f)
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
     pub offset: usize,
@@ -41,6 +88,8 @@ pub struct Program {
     pub faces: Vec<Face>,
     pub points: Vec<Point>,
     pub lines: Vec<Line>,
+    pub texts: Vec<Text>,
+    pub submodels: Vec<Submodel>,
 }
 
 fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
@@ -66,6 +115,8 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     let mut faces = Vec::new();
     let mut points = Vec::new();
     let mut lines = Vec::new();
+    let mut texts = Vec::new();
+    let mut submodels = Vec::new();
     let mut branches = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -132,6 +183,44 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                 ));
             }
             lines.push(line);
+        }
+        if opcode == 10 {
+            let payload = &bytes[offset + 2..offset + 10];
+            let text = Text {
+                offset,
+                material: word(payload, 0)?,
+                normal: payload[2],
+                size: payload[3] & 15,
+                glyphs: payload[3] >> 4,
+                vertex: payload[4],
+                frame: word(payload, 4)?,
+                string: word(payload, 6)?,
+            };
+            if u32::from(text.vertex) >= vertex_count {
+                return Err(format!(
+                    "Text references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            texts.push(text);
+        }
+        if opcode == 14 {
+            let payload = &bytes[offset + 2..offset + size];
+            let submodel = Submodel {
+                offset,
+                model: code >> 5,
+                vertex: payload[0],
+                frame: word(payload, 0)?,
+                extra: (size == 8).then(|| [payload[2], payload[3], payload[4], payload[5]]),
+            };
+            if std::iter::once(submodel.vertex)
+                .chain(submodel.extra_vertices())
+                .any(|index| u32::from(index) >= vertex_count)
+            {
+                return Err(format!(
+                    "Submodel references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            submodels.push(submodel);
         }
         if matches!(opcode, 3 | 4 | 7 | 8) {
             if code != opcode {
@@ -212,6 +301,8 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         faces,
         points,
         lines,
+        texts,
+        submodels,
     })
 }
 

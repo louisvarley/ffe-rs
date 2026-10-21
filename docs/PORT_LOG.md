@@ -4,6 +4,64 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Linux reference build; text and submodel operands (v0.14)
+
+**Linux oracle.** `tools/reference/build-linux.sh` builds the same local-only
+adapter as 32-bit ELF (needs `nasm` and `gcc -m32`). The original
+`jjffe-master/linux/lnxconv.c` converter writes a generated copy of `ffe.asm`
+(underscore-free externs); `abs` is escaped there because current NASM treats it
+as a keyword. Supplied sources stay unchanged. Every recorded trace hash
+reproduces once LF output is hashed with CRLF endings: core `accbe92f…`, depth,
+depth-commands, order, composed-order, visibility, normals, transforms,
+rotation operands, projection, live vertices, commands `2c0c1a67…`, execution
+`d2a76e9c…` and point-line `afa955be…`.
+
+**Probe generation.** The command-probe copy is now written by one script,
+`tools/reference/make-probe.py`, used by both `build-smoke.ps1` and
+`build-linux.sh`. Besides the four whole-file emitter hooks, it redirects nested
+calls only inside F1747 (text) and F1749/F1750 (submodel) to recorders that
+return synthetic vertices/descriptors. The original handlers still decode their
+operands and return their own cursor; the earlier probe traces are unchanged.
+
+**Correction.** Opcode 14 is not a second text form. F1749 resolves byte 0
+through F1471 and calls F1750 with model `code >> 5`; F1750 looks the model up
+(F1538), culls it (F1687), and otherwise sets up a child frame (F1740) and runs
+the child program (F1773/F1774). It is the child-model call. Opcode 10 (F1747)
+is 3D text: each glyph is a model program run nested, after F1344 expands the
+string. Both push and pop their own vertex/normal buffer frame (F1745/F1746), so
+the parent program's state is unchanged apart from lazy vertex resolution.
+
+Verified layouts (`--text-submodel`, 7 cases):
+
+- Text, 10 bytes: +0 material word, +2 normal index (a culled normal skips the
+  text), +3 high nibble glyph-model set (F1539) and low nibble stored but unread
+  before glyph execution, +4 position vertex (F1470), word +4 frame (F1740),
+  word +6 string ID (F1344).
+- Submodel, 4 or 8 bytes: model `code >> 5`, +0 position vertex (F1471), word +0
+  frame (F1740). Bit 7 of byte 1 adds bytes +2..+5, resolved in the order
+  +4, +2, +3, +5 up to the first `0x7f`, and only for a visible child. The record
+  is 8 bytes whether or not the child is culled.
+
+`ffe-core` decodes these as `Text`/`Submodel` and `model_execute` emits
+`TextEmission` (with the normal skip as `culled`) and `SubmodelEmission` in
+command order. They are never in `Execution.ordered`: their nested primitives
+come from glyph/child programs that are not executed. In `execute_live`, the
+text position is resolved through F1470 unless culled and the submodel position
+is projected through F1471; extra vertices wait for child culling.
+`verify-text-submodel.py` passes with repeat, 11 tamper fields and an empty
+trace rejected. Trace SHA-256 `5ba06002572b4395481a3651d84c588dbdec4285a210b8fe7e4b0d1a8041f73d`
+(CRLF, Windows-equivalent); the Linux LF capture is `b095c38c…`.
+
+Real stations now pass their v0.13 stop points: model 74 stops at an
+unsupported opcode 28 transform form; model 75 at opcode 26 (`0x001a`/`0x234`).
+Three synthetic tests added and one updated (opcode 26 replaces 10 as the
+unsupported example); 149 `#[test]`, 18 ignored, one Unix-only (130 runnable on
+Windows). F4, synthetic flight and cache v6/385 are unchanged.
+
+Not covered: glyph and child execution, string expansion, child culling
+(F1687 with the child radius), material/colour for text, nested primitives in
+render order, and pixels.
+
 ## 2026-10-21 — Point and line primitive emission (v0.13)
 
 `ffe-core::model_commands` now decodes opcode 1 (point source) and opcode 2

@@ -38,13 +38,8 @@ Invoke-Native 'JJFFE smoke-adapter compile/link failed.' { & $env:ComSpec /d /c 
 # Build a separate, narrowly instrumented oracle; leave both supplied assembly and
 # the ordinary smoke executable unmodified. Capture primitive arguments before rasterization.
 $probeSource = Join-Path $output 'ffe-command-probe.asm'
-$assembly = [IO.File]::ReadAllText((Join-Path $source 'ffe.asm'))
-foreach ($pair in @(@('FUNC_001708', '_trace_triangle'), @('FUNC_001712', '_trace_quad'), @('FUNC_001699', '_trace_point_args'), @('FUNC_001703', '_trace_line_args'))) {
-    $pattern = '(?m)^(\s*call )' + $pair[0] + '(\s*)$'
-    if ([regex]::Matches($assembly, $pattern).Count -ne 2) { throw "Unexpected primitive hook sites: $($pair[0])" }
-    $assembly = [regex]::Replace($assembly, $pattern, ('${1}' + $pair[1] + '${2}'))
-}
-[IO.File]::WriteAllText($probeSource, "EXTERN _trace_triangle`r`nEXTERN _trace_quad`r`nEXTERN _trace_point_args`r`nEXTERN _trace_line_args`r`n" + $assembly, [Text.Encoding]::ASCII)
+# Primitive-emitter and scoped text/submodel hooks are defined once in make-probe.py.
+Invoke-Native 'JJFFE command-probe generation failed.' { & python (Join-Path $PSScriptRoot 'make-probe.py') (Join-Path $source 'ffe.asm') $probeSource --prefix _ }
 Push-Location $source
 try {
     Invoke-Native 'JJFFE command-probe assembly failed.' { & $nasmPath -f win32 -p $exports -o (Join-Path $output 'ffe-command-probe.obj') $probeSource }
@@ -90,7 +85,8 @@ $hashes = @($paths | ForEach-Object {
     projection_adapter = 'projection-v1'
     live_vertex_adapter = 'live-vertices-v1'
     command_adapter = 'commands-v1'
-    command_probe_hooks = @('Two calls F1708 -> trace_triangle', 'Two calls F1712 -> trace_quad', 'Two calls F1699 -> trace_point_args', 'Two calls F1703 -> trace_line_args')
+    command_probe_hooks = @('Two calls F1708 -> trace_triangle', 'Two calls F1712 -> trace_quad', 'Two calls F1699 -> trace_point_args', 'Two calls F1703 -> trace_line_args', 'F1747 nested calls -> trace_text_*', 'F1749/F1750 nested calls -> trace_submodel_*')
+    text_submodel_adapter = 'text-submodel-v1'
     command_probe_command = $probeCommand
     command_probe_sha256 = (Get-FileHash -LiteralPath (Join-Path $output 'jjffe-commands.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     command_probe_source_sha256 = (Get-FileHash -LiteralPath $probeSource -Algorithm SHA256).Hash.ToLowerInvariant()

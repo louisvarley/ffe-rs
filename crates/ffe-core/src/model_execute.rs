@@ -8,7 +8,8 @@
 //! caller's context and vertex cache unchanged.
 use crate::model::VertexContext;
 use crate::model_commands::{
-    arithmetic_with_table, bit_branch, decode, visibility_branch, Face, VisibilityContext,
+    arithmetic_with_table, bit_branch, decode, visibility_branch, Face, Submodel, Text,
+    VisibilityContext,
 };
 use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
@@ -46,6 +47,23 @@ pub struct LineEmission {
     pub context: VertexContext,
 }
 
+/// A text operand event (F1747). `culled` is the original normal-flag skip; the
+/// glyph programs, string expansion and their nested primitives are not executed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextEmission {
+    pub text: Text,
+    pub culled: bool,
+    pub context: VertexContext,
+}
+
+/// A child-model call operand event (F1749/F1750). The child's culling, frame and
+/// program are not evaluated, so its nested primitives are absent from `ordered`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmodelEmission {
+    pub submodel: Submodel,
+    pub context: VertexContext,
+}
+
 /// One render-order entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primitive {
@@ -64,6 +82,10 @@ pub struct Execution {
     pub points: Vec<PointEmission>,
     /// Line emissions in command order.
     pub lines: Vec<LineEmission>,
+    /// Text operand events in command order; never in [`Self::ordered`].
+    pub texts: Vec<TextEmission>,
+    /// Child-model call operand events in command order; never in [`Self::ordered`].
+    pub submodels: Vec<SubmodelEmission>,
     /// All emitted primitives in original render order. Populated only by
     /// [`execute_live`]; empty for [`execute`], which has no live vertex keys.
     pub ordered: Vec<Primitive>,
@@ -268,6 +290,8 @@ fn execute_inner(
         emissions: Vec::new(),
         points: Vec::new(),
         lines: Vec::new(),
+        texts: Vec::new(),
+        submodels: Vec::new(),
         ordered: Vec::new(),
         ordered_keys: Vec::new(),
     };
@@ -358,6 +382,50 @@ fn execute_inner(
                         let key = model_depth::key(vertex.view, instance.key_scale);
                         queue.push(key, Primitive::Face(emission))?;
                     }
+                }
+                Some(command.size as i32)
+            }
+            10 => {
+                for text in program.texts.iter().filter(|t| t.offset == offset) {
+                    let culled = visibility
+                        .normals
+                        .get(usize::from(text.normal))
+                        .ok_or_else(|| {
+                            format!("Text at {offset:#x} references an out-of-range normal.")
+                        })?
+                        .culled;
+                    if let (false, Some(live)) = (culled, working_vertices.as_mut()) {
+                        live.resolve(
+                            text.vertex as i8,
+                            &working,
+                            instance.position,
+                            instance.generation,
+                            false,
+                        )?;
+                    }
+                    result.texts.push(TextEmission {
+                        text: text.clone(),
+                        culled,
+                        context: working.clone(),
+                    });
+                }
+                Some(command.size as i32)
+            }
+            14 => {
+                for submodel in program.submodels.iter().filter(|s| s.offset == offset) {
+                    if let Some(live) = working_vertices.as_mut() {
+                        live.resolve(
+                            submodel.vertex as i8,
+                            &working,
+                            instance.position,
+                            instance.generation,
+                            true,
+                        )?;
+                    }
+                    result.submodels.push(SubmodelEmission {
+                        submodel: submodel.clone(),
+                        context: working.clone(),
+                    });
                 }
                 Some(command.size as i32)
             }

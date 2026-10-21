@@ -31,20 +31,8 @@ gcc "${cflags[@]}" -c "$source/ffemisc.c" -o ffemisc.o
 gcc "${cflags[@]}" -c "$harness" -o headless.o
 gcc -m32 -no-pie -o jjffe-smoke headless.o ffecfg.o ffemisc.o ffe.o ffebmp.o -lm 2>/dev/null
 
-# Instrumented copy: redirect exactly two call sites per primitive emitter.
-python3 - "$output/ffelnx.asm" "$output/ffe-command-probe.asm" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="latin-1").read()
-hooks = [("FUNC_001708", "trace_triangle"), ("FUNC_001712", "trace_quad"),
-         ("FUNC_001699", "trace_point_args"), ("FUNC_001703", "trace_line_args")]
-for original, probe in hooks:
-    pattern = re.compile(r"(?m)^(\s*call )" + original + r"(\s*)$")
-    if len(pattern.findall(text)) != 2:
-        sys.exit(f"Unexpected primitive hook sites: {original}")
-    text = pattern.sub(lambda m: m.group(1) + probe + m.group(2), text)
-header = "".join(f"EXTERN {probe}\n" for _, probe in hooks)
-open(sys.argv[2], "w", encoding="latin-1").write(header + text)
-PY
+# Instrumented copy: see make-probe.py for the redirected call sites.
+python3 "$root/tools/reference/make-probe.py" ffelnx.asm ffe-command-probe.asm
 nasm -f elf32 -w-all -i"$source/" -p exports-linux.inc -o ffe-command-probe.o ffe-command-probe.asm
 gcc "${cflags[@]}" -DFFE_COMMAND_PROBE -c "$harness" -o headless-probe.o
 gcc -m32 -no-pie -o jjffe-commands headless-probe.o ffecfg.o ffemisc.o ffe-command-probe.o ffebmp.o -lm 2>/dev/null

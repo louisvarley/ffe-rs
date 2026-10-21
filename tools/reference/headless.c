@@ -109,6 +109,29 @@ void trace_line_args(void *instance, long material, long a, long b)
     point_line_count++;
 }
 
+/* Scoped text (F1747) and submodel (F1749/F1750) probes. Nested routines are
+   replaced by recorders returning synthetic descriptors/vertices; the original
+   handlers still decode their operands and compute the returned cursor. */
+static unsigned long nested_count, nested_kind[32], nested_value[32][3];
+static long nested_vertex[9], nested_descriptor[16];
+static void nested_event(unsigned long kind, unsigned long a, unsigned long b, unsigned long c)
+{
+    if (nested_count >= 32) { fprintf(stderr,"too many nested probe callbacks\n"); exit(2); }
+    nested_kind[nested_count]=kind;
+    nested_value[nested_count][0]=a; nested_value[nested_count][1]=b; nested_value[nested_count][2]=c;
+    nested_count++;
+}
+long *trace_text_vertex(void *instance, long index) { (void)instance; nested_event(1,(unsigned char)index,0,0); return nested_vertex; }
+long *trace_text_font(long selector) { nested_event(2,(unsigned long)selector,0,0); return nested_descriptor; }
+void trace_text_frame(void *child, void *instance, long word) { (void)child; (void)instance; nested_event(3,(unsigned long)word,0,0); }
+long trace_text_push(long vertices, long normals, long extra) { nested_event(4,(unsigned long)vertices,(unsigned long)normals,(unsigned long)extra); return 0; }
+void trace_text_string(char *output, long string, void *scratch) { (void)scratch; output[0]=0; nested_event(5,(unsigned long)string,0,0); }
+void trace_text_pop(void) { nested_event(6,0,0,0); }
+long *trace_submodel_vertex(void *instance, long index) { (void)instance; nested_event(7,(unsigned char)index,0,0); return nested_vertex; }
+long *trace_submodel_model(long index) { nested_event(8,(unsigned long)index,0,0); return nested_descriptor; }
+void trace_submodel_frame(void *child, void *instance, long word) { (void)child; (void)instance; nested_event(9,(unsigned long)word,0,0); }
+void trace_submodel_run(void *child, void *descriptor) { (void)child; (void)descriptor; nested_event(10,0,0,0); }
+
 static unsigned char pixels[320 * 200];
 static unsigned char palette[256 * 3];
 static unsigned long frames, limit = 32, milliseconds, clock_reads, blits;
@@ -749,6 +772,51 @@ static int point_line_vectors(void)
 #endif
 }
 
+static void text_submodel_case(const char *name,const unsigned short *program,int culled)
+{
+    unsigned long instance[0x160/4],globals[0x120/4],normals[8*8/4],vertices[8*9],i;
+    memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));
+    memset(normals,0,sizeof(normals));memset(vertices,0,sizeof(vertices));
+    memset(nested_vertex,0,sizeof(nested_vertex));memset(nested_descriptor,0,sizeof(nested_descriptor));
+    instance[0xf0/4]=2;instance[0x14c/4]=(unsigned long)globals;
+    ref_vertex_buffer=(long *)vertices;
+    ref_normal_buffer=(unsigned char *)normals;
+    /* Text culls on its normal's flag; submodels cull when the projected z is behind. */
+    if(culled) ref_normal_buffer[2*8+3]=1;
+    nested_vertex[3]=culled ? 0 : 1000;
+    nested_count=0;point_line_count=0;ref_command_alive=1;
+    ref_execute(instance,(void *)program);
+    printf("{\"case\":\"%s\",\"events\":[",name);
+    for(i=0;i<nested_count;++i)
+        printf("%s[%lu,%lu,%lu,%lu]",i?",":"",nested_kind[i],nested_value[i][0],nested_value[i][1],nested_value[i][2]);
+    printf("],\"lines\":[");
+    for(i=0;i<point_line_count;++i)
+        printf("%s[%lu,%lu,%lu]",i?",":"",point_line_a[i],point_line_b[i],point_line_c[i]);
+    printf("],\"alive\":%lu}\n",ref_command_alive);
+}
+
+static int text_submodel_vectors(void)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--text-submodel requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static const unsigned short text[]={10,0x0123,0x5a02,0x8104,0x1234,2,0x0456,0x0201,0};
+    static const unsigned short submodel[]={0x1c6e,0x0305,2,0x0456,0x0201,0};
+    static const unsigned short extended[]={0x002e,0x8306,0x0201,0x0403,2,0x0456,0x0201,0};
+    static const unsigned short stopped[]={0x002e,0x8306,0x7f01,0x0403,2,0x0456,0x0201,0};
+    fprintf(stderr,"JJFFE text-submodel-v1: original F1747/F1749/F1750 operand decoding and cursor advance with nested calls recorded, not glyph/child execution or pixels.\n");
+    text_submodel_case("text-visible",text,0);
+    text_submodel_case("text-culled",text,1);
+    text_submodel_case("submodel-visible",submodel,0);
+    text_submodel_case("submodel-culled",submodel,1);
+    text_submodel_case("extended-visible",extended,0);
+    text_submodel_case("extended-culled",extended,1);
+    text_submodel_case("stopped-visible",stopped,0);
+    return 0;
+#endif
+}
+
 static void visibility_case(unsigned long *instance,unsigned long number,short operand)
 {
     static const unsigned short codes[]={11,12,0x8b,0x8c,0xff8b,0xff8c};
@@ -941,6 +1009,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--visibility")) return visibility_vectors();
     if (argc == 2 && !strcmp(argv[1], "--execution")) return execution_vectors();
     if (argc == 2 && !strcmp(argv[1], "--point-line")) return point_line_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--text-submodel")) return text_submodel_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();
     if (argc == 2 && !strcmp(argv[1], "--order")) return order_vectors();
