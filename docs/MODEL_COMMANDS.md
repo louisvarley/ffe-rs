@@ -33,7 +33,7 @@ explicit unsupported-command error.
 | 18 | `F1763` | — | — | **no** | no | unsupported record form |
 | 19 | `F1756` | bit branch | 4 | yes | yes | zero-mask branch |
 | 20 | `F1757` | inverse bit branch | 4 | yes | yes | inverse |
-| 21 | `F1697` | nested execution block start/end | — | **no** | no | submodel/nested program form; needs child model data and a bound |
+| 21 | `F1697` | nested depth block start/end | 2 | yes | yes (live) | v0.26: without bit 15, F1781 block keyed by F1777 of vertex `code >> 5`'s view; with bit 15, F1782 end. Both close the group. `Order::nested`. |
 | 22 | `F1737` | spline | — | **no** | no | unsupported record form |
 | 23 | `F1765` | — | — | **no** | no | unsupported record form |
 | 24 | `F1766` | — | — | **no** | no | unsupported record form |
@@ -90,19 +90,19 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.25: **312 of 466** execute, and all that the original completes match
+v0.26: **317 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Top remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| decode: opcode 21 (nested block) | 33 |
+| decode: Model command stream lacks a final terminator. | 18 |
+| decode: opcode 17 | 17 |
 | decode: opcode 25 | 15 |
-| vertices: vertex opcode 0x15 (21) | 13 |
-| decode: opcode 24 | 12 |
-| decode: opcode 17 | 11 |
-| decode: stream lacks a final terminator | 11 |
-| decode: opcode 22 (spline) | 8 |
-| decode: opcode 30 | 5 |
+| decode: opcode 24 | 15 |
+| vertices: unsupported opcode 0x15. | 13 |
+| decode: opcode 22 | 9 |
+| decode: opcode 0 | 8 |
+| decode: opcode 16 | 6 |
 
 Vertex opcodes supported: 0-2, 5-12, 15-20 (7/8 since v0.22). Not yet: 3/4,
 13/14 (screen-space midpoints), 21/22 and 23/24 (F1477 forms).

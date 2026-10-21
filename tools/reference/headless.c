@@ -176,6 +176,20 @@ void trace_text_string(char *output, long string, void *scratch) { (void)scratch
 void trace_text_pop(void) { nested_event(6,0,0,0); }
 long *trace_submodel_vertex(void *instance, long index) { nested_event(7,(unsigned char)index,0,0); return nested_station ? ref_project_vertex(instance,(signed char)index) : nested_vertex; }
 long *trace_submodel_model(long index) { nested_event(8,(unsigned long)index,0,0); return nested_descriptor; }
+extern void ref_nested_push(unsigned long key);
+extern void ref_nested_pop(void);
+void trace_nested_push(unsigned long key)
+{
+    nested_event(12,key,0,0);
+    if (queue_mode) queue_event(4,1,key);
+    ref_nested_push(key);
+}
+void trace_nested_pop(void)
+{
+    nested_event(13,0,0,0);
+    if (queue_mode) queue_event(4,0,0);
+    ref_nested_pop();
+}
 extern long ref_cull(void *view, long radius);
 /* Station modes cull every child regardless of the scale adjustment. */
 long trace_submodel_cull(void *view, long radius) { return nested_station ? 1 : ref_cull(view,radius); }

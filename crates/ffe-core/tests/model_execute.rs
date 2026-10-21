@@ -957,3 +957,45 @@ fn surfaces_span_their_entry_list_and_terminator() {
     .unwrap_err()
     .contains("Truncated"));
 }
+
+#[test]
+fn live_nested_blocks_key_by_vertex_depth_and_must_close() {
+    // Block on vertex 2, a triangle inside, block end; then a standalone triangle.
+    let mut words = vec![21 | (2 << 5)];
+    words.extend_from_slice(&triangle(0x0123, [0, 1, 2]));
+    words.push(0x8015);
+    words.extend_from_slice(&triangle(0x0456, [2, 3, 0]));
+    words.push(0);
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &bytes(&words),
+        &mut vertices,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        live_instance([0, 0, 100], 0, 0),
+        16,
+    )
+    .unwrap();
+    assert_eq!(result.blocks.len(), 2);
+    assert!(result.blocks[0].key.is_some() && result.blocks[1].key.is_none());
+    assert_eq!(result.ordered.len(), 2);
+    // An unterminated block cannot be finished, and nothing is committed.
+    let mut open = vec![21 | (2 << 5)];
+    open.extend_from_slice(&triangle(0x0123, [0, 1, 2]));
+    open.push(0);
+    let mut context = VertexContext::default();
+    let before = context.clone();
+    assert!(execute_live(
+        &bytes(&open),
+        &mut Vertices::new(&LIVE_RECORDS, 4).unwrap(),
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0, 0, 100], 0, 0),
+        16,
+    )
+    .unwrap_err()
+    .contains("Nested depth block is still open"));
+    assert_eq!(context, before);
+}

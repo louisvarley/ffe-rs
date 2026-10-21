@@ -213,6 +213,16 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             4 | 8 => 10,
             6 => crate::model_depth::decode(&bytes[offset..])?.1,
             9 => 8,
+            // F1697: start a nested depth block keyed by vertex `code >> 5`, or (bit 15)
+            // end it. Two bytes either way.
+            21 => {
+                if code & 0x8000 == 0 && u32::from((code >> 5) as u8) >= vertex_count {
+                    return Err(format!(
+                        "Nested block references external/out-of-range vertex at {offset:#x}."
+                    ));
+                }
+                2
+            }
             // Code, 12 header bytes, 16-byte entries while the first word is non-zero,
             // then the zero word (F1823).
             31 => {

@@ -59,3 +59,42 @@ fn exact_operation_budget_rejects_without_mutating_queue_or_active_group() {
     assert_eq!(order, before);
     assert_eq!(order.finish().unwrap(), [7]);
 }
+
+#[test]
+fn nested_blocks_sort_inside_their_node_and_close_the_group() {
+    use ffe_core::model_order::Order;
+    let mut order = Order::new(64).unwrap();
+    order.push(5, "outer-5").unwrap();
+    order.group(Some(1)).unwrap();
+    order.push(99, "grouped-1").unwrap();
+    // Starting a block closes the open group; members sort within the block.
+    order.nested(Some(7)).unwrap();
+    order.push(2, "inner-2").unwrap();
+    order.push(9, "inner-9").unwrap();
+    order.nested(Some(4)).unwrap();
+    order.push(1, "deep-1").unwrap();
+    order.push(3, "deep-3").unwrap();
+    order.nested(None).unwrap();
+    order.nested(None).unwrap();
+    order.push(6, "outer-6").unwrap();
+    assert_eq!(
+        order.finish_with_keys().unwrap(),
+        [
+            (9, "inner-9"),
+            (3, "deep-3"),
+            (1, "deep-1"),
+            (2, "inner-2"),
+            (6, "outer-6"),
+            (5, "outer-5"),
+            (1, "grouped-1"),
+        ]
+    );
+    let mut open = Order::<u8>::new(8).unwrap();
+    open.nested(Some(1)).unwrap();
+    assert!(open
+        .finish()
+        .unwrap_err()
+        .contains("Nested depth block is still open"));
+    let mut unbalanced = Order::<u8>::new(8).unwrap();
+    assert!(unbalanced.nested(None).is_err());
+}

@@ -131,7 +131,7 @@ fn executed_reference_station_models() {
             );
             emitted.extend(event.context.basis.into_iter().flat_map(i32::to_le_bytes));
         }
-        let (mut p, mut l, mut t, mut s, mut g) = (0, 0, 0, 0, 0);
+        let (mut p, mut l, mut t, mut s, mut g, mut b) = (0, 0, 0, 0, 0, 0);
         let (mut points, mut nested) = (Vec::new(), Vec::new());
         let mut projected = std::collections::HashSet::new();
         for offset in &result.commands {
@@ -154,6 +154,13 @@ fn executed_reference_station_models() {
                     0,
                 ]);
                 l += 1;
+            }
+            if let Some(block) = result.blocks.get(b).filter(|e| e.offset == *offset) {
+                nested.push(match block.key {
+                    Some(key) => [12, key, 0, 0],
+                    None => [13, 0, 0, 0],
+                });
+                b += 1;
             }
             if let Some(polygon) = result
                 .polygons

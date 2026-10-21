@@ -30,6 +30,10 @@ SCOPED_HOOKS = [
     ("FUNC_001696", "FUNC_001697", [
         ("FUNC_001780", "trace_group", 8),                # depth-group open/close
     ]),
+    ("FUNC_001697", "FUNC_001698", [
+        ("FUNC_001781", "trace_nested_push", 1),          # nested block start
+        ("FUNC_001782", "trace_nested_pop", 1),           # nested block end
+    ]),
     ("FUNC_001708", "FUNC_001715", [
         ("FUNC_001778", "trace_alloc", 5),                # face queue allocations
     ]),

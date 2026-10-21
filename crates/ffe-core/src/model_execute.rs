@@ -90,6 +90,14 @@ pub struct SurfaceEmission {
     pub context: VertexContext,
 }
 
+/// An opcode 21 nested depth block boundary (F1697): `Some(key)` starts a block
+/// keyed by its vertex's depth (F1781), `None` ends it (F1782).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockEmission {
+    pub offset: usize,
+    pub key: Option<u32>,
+}
+
 /// Where an opcode 26 colour was written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColourTarget {
@@ -129,6 +137,8 @@ fn resolve_colour(value: u16, instance: [u8; 3], normal: [u8; 3]) -> [u8; 3] {
 pub enum QueueEvent {
     /// Close the current group and open one with this key, or none.
     Group(Option<u32>),
+    /// Start (`Some`) or end (`None`) a nested block; each also closes the group.
+    Nested(Option<u32>),
     Face(u32),
     Polygon(u32),
     Point(u32),
@@ -166,6 +176,8 @@ pub struct Execution {
     pub thrusters: Vec<ThrusterEmission>,
     /// Curved surfaces in command order; never in [`Self::ordered`].
     pub surfaces: Vec<SurfaceEmission>,
+    /// Nested depth block boundaries in command order ([`execute_live`] only).
+    pub blocks: Vec<BlockEmission>,
     /// Final normal entry 0 colour if a colour command wrote it during this run.
     pub normal_zero_colour: Option<[u8; 3]>,
     /// Depth-queue operations in program order ([`execute_live`] only), excluding the
@@ -461,6 +473,7 @@ fn execute_inner(
         polygons: Vec::new(),
         thrusters: Vec::new(),
         surfaces: Vec::new(),
+        blocks: Vec::new(),
         normal_zero_colour: None,
         queue: Vec::new(),
         ordered: Vec::new(),
@@ -618,6 +631,29 @@ fn execute_inner(
                         context: working.clone(),
                     });
                 }
+                Some(command.size as i32)
+            }
+            21 => {
+                let (Some(live), Some(queue)) = (working_vertices.as_mut(), order.as_mut()) else {
+                    return Err(format!(
+                        "Unsupported executed command {code:#06x} at {offset:#x}."
+                    ));
+                };
+                let key = if code & 0x8000 != 0 {
+                    None
+                } else {
+                    let vertex = live.resolve(
+                        (code >> 5) as u8 as i8,
+                        &working,
+                        instance.position,
+                        instance.generation,
+                        false,
+                    )?;
+                    Some(model_depth::key(vertex.view, instance.key_scale))
+                };
+                queue.nested(key)?;
+                result.queue.push(QueueEvent::Nested(key));
+                result.blocks.push(BlockEmission { offset, key });
                 Some(command.size as i32)
             }
             31 => {

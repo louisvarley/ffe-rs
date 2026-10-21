@@ -4,6 +4,30 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Nested depth blocks (opcode 21, v0.26)
+
+F1697 is a 2-byte command. Without bit 15 it resolves vertex `(code >> 5) & 0xff`
+(F1470), keys it (F1777) and calls F1781: close the open group (F1780(0,0)),
+queue a node with that key in the current list (callback F1790), and push the
+node's own list as current (stack `DATA_009254`, depth `DATA_007831`, current
+head `DATA_007832`). With bit 15, F1782 closes the group, pops back to the
+parent list and records where the block ended. When drawn, F1790 sorts the
+block's list with F1788 and continues after it.
+
+`model_order::Order` now holds a stack of lists; `Order::nested(Some(key))` and
+`nested(None)` mirror F1781/F1782, and `finish_with_keys` sorts each block's
+members inside its node. A block left open at the end is an error, as the
+original cannot draw it. `execute_live` handles opcode 21 (`Execution.blocks`,
+`QueueEvent::Nested`); `execute` still rejects it.
+
+The probe records F1781/F1782 calls inside F1697 (nested events 12/13, queue
+kind 4) and passes them through. Census: **317 of 466** execute natively; all
+316 the original completes match, including every block key. The sort within a
+block is the verified F1788 order but nested composition itself has not been
+compared with an executed original queue yet. Two synthetic tests added (166
+`#[test]`, 24 ignored, one Unix-only; 141 runnable on Windows). Earlier traces
+are unchanged.
+
 ## 2026-10-21 — Curved surfaces (opcode 31, v0.25)
 
 F1874 resolves an origin vertex (byte +2, F1470 view) and three axis vertices
