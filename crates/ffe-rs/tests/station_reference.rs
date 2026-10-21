@@ -112,6 +112,7 @@ fn executed_reference_station_programs() {
         let mut points = Vec::new();
         let (mut p, mut l, mut t, mut s) = (0, 0, 0, 0);
         let mut nested = Vec::new();
+        let mut projected = std::collections::HashSet::new();
         for offset in &result.commands {
             if let Some(point) = result.points.get(p).filter(|e| e.offset == *offset) {
                 points.push([
@@ -136,7 +137,10 @@ fn executed_reference_station_programs() {
             if let Some(text) = result.texts.get(t).filter(|e| e.text.offset == *offset) {
                 if !text.culled {
                     // Station mode reports no room for glyph buffers after F1745.
-                    nested.push([1, u32::from(text.text.vertex), 0, 0]);
+                    // F1747 calls F1470 only on a cache miss; F1470 does not stamp.
+                    if !projected.contains(&text.text.vertex) {
+                        nested.push([1, u32::from(text.text.vertex), 0, 0]);
+                    }
                     nested.push([2, u32::from(text.text.glyphs), 0, 0]);
                     nested.push([3, u32::from(text.text.frame), 0, 0]);
                     nested.push([4, 0, 0, 4]);
@@ -149,7 +153,11 @@ fn executed_reference_station_programs() {
                 .filter(|e| e.submodel.offset == *offset)
             {
                 // Station mode culls every child, so extras and frames are not reached.
-                nested.push([7, u32::from(call.submodel.vertex), 0, 0]);
+                // F1749 calls F1471 (the probe's event 7) only on a cache miss; in the
+                // probe build only earlier child calls have projected a vertex.
+                if projected.insert(call.submodel.vertex) {
+                    nested.push([7, u32::from(call.submodel.vertex), 0, 0]);
+                }
                 nested.push([8, u32::from(call.submodel.model), 0, 0]);
                 s += 1;
             }

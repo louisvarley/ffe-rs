@@ -63,12 +63,15 @@ capture produced by two repeat runs of the local reference.
 | v0.17 whole-station oracle | (no new core code) | `station_reference.rs` (1, ignored) | `verify-station.py` (models 74/75, 10 tamper fields) | `0ea8f4a7b9df2616dc6537a032b8527ab3ca0fde89e63856c260d23392f722b2` (CRLF; Linux LF `b9e3c831…`) | real station streams through original F1772; command-order events and final state match; render order/glyphs/children/pixels not covered |
 | v0.18 face draw queue | `model_execute` (face queue rule, `Execution.queue`, `InstanceContext::textures`) | `model_execute.rs` (+1), `station_reference.rs` (+1, ignored) | `verify-station-queue.py` (12 cases, 7 tamper fields) | `35e55a26689eb1e520dffa6b4c36f4a25dff36066d1b4c9ba969c7345425fb56` (CRLF; Linux LF `350b6d2c…`) | F1708/F1712/F1709/F1713/F1714 queueing; faces in `ordered` now match the original draw order; points/lines not yet |
 | v0.19 model census | `ffe-convert::model_extents` (generated), `model_command_bytes`, `ffe-tools model-census` | `embedded.rs` (+1, updated) | descriptor shapes cross-checked for all 466 slots (floppy 1.02) | — | 180 of 466 models execute natively (synthetic inputs, unverified); ranked blockers in `docs/MODEL_COMMANDS.md` |
+| v0.20 whole-table comparison | (no new core code) | `station_models_reference.rs` (1, ignored) | `verify-station-models.py` (all 466 slots; 4 tamper fields) | `3e04ba2e…` (Linux LF) | all 180 natively executed models match the original F1772 in command order; 13 slots crash the original in the synthetic setup |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 157 `#[test]` functions total; 22 are
+- `cargo test --workspace --locked` passes. 158 `#[test]` functions total; 23 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
   that is **134 runnable synthetic tests** (135 on Linux).
+- `verify-station-models.py`: all 180 natively executed models match the
+  original command flow and final state.
 - `ffe-tools model-census --game game` (floppy 1.02): 180 of 466 slots execute
   natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
 - `tools/reference/build-linux.sh` builds `jjffe-smoke`/`jjffe-commands` under
@@ -97,8 +100,8 @@ the v0.19 census ranks what blocks the other models. Next, in order:
 2. **Vertex opcode 0x7** (59 models) and **0x15** (13): extend
    `ffe-core::model` with oracle cases like v0.3's.
 3. **Opcodes 31 and 27** (39 and 26 models), then 17/24/25/22.
-4. Generalise the station oracles (`--station`, `--station-queue`) to any model
-   index so each newly unblocked model can be compared with the original.
+4. The command-order oracle covers every slot since v0.20
+   (`verify-station-models.py`); extend the queue oracle the same way.
 5. Primitive colour, point/line queueing (F1700/F1704), rasterisation, and
    glyph/child execution as before.
 

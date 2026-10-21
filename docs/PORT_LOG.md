@@ -4,6 +4,37 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Whole-table comparison with the original (v0.20)
+
+`--station-model N` runs any model slot through the original F1772 as
+`--station` does, with consistent synthetic inputs: identity frame and basis,
+position z 2000 (also the visibility depth), the descriptor scale at +0x148
+(which the original uses as vertex scale, operand scale and visibility scale
+alike), every normal visible, glyphs and children recorded but not executed.
+The probe's face, point and nested-event capacities were raised; earlier traces
+are unchanged. One process per slot: the original crashes in this synthetic
+setup for 13 slots (15, 153, 179, 198, 199, 227, 259, 270, 316, 335, 369, 388,
+458); they are excluded, not counted as failures.
+
+`station_models_reference.rs` reads model bytes straight from FIRSTENC.EXE (via
+`ffe-convert`, now a dev-dependency of `ffe-rs`) and compares every slot the
+native executor completes. **All 180 match** the original: face count and
+the stream of face arguments with locals/basis at emission, points/lines, text
+and child calls, final locals, basis, colour and handedness.
+
+Two probe details had to be modelled in the expected events, not the port: F1749
+calls F1471 and F1747 calls F1470 only on a vertex-cache miss, so the probe's
+vertex events appear only for vertices no earlier child call has projected (in
+the probe build faces are hooked and do not project; F1470 never stamps).
+Both station tests now apply that rule.
+
+`verify-station-models.py --game <dir>` selects the table RVA by executable
+hash, captures all slots twice, compares, and rejects four tampered fields and
+an empty trace. Trace SHA-256 (Linux LF)
+`3e04ba2e481427b2f2300736bbef8464064bdb4db75f87676ab5e963892cb153`.
+
+158 `#[test]`, 23 ignored, one Unix-only (134 runnable on Windows).
+
 ## 2026-10-21 — Model census across the whole table (v0.19)
 
 The original model table (`DATA_004681`, "Ship object table") has **466 slots**,

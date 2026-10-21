@@ -184,6 +184,7 @@ name = "ffe-rs"
 version = "0.9.0"
 dependencies = [
  "ffe-content",
+ "ffe-convert",
  "ffe-core",
  "minifb",
  "png",

@@ -113,11 +113,11 @@ int trace_quad(void *instance, long material, unsigned long a, unsigned long b, 
     return 0;
 }
 
-static unsigned long point_line_count, point_line_kind[16], point_line_a[16], point_line_b[16], point_line_c[16], point_line_d[16];
+static unsigned long point_line_count, point_line_kind[256], point_line_a[256], point_line_b[256], point_line_c[256], point_line_d[256];
 void trace_point_args(void *instance, long material, long angle, long vertex, long flag)
 {
     (void)instance;
-    if (point_line_count >= 16) { fprintf(stderr,"too many point callbacks\n"); exit(2); }
+    if (point_line_count >= 256) { fprintf(stderr,"too many point callbacks\n"); exit(2); }
     point_line_kind[point_line_count]=1;
     point_line_a[point_line_count]=(unsigned long)material;
     point_line_b[point_line_count]=(unsigned long)angle;
@@ -129,7 +129,7 @@ void trace_point_args(void *instance, long material, long angle, long vertex, lo
 void trace_line_args(void *instance, long material, long a, long b)
 {
     (void)instance;
-    if (point_line_count >= 16) { fprintf(stderr,"too many line callbacks\n"); exit(2); }
+    if (point_line_count >= 256) { fprintf(stderr,"too many line callbacks\n"); exit(2); }
     point_line_kind[point_line_count]=2;
     point_line_a[point_line_count]=(unsigned long)material;
     point_line_b[point_line_count]=(unsigned long)a;
@@ -204,7 +204,7 @@ static void execution_hash_bytes(const unsigned char *data,size_t size)
 
 static void execution_emission(void *instance,const unsigned long *face)
 {
-    if(++execution_faces>256) {fprintf(stderr,"unbounded execution probe emissions\n");exit(2);}
+    if(++execution_faces>4096) {fprintf(stderr,"unbounded execution probe emissions\n");exit(2);}
     execution_hash_bytes((const unsigned char *)face,24);
     execution_hash_bytes((const unsigned char *)instance+0x54,32);
     execution_hash_bytes((const unsigned char *)instance+0x9c,36);
@@ -944,6 +944,63 @@ static int station_vectors(void)
 #endif
 }
 
+static int station_model_vector(int index)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--station-model requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static unsigned char normals[32768*8];
+    static unsigned long model_queue[65536];
+    static unsigned long instance[0x160/4],globals[0x120/4],slots[128*9];
+    static const long identity[9]={2147483647,0,0,0,2147483647,0,0,0,2147483647};
+    unsigned long m,i;
+    unsigned char *colour;
+    fprintf(stderr,"JJFFE station-model-v1: one model table slot through original F1772 as in station-v1, with the descriptor scale at +0x148 and position z 2000. Not pixels or render order.\n");
+    for(m=0;m<1;++m) {
+        unsigned long *model;
+        if(index<0 || index>465) fail("model index outside the table");
+        model=ref_model(index);
+        if(!model) { printf("{\"model\":%d,\"null\":1}\n",index); return 0; }
+        memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));
+        memset(slots,0,sizeof(slots));memset(normals,0,sizeof(normals));
+        memset(nested_descriptor,0,sizeof(nested_descriptor));
+        memcpy((char *)instance+0x14,identity,36);
+        memcpy((char *)instance+0x9c,identity,36);
+        instance[0xc/4]=2000;
+        instance[0x148/4]=model[5];
+        instance[0xf0/4]=2;
+        instance[0x14c/4]=(unsigned long)globals;
+        instance[0x150/4]=model[1];
+        ref_vertex_buffer=(long *)slots;
+        ref_normal_buffer=normals;
+        ref_detail_primary=ref_detail_secondary=0;
+        nested_descriptor[0x1c/4]=-0x40000000L;
+        memset(model_queue,0,sizeof(model_queue));
+        ref_order_base=model_queue;ref_order_active=0;ref_order_state=0;
+        ref_order_init(model_queue);
+        nested_station=1;nested_count=0;point_line_count=0;
+        execution_probe=1;execution_faces=0;execution_hash=UINT64_C(14695981039346656037);
+        ref_command_alive=1;
+        ref_execute(instance,(void *)model[0]);
+        execution_probe=0;nested_station=0;
+        colour=(unsigned char *)instance+0xf4;
+        printf("{\"model\":%d,\"faces\":%lu,\"emissions\":\"%016llx\",\"points\":[",index,execution_faces,(unsigned long long)execution_hash);
+        for(i=0;i<point_line_count;++i) {
+            if(point_line_kind[i]==1) printf("%s[1,%lu,%ld,%lu,%lu]",i?",":"",point_line_a[i]&0xffff,(long)(short)point_line_b[i],point_line_c[i],point_line_d[i]);
+            else printf("%s[2,%lu,%lu,%lu,0]",i?",":"",point_line_a[i]&0xffff,point_line_b[i],point_line_c[i]);
+        }
+        printf("],\"nested\":[");
+        for(i=0;i<nested_count;++i)
+            printf("%s[%lu,%lu,%lu,%lu]",i?",":"",nested_kind[i],nested_value[i][0],nested_value[i][1],nested_value[i][2]);
+        printf("],\"locals\":\"%016llx\",\"basis\":[",(unsigned long long)fingerprint((unsigned char *)instance+0x54,32));
+        for(i=0;i<9;++i) printf("%s%ld",i?",":"",(long)instance[0x9c/4+i]);
+        printf("],\"colour\":[%u,%u,%u],\"handedness\":%lu,\"alive\":%lu}\n",colour[0],colour[1],colour[2],instance[0xfc/4],ref_command_alive);
+    }
+    return 0;
+#endif
+}
+
 static int station_queue_vectors(void)
 {
 #ifndef FFE_COMMAND_PROBE
@@ -1227,6 +1284,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--text-submodel")) return text_submodel_vectors();
     if (argc == 2 && !strcmp(argv[1], "--colour")) return colour_vectors();
     if (argc == 2 && !strcmp(argv[1], "--station")) return station_vectors();
+    if (argc == 3 && !strcmp(argv[1], "--station-model")) return station_model_vector(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--station-queue")) return station_queue_vectors();
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();

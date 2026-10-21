@@ -111,7 +111,9 @@ native importer, decoder and executor with synthetic inputs. Floppy 1.02:
 | null table entry (slot 149) | 1 |
 | **Executed to completion** | **180 of 466** |
 
-Use it to choose the next opcode; re-run it after each one.
+Use it to choose the next opcode; re-run it after each one. Every model that
+executes natively is compared with the original F1772 by
+`verify-station-models.py` (v0.20: all 180 match in command order).
 
 ## Next: executing glyphs and children
 

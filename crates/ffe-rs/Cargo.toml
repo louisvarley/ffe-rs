@@ -15,4 +15,5 @@ minifb = { version = "0.28", default-features = false, features = ["x11"] }
 png = "0.17"
 
 [dev-dependencies]
+ffe-convert = { path = "../ffe-convert" }
 tempfile = "3"

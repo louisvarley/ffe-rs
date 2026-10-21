@@ -27,8 +27,9 @@ verified opcode 28 base-relative transforms, after which both real station
 programs run to completion; v0.17 matches both against the original F1772 run of
 the same programs, event for event in command order; v0.18 matches their face
 draw queues. V0.19 adds a whole-table model census: 180 of 466 models already
-execute natively (unverified); opcode 5, vertex opcode 7 and opcodes 31/27 block
-most of the rest.
+execute natively, and v0.20 matches all 180 against the original F1772 in
+command order; opcode 5, vertex opcode 7 and opcodes 31/27 block most of the
+rest.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.
