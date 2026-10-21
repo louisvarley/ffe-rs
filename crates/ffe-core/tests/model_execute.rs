@@ -903,3 +903,57 @@ fn coloured_child_calls_carry_material_scale_and_offset_extras() {
     let call = &result.submodels[0].submodel;
     assert_eq!((call.material, call.scale), (None, ChildScale::Literal(0)));
 }
+
+#[test]
+fn surfaces_span_their_entry_list_and_terminator() {
+    // Surface: word 7, origin 0, axes 1/2/3, parameters 4/5/6, two 16-byte entries,
+    // zero terminator; then a line on 1/2.
+    let mut words = vec![31, 7, 0x0100, 0x0302, 4, 5, 6];
+    words.extend([1u16; 8]);
+    words.extend([2u16; 8]);
+    words.extend([0, 2, 0x0456, 0x0201, 0]);
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &bytes(&words),
+        &mut vertices,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        live_instance([0, 0, 100], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert_eq!(result.commands, [0, 48, 54], "2 + 12 + 2 * 16 + 2 bytes");
+    let surface = &result.surfaces[0].surface;
+    assert_eq!(
+        (
+            surface.word,
+            surface.origin,
+            surface.axes,
+            surface.parameters
+        ),
+        (7, 0, [1, 2, 3], [4, 5, 6])
+    );
+    assert_eq!(surface.entries.len(), 2);
+    assert_eq!(
+        surface.entries[1],
+        [2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0]
+    );
+    assert!(result
+        .ordered
+        .iter()
+        .all(|p| matches!(p, Primitive::Line(_))));
+    // An unterminated entry list is a truncated command, never a guessed length.
+    let mut open = vec![31, 7, 0x0100, 0x0302, 4, 5, 6];
+    open.extend([1u16; 8]);
+    assert!(execute(
+        &bytes(&open),
+        4,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        8
+    )
+    .unwrap_err()
+    .contains("Truncated"));
+}

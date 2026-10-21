@@ -117,6 +117,23 @@ pub struct Thruster {
     pub width: i16,
 }
 
+/// F1874 curved-surface operands, rendered by F1876. The entries (parsed by F1823)
+/// are kept raw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Surface {
+    pub offset: usize,
+    /// Word +0, passed to F1876.
+    pub word: i16,
+    /// Origin vertex (byte +2, view space through F1470).
+    pub origin: u8,
+    /// Axis vertices (bytes +3..+5, object space through F1472).
+    pub axes: [u8; 3],
+    /// Words +6, +8 and +10, passed to F1876 (+8 shifted left by 16).
+    pub parameters: [i16; 3],
+    /// 16-byte entries up to the zero terminator word.
+    pub entries: Vec<[u8; 16]>,
+}
+
 /// F1762 colour operands: 6 bytes, or 20 when byte 3 selects an alternative.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Colour {
@@ -149,6 +166,7 @@ pub struct Program {
     pub colours: Vec<Colour>,
     pub polygons: Vec<Polygon>,
     pub thrusters: Vec<Thruster>,
+    pub surfaces: Vec<Surface>,
 }
 
 fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
@@ -179,6 +197,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     let mut colours = Vec::new();
     let mut polygons = Vec::new();
     let mut thrusters = Vec::new();
+    let mut surfaces = Vec::new();
     let mut branches = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -194,6 +213,15 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             4 | 8 => 10,
             6 => crate::model_depth::decode(&bytes[offset..])?.1,
             9 => 8,
+            // Code, 12 header bytes, 16-byte entries while the first word is non-zero,
+            // then the zero word (F1823).
+            31 => {
+                let mut end = offset + 14;
+                while word(bytes, end)? != 0 {
+                    end += 16;
+                }
+                end + 2 - offset
+            }
             10 => 10,
             27 => {
                 if word(bytes, offset + 2)? & 0x8000 != 0 {
@@ -355,6 +383,33 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             }
             thrusters.push(thruster);
         }
+        if opcode == 31 {
+            let payload = &bytes[offset + 2..offset + size];
+            let surface = Surface {
+                offset,
+                word: word(payload, 0)? as i16,
+                origin: payload[2],
+                axes: [payload[3], payload[4], payload[5]],
+                parameters: [
+                    word(payload, 6)? as i16,
+                    word(payload, 8)? as i16,
+                    word(payload, 10)? as i16,
+                ],
+                entries: payload[12..payload.len() - 2]
+                    .chunks_exact(16)
+                    .map(|entry| std::array::from_fn(|i| entry[i]))
+                    .collect(),
+            };
+            if std::iter::once(surface.origin)
+                .chain(surface.axes)
+                .any(|index| u32::from(index) >= vertex_count)
+            {
+                return Err(format!(
+                    "Surface references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            surfaces.push(surface);
+        }
         if opcode == 26 {
             let payload = &bytes[offset + 2..offset + size];
             colours.push(Colour {
@@ -452,6 +507,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         colours,
         polygons,
         thrusters,
+        surfaces,
     })
 }
 

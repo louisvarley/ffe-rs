@@ -10,7 +10,7 @@ use crate::model::variable;
 use crate::model::VertexContext;
 use crate::model_commands::{
     arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Polygon,
-    Submodel, Text, Thruster, VisibilityContext,
+    Submodel, Surface, Text, Thruster, VisibilityContext,
 };
 use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
@@ -79,6 +79,14 @@ pub struct PolygonEmission {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThrusterEmission {
     pub thruster: Thruster,
+    pub context: VertexContext,
+}
+
+/// A curved-surface operand event (F1874). F1876's patch rendering and its own
+/// queueing are not ported, so it is absent from `ordered`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceEmission {
+    pub surface: Surface,
     pub context: VertexContext,
 }
 
@@ -156,6 +164,8 @@ pub struct Execution {
     pub polygons: Vec<PolygonEmission>,
     /// Thrusters in command order; never in [`Self::ordered`].
     pub thrusters: Vec<ThrusterEmission>,
+    /// Curved surfaces in command order; never in [`Self::ordered`].
+    pub surfaces: Vec<SurfaceEmission>,
     /// Final normal entry 0 colour if a colour command wrote it during this run.
     pub normal_zero_colour: Option<[u8; 3]>,
     /// Depth-queue operations in program order ([`execute_live`] only), excluding the
@@ -450,6 +460,7 @@ fn execute_inner(
         colours: Vec::new(),
         polygons: Vec::new(),
         thrusters: Vec::new(),
+        surfaces: Vec::new(),
         normal_zero_colour: None,
         queue: Vec::new(),
         ordered: Vec::new(),
@@ -604,6 +615,27 @@ fn execute_inner(
                     }
                     result.thrusters.push(ThrusterEmission {
                         thruster: thruster.clone(),
+                        context: working.clone(),
+                    });
+                }
+                Some(command.size as i32)
+            }
+            31 => {
+                for surface in program.surfaces.iter().filter(|s| s.offset == offset) {
+                    // F1874 resolves the origin (view) and three axis vertices (object).
+                    if let Some(live) = working_vertices.as_mut() {
+                        for index in std::iter::once(surface.origin).chain(surface.axes) {
+                            live.resolve(
+                                index as i8,
+                                &working,
+                                instance.position,
+                                instance.generation,
+                                false,
+                            )?;
+                        }
+                    }
+                    result.surfaces.push(SurfaceEmission {
+                        surface: surface.clone(),
                         context: working.clone(),
                     });
                 }

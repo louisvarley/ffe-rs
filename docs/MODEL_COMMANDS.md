@@ -43,7 +43,7 @@ explicit unsupported-command error.
 | 28 | `F1741` | `0x9c` matrix transformation | 4 (6 for `0xc000`) | partial | partial | `0x8000` local rotation (v0.6); `0x0000`/`0x4000` base-relative F1739 + optional F1743 verified v0.16 (6,048 cases); `0xc000` vertex-defined basis unsupported |
 | 29 | `F1758` | arithmetic (second entry) | 4 | yes | yes | same helper as 13 |
 | 30 | `F1767` | — | — | **no** | no | unsupported record form |
-| 31 | `F1874` | — | — | **no** | no | unsupported record form |
+| 31 | `F1874` | curved surface (via `F1876`) | 16 + 16n | yes | yes | v0.25: word +0, origin vertex +2 (view), axis vertices +3..+5 (object), words +6/+8/+10, then 16-byte entries to a zero word (F1823). Operand event; F1876 rendering not ported. |
 
 ## Verified so far
 
@@ -90,18 +90,19 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.24: **277 of 466** execute, and all that the original completes match
+v0.25: **312 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Top remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| decode: opcode 31 | 39 |
 | decode: opcode 21 (nested block) | 33 |
+| decode: opcode 25 | 15 |
 | vertices: vertex opcode 0x15 (21) | 13 |
 | decode: opcode 24 | 12 |
-| decode: opcodes 17 / 25 | 11 each |
+| decode: opcode 17 | 11 |
 | decode: stream lacks a final terminator | 11 |
 | decode: opcode 22 (spline) | 8 |
+| decode: opcode 30 | 5 |
 
 Vertex opcodes supported: 0-2, 5-12, 15-20 (7/8 since v0.22). Not yet: 3/4,
 13/14 (screen-space midpoints), 21/22 and 23/24 (F1477 forms).

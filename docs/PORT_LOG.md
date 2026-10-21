@@ -4,6 +4,23 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Curved surfaces (opcode 31, v0.25)
+
+F1874 resolves an origin vertex (byte +2, F1470 view) and three axis vertices
+(bytes +3..+5, F1472 object), then passes word +0, words +6/+8/+10 and a
+sub-stream starting at +12 to F1876, the curved-surface/planet renderer
+(1,580 lines). F1876 advances the stream only through F1823, which walks
+16-byte entries while their first word is non-zero and returns past the zero
+word; every F1876 exit follows that parse. So the record is
+**2 + 12 + 16·n + 2 bytes**.
+
+Rust decodes `Surface` (entries raw) and emits `SurfaceEmission` in command
+order after resolving the same vertices; patch rendering stays with F1876 and
+out of `ordered`. Census: **312 of 466** execute natively; all 311 the original
+completes match. One synthetic test added (164 `#[test]`, 24 ignored, one
+Unix-only; 139 runnable on Windows). Top blockers: opcode 21 (33), 25 (15),
+vertex opcode 0x15 (13), 24 (12), 17 (11), missing terminator (11), 22 (8).
+
 ## 2026-10-21 — Coloured child-model calls (opcode 27, v0.24)
 
 F1748 is a second child-model call into F1750. Operands: byte +0 position
