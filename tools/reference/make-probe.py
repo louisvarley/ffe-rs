@@ -40,6 +40,7 @@ SCOPED_HOOKS = [
     ("FUNC_001749", "FUNC_001751", [
         ("near [DATA_007727]", "trace_submodel_vertex", 5),  # F1471 projected vertex
         ("near [DATA_007756]", "trace_submodel_model", 1),   # F1538 model descriptor
+        ("FUNC_001687", "trace_submodel_cull", 1),           # child screen cull
         ("FUNC_001740", "trace_submodel_frame", 1),          # child basis set-up
         ("FUNC_001773", "trace_submodel_run", 1),            # nested execution
     ]),

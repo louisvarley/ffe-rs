@@ -36,6 +36,7 @@ GLOBAL _ref_face3
 GLOBAL _ref_face4
 GLOBAL _ref_jitter_a
 GLOBAL _ref_jitter_b
+GLOBAL _ref_cull
 GLOBAL _ref_visibility
 GLOBAL _ref_visibility_branch
 GLOBAL _ref_visibility_inverse
@@ -93,6 +94,7 @@ _ref_face3 equ FUNC_001708
 _ref_face4 equ FUNC_001712
 _ref_jitter_a equ DATA_008818
 _ref_jitter_b equ DATA_008820
+_ref_cull equ FUNC_001687
 _ref_visibility equ FUNC_001751
 _ref_visibility_branch equ FUNC_001752
 _ref_visibility_inverse equ FUNC_001755

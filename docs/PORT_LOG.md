@@ -4,6 +4,27 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Coloured child-model calls (opcode 27, v0.24)
+
+F1748 is a second child-model call into F1750. Operands: byte +0 position
+vertex (F1471), word +0 frame, byte +3 scale adjustment — high nibble as a
+signed literal, or local variable `byte >> 4` when bit 3 is set — and word +4 a
+child material resolved through F1694 (opcode 14 passes the instance colour and
+a zero adjustment instead). The four optional extra vertices (byte 1 bit 7)
+follow at +6, so the record is 8 or 12 bytes. `Submodel` gains `material` and
+`scale` (`ChildScale::{Literal, Local}`); opcodes 14 and 27 share execution.
+
+Oracle fix: station modes forced child culling with a negative descriptor
+radius, which a negative scale adjustment shifts to zero, so some opcode 27
+children ran their (hooked) frame/run steps. F1750's F1687 cull call is now
+hooked: it always culls in station modes and passes through to the original
+elsewhere. Earlier traces are unchanged.
+
+Census: **277 of 466** models execute natively; all 276 that the original also
+completes in this setup match. One synthetic test added (163 `#[test]`, 24
+ignored, one Unix-only; 138 runnable on Windows). Top blockers: opcode 31 (39),
+21 (33), vertex opcode 0x15 (13), 24 (12), 17/25 (11), missing terminator (11).
+
 ## 2026-10-21 — Thrusters (opcode 9, v0.23)
 
 F1738 records are always 8 bytes: word +0 material, bytes +2/+3 vertices A and

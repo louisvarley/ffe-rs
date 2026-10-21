@@ -47,7 +47,17 @@ pub struct Text {
     pub string: u16,
 }
 
-/// F1749/F1750 child-model call operands. The child program is not executed here.
+/// The scale adjustment F1750 adds to a child's model scale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildScale {
+    /// A signed literal (opcode 27 byte 3 high nibble, or 0 for opcode 14).
+    Literal(i8),
+    /// Local variable `0..16` (opcode 27 with byte 3 bit 3 set).
+    Local(u8),
+}
+
+/// F1749/F1748 -> F1750 child-model call operands. The child program is not
+/// executed here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Submodel {
     pub offset: usize,
@@ -57,8 +67,13 @@ pub struct Submodel {
     pub vertex: u8,
     /// Word at +0, passed to F1740.
     pub frame: u16,
-    /// Raw bytes at +2..+6, present when bit 7 of byte 1 is set.
+    /// Four extra vertex bytes (after the fixed operands), present when bit 7 of
+    /// byte 1 is set.
     pub extra: Option<[u8; 4]>,
+    /// Opcode 27's own child material (word +4, resolved through F1694); opcode 14
+    /// passes the instance colour instead.
+    pub material: Option<u16>,
+    pub scale: ChildScale,
 }
 
 impl Submodel {
@@ -180,6 +195,13 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             6 => crate::model_depth::decode(&bytes[offset..])?.1,
             9 => 8,
             10 => 10,
+            27 => {
+                if word(bytes, offset + 2)? & 0x8000 != 0 {
+                    12
+                } else {
+                    8
+                }
+            }
             11..=14 | 19 | 20 | 29 => {
                 if matches!(opcode, 11 | 12 | 19 | 20) && code >> 5 != 0 {
                     let target = (offset as i32 + 4)
@@ -259,14 +281,30 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             }
             texts.push(text);
         }
-        if opcode == 14 {
+        if matches!(opcode, 14 | 27) {
             let payload = &bytes[offset + 2..offset + size];
+            // Opcode 14: vertex/frame word then extras at +2; opcode 27 adds byte 3
+            // (scale), word +4 (material) and puts its extras at +6.
+            let fixed = if opcode == 14 { 2 } else { 6 };
             let submodel = Submodel {
                 offset,
                 model: code >> 5,
                 vertex: payload[0],
                 frame: word(payload, 0)?,
-                extra: (size == 8).then(|| [payload[2], payload[3], payload[4], payload[5]]),
+                extra: (size == fixed + 6).then(|| {
+                    [
+                        payload[fixed],
+                        payload[fixed + 1],
+                        payload[fixed + 2],
+                        payload[fixed + 3],
+                    ]
+                }),
+                material: (opcode == 27).then(|| word(payload, 4)).transpose()?,
+                scale: match (opcode, payload.get(3)) {
+                    (27, Some(byte)) if byte & 8 != 0 => ChildScale::Local(byte >> 4),
+                    (27, Some(byte)) => ChildScale::Literal((*byte as i8) >> 4),
+                    _ => ChildScale::Literal(0),
+                },
             };
             if std::iter::once(submodel.vertex)
                 .chain(submodel.extra_vertices())

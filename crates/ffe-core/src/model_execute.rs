@@ -635,7 +635,7 @@ fn execute_inner(
                 }
                 Some(command.size as i32)
             }
-            14 => {
+            14 | 27 => {
                 for submodel in program.submodels.iter().filter(|s| s.offset == offset) {
                     if let Some(live) = working_vertices.as_mut() {
                         live.resolve(

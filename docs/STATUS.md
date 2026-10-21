@@ -67,13 +67,14 @@ capture produced by two repeat runs of the local reference.
 | v0.21 complex polygons | `model_commands::Polygon`, `model_execute` (`PolygonEmission`, `Primitive::Polygon`) | `model_execute.rs` (+1) | `verify-station-models.py` (polygon keys, event 11) | — | opcode 5 decoded/keyed/queued; segments not executed; 229 of 466 models execute and match |
 | v0.22 jittered vertices | `model::{jitter, evaluate_with_jitter}`, opcodes 7/8, `Vertices::{jitter, set_jitter}` | `model.rs` (+1), `jitter_reference.rs` (1, ignored) | `verify-jitter.py` (118 evaluations, 59 models) | `0fc5445f…` (Linux LF) | F1476 state caller-owned (open question in KNOWN_ISSUES); 232 of 466 models execute and match |
 | v0.23 thrusters | `model_commands::Thruster`, `ThrusterEmission` | `model_execute.rs` (+1) | `verify-station-models.py` (command flow after thrusters) | — | opcode 9 operand events; glow queueing not ported; 245 of 466 models execute and match |
+| v0.24 coloured child calls | `Submodel::{material, scale}`, `ChildScale`, opcode 27 | `model_execute.rs` (+1) | `verify-station-models.py` (F1687 cull hook) | — | 277 of 466 models execute; all the original completes match |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 162 `#[test]` functions total; 24 are
+- `cargo test --workspace --locked` passes. 163 `#[test]` functions total; 24 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **137 runnable synthetic tests** (138 on Linux).
-- `verify-station-models.py`: all 245 natively executed models match the
+  that is **138 runnable synthetic tests** (139 on Linux).
+- `verify-station-models.py`: all 276 models that both sides complete match the
   original command flow and final state.
 - `ffe-tools model-census --game game` (floppy 1.02): 180 of 466 slots execute
   natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
@@ -97,8 +98,8 @@ Facts verified on 2026-10-21:
 Stations are verified for command flow (v0.17) and face draw queues (v0.18);
 the v0.19 census ranks what blocks the other models. Next, in order:
 
-1. **Opcode 27** (53 models) and **31** (39), then 21 (29; nested blocks),
-   24/25/17 (11 each) and 22.
+1. **Opcode 31** (39 models) and **21** (33; nested blocks), then 24 (12),
+   17/25 (11 each), the missing-terminator streams (11) and 22.
 2. Thruster glow queueing (F1666/F1467/F1704) with point/line queueing.
 3. **Vertex opcode 0x15** (13 models; F1477 forms) and 3/4, 13/14, 23/24.
 4. **Polygon segments** (F1734/F1724/F1730/F1733/F1723/F1736 and their curve

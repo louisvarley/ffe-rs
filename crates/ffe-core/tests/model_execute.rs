@@ -867,3 +867,39 @@ fn thrusters_are_eight_byte_operand_events_outside_render_order() {
     .unwrap_err()
     .contains("Thruster references external/out-of-range vertex"));
 }
+
+#[test]
+fn coloured_child_calls_carry_material_scale_and_offset_extras() {
+    use ffe_core::model_commands::ChildScale;
+    // Model 228 at vertex 2: frame 0x0402, byte 3 = 0xd0 (literal -3), material 0x0123.
+    let plain = bytes(&[0x1c9b, 0x0402, 0xd000, 0x0123, 2, 0x0456, 0x0201, 0]);
+    let mut context = VertexContext::default();
+    let result = execute(&plain, 8, &mut context, &visibility(), None, 8).unwrap();
+    assert_eq!(result.commands, [0, 8, 14]);
+    let call = &result.submodels[0].submodel;
+    assert_eq!(
+        (
+            call.model,
+            call.vertex,
+            call.frame,
+            call.material,
+            call.scale
+        ),
+        (228, 2, 0x0402, Some(0x0123), ChildScale::Literal(-3))
+    );
+    assert_eq!(call.extra, None);
+    // Byte 3 bit 3 selects local 5; byte 1 bit 7 adds four extras after the material.
+    let extended = bytes(&[
+        0x1c9b, 0x8402, 0x5800, 0x0123, 0x0201, 0x0403, 2, 0x0456, 0x0201, 0,
+    ]);
+    let result = execute(&extended, 8, &mut context, &visibility(), None, 8).unwrap();
+    assert_eq!(result.commands, [0, 12, 18]);
+    let call = &result.submodels[0].submodel;
+    assert_eq!(call.scale, ChildScale::Local(5));
+    assert_eq!(call.extra_vertices(), [3, 1, 2, 4]);
+    // Opcode 14 inherits the instance colour and adds no scale.
+    let inherited = bytes(&[0x1c6e, 0x0305, 0]);
+    let result = execute(&inherited, 8, &mut context, &visibility(), None, 8).unwrap();
+    let call = &result.submodels[0].submodel;
+    assert_eq!((call.material, call.scale), (None, ChildScale::Literal(0)));
+}

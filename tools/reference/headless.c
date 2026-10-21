@@ -176,6 +176,9 @@ void trace_text_string(char *output, long string, void *scratch) { (void)scratch
 void trace_text_pop(void) { nested_event(6,0,0,0); }
 long *trace_submodel_vertex(void *instance, long index) { nested_event(7,(unsigned char)index,0,0); return nested_station ? ref_project_vertex(instance,(signed char)index) : nested_vertex; }
 long *trace_submodel_model(long index) { nested_event(8,(unsigned long)index,0,0); return nested_descriptor; }
+extern long ref_cull(void *view, long radius);
+/* Station modes cull every child regardless of the scale adjustment. */
+long trace_submodel_cull(void *view, long radius) { return nested_station ? 1 : ref_cull(view,radius); }
 void trace_submodel_frame(void *child, void *instance, long word) { (void)child; (void)instance; nested_event(9,(unsigned long)word,0,0); }
 void trace_submodel_run(void *child, void *descriptor) { (void)child; (void)descriptor; nested_event(10,0,0,0); }
 

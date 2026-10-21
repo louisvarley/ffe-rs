@@ -39,7 +39,7 @@ explicit unsupported-command error.
 | 24 | `F1766` | — | — | **no** | no | unsupported record form |
 | 25 | `F1771` | — | — | **no** | no | unsupported record form |
 | 26 | `F1762` | set colour | 6 or 20 | yes | yes | verified v0.15: word +0 material, byte +2 normal (low 7) / normal-0 target (bit 7), byte +3 selector; non-zero selector adds seven alternative words (20 bytes). Updates instance colour or normal 0. |
-| 27 | `F1748` | — | — | **no** | no | unsupported record form |
+| 27 | `F1748` | coloured child-model call (via `F1750`) | 8 or 12 | yes | yes | v0.24: model `code >> 5`, byte +0 vertex, word +0 frame, byte +3 scale (signed high nibble, or local `>> 4` with bit 3), word +4 child material; extras at +6 when byte 1 bit 7. Operand event; child not executed. |
 | 28 | `F1741` | `0x9c` matrix transformation | 4 (6 for `0xc000`) | partial | partial | `0x8000` local rotation (v0.6); `0x0000`/`0x4000` base-relative F1739 + optional F1743 verified v0.16 (6,048 cases); `0xc000` vertex-defined basis unsupported |
 | 29 | `F1758` | arithmetic (second entry) | 4 | yes | yes | same helper as 13 |
 | 30 | `F1767` | — | — | **no** | no | unsupported record form |
@@ -90,19 +90,18 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.23: **245 of 466** execute, and all 245 match the original
+v0.24: **277 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Top remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| decode: opcode 27 | 53 |
 | decode: opcode 31 | 39 |
-| decode: opcode 21 (nested block) | 29 |
+| decode: opcode 21 (nested block) | 33 |
 | vertices: vertex opcode 0x15 (21) | 13 |
-| decode: opcodes 17 / 24 / 25 | 11 each |
+| decode: opcode 24 | 12 |
+| decode: opcodes 17 / 25 | 11 each |
+| decode: stream lacks a final terminator | 11 |
 | decode: opcode 22 (spline) | 8 |
-| decode: stream lacks a final terminator | 6 |
-| decode: opcode 30 | 5 |
 
 Vertex opcodes supported: 0-2, 5-12, 15-20 (7/8 since v0.22). Not yet: 3/4,
 13/14 (screen-space midpoints), 21/22 and 23/24 (F1477 forms).
