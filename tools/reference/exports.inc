@@ -32,6 +32,8 @@ GLOBAL _ref_rotate
 GLOBAL _ref_angle
 GLOBAL _ref_rotate_command
 GLOBAL _ref_transform_command
+GLOBAL _ref_face3
+GLOBAL _ref_face4
 GLOBAL _ref_visibility
 GLOBAL _ref_visibility_branch
 GLOBAL _ref_visibility_inverse
@@ -85,6 +87,8 @@ _ref_rotate equ FUNC_001744
 _ref_angle equ FUNC_001474
 _ref_rotate_command equ FUNC_001742
 _ref_transform_command equ FUNC_001741
+_ref_face3 equ FUNC_001708
+_ref_face4 equ FUNC_001712
 _ref_visibility equ FUNC_001751
 _ref_visibility_branch equ FUNC_001752
 _ref_visibility_inverse equ FUNC_001755

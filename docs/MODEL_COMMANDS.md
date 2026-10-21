@@ -79,7 +79,12 @@ explicit unsupported-command error.
 - Whole real stations match the original F1772 in command order
   (`verify-station.py`, models 74/75, trace `0ea8f4a7…`): every face with its
   locals/basis, points, text/child calls, and final locals/basis/colour/
-  handedness. Render order, glyph/child execution and pixels are not covered.
+  handedness.
+- Face draw queues match the original F1708/F1712 queueing for both stations
+  in six views each (`verify-station-queue.py`, 12 cases, trace `35e55a26…`):
+  normal cull, textured guard/perimeter path, flat outcode rejection and the
+  vertex-a key, interleaved with depth groups. Points/lines queueing, glyph/child
+  execution and pixels are not covered.
 
 ## Next: executing glyphs and children
 

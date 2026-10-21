@@ -185,13 +185,19 @@ fn executed_reference_composed_order() {
         depth: 100,
         scale: 0,
         detail: [0, 0],
-        normals: &[],
+        // Every face uses normal 0 and keeps at least one vertex on screen, so the
+        // F1708 queueing rule admits all three marker faces.
+        normals: &[ffe_core::model_normals::Normal {
+            culled: false,
+            colour: [0; 3],
+        }],
     };
     let instance = InstanceContext {
         position: [0; 3],
         generation: 2,
         key_scale: 0,
         operand_scale: 0,
+        textures: true,
     };
     let result = execute_live(
         &stream,

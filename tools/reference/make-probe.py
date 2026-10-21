@@ -27,6 +27,12 @@ SCOPED_HOOKS = [
         ("near [DATA_007639]", "trace_text_string", 1),   # F1344 string expansion
         ("FUNC_001746", "trace_text_pop", 1),             # nested buffer frame pop
     ]),
+    ("FUNC_001696", "FUNC_001697", [
+        ("FUNC_001780", "trace_group", 8),                # depth-group open/close
+    ]),
+    ("FUNC_001708", "FUNC_001715", [
+        ("FUNC_001778", "trace_alloc", 5),                # face queue allocations
+    ]),
     ("FUNC_001749", "FUNC_001751", [
         ("near [DATA_007727]", "trace_submodel_vertex", 5),  # F1471 projected vertex
         ("near [DATA_007756]", "trace_submodel_model", 1),   # F1538 model descriptor

@@ -50,6 +50,7 @@ fn executed_reference_point_line_operands() {
         generation: 2,
         key_scale: 0,
         operand_scale: 0,
+        textures: true,
     };
     let result = execute_live(
         &stream,

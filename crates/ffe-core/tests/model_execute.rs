@@ -11,12 +11,18 @@ fn bytes(words: &[u16]) -> Vec<u8> {
     words.iter().flat_map(|w| w.to_le_bytes()).collect()
 }
 
+const VISIBLE_NORMAL: Normal = Normal {
+    culled: false,
+    colour: [0; 3],
+};
+static VISIBLE: [Normal; 16] = [VISIBLE_NORMAL; 16];
+
 fn visibility() -> VisibilityContext<'static> {
     VisibilityContext {
         depth: 100,
         scale: 0,
         detail: [0, 0],
-        normals: &[],
+        normals: &VISIBLE,
     }
 }
 
@@ -155,6 +161,7 @@ fn live_instance(position: [i32; 3], key_scale: i32, operand_scale: i32) -> Inst
         generation: 2,
         key_scale,
         operand_scale,
+        textures: true,
     }
 }
 
@@ -597,7 +604,10 @@ fn live_text_and_submodels_stay_out_of_render_order_and_errors_are_transactional
         &stream,
         &mut fresh,
         &mut context,
-        &visibility(),
+        &VisibilityContext {
+            normals: &[],
+            ..visibility()
+        },
         None,
         live_instance([0; 3], 0, 0),
         8,
@@ -689,4 +699,70 @@ fn colour_errors_are_transactional() {
         assert!(error.contains(expected), "{error}");
         assert_eq!(context, before);
     }
+}
+
+#[test]
+fn live_faces_are_queued_by_the_original_cull_guard_and_outcode_rules() {
+    // Triangles on vertices 0, 1, 2: culled normal 1, flat material, textured material.
+    let face = |material: u16, normal: u8| [3, material, 0x0001, u16::from_le_bytes([normal, 2])];
+    let mut words = Vec::new();
+    words.extend_from_slice(&face(0x0123, 1));
+    words.extend_from_slice(&face(0x0123, 0));
+    words.extend_from_slice(&face(0x4001, 0));
+    words.push(0);
+    let stream = bytes(&words);
+    let mut normals = vec![VISIBLE_NORMAL; 2];
+    normals[1].culled = true;
+    let inputs = VisibilityContext {
+        normals: &normals,
+        ..visibility()
+    };
+    // (x offset, expected queued materials, expected screen x range of all points)
+    for (x, queued, screens) in [
+        (0, vec![0x0123, 0x4001], 0..320),
+        // Off the left edge but inside the guard: only the textured face survives.
+        (-300, vec![0x4001], -2000..0),
+        // Beyond the guard: the textured face takes the flat path and is rejected too.
+        (-1000, vec![], -100_000..0),
+    ] {
+        let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+        let result = execute_live(
+            &stream,
+            &mut vertices,
+            &mut VertexContext::default(),
+            &inputs,
+            None,
+            live_instance([x, 0, 100], 0, 0),
+            8,
+        )
+        .unwrap();
+        assert_eq!(result.emissions.len(), 3, "all faces are still emitted");
+        let slots = vertices.slots();
+        assert!(
+            (0..3).all(|i| screens.contains(&i32::from(slots[i].screen[0]))),
+            "precondition for x {x}: {:?}",
+            &slots[..3]
+        );
+        let materials: Vec<u16> = result
+            .ordered
+            .iter()
+            .map(|p| face_emission(p).face.material)
+            .collect();
+        assert_eq!(materials, queued, "x offset {x}");
+        assert_eq!(result.queue.len(), queued.len());
+    }
+    // Every point behind the near plane is rejected whatever the material.
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut VertexContext::default(),
+        &inputs,
+        None,
+        live_instance([0, 0, -500], 0, 0),
+        8,
+    )
+    .unwrap();
+    assert!(result.ordered.is_empty());
+    assert!(result.queue.is_empty());
 }

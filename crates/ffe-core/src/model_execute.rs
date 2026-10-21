@@ -98,6 +98,17 @@ fn resolve_colour(value: u16, instance: [u8; 3], normal: [u8; 3]) -> [u8; 3] {
     rgb
 }
 
+/// One depth-queue operation in program order: the original F1780 group changes
+/// and F1778 primitive allocations. Sorting these is [`crate::model_order::Order`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueEvent {
+    /// Close the current group and open one with this key, or none.
+    Group(Option<u32>),
+    Face(u32),
+    Point(u32),
+    Line(u32),
+}
+
 /// One render-order entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Primitive {
@@ -124,6 +135,9 @@ pub struct Execution {
     pub colours: Vec<ColourEmission>,
     /// Final normal entry 0 colour if a colour command wrote it during this run.
     pub normal_zero_colour: Option<[u8; 3]>,
+    /// Depth-queue operations in program order ([`execute_live`] only), excluding the
+    /// top-level close after return.
+    pub queue: Vec<QueueEvent>,
     /// All emitted primitives in original render order. Populated only by
     /// [`execute_live`]; empty for [`execute`], which has no live vertex keys.
     pub ordered: Vec<Primitive>,
@@ -142,6 +156,9 @@ pub struct InstanceContext {
     pub key_scale: i32,
     /// Depth operand scale at +0x148.
     pub operand_scale: i32,
+    /// Texture rendering enabled (the original's global at `DATA_008812` is >= 0,
+    /// its default). Textured faces then skip the off-screen rejection.
+    pub textures: bool,
 }
 
 impl Default for InstanceContext {
@@ -151,6 +168,7 @@ impl Default for InstanceContext {
             generation: 1,
             key_scale: 0,
             operand_scale: 0,
+            textures: true,
         }
     }
 }
@@ -240,6 +258,82 @@ fn view_point(
             false,
         )?
         .view)
+}
+
+/// F1708/F1712 face queueing. A culled normal queues nothing. Otherwise every vertex is
+/// projected (F1471) in the original order: b, c, (d,) then a. A textured face whose
+/// screen points are all within the guard range and whose screen perimeter is at
+/// least 6 is queued; any other face is queued unless every point is off screen and
+/// the F1713 outcodes put them all left, all right (or above/below) or all behind
+/// the near plane. The key is always
+/// F1777 of vertex a's view.
+fn face_queue_key(
+    face: &Face,
+    live: &mut Vertices<'_>,
+    context: &VertexContext,
+    instance: &InstanceContext,
+    visibility: &VisibilityContext<'_>,
+) -> Result<Option<u32>, String> {
+    let culled = visibility
+        .normals
+        .get(usize::from(face.normal))
+        .ok_or_else(|| {
+            format!(
+                "Face at {:#x} references an out-of-range normal.",
+                face.offset
+            )
+        })?
+        .culled;
+    if culled {
+        return Ok(None);
+    }
+    let count = face.vertices.len();
+    let mut points = vec![crate::model_instance::Vertex::default(); count];
+    for slot in (1..count).chain(std::iter::once(0)) {
+        points[slot] = live.resolve(
+            face.vertices[slot] as i8,
+            context,
+            instance.position,
+            instance.generation,
+            true,
+        )?;
+    }
+    let screens: Vec<[i32; 2]> = points
+        .iter()
+        .map(|p| [i32::from(p.screen[0]), i32::from(p.screen[1])])
+        .collect();
+    let decoded = material(face.material);
+    let guarded = screens
+        .iter()
+        .all(|[x, y]| (-2000..=2320).contains(x) && (-2000..=2158).contains(y));
+    let perimeter: i32 = (0..count)
+        .map(|i| {
+            let [ax, ay] = screens[i];
+            let [bx, by] = screens[(i + 1) % count];
+            (ax - bx).abs() + (ay - by).abs()
+        })
+        .sum();
+    let key = model_depth::key(points[0].view, instance.key_scale);
+    if instance.textures && decoded.texture != 0 && guarded && perimeter >= 6 {
+        return Ok(Some(key));
+    }
+    let on_screen = |[x, y]: [i32; 2]| (x as u32) < 320 && (y as u32) < 158;
+    if screens.iter().any(|s| on_screen(*s)) {
+        return Ok(Some(key));
+    }
+    // F1715/F1716 outcodes over a, b, c and (for triangles, c again) d.
+    let code = |value: i32, limit: i32| match value {
+        -32766 => 8,
+        v if (0..limit).contains(&v) => 2,
+        v if v < 0 => 1,
+        _ => 4,
+    };
+    let rejected = |axis: usize, limit: i32| {
+        let combined = screens.iter().fold(0, |acc, s| acc | code(s[axis], limit));
+        // DATA_007818 rejects all-left (1), all-right (4) and all-behind (8).
+        matches!(combined, 1 | 4 | 8)
+    };
+    Ok((!rejected(0, 320) && !rejected(1, 158)).then_some(key))
 }
 
 fn resolve_depth_key(
@@ -332,6 +426,7 @@ fn execute_inner(
         submodels: Vec::new(),
         colours: Vec::new(),
         normal_zero_colour: None,
+        queue: Vec::new(),
         ordered: Vec::new(),
         ordered_keys: Vec::new(),
     };
@@ -373,6 +468,7 @@ fn execute_inner(
                         )?;
                         let key = model_depth::key(vertex.view, instance.key_scale);
                         queue.push(key, Primitive::Point(emission))?;
+                        result.queue.push(QueueEvent::Point(key));
                     }
                 }
                 Some(command.size as i32)
@@ -396,6 +492,7 @@ fn execute_inner(
                         )?;
                         let key = model_depth::key(vertex.view, instance.key_scale);
                         queue.push(key, Primitive::Line(emission))?;
+                        result.queue.push(QueueEvent::Line(key));
                     }
                 }
                 Some(command.size as i32)
@@ -408,19 +505,12 @@ fn execute_inner(
                     };
                     result.emissions.push(emission.clone());
                     if let (Some(queue), Some(live)) = (order.as_mut(), working_vertices.as_mut()) {
-                        let first = *face
-                            .vertices
-                            .first()
-                            .ok_or_else(|| format!("Face at {offset:#x} has no vertices."))?;
-                        let vertex = live.resolve(
-                            first as i8,
-                            &working,
-                            instance.position,
-                            instance.generation,
-                            false,
-                        )?;
-                        let key = model_depth::key(vertex.view, instance.key_scale);
-                        queue.push(key, Primitive::Face(emission))?;
+                        if let Some(key) =
+                            face_queue_key(face, live, &working, &instance, visibility)?
+                        {
+                            queue.push(key, Primitive::Face(emission))?;
+                            result.queue.push(QueueEvent::Face(key));
+                        }
                     }
                 }
                 Some(command.size as i32)
@@ -536,6 +626,7 @@ fn execute_inner(
                     .as_mut()
                     .ok_or_else(|| "Depth execution requires an order queue.".to_owned())?
                     .group(key)?;
+                result.queue.push(QueueEvent::Group(key));
                 Some(command.size as i32)
             }
             13 | 29 => {

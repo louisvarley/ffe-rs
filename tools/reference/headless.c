@@ -54,6 +54,31 @@ extern long ref_project_point(void *output,const long *point);
 /* Only the separate command probe redirects the four primitive-emission calls.
    These callbacks capture original handler arguments, not native decoder output. */
 static int probe_face_count;
+/* Queue mode: faces run through the real F1708/F1712, and every face allocation
+   (F1778 within F1708..F1714) and depth-group change (F1780 within F1696) is logged
+   before reaching the original allocator. */
+extern int ref_face3(void *instance, long material, unsigned long a, unsigned long b, unsigned long c, unsigned long normal);
+extern int ref_face4(void *instance, long material, unsigned long a, unsigned long b, unsigned long c, unsigned long d, unsigned long normal);
+extern void ref_order_group(long active,unsigned long key);
+extern unsigned long *ref_order_allocate(long words,unsigned long key,long force);
+static int queue_mode;
+static unsigned long queue_count, queue_log[1024][3];
+static void queue_event(unsigned long kind, unsigned long active, unsigned long key)
+{
+    if (queue_count >= 1024) { fprintf(stderr,"too many queue events\n"); exit(2); }
+    queue_log[queue_count][0]=kind; queue_log[queue_count][1]=active; queue_log[queue_count][2]=key;
+    queue_count++;
+}
+void trace_group(long active, unsigned long key)
+{
+    if (queue_mode) queue_event(2,active!=0,active ? key : 0);
+    ref_order_group(active,key);
+}
+unsigned long *trace_alloc(long words, unsigned long key, long force)
+{
+    if (queue_mode) queue_event(1,0,key);
+    return ref_order_allocate(words,key,force);
+}
 static unsigned long probe_faces[2][6];
 static int execution_probe;
 static unsigned long execution_faces;
@@ -62,6 +87,7 @@ static void execution_emission(void *instance,const unsigned long *face);
 int trace_triangle(void *instance, long material, unsigned long a, unsigned long b, unsigned long c, unsigned long normal)
 {
     unsigned long *face;
+    if(queue_mode) return ref_face3(instance,material,a,b,c,normal);
     if(execution_probe) {
         unsigned long emitted[6]={(unsigned short)material,normal,a,b,c,255};
         execution_emission(instance,emitted);return 0;
@@ -75,6 +101,7 @@ int trace_triangle(void *instance, long material, unsigned long a, unsigned long
 int trace_quad(void *instance, long material, unsigned long a, unsigned long b, unsigned long c, unsigned long d, unsigned long normal)
 {
     unsigned long *face;
+    if(queue_mode) return ref_face4(instance,material,a,b,c,d,normal);
     if(execution_probe) {
         unsigned long emitted[6]={(unsigned short)material,normal,a,b,c,d};
         execution_emission(instance,emitted);return 0;
@@ -917,6 +944,60 @@ static int station_vectors(void)
 #endif
 }
 
+static int station_queue_vectors(void)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--station-queue requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static const int models[]={74,75};
+    static unsigned char normals[32768*8];
+    static unsigned long instance[0x160/4],globals[0x120/4],slots[128*9];
+    static const long identity[9]={2147483647,0,0,0,2147483647,0,0,0,2147483647};
+    static const long positions[][3]={{0,0,100},{0,0,600},{150,-80,400},{-40,30,250},{-260,0,300},{0,10,40}};
+    static const long frames[][9]={
+        {2147483647,0,0,0,2147483647,0,0,0,2147483647},
+        {2147483647,0,0,0,2147483647,0,0,0,2147483647},
+        {2147483647,0,0,0,2147483647,0,0,0,2147483647},
+        {1518500249,0,-1518500249,0,2147483647,0,1518500249,0,1518500249},
+        {2147483647,0,0,0,2147483647,0,0,0,2147483647},
+        {2147483647,0,0,0,2147483647,0,0,0,2147483647}
+    };
+    unsigned long m,v,i;
+    static unsigned long queue_buffer[65536];
+    fprintf(stderr,"JJFFE station-queue-v1: real station streams through original F1772 with faces drawn by the real F1708/F1712; every face queue allocation and depth-group change logged in order. Points/lines/text/children not queued; no flush or pixels.\n");
+    for(m=0;m<2;++m) for(v=0;v<6;++v) {
+        unsigned long *model=ref_model(models[m]);
+        memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));
+        memset(slots,0,sizeof(slots));memset(normals,0,sizeof(normals));
+        memset(nested_descriptor,0,sizeof(nested_descriptor));
+        memcpy((char *)instance+0x14,frames[v],36);
+        memcpy((char *)instance+0x9c,identity,36);
+        memcpy((char *)instance+4,positions[v],12);
+        instance[0xf0/4]=2;
+        instance[0x14c/4]=(unsigned long)globals;
+        instance[0x150/4]=model[1];
+        ref_vertex_buffer=(long *)slots;
+        ref_normal_buffer=normals;
+        ref_detail_primary=ref_detail_secondary=0;
+        nested_descriptor[0x1c/4]=-0x40000000L;
+        memset(queue_buffer,0,sizeof(queue_buffer));
+        ref_order_base=queue_buffer;ref_order_active=0;ref_order_state=0;
+        ref_order_init(queue_buffer);
+        queue_mode=1;queue_count=0;
+        nested_station=1;nested_count=0;point_line_count=0;
+
+        ref_command_alive=1;
+        ref_execute(instance,(void *)model[0]);
+        queue_mode=0;nested_station=0;
+        printf("{\"model\":%d,\"view\":%lu,\"queue\":[",models[m],v);
+        for(i=0;i<queue_count;++i) printf("%s[%lu,%lu,%lu]",i?",":"",queue_log[i][0],queue_log[i][1],queue_log[i][2]);
+        printf("],\"alive\":%lu}\n",ref_command_alive);
+    }
+    return 0;
+#endif
+}
+
 static void visibility_case(unsigned long *instance,unsigned long number,short operand)
 {
     static const unsigned short codes[]={11,12,0x8b,0x8c,0xff8b,0xff8c};
@@ -1146,6 +1227,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--text-submodel")) return text_submodel_vectors();
     if (argc == 2 && !strcmp(argv[1], "--colour")) return colour_vectors();
     if (argc == 2 && !strcmp(argv[1], "--station")) return station_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--station-queue")) return station_queue_vectors();
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

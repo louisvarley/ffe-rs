@@ -25,8 +25,9 @@ text (10) and child-model call (14) operand events and a Linux build of the
 reference adapter. V0.15 adds the verified opcode 26 colour command; v0.16 the
 verified opcode 28 base-relative transforms, after which both real station
 programs run to completion; v0.17 matches both against the original F1772 run of
-the same programs, event for event in command order. Render order, primitive
-colour and glyph/child execution remain next.
+the same programs, event for event in command order; v0.18 matches their face
+draw queues. Point/line queueing, primitive colour, rasterisation and
+glyph/child execution remain next.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.
@@ -806,9 +807,10 @@ events; opcode 14 is the F1749/F1750 child-model call, not text. See
 docs/PORT_LOG.md. V0.15 adds the verified opcode 26 colour command (6- or
 20-byte record). V0.16 adds the opcode 28 base-relative forms and the top-level
 group close (F1683/F1684), so both stations complete; v0.17 verifies them
-whole-program in command order. The next single task is render order (the
-original queues faces inside F1708/F1712), then primitive colour and
-glyph/child execution. For each, first add an original handler probe and
+whole-program in command order, and v0.18 ports the F1708/F1712 face queueing
+(cull, textured guard, outcode rejection, vertex-a key) verified against the
+original's queue. The next single task is point/line queueing, then primitive
+colour, rasterisation and glyph/child execution. For each, first add an original handler probe and
 document the payload; do not infer fields from record size. Do not claim static
 resolved points remain valid through transform or animation changes. Preserve
 the catalogue-vs-execution distinction and keep errors transactional; F4,

@@ -4,6 +4,49 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Face draw queue (v0.18)
+
+The original queues faces inside its raster path. F1708 (triangle) and F1712
+(quad) return without queueing for a culled normal; otherwise they project
+every vertex through F1471 (order b, c, (d,) a) and then:
+
+- **Textured path** (`DATA_008812 >= 0`, its default; material texture
+  non-zero; every screen point within x -2000..2320 and y -2000..2158; screen
+  perimeter |a-b|+|b-c|(+|c-d|)+|last-a| at least 6): always queued.
+- **Flat path** otherwise (F1709 / F1712 tail): queued if any point is on
+  screen (0 <= x < 320, 0 <= y < 158); if none is, F1713 ORs the F1715/F1716
+  outcodes (1 left/above, 2 inside, 4 right/below, 8 near-plane sentinel) and
+  `DATA_007818` rejects 1, 4 and 8, i.e. all left, all right (or all
+  above/below) or all behind the near plane. Otherwise F1714 queues a clipped
+  polygon.
+- The key is always F1777 of vertex a's view (F1709, F1714 and both textured
+  allocations).
+
+`execute_live` now applies exactly this: culled faces and rejected faces stay in
+`Execution.emissions` but not in `ordered`, face vertices are projected
+(stamping the cache as F1471 does), and `InstanceContext::textures` mirrors
+`DATA_008812`. `Execution.queue` logs every group change and allocation in
+program order (excluding the top-level close).
+
+`--station-queue` lets faces run through the real F1708/F1712 and logs every
+F1778 call inside F1708..F1714 and every F1780 call inside F1696 before passing
+it on. Six views per station (z 100/600, two offset views, a 45-degree tilted
+frame, a view partly off the left edge and one almost entirely behind the near
+plane): `verify-station-queue.py` matches all 12 queues with repeat, 7 tamper
+fields and an empty trace rejected. Trace SHA-256
+`35e55a26689eb1e520dffa6b4c36f4a25dff36066d1b4c9ba969c7345425fb56` (CRLF);
+Linux LF `350b6d2c…`. Earlier probe traces are unchanged. A first comparison
+found Rust queueing all-behind faces: the 9th entry of `DATA_007818` (code 8)
+also rejects, which had been misread.
+
+Because sorting these operations is the verified F1788 order (v0.9), Rust's
+`ordered` faces now match the original draw order for these views. Points and
+lines are still keyed by their first view vertex and queued unconditionally;
+their originals (F1700 discs, F1704) are not yet ported. One synthetic test
+added; the composed-order oracle test now supplies a visible normal; the local
+station-completion test now uses position z 100. 156 `#[test]`, 22 ignored,
+one Unix-only (133 runnable on Windows).
+
 ## 2026-10-21 — Whole-station command-order oracle (v0.17)
 
 `--station` runs the real model 74/75 command streams (from the reference

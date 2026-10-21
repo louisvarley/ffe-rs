@@ -192,10 +192,11 @@ fn executed_reference_station_depth_composition_advances() {
         let before = context.clone();
         let mut vertices = Vertices::new(records, vertex_count).unwrap();
         let instance = InstanceContext {
-            position: [0; 3],
+            position: [0, 0, 100],
             generation: 2,
             key_scale: 0,
             operand_scale: 0,
+            textures: true,
         };
         let result = match execute_live(
             bytes,

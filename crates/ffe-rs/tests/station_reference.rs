@@ -1,6 +1,6 @@
 use ffe_core::model::VertexContext;
 use ffe_core::model_commands::VisibilityContext;
-use ffe_core::model_execute::{execute_live, InstanceContext};
+use ffe_core::model_execute::{execute_live, InstanceContext, QueueEvent};
 use ffe_core::model_instance::Vertices;
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::Normal;
@@ -76,6 +76,7 @@ fn executed_reference_station_programs() {
             generation: 2,
             key_scale: 0,
             operand_scale: 0,
+            textures: true,
         };
         let result = execute_live(
             bytes,
@@ -177,5 +178,121 @@ fn executed_reference_station_programs() {
             "model {index} handedness"
         );
         assert_eq!(station.alive, 1);
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Queue {
+    model: u32,
+    view: usize,
+    queue: Vec<[u32; 3]>,
+    alive: u32,
+}
+
+/// Same inputs as `--station`, with faces drawn by the original F1708/F1712: the
+/// original's face allocations and depth-group changes must match Rust's queue log.
+#[test]
+#[ignore = "Local-only station draw queues; use tools/reference/verify-station-queue.py"]
+fn executed_reference_station_queues() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_STATION_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let table = SineTable::from_bytes(cache.asset("base:math/sine").unwrap()).unwrap();
+    let input =
+        std::fs::read_to_string(std::env::var_os("FFE_STATION_QUEUE_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 65536);
+    let queues: Vec<Queue> = input
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        queues.iter().map(|q| (q.model, q.view)).collect::<Vec<_>>(),
+        [74, 75]
+            .into_iter()
+            .flat_map(|m| (0..6).map(move |v| (m, v)))
+            .collect::<Vec<_>>()
+    );
+    // The adapter's six views: position (+0x4, z doubling as visibility depth) and frame.
+    let positions = [
+        [0, 0, 100],
+        [0, 0, 600],
+        [150, -80, 400],
+        [-40, 30, 250],
+        [-260, 0, 300],
+        [0, 10, 40],
+    ];
+    let tilted = [
+        1518500249,
+        0,
+        -1518500249,
+        0,
+        2147483647,
+        0,
+        1518500249,
+        0,
+        1518500249,
+    ];
+    let normals = vec![
+        Normal {
+            culled: false,
+            colour: [0; 3]
+        };
+        32768
+    ];
+    for queue in &queues {
+        let index = queue.model;
+        let vertex_count = if index == 74 { 54 } else { 88 };
+        let position = positions[queue.view];
+        let visibility = VisibilityContext {
+            depth: position[2],
+            scale: 0,
+            detail: [0, 0],
+            normals: &normals,
+        };
+        let mut context = VertexContext::default();
+        if queue.view == 3 {
+            context.matrix = tilted;
+        }
+        let bytes = cache
+            .asset(&format!("base:model-commands/{index:03}"))
+            .unwrap();
+        let records = cache
+            .asset(&format!("base:model-vertices/{index:03}"))
+            .unwrap();
+        let mut vertices = Vertices::new(records, vertex_count).unwrap();
+        let instance = InstanceContext {
+            position,
+            generation: 2,
+            key_scale: 0,
+            operand_scale: 0,
+            textures: true,
+        };
+        let result = execute_live(
+            bytes,
+            &mut vertices,
+            &mut context,
+            &visibility,
+            Some(&table),
+            instance,
+            4096,
+        )
+        .unwrap();
+        let events: Vec<[u32; 3]> = result
+            .queue
+            .iter()
+            .filter_map(|event| match event {
+                QueueEvent::Group(key) => Some([2, u32::from(key.is_some()), key.unwrap_or(0)]),
+                QueueEvent::Face(key) => Some([1, 0, *key]),
+                // Points and lines stay hooked in the probe and are not queued there.
+                QueueEvent::Point(_) | QueueEvent::Line(_) => None,
+            })
+            .collect();
+        assert_eq!(
+            events, queue.queue,
+            "model {index} view {} draw queue",
+            queue.view
+        );
+        assert_eq!(queue.alive, 1);
     }
 }
