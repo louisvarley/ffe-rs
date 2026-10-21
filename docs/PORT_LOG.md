@@ -4,6 +4,23 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Offset curve vertices 0x17/0x18 (v0.32)
+
+F1478 sends vertex opcodes 0x17/0x18 to F1477 with the *unsigned byte 2* as the
+vertex index and F1474(bytes 3 | 4 << 8) as an extra parameter. F1477 reads the
+record of that index (pair `byte2 >> 1`, mirror bit `byte2 & 1`), not the
+current one: a 0x13/0x14 record gives the line P0 + 2·m(P1 − P0, t), any other
+record the cubic of v0.29 through its bytes 3, 4, 4 + 2 and 3 + 2, with
+t = (variable(its byte 2) + extra) << 14. The current vertex's own mirror bit is
+not used. `ObjectCache::curve` now serves 0x13-0x18; validation follows the
+selected record's control points.
+
+`verify-vertex-programs.py` (minimum now 452): **452 of 452** comparable vertex
+programs match; trace unchanged (`b3ed1b7d…`). The seven models that needed it
+now stop at opcode 28 (`0xc000` form, 12 models). Census unchanged at 423 of 466;
+`verify-station-models.py` still 418 compared, 0 mismatched. One synthetic test
+added; 173 `#[test]`, 25 ignored, one Unix-only (147 runnable on Windows).
+
 ## 2026-10-21 — Opcode 22 curves (v0.31)
 
 F1737 (opcode 22) is ten bytes: material word, four vertex bytes (+2..+5) and a

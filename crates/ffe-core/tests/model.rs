@@ -163,3 +163,42 @@ fn curve_vertices_follow_the_original_cubic_including_its_four_p0_term() {
     bad[28] = 8;
     assert!(evaluate(&bad, 10, &context).is_err());
 }
+
+#[test]
+fn offset_curve_vertices_reuse_the_selected_records_curve() {
+    use ffe_core::model::{evaluate, multiply, variable};
+    // Pairs 0..3 literal; pair 4 the cubic of the test above; pair 5 a 0x13 line
+    // from v0 to v2. Pair 6 (0x17) selects vertex 8 (pair 4, mirror 0) and pair 7
+    // (0x18) vertex 11 (pair 5, mirror 1), both with packed offset 0x0010 = 0x2000.
+    let records = [
+        1, 0, 0, 0, 10, 0, //
+        1, 0, 0, 40, 10, 0, //
+        1, 0, 0, 40, 50, 0, //
+        1, 0, 0, 0, 50, 0, //
+        21, 0, 0xc8, 0, 2, 0, //
+        19, 0, 0xc8, 0, 2, 0, //
+        23, 0, 8, 0x10, 0, 0, //
+        24, 0, 11, 0x10, 0, 0,
+    ];
+    let mut context = VertexContext::default();
+    context.locals[8] = 0x1000;
+    let points = evaluate(&records, 16, &context).unwrap();
+    let t = (variable(0xc8, &context) + 0x2000) << 14;
+    let [p0, p1, p2, p3] = [points[0], points[2], points[4], points[2]];
+    let (t2, t3) = (multiply(t, t), multiply(multiply(t, t), t));
+    let cubic: [i32; 3] = std::array::from_fn(|i| {
+        p0[i]
+            + multiply(3 * p1[i] - 3 * p0[i], t) * 2
+            + multiply(3 * p2[i] - 6 * p1[i] + 4 * p0[i], t2) * 4
+            + multiply(p3[i] - 3 * p2[i] + 3 * p1[i] - 2 * p0[i], t3) * 8
+    });
+    assert_eq!(points[12], cubic);
+    // Mirror 1 of the line record: P0 = v1, P1 = v3.
+    let [a, b] = [points[1], points[3]];
+    let line: [i32; 3] = std::array::from_fn(|i| a[i] + multiply(b[i] - a[i], t) * 2);
+    assert_eq!(points[14], line);
+    // A selector beyond the model is rejected.
+    let mut bad = records;
+    bad[38] = 16;
+    assert!(evaluate(&bad, 16, &context).is_err());
+}

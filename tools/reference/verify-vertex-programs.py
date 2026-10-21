@@ -33,7 +33,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", required=True, type=Path)
     parser.add_argument("--game", required=True, type=Path, help="installed game directory")
-    parser.add_argument("--minimum", type=int, default=445)
+    parser.add_argument("--minimum", type=int, default=452)
     args = parser.parse_args()
     reference = args.reference.resolve(strict=True)
     exe = next(p for p in args.game.resolve(strict=True).iterdir()

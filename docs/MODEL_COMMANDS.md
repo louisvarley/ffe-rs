@@ -95,8 +95,7 @@ v0.31: **423 of 466** execute, and all that the original completes match
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| vertices: vertex opcode 0x17 (23) | 7 |
-| decode: opcode 28 (unsupported rotation form) | 5 |
+| decode: opcode 28 (unsupported rotation form) | 12 |
 | decode: opcode 18 | 3 |
 | vertices: vertex opcode 0xd (13) | 2 |
 | execute: opcode 30 light points (`0x801e`) | 1 |
@@ -105,9 +104,8 @@ v0.31: **423 of 466** execute, and all that the original completes match
 Some declaration blocks hold data after the final terminator; the decoder takes
 the longest self-contained prefix (`Program::trailing`, v0.27).
 
-Vertex opcodes supported: 0-2, 5-12, 15-22 (7/8 since v0.22, 21/22 since
-v0.29). Not yet: 3/4, 13/14 (screen-space midpoints) and 23/24 (F1477 with an
-F1474 angle). All supported vertex programs match the original
+Vertex opcodes supported: 0-2, 5-12, 15-24 (7/8 since v0.22, 21/22 since
+v0.29, 23/24 since v0.32). Not yet: 3/4 and 13/14 (screen-space midpoints). All supported vertex programs match the original
 (`verify-vertex-programs.py`).
 
 Use it to choose the next opcode; re-run it after each one. Every model that

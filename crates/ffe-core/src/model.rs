@@ -70,6 +70,7 @@ pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
     if count == 0 || count > 128 || count % 2 != 0 || records.len() != count as usize / 2 * 6 {
         return Err("Expected 1..64 six-byte vertex pairs (2..128 vertices).".to_owned());
     }
+    let mut curve_references;
     for (index, record) in records.chunks_exact(6).enumerate() {
         let references: &[u8] = match record[0] {
             0..=2 | 9 | 10 => &[],
@@ -83,6 +84,30 @@ pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
                 record[4].wrapping_add(2),
             ],
             15 | 16 => &record[2..5],
+            // F1477 on the record selected by byte 2 (its own mirror bit) with an
+            // F1474 offset: that record's linear or cubic control points.
+            23 | 24 => {
+                let selector = record[2];
+                let base = usize::from(selector >> 1) * 6;
+                let Some(source) = records.get(base..base + 6) else {
+                    return Err(format!(
+                        "Vertex pair {index}: external/out-of-range vertex reference."
+                    ));
+                };
+                let m = selector & 1;
+                curve_references = if matches!(source[0], 19 | 20) {
+                    vec![source[3] ^ m, source[4] ^ m]
+                } else {
+                    vec![
+                        source[3] ^ m,
+                        source[4] ^ m,
+                        source[4].wrapping_add(2) ^ m,
+                        source[3].wrapping_add(2) ^ m,
+                    ]
+                };
+                curve_references.push(selector);
+                &curve_references
+            }
             opcode => {
                 return Err(format!(
                     "Vertex pair {index}: unsupported opcode {opcode:#x}."
@@ -231,34 +256,13 @@ impl<'a> ObjectCache<'a> {
                 self.slots[pair + 1].stamp = 1;
                 self.slots[slot].object
             }
-            21 | 22 => {
-                // F1477 cubic: P0 = byte3, P1 = byte4, P2 = byte4 + 2, P3 = byte3 + 2
-                // (each XOR the mirror bit), t = variable(byte2) << 14. The P0 factor of
-                // the t^2 term is 4, as the original computes it.
-                let p0 = self.vertex(r[3] ^ mirror, context, depth + 1)?;
-                let p1 = self.vertex(r[4] ^ mirror, context, depth + 1)?;
-                let p2 = self.vertex(r[4].wrapping_add(2) ^ mirror, context, depth + 1)?;
-                let p3 = self.vertex(r[3].wrapping_add(2) ^ mirror, context, depth + 1)?;
-                let t = variable(r[2], context).wrapping_shl(14);
-                let t2 = multiply(t, t);
-                let t3 = multiply(t2, t);
-                std::array::from_fn(|i| {
-                    let linear = p1[i].wrapping_mul(3).wrapping_sub(p0[i].wrapping_mul(3));
-                    let square = p2[i]
-                        .wrapping_mul(3)
-                        .wrapping_sub(p1[i].wrapping_mul(6))
-                        .wrapping_add(p0[i].wrapping_shl(2));
-                    let cube = p3[i]
-                        .wrapping_sub(p2[i].wrapping_mul(3))
-                        .wrapping_add(p1[i].wrapping_mul(3))
-                        .wrapping_sub(p0[i].wrapping_mul(2));
-                    p0[i]
-                        .wrapping_add(multiply(linear, t).wrapping_mul(2))
-                        .wrapping_add(multiply(square, t2).wrapping_shl(2))
-                        .wrapping_add(multiply(cube, t3).wrapping_shl(3))
-                })
+            19..=22 => self.curve(index, 0, context, depth)?,
+            23 | 24 => {
+                let offset =
+                    crate::model_math::angle_operand(i16::from_le_bytes([r[3], r[4]]), context);
+                self.curve(r[2], offset, context, depth)?
             }
-            11 | 12 | 15..=20 => {
+            11 | 12 | 15..=18 => {
                 let a = self.vertex(r[3] ^ mirror, context, depth + 1)?;
                 let b = self.vertex(r[4] ^ mirror, context, depth + 1)?;
                 match r[0] {
@@ -267,15 +271,7 @@ impl<'a> ObjectCache<'a> {
                         let c = self.vertex(r[2] ^ mirror, context, depth + 1)?;
                         std::array::from_fn(|i| a[i].wrapping_sub(b[i]).wrapping_add(c[i]))
                     }
-                    17 | 18 => std::array::from_fn(|i| a[i].wrapping_add(b[i])),
-                    _ => {
-                        let fraction = variable(r[2], context).wrapping_shl(14);
-                        std::array::from_fn(|i| {
-                            a[i].wrapping_add(
-                                multiply(b[i].wrapping_sub(a[i]), fraction).wrapping_mul(2),
-                            )
-                        })
-                    }
+                    _ => std::array::from_fn(|i| a[i].wrapping_add(b[i])),
                 }
             }
             _ => unreachable!("records validated before evaluation"),
@@ -286,5 +282,53 @@ impl<'a> ObjectCache<'a> {
             self.slots[slot].stamp = 1;
         }
         Ok(value)
+    }
+
+    /// F1477 on the record holding `selector` (mirror bit `selector & 1`), with
+    /// t = (variable(byte 2) + `offset`) << 14. Records 0x13/0x14 interpolate
+    /// P0 = byte 3 to P1 = byte 4; every other record is the cubic through bytes 3,
+    /// 4, 4 + 2 and 3 + 2, whose t^2 term takes 4·P0, as the original computes it.
+    fn curve(
+        &mut self,
+        selector: u8,
+        offset: i32,
+        context: &VertexContext,
+        depth: usize,
+    ) -> Result<[i32; 3], String> {
+        let base = usize::from(selector >> 1) * 6;
+        let r: [u8; 6] = std::array::from_fn(|i| self.records[base + i]);
+        let m = selector & 1;
+        let p0 = self.vertex(r[3] ^ m, context, depth + 1)?;
+        let p1 = self.vertex(r[4] ^ m, context, depth + 1)?;
+        if matches!(r[0], 19 | 20) {
+            let t = variable(r[2], context)
+                .wrapping_add(offset)
+                .wrapping_shl(14);
+            return Ok(std::array::from_fn(|i| {
+                p0[i].wrapping_add(multiply(p1[i].wrapping_sub(p0[i]), t).wrapping_mul(2))
+            }));
+        }
+        let p2 = self.vertex(r[4].wrapping_add(2) ^ m, context, depth + 1)?;
+        let p3 = self.vertex(r[3].wrapping_add(2) ^ m, context, depth + 1)?;
+        let t = variable(r[2], context)
+            .wrapping_add(offset)
+            .wrapping_shl(14);
+        let t2 = multiply(t, t);
+        let t3 = multiply(t2, t);
+        Ok(std::array::from_fn(|i| {
+            let linear = p1[i].wrapping_mul(3).wrapping_sub(p0[i].wrapping_mul(3));
+            let square = p2[i]
+                .wrapping_mul(3)
+                .wrapping_sub(p1[i].wrapping_mul(6))
+                .wrapping_add(p0[i].wrapping_shl(2));
+            let cube = p3[i]
+                .wrapping_sub(p2[i].wrapping_mul(3))
+                .wrapping_add(p1[i].wrapping_mul(3))
+                .wrapping_sub(p0[i].wrapping_mul(2));
+            p0[i]
+                .wrapping_add(multiply(linear, t).wrapping_mul(2))
+                .wrapping_add(multiply(square, t2).wrapping_shl(2))
+                .wrapping_add(multiply(cube, t3).wrapping_shl(3))
+        }))
     }
 }
