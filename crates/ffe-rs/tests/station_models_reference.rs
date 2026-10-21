@@ -131,7 +131,7 @@ fn executed_reference_station_models() {
             );
             emitted.extend(event.context.basis.into_iter().flat_map(i32::to_le_bytes));
         }
-        let (mut p, mut l, mut t, mut s, mut g, mut b) = (0, 0, 0, 0, 0, 0);
+        let (mut p, mut l, mut t, mut s, mut g, mut b, mut c) = (0, 0, 0, 0, 0, 0, 0);
         let (mut points, mut nested) = (Vec::new(), Vec::new());
         let mut projected = std::collections::HashSet::new();
         for offset in &result.commands {
@@ -171,6 +171,19 @@ fn executed_reference_station_models() {
                     nested.push([11, key, 0, 0]);
                 }
                 g += 1;
+            }
+            // F1737 curve entries: key, then the screen points packed x | y << 16 and
+            // the colour as F1326 receives it.
+            if let Some(spline) = result.splines.get(c).filter(|e| e.spline.offset == *offset) {
+                if let (Some(key), Some(points)) = (spline.key, spline.points) {
+                    let [p0, p1, p2, p3] =
+                        points.map(|[x, y]| u32::from(x as u16) | u32::from(y as u16) << 16);
+                    let [r, g, blue] = spline.colour.map(u32::from);
+                    nested.push([14, key, 0, 0]);
+                    nested.push([15, p0, p1, p2]);
+                    nested.push([16, p3, r | g << 8 | blue << 16, 0]);
+                }
+                c += 1;
             }
             if let Some(text) = result.texts.get(t).filter(|e| e.text.offset == *offset) {
                 if !text.culled {

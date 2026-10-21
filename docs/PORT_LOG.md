@@ -4,6 +4,25 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Opcode 22 curves (v0.31)
+
+F1737 (opcode 22) is ten bytes: material word, four vertex bytes (+2..+5) and a
+normal byte (+6). When the normal is not culled it resolves the colour through
+F1692/F1693/F1691 with that normal's colour, projects +5, +4, +3 and +2 through
+F1471 (cache-checked, so the cache is stamped even when nothing is queued), and
+only if all four have view z >= 0x40 allocates a 10-word entry (draw routine
+F1811) keyed by F1777 of +4's view, holding the screen points of +4, +2, +5 and
++3 and the F1326 palette colour. `Spline`/`SplineEmission`/`Primitive::Spline`
+carry it; F1811's drawing is not ported.
+
+The probe hooks F1777, F1778 and F1326 inside F1737 and records the key, the
+packed screen points and the colour as nested events 14-16 (queue event 5);
+`verify-station-models.py` compares them. Over the table the original queues 21
+curve entries in 5 models; all match. Census: **423 of 466** execute; 418
+compared, 0 mismatched (trace `6ffe0c7b…`, Linux LF). The station, station
+queue, text/submodel and vertex-program traces are unchanged. One synthetic test
+added; 172 `#[test]`, 25 ignored, one Unix-only (146 runnable on Windows).
+
 ## 2026-10-21 — Opcode 30 vertex-frame restore (v0.30)
 
 F1767 (opcode 30, two bytes) has three forms. With bit 15 set it calls F1768 with

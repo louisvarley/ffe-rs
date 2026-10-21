@@ -34,7 +34,7 @@ explicit unsupported-command error.
 | 19 | `F1756` | bit branch | 4 | yes | yes | zero-mask branch |
 | 20 | `F1757` | inverse bit branch | 4 | yes | yes | inverse |
 | 21 | `F1697` | nested depth block start/end | 2 | yes | yes (live) | v0.26: without bit 15, F1781 block keyed by F1777 of vertex `code >> 5`'s view; with bit 15, F1782 end. Both close the group. `Order::nested`. |
-| 22 | `F1737` | spline | — | **no** | no | unsupported record form |
+| 22 | `F1737` | four-vertex curve (`Spline`) | 10 | yes | yes (live) | v0.31: word +0 material, bytes +2..+5 vertices, byte +6 normal. Unless the normal is culled: F1692/F1693/F1691 colour, F1471 on +5, +4, +3, +2, and when all four have view z >= 0x40 a 10-word F1811 entry keyed by +4's view (F1777) holding screen points +4, +2, +5, +3. Drawing not ported. |
 | 23 | `F1765` | — | — | **no** | no | unsupported record form |
 | 24 | `F1766` | vertex-pair chain (`Chain`) | 6 + 2k | yes | yes | v0.28: material, F1474 size, 2-byte pairs through the first holding 0x7f. Operand record; drawing not ported. |
 | 25 | `F1771` | align basis with instance direction | 2 | yes | partial | v0.28: bit 15 resets the basis (F1770); otherwise rotation from `VertexContext::direction` via F1467/F1523/F1744 — zero pairs exact, non-zero needs the sqrt table. |
@@ -90,12 +90,11 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.30: **413 of 466** execute, and all that the original completes match
+v0.31: **423 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| decode: opcode 22 (spline) | 10 |
 | vertices: vertex opcode 0x17 (23) | 7 |
 | decode: opcode 28 (unsupported rotation form) | 5 |
 | decode: opcode 18 | 3 |

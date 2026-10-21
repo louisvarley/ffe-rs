@@ -41,6 +41,11 @@ SCOPED_HOOKS = [
         ("FUNC_001777", "trace_polygon_key", 1),          # polygon depth key
         ("FUNC_001778", "trace_polygon_alloc", 1),        # polygon queue allocation
     ]),
+    ("FUNC_001737", "FUNC_001738", [
+        ("FUNC_001777", "trace_spline_key", 1),           # curve depth key
+        ("FUNC_001778", "trace_spline_alloc", 1),         # curve queue allocation
+        ("near [DATA_007629]", "trace_spline_colour", 1),  # F1326 after the entry is filled
+    ]),
     ("FUNC_001749", "FUNC_001751", [
         ("near [DATA_007727]", "trace_submodel_vertex", 5),  # F1471 projected vertex
         ("near [DATA_007756]", "trace_submodel_model", 1),   # F1538 model descriptor

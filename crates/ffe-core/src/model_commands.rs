@@ -156,6 +156,19 @@ pub struct Chain {
     pub pairs: Vec<[u8; 2]>,
 }
 
+/// F1737 operands (opcode 22): a curve through four projected vertices, drawn by
+/// F1811 from its queue entry. Ten bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spline {
+    pub offset: usize,
+    pub material: u16,
+    /// Bytes +2..+5. F1737 projects them in reverse order (+5 first) and stores
+    /// screen points +4, +2, +5, +3; the entry is keyed by +4's view.
+    pub vertices: [u8; 4],
+    /// Byte +6: the normal whose cull flag skips the curve and whose colour lights it.
+    pub normal: u8,
+}
+
 /// F1762 colour operands: 6 bytes, or 20 when byte 3 selects an alternative.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Colour {
@@ -191,6 +204,7 @@ pub struct Program {
     pub surfaces: Vec<Surface>,
     pub beams: Vec<Beam>,
     pub chains: Vec<Chain>,
+    pub splines: Vec<Spline>,
     /// Bytes after the program's final terminator that belong to the model's
     /// declaration block but are not commands.
     pub trailing: usize,
@@ -256,6 +270,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     let mut surfaces = Vec::new();
     let mut beams = Vec::new();
     let mut chains = Vec::new();
+    let mut splines = Vec::new();
     let mut branches = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -272,6 +287,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             6 => crate::model_depth::decode(&bytes[offset..])?.1,
             9 => 8,
             17 => 14,
+            22 => 10,
             25 | 30 => 2,
             // Material, size, then 2-byte pairs through the first one holding 0x7f.
             24 => {
@@ -467,6 +483,25 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             }
             thrusters.push(thruster);
         }
+        if opcode == 22 {
+            let payload = &bytes[offset + 2..offset + 10];
+            let spline = Spline {
+                offset,
+                material: word(payload, 0)?,
+                vertices: [payload[2], payload[3], payload[4], payload[5]],
+                normal: payload[6],
+            };
+            if spline
+                .vertices
+                .iter()
+                .any(|v| u32::from(*v) >= vertex_count)
+            {
+                return Err(format!(
+                    "Spline references external/out-of-range vertex at {offset:#x}."
+                ));
+            }
+            splines.push(spline);
+        }
         if opcode == 17 {
             let payload = &bytes[offset + 2..offset + 14];
             let beam = Beam {
@@ -631,6 +666,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         surfaces,
         beams,
         chains,
+        splines,
         trailing: 0,
     })
 }

@@ -10,7 +10,7 @@ use crate::model::variable;
 use crate::model::VertexContext;
 use crate::model_commands::{
     arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Polygon,
-    Submodel, Surface, Text, Thruster, VisibilityContext,
+    Spline, Submodel, Surface, Text, Thruster, VisibilityContext,
 };
 use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
@@ -72,6 +72,19 @@ pub struct PolygonEmission {
     pub polygon: Polygon,
     pub key: Option<u32>,
     pub context: VertexContext,
+}
+
+/// A curve queued by F1737 (opcode 22). `points` are the screen points of vertex
+/// bytes +4, +2, +5, +3 in entry order; `key` is +4's depth key. Both are `None`
+/// when the normal is culled or any of the four is nearer than z = 0x40, and the
+/// original queues nothing. F1811's drawing is not ported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SplineEmission {
+    pub spline: Spline,
+    pub key: Option<u32>,
+    pub points: Option<[[i16; 2]; 4]>,
+    /// F1692/F1693/F1691 colour; zero when culled (not computed).
+    pub colour: [u8; 3],
 }
 
 /// A thruster operand event (F1738). Its glow/line queueing (depth-scaled width,
@@ -143,6 +156,7 @@ pub enum QueueEvent {
     Polygon(u32),
     Point(u32),
     Line(u32),
+    Spline(u32),
 }
 
 /// One render-order entry.
@@ -152,6 +166,7 @@ pub enum Primitive {
     Polygon(PolygonEmission),
     Point(PointEmission),
     Line(LineEmission),
+    Spline(SplineEmission),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -176,6 +191,8 @@ pub struct Execution {
     pub thrusters: Vec<ThrusterEmission>,
     /// Curved surfaces in command order; never in [`Self::ordered`].
     pub surfaces: Vec<SurfaceEmission>,
+    /// Curves in command order ([`execute_live`] only).
+    pub splines: Vec<SplineEmission>,
     /// Nested depth block boundaries in command order ([`execute_live`] only).
     pub blocks: Vec<BlockEmission>,
     /// Final normal entry 0 colour if a colour command wrote it during this run.
@@ -473,6 +490,7 @@ fn execute_inner(
         polygons: Vec::new(),
         thrusters: Vec::new(),
         surfaces: Vec::new(),
+        splines: Vec::new(),
         blocks: Vec::new(),
         normal_zero_colour: None,
         queue: Vec::new(),
@@ -601,6 +619,57 @@ fn execute_inner(
                         queue.push(key, Primitive::Polygon(emission))?;
                         result.queue.push(QueueEvent::Polygon(key));
                     }
+                }
+                Some(command.size as i32)
+            }
+            22 => {
+                let Some(live) = working_vertices.as_mut() else {
+                    return Err(format!(
+                        "Unsupported executed command {code:#06x} at {offset:#x}."
+                    ));
+                };
+                for spline in program.splines.iter().filter(|e| e.offset == offset) {
+                    let normal = visibility
+                        .normals
+                        .get(usize::from(spline.normal))
+                        .ok_or_else(|| {
+                            format!("Spline at {offset:#x} references an out-of-range normal.")
+                        })?;
+                    let mut emission = SplineEmission {
+                        spline: spline.clone(),
+                        key: None,
+                        points: None,
+                        colour: [0; 3],
+                    };
+                    if !normal.culled {
+                        let lighting = match (spline.normal, result.normal_zero_colour) {
+                            (0, Some(rgb)) => rgb,
+                            _ => normal.colour,
+                        };
+                        emission.colour = resolve_colour(spline.material, working.colour, lighting);
+                        // F1471 on +5, +4, +3, +2 (cache-checked), then the near test.
+                        let mut resolved = [None; 4];
+                        for slot in (0..4).rev() {
+                            resolved[slot] = Some(live.resolve(
+                                spline.vertices[slot] as i8,
+                                &working,
+                                instance.position,
+                                instance.generation,
+                                true,
+                            )?);
+                        }
+                        let [b2, b3, b4, b5] = resolved.map(Option::unwrap);
+                        if [b2, b3, b4, b5].iter().all(|v| v.view[2] >= 0x40) {
+                            let key = model_depth::key(b4.view, instance.key_scale);
+                            emission.key = Some(key);
+                            emission.points = Some([b4.screen, b2.screen, b5.screen, b3.screen]);
+                            if let Some(queue) = order.as_mut() {
+                                queue.push(key, Primitive::Spline(emission.clone()))?;
+                                result.queue.push(QueueEvent::Spline(key));
+                            }
+                        }
+                    }
+                    result.splines.push(emission);
                 }
                 Some(command.size as i32)
             }

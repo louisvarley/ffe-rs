@@ -168,6 +168,28 @@ unsigned long trace_polygon_key(void *instance, const long *view)
     nested_event(11,key,0,0);
     return key;
 }
+/* F1737 (opcode 22): key, allocation, then the filled entry when F1326 converts its
+   colour. Screen words are packed x | y << 16; the palette value is not modelled. */
+static unsigned long *spline_entry;
+unsigned long trace_spline_key(void *instance, const long *view)
+{
+    unsigned long key=ref_depth_key(instance,view);
+    nested_event(14,key,0,0);
+    return key;
+}
+unsigned long *trace_spline_alloc(long words, unsigned long key, long force)
+{
+    if (queue_mode) queue_event(5,0,key);
+    spline_entry=ref_order_allocate(words,key,force);
+    return spline_entry;
+}
+#define SPLINE_POINT(i) ((spline_entry[1+2*(i)]&0xffff)|(spline_entry[2+2*(i)]<<16))
+unsigned long trace_spline_colour(unsigned long colour)
+{
+    nested_event(15,SPLINE_POINT(0),SPLINE_POINT(1),SPLINE_POINT(2));
+    nested_event(16,SPLINE_POINT(3),colour&0xffffff,0);
+    return 0;
+}
 long *trace_text_vertex(void *instance, long index) { nested_event(1,(unsigned char)index,0,0); return nested_station ? ref_view_vertex(instance,(signed char)index) : nested_vertex; }
 long *trace_text_font(long selector) { nested_event(2,(unsigned long)selector,0,0); return nested_descriptor; }
 void trace_text_frame(void *child, void *instance, long word) { (void)child; (void)instance; nested_event(3,(unsigned long)word,0,0); }

@@ -1077,3 +1077,51 @@ fn opcode_30_restores_the_vertex_frame_from_the_basis() {
         assert_eq!(context, before);
     }
 }
+
+#[test]
+fn opcode_22_queues_a_curve_keyed_by_its_third_vertex_byte() {
+    // Material 0x0123, vertex bytes +2..+5 = 0, 1, 2, 3, normal 0.
+    let stream = bytes(&[22, 0x0123, 0x0100, 0x0302, 0x0000, 0]);
+    let program = ffe_core::model_commands::decode(&stream, 4).unwrap();
+    assert_eq!(program.splines[0].vertices, [0, 1, 2, 3]);
+    assert_eq!(program.commands[0].size, 10);
+
+    let run = |z: i32| {
+        let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+        let result = execute_live(
+            &stream,
+            &mut vertices,
+            &mut VertexContext::default(),
+            &visibility(),
+            None,
+            live_instance([0, 0, z], 0, 0),
+            8,
+        )
+        .unwrap();
+        (result, vertices)
+    };
+    let (result, mut vertices) = run(100);
+    let instance = live_instance([0, 0, 100], 0, 0);
+    let resolved: Vec<_> = (0..4)
+        .map(|i| {
+            vertices
+                .resolve(i, &VertexContext::default(), instance.position, 2, true)
+                .unwrap()
+        })
+        .collect();
+    let spline = &result.splines[0];
+    assert_eq!(
+        spline.points,
+        Some([2, 0, 3, 1].map(|i: usize| resolved[i].screen))
+    );
+    let key = ffe_core::model_depth::key(resolved[2].view, 0);
+    assert_eq!(spline.key, Some(key));
+    assert_eq!(spline.colour, [1, 2, 3]);
+    assert_eq!(result.ordered_keys, [key]);
+    assert!(matches!(result.ordered[0], Primitive::Spline(_)));
+
+    // Vertices 0 and 1 are nearer than z = 0x40 without the offset: nothing queued.
+    let (near, _) = run(0);
+    assert_eq!(near.splines[0].key, None);
+    assert!(near.ordered.is_empty());
+}
