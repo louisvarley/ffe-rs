@@ -4,6 +4,18 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Opcode 15 sound requests (v0.36)
+
+F1759 (opcode 15, two bytes) sums the absolute instance position components
+(+0x4..+0xc), divides unsigned by 0x20000 and, below 63, calls F1908 with sample
+`code >> 5 & 15` and volume 63 minus that distance. It changes no model state.
+`SoundEmission` records the request; playback is not ported. The probe hooks
+F1908 inside F1759 (nested event 18). Model 250's request (sample 0, volume 63)
+matches; census **439 of 466**; 434 compared, 0 mismatched (trace `4bcf902e…`,
+Linux LF). Opcode 16 replaces 15 as the unsupported example in the transactional
+test. One synthetic test added; 177 `#[test]`, 25 ignored, one Unix-only (151
+runnable on Windows).
+
 ## 2026-10-21 — Opcode 30 light points with no points (v0.35)
 
 F1769 (opcode 30 `0x801e`) loops over the count in global word 4 (+0xa4 of the

@@ -297,6 +297,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             4 | 8 => 10,
             6 => crate::model_depth::decode(&bytes[offset..])?.1,
             9 => 8,
+            15 => 2,
             17 => 14,
             18 => 4,
             22 => 10,

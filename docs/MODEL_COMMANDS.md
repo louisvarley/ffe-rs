@@ -27,7 +27,7 @@ explicit unsupported-command error.
 | 12 | `F1755` | inverse visibility branch | 4 | yes | yes | F1751 inverse |
 | 13 | `F1758` | arithmetic | 4 | yes | yes | 16 operations; trig needs the sine table |
 | 14 | `F1749` | child-model call (via `F1750`) | 4 or 8 | yes | yes | verified v0.14: model `code >> 5`, +0 vertex, word +0 frame; byte 1 bit 7 adds +2..+5 extra vertices (order +4,+2,+3,+5, `0x7f` ends). Operand event; child not executed. Earlier "text (second form)" label was wrong. |
-| 15 | `F1759` | — | — | **no** | no | unsupported record form |
+| 15 | `F1759` | sound request | 2 | yes | yes | v0.36: sample `code >> 5 & 15` at volume 63 − (\|x\| + \|y\| + \|z\|) / 0x20000 of the instance position when positive (`SoundEmission`); F1908 playback not ported. |
 | 16 | `F1815` | — | — | **no** | no | unsupported record form |
 | 17 | `F1760` | two-vertex shape (`Beam`) | 14 | yes | yes | v0.28: word +0 material, word +2 vertices (low/high byte), words +4..+10 to F1761. Operand record; drawing not ported. |
 | 18 | `F1763` | screen label (`Label`) | 4 | yes | yes (live) | v0.34: vertex `code >> 5`, word +0 string. F1764 projects the vertex (F1471) and, inside x 2..=317 / y 4..=149, queues a 4-word F1812 entry (string, screen point, pick id 0) keyed by its view. Text drawing and the pointer pick test are not ported. |
@@ -90,7 +90,7 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.35: **438 of 466** execute, and all that the original completes match
+v0.36: **439 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Remaining blockers:
 
 | Blocker (first failing stage) | Models |

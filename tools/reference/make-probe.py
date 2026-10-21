@@ -41,6 +41,9 @@ SCOPED_HOOKS = [
         ("FUNC_001777", "trace_polygon_key", 1),          # polygon depth key
         ("FUNC_001778", "trace_polygon_alloc", 1),        # polygon queue allocation
     ]),
+    ("FUNC_001759", "FUNC_001760", [
+        ("FUNC_001908_SoundPlaySampleLinVol", "trace_sound", 1),  # opcode 15 sample
+    ]),
     ("FUNC_001764", "FUNC_001765", [
         ("FUNC_001777", "trace_label_key", 1),            # label depth key
         ("FUNC_001778", "trace_label_alloc", 1),          # label queue allocation

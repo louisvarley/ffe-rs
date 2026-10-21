@@ -173,6 +173,10 @@ fn executed_reference_station_models() {
                 }
                 g += 1;
             }
+            // F1759 sound requests: sample and volume.
+            for sound in result.sounds.iter().filter(|e| e.offset == *offset) {
+                nested.push([18, u32::from(sound.sample), u32::from(sound.volume), 0]);
+            }
             // F1764 label entries: key and the screen dword (x | y << 16).
             if let Some(label) = result
                 .labels

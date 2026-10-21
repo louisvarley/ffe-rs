@@ -83,9 +83,9 @@ fn execution_is_transactional_for_budget_arithmetic_unsupported_alias_and_rotati
             "unsigned division by zero",
         ),
         (
-            vec![13, 0x00c8, 15, 0],
+            vec![13, 0x00c8, 16, 0],
             8,
-            "Unsupported command 0x000f at 0x4",
+            "Unsupported command 0x0010 at 0x4",
         ),
         (
             vec![13, 0x00c8, 13, 0x00d2, 0],
@@ -1196,4 +1196,28 @@ fn opcode_18_queues_a_label_only_inside_the_screen_window() {
     assert!(aside.ordered.is_empty());
     // A vertex beyond the model is rejected.
     assert!(ffe_core::model_commands::decode(&bytes(&[(4 << 5) | 18, 0, 0]), 4).is_err());
+}
+
+#[test]
+fn opcode_15_requests_a_sound_whose_volume_falls_with_instance_distance() {
+    let stream = bytes(&[(5 << 5) | 15, 0]);
+    let run = |position: [i32; 3]| {
+        let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+        execute_live(
+            &stream,
+            &mut vertices,
+            &mut VertexContext::default(),
+            &visibility(),
+            None,
+            live_instance(position, 0, 0),
+            8,
+        )
+        .unwrap()
+        .sounds
+    };
+    let near = run([0, 0, 100]);
+    assert_eq!((near[0].sample, near[0].volume), (5, 63));
+    // |x| + |y| + |z| = 62 * 0x20000 leaves volume 1; 63 * 0x20000 plays nothing.
+    assert_eq!(run([-31 * 0x20000, 0, 31 * 0x20000])[0].volume, 1);
+    assert!(run([0, -63 * 0x20000, 0]).is_empty());
 }

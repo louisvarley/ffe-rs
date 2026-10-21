@@ -74,6 +74,16 @@ pub struct PolygonEmission {
     pub context: VertexContext,
 }
 
+/// A sound request (opcode 15, F1759): sample `code >> 5 & 15` at volume
+/// 63 - (|x| + |y| + |z|) / 0x20000 of the instance position, only when that is
+/// positive. Playback (F1908) is not ported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SoundEmission {
+    pub offset: usize,
+    pub sample: u8,
+    pub volume: u8,
+}
+
 /// A label (opcode 18, F1763/F1764). The vertex is projected (F1471); `key` is
 /// `None` unless its screen point lies within x 2..=317, y 4..=149, when F1764
 /// queues a 4-word F1812 text entry. F1764's pointer pick test is not modelled.
@@ -205,6 +215,8 @@ pub struct Execution {
     pub surfaces: Vec<SurfaceEmission>,
     /// Curves in command order ([`execute_live`] only).
     pub splines: Vec<SplineEmission>,
+    /// Sound requests in command order; never in [`Self::ordered`].
+    pub sounds: Vec<SoundEmission>,
     /// Labels in command order ([`execute_live`] only).
     pub labels: Vec<LabelEmission>,
     /// Nested depth block boundaries in command order ([`execute_live`] only).
@@ -506,6 +518,7 @@ fn execute_inner(
         surfaces: Vec::new(),
         splines: Vec::new(),
         labels: Vec::new(),
+        sounds: Vec::new(),
         blocks: Vec::new(),
         normal_zero_colour: None,
         queue: Vec::new(),
@@ -634,6 +647,21 @@ fn execute_inner(
                         queue.push(key, Primitive::Polygon(emission))?;
                         result.queue.push(QueueEvent::Polygon(key));
                     }
+                }
+                Some(command.size as i32)
+            }
+            15 => {
+                let distance = instance
+                    .position
+                    .iter()
+                    .fold(0u32, |sum, c| sum.wrapping_add(c.wrapping_abs() as u32))
+                    / 0x20000;
+                if distance < 63 {
+                    result.sounds.push(SoundEmission {
+                        offset,
+                        sample: (code >> 5 & 15) as u8,
+                        volume: (63 - distance) as u8,
+                    });
                 }
                 Some(command.size as i32)
             }

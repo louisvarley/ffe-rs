@@ -168,6 +168,8 @@ unsigned long trace_polygon_key(void *instance, const long *view)
     nested_event(11,key,0,0);
     return key;
 }
+/* F1759 (opcode 15): the sample and volume it would play; no sound in the adapter. */
+void trace_sound(long sample, long volume) { nested_event(18,(unsigned long)sample,(unsigned long)volume,0); }
 /* F1764 (opcode 18 labels): key with the projected screen dword just before the view. */
 unsigned long trace_label_key(void *instance, const long *view)
 {
