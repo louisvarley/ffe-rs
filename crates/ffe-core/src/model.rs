@@ -75,6 +75,13 @@ pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
             0..=2 | 9 | 10 => &[],
             5..=8 => &record[4..5],
             11 | 12 | 17..=20 => &record[3..5],
+            // Curve control points are bytes 3 and 4 and those plus 2 (mirror-adjusted).
+            21 | 22 => &[
+                record[3],
+                record[4],
+                record[3].wrapping_add(2),
+                record[4].wrapping_add(2),
+            ],
             15 | 16 => &record[2..5],
             opcode => {
                 return Err(format!(
@@ -223,6 +230,33 @@ impl<'a> ObjectCache<'a> {
                 self.slots[pair].stamp = 1;
                 self.slots[pair + 1].stamp = 1;
                 self.slots[slot].object
+            }
+            21 | 22 => {
+                // F1477 cubic: P0 = byte3, P1 = byte4, P2 = byte4 + 2, P3 = byte3 + 2
+                // (each XOR the mirror bit), t = variable(byte2) << 14. The P0 factor of
+                // the t^2 term is 4, as the original computes it.
+                let p0 = self.vertex(r[3] ^ mirror, context, depth + 1)?;
+                let p1 = self.vertex(r[4] ^ mirror, context, depth + 1)?;
+                let p2 = self.vertex(r[4].wrapping_add(2) ^ mirror, context, depth + 1)?;
+                let p3 = self.vertex(r[3].wrapping_add(2) ^ mirror, context, depth + 1)?;
+                let t = variable(r[2], context).wrapping_shl(14);
+                let t2 = multiply(t, t);
+                let t3 = multiply(t2, t);
+                std::array::from_fn(|i| {
+                    let linear = p1[i].wrapping_mul(3).wrapping_sub(p0[i].wrapping_mul(3));
+                    let square = p2[i]
+                        .wrapping_mul(3)
+                        .wrapping_sub(p1[i].wrapping_mul(6))
+                        .wrapping_add(p0[i].wrapping_shl(2));
+                    let cube = p3[i]
+                        .wrapping_sub(p2[i].wrapping_mul(3))
+                        .wrapping_add(p1[i].wrapping_mul(3))
+                        .wrapping_sub(p0[i].wrapping_mul(2));
+                    p0[i]
+                        .wrapping_add(multiply(linear, t).wrapping_mul(2))
+                        .wrapping_add(multiply(square, t2).wrapping_shl(2))
+                        .wrapping_add(multiply(cube, t3).wrapping_shl(3))
+                })
             }
             11 | 12 | 15..=20 => {
                 let a = self.vertex(r[3] ^ mirror, context, depth + 1)?;

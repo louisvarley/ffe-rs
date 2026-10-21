@@ -549,6 +549,35 @@ static int jitter_vertex_vectors(int only)
     return 0;
 }
 
+static int vertex_program_vector(int index)
+{
+    static unsigned long instance[0x160/4], globals[0x120/4];
+    static long vertices[256*9], coordinates[128*3];
+    unsigned long *model,i;
+    fprintf(stderr,"JJFFE vertex-program-v1: every vertex of one model slot through F1472/F1478 in index order, cache-checked like command callers; identity frame, descriptor scale, start-up F1476 seed. No commands or projection.\n");
+    if(index<0 || index>465) fail("model index outside the table");
+    model=ref_model(index);
+    if(!model || model[2]==0 || model[2]>128) { printf("{\"model\":%d,\"null\":1}\n",index); return 0; }
+    memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));memset(vertices,0,sizeof(vertices));
+    ref_vertex_buffer=vertices+128*9;
+    instance[0x14/4]=2147483647;instance[0x24/4]=2147483647;instance[0x34/4]=2147483647;
+    instance[0xf0/4]=1;
+    instance[0x148/4]=model[5];
+    instance[0x14c/4]=(unsigned long)globals;
+    instance[0x150/4]=model[1];
+    ref_jitter_a=0x12345678UL;ref_jitter_b=0x456789abUL;
+    for (i=0;i<model[2];++i) {
+        long *vertex=ref_vertex_buffer+i*9;
+        if(!vertex[5]) vertex=ref_vertex(instance,(int)i);
+        memcpy(coordinates+i*3,vertex+6,12);
+    }
+    if(getenv("FFE_VERTEX_DUMP")) for(i=0;i<model[2];++i) fprintf(stderr,"v%lu %ld %ld %ld\n",i,coordinates[i*3],coordinates[i*3+1],coordinates[i*3+2]);
+    printf("{\"model\":%d,\"vertices\":%lu,\"records\":\"%016llx\",\"coordinates\":\"%016llx\",\"state\":[%lu,%lu]}\n",
+        index,model[2],(unsigned long long)fingerprint((const unsigned char *)model[1],model[2]/2*6),
+        (unsigned long long)fingerprint((unsigned char *)coordinates,model[2]*12),ref_jitter_a,ref_jitter_b);
+    return 0;
+}
+
 static int normal_vectors(void)
 {
     static const int models[]={74,75};
@@ -1373,6 +1402,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--models")) return model_vectors();
     if (argc == 2 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(-1);
     if (argc == 3 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(atoi(argv[2]));
+    if (argc == 3 && !strcmp(argv[1], "--vertex-program")) return vertex_program_vector(atoi(argv[2]));
     state_mode = argc == 3 && !strcmp(argv[1], "--state");
     if (argc != 2 && !state_mode)
         fail("usage: jjffe-smoke <frames> | --state <frames> | --vectors | --font | --blit | --models");

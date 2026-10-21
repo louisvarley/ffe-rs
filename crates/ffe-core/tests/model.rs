@@ -129,3 +129,37 @@ fn jittered_pairs_draw_three_offsets_once_and_swap_them_for_the_mirror() {
     assert_eq!(jitter(&mut s), 0x0001_0000);
     assert_eq!(s, [3, 0x0001_0000]);
 }
+
+#[test]
+fn curve_vertices_follow_the_original_cubic_including_its_four_p0_term() {
+    use ffe_core::model::{evaluate, multiply, variable};
+    // Pairs 0..3: literal points; pair 4: curve on bytes 3 = 0, 4 = 2, so
+    // P0 = v0, P1 = v2, P2 = v(2 + 2) = v4, P3 = v(0 + 2) = v2; parameter local 8.
+    let records = [
+        1, 0, 0, 0, 10, 0, //
+        1, 0, 0, 40, 10, 0, //
+        1, 0, 0, 40, 50, 0, //
+        1, 0, 0, 0, 50, 0, //
+        21, 0, 0xc8, 0, 2, 0,
+    ];
+    let mut context = VertexContext::default();
+    context.locals[8] = 0x8000;
+    let points = evaluate(&records, 10, &context).unwrap();
+    let [p0, p1, p2, p3] = [points[0], points[2], points[4], points[2]];
+    let t = variable(0xc8, &context) << 14;
+    let (t2, t3) = (multiply(t, t), multiply(multiply(t, t), t));
+    let expected: [i32; 3] = std::array::from_fn(|i| {
+        p0[i]
+            + multiply(3 * p1[i] - 3 * p0[i], t) * 2
+            + multiply(3 * p2[i] - 6 * p1[i] + 4 * p0[i], t2) * 4
+            + multiply(p3[i] - 3 * p2[i] + 3 * p1[i] - 2 * p0[i], t3) * 8
+    });
+    assert_eq!(points[8], expected);
+    // The mirrored vertex uses the mirrored control points.
+    let [m0, m1] = [points[1], points[3]];
+    assert_eq!(points[9][0] == points[8][0], m0 == p0 && m1 == p1);
+    // Control points beyond the model are rejected.
+    let mut bad = records;
+    bad[28] = 8;
+    assert!(evaluate(&bad, 10, &context).is_err());
+}

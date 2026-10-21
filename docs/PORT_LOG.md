@@ -4,6 +4,35 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Curve vertices and a whole-table vertex oracle (v0.29)
+
+Vertex opcodes 0x15/0x16 (F1478 -> F1477 with a zero extra parameter) compute a
+cubic point from P0 = vertex(byte 3), P1 = vertex(byte 4), P2 = vertex(byte 4 +
+2) and P3 = vertex(byte 3 + 2), each XOR the mirror bit, with
+t = variable(byte 2) << 14 and m(a, b) = (a·b) >> 31, all wrapping:
+
+P0 + 2·m(3P1 − 3P0, t) + 4·m(3P2 − 6P1 + 4P0, t²) + 8·m(P3 − 3P2 + 3P1 − 2P0, t³)
+
+The `4P0` in the t² term is what the original computes (a textbook Bezier has
+3P0); it is ported exactly. Control points are evaluated in that order (it
+matters for jittered sources).
+
+`--vertex-program N` evaluates every vertex of any slot in index order,
+cache-checked like command callers, with the start-up F1476 seed; it also
+reports a hash of the reference build's own vertex records.
+`vertex_program_reference.rs` reads each slot from FIRSTENC.EXE and compares
+every slot the native evaluator supports: **445 of 445 match** (coordinates and
+final generator state). Model 361's vertex records differ between the JJFFE
+declarations (z 64/69) and floppy 1.02 (56/64); it is reported as a data
+difference, not compared. 10 slots crash the original in this setup.
+`verify-vertex-programs.py` checks repeat, three tampered fields and an empty
+trace; Linux LF trace `b3ed1b7d…`.
+
+Census: **405 of 466** execute natively; all 400 that the original completes
+match in command order. One synthetic test added; 170 `#[test]`, 25 ignored,
+one Unix-only (144 runnable on Windows). Also added `build.bat` (debug and
+release builds of `ffe-rs`/`ffe-tools`).
+
 ## 2026-10-21 — Opcodes 17, 24 and 25 (v0.28)
 
 - **17 (F1760 -> F1761)**: 14 bytes; word +0 material, word +2 two vertices
