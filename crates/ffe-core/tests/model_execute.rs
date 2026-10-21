@@ -1125,3 +1125,29 @@ fn opcode_22_queues_a_curve_keyed_by_its_third_vertex_byte() {
     assert_eq!(near.splines[0].key, None);
     assert!(near.ordered.is_empty());
 }
+
+#[test]
+fn opcode_28_0xc000_builds_the_basis_from_three_object_vertices() {
+    // Vertices 0, 2, 1 as A, B, C.
+    let stream = bytes(&[0xc01c, 0x0200, 0x0001, 0]);
+    let program = ffe_core::model_commands::decode(&stream, 4).unwrap();
+    assert_eq!(program.commands[0].size, 6);
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let mut context = VertexContext::default();
+    execute_live(
+        &stream,
+        &mut vertices,
+        &mut context,
+        &visibility(),
+        None,
+        live_instance([0, 0, 100], 0, 0),
+        8,
+    )
+    .unwrap();
+    let mut object = |i| vertices.object(i, &VertexContext::default()).unwrap();
+    let [a, b, c] = [object(0), object(2), object(1)];
+    assert_eq!(context.basis, ffe_core::model_math::vertex_basis(a, b, c));
+    assert_ne!(context.basis, ffe_core::model::IDENTITY);
+    // A vertex beyond the model is rejected when decoding.
+    assert!(ffe_core::model_commands::decode(&bytes(&[0xc01c, 0x0204, 0x0001, 0]), 4).is_err());
+}

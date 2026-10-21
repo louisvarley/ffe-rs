@@ -152,3 +152,26 @@ fn trig_arithmetic_commits_low_word_only_and_missing_table_preserves_locals() {
         assert_eq!(context.locals[3], i32::from(expected));
     }
 }
+
+#[test]
+fn square_root_length_and_vertex_basis_follow_the_original_integer_steps() {
+    use ffe_core::model_math::{fraction, length, square_root, vertex_basis};
+    // F1502 is approximate and never returns below 0xffff: every final trial
+    // succeeds for a zero input.
+    assert_eq!(square_root(0), 0xffff);
+    assert_eq!(square_root(4), 114_687);
+    assert_eq!(square_root(1 << 30), 1_518_500_252);
+    assert_eq!(square_root(u32::MAX), u32::MAX);
+    // F1466 is exact for these and never below the largest component.
+    assert_eq!(length([3, 4, 0]), 5);
+    assert_eq!(length([300_000, -400_000, 0]), 500_000);
+    assert_eq!(length([0, 0, i32::MIN]), 0x8000_0000);
+    // F1523 saturates instead of dividing when the quotient would overflow.
+    assert_eq!(fraction(1, 0), u32::MAX);
+    assert_eq!(fraction(1, 2), 1 << 30);
+    // z along +z, x = (C - A) x z, y = z x x.
+    assert_eq!(
+        vertex_basis([0, 0, 0], [0, 0, 100], [100, 0, 0]),
+        [0, -2126008811, 0, 2104959219, 0, 0, 0, 0, 2126221433]
+    );
+}

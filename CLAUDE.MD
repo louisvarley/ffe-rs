@@ -33,8 +33,8 @@ command order. V0.21 adds complex polygons (opcode 5) and v0.22 jittered vertice
 (opcode 27), v0.25 curved surfaces (opcode 31), v0.26 nested depth blocks
 (opcode 21), v0.27 trailing declaration data, v0.28 opcodes 17/24/25, v0.29 curve vertices
 (0x15/0x16) and a whole-table vertex oracle, v0.30 opcode 30 frame restore, v0.31
-opcode 22 curves, v0.32 offset curve vertices: 423 models now execute and all 418 the original completes
-match.
+opcode 22 curves, v0.32 offset curve vertices, v0.33 vertex-defined basis (opcode 28
+`0xc000`): 435 models now execute and all 430 the original completes match.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.
@@ -818,7 +818,7 @@ whole-program in command order, and v0.18 ports the F1708/F1712 face queueing
 (cull, textured guard, outcode rejection, vertex-a key) verified against the
 original's queue. V0.19 imports any model slot (generated extents, 466 slots
 including the null slot 149) and adds `ffe-tools model-census`. The next single
-task is the largest census blocker (opcodes 28/18, vertex opcodes 3/4/13; see
+task is the largest census blocker (opcode 18, vertex opcodes 3/4/13, validation of external vertex references; see
 docs/MODEL_COMMANDS.md) and a whole-table queue oracle (v0.21-v0.26 ported
 opcodes 5, 9, 21, 27, 31 and vertex opcodes 7/8; the command-order oracle checks
 every newly executable model). For each, first add an original handler probe and

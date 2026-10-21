@@ -86,6 +86,20 @@ impl<'a> Vertices<'a> {
         self.objects.slots.len()
     }
 
+    /// F1472 behind the callers' cache check: the object-space position, evaluated
+    /// (and stamped 1) only on a zero stamp. Transactional like [`Self::resolve`].
+    pub fn object(&mut self, index: i8, context: &VertexContext) -> Result<[i32; 3], String> {
+        let slot =
+            usize::try_from(index).map_err(|_| "External negative vertex index.".to_owned())?;
+        if slot >= self.objects.slots.len() || context.scale > 31 {
+            return Err("Invalid live vertex index or scale.".to_owned());
+        }
+        let mut working = self.objects.clone();
+        let object = working.vertex(index as u8, context, 0)?;
+        self.objects = working;
+        Ok(object)
+    }
+
     /// F1470 translates every call without updating the stamp; F1471 projects and stamps.
     /// Only a zero stamp re-evaluates the object, exactly as F1478 dependencies do.
     /// A matching generation bypasses both, as original command callers do.

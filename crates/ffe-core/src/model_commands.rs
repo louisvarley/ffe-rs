@@ -350,7 +350,19 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                     20
                 }
             }
-            28 if code & 0xc000 != 0xc000 => 4,
+            // F1741 0xc000: basis from vertex bytes +2, +3, +4 (object space); six bytes.
+            28 if code & 0xc000 == 0xc000 => {
+                let vertices = bytes
+                    .get(offset + 2..offset + 5)
+                    .ok_or("Truncated vertex basis command.")?;
+                if vertices.iter().any(|v| u32::from(*v) >= vertex_count) {
+                    return Err(format!(
+                        "Vertex basis references external/out-of-range vertex at {offset:#x}."
+                    ));
+                }
+                6
+            }
+            28 => 4,
             _ => return Err(format!("Unsupported command {code:#06x} at {offset:#x}.")),
         };
         if offset + size > bytes.len() {

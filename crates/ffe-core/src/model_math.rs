@@ -1,6 +1,99 @@
 //! Integer trigonometry and local basis rotation used by model commands.
 use crate::model::{multiply, variable, VertexContext};
 
+/// F1502: the original's bit-by-bit square root (`sqrt(x) << 16`, truncated).
+pub fn square_root(x: u32) -> u32 {
+    let mut step = 0u32;
+    let mut bit = 0x8000_0000u32;
+    while bit > x {
+        step += 1;
+        bit >>= 2;
+    }
+    let (mut root, mut accumulated) = (0u32, 0u32);
+    while step <= 15 {
+        let trial = (root >> (step.wrapping_sub(1) & 31))
+            .wrapping_add(accumulated)
+            .wrapping_add(0x8000_0000 >> (2 * step));
+        if trial <= x {
+            accumulated = trial;
+            root = root.wrapping_add(0x8000_0000 >> step);
+        }
+        step += 1;
+    }
+    while step <= 31 {
+        let trial = (root >> (step - 1)).wrapping_add(accumulated);
+        if trial <= x {
+            accumulated = trial;
+            root = root.wrapping_add(0x8000_0000 >> step);
+        }
+        step += 1;
+    }
+    root
+}
+
+/// F1466: vector length, normalised by the highest set bit, never shorter than
+/// the largest absolute component (unsigned comparisons, as the original).
+pub fn length(vector: [i32; 3]) -> u32 {
+    let absolute = vector.map(i32::wrapping_abs);
+    let bits = absolute.iter().fold(0u32, |a, v| a | *v as u32);
+    // F1656: index of the highest set bit, zero for zero.
+    let msb = 31u32.saturating_sub(bits.leading_zeros()) as i32;
+    let shift = 30 - msb;
+    let scaled = absolute.map(|v| v.wrapping_shl(shift as u32));
+    let sum = scaled
+        .iter()
+        .fold(0i32, |a, v| a.wrapping_add(multiply(*v, *v) >> 2));
+    let mut result = if shift > 0 {
+        square_root(sum as u32) >> ((shift - 1) & 31)
+    } else {
+        square_root(sum as u32).wrapping_mul(2)
+    };
+    for value in absolute {
+        result = result.max(value as u32);
+    }
+    result
+}
+
+/// F1523: unsigned `(a << 31) / b`, saturating to `u32::MAX` when it would overflow.
+pub fn fraction(a: u32, b: u32) -> u32 {
+    if a >> 1 >= b {
+        u32::MAX
+    } else {
+        ((u64::from(a) << 31) / u64::from(b)) as u32
+    }
+}
+
+/// F1741 normalisation: each component divided by `length + 1` through F1523,
+/// keeping its sign.
+fn normalise(vector: [i32; 3]) -> [i32; 3] {
+    let scale = length(vector).wrapping_add(1);
+    vector.map(|c| {
+        if c < 0 {
+            (fraction(c.wrapping_neg() as u32, scale) as i32).wrapping_neg()
+        } else {
+            fraction(c as u32, scale) as i32
+        }
+    })
+}
+
+/// F1741 0xc000: basis rows from object-space vertices A, B, C. z = |B - A|, x =
+/// |(C - A) x z|, y = z x x, written row by row exactly as the original orders them.
+pub fn vertex_basis(a: [i32; 3], b: [i32; 3], c: [i32; 3]) -> [i32; 9] {
+    let z = normalise(std::array::from_fn(|i| b[i].wrapping_sub(a[i])));
+    let d: [i32; 3] = std::array::from_fn(|i| c[i].wrapping_sub(a[i]));
+    let x = normalise([
+        multiply(d[1], z[2]).wrapping_sub(multiply(d[2], z[1])),
+        multiply(d[2], z[0]).wrapping_sub(multiply(d[0], z[2])),
+        multiply(d[0], z[1]).wrapping_sub(multiply(d[1], z[0])),
+    ]);
+    let y = [
+        multiply(z[1], x[2]).wrapping_sub(multiply(z[2], x[1])),
+        multiply(z[2], x[0]).wrapping_sub(multiply(z[0], x[2])),
+        multiply(z[0], x[1]).wrapping_sub(multiply(z[1], x[0])),
+    ];
+    [x[0], x[1], x[2], y[0], y[1], y[2], z[0], z[1], z[2]]
+}
+
 /// F1474's packed signed angle is distinct from the byte variable decoder.
 pub fn angle_operand(encoded: i16, context: &VertexContext) -> i32 {
     if encoded as u16 & 0xc0 >= 0x80 {

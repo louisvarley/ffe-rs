@@ -4,6 +4,29 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Vertex-defined basis, opcode 28 `0xc000` (v0.33)
+
+F1741's `0xc000` form is six bytes: vertices A, B, C at bytes +2..+4, each read
+as an object position through F1472 behind a non-zero-stamp check
+(`Vertices::object`). It writes the basis rows z = norm(B − A), then
+x = norm((C − A) × z), then y = z × x (unnormalised), all with F1521 products.
+norm divides each component's magnitude by F1466(v) + 1 through F1523 and
+restores the sign.
+
+Three helpers are ported literally into `model_math`: F1502 `square_root`, a
+bit-by-bit root that is approximate (≈ sqrt(x)·2^15.5) and returns 0xffff for
+zero; F1466 `length`, which shifts the absolute components by 30 − msb, sums
+their Q31 squares / 4, roots and shifts back, and never returns less than the
+largest component; F1523 `fraction`, unsigned (a << 31) / b, saturating to
+`u32::MAX` when a / 2 >= b. F1467 (opcode 25's table root) is a different
+routine and is still not imported.
+
+Census: **435 of 466** execute; `verify-station-models.py` compares 430 with 0
+mismatched (trace unchanged, `6ffe0c7b…`). Among them, models 351, 353, 356, 357
+and 359 finish with non-axis-aligned bases (e.g. `[-1970604551, 0, -853274219]`
+for row x of 351) that match exactly. Two synthetic tests added; 175 `#[test]`,
+25 ignored, one Unix-only (149 runnable on Windows).
+
 ## 2026-10-21 — Offset curve vertices 0x17/0x18 (v0.32)
 
 F1478 sends vertex opcodes 0x17/0x18 to F1477 with the *unsigned byte 2* as the

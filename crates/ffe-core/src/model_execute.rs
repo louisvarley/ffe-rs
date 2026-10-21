@@ -929,6 +929,19 @@ fn execute_inner(
                 }
                 branch
             }
+            // F1741 0xc000: the basis from three vertices' object positions, each
+            // through F1472 behind a cache check, in byte order.
+            28 if code & 0xc000 == 0xc000 => {
+                let Some(live) = working_vertices.as_mut() else {
+                    return Err(format!(
+                        "Unsupported executed command {code:#06x} at {offset:#x}."
+                    ));
+                };
+                let [a, b, c] = [payload[0], payload[1], payload[2]]
+                    .map(|index| live.object(index as i8, &working));
+                working.basis = crate::model_math::vertex_basis(a?, b?, c?);
+                Some(command.size as i32)
+            }
             28 => {
                 let table =
                     table.ok_or("Model rotation execution needs the original sine table.")?;
