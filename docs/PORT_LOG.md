@@ -4,6 +4,25 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-21 — Data after the final terminator (v0.27)
+
+18 models failed with "lacks a final terminator" and 8 with "opcode 0": their
+declaration blocks carry data after the program's last terminator (for example
+model 58: a child call, its operand, the terminator, then `0x07d4 0x1f40`). The
+decoder swept the whole extent and read that data as commands. `decode` now
+tries the whole extent first and otherwise takes the longest prefix that ends
+in a terminator and decodes strictly with every branch inside it; the rest is
+`Program::trailing`. A zero word that is not a record boundary cannot satisfy
+this (the record spanning it would be truncated), a branch into the data
+rejects the prefix, and with no valid prefix the original error is reported.
+Size/count bounds apply to the whole input first. The cache build is
+byte-identical.
+
+Census: **368 of 466** execute natively; all 367 the original completes match.
+One synthetic test added (167 `#[test]`, 24 ignored, one Unix-only; 142
+runnable on Windows). Top blockers: opcode 17 (16), 25 (15), vertex opcode
+0x15 (13), 24 (10), 22 (9), 30 (5).
+
 ## 2026-10-21 — Nested depth blocks (opcode 21, v0.26)
 
 F1697 is a 2-byte command. Without bit 15 it resolves vertex `(code >> 5) & 0xff`

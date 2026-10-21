@@ -167,6 +167,9 @@ pub struct Program {
     pub polygons: Vec<Polygon>,
     pub thrusters: Vec<Thruster>,
     pub surfaces: Vec<Surface>,
+    /// Bytes after the program's final terminator that belong to the model's
+    /// declaration block but are not commands.
+    pub trailing: usize,
 }
 
 fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
@@ -179,6 +182,35 @@ fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
 /// Decode every physical record, including records after conditional/block terminators.
 /// Only known station-stream forms are accepted; no byte scanning for "likely" polygons.
 pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
+    if bytes.is_empty()
+        || bytes.len() > 16384
+        || bytes.len() % 2 != 0
+        || vertex_count == 0
+        || vertex_count > 128
+        || vertex_count % 2 != 0
+    {
+        return Err("Invalid bounded model command stream/count.".to_owned());
+    }
+    let error = match decode_prefix(bytes, vertex_count) {
+        Ok(program) => return Ok(program),
+        Err(error) => error,
+    };
+    // Some declaration blocks carry data after the final terminator. The program is
+    // the longest prefix that ends in a terminator and decodes with every branch
+    // inside it; a zero word that is not a record boundary cannot satisfy that.
+    for end in (2..bytes.len()).step_by(2).rev() {
+        if bytes[end - 2..end] != [0, 0] {
+            continue;
+        }
+        if let Ok(mut program) = decode_prefix(&bytes[..end], vertex_count) {
+            program.trailing = bytes.len() - end;
+            return Ok(program);
+        }
+    }
+    Err(error)
+}
+
+fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     if bytes.is_empty()
         || bytes.len() > 16384
         || bytes.len() % 2 != 0
@@ -518,6 +550,7 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         polygons,
         thrusters,
         surfaces,
+        trailing: 0,
     })
 }
 

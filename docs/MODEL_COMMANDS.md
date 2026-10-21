@@ -90,19 +90,21 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.26: **317 of 466** execute, and all that the original completes match
+v0.27: **368 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Top remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
-| decode: Model command stream lacks a final terminator. | 18 |
-| decode: opcode 17 | 17 |
+| decode: opcode 17 | 16 |
 | decode: opcode 25 | 15 |
-| decode: opcode 24 | 15 |
-| vertices: unsupported opcode 0x15. | 13 |
-| decode: opcode 22 | 9 |
-| decode: opcode 0 | 8 |
-| decode: opcode 16 | 6 |
+| vertices: vertex opcode 0x15 (21) | 13 |
+| decode: opcode 24 | 10 |
+| decode: opcode 22 (spline) | 9 |
+| decode: opcode 30 | 5 |
+| other vertex-record errors | ~10 |
+
+Some declaration blocks hold data after the final terminator; the decoder takes
+the longest self-contained prefix (`Program::trailing`, v0.27).
 
 Vertex opcodes supported: 0-2, 5-12, 15-20 (7/8 since v0.22). Not yet: 3/4,
 13/14 (screen-space midpoints), 21/22 and 23/24 (F1477 forms).

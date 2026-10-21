@@ -177,3 +177,25 @@ fn bit_branches_distinguish_zero_mask_shift_wrapping_negative_offsets_and_return
     assert_eq!(material(0x4123).rgb, [0, 0, 0]);
     assert_eq!(material(0x4123).texture, 0x123);
 }
+
+#[test]
+fn declaration_data_after_the_final_terminator_is_not_decoded_as_commands() {
+    let words = |w: &[u16]| -> Vec<u8> { w.iter().flat_map(|v| v.to_le_bytes()).collect() };
+    // A line, the terminator, then two data words that are not a valid command.
+    let program = decode(&words(&[2, 0x0456, 0x0201, 0, 0x07d4, 0x1f40]), 6).unwrap();
+    assert_eq!(program.trailing, 4);
+    assert_eq!(program.commands.len(), 2);
+    assert_eq!(program.lines.len(), 1);
+    // Data ending in zero words: the longest valid prefix still ends at a terminator.
+    let program = decode(&words(&[0x070e, 0, 0, 0x07d4, 0x1f40]), 6).unwrap();
+    assert_eq!(
+        (program.commands.len(), program.trailing),
+        (2, 4),
+        "submodel + terminator"
+    );
+    // A branch into the data region makes every prefix invalid.
+    let into_data = words(&[0x004b, 0x0000, 0, 0x07d4, 0x1f40]);
+    assert!(decode(&into_data, 6).is_err());
+    // Without any terminator nothing is guessed.
+    assert!(decode(&words(&[2, 0x0456, 0x0201, 0x07d4]), 6).is_err());
+}

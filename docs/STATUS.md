@@ -70,13 +70,14 @@ capture produced by two repeat runs of the local reference.
 | v0.24 coloured child calls | `Submodel::{material, scale}`, `ChildScale`, opcode 27 | `model_execute.rs` (+1) | `verify-station-models.py` (F1687 cull hook) | — | 277 of 466 models execute; all the original completes match |
 | v0.25 curved surfaces | `model_commands::Surface`, `SurfaceEmission` | `model_execute.rs` (+1) | `verify-station-models.py` | — | opcode 31 operand events (F1823 entry list); 312 of 466 models execute; all the original completes match |
 | v0.26 nested depth blocks | `Order::nested`, opcode 21, `Execution.blocks`, `QueueEvent::Nested` | `model_order.rs` (+1), `model_execute.rs` (+1) | `verify-station-models.py` (block keys) | — | 317 of 466 models execute; all the original completes match; nested sort composition not yet oracle-checked |
+| v0.27 trailing declaration data | `model_commands::decode` (longest self-contained prefix), `Program::trailing` | `model_commands.rs` (+1) | `verify-station-models.py` | — | 368 of 466 models execute; all the original completes match |
 
 Facts verified on 2026-10-21:
 
-- `cargo test --workspace --locked` passes. 166 `#[test]` functions total; 24 are
+- `cargo test --workspace --locked` passes. 167 `#[test]` functions total; 24 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **141 runnable synthetic tests** (142 on Linux).
-- `verify-station-models.py`: all 316 models that both sides complete match the
+  that is **142 runnable synthetic tests** (143 on Linux).
+- `verify-station-models.py`: all 367 models that both sides complete match the
   original command flow and final state.
 - `ffe-tools model-census --game game` (floppy 1.02): 180 of 466 slots execute
   natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
@@ -100,8 +101,8 @@ Facts verified on 2026-10-21:
 Stations are verified for command flow (v0.17) and face draw queues (v0.18);
 the v0.19 census ranks what blocks the other models. Next, in order:
 
-1. The remaining census blockers (see `docs/MODEL_COMMANDS.md`): opcodes 25,
-   24, 17, vertex opcode 0x15, the missing-terminator streams and 22.
+1. The remaining census blockers (see `docs/MODEL_COMMANDS.md`): opcodes 17,
+   25, 24, 22, 30 and vertex opcode 0x15.
 2. Extend the queue oracle (`--station-queue`) to any model so nested blocks,
    polygons and their sort order are compared with the original queue.
 3. Thruster glow queueing (F1666/F1467/F1704) with point/line queueing.
