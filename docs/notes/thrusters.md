@@ -210,6 +210,14 @@ the F1691 colour. The viewer now passes the model scale as the instance's
 too narrow (it also affects depth-offset keys and polygon circles, now as in
 the original).
 
+**Flicker (v0.47).** Vertex B's far point is jittered (opcode 7), so the plume
+only moves if the F1476 state moves between frames. `AnimationInputs::jitter`
+seeds each render and `Frame::jitter` returns the state after it: flight chains
+the stream through the drawn objects once per flight step, and the viewer
+advances it with its clock. In the viewer, **E** sets the engines (off, 2048,
+4095); the test inputs 5/9 put bit 15 in global 15, which ships read as
+reverse thrust (no glow).
+
 ## Not done
 
 - F1616 line rasterisation (F1803) and pixel-level comparison of the glows

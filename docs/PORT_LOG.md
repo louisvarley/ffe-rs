@@ -4,6 +4,35 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Console view clicks and flickering plumes (v0.47)
+
+- **Console view buttons now take clicks.** `main.rs` scaled minifb's
+  `get_mouse_pos` (already divided by the creation scale, 2) by the client
+  size from `get_size` (not divided), so clicks landed at half their position
+  and never reached the icons; it also ignored resizing and the aspect-ratio
+  letterbox. `Screen::logical_point` maps client pixels
+  (`get_unscaled_mouse_pos`) through minifb's own AspectRatioStretch
+  placement to the 320x200 canvas, then `view_button` applies the original hot
+  areas as before. Test: initial size, resized, wide and tall windows.
+- **Thruster plumes flicker.** The plume's far end is a jittered vertex
+  (opcode 7, F1476), but every render started from `JITTER_SEED`, so the plume
+  was frozen. `AnimationInputs::jitter` now seeds the vertex cache and
+  `Frame::jitter` returns the state after the frame. Flight chains one stream
+  through the drawn objects, advancing once per 50 Hz flight step (a paused
+  picture holds still); the F6 viewer advances it with its clock. The stream
+  stays presentation-only (KNOWN_ISSUES, F1476); how far the original's
+  stream moves per frame depends on its other readers, which are not modelled.
+- **Viewer engines.** Nothing set the viewer's thrust, and test inputs 5/9 put
+  bit 15 in global 15, which the ships' preamble treats as reverse thrust, so
+  glows could not be seen in the viewer. E now steps the engines off / 2048 /
+  4095.
+- Checked: every ship's forward thrust limit (cache v12) is 1635 or more, so
+  full throttle always shows a plume; reverse limits are stored negative,
+  giving a negative global 15 and no glow, as in the original.
+
+`docs/STATUS.md` was refreshed and its "Next task" list replaced by the v0.48
+milestone plan ("Every model fully drawn").
+
 ## 2026-10-22 — Engine glows, moving parts and the spinning station
 
 Two parallel tasks, merged with the ships/views work; details in

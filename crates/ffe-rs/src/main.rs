@@ -292,6 +292,10 @@ fn run() -> Result<(), String> {
                 if pressed(Key::T) {
                     viewer.cycle_rate();
                 }
+                // Engines: off / half / full thrust (global 15) for the glows.
+                if pressed(Key::E) {
+                    viewer.cycle_thrust();
+                }
                 viewer.advance((elapsed * 1000.0).round() as u32);
             } else if let Some(lab) = model_lab.as_mut() {
                 if pressed(Key::Tab) {
@@ -344,14 +348,13 @@ fn run() -> Result<(), String> {
                     .map_or(0, |stats| stats.gun_mounts);
                 if state.mode == ffe_rs::flight::Mode::Flight {
                     let mouse_down = window.get_mouse_down(MouseButton::Left);
+                    // Client pixels against the client size: get_mouse_pos divides
+                    // by the creation scale only, which breaks after a resize.
                     let clicked = if mouse_down && !mouse_was_down {
-                        window.get_mouse_pos(MouseMode::Discard).and_then(|(x, y)| {
-                            let (width, height) = window.get_size();
-                            Screen::view_button(
-                                (x * 320.0 / width.max(1) as f32) as i32,
-                                (y * 200.0 / height.max(1) as f32) as i32,
-                            )
-                        })
+                        window
+                            .get_unscaled_mouse_pos(MouseMode::Pass)
+                            .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+                            .and_then(|(x, y)| Screen::view_button(x, y))
                     } else {
                         None
                     };

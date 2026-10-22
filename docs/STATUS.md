@@ -18,8 +18,9 @@ coverage and `docs/notes/` for the feature records.
 - `docs/REFERENCE_HARNESS.md` — how to add a differential test against the executed JJFFE reference.
 - `docs/MODEL_EXECUTION_PLAN.md` — design record for the v0.11 depth/point/line work and its follow-ups.
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
-- `docs/notes/` — per-feature records: polygons, textures, child models and the
-  thruster analysis.
+- `docs/notes/` — per-feature records: polygons, textures, child models,
+  thrusters, animation, views, and the stopped text/surface work
+  (`unfinished-work.md`).
 
 ## Verdict on handoff readiness
 
@@ -33,16 +34,21 @@ release-data difference and the null table entry at 149. Two more slots (94,
 148) execute standalone but stop a child scene on the original's own undefined
 child state.
 
+Since v0.43 the flight view uses that port for real: the original ships
+(cache v11 names, v12 statistics), the original's views and console view
+buttons, cockpit eyes and turrets, verified thruster glows with flickering
+plumes, animated parts and the station spinning at its original rate.
+
 What is *not* done is presentation and gameplay, in this order of readiness:
 
 1. Drawing features the executor already queues but the viewer does not draw:
    text (opcode 10) and labels (18) need the message-string handlers and the
-   font models; curved surfaces (31) need F1876; thruster glows (9) are analysed
-   in `docs/notes/thrusters.md` but were withdrawn unverified.
+   font models; curved surfaces (31) need F1874/F1876. **This is the next
+   milestone (below).**
 2. Rasterisation fidelity: flat polygon fills use a diagnostic scanline fill
-   (the original's F1795/F1796/F1797 spans), and curves draw a stand-in cubic
-   (F1811 is not ported). Both need a pixel-level oracle, not the current
-   command/queue one.
+   (the original's F1795/F1796/F1797 spans), lines use a stand-in (F1616), and
+   curves draw a stand-in cubic (F1811). These need a pixel-level oracle, not
+   the current command/queue one. Also part of the next milestone.
 3. The gameplay slice itself: flight physics, economy, missions, saves and
    audio are still the synthetic scaffolding described in `CLAUDE.MD`; the
    model port is not a substitute for that port.
@@ -57,7 +63,7 @@ Move-Item -Force .\data-new.bin .\data.bin
 python .\tools\reference\verify-all.py
 ```
 
-`verify-all.py` checks that every input exists first and then runs all 26
+`verify-all.py` checks that every input exists first and then runs all 29
 oracles (about five minutes), printing one line each and a final pass/fail. It
 needs the player's own files, NASM and the MSVC x86 tools; none of it is public
 CI. Rebuild the reference after any change to `tools/reference/`, and note that
@@ -118,13 +124,23 @@ capture produced by two repeat runs of the local reference.
 | v0.41 child models in the viewer | `execute_scene`, cache v10 | `model_execute.rs`, `model_viewer.rs` | `verify-child-models.py` (417) | `eaee2ad1…` | the station's rings and side pods draw; 424 of 456 models render |
 | v0.42 screen-space midpoints | `model::{evaluate_entries, screen_midpoint}`, external references in the thruster/beam/chain | `model.rs`, `model_commands.rs` | `verify-vertex-programs.py` (454), `verify-child-models.py` (437), `verify-station-models.py` (445) | `1afe0c45…`, `cbe87dd9…`, `34c1bf26…` | vertex opcodes 3/4 and 13/14; census 446 of 466 |
 | v0.43 zero normals and the return record | `model_normals::validate_records`, `model_commands::decode` | `model_normals.rs`, `model_commands.rs` | `verify-station-models.py` (448), `verify-child-models.py` (440) | `34c1bf26…`, `cbe87dd9…` | F1754 returns for any opcode-0 word; F1480 needs no records for a count of zero; census 449 of 466 |
-| thruster analysis (withdrawn) | none | none | attempted `verify-thrusters.py`, withdrawn | — | `docs/notes/thrusters.md`: the original's three queue paths and the open screen-position question |
+| v0.44 ships and views | `ffe_rs::ships`, `ffe_rs::camera`, cache v11 (model names) | `views.rs` (7) | none (UI; research in `docs/notes/views.md`) | — | real craft (slots 14..=70, Page Up/Down); F1 cycle, F6/F7/F9, console icons; external camera exact |
+| v0.45 thruster glows | `ffe-core::model_thruster`, opcode 9 queueing, `Shape::Glow` | `model_thruster.rs` (5), `model_viewer.rs` (+1) | `verify-thrusters.py` (12,288) + thruster events in the whole-table oracles | `5a8eddfe…` | F1738/F1704/F1805; the first attempt's screen-position difference does not reproduce |
+| v0.45 animation inputs, station spin | `ffe-core::model_animation` | `model_animation.rs` (6) | `verify-animation.py` (2,640 rotation + 4,096 orbital + F1537/F1680/F1683 set-ups) | `10ed4039…`, `2ab63f4d…` | global 0 = GameTics >> 10, global 1 gear/door (F865); F866/F1675 spin, model 74 at speed 10 |
+| v0.46 ship statistics, eyes, turrets | cache v12 `base:ship/stats`, `ShipStats`, `camera` eye/turret views | `views.rs` | none (data imported byte-exact; views from the assembly) | — | thrust limits feed global 15; F8 turret views for > 2 gun mounts |
+| v0.47 console clicks, plume flicker | `Screen::logical_point`, `AnimationInputs::jitter`, `Frame::jitter`, viewer `cycle_thrust` | `views.rs` (+1), `model_viewer.rs` (+1) | none (presentation) | — | view icons now take clicks at any window size; F1476 stream runs across frames so plumes flicker; viewer E key sets engine thrust |
 
-Facts verified on 2026-10-22:
+Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
+for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
-- `cargo test --workspace --locked` passes. 203 `#[test]` functions total; 29 are
-  `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **173 runnable synthetic tests** (174 on Linux).
+- `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
+  `cargo clippy -D warnings`. 237 `#[test]` functions total; 33 are `#[ignore]`
+  local-only reference tests; one more is `#[cfg(unix)]`. On Windows that is
+  **203 runnable synthetic tests** (204 on Linux).
+- `ffe-rs.exe --root . --smoke-frames 60` presents 60 frames with the local
+  cache v12.
+- `verify-all.py`: **29 of 29 oracles pass** (the 26 below plus
+  `verify-thrusters.py`, the deep child-model run and `verify-animation.py`).
 - `verify-station-models.py`: all 448 models that both sides complete match the
   original command flow and final state; `verify-child-models.py`: all 440
   models that execute match, with 1330 child runs and no mismatch;
@@ -148,8 +164,9 @@ Facts verified on 2026-10-22:
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v10 with 1776 assets and 462 of 466 models;
-  `.cache/data-v1..v5-backup.bin` and `data-v10-backup.bin` are retained.
+  `data.bin` is cache v12 (v10's 1776 assets plus the model name table and ship
+  statistics) with 462 of 466 models; `.cache/data-v1..v5-backup.bin` and
+  `data-v10-backup.bin` are retained.
 - `verify-assets.py` checks the whole v10 cache against the executable's own
   bytes and the JJFFE pointer provenance. **34 of the 462 imported models
   differ from the JJFFE 2.8a7 declarations** by a few bytes each: the mod's
@@ -157,38 +174,87 @@ Facts verified on 2026-10-22:
   executable (the original game's data); the local reference build embeds the
   mod's, so the differential oracles compare the models whose bytes agree, and
   they all do.
-- `python tools/reference/verify-all.py` runs the whole set: **26 of 26
-  oracles pass** in about five minutes on this checkout.
+- `python tools/reference/verify-all.py` runs the whole set in about five
+  minutes on this checkout.
 
-## Next task
+## Next milestone: v0.48 "Every model fully drawn"
 
-The model port's own list is nearly empty. In order:
+**Goal.** The F6 viewer and the flight view draw every primitive the executor
+queues, with the original's own rasterisers, verified at the pixel level. Today
+the viewer still reports "NOT DRAWN YET" for labels, skips text and curved
+surfaces, and fills/lines/curves with diagnostic stand-ins. Gameplay is out of
+scope (see "After this milestone").
 
-1. **Thruster glow (opcode 9).** Analysed and documented in
-   `docs/notes/thrusters.md`, **not shipped**: the differential check found the
-   port's screen positions differ for the vertices involved, so resolve that
-   first (model 311, key 53439) rather than starting from the glow arithmetic.
-2. **Text (10) and labels (18).** Both need F1344's message-string handlers
-   (the record's "string" word is an FF-code, e.g. 0x3022, expanded by the
-   `DATA_007649`/`DATA_007652` handler tables, several of which read game state)
-   and the per-glyph font models run through `execute_scene`. Start by probing
-   F1344's arguments and recording which handlers the station's four labels use.
-3. **Curved surfaces (31).** F1876's patch rendering and its queueing; the
-   operand event exists (v0.25).
-4. **Rasterisation oracles.** Replace the diagnostic polygon fill and the
-   stand-in curve with the original's F1795/F1796/F1797 spans and F1811, with a
-   pixel comparison - the current oracles stop at the queue.
-5. The remaining census blockers are all explained (`docs/MODEL_COMMANDS.md`);
-   the F1467 square-root table for opcode 25's direction alignment is the only
-   unported helper, and it only matters once real flight feeds a direction.
+**Work, in order.** Each step lands separately with its notes file, synthetic
+tests and an oracle, as the earlier milestones did.
 
-Run the census after each step; check the CD 1.01 executable with it when
-available.
+1. **Text (opcode 10) and labels (opcode 18).** Ships' registrations and
+   station names.
+   - Probe F1344's arguments first and record which `DATA_007649`/`DATA_007652`
+     string handlers the station's four labels and the ship decals use. The
+     record's string word is an FF-code (e.g. 0x3022), and several handlers
+     read game state; decide per handler whether flight state must supply it
+     or a fixed value is faithful for now.
+   - Port the F1344 expansion, then F1747's glyph placement using the F1539
+     font models through `execute_scene`, then F1764/F1812 for labels.
+   - Import the message strings and font-model data as cache **v13** (future-
+     version tests then use 14).
+   - Oracle: the existing `trace_text_*`/`trace_label_*` probe hooks in
+     `tools/reference/make-probe.py`, extended to a whole-table text/label
+     comparison. Notes: `docs/notes/text.md`.
+2. **Curved surfaces (opcode 31).** The rounded hulls and station parts.
+   - Port F1874/F1876 patch generation and queueing from the existing v0.25
+     operand event (`program.surfaces`).
+   - Oracle: the `trace_spline_*` hooks, compared through the whole-table runs.
+     Notes: `docs/notes/surfaces.md`.
+3. **Lines and curves.** F1616 (DrawLine) for F1803 entries (opcode 2 lines,
+   narrow thrusters) and F1811 for opcode 22 curves, replacing the stand-ins.
+4. **Pixel oracle.** Add a framebuffer mode to the reference adapter that
+   draws one queued scene with the original's F1795/F1796/F1797 spans, F1647
+   textures, F1616 lines and F1811 curves. Then replace the viewer's diagnostic
+   scanline fill and compare whole frames byte for byte.
+
+**Exit criteria.**
+- The viewer draws all 449 executable models with no "NOT DRAWN YET" count and
+  no skipped text or surfaces.
+- The text/label and surface oracles report 0 mismatched across the table, and
+  `verify-all.py` passes with them added.
+- The pixel oracle matches station 74 and at least three ships (one with
+  textures, one with curved surfaces, one with glows) at two distances each,
+  byte for byte, over the fixed low palette. The upper (runtime) palette stays
+  a recorded gap unless it is ported along the way.
+- Census unchanged at 449 of 466 (re-run after each step; also check the CD
+  1.01 executable).
+- Owner check (2 minutes): in M, page to the station and an Eagle and see the
+  name and registration text and rounded parts; in flight, F9 shows the
+  ship's plume flickering under W.
+
+**Risks.** Text handlers that read game state may need small pieces of
+the flight/commander state that do not exist yet; record those as explicit
+placeholders rather than inventing values. The pixel oracle needs the
+adapter's framebuffer capture to run without the original's video set-up.
+
+## After this milestone
+
+The phase-3 gameplay slice (`CLAUDE.MD` section 6) replaces the synthetic
+flight: the player control and thrust vector (F598/F600, which also gives the
+glows their real global 15 instead of the throttle mapping), the original
+flight integration, docking and the station's real position and orientation,
+traced against the reference with scripted inputs. Before porting flight or
+AI, settle the shared F1476 stream question in `docs/KNOWN_ISSUES.md` with the
+owner. Smaller open items: the F1467 square-root table for opcode 25's
+direction alignment (needed once flight feeds a direction), the
+missile/combat views, the Alt-arrow nudge, and the turret angles' starting
+values.
 
 ## Known stale spots
 
 - `README.md` and the executable title still say "0.9" because the product
   version label has not been bumped (cosmetic).
+- `README.md` still describes cache v11 and "26 oracles" in places; the figures
+  above are current (cache v12, 29 oracles).
+- The milestone numbers v0.44-v0.47 were assigned in this file after the fact;
+  `docs/PORT_LOG.md` records that work by date and title.
 - `tests/golden/` still does not exist; it is labelled "planned" in `README.md`.
 - The child oracle's trace SHA-256 is not reproducible across reference
   rebuilds; read that oracle by its counts (440 compared, 0 mismatched).

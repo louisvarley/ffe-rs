@@ -1,5 +1,7 @@
 # Unfinished background work (stopped 2026-10-22)
 
+Both tasks are now steps 1 and 2 of the v0.48 milestone in `docs/STATUS.md`.
+
 Two background agents started after the "Engine glows, moving parts and the
 spinning station" round stopped (most likely at a usage limit) before writing
 any code. Both worked from main at b1d19c4. Neither committed anything; their

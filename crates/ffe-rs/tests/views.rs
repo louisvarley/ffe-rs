@@ -268,6 +268,37 @@ fn console_hot_areas_select_views() {
     assert_eq!(Screen::view_button(10, 10), None);
 }
 
+/// Mouse positions arrive in window client pixels; the 640x480 picture is
+/// stretched to the client area keeping 4:3, with bars on the long side.
+#[test]
+fn window_clicks_map_to_logical_pixels_through_scale_resize_and_letterbox() {
+    // The initial 1280x960 window (scale 2): the front icon's hot area at (150, 170).
+    assert_eq!(
+        Screen::logical_point(600.0, 816.0, (1280, 960)),
+        Some((150, 170))
+    );
+    let button =
+        |x, y, size| Screen::logical_point(x, y, size).and_then(|(x, y)| Screen::view_button(x, y));
+    let front = Some(ViewButton::Select(ViewMode::Front));
+    assert_eq!(button(600.0, 816.0, (1280, 960)), front);
+    // The old mapping (positions already divided by the scale) hit the view.
+    assert_eq!(button(300.0, 408.0, (1280, 960)), None);
+    // Resized to 640x480: the same icon at half the client position.
+    assert_eq!(
+        Screen::logical_point(300.0, 408.0, (640, 480)),
+        Some((150, 170))
+    );
+    assert_eq!(button(300.0, 408.0, (640, 480)), front);
+    // A wide 1920x960 window: 320-pixel bars left and right.
+    assert_eq!(Screen::logical_point(100.0, 500.0, (1920, 960)), None);
+    assert_eq!(button(320.0 + 600.0, 816.0, (1920, 960)), front);
+    // A tall 1280x1160 window: 100-pixel bars top and bottom.
+    assert_eq!(Screen::logical_point(640.0, 50.0, (1280, 1160)), None);
+    assert_eq!(button(600.0, 100.0 + 816.0, (1280, 1160)), front);
+    assert_eq!(Screen::logical_point(1280.0, 959.0, (1280, 960)), None);
+    assert_eq!(Screen::logical_point(10.0, 10.0, (0, 0)), None);
+}
+
 #[test]
 fn ship_list_steps_and_wraps_in_table_order() {
     let ships = ShipList::from_ships(vec![

@@ -86,6 +86,57 @@ fn thruster_glows_follow_the_thrust_global() {
     assert_eq!(glows(&viewer), 0);
 }
 
+/// A plume whose far end (vertices 4/5) is a jittered copy of (0, 0, 40), as
+/// ship plumes are: it holds still while the clock is stopped and flickers as
+/// the F1476 stream continues from frame to frame.
+#[test]
+fn thruster_plumes_flicker_as_the_clock_runs() {
+    let vertices = [
+        1, 0, 0, 0, 10, 0, // 0/1: (0, 0, 10)
+        1, 0, 0, 0, 40, 0, // 2/3: (0, 0, 40)
+        7, 0, 24, 0, 2, 0, // 4/5: vertex 2 plus three draws >> 24
+    ];
+    let commands: Vec<u8> = [9u16, 0x0123, 0x0400, 4000, 0]
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect();
+    let model = ViewerModel::new(5, 6, 4, &vertices, &commands, &[], 2);
+    let mut viewer = ModelViewer::from_models(vec![model], table()).unwrap();
+    // E steps the engines: off, half, full, off.
+    viewer.cycle_thrust();
+    assert_eq!(viewer.thrust(), Some(2048));
+    viewer.cycle_thrust();
+    assert_eq!(viewer.thrust(), Some(4095));
+    let glow = |viewer: &ModelViewer| {
+        let frame = viewer.render().unwrap();
+        let glows: Vec<_> = frame
+            .shapes
+            .into_iter()
+            .filter_map(|shape| match shape {
+                Shape::Glow(glow) => Some(glow.points),
+                _ => None,
+            })
+            .collect();
+        assert!(!glows.is_empty(), "expected a glow");
+        glows
+    };
+    let first = glow(&viewer);
+    assert_eq!(
+        glow(&viewer),
+        first,
+        "a stopped clock holds the plume still"
+    );
+    let mut seen = vec![first];
+    for _ in 0..4 {
+        viewer.advance(20);
+        seen.push(glow(&viewer));
+    }
+    seen.dedup();
+    assert!(seen.len() > 1, "the plume should flicker: {seen:?}");
+    viewer.cycle_thrust();
+    assert_eq!(viewer.thrust(), None);
+}
+
 #[test]
 fn viewer_clock_drives_the_original_animation_inputs() {
     use ffe_core::model_animation::START_TICS;

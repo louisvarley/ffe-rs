@@ -9,7 +9,7 @@
 use crate::ships::ShipStats;
 use crate::textures::TextureSet;
 use ffe_content::{AssetKind, VerifiedCache};
-use ffe_core::model::{evaluate, VertexContext};
+use ffe_core::model::{evaluate, VertexContext, JITTER_SEED};
 use ffe_core::model_animation::{
     door_step, time_word, top_level_locals, START_TICS, TICS_PER_FRAME,
 };
@@ -26,6 +26,7 @@ use ffe_core::model_texture::{
     draw_quad, draw_triangle, flat_colour, quad_uv, textured_colours, textured_path, triangle_uv,
 };
 use ffe_core::model_thruster::{line_colour, Shape as ThrusterShape};
+use std::cell::Cell;
 
 /// One screen-space primitive in draw order (logical 320x158 view coordinates).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +58,9 @@ pub struct Frame {
     pub skipped: usize,
     /// Why child models were left out of this frame, if they were.
     pub children_error: Option<String>,
+    /// The F1476 state after this frame's jittered vertices: the next frame's
+    /// [`AnimationInputs::jitter`] continues the original's single stream.
+    pub jitter: [u32; 2],
 }
 
 pub struct ViewerModel {
@@ -76,6 +80,10 @@ pub struct ViewerModel {
 pub struct AnimationInputs {
     pub globals: [u16; 64],
     pub locals: [i32; 64],
+    /// The F1476 state jittered vertices (opcodes 7/8) draw from, such as the
+    /// flickering far end of a thruster plume. The original keeps one stream
+    /// running across frames; pass the previous [`Frame::jitter`] to animate.
+    pub jitter: [u32; 2],
 }
 
 impl AnimationInputs {
@@ -91,6 +99,7 @@ impl AnimationInputs {
         Self {
             globals,
             locals: top_level_locals(shades).0,
+            jitter: JITTER_SEED,
         }
     }
 
@@ -102,6 +111,7 @@ impl AnimationInputs {
         Self {
             globals,
             locals: [i32::from(value); 64],
+            jitter: JITTER_SEED,
         }
     }
 }
@@ -134,7 +144,15 @@ pub struct ModelViewer {
     /// Global word 15 (the ship's forward thrust, object +0xba); `None` leaves it
     /// to the animation input. See [`ModelViewer::set_thrust`].
     thrust: Option<u16>,
+    /// The F1476 state the next frame draws from, and the state the last
+    /// rendered frame ended with (taken over when the clock advances).
+    jitter: [u32; 2],
+    jitter_next: Cell<[u32; 2]>,
 }
+
+/// The engine settings the viewer's E key steps through: off (the animation
+/// input), half and full plume (4095, where ship models stop lengthening it).
+const THRUST_STEPS: [Option<u16>; 3] = [None, Some(2048), Some(4095)];
 
 /// The model global that ship models read as their forward thrust: global word 15
 /// is object word `+0x9c + 2 * 15` = `+0xba` (F1473), the z word of the vector F598
@@ -329,6 +347,8 @@ impl ModelViewer {
             descriptors: Vec::new(),
             ship_stats: Vec::new(),
             thrust: None,
+            jitter: JITTER_SEED,
+            jitter_next: Cell::new(JITTER_SEED),
         })
     }
 
@@ -400,6 +420,10 @@ impl ModelViewer {
         };
         self.tics = self.tics.wrapping_add(delta);
         (self.door, self.door_state) = door_step(self.door, self.door_state, delta);
+        // A new frame of game time: jittered vertices continue the stream.
+        if delta != 0 {
+            self.jitter = self.jitter_next.get();
+        }
     }
 
     /// Start moving the gear/door word the other way (F865's +0xc9 = 1 opens
@@ -418,10 +442,12 @@ impl ModelViewer {
 
     /// The inputs the selected model runs with now.
     pub fn inputs(&self) -> AnimationInputs {
-        match self.test {
+        let mut inputs = match self.test {
             Some(value) => AnimationInputs::test(value),
             None => AnimationInputs::original(self.tics, self.door, &self.lighting.shades),
-        }
+        };
+        inputs.jitter = self.jitter;
+        inputs
     }
 
     /// A generated station's orientation at game time `tics` (F866: rotation
@@ -456,6 +482,12 @@ impl ModelViewer {
         self.thrust
     }
 
+    /// Step the engines through off, half and full thrust ([`THRUST_STEPS`]).
+    pub fn cycle_thrust(&mut self) {
+        let position = THRUST_STEPS.iter().position(|t| *t == self.thrust);
+        self.thrust = THRUST_STEPS[position.map_or(0, |p| (p + 1) % THRUST_STEPS.len())];
+    }
+
     /// Execute the selected model and project its ordered primitives. A first pass
     /// at the bounding-radius distance measures the drawn extent; the second fits
     /// it to about 70 pixels from the centre, then applies the zoom.
@@ -481,7 +513,9 @@ impl ModelViewer {
         } else {
             first
         };
-        self.render_at(fitted * 2f64.powf(-f64::from(self.zoom) / 4.0))
+        let frame = self.render_at(fitted * 2f64.powf(-f64::from(self.zoom) / 4.0))?;
+        self.jitter_next.set(frame.jitter);
+        Ok(frame)
     }
 
     /// The light direction as a unit vector: the original default light (F960,
@@ -614,6 +648,7 @@ impl ModelViewer {
         )?;
         let mut vertices =
             Vertices::new(&model.vertices, model.vertex_count)?.with_normal_records(&model.normals);
+        vertices.set_jitter(inputs.jitter);
         let mut context = VertexContext {
             matrix,
             basis: matrix,
@@ -689,6 +724,7 @@ impl ModelViewer {
         };
         let mut frame = Frame {
             children_error,
+            jitter: vertices.jitter(),
             ..Frame::default()
         };
         let point =

@@ -4,6 +4,7 @@ use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOG
 use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
 use ffe_content::{AssetKind, VerifiedCache};
+use ffe_core::model::JITTER_SEED;
 use std::io::Cursor;
 
 pub const WIDTH: usize = 640;
@@ -21,6 +22,31 @@ pub struct Screen {
     stars: Vec<[f64; 3]>,
     /// The original console view icons (secondary bitmaps 63..81), when cached.
     icons: Vec<Option<IndexedImage>>,
+    jitter: Jitter,
+}
+
+/// The F1476 stream the flight scene's jittered vertices draw from (the
+/// flickering ends of thruster plumes). The original runs one stream across all
+/// drawn objects and frames; here it advances once per flight step, so a paused
+/// picture holds still, and it never feeds the simulation (KNOWN_ISSUES).
+#[derive(Debug, Clone, Copy)]
+struct Jitter {
+    /// Flight step the current frame's start state belongs to.
+    tick: Option<u64>,
+    /// State the current flight step's first object draws from.
+    start: [u32; 2],
+    /// State after the last drawn object, in draw order.
+    cursor: [u32; 2],
+}
+
+impl Default for Jitter {
+    fn default() -> Self {
+        Self {
+            tick: None,
+            start: JITTER_SEED,
+            cursor: JITTER_SEED,
+        }
+    }
 }
 
 /// Console view buttons (`DATA_005100`): position, off and on bitmap ids, and the
@@ -112,6 +138,36 @@ impl Screen {
         }
     }
 
+    /// The logical 320x200 pixel under a mouse position in window client pixels
+    /// (`Window::get_unscaled_mouse_pos`), for a client area of `size` showing the
+    /// WIDTH x HEIGHT buffer with minifb's aspect-ratio stretch. `None` on the
+    /// letterbox bars or outside the window.
+    pub fn logical_point(x: f32, y: f32, size: (usize, usize)) -> Option<(i32, i32)> {
+        let (window_width, window_height) = (size.0 as i32, size.1 as i32);
+        if window_width <= 0 || window_height <= 0 {
+            return None;
+        }
+        // As minifb's WM_PAINT places the picture.
+        let aspect = WIDTH as f32 / HEIGHT as f32;
+        let (mut width, mut height, mut left, mut top) = (window_width, window_height, 0, 0);
+        if aspect > window_width as f32 / window_height as f32 {
+            height = (window_width as f32 / aspect) as i32;
+            top = (window_height - height) / 2;
+        } else {
+            width = (window_height as f32 * aspect) as i32;
+            left = (window_width - width) / 2;
+        }
+        let (px, py) = (x - left as f32, y - top as f32);
+        if width <= 0 || height <= 0 || px < 0.0 || py < 0.0 {
+            return None;
+        }
+        let (lx, ly) = (
+            (px * LOGICAL_WIDTH as f32 / width as f32) as i32,
+            (py * LOGICAL_HEIGHT as f32 / height as f32) as i32,
+        );
+        (lx < LOGICAL_WIDTH as i32 && ly < LOGICAL_HEIGHT as i32).then_some((lx, ly))
+    }
+
     pub fn from_assets(
         cabin_png: &[u8],
         font: &[u8],
@@ -159,6 +215,7 @@ impl Screen {
             indexed: Box::new([0; 64000]),
             stars,
             icons: Vec::new(),
+            jitter: Jitter::default(),
         })
     }
 
@@ -328,6 +385,13 @@ impl Screen {
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
             let camera = Camera::new(state, &views, stats.as_ref(), scale);
+            // A new flight step continues the stream where the last frame left it;
+            // redrawing the same step replays it.
+            if self.jitter.tick != Some(state.ticks) {
+                self.jitter.tick = Some(state.ticks);
+                self.jitter.start = self.jitter.cursor;
+            }
+            self.jitter.cursor = self.jitter.start;
             for index in 0..self.stars.len() {
                 if let Some((x, y)) = camera.project(self.stars[index], false) {
                     if y < 158 {
@@ -547,9 +611,11 @@ impl Screen {
         let origin = camera.point([0.0; 3]).map(|v| v * scale);
         // The original default light (F960), fixed in flight space.
         let light = camera.direction(scene.light_direction());
-        let inputs = AnimationInputs::original(tics, 0, &scene.shades());
+        let mut inputs = AnimationInputs::original(tics, 0, &scene.shades());
+        inputs.jitter = self.jitter.cursor;
         match scene.render_scene_with(STATION_MODEL, rows, origin, light, &inputs) {
             Ok(frame) => {
+                self.jitter.cursor = frame.jitter;
                 self.draw_shapes(scene, &frame.shapes);
                 true
             }
@@ -574,8 +640,11 @@ impl Screen {
             Some(stats) => stats.thrust_word(state.thrust),
             None => (state.thrust.max(0.0) * 4095.0) as u16,
         };
+        // The plume's far end is a jittered vertex: it flickers as the stream runs.
+        inputs.jitter = self.jitter.cursor;
         match scene.render_scene_with(state.ship, rows, origin, light, &inputs) {
             Ok(frame) => {
+                self.jitter.cursor = frame.jitter;
                 self.draw_shapes(scene, &frame.shapes);
                 true
             }
@@ -618,7 +687,7 @@ impl Screen {
             3,
             1,
             &format!(
-                "MODEL VIEWER {}/{}  MODEL {}",
+                "MODEL VIEWER {}/{}  MODEL {}  M BACK",
                 viewer.selected() + 1,
                 viewer.len(),
                 model.index,
@@ -629,16 +698,20 @@ impl Screen {
         // The animation inputs: the test constant, or the original inputs over
         // the viewer's clock (global 0 = tics >> 10, global 1 = gear/door word).
         let (tics, door, rate) = viewer.clock();
+        let engines = match viewer.thrust() {
+            Some(thrust) => format!("ENGINES {thrust}"),
+            None => "ENGINES OFF".to_owned(),
+        };
         let inputs = match viewer.animation() {
-            Some(value) => format!("TEST INPUT {value}"),
+            Some(value) => format!("TEST INPUT {value}  {engines}"),
             None => format!(
-                "TIME {:04X}  GEAR/DOOR {door:04X}  X{rate}",
+                "TIME {:04X}  DOOR {door:04X}  X{rate}  {engines}",
                 ffe_core::model_animation::time_word(tics)
             ),
         };
         self.text(3, 126, &inputs, 15);
         self.text(3, 137, "PGUP/PGDN MODEL  ARROWS TURN  +/- ZOOM", 15);
-        self.text(3, 148, "0/5/9 TEST  C CLOCK  G GEAR  T RATE  M BACK", 18);
+        self.text(3, 148, "0/5/9 TEST C CLOCK G GEAR T RATE E ENGINES", 18);
         self.present();
     }
 
