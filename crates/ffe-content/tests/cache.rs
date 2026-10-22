@@ -67,7 +67,7 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         read(&bytes).unwrap().asset("base:model-commands/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 8] {
+    for version in [1, 2, 3, 9] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
 
@@ -103,7 +103,7 @@ fn normal_payloads_require_v5_and_validate_counts_and_anchor_bounds() {
         read(&bytes).unwrap().asset("base:model-normals/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 8] {
+    for version in [1, 2, 3, 4, 9] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for count in [0, 1, 3, 6, 258, u32::MAX] {
@@ -134,7 +134,7 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
         read(&bytes).unwrap().asset("base:model-vertices/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 8] {
+    for version in [1, 2, 9] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for (program, count, scale, index) in [
@@ -219,7 +219,7 @@ fn stored_cache_is_deterministic_sorted_and_loads_by_stable_id() {
 fn malformed_manifests_cannot_claim_complete_content_or_escape_paths() {
     let bytes = build(manifest(), assets()).unwrap();
     for (key, value) in [
-        ("format_version", serde_json::json!(8)),
+        ("format_version", serde_json::json!(9)),
         ("format", serde_json::json!("other")),
         ("complete_game_assets", serde_json::json!(true)),
         ("unresolved", serde_json::json!([])),
@@ -339,4 +339,53 @@ fn builder_rejects_duplicate_paths_ids_and_invalid_typed_payloads() {
         }
         assert!(build(manifest(), assets).is_err(), "change {change}");
     }
+}
+
+#[test]
+fn texture_tables_require_v8_and_validate_payloads() {
+    // Synthetic table: every record after the empty record 0 names bitmap 1 with
+    // one colour.
+    let mut table = vec![0u8; 148 * 30];
+    for n in 1..148 {
+        table[n * 30] = 1;
+        table[n * 30 + 4] = 1;
+        table[n * 30 + 8..n * 30 + 11].copy_from_slice(&[1, 2, 3]);
+    }
+    let descriptors = |bytes: Vec<u8>, count: u32| Asset {
+        id: "base:texture/descriptors".to_owned(),
+        path: "textures/descriptors.bin".to_owned(),
+        kind: AssetKind::TextureDescriptors {
+            count,
+            source_offset: 1,
+        },
+        bytes,
+    };
+    let map = |bytes: Vec<u8>| Asset {
+        id: "base:palette/fixed-map".to_owned(),
+        path: "palettes/fixed-map.bin".to_owned(),
+        kind: AssetKind::FixedColourMap { source_offset: 2 },
+        bytes,
+    };
+    let mut m = manifest();
+    m.format_version = 7;
+    assert!(build(m.clone(), vec![descriptors(table.clone(), 148)]).is_err());
+    assert!(build(m.clone(), vec![map(vec![0; 4096])]).is_err());
+    m.format_version = 8;
+    let bytes = build(
+        m.clone(),
+        vec![descriptors(table.clone(), 148), map(vec![1; 4096])],
+    )
+    .unwrap();
+    let cache = read(&bytes).unwrap();
+    assert_eq!(
+        cache.asset("base:texture/descriptors").unwrap(),
+        table.as_slice()
+    );
+    let mut bad = table.clone();
+    bad[34] = 8; // record 1 colour count
+    assert!(build(m.clone(), vec![descriptors(bad, 148)]).is_err());
+    assert!(build(m.clone(), vec![descriptors(table.clone(), 147)]).is_err());
+    assert!(build(m.clone(), vec![descriptors(table[..4410].to_vec(), 148)]).is_err());
+    assert!(build(m.clone(), vec![map(vec![129; 4096])]).is_err());
+    assert!(build(m, vec![map(vec![0; 4095])]).is_err());
 }

@@ -6,3 +6,4 @@ pub mod model_lab;
 pub mod model_viewer;
 pub mod saves;
 pub mod screen;
+pub mod textures;

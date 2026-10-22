@@ -2,8 +2,8 @@ use crate::external::{output_destination, recorded_bytes};
 use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
-    decode_bitmaps, decode_font, decode_model_commands, decode_model_normals,
-    decode_model_vertices, decode_sine_table, BitmapLayout,
+    decode_bitmaps, decode_colour_map, decode_font, decode_model_commands, decode_model_normals,
+    decode_model_vertices, decode_sine_table, decode_texture_descriptors, BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -16,6 +16,16 @@ pub(crate) fn model_layout(profile: &str) -> Result<(u32, u32), String> {
         "ffe-floppy-1.02-en" => Ok((0x0d0cfc, 0x106390)),
         "ffe-cd-1.01-en" => Ok((0x0d0cf8, 0x105334)),
         _ => Err("no verified model layout for this source profile".to_owned()),
+    }
+}
+
+/// Texture descriptor (`DATA_007811`) and 12-bit colour map (`DATA_007770`) RVAs
+/// (v8). Verified byte for byte against JJFFE 2.8a7 for floppy 1.02 only; the CD
+/// 1.01 executable was not available, so its cache omits both tables.
+pub(crate) fn texture_layout(profile: &str) -> Option<(u32, u32)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0x102da8, 0x101b10)),
+        _ => None,
     }
 }
 
@@ -131,6 +141,27 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: model.bytes,
                 });
             }
+            if let Some((descriptor_rva, colour_map_rva)) = texture_layout(profile.id) {
+                let table = decode_texture_descriptors(&bytes, descriptor_rva)?;
+                assets.push(Asset {
+                    id: "base:texture/descriptors".to_owned(),
+                    path: "textures/descriptors.bin".to_owned(),
+                    kind: AssetKind::TextureDescriptors {
+                        count: ffe_core::model_texture::DESCRIPTOR_COUNT as u32,
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+                let map = decode_colour_map(&bytes, colour_map_rva)?;
+                assets.push(Asset {
+                    id: "base:palette/fixed-map".to_owned(),
+                    path: "palettes/fixed-map.bin".to_owned(),
+                    kind: AssetKind::FixedColourMap {
+                        source_offset: map.source_offset as u64,
+                    },
+                    bytes: map.bytes,
+                });
+            }
             let font = decode_font(&bytes, font_rva)?;
             assets.push(Asset {
                 id: "base:font/main".to_owned(),
@@ -204,15 +235,21 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             });
         }
     }
-    // 379 non-model assets plus vertices, commands and normals per imported model.
-    if models < 2 || assets.len() != 379 + 3 * models {
+    // 379 non-model assets (381 with the v8 texture tables) plus vertices, commands
+    // and normals per imported model.
+    let tables = if texture_layout(profile.id).is_some() {
+        2
+    } else {
+        0
+    };
+    if models < 2 || assets.len() != 379 + tables + 3 * models {
         return Err(format!(
             "unexpected imported asset count {} ({models} models); no cache written",
             assets.len()
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 7,
+        format: "ffe-content-cache".to_owned(), format_version: 8,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,
@@ -221,6 +258,11 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         unresolved: vec![
             format!("{models} of {} model vertex/command/normal programs (those that decode), the two bitmap tables, main bitmap font, fixed low palette, external cabins and PCM effects are imported.", ffe_convert::model_extents::MODEL_COUNT),
             "Upper 128 palette colours are runtime state; bitmap RGBA previews and upscale eligibility are not inferred.".to_owned(),
+            if tables == 0 {
+                "Texture descriptors and the 12-bit colour map are not imported: their RVAs are verified for floppy 1.02 only.".to_owned()
+            } else {
+                "Texture descriptors and the 12-bit fixed colour map are imported; textured faces are drawn only by the diagnostic F6 viewer.".to_owned()
+            },
             "Station commands are structurally decoded, not fully executed; submodels, other fonts, gameplay tables, journal, music and optional CD media remain unconverted.".to_owned(),
             "Not a playable game cache or installable graphics pack; patch-output layouts are unsupported.".to_owned(),
         ],

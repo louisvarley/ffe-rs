@@ -36,6 +36,7 @@ SCOPED_HOOKS = [
     ]),
     ("FUNC_001708", "FUNC_001715", [
         ("FUNC_001778", "trace_alloc", 5),                # face queue allocations
+        ("FUNC_001691", "trace_face_colour", 2),          # flat face colour (F1708/F1712)
     ]),
     ("FUNC_001721", "FUNC_001722", [
         ("FUNC_001777", "trace_polygon_key", 1),          # polygon depth key

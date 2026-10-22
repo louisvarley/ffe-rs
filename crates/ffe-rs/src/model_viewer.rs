@@ -1,8 +1,11 @@
 //! F6 model viewer: every imported model executed by the verified port and drawn
 //! in the original render order. A development view, not the faithful renderer:
 //! the camera, light, flat colour mapping and fill are diagnostic choices, and
-//! textures (grey stand-in), polygons, curved surfaces, text, labels and child
-//! models are not drawn.
+//! polygons, curved surfaces, text, labels and child models are not drawn.
+//! Textured faces follow the original F1708/F1712 entry and F1644/F1647
+//! rasterisers with the cache v8 descriptor table (verified, see
+//! `docs/notes/textures.md`); without v8 they show as a lit grey stand-in.
+use crate::textures::TextureSet;
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::{evaluate, VertexContext};
 use ffe_core::model_commands::{material, VisibilityContext};
@@ -10,6 +13,9 @@ use ffe_core::model_execute::{execute_live, resolve_colour, InstanceContext, Pri
 use ffe_core::model_instance::{Vertices, NEAR_SENTINEL};
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::{self, NormalContext};
+use ffe_core::model_texture::{
+    draw_quad, draw_triangle, flat_colour, quad_uv, textured_colours, textured_path, triangle_uv,
+};
 
 /// One screen-space primitive in draw order (logical 320x158 view coordinates).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +23,17 @@ pub enum Shape {
     Fill(Vec<(i32, i32)>, [u8; 3]),
     Line((i32, i32), (i32, i32), [u8; 3]),
     Point((i32, i32), [u8; 3]),
+    Textured(Textured),
+}
+
+/// A textured F1807/F1805 queue entry: screen points in queue order (the face's
+/// vertices v0..), the descriptor's bitmap dword and the slot colours that
+/// `DATA_009252` receives (RGB of the F1326 colours).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Textured {
+    pub points: Vec<(i32, i32)>,
+    pub bitmap: u32,
+    pub slots: Vec<[u8; 3]>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -46,6 +63,7 @@ pub struct ModelViewer {
     pitch: i32,
     zoom: i32,
     animation: u16,
+    textures: TextureSet,
 }
 
 const GENERATION: u32 = 2;
@@ -94,7 +112,50 @@ impl ModelViewer {
                 *normal_count,
             ));
         }
-        Self::from_models(models, table)
+        let mut viewer = Self::from_models(models, table)?;
+        viewer.textures = TextureSet::from_cache(cache);
+        Ok(viewer)
+    }
+
+    /// Use these textures (bitmaps, descriptor table, colour map).
+    pub fn set_textures(&mut self, textures: TextureSet) {
+        self.textures = textures;
+    }
+
+    /// Rasterise a textured shape with the original affine mapping (F1644/F1647
+    /// and the F1650-F1653 spans), calling `plot` with each pixel's RGB.
+    /// Texels without a slot colour (7 and above, never written by face entries;
+    /// stale `DATA_009252` contents in the original) are drawn black, the zeroed
+    /// start-up value. Returns false when the bitmap is missing.
+    pub fn rasterise(&self, shape: &Textured, mut plot: impl FnMut(i32, i32, [u8; 3])) -> bool {
+        let Some(map) = self.textures.map(shape.bitmap & 0xfff) else {
+            return false;
+        };
+        let point = |i: usize| [shape.points[i].0 as i16, shape.points[i].1 as i16];
+        let colour = |texel: u8| {
+            shape
+                .slots
+                .get(usize::from(texel))
+                .copied()
+                .unwrap_or([0; 3])
+        };
+        let plot = |x, y, texel| plot(x, y, colour(texel));
+        match shape.points.len() {
+            3 => draw_triangle(
+                [point(0), point(1), point(2)],
+                triangle_uv(map.width),
+                map,
+                plot,
+            ),
+            4 => draw_quad(
+                [point(0), point(1), point(2), point(3)],
+                quad_uv(map.width, (shape.bitmap >> 12 & 7) as u8),
+                map,
+                plot,
+            ),
+            _ => return false,
+        };
+        true
     }
 
     pub fn from_models(mut models: Vec<ViewerModel>, table: SineTable) -> Result<Self, String> {
@@ -110,6 +171,7 @@ impl ModelViewer {
             pitch: -20,
             zoom: 0,
             animation: 0,
+            textures: TextureSet::default(),
         })
     }
 
@@ -168,6 +230,7 @@ impl ModelViewer {
                 Shape::Fill(points, _) => points.clone(),
                 Shape::Line(a, b, _) => vec![*a, *b],
                 Shape::Point(p, _) => vec![*p],
+                Shape::Textured(textured) => textured.points.clone(),
             })
             .map(|(x, y)| (x - 160).abs().max((y - 79).abs()))
             .max()
@@ -276,11 +339,17 @@ impl ModelViewer {
                     let normal = normals
                         .get(usize::from(face.normal))
                         .ok_or("Face normal outside the evaluated table.")?;
-                    // Texture mapping is not ported: textured faces show as lit grey.
-                    let rgb = rgb(if material(face.material).texture != 0 {
-                        std::array::from_fn(|i| 5 + normal.colour[i])
-                    } else {
-                        resolve_colour(face.material, emission.context.colour, normal.colour)
+                    let textured = material(face.material).texture != 0;
+                    let descriptors = self.textures.descriptors();
+                    let colour = emission.context.colour;
+                    let rgb = rgb(match (textured, descriptors) {
+                        // F1693/F1691 flat colour (the textured path is chosen below).
+                        (true, Some(table)) => {
+                            flat_colour(face.material, colour, normal.colour, table)?
+                        }
+                        // No v8 descriptor table: lit grey stand-in.
+                        (true, None) => std::array::from_fn(|i| 5 + normal.colour[i]),
+                        (false, _) => resolve_colour(face.material, colour, normal.colour),
                     });
                     let mut points = Vec::with_capacity(face.vertices.len());
                     for vertex in &face.vertices {
@@ -291,6 +360,23 @@ impl ModelViewer {
                     }
                     if points.len() != face.vertices.len() {
                         continue;
+                    }
+                    let screens: Vec<[i32; 2]> = points.iter().map(|&(x, y)| [x, y]).collect();
+                    if let Some(table) = descriptors.filter(|_| points.len() >= 3) {
+                        if textured_path(true, face.material, &screens) {
+                            let entry =
+                                textured_colours(face.material, colour, normal.colour, table)?;
+                            frame.shapes.push(Shape::Textured(Textured {
+                                points,
+                                bitmap: entry.bitmap,
+                                slots: entry
+                                    .colours
+                                    .iter()
+                                    .map(|c| self.textures.rgb(*c))
+                                    .collect(),
+                            }));
+                            continue;
+                        }
                     }
                     frame.shapes.push(if points.len() == 2 {
                         Shape::Line(points[0], points[1], rgb)

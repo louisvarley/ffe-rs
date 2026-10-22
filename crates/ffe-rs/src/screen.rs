@@ -403,6 +403,13 @@ impl Screen {
                                 self.frame[*y as usize * 320 + *x as usize] = value(*rgb);
                             }
                         }
+                        Shape::Textured(textured) => {
+                            let frame = &mut self.frame;
+                            // The rasteriser clips to x 0..320, y 0..158 itself.
+                            viewer.rasterise(textured, |x, y, rgb| {
+                                frame[y as usize * 320 + x as usize] = value(rgb);
+                            });
+                        }
                     }
                 }
                 if frame.skipped > 0 {
