@@ -101,7 +101,6 @@ fn normal_import_preserves_mirrored_pair_count_implicit_entries_and_provenance()
         (0x200 + 74 * 4, 0),
         (0x80c, 0),
         (0x80c, 0x4017ff),
-        (0x810, 0),
         (0x810, 3),
         (0x810, 258),
     ] {
@@ -109,6 +108,13 @@ fn normal_import_preserves_mirrored_pair_count_implicit_entries_and_provenance()
         put32(&mut bad, offset, value);
         assert!(decode_model_normals(&bad, 0x1000, 74).is_err());
     }
+    // A declared count of zero is the implicit pair alone: F1480 writes normals
+    // 0 and 1 from the shades and computes no others.
+    let mut implicit = bytes.clone();
+    put32(&mut implicit, 0x810, 0);
+    let normals = decode_model_normals(&implicit, 0x1000, 74).unwrap();
+    assert_eq!(normals.normal_count, 0);
+    assert!(normals.bytes.is_empty());
     let mut bad = bytes.clone();
     bad[0x990] = 2;
     assert!(decode_model_normals(&bad, 0x1000, 74).is_err());

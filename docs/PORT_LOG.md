@@ -4,6 +4,34 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — The last census blockers: zero normals and the return record (v0.43)
+
+Two small pieces of the original's own behaviour were still rejected by the
+port, and both held three models back.
+
+**A declared normal count of zero.** F1480 writes the implicit pair 0 and 1
+from the shades and computes the rest lazily, so a model that declares no
+normals needs no records at all; the importer now accepts a count of zero the
+way it already accepted a count of two with a null pointer. Models 0, 1 and 2
+execute.
+
+**The return record.** F1754 is the return: it clears the dispatcher's flag
+whatever the material bits hold, so *any* word whose opcode is zero ends the
+program. The decoder accepted only the zero word, and its search for the
+program's end (the blocks that carry data after the terminator) looked for the
+same. Both now use the opcode.
+
+**Census 446 -> 449 of 466**; `verify-station-models.py` 445 -> **448 models
+compared, 0 mismatched**; `verify-child-models.py` 437 -> **440 models compared,
+0 mismatched**, with only five left that the port does not execute: 89 (the
+release data differs from the JJFFE declarations), 94 (the original's own
+undefined child state), 148 (a child scale of 32) and 229/319 (top-level
+external references, which the original resolves through null pointers). The
+station-queue, texture and vertex-program traces are unchanged.
+
+The local cache was rebuilt again: 1776 assets, 462 of 466 models. The F6
+viewer now draws **449 of the 466 models** (424 of 456 in v0.41).
+
 ## 2026-10-22 — Screen-space midpoint vertices and the remaining external references (v0.42)
 
 `model::ObjectCache` now runs the original's two remaining vertex opcodes.

@@ -197,13 +197,14 @@ pub fn decode_model_normals(
     let vertices = decode_model_vertices(bytes, table_rva, index)?;
     let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
     let normal_count = dword(bytes, descriptor_offset + 16)?;
-    if !(2..=256).contains(&normal_count) || normal_count % 2 != 0 {
+    if !(0..=256).contains(&normal_count) || normal_count % 2 != 0 {
         return Err("Invalid bounded model normal count.".to_owned());
     }
     let pointer = dword(bytes, descriptor_offset + 12)?;
-    if normal_count == 2 && pointer == 0 {
-        // Only the implicit pair: no explicit records, and the original leaves the
-        // pointer null.
+    if normal_count <= 2 {
+        // Only the implicit pair: F1480 writes normals 0 and 1 from the shades
+        // and computes no others, so a declared count of zero or two needs no
+        // records and the original leaves the pointer null.
         return Ok(EmbeddedModelNormals {
             descriptor_offset,
             source_offset: 0,

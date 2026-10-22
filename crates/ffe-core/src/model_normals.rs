@@ -18,11 +18,14 @@ pub fn validate_records(records: &[u8], count: u32, vertex_count: u32) -> Result
     if vertex_count == 0 || vertex_count > 128 || vertex_count % 2 != 0 {
         return Err("Invalid normal anchor vertex count.".to_owned());
     }
-    if !(2..=256).contains(&count)
-        || count % 2 != 0
-        || records.len() != (count as usize / 2 - 1) * 6
-    {
-        return Err("Expected 2..256 paired normals, with two implicit entries.".to_owned());
+    // F1480 writes the implicit pair 0 and 1 from the shades and computes the
+    // rest lazily, so a declared count of zero or two needs no records.
+    if !(0..=256).contains(&count) || count % 2 != 0 {
+        return Err("Expected 0..256 paired normals, with two implicit entries.".to_owned());
+    }
+    let expected = (count / 2).saturating_sub(1) * 6;
+    if records.len() != expected as usize {
+        return Err("Expected 0..256 paired normals, with two implicit entries.".to_owned());
     }
     for (i, record) in records.chunks_exact(6).enumerate() {
         if u32::from(record[0]) >= vertex_count {

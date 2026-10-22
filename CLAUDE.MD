@@ -47,7 +47,10 @@ original station in the flight view, use the original lighting tables and colour
 packing (cache v9) and draw child models in the viewer and the station (cache
 v10). v0.42 ports the original's screen-space midpoint vertex opcodes (3/4 and
 13/14) and the remaining external vertex references: 446 of 466 models execute
-and 437 models with their children match the original.
+and 437 models with their children match the original. v0.43 accepts a
+declared normal count of zero and the original's return record (any opcode-zero
+word): 449 of 466 models execute and 448 match the original, 440 with their
+children.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.

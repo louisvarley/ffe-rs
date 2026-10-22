@@ -86,18 +86,19 @@ capture produced by two repeat runs of the local reference.
 | v0.40 original lighting and colours | `model_lighting`, cache v9 | `model_lighting.rs` | (lighting tables imported) | — | the default light, the shade table and F1326 colour packing |
 | v0.41 child models in the viewer | `execute_scene`, cache v10 | `model_execute.rs`, `model_viewer.rs` | `verify-child-models.py` (417) | `eaee2ad1…` | the station's rings and side pods draw; 424 of 456 models render |
 | v0.42 screen-space midpoints | `model::{evaluate_entries, screen_midpoint}`, external references in the thruster/beam/chain | `model.rs`, `model_commands.rs` | `verify-vertex-programs.py` (454), `verify-child-models.py` (437), `verify-station-models.py` (445) | `1afe0c45…`, `cbe87dd9…`, `34c1bf26…` | vertex opcodes 3/4 and 13/14; census 446 of 466 |
+| v0.43 zero normals and the return record | `model_normals::validate_records`, `model_commands::decode` | `model_normals.rs`, `model_commands.rs` | `verify-station-models.py` (448), `verify-child-models.py` (440) | `34c1bf26…`, `cbe87dd9…` | F1754 returns for any opcode-0 word; F1480 needs no records for a count of zero; census 449 of 466 |
 
 Facts verified on 2026-10-22:
 
 - `cargo test --workspace --locked` passes. 203 `#[test]` functions total; 29 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
   that is **173 runnable synthetic tests** (174 on Linux).
-- `verify-station-models.py`: all 445 models that both sides complete match the
-  original command flow and final state; `verify-child-models.py`: all 437
+- `verify-station-models.py`: all 448 models that both sides complete match the
+  original command flow and final state; `verify-child-models.py`: all 440
   models that execute match, with 1330 child runs and no mismatch;
   `verify-vertex-programs.py`: all 454 comparable vertex programs match, now
   including every vertex entry's screen position and view position.
-- `ffe-tools model-census --game game` (floppy 1.02): 446 of 466 slots execute
+- `ffe-tools model-census --game game` (floppy 1.02): 449 of 466 slots execute
   natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
 - `tools/reference/build-linux.sh` builds `jjffe-smoke`/`jjffe-commands` under
   `.cache/jjffe-reference-linux/`; their traces, hashed with CRLF endings, match
@@ -112,7 +113,7 @@ Facts verified on 2026-10-22:
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v10 with 1767 assets and 459 of 466 models;
+  `data.bin` is cache v10 with 1776 assets and 462 of 466 models;
   `.cache/data-v1..v5-backup.bin` and `data-v10-backup.bin` are retained.
 
 ## Next task
@@ -121,15 +122,15 @@ Stations are verified for command flow (v0.17) and face draw queues (v0.18);
 the v0.19 census ranks what blocks the other models. Next, in order:
 
 1. The remaining census blockers (see `docs/MODEL_COMMANDS.md`): opcode 30
-   light-point tables, 30 light points, a declared normal count of zero
-   (models 0-2) and the F1467 square-root table for opcode 25 rotations.
+   light-point tables, 30 light points and the F1467 square-root table for
+   opcode 25 rotations. Five models are left, and the original cannot run four
+   of them standalone either.
 2. Thruster glow queueing (F1666/F1467/F1704) with point/line queueing.
-3. **Vertex opcode 0x15** (13 models; F1477 forms) and 23/24.
-4. **Polygon segments** (F1734/F1724/F1730/F1733/F1723/F1736 and their curve
+3. **Polygon segments** (F1734/F1724/F1730/F1733/F1723/F1736 and their curve
    helpers) — needed for outline rasterising and for exact vertex-cache events.
-5. The command-order and queue oracles cover every slot since v0.20 and v0.38
+4. The command-order and queue oracles cover every slot since v0.20 and v0.38
    (`verify-station-models.py`, `verify-child-models.py`).
-6. Primitive colour, rasterisation, and glyph/child execution as before.
+5. Primitive colour, rasterisation, and glyph/child execution as before.
 
 Run the census after each step; check the CD 1.01 executable with it when
 available.

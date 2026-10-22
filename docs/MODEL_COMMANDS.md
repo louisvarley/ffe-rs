@@ -90,18 +90,19 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.42: **446 of 466** execute, and all that the original completes match
+v0.43: **449 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
 | decode: model 89 release program runs past the JJFFE extent (data differs) | 1 |
-| normals: a declared normal count of zero | 3 |
 | execute: an external vertex with no parent instance (the original crashes) | 15 |
 | execute: the original's own undefined child state or an out-of-range child scale | 2 |
 
 Some declaration blocks hold data after the final terminator; the decoder takes
-the longest self-contained prefix (`Program::trailing`, v0.27).
+the longest self-contained prefix (`Program::trailing`, v0.27). F1754 is the
+return: any word whose opcode is zero ends the program, whatever its material
+bits hold (v0.43).
 
 Vertex opcodes supported: 0-2, 3/4 (the screen-space midpoints, v0.42), 5-12,
 13/14 (the screen-space midpoints, v0.42), 15-24 (7/8 since v0.22, 21/22 since

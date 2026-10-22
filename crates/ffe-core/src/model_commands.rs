@@ -260,9 +260,10 @@ pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
     };
     // Some declaration blocks carry data after the final terminator. The program is
     // the longest prefix that ends in a terminator and decodes with every branch
-    // inside it; a zero word that is not a record boundary cannot satisfy that.
+    // inside it; a word that is not a record boundary cannot satisfy that.
     for end in (2..bytes.len()).step_by(2).rev() {
-        if bytes[end - 2..end] != [0, 0] {
+        // F1754 is the return: any word whose opcode is zero ends the program.
+        if bytes[end - 2] & 31 != 0 {
             continue;
         }
         if let Ok(mut program) = decode_prefix(&bytes[..end], vertex_count) {
@@ -303,7 +304,9 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         let code = word(bytes, offset)?;
         let opcode = code & 31;
         let size = match opcode {
-            0 if code == 0 => 2,
+            // F1754 is the return: it clears the dispatcher's flag whatever the
+            // material bits hold.
+            0 => 2,
             1 => 8,
             // Word, normal byte, segment length L, then L segment bytes.
             5 => 6 + usize::from(*bytes.get(offset + 5).ok_or("Truncated polygon command.")?),
@@ -698,7 +701,8 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
         });
         offset += size;
     }
-    if commands.last().is_none_or(|c| c.word != 0) {
+    // F1754 returns for any word whose opcode is zero.
+    if commands.last().is_none_or(|c| c.word & 31 != 0) {
         return Err("Model command stream lacks a final terminator.".to_owned());
     }
     for (source, target) in branches {
