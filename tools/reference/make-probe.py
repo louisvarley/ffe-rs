@@ -40,6 +40,8 @@ SCOPED_HOOKS = [
     ("FUNC_001721", "FUNC_001722", [
         ("FUNC_001777", "trace_polygon_key", 1),          # polygon depth key
         ("FUNC_001778", "trace_polygon_alloc", 1),        # polygon queue allocation
+        ("near [DATA_007629]", "trace_polygon_colour", 1),  # F1326 after the outline is queued
+        ("FUNC_001779", "trace_polygon_abandon", 1),      # flag abandonment (F1813 entry)
     ]),
     ("FUNC_001759", "FUNC_001760", [
         ("FUNC_001908_SoundPlaySampleLinVol", "trace_sound", 1),  # opcode 15 sample

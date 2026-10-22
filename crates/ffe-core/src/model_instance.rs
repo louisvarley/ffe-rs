@@ -48,13 +48,26 @@ impl From<CachedVertex> for Vertex {
 #[derive(Clone)]
 pub struct Vertices<'a> {
     objects: ObjectCache<'a>,
+    normal_records: &'a [u8],
 }
 
 impl<'a> Vertices<'a> {
     pub fn new(records: &'a [u8], count: u32) -> Result<Self, String> {
         Ok(Self {
             objects: ObjectCache::new(records, count)?,
+            normal_records: &[],
         })
+    }
+
+    /// Attach the model's normal records (instance +0x154, six bytes per mirrored
+    /// pair), which polygon circles (F1736) read. Without them a circle is an error.
+    pub fn with_normal_records(mut self, records: &'a [u8]) -> Self {
+        self.normal_records = records;
+        self
+    }
+
+    pub fn normal_records(&self) -> &'a [u8] {
+        self.normal_records
     }
 
     /// Begin another invocation explicitly; context changes do not invalidate legacy slots.

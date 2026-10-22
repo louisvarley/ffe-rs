@@ -8,6 +8,7 @@ pub mod model_instance;
 pub mod model_math;
 pub mod model_normals;
 pub mod model_order;
+pub mod model_polygon;
 
 /// JJFFE's two-word generator. The returned low 16 bits are not the full state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -16,6 +16,7 @@ use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
 use crate::model_math::{angle_operand, SineTable};
 use crate::model_order::Order;
+use crate::model_polygon::{self, Outline};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Emission {
@@ -65,13 +66,23 @@ pub struct SubmodelEmission {
     pub context: VertexContext,
 }
 
-/// A complex-polygon operand event (F1721). `key` is the depth key it was queued
-/// with, or `None` when its normal is culled (the original then skips it).
+/// A complex polygon (F1721). `key` is the depth key it was queued with, or `None`
+/// when its normal is culled (the original then skips it and queues nothing).
+/// `outline` holds the entries its segment handlers queued after the F1794 header
+/// (see [`crate::model_polygon`]); [`crate::model_polygon::edges`] turns them into
+/// the draw routine's edges.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolygonEmission {
     pub polygon: Polygon,
     pub key: Option<u32>,
     pub context: VertexContext,
+    pub outline: Outline,
+    /// F1692/F1693 colour, as F1326 receives it for the F1799 fill; zero when culled
+    /// (not computed). For a textured material (`material(..).texture != 0`) F1691
+    /// also adds bytes +8..+10 of the record at `DATA_007811 + 30 * texture`, which
+    /// for most textures lies beyond that shade table in unrelated legacy data; that
+    /// addition is **not** applied here.
+    pub colour: [u8; 3],
 }
 
 /// A sound request (opcode 15, F1759): sample `code >> 5 & 15` at volume
@@ -617,17 +628,28 @@ fn execute_inner(
                     ));
                 };
                 for polygon in program.polygons.iter().filter(|p| p.offset == offset) {
-                    let culled = visibility
+                    let normal = visibility
                         .normals
                         .get(usize::from(polygon.normal))
                         .ok_or_else(|| {
                             format!("Polygon at {offset:#x} references an out-of-range normal.")
-                        })?
-                        .culled;
-                    // F1721 keys the outline by its first vertex's view (F1470).
-                    let key = if culled {
-                        None
-                    } else {
+                        })?;
+                    let mut emission = PolygonEmission {
+                        polygon: polygon.clone(),
+                        key: None,
+                        context: working.clone(),
+                        outline: Outline::default(),
+                        colour: [0; 3],
+                    };
+                    if !normal.culled {
+                        let lighting = match (polygon.normal, result.normal_zero_colour) {
+                            (0, Some(rgb)) => rgb,
+                            _ => normal.colour,
+                        };
+                        emission.colour =
+                            resolve_colour(polygon.material, working.colour, lighting);
+                        // F1721 keys the outline by its first vertex's view (F1470), then
+                        // runs the segment handlers, which project through F1471.
                         let vertex = live.resolve(
                             polygon.vertex as i8,
                             &working,
@@ -635,13 +657,30 @@ fn execute_inner(
                             instance.generation,
                             false,
                         )?;
-                        Some(model_depth::key(vertex.view, instance.key_scale))
-                    };
-                    let emission = PolygonEmission {
-                        polygon: polygon.clone(),
-                        key,
-                        context: working.clone(),
-                    };
+                        emission.key = Some(model_depth::key(vertex.view, instance.key_scale));
+                        let inputs = model_polygon::Inputs {
+                            matrix: working.matrix,
+                            scale: instance.operand_scale,
+                            normal_records: live.normal_records(),
+                        };
+                        emission.outline = model_polygon::run(
+                            &polygon.segments,
+                            &polygon.segment_bytes,
+                            polygon.flag,
+                            &inputs,
+                            &mut |index| {
+                                live.resolve(
+                                    index as i8,
+                                    &working,
+                                    instance.position,
+                                    instance.generation,
+                                    true,
+                                )
+                            },
+                        )
+                        .map_err(|error| format!("{error} (polygon at {offset:#x})"))?;
+                    }
+                    let key = emission.key;
                     result.polygons.push(emission.clone());
                     if let (Some(key), Some(queue)) = (key, order.as_mut()) {
                         queue.push(key, Primitive::Polygon(emission))?;

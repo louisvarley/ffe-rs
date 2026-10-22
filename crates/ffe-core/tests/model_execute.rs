@@ -769,9 +769,12 @@ fn live_faces_are_queued_by_the_original_cull_guard_and_outcode_rules() {
 
 #[test]
 fn live_polygons_skip_by_their_length_and_queue_by_their_first_segment_vertex() {
-    // Polygon: material 0x0123, normal 1 (bit 7 flag set), L = 4 segment bytes whose
-    // first byte (vertex 2, high bit masked) keys it; then a line on vertices 1/2.
-    let words = [5, 0x0123, 0x0481, 0x0082, 0x0000, 2, 0x0456, 0x0201, 0];
+    // Polygon: material 0x0123, normal 1 (bit 7 flag set), L = 6 segment bytes: an
+    // F1724 edge from vertex 2 (the low byte, which also keys it) to vertex 1, then
+    // the terminator; then a line on vertices 1/2.
+    let words = [
+        5, 0x0123, 0x0681, 0x0402, 0x0001, 0x0000, 2, 0x0456, 0x0201, 0,
+    ];
     let stream = bytes(&words);
     for (culled, queued) in [(false, true), (true, false)] {
         let mut normals = vec![VISIBLE_NORMAL; 2];
@@ -791,7 +794,7 @@ fn live_polygons_skip_by_their_length_and_queue_by_their_first_segment_vertex() 
             8,
         )
         .unwrap();
-        assert_eq!(result.commands, [0, 10, 16], "6 + L bytes, culled or not");
+        assert_eq!(result.commands, [0, 12, 18], "6 + L bytes, culled or not");
         let polygon = &result.polygons[0].polygon;
         assert_eq!(
             (
@@ -802,7 +805,11 @@ fn live_polygons_skip_by_their_length_and_queue_by_their_first_segment_vertex() 
             ),
             (0x0123, 1, true, 2)
         );
-        assert_eq!(polygon.segments, [0x82, 0x00, 0x00, 0x00]);
+        assert_eq!(
+            polygon.segments,
+            [ffe_core::model_polygon::Segment::LineStart { start: 2, end: 1 }]
+        );
+        assert_eq!(polygon.segment_bytes, [0x02, 0x04, 0x01, 0x00, 0x00, 0x00]);
         assert_eq!(result.polygons[0].key.is_some(), queued);
         assert_eq!(
             result
