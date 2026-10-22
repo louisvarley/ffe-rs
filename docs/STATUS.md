@@ -128,17 +128,18 @@ capture produced by two repeat runs of the local reference.
 | v0.45 thruster glows | `ffe-core::model_thruster`, opcode 9 queueing, `Shape::Glow` | `model_thruster.rs` (5), `model_viewer.rs` (+1) | `verify-thrusters.py` (12,288) + thruster events in the whole-table oracles | `5a8eddfe…` | F1738/F1704/F1805; the first attempt's screen-position difference does not reproduce |
 | v0.45 animation inputs, station spin | `ffe-core::model_animation` | `model_animation.rs` (6) | `verify-animation.py` (2,640 rotation + 4,096 orbital + F1537/F1680/F1683 set-ups) | `10ed4039…`, `2ab63f4d…` | global 0 = GameTics >> 10, global 1 gear/door (F865); F866/F1675 spin, model 74 at speed 10 |
 | v0.46 ship statistics, eyes, turrets | cache v12 `base:ship/stats`, `ShipStats`, `camera` eye/turret views | `views.rs` | none (data imported byte-exact; views from the assembly) | — | thrust limits feed global 15; F8 turret views for > 2 gun mounts |
+| v0.48a labels, full string table | `ModelViewer::model_strings`, `Shape::Label`, scanned `decode_model_names`, cache v13 | `model_viewer.rs` (+1), `embedded.rs` (+1), `text_census.rs` (1, ignored) | census: all 6 label codes resolve | — | F1812/F1583 labels drawn at the queued point in font 15; string table scanned to 219 entries (209 in v11/v12 left six codes unresolved) |
 | v0.47 console clicks, plume flicker | `Screen::logical_point`, `AnimationInputs::jitter`, `Frame::jitter`, viewer `cycle_thrust` | `views.rs` (+1), `model_viewer.rs` (+1) | none (presentation) | — | view icons now take clicks at any window size; F1476 stream runs across frames so plumes flicker; viewer E key sets engine thrust |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 237 `#[test]` functions total; 33 are `#[ignore]`
+  `cargo clippy -D warnings`. 239 `#[test]` functions total; 34 are `#[ignore]`
   local-only reference tests; one more is `#[cfg(unix)]`. On Windows that is
-  **203 runnable synthetic tests** (204 on Linux).
-- `ffe-rs.exe --root . --smoke-frames 60` presents 60 frames with the local
-  cache v12.
+  **204 runnable synthetic tests** (205 on Linux).
+- `ffe-rs.exe --root . --smoke-frames 30` presents frames with the local
+  cache v13.
 - `verify-all.py`: **29 of 29 oracles pass** (the 26 below plus
   `verify-thrusters.py`, the deep child-model run and `verify-animation.py`).
 - `verify-station-models.py`: all 448 models that both sides complete match the
@@ -164,9 +165,12 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v12 (v10's 1776 assets plus the model name table and ship
-  statistics) with 462 of 466 models; `.cache/data-v1..v5-backup.bin` and
-  `data-v10-backup.bin` are retained.
+  `data.bin` is cache v13 (1778 assets, 462 of 466 models, 219 model strings);
+  `.cache/data-v1..v5-backup.bin`, `data-v10-backup.bin` and
+  `data-v12-backup.bin` are retained.
+- `text_census` (local-only): 236 text records with 136 codes (130 model
+  strings, all resolvable; `0x3016`, `0x3022`, `0x9c00`-`0x9c03` need handlers);
+  glyph sets 0/1/2 = model slots 0/1/2; 6 labels, all model strings.
 - `verify-assets.py` checks the whole v10 cache against the executable's own
   bytes and the JJFFE pointer provenance. **34 of the 462 imported models
   differ from the JJFFE 2.8a7 declarations** by a few bytes each: the mod's
@@ -190,18 +194,20 @@ tests and an oracle, as the earlier milestones did.
 
 1. **Text (opcode 10) and labels (opcode 18).** Ships' registrations and
    station names.
-   - Probe F1344's arguments first and record which `DATA_007649`/`DATA_007652`
-     string handlers the station's four labels and the ship decals use. The
-     record's string word is an FF-code (e.g. 0x3022), and several handlers
-     read game state; decide per handler whether flight state must supply it
-     or a fixed value is faithful for now.
-   - Port the F1344 expansion, then F1747's glyph placement using the F1539
-     font models through `execute_scene`, then F1764/F1812 for labels.
-   - Import the message strings and font-model data as cache **v13** (future-
-     version tests then use 14).
-   - Oracle: the existing `trace_text_*`/`trace_label_*` probe hooks in
-     `tools/reference/make-probe.py`, extended to a whole-table text/label
-     comparison. Notes: `docs/notes/text.md`.
+   - **Done (v0.48a):** the census and F1344 dispatch are recorded in
+     `docs/notes/text.md`; cache v13 carries the executable's full 219-entry
+     string table (v11/v12 held JJFFE's declared 209, so six codes above 208
+     could not resolve); opcode 18 labels now draw at their queued point in
+     the original font (F1812 -> F1583, colour 15), all six of them resolving.
+   - **Next:** import the per-character glyph program extents (font model
+     descriptor +0x40, outside the font's 10-byte top-level program), port
+     F1747's glyph placement (F1740/F1745 nested frame, F1470 per-character
+     vertex, F1746 pop) and run each glyph program through `execute_scene`.
+     Then add `0x3016`/`0x3022` (the object string at +0x124; `0x3022` also
+     needs the `DATA_007648` width table for F1398's wrap) and `0x9c00`-`0x9c03`
+     (`DATA_005104`).
+   - Oracle: the existing `trace_text_*`/`trace_label_*` probe hooks, extended
+     to a whole-table text/label comparison.
 2. **Curved surfaces (opcode 31).** The rounded hulls and station parts.
    - Port F1874/F1876 patch generation and queueing from the existing v0.25
      operand event (`program.surfaces`).
@@ -225,8 +231,9 @@ tests and an oracle, as the earlier milestones did.
   a recorded gap unless it is ported along the way.
 - Census unchanged at 449 of 466 (re-run after each step; also check the CD
   1.01 executable).
-- Owner check (2 minutes): in M, page to the station and an Eagle and see the
-  name and registration text and rounded parts; in flight, F9 shows the
+- Owner check (2 minutes): in M, page to models 66 and 453 and see their name
+  labels; then to the station and an Eagle and see rounded parts (and, once
+  the glyph step lands, their registration text); in flight, F9 shows the
   ship's plume flickering under W.
 
 **Risks.** Text handlers that read game state may need small pieces of
@@ -255,6 +262,7 @@ values.
   above are current (cache v12, 29 oracles).
 - The milestone numbers v0.44-v0.47 were assigned in this file after the fact;
   `docs/PORT_LOG.md` records that work by date and title.
+- `README.md` still says the cache is v11 in the build section (v13 is current).
 - `tests/golden/` still does not exist; it is labelled "planned" in `README.md`.
 - The child oracle's trace SHA-256 is not reproducible across reference
   rebuilds; read that oracle by its counts (440 compared, 0 mismatched).

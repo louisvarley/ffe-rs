@@ -86,6 +86,30 @@ fn thruster_glows_follow_the_thrust_global() {
     assert_eq!(glows(&viewer), 0);
 }
 
+#[test]
+fn queued_labels_resolve_model_strings_at_their_screen_point() {
+    let vertices = [1, 0, 0, 0, 40, 0];
+    // Opcode 18, vertex 0; model-string code 0x4000; return.
+    let commands: Vec<u8> = [18u16, 0x4000, 0]
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect();
+    let model = ViewerModel::new(5, 2, 4, &vertices, &commands, &[], 2);
+    let mut viewer = ModelViewer::from_models(vec![model], table()).unwrap();
+    let missing = viewer.render().unwrap();
+    assert_eq!(missing.skipped, 1);
+    assert!(missing.shapes.is_empty());
+
+    viewer.set_model_strings(vec![b"LABEL".to_vec()]);
+    let frame = viewer.render().unwrap();
+    assert_eq!(frame.skipped, 0);
+    let [Shape::Label(position, text)] = frame.shapes.as_slice() else {
+        panic!("expected one label: {:?}", frame.shapes);
+    };
+    assert!((2..=317).contains(&position.0) && (4..=149).contains(&position.1));
+    assert_eq!(text, b"LABEL");
+}
+
 /// A plume whose far end (vertices 4/5) is a jittered copy of (0, 0, 40), as
 /// ship plumes are: it holds still while the clock is stopped and flickers as
 /// the F1476 stream continues from frame to frame.

@@ -4,6 +4,45 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Labels, and the string table the text commands index (v0.48a)
+
+Milestone v0.48 step 1, first half. Notes: `docs/notes/text.md`; census:
+`crates/ffe-rs/tests/text_census.rs` (local-only, `FFE_TEXT_CACHE`).
+
+- **The model string table was cut short.** `DATA_004682` is declared with 209
+  pointers in JJFFE 2.8a7, and cache v11 imported exactly those. The release
+  executable's table continues to **219** entries (`police`, the First
+  Encounters logo, the station's `DOCK OTHER SIDE` artwork); the model text
+  and label commands index the same table as `0x4000 | n`, so six codes above
+  `0x40d0` could not resolve. `decode_model_names` now scans pointers while
+  they resolve to a NUL-terminated printable string inside the data section,
+  rejects a table shorter than the declaration (a misplaced RVA), and records
+  the scanned count. Cache **v13** (1778 assets) carries all 219.
+- **Labels (opcode 18) are drawn.** `execute_live` already queued F1812; the
+  viewer now resolves the string as a model string and draws it with the
+  original bitmap font at the projected point in colour 15, clipped to the
+  view, which is what F1812 -> F1583 does. All six labels (models 66 and 453)
+  resolve. Unsupported codes are counted as skipped, not drawn as something
+  else.
+- **The census** settles the scope of the remaining 3D text: 236 text records
+  in 76 models, 130 distinct model-string codes (all resolvable), and only six
+  codes needing handlers (`0x3016` in 50 models, `0x3022` in 10, `0x9c00`-
+  `0x9c03` in models 172/175). The glyph sets are model slots 0/1/2, already
+  imported.
+- **F1344's `0x3016`/`0x3022` read one field.** F1747 fills the StrVars it
+  passes with only `vars+0xc` = object+0x124, and both codes expand that field
+  (the ship's registration); `0x3022` additionally wraps at 35 columns via
+  F1398, which needs the `DATA_007648` width table. No other game state is
+  read by the codes the models use.
+- **Not ported:** F1747's per-character glyph placement (the glyph programs lie
+  outside the font model's 10-byte top-level extent and are not imported), so
+  text records are reported in the viewer status rather than drawn. The
+  mechanism read from the assembly is recorded in `docs/notes/text.md`.
+
+Cache v13 was rebuilt and inspected; the previous v12 cache is retained at
+`.cache/data-v12-backup.bin`. Tests: 204 runnable synthetic tests on Windows
+(+1 embedded scan test, +1 viewer label test), clippy clean.
+
 ## 2026-10-22 — Console view clicks and flickering plumes (v0.47)
 
 - **Console view buttons now take clicks.** `main.rs` scaled minifb's

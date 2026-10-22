@@ -39,6 +39,9 @@ pub enum Shape {
     /// over bitmap 0x123 or 0x65), but left out of the viewer's fit so that the
     /// model keeps its size as the plume grows with thrust.
     Glow(Textured),
+    /// F1812: a model-name-table string in the original bitmap font at the
+    /// label's queued screen point (colour 15, clipped, unshadowed).
+    Label((i32, i32), Vec<u8>),
 }
 
 /// A textured F1807/F1805 queue entry: screen points in queue order (the face's
@@ -54,8 +57,12 @@ pub struct Textured {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub shapes: Vec<Shape>,
-    /// Ordered primitives the viewer does not draw yet (labels).
+    /// Ordered primitives the viewer does not draw yet (labels whose string is
+    /// missing from the cache).
     pub skipped: usize,
+    /// Opcode 10 text records the executor ran but the viewer does not draw yet
+    /// (the glyph programs are not imported or executed).
+    pub texts: usize,
     /// Why child models were left out of this frame, if they were.
     pub children_error: Option<String>,
     /// The F1476 state after this frame's jittered vertices: the next frame's
@@ -141,6 +148,8 @@ pub struct ModelViewer {
     /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
     descriptors: Vec<[i32; 2]>,
     ship_stats: Vec<Option<ShipStats>>,
+    /// `DATA_004682`, split into its NUL-terminated entries (cache v11).
+    model_strings: Vec<Vec<u8>>,
     /// Global word 15 (the ship's forward thrust, object +0xba); `None` leaves it
     /// to the animation input. See [`ModelViewer::set_thrust`].
     thrust: Option<u16>,
@@ -269,6 +278,14 @@ impl ModelViewer {
         if let Some(table) = cache.asset("base:ship/stats") {
             viewer.ship_stats = table.chunks_exact(48).map(ShipStats::from_block).collect();
         }
+        if let Some(table) = cache.asset("base:text/model-names") {
+            let mut strings: Vec<Vec<u8>> =
+                table.split(|byte| *byte == 0).map(<[u8]>::to_vec).collect();
+            if table.last() == Some(&0) {
+                strings.pop();
+            }
+            viewer.model_strings = strings;
+        }
         Ok(viewer)
     }
 
@@ -346,6 +363,7 @@ impl ModelViewer {
             lighting: FALLBACK_LIGHTING,
             descriptors: Vec::new(),
             ship_stats: Vec::new(),
+            model_strings: Vec::new(),
             thrust: None,
             jitter: JITTER_SEED,
             jitter_next: Cell::new(JITTER_SEED),
@@ -482,6 +500,23 @@ impl ModelViewer {
         self.thrust
     }
 
+    /// Supply the F1345 (`0x40xx`) strings to a synthetic viewer.
+    pub fn set_model_strings(&mut self, strings: Vec<Vec<u8>>) {
+        self.model_strings = strings;
+    }
+
+    /// F1343/F1345's direct model-string case. Other FF-code families need
+    /// their own handlers and are rejected rather than guessed.
+    fn model_string(&self, code: u16) -> Result<&[u8], String> {
+        if !(0x4000..0x8000).contains(&code) {
+            return Err(format!("Unsupported model string code {code:#06x}."));
+        }
+        self.model_strings
+            .get(usize::from(code & 0x3fff))
+            .map(Vec::as_slice)
+            .ok_or_else(|| format!("Model string {code:#06x} is not in the cache."))
+    }
+
     /// Step the engines through off, half and full thrust ([`THRUST_STEPS`]).
     pub fn cycle_thrust(&mut self) {
         let position = THRUST_STEPS.iter().position(|t| *t == self.thrust);
@@ -504,6 +539,7 @@ impl ModelViewer {
                 Shape::Point(p, _) => vec![*p],
                 Shape::Textured(textured) => textured.points.clone(),
                 Shape::Glow(_) => Vec::new(),
+                Shape::Label(_, _) => Vec::new(),
             })
             .map(|(x, y)| (x - 160).abs().max((y - 79).abs()))
             .max()
@@ -725,6 +761,7 @@ impl ModelViewer {
         let mut frame = Frame {
             children_error,
             jitter: vertices.jitter(),
+            texts: result.texts.iter().filter(|text| !text.culled).count(),
             ..Frame::default()
         };
         let point =
@@ -862,7 +899,13 @@ impl ModelViewer {
                         frame.shapes.push(Shape::Line(a, b, self.rgb(colour)));
                     }
                 },
-                Primitive::Label(_) => frame.skipped += 1,
+                Primitive::Label(label) => match self.model_string(label.label.string) {
+                    Ok(text) => frame.shapes.push(Shape::Label(
+                        (i32::from(label.screen[0]), i32::from(label.screen[1])),
+                        text.to_vec(),
+                    )),
+                    Err(_) => frame.skipped += 1,
+                },
             }
         }
         Ok(frame)

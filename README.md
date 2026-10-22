@@ -12,7 +12,7 @@ the current experimental example is not that faithful renderer.
 > Original cabin, proportional bitmap font and console artwork are imported.
 > Version 0.4 extends the **F4 station model lab** with original declared
 > triangle/quad outlines and individual-face inspection, not finished models.
-> The **F6 model viewer** (cache v11) runs every imported ship, station and object
+> The **F6 model viewer** (cache v13) runs every imported ship, station and object
 > program through the verified model executor and draws its faces, textured faces
 > (original bitmaps), complex polygons, lines, points and curves in the original
 > render order, including child models (station rings, ship parts). Curved
@@ -37,10 +37,10 @@ The Windows executable is built in this checkout. From the repository root:
 
 **Easiest on Windows:** double-click `play.bat`. It builds the release game and
 tools, creates or updates `data.bin` from your files in `.\game` when it is
-missing or older than this build needs (currently cache v11), and launches the
+missing or older than this build needs (currently cache v13), and launches the
 game; on any error the window stays open with the message. Rebuilding by hand:
 `cargo build --release --locked -p ffe-rs -p ffe-tools`.
-The root directory must contain your locally generated **v11** `data.bin` (build command
+The root directory must contain your locally generated **v13** `data.bin` (build command
 below, or let `play.bat` make it). The game verifies it before opening a window.
 Without `--root`, it looks beside its own executable and then up to four parent
 folders, so `target\release\ffe-rs.exe` finds the checkout's `data.bin`. If
@@ -314,22 +314,24 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v11** imports every model that decodes (462 of 466 on floppy 1.02) with
+**Cache v13** imports every model that decodes (462 of 466 on floppy 1.02) with
 its descriptor fields for child models, the original texture descriptor table and
-fixed-colour map, the original lighting tables (default light, shade tables) and the original model
-name table (ship names). `build-data` refuses an existing destination, so build to a new file,
+fixed-colour map, the original lighting tables (default light, shade tables), the
+original ship statistics and the full original string table (219 entries: model
+and ship names plus the markings the text and label commands draw).
+`build-data` refuses an existing destination, so build to a new file,
 then replace your old `data.bin` with it:
 
 ```powershell
-.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v11.bin
-Move-Item -Force .\data-v11.bin .\data.bin
+.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v13.bin
+Move-Item -Force .\data-v13.bin .\data.bin
 ```
 
 The local cache has been generated on this checkout. It is ignored and must
 not be distributed. Unlike the reference smoke executable, the Rust importer
 does not need JJFFE sources, NASM, or execution of the original game.
 
-The versioned, deterministic ZIP now contains **1776 assets (cache v10)**:
+The versioned, deterministic ZIP now contains **1778 assets (cache v13)**:
 
 - 345 embedded indexed images, with original dimensions, signed drawing offsets,
   mask-zero flags, table/slot IDs and executable source offsets.
@@ -361,13 +363,15 @@ game folder or automatically rebuild stale caches.
 
 V1 (377 assets), v2 (378) and v3 (380) remain readable. V4 is a deliberate schema
 bump: older tools reject it, rather than misinterpreting the new command kind.
-V7 to V10 add model, texture and lighting assets; the format did not change
-again, so a v10 cache rebuilt from the same files holds more models than the
-previous one.
+V7 to V13 add model, texture, lighting, ship-statistics and string-table assets;
+except for v4 the format did not change again, so a rebuilt cache from the same
+files holds more models than an older one. V11 and v12 held the first 209 model
+strings (JJFFE's declared count); **v13 scans the executable's table to its real
+end (219)** so every text and label code can resolve.
 
 This is **not a complete game cache**: the four model slots that do not decode,
-the gameplay tables, additional fonts, the message strings, journal, music and
-optional CD media remain unconverted. Scope is explicit in
+the gameplay tables, additional fonts, the glyph programs the 3D text commands
+need, the journal, music and optional CD media remain unconverted. Scope is explicit in
 the manifest (`complete_game_assets: false`). Automatic import/freshness checking/rebuild,
 the complete upscale export and replacement-pack loading are still planned.
 All build/inspection failures exit 2; existing outputs are never overwritten.
@@ -492,7 +496,7 @@ binaries, `data.bin`, `game/`, the release tools and the supplied sources):
 python .\tools\reference\verify-all.py
 ```
 
-It checks the inputs exist, runs all 26 oracles against the executed JJFFE
+It checks the inputs exist, runs all 29 oracles against the executed JJFFE
 reference, prints one line each and a pass/fail summary, and exits non-zero on
 the first failure. The individual commands below remain useful when working on
 one family of helpers.

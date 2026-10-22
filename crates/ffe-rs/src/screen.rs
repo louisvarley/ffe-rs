@@ -300,14 +300,22 @@ impl Screen {
     }
 
     fn text(&mut self, x: usize, y: usize, message: &str, colour: u8) {
+        let bytes: Vec<u8> = message
+            .chars()
+            .map(|character| {
+                if character.is_ascii() && !character.is_ascii_control() {
+                    character as u8
+                } else {
+                    b'?'
+                }
+            })
+            .collect();
+        self.text_bytes(x, y, &bytes, colour);
+    }
+
+    fn text_bytes(&mut self, x: usize, y: usize, message: &[u8], colour: u8) {
         let mut cursor = x;
-        for character in message.chars() {
-            // The original font is not Unicode. Full diagnostics also go to stderr.
-            let code = if character.is_ascii() && !character.is_ascii_control() {
-                character as u8
-            } else {
-                b'?'
-            };
+        for &code in message {
             if let Some(glyph) = self.font.glyph(code) {
                 for (col, row) in glyph.pixels() {
                     if cursor + col < 320 && y + row < 200 {
@@ -589,6 +597,11 @@ impl Screen {
                         frame[y as usize * 320 + x as usize] = value(rgb);
                     });
                 }
+                Shape::Label((x, y), text) => {
+                    if *x >= 0 && *y >= 0 {
+                        self.text_bytes(*x as usize, *y as usize, text, 15);
+                    }
+                }
             }
         }
     }
@@ -665,15 +678,18 @@ impl Screen {
                     let words: String = error.to_ascii_uppercase().chars().take(60).collect();
                     self.text(3, 34, &words, 12);
                 }
+                let mut status = format!("{} SHAPES", frame.shapes.len());
                 if frame.skipped > 0 {
-                    format!(
+                    status = format!(
                         "{} SHAPES, {} NOT DRAWN YET",
                         frame.shapes.len(),
                         frame.skipped
-                    )
-                } else {
-                    format!("{} SHAPES", frame.shapes.len())
+                    );
                 }
+                if frame.texts > 0 {
+                    status.push_str(&format!(", {} TEXT", frame.texts));
+                }
+                status
             }
             Err(error) => {
                 // Shown on screen, not logged: this runs every frame.

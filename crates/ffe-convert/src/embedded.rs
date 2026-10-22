@@ -306,35 +306,68 @@ pub fn decode_texture_descriptors(bytes: &[u8], rva: u32) -> Result<EmbeddedTabl
     })
 }
 
-/// Entries in the original model name table (`DATA_004682`, "Ship string table").
+/// Model strings the JJFFE 2.8a7 declaration of `DATA_004682` lists. The release
+/// executable's table continues past them (see [`decode_model_names`]).
 pub const MODEL_NAME_COUNT: usize = 209;
 
-/// The model name table: 209 pointers to NUL-terminated Latin-1 strings, entry n
-/// naming model table slot n. Stored as the strings joined by NUL bytes (each one
-/// terminated), in table order.
-pub fn decode_model_names(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+/// Most pointers the scanned string table may hold.
+pub const MODEL_NAME_LIMIT: usize = 512;
+
+#[derive(Debug)]
+pub struct EmbeddedModelNames {
+    pub source_offset: usize,
+    /// Every string, each followed by a NUL byte, in table order.
+    pub bytes: Vec<u8>,
+    pub count: usize,
+}
+
+/// The model string table (`DATA_004682`, "Ship string table"): pointers to
+/// NUL-terminated Latin-1 strings, entry n naming model table slot n. The
+/// release executable's table is longer than the JJFFE declaration's 209 entries
+/// (219 on floppy 1.02: the extra ones include "police" and the First Encounters
+/// logo), and the model text commands index the same table through
+/// `0x4000 | n`. So the table is scanned, not taken from the declaration: the
+/// scan stops at the first word that is not a pointer into the data section
+/// holding a terminated string.
+pub fn decode_model_names(bytes: &[u8], rva: u32) -> Result<EmbeddedModelNames, String> {
     let section = DataSection::parse(bytes)?;
-    let source_offset = section.offset(rva, MODEL_NAME_COUNT * 4)?;
+    let first = section.offset(rva, 4)?;
     let mut joined = Vec::new();
-    for entry in 0..MODEL_NAME_COUNT {
-        let pointer = dword(bytes, source_offset + 4 * entry)?;
-        let string_rva = pointer
-            .checked_sub(section.image_base)
-            .ok_or("Model name pointer precedes the image base")?;
-        let start = section.offset(string_rva, 1)?;
+    let mut count = 0;
+    while count < MODEL_NAME_LIMIT {
+        let pointer = dword(bytes, first + 4 * count)?;
+        let Some(string_rva) = pointer.checked_sub(section.image_base) else {
+            break;
+        };
+        let Ok(start) = section.offset(string_rva, 1) else {
+            break;
+        };
         let text = bytes
             .get(start..start.saturating_add(256).min(bytes.len()))
             .ok_or("Model name outside the executable")?;
-        let end = text
+        let Some(end) = text.iter().position(|b| *b == 0) else {
+            break;
+        };
+        if text[..end]
             .iter()
-            .position(|b| *b == 0)
-            .ok_or("Model name longer than 255 bytes")?;
+            .any(|b| !matches!(b, 0x0a | 0x0d | 0x20..=0x7e))
+        {
+            break;
+        }
         joined.extend_from_slice(&text[..end]);
         joined.push(0);
+        count += 1;
     }
-    Ok(EmbeddedTable {
-        source_offset,
+    // A truncated or misplaced table would silently lose names the commands use.
+    if count < MODEL_NAME_COUNT {
+        return Err(format!(
+            "Model string table at {rva:#x} holds only {count} entries."
+        ));
+    }
+    Ok(EmbeddedModelNames {
+        source_offset: first,
         bytes: joined,
+        count,
     })
 }
 

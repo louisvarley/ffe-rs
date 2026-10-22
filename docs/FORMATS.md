@@ -150,8 +150,29 @@ contract, not the full schema/examples in sections 2.1 onward.
   after the low palette). Both match the JJFFE tables byte for byte. V1..v7 reject
   the new kinds. Floppy 1.02 v8 has 1698 assets (v7 1696). Semantics:
   `docs/notes/textures.md`.
-- Total: v1 has 377 assets/378 ZIP entries; v2 has 378/379; v3 has 380/381;
-  v4 has 382/383; v5 has 384/385; v6 has 385/386. Tools read all six. The playable requires v2 font content;
+- V9 adds `lighting/default.bin` (`base:lighting/default`, type
+  `default_lighting`, 36 bytes: the 3-word default light + the 8 x 3 shade table,
+  JJFFE `DATA_007231`, RVA `0x0eec60`) and `lighting/star-shades.bin`
+  (`base:lighting/star-shades`, type `star_shades`, `count` 6, six 24-byte
+  tables, JJFFE `DATA_007759`, RVA `0x101858`). Floppy 1.02 only.
+- V10 adds `models/descriptors.bin` (`base:model/descriptors`, type
+  `model_descriptors`, `count` 466, 8 bytes per slot: descriptor +0x18 and +0x1c)
+  and `ships/stats.bin` (v12, `base:ship/stats`, type `ship_stats`, `count` 466,
+  48 bytes per slot from descriptor +0x38, zero-filled for null pointers).
+- V11 adds `text/model-names.bin`, ID `base:text/model-names`, type
+  `model_names` with `count`, `source_offset`: the readable model string table
+  (`DATA_004682`, RVA `0x0d1444`), NUL-terminated entries in table order, entry n
+  naming model slot n. The table is **scanned**, not cut at the 209 entries the
+  JJFFE 2.8a7 declaration lists: the release executable continues past them (219
+  entries on floppy 1.02, including "police" and the First Encounters logo), and
+  the model text commands index the same table as `0x4000 | n`. A scan below 209
+  entries is rejected as a misplaced table. Floppy 1.02 only.
+- V13 extends that table to the scanned length (219 entries; v11/v12 caches hold
+  the first 209, which left six text/label codes above 208 unresolvable). No new
+  asset kind or path changed, so only the payload and its `count` differ.
+- Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
+  v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
+  v10). Tools read every version. The playable requires v2 font content;
   F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps
   points-only inspection; v4 adds declared-face inspection. The lab requires
   matching command/vertex model indices, counts and descriptor offsets.

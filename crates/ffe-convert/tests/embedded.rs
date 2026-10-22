@@ -1,5 +1,5 @@
 use ffe_convert::embedded::{
-    decode_bitmaps, decode_font, decode_model_commands, decode_model_normals,
+    decode_bitmaps, decode_font, decode_model_commands, decode_model_names, decode_model_normals,
     decode_model_vertices, decode_sine_table, model_command_bytes, BitmapLayout,
 };
 
@@ -221,6 +221,46 @@ fn sine_import_preserves_full_table_and_rejects_bss_truncation_and_invalid_shape
     assert!(decode_sine_table(&bytes[..bytes.len() - 1], 0x1800).is_err());
     bytes[0xa00] = 1;
     assert!(decode_sine_table(&bytes, 0x1800).is_err());
+}
+
+/// The string table is scanned to its first non-pointer, not cut at the 209
+/// entries the JJFFE declaration lists: the release executable holds 219.
+#[test]
+fn model_string_table_scans_past_the_declaration_and_stops_at_a_non_pointer() {
+    let names = 219;
+    let mut bytes = executable();
+    bytes.resize(0x4000, 0);
+    put32(&mut bytes, 0x108, 0x3000);
+    // Raw 0x200 is RVA 0x1000, so raw 0xa00 is RVA 0x1800.
+    let mut rva = 0x1800;
+    for index in 0..names {
+        put32(&mut bytes, 0x200 + 4 * index, 0x400000 + rva as u32);
+        let text = format!("Name{index}");
+        let start = rva - 0xe00;
+        bytes[start..start + text.len()].copy_from_slice(text.as_bytes());
+        rva += text.len() + 1;
+    }
+    let table = decode_model_names(&bytes, 0x1000).unwrap();
+    assert_eq!(table.count, names);
+    assert_eq!(table.source_offset, 0x200);
+    let strings: Vec<&[u8]> = table.bytes.split(|b| *b == 0).collect();
+    assert_eq!(strings.len(), names + 1);
+    assert_eq!(strings[0], b"Name0");
+    assert_eq!(strings[names - 1], b"Name218");
+    // The declaration's own count is a lower bound.
+    assert!(names > ffe_convert::embedded::MODEL_NAME_COUNT);
+    // A word that is not a data-section pointer ends the table; 209 entries are
+    // still enough, fewer are not.
+    let mut short = bytes.clone();
+    put32(&mut short, 0x200 + 4 * 209, 0);
+    assert_eq!(decode_model_names(&short, 0x1000).unwrap().count, 209);
+    put32(&mut short, 0x200 + 4 * 208, 1);
+    assert!(decode_model_names(&short, 0x1000).is_err());
+    // A pointer to text with non-printable bytes ends the scan the same way.
+    let mut bad = bytes.clone();
+    bad[0xa00] = 1; // "Name0" no longer reads as text at the first pointer.
+    assert!(decode_model_names(&bad, 0x1000).is_err());
+    assert!(decode_model_names(&bytes, 0x2fff).is_err());
 }
 
 fn executable() -> Vec<u8> {

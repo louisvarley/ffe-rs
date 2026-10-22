@@ -45,6 +45,19 @@ def db_text_bytes(body: str) -> bytes:
     return bytes(out)
 
 
+def pe_data_section(exe: bytes) -> tuple[int, int, int]:
+    """Image base, and the DATA section's virtual address and raw offset."""
+    pe = struct.unpack_from("<I", exe, 0x3C)[0]
+    sections, optional = struct.unpack_from("<H", exe, pe + 6)[0], struct.unpack_from("<H", exe, pe + 20)[0]
+    base = struct.unpack_from("<I", exe, pe + 0x34)[0]
+    for index in range(sections):
+        header = pe + 24 + optional + 40 * index
+        if exe[header:header + 8].rstrip(b"\0") == b"DATA":
+            _, address, _, raw, _ = struct.unpack_from("<IIIII", exe, header + 8)
+            return base, address, raw
+    raise RuntimeError("no DATA section")
+
+
 def ship_object_table(blocks: dict[str, str]) -> list[str | None]:
     """The ship object table slot by slot; a null entry is four zero bytes."""
     slots: list[str | None] = []
@@ -116,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 12 or len(manifest["files"]) != 1778:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 13 or len(manifest["files"]) != 1778:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -145,10 +158,26 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                     names = payload.split(b"\0")[:-1]
                     # Entries 0..110 (every craft and more) match; from 111 floppy 1.02
                     # inserts ten digit entries ("0".."9") and differs in decal texts.
-                    if (len(labels) != asset["count"] or len(names) != asset["count"]
+                    # The release table also continues past JJFFE's 209 declared
+                    # pointers (219 entries: "police", the FFE logo, ...), so the
+                    # declaration is a lower bound, not the expected count. The
+                    # extra entries are checked against the executable's own bytes
+                    # below by their provenance offset.
+                    if (asset["count"] < len(labels) or len(names) != asset["count"]
                             or names[:111] != expected[:111]
                             or names[111:121] != [str(d).encode() for d in range(10)]):
                         raise RuntimeError("model name table differs from JJFFE DATA_004682")
+                    offset = asset["source_offset"]
+                    extra = names[len(labels):]
+                    if extra:
+                        # Each extra pointer sits after JJFFE's 209 and must point
+                        # into the data section at the same string in the file.
+                        base, section_va, section_raw = pe_data_section(exe)
+                        for entry, text in enumerate(extra, start=len(labels)):
+                            pointer = struct.unpack_from("<I", exe, offset + 4 * entry)[0]
+                            start = pointer - base - section_va + section_raw
+                            if exe[start:start + len(text) + 1] != text + b"\0":
+                                raise RuntimeError("extra model string does not match the executable")
                 if asset["kind"] == "sine_table":
                     if payload != db_bytes(blocks["DATA_007975"]) or len(payload) != 65536:
                         raise RuntimeError("original sine table differs")

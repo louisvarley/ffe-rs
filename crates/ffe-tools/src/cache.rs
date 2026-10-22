@@ -219,7 +219,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     id: "base:text/model-names".to_owned(),
                     path: "text/model-names.bin".to_owned(),
                     kind: AssetKind::ModelNames {
-                        count: ffe_convert::embedded::MODEL_NAME_COUNT as u32,
+                        count: table.count as u32,
                         source_offset: table.source_offset as u64,
                     },
                     bytes: table.bytes,
@@ -338,7 +338,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 12,
+        format: "ffe-content-cache".to_owned(), format_version: 13,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,
