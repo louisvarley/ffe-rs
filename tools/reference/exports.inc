@@ -58,6 +58,14 @@ GLOBAL _ref_order_flush
 GLOBAL _ref_view_vertex
 GLOBAL _ref_project_vertex
 GLOBAL _ref_project_point
+GLOBAL _ref_tex_triangle
+GLOBAL _ref_tex_quad
+GLOBAL _ref_tex_slots
+GLOBAL _ref_tex_draw_triangle
+GLOBAL _ref_tex_draw_quad
+GLOBAL _ref_flat_draw_triangle
+GLOBAL _ref_flat_draw_quad
+GLOBAL _ref_face_colour
 
 _ref_state equ DATA_008804
 _ref_rng equ FUNC_001530
@@ -118,3 +126,11 @@ _ref_order_flush equ FUNC_001789
 _ref_view_vertex equ FUNC_001470
 _ref_project_vertex equ FUNC_001471
 _ref_project_point equ FUNC_001479
+_ref_tex_triangle equ FUNC_001644_DrawTexTriangle
+_ref_tex_quad equ FUNC_001647_DrawTexQuad
+_ref_tex_slots equ DATA_009252
+_ref_tex_draw_triangle equ FUNC_001807
+_ref_tex_draw_quad equ FUNC_001805
+_ref_flat_draw_triangle equ FUNC_001804
+_ref_flat_draw_quad equ FUNC_001809
+_ref_face_colour equ FUNC_001691

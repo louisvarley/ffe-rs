@@ -25,7 +25,7 @@ export-external converts only six cockpit BMPs and 23 PCM effects, with
 per-image UHD guidance and a contact sheet. It never overwrites an output.
 build-data imports 345 bitmaps, two raw texture blocks, the fixed low palette, cabins and
 effects and main font into a deterministic partial cache. V3 adds two original
-station vertex programs; v4/v5 add root commands/normals and v6 the original sine table; v7 imports every model that decodes.
+station vertex programs; v4/v5 add root commands/normals and v6 the original sine table; v7 imports every model that decodes; v8 adds the texture descriptor table and the 12-bit fixed colour map (floppy 1.02).
 inspect-data verifies every entry. Bounded native command execution is not yet
 complete station rendering. Submodels, gameplay tables, music and full conversion remain absent.
 verify-reference compares fixed legacy RNG/timer vectors and bounded new-game

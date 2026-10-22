@@ -71,6 +71,15 @@ pub enum AssetKind {
         height: u32,
     },
     EffectWav,
+    /// The original texture descriptor table `DATA_007811` (v8).
+    TextureDescriptors {
+        count: u32,
+        source_offset: u64,
+    },
+    /// The original 12-bit colour to fixed low-palette map `DATA_007770` (v8).
+    FixedColourMap {
+        source_offset: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,7 +160,7 @@ fn valid_digest(value: &str) -> bool {
 const MODEL_TABLE_SLOTS: u32 = 466;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=7) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=8) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -189,6 +198,14 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             index >= MODEL_TABLE_SLOTS || (manifest.format_version < 7 && !matches!(index, 74 | 75))
         }) {
             return Err("model programs outside stations 74/75 require cache v7".to_owned());
+        }
+        if manifest.format_version < 8
+            && matches!(
+                record.asset,
+                AssetKind::TextureDescriptors { .. } | AssetKind::FixedColourMap { .. }
+            )
+        {
+            return Err("Texture descriptors and the colour map require cache v8.".to_owned());
         }
         if manifest.format_version < 6 && matches!(record.asset, AssetKind::SineTable { .. }) {
             return Err("Sine tables require cache v6 or later.".to_owned());
@@ -318,6 +335,15 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
             if *width != 320 || *height != 158 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
                 return Err("invalid cabin PNG descriptor/signature".to_owned());
             }
+        }
+        AssetKind::TextureDescriptors { count, .. } => {
+            if *count as usize != ffe_core::model_texture::DESCRIPTOR_COUNT {
+                return Err("invalid texture descriptor count".to_owned());
+            }
+            ffe_core::model_texture::Descriptors::from_bytes(bytes)?;
+        }
+        AssetKind::FixedColourMap { .. } => {
+            ffe_core::model_texture::validate_colour_map(bytes)?;
         }
         AssetKind::EffectWav => {
             if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt " {

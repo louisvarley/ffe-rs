@@ -72,7 +72,7 @@ The writer is covered by a build-twice byte-equality test. If a future `ron` ver
 
 ## 2. `data.bin` layout
 
-### Implemented precursor: `ffe-content-cache` versions 1 through 6
+### Implemented precursor: `ffe-content-cache` versions 1 through 8
 
 The runnable `build-data`/`inspect-data` commands use the following **partial**
 contract, not the full schema/examples in sections 2.1 onward.
@@ -83,7 +83,7 @@ contract, not the full schema/examples in sections 2.1 onward.
   is deferred. Identical inputs/tool versions produce identical bytes.
 - Compact JSON plus final newline, with deterministic struct field order (not
   the proposed lexicographically sorted-key writer). Unknown fields/versions
-  are rejected. `format = "ffe-content-cache"`, `format_version` in `1..=6`,
+  are rejected. `format = "ffe-content-cache"`, `format_version` in `1..=8`,
   `complete_game_assets = false`, and nonempty `unresolved` are mandatory.
 - Manifest includes tool version, source profile, 48 inspected source records,
   and sorted `files` with stable IDs, paths, byte sizes, SHA-256 and typed `asset`
@@ -138,6 +138,18 @@ contract, not the full schema/examples in sections 2.1 onward.
   bytes), nonnegative/nondecreasing from zero. V1..v5 reject the new kind.
   Full bytes match JJFFE `DATA_007975` in both exact-hash original executables.
   RVA is `0x106390` (floppy) / `0x105334` (CD); do not extrapolate the font delta.
+- V8 adds two original tables (floppy 1.02 only; the CD 1.01 cache omits both and
+  says so in `unresolved`, because its RVAs could not be checked):
+  `textures/descriptors.bin`, ID `base:texture/descriptors`, type
+  `texture_descriptors` with `count` (148) and `source_offset`: JJFFE
+  `DATA_007811`, 148 records of 30 bytes (dword bitmap id | orientation << 12,
+  dword colour count 1..=7, 7 nibble RGB triples, a zero pad byte; record 0 all
+  zero), RVA `0x102da8`; and `palettes/fixed-map.bin`, ID `base:palette/fixed-map`,
+  type `fixed_colour_map` with `source_offset`: JJFFE `DATA_007770`, 4096 bytes,
+  one per 12-bit colour, 0 or a low-palette index + 1, RVA `0x101b10` (directly
+  after the low palette). Both match the JJFFE tables byte for byte. V1..v7 reject
+  the new kinds. Floppy 1.02 v8 has 1698 assets (v7 1696). Semantics:
+  `docs/notes/textures.md`.
 - Total: v1 has 377 assets/378 ZIP entries; v2 has 378/379; v3 has 380/381;
   v4 has 382/383; v5 has 384/385; v6 has 385/386. Tools read all six. The playable requires v2 font content;
   F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps

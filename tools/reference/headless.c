@@ -75,11 +75,28 @@ void trace_group(long active, unsigned long key)
     if (queue_mode) queue_event(2,active!=0,active ? key : 0);
     ref_order_group(active,key);
 }
+/* Texture-queue mode: the last face allocation and the F1691 flat colour of the
+   face being emitted, captured around each real F1708/F1712 call. */
+static int texture_queue_mode;
+static unsigned long *face_entry;
+static int face_colour_called;
+static unsigned char face_colour[3];
+extern void *ref_face_colour(void *output, long rgb, long texture, long unlit, long local);
+void *trace_face_colour(void *output, long rgb, long texture, long unlit, long local)
+{
+    void *result = ref_face_colour(output,rgb,texture,unlit,local);
+    face_colour_called=1;
+    memcpy(face_colour,output,3);
+    return result;
+}
 unsigned long *trace_alloc(long words, unsigned long key, long force)
 {
     if (queue_mode) queue_event(1,0,key);
-    return ref_order_allocate(words,key,force);
+    face_entry = ref_order_allocate(words,key,force);
+    return face_entry;
 }
+static void texture_face_begin(void);
+static void texture_face_end(int kind, long material, unsigned long normal);
 unsigned long *trace_polygon_alloc(long words, unsigned long key, long force)
 {
     if (queue_mode) queue_event(3,0,key);
@@ -93,7 +110,13 @@ static void execution_emission(void *instance,const unsigned long *face);
 int trace_triangle(void *instance, long material, unsigned long a, unsigned long b, unsigned long c, unsigned long normal)
 {
     unsigned long *face;
-    if(queue_mode) return ref_face3(instance,material,a,b,c,normal);
+    if(queue_mode) {
+        int result;
+        texture_face_begin();
+        result=ref_face3(instance,material,a,b,c,normal);
+        texture_face_end(3,material,normal);
+        return result;
+    }
     if(execution_probe) {
         unsigned long emitted[6]={(unsigned short)material,normal,a,b,c,255};
         execution_emission(instance,emitted);return 0;
@@ -107,7 +130,13 @@ int trace_triangle(void *instance, long material, unsigned long a, unsigned long
 int trace_quad(void *instance, long material, unsigned long a, unsigned long b, unsigned long c, unsigned long d, unsigned long normal)
 {
     unsigned long *face;
-    if(queue_mode) return ref_face4(instance,material,a,b,c,d,normal);
+    if(queue_mode) {
+        int result;
+        texture_face_begin();
+        result=ref_face4(instance,material,a,b,c,d,normal);
+        texture_face_end(4,material,normal);
+        return result;
+    }
     if(execution_probe) {
         unsigned long emitted[6]={(unsigned short)material,normal,a,b,c,d};
         execution_emission(instance,emitted);return 0;
@@ -1193,6 +1222,154 @@ static int station_queue_vectors(void)
 #endif
 }
 
+/* Textured faces. texture-raster drives the original F1644/F1647 rasterisers
+   (F1643 routine choice, F1642 edge set-up, F1646/F1649 walks, F1650-F1653 spans)
+   with synthetic points/descriptor dwords over the linked JJFFE bitmaps. */
+extern void ref_tex_triangle(const short *p1,const short *p2,const short *p3,unsigned long tex);
+extern void ref_tex_quad(const short *p1,const short *p2,const short *p3,const short *p4,unsigned long tex);
+extern unsigned char ref_tex_slots[256];
+extern unsigned char ref_tex_draw_triangle[], ref_tex_draw_quad[];
+extern unsigned char ref_flat_draw_triangle[], ref_flat_draw_quad[];
+static unsigned long texture_rng;
+static long texture_random(long low,long high)
+{
+    texture_rng=(texture_rng*1103515245UL+12345UL)&0xffffffffUL;
+    return low+(long)((texture_rng>>8)%(unsigned long)(high-low+1));
+}
+static void texture_box(short points[4][2],long cx,long cy,long rx,long ry)
+{
+    static const int sx[4]={-1,1,1,-1},sy[4]={-1,-1,1,1};
+    short box[4][2];
+    long i,start=texture_random(0,3),step=texture_random(0,1)?1:3;
+    for(i=0;i<4;++i) {
+        box[i][0]=(short)(cx+sx[i]*rx+texture_random(-rx/3,rx/3));
+        box[i][1]=(short)(cy+sy[i]*ry+texture_random(-ry/3,ry/3));
+    }
+    for(i=0;i<4;++i) {points[i][0]=box[(start+i*step)&3][0];points[i][1]=box[(start+i*step)&3][1];}
+}
+static int texture_raster_vectors(void)
+{
+    static const unsigned long bitmaps[]={50,53,74,338,94,81,99,113,51,230};
+    static const short xs[]={-10,0,5,160,319,320,330},ys[]={-5,0,1,79,157,158,170};
+    static unsigned char buffer[320*200];
+    short points[4][2];
+    unsigned long n,i,count,tex;
+    long minx,miny,maxx,maxy,kind,form;
+    fprintf(stderr,"JJFFE texture-raster-v1: original F1644/F1647 (F1643, F1642, F1646/F1649, F1650-F1653) on synthetic screen points and descriptor dwords over the linked JJFFE bitmaps; DATA_009252[i]=(7i+1)&0x7f; 320x200 buffer filled with 0xff and hashed. Not queueing, colours or palette.\n");
+    for(i=0;i<256;++i) ref_tex_slots[i]=(unsigned char)((i*7+1)&0x7f);
+    ref_framebuffer=buffer;
+    texture_rng=0x2545f491UL;
+    for(n=0;n<4096;++n) {
+        kind=(n&1)?4:3;
+        form=(n>>1)&3;
+        tex=bitmaps[(n>>3)%10]|((unsigned long)texture_random(0,7)<<12);
+        if(form==0) texture_box(points,texture_random(20,300),texture_random(20,138),texture_random(1,60),texture_random(1,60));
+        else if(form==1) texture_box(points,texture_random(-200,520),texture_random(-150,300),texture_random(20,400),texture_random(20,400));
+        else if(form==2) for(i=0;i<4;++i) {points[i][0]=(short)texture_random(-300,620);points[i][1]=(short)texture_random(-200,360);}
+        else for(i=0;i<4;++i) {points[i][0]=xs[texture_random(0,6)];points[i][1]=ys[texture_random(0,6)];}
+        memset(buffer,0xff,sizeof(buffer));
+        if(kind==3) ref_tex_triangle(points[0],points[1],points[2],tex);
+        else ref_tex_quad(points[0],points[1],points[2],points[3],tex);
+        count=0;minx=miny=100000;maxx=maxy=-1;
+        for(i=0;i<sizeof(buffer);++i) if(buffer[i]!=0xff) {
+            long x=(long)(i%320),y=(long)(i/320);
+            ++count;
+            if(x<minx) minx=x; if(x>maxx) maxx=x; if(y<miny) miny=y; if(y>maxy) maxy=y;
+        }
+        printf("{\"case\":%lu,\"kind\":%ld,\"tex\":%lu,\"points\":[",n,kind,tex);
+        for(i=0;i<(unsigned long)kind;++i) printf("%s[%d,%d]",i?",":"",points[i][0],points[i][1]);
+        printf("],\"written\":%lu,\"bounds\":[%ld,%ld,%ld,%ld],\"pixels_fnv1a64\":\"%016llx\"}\n",
+               count,count?minx:0,count?miny:0,count?maxx:0,count?maxy:0,
+               (unsigned long long)fingerprint(buffer,sizeof(buffer)));
+    }
+    if (fflush(stdout)) fail("cannot flush texture raster vectors");
+    return 0;
+}
+
+static unsigned long texture_face_count;
+static unsigned long texture_faces[1024][20];
+static void texture_face_begin(void)
+{
+    face_entry=0;face_colour_called=0;
+}
+static void texture_face_end(int kind, long material, unsigned long normal)
+{
+    unsigned long *row,words=0,i;
+    if(!texture_queue_mode) return;
+    if(texture_face_count>=1024) fail("too many texture-queue faces");
+    row=texture_faces[texture_face_count++];
+    memset(row,0,sizeof(texture_faces[0]));
+    row[0]=(unsigned long)kind;row[1]=(unsigned short)material;row[2]=normal;
+    if(face_entry && face_entry[0]==(unsigned long)ref_tex_draw_triangle) {row[3]=1;words=11;}
+    else if(face_entry && face_entry[0]==(unsigned long)ref_tex_draw_quad) {row[3]=1;words=12;}
+    else if(face_entry && face_entry[0]==(unsigned long)ref_flat_draw_triangle) {row[3]=2;words=4;}
+    else if(face_entry && face_entry[0]==(unsigned long)ref_flat_draw_quad) {row[3]=2;words=5;}
+    row[4]=face_colour_called ? ((unsigned long)face_colour[0]|((unsigned long)face_colour[1]<<8)|((unsigned long)face_colour[2]<<16)) : 0xffffffffUL;
+    row[5]=words;
+    for(i=0;i<words;++i) row[6+i]=face_entry[1+i];
+}
+
+static int texture_queue_vector(int index)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--texture-queue requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static unsigned char normals[32768*8];
+    static unsigned long queue_buffer[65536];
+    static unsigned long instance[0x160/4],globals[0x120/4],slots[128*9];
+    static const long identity[9]={2147483647,0,0,0,2147483647,0,0,0,2147483647};
+    static const long tilted[9]={1518500249,0,-1518500249,0,2147483647,0,1518500249,0,1518500249};
+    static const long positions[][3]={{0,0,2000},{0,0,600},{300,-200,3000},{0,0,12000}};
+    unsigned long v,i,j;
+    unsigned long *model;
+    fprintf(stderr,"JJFFE texture-queue-v1: one model slot through original F1772 with real F1708/F1712 (as station-model-v1, four views, instance colour 1,2,3, synthetic normal colours r=3i%%9 g=5i%%10 b=7i%%11, culled when i%%7==3); per face the queue entry of the textured (F1807/F1805) or on-screen flat (F1804/F1809) path and the F1691 flat colour. Points/lines/text/children not queued; no flush or pixels.\n");
+    if(index<0 || index>465) fail("model index outside the table");
+    model=ref_model(index);
+    if(!model) { printf("{\"model\":%d,\"null\":1}\n",index); return 0; }
+    for(i=0;i<32768;++i) {
+        normals[8*i]=(unsigned char)(i*3%9);normals[8*i+1]=(unsigned char)(i*5%10);
+        normals[8*i+2]=(unsigned char)(i*7%11);normals[8*i+3]=(unsigned char)(i%7==3);
+        normals[8*i+4]=normals[8*i+5]=normals[8*i+6]=normals[8*i+7]=0;
+    }
+    for(v=0;v<4;++v) {
+        memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));
+        memset(slots,0,sizeof(slots));
+        memset(nested_descriptor,0,sizeof(nested_descriptor));
+        memcpy((char *)instance+0x14,v>=2?tilted:identity,36);
+        memcpy((char *)instance+0x9c,identity,36);
+        memcpy((char *)instance+4,positions[v],12);
+        ((unsigned char *)instance)[0xf4]=1;((unsigned char *)instance)[0xf5]=2;((unsigned char *)instance)[0xf6]=3;
+        instance[0x148/4]=model[5];
+        instance[0xf0/4]=2;
+        instance[0x14c/4]=(unsigned long)globals;
+        instance[0x150/4]=model[1];
+        ref_vertex_buffer=(long *)slots;
+        ref_normal_buffer=normals;
+        ref_detail_primary=ref_detail_secondary=0;
+        nested_descriptor[0x1c/4]=-0x40000000L;
+        memset(queue_buffer,0,sizeof(queue_buffer));
+        ref_order_base=queue_buffer;ref_order_active=0;ref_order_state=0;
+        ref_order_init(queue_buffer);
+        ref_jitter_a=0x12345678UL;ref_jitter_b=0x456789abUL;
+        queue_mode=1;queue_count=0;texture_queue_mode=1;texture_face_count=0;
+        nested_station=1;nested_count=0;point_line_count=0;
+        ref_command_alive=1;
+        ref_execute(instance,(void *)model[0]);
+        queue_mode=0;texture_queue_mode=0;nested_station=0;
+        printf("{\"model\":%d,\"view\":%lu,\"faces\":[",index,v);
+        for(i=0;i<texture_face_count;++i) {
+            unsigned long *row=texture_faces[i];
+            printf("%s[%lu,%lu,%lu,%lu,%ld",i?",":"",row[0],row[1],row[2],row[3],row[4]==0xffffffffUL?-1L:(long)row[4]);
+            for(j=0;j<row[5];++j) printf(",%lu",row[6+j]);
+            printf("]");
+        }
+        printf("],\"alive\":%lu}\n",ref_command_alive);
+    }
+    return 0;
+#endif
+}
+
 static void visibility_case(unsigned long *instance,unsigned long number,short operand)
 {
     static const unsigned short codes[]={11,12,0x8b,0x8c,0xff8b,0xff8c};
@@ -1424,6 +1601,8 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--station")) return station_vectors();
     if (argc == 3 && !strcmp(argv[1], "--station-model")) return station_model_vector(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--station-queue")) return station_queue_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--texture-raster")) return texture_raster_vectors();
+    if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

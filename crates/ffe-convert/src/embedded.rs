@@ -206,6 +206,39 @@ pub fn decode_sine_table(bytes: &[u8], rva: u32) -> Result<EmbeddedSineTable, St
     })
 }
 
+#[derive(Debug)]
+pub struct EmbeddedTable {
+    pub source_offset: usize,
+    pub bytes: Vec<u8>,
+}
+
+/// The original texture descriptor table (`DATA_007811`, 148 x 30 bytes).
+pub fn decode_texture_descriptors(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    use ffe_core::model_texture::{Descriptors, DESCRIPTOR_BYTES, DESCRIPTOR_COUNT};
+    let section = DataSection::parse(bytes)?;
+    let size = DESCRIPTOR_COUNT * DESCRIPTOR_BYTES;
+    let source_offset = section.offset(rva, size)?;
+    let table = range(bytes, source_offset, size)?;
+    Descriptors::from_bytes(table)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table.to_vec(),
+    })
+}
+
+/// The original 12-bit colour to fixed low-palette map (`DATA_007770`, 4096 bytes).
+pub fn decode_colour_map(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    use ffe_core::model_texture::{validate_colour_map, COLOUR_MAP_ENTRIES};
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, COLOUR_MAP_ENTRIES)?;
+    let table = range(bytes, source_offset, COLOUR_MAP_ENTRIES)?;
+    validate_colour_map(table)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table.to_vec(),
+    })
+}
+
 pub fn decode_font(bytes: &[u8], rva: u32) -> Result<EmbeddedFont, String> {
     let section = DataSection::parse(bytes)?;
     let source_offset = section.offset(rva, 1160)?;
