@@ -57,11 +57,20 @@ keyed by `F1777(a.view)`.
 - **The port's screen positions.** With a `--thruster N` mode and the entry
   points logged, the port's midpoint and square corners differed from the
   original's while the depth key matched. That points at `Emission::screen` for
-  the vertices involved, not at the glow arithmetic: the thruster's A and B can
-  be the screen-space midpoint vertices (v0.42), whose screen position is the
-  average of their *unprojected* sources - zero unless an earlier command
-  projected those sources. Check what the original's entries hold after the
-  preceding faces before changing the glow code.
+  the vertices involved, not at the glow arithmetic. Two candidate causes, both
+  in the v0.42 screen-space vertices:
+  1. F1738 resolves A and B through F1471, whose own body has no early return:
+     with a zero stamp it runs F1478 with generation 1 (case 6 writes the
+     midpoint and returns), but with a *non-zero* stamp it recomputes the view
+     from the entry's object coordinate - which the original never wrote for
+     these vertices - and projects that. The port keeps the midpoint in both
+     cases. The synthetic arena makes the object zero, so the original's second
+     value is `project(position)`; a real arena makes it garbage.
+  2. The midpoint averages the *screens* its two sources already hold. Those are
+     zero unless an earlier command projected them, so the order in which the
+     preceding faces touch the same vertices matters.
+  Confirm which one by logging A/B for one model (311: scale 12, five
+  thrusters, key 53439) before touching the glow code.
 - The six faded colours and F1805's rasterisation are not modelled; the viewer
   would fill the quad with the base colour.
 
