@@ -31,6 +31,24 @@ pub fn square_root(x: u32) -> u32 {
     root
 }
 
+/// F1467: square root through the 16-bit table `DATA_007977`, `sqrt(x) << 5`
+/// truncated per range. Entry i of the 2048 entries F1467 reads is exactly
+/// `isqrt(i << 21)` (checked against the supplied table and the executed original),
+/// so the table is computed rather than imported.
+pub fn table_root(x: u32) -> u32 {
+    let entry = |index: u32| (u64::from(index) << 21).isqrt() as u32;
+    match x {
+        0x4000_0000.. => entry(x >> 21),
+        0x1000_0000.. => entry(x >> 19) >> 1,
+        0x0400_0000.. => entry(x >> 17) >> 2,
+        0x0040_0000.. => entry(x >> 15) >> 3,
+        0x0004_0000.. => entry(x >> 11) >> 5,
+        0x0000_4000.. => entry(x >> 7) >> 7,
+        0x0000_0400.. => entry(x >> 3) >> 9,
+        _ => entry(x * 2) >> 11,
+    }
+}
+
 /// F1466: vector length, normalised by the highest set bit, never shorter than
 /// the largest absolute component (unsigned comparisons, as the original).
 pub fn length(vector: [i32; 3]) -> u32 {

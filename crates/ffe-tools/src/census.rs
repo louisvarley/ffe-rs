@@ -76,10 +76,13 @@ fn census_model(bytes: &[u8], table_rva: u32, table: &SineTable, index: u32) -> 
             return report;
         }
     };
-    if let Err(error) = decode_model_normals(bytes, table_rva, index) {
-        report.failure = fail("normals", error);
-        return report;
-    }
+    let normal_records = match decode_model_normals(bytes, table_rva, index) {
+        Ok(normals) => normals.bytes,
+        Err(error) => {
+            report.failure = fail("normals", error);
+            return report;
+        }
+    };
     if let Err(error) = decode(&commands.bytes, commands.vertex_count) {
         report.failure = fail("decode", error);
         return report;
@@ -100,7 +103,8 @@ fn census_model(bytes: &[u8], table_rva: u32, table: &SineTable, index: u32) -> 
         normals: &normals,
     };
     let mut live = match Vertices::new(&vertices.bytes, vertices.vertex_count) {
-        Ok(live) => live,
+        // Polygon circles read the normal records (+0x154).
+        Ok(live) => live.with_normal_records(&normal_records),
         Err(error) => {
             report.failure = fail("vertices", error);
             return report;

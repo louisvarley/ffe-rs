@@ -228,7 +228,8 @@ impl ModelViewer {
                 shades: std::array::from_fn(|i| [2 * (7 - i as u8); 3]),
             },
         )?;
-        let mut vertices = Vertices::new(&model.vertices, model.vertex_count)?;
+        let mut vertices =
+            Vertices::new(&model.vertices, model.vertex_count)?.with_normal_records(&model.normals);
         let mut context = VertexContext {
             matrix,
             basis: matrix,
@@ -334,7 +335,25 @@ impl ModelViewer {
                         }
                     }
                 }
-                Primitive::Polygon(_) | Primitive::Label(_) => frame.skipped += 1,
+                Primitive::Polygon(polygon) => {
+                    // The outline is the original's queued entries and F1547 edge
+                    // subdivision; the fill is the diagnostic even-odd scanline fill.
+                    // Textured fills (F1691 texture colour not ported) show grey.
+                    let path = ffe_core::model_polygon::fill_path(&polygon.outline.entries)?;
+                    if path.len() >= 3 {
+                        let colour = if material(polygon.polygon.material).texture != 0 {
+                            [5; 3]
+                        } else {
+                            polygon.colour
+                        };
+                        let points = path
+                            .iter()
+                            .map(|[x, y]| (i32::from(*x), i32::from(*y)))
+                            .collect();
+                        frame.shapes.push(Shape::Fill(points, rgb(colour)));
+                    }
+                }
+                Primitive::Label(_) => frame.skipped += 1,
             }
         }
         Ok(frame)

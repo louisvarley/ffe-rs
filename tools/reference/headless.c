@@ -80,10 +80,13 @@ unsigned long *trace_alloc(long words, unsigned long key, long force)
     if (queue_mode) queue_event(1,0,key);
     return ref_order_allocate(words,key,force);
 }
+/* F1721's own entry (its F1794 word); the segment handlers append after it. */
+static unsigned long *polygon_entry;
 unsigned long *trace_polygon_alloc(long words, unsigned long key, long force)
 {
     if (queue_mode) queue_event(3,0,key);
-    return ref_order_allocate(words,key,force);
+    polygon_entry=ref_order_allocate(words,key,force);
+    return polygon_entry;
 }
 static unsigned long probe_faces[2][6];
 static int execution_probe;
@@ -149,14 +152,15 @@ extern long *ref_project_vertex(void *instance,int index);
 /* Scoped text (F1747) and submodel (F1749/F1750) probes. Nested routines are
    replaced by recorders returning synthetic descriptors/vertices; the original
    handlers still decode their operands and compute the returned cursor. */
-static unsigned long nested_count, nested_kind[256], nested_value[256][3];
+#define NESTED_LIMIT 4096
+static unsigned long nested_count, nested_kind[NESTED_LIMIT], nested_value[NESTED_LIMIT][3];
 static long nested_vertex[9], nested_descriptor[16];
 /* Station mode: vertex hooks resolve through the real F1470/F1471, text skips its
    glyphs (F1745 reports no room) and child descriptors always cull (negative radius). */
 static int nested_station;
 static void nested_event(unsigned long kind, unsigned long a, unsigned long b, unsigned long c)
 {
-    if (nested_count >= 256) { fprintf(stderr,"too many nested probe callbacks\n"); exit(2); }
+    if (nested_count >= NESTED_LIMIT) { fprintf(stderr,"too many nested probe callbacks\n"); exit(2); }
     nested_kind[nested_count]=kind;
     nested_value[nested_count][0]=a; nested_value[nested_count][1]=b; nested_value[nested_count][2]=c;
     nested_count++;
@@ -167,6 +171,36 @@ unsigned long trace_polygon_key(void *instance, const long *view)
     unsigned long key=ref_depth_key(instance,view);
     nested_event(11,key,0,0);
     return key;
+}
+/* F1721 (opcode 5): when F1326 converts the fill colour, the polygon's queue holds
+   F1794, the segment handlers' entries, then the F1799 fill just allocated. Each
+   entry becomes event 19 [kind, a, b] (1 F1795 edge a-b, 2 F1796 edge to a,
+   3 F1797 curve a, b) plus 20 [c, d] for a curve's last two points; points are the
+   stored screen dwords (x | y << 16). Event 21 closes with the colour and entry
+   count; the palette value is not modelled. An abandoned polygon (F1779, then
+   F1813) logs 22 instead. */
+extern void ref_poly_start(void), ref_poly_edge(void), ref_poly_to(void), ref_poly_curve(void), ref_poly_fill(void);
+unsigned long trace_polygon_colour(unsigned long colour)
+{
+    unsigned long *word=polygon_entry, *end=ref_order_cursor-2, entries=0;
+    if (!word || word[0]!=(unsigned long)ref_poly_start || end[0]!=(unsigned long)ref_poly_fill) {
+        fprintf(stderr,"unexpected polygon queue layout\n"); exit(2);
+    }
+    for (++word; word<end; ++entries) {
+        if (word[0]==(unsigned long)ref_poly_edge) { nested_event(19,1,word[1],word[2]); word+=3; }
+        else if (word[0]==(unsigned long)ref_poly_to) { nested_event(19,2,word[1],0); word+=2; }
+        else if (word[0]==(unsigned long)ref_poly_curve) {
+            nested_event(19,3,word[1],word[2]); nested_event(20,word[3],word[4],0); word+=5;
+        } else { fprintf(stderr,"unknown polygon queue entry\n"); exit(2); }
+    }
+    if (word!=end) { fprintf(stderr,"polygon queue entries overrun the fill\n"); exit(2); }
+    nested_event(21,colour&0xffffff,entries,0);
+    return 0;
+}
+void trace_polygon_abandon(unsigned long *entry)
+{
+    nested_event(22,entry==polygon_entry,0,0);
+    ref_order_cursor=entry;
 }
 /* F1759 (opcode 15): the sample and volume it would play; no sound in the adapter. */
 void trace_sound(long sample, long volume) { nested_event(18,(unsigned long)sample,(unsigned long)volume,0); }
@@ -1108,6 +1142,9 @@ static int station_model_vector(int index)
         instance[0xf0/4]=2;
         instance[0x14c/4]=(unsigned long)globals;
         instance[0x150/4]=model[1];
+        /* Normal records, as F1774 sets them for any model; polygon circles (F1736)
+           and beams (F1761) read them. */
+        instance[0x154/4]=model[3];
         ref_vertex_buffer=(long *)slots;
         ref_normal_buffer=normals;
         ref_detail_primary=ref_detail_secondary=0;
@@ -1410,6 +1447,96 @@ static int command_vectors(void)
 #endif
 }
 
+/* Polygon helpers called directly: F1467 table root, F1564 near-plane point, F1557
+   circle point, F1554 circle (F1555/F1556 inside) and F1547 curve subdivision with
+   a recording edge callback in place of F1560. Inputs are fixed boundary cases plus
+   a seeded xorshift; nothing here depends on game state. */
+extern unsigned long ref_table_root(unsigned long x);
+extern void ref_near_point(void *out, const long *behind, const long *front);
+extern long ref_circle_point(void *out, const long *point);
+extern long ref_circle(void *buffer, const long *centre, const long *axis, long radius);
+extern void ref_curve(void *buffer, const unsigned long *a, const unsigned long *b,
+    const unsigned long *c, const unsigned long *d,
+    void (*edge)(void *, unsigned long *, unsigned long *, long), long arg);
+static unsigned long helper_state = 0x2545f491UL;
+static unsigned long helper_random(void)
+{
+    helper_state ^= helper_state << 13; helper_state &= 0xffffffffUL;
+    helper_state ^= helper_state >> 17;
+    helper_state ^= helper_state << 5; helper_state &= 0xffffffffUL;
+    return helper_state;
+}
+/* A signed value of random magnitude: shifted right by 0..31. */
+static long helper_value(void) { long v = (long)helper_random(); return v >> (helper_random() % 32); }
+static unsigned long curve_edges[64][2], curve_edge_count;
+static void curve_edge(void *buffer, unsigned long *a, unsigned long *b, long arg)
+{
+    (void)buffer; (void)arg;
+    if (curve_edge_count >= 64) { fprintf(stderr,"too many curve edges\n"); exit(2); }
+    curve_edges[curve_edge_count][0]=*a; curve_edges[curve_edge_count][1]=*b; curve_edge_count++;
+}
+#define SCREEN_X(p) ((long)(short)((p)&0xffff))
+#define SCREEN_Y(p) ((long)(short)((p)>>16))
+static int polygon_helper_vectors(void)
+{
+    static const unsigned long limits[] = {0x400UL,0x4000UL,0x40000UL,0x400000UL,0x4000000UL,0x10000000UL,0x40000000UL,0x80000000UL};
+    unsigned long i, j, out;
+    fprintf(stderr,"JJFFE polygon-helpers-v1: F1467, F1564, F1557, F1554 and F1547 called directly on synthetic inputs. Not rasterisation.\n");
+    for (i=0;i<2048+8*5+2048;++i) {
+        unsigned long x;
+        if (i<2048) x=i;
+        else if (i<2048+40) x=limits[(i-2048)/5]+(i-2048)%5-2;
+        else x=helper_random()>>(helper_random()%32);
+        printf("{\"k\":\"root\",\"in\":[%lu],\"out\":[%lu]}\n",x,ref_table_root(x));
+    }
+    for (i=0;i<2048;++i) {
+        long behind[3], front[3];
+        behind[0]=helper_value(); behind[1]=helper_value(); behind[2]=i ? 0x3f-(long)(helper_random()>>(helper_random()%32)) : 0x3f;
+        front[0]=helper_value(); front[1]=helper_value(); front[2]=i ? 0x40+(long)(helper_random()>>(1+helper_random()%31)) : 0x40;
+        out=0; ref_near_point(&out,behind,front);
+        printf("{\"k\":\"near\",\"in\":[%ld,%ld,%ld,%ld,%ld,%ld],\"out\":[%ld,%ld]}\n",
+            behind[0],behind[1],behind[2],front[0],front[1],front[2],SCREEN_X(out),SCREEN_Y(out));
+    }
+    for (i=0;i<2048;++i) {
+        long point[3]; long ok;
+        point[0]=helper_value(); point[1]=helper_value(); point[2]=helper_value();
+        out=0; ok=ref_circle_point(&out,point);
+        printf("{\"k\":\"point\",\"in\":[%ld,%ld,%ld],\"out\":[%ld,%ld,%ld]}\n",
+            point[0],point[1],point[2],ok,ok?SCREEN_X(out):0,ok?SCREEN_Y(out):0);
+    }
+    for (i=0;i<2048;++i) {
+        long centre[3], axis[3], radius, ok;
+        unsigned long buffer[0x98/4];
+        centre[0]=helper_value()>>4; centre[1]=helper_value()>>4; centre[2]=helper_value()>>2;
+        for (j=0;j<3;++j) axis[j]=(i%4) ? (long)(helper_random()%255)-127 : helper_value()>>(helper_random()%2 ? 16 : 1);
+        radius=(long)((helper_random()&255)<<(helper_random()%16));
+        memset(buffer,0,sizeof(buffer));
+        ok=ref_circle(buffer,centre,axis,radius);
+        printf("{\"k\":\"circle\",\"in\":[%ld,%ld,%ld,%ld,%ld,%ld,%ld],\"out\":[%ld",
+            centre[0],centre[1],centre[2],axis[0],axis[1],axis[2],radius,ok);
+        if (ok) for (j=0;j<8;++j) printf(",%ld,%ld",SCREEN_X(buffer[0x6c/4+j]),SCREEN_Y(buffer[0x6c/4+j]));
+        printf("]}\n");
+    }
+    for (i=0;i<2048;++i) {
+        unsigned long points[4];
+        unsigned long range = i%3==0 ? 50 : i%3==1 ? 8000 : 32767;
+        for (j=0;j<4;++j) {
+            long x=(long)(helper_random()%(2*range+1))-(long)range, y=(long)(helper_random()%(2*range+1))-(long)range;
+            points[j]=((unsigned long)x&0xffff)|((unsigned long)y<<16);
+        }
+        curve_edge_count=0;
+        ref_curve(NULL,&points[0],&points[1],&points[2],&points[3],curve_edge,0);
+        printf("{\"k\":\"curve\",\"in\":[");
+        for (j=0;j<4;++j) printf("%s%ld,%ld",j?",":"",SCREEN_X(points[j]),SCREEN_Y(points[j]));
+        printf("],\"out\":[");
+        for (j=0;j<curve_edge_count;++j) printf("%s%ld,%ld,%ld,%ld",j?",":"",
+            SCREEN_X(curve_edges[j][0]),SCREEN_Y(curve_edges[j][0]),SCREEN_X(curve_edges[j][1]),SCREEN_Y(curve_edges[j][1]));
+        printf("]}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush polygon helper vectors");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *count;
@@ -1424,6 +1551,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--station")) return station_vectors();
     if (argc == 3 && !strcmp(argv[1], "--station-model")) return station_model_vector(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--station-queue")) return station_queue_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--polygon-helpers")) return polygon_helper_vectors();
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

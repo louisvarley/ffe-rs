@@ -1,11 +1,15 @@
-use ffe_convert::embedded::{decode_model_vertices, model_command_bytes};
+use ffe_convert::embedded::{decode_model_normals, decode_model_vertices, model_command_bytes};
 use ffe_core::model::VertexContext;
-use ffe_core::model_commands::VisibilityContext;
+use ffe_core::model_commands::{material, VisibilityContext};
 use ffe_core::model_execute::{execute_live, InstanceContext};
 use ffe_core::model_instance::Vertices;
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::Normal;
+use ffe_core::model_polygon::Entry;
 use serde::Deserialize;
+
+/// Marks a textured polygon fill colour, whose F1691 texture addition is not ported.
+const TEXTURED: u32 = u32::MAX;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +74,7 @@ fn executed_reference_station_models() {
         32768
     ];
     let (mut compared, mut skipped, mut mismatches) = (0, Vec::new(), Vec::new());
+    let (mut polygons, mut entries, mut textured) = (0usize, 0usize, 0usize);
     for line in input.lines() {
         let original: Model = serde_json::from_str(line).unwrap();
         let index = original.model;
@@ -90,7 +95,14 @@ fn executed_reference_station_models() {
             detail: [0, 0],
             normals: &normals,
         };
-        let mut live = Vertices::new(&vertices.bytes, vertices.vertex_count).unwrap();
+        // Polygon circles read the normal records (+0x154); a model whose records the
+        // importer rejects runs without them and fails only if it draws a circle.
+        let normal_records = decode_model_normals(&exe, table_rva, index)
+            .map(|normals| normals.bytes)
+            .unwrap_or_default();
+        let mut live = Vertices::new(&vertices.bytes, vertices.vertex_count)
+            .unwrap()
+            .with_normal_records(&normal_records);
         let mut context = VertexContext {
             scale,
             ..Default::default()
@@ -168,8 +180,39 @@ fn executed_reference_station_models() {
                 .get(g)
                 .filter(|e| e.polygon.offset == *offset)
             {
+                // F1721: the key, then the queued entries (19/20) and the fill colour
+                // with the entry count (21), or the abandonment (22).
                 if let Some(key) = polygon.key {
                     nested.push([11, key, 0, 0]);
+                    let pack = |[x, y]: [i16; 2]| u32::from(x as u16) | u32::from(y as u16) << 16;
+                    if polygon.outline.abandoned {
+                        nested.push([22, 1, 0, 0]);
+                    } else {
+                        for entry in &polygon.outline.entries {
+                            match *entry {
+                                Entry::Edge([a, b]) => nested.push([19, 1, pack(a), pack(b)]),
+                                Entry::To(a) => nested.push([19, 2, pack(a), 0]),
+                                Entry::Curve([a, b, c, d]) => {
+                                    nested.push([19, 3, pack(a), pack(b)]);
+                                    nested.push([20, pack(c), pack(d), 0]);
+                                }
+                            }
+                        }
+                        // F1691's texture colour is not ported: a textured fill's
+                        // colour is marked and not compared (see below).
+                        let [red, green, blue] = polygon.colour.map(u32::from);
+                        let textured = material(polygon.polygon.material).texture != 0;
+                        nested.push([
+                            21,
+                            if textured {
+                                TEXTURED
+                            } else {
+                                red | green << 8 | blue << 16
+                            },
+                            polygon.outline.entries.len() as u32,
+                            0,
+                        ]);
+                    }
                 }
                 g += 1;
             }
@@ -229,8 +272,9 @@ fn executed_reference_station_models() {
             }
         }
         // Vertex-lookup events (1: text F1470, 7: child F1471) fire only on a cache
-        // miss, and polygon segment handlers (not executed natively yet) project
-        // vertices; compare every other nested event.
+        // miss. The probe replaces the face handlers (which project in Rust), and
+        // splines, labels, thrusters and polygon segments project too, so the cache
+        // state at each lookup is not predicted here; compare every other event.
         let lookups = |events: &[[u32; 4]]| -> Vec<[u32; 4]> {
             events
                 .iter()
@@ -238,7 +282,28 @@ fn executed_reference_station_models() {
                 .filter(|event| !matches!(event[0], 1 | 7))
                 .collect()
         };
-        let nested_matches = lookups(&nested) == lookups(&original.nested);
+        let (ours, mut theirs) = (lookups(&nested), lookups(&original.nested));
+        for (event, original_event) in ours.iter().zip(theirs.iter_mut()) {
+            if event[0] == 21 && original_event[0] == 21 {
+                polygons += 1;
+                entries += event[2] as usize;
+                if event[1] == TEXTURED {
+                    original_event[1] = TEXTURED;
+                    textured += 1;
+                }
+            }
+        }
+        let nested_matches = ours == theirs;
+        if !nested_matches {
+            let at = (0..ours.len().max(theirs.len()))
+                .find(|&i| ours.get(i) != theirs.get(i))
+                .unwrap_or(0);
+            eprintln!(
+                "  model {index} nested event {at}: rust {:?} original {:?}",
+                ours.get(at),
+                theirs.get(at)
+            );
+        }
         let checks = [
             ("faces", result.emissions.len() == original.faces),
             ("face stream", hash(emitted) == original.emissions),
@@ -264,7 +329,8 @@ fn executed_reference_station_models() {
         compared += 1;
     }
     eprintln!(
-        "compared {compared} models; {} not executed natively; {} mismatched",
+        "compared {compared} models; {} not executed natively; {} mismatched; \
+         {polygons} polygon fills with {entries} entries ({textured} textured, colour not compared)",
         skipped.len(),
         mismatches.len()
     );

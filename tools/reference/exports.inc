@@ -58,6 +58,16 @@ GLOBAL _ref_order_flush
 GLOBAL _ref_view_vertex
 GLOBAL _ref_project_vertex
 GLOBAL _ref_project_point
+GLOBAL _ref_poly_start
+GLOBAL _ref_poly_edge
+GLOBAL _ref_poly_to
+GLOBAL _ref_poly_curve
+GLOBAL _ref_poly_fill
+GLOBAL _ref_table_root
+GLOBAL _ref_near_point
+GLOBAL _ref_circle_point
+GLOBAL _ref_circle
+GLOBAL _ref_curve
 
 _ref_state equ DATA_008804
 _ref_rng equ FUNC_001530
@@ -118,3 +128,13 @@ _ref_order_flush equ FUNC_001789
 _ref_view_vertex equ FUNC_001470
 _ref_project_vertex equ FUNC_001471
 _ref_project_point equ FUNC_001479
+_ref_poly_start equ FUNC_001794
+_ref_poly_edge equ FUNC_001795
+_ref_poly_to equ FUNC_001796
+_ref_poly_curve equ FUNC_001797
+_ref_poly_fill equ FUNC_001799
+_ref_table_root equ FUNC_001467
+_ref_near_point equ FUNC_001564
+_ref_circle_point equ FUNC_001557
+_ref_circle equ FUNC_001554
+_ref_curve equ FUNC_001547

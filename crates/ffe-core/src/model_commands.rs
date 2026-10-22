@@ -90,20 +90,24 @@ impl Submodel {
     }
 }
 
-/// F1721 complex-polygon operands. The outline segments (DATA_007817 handlers) are
-/// kept raw; they build the outline and are not executed here.
+/// F1721 complex-polygon operands. The outline segments (`DATA_007817` handlers) are
+/// decoded by [`crate::model_polygon::decode_segments`] and run by `execute_live`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Polygon {
     pub offset: usize,
     pub material: u16,
     /// Low 7 bits of byte 2: the normal whose culled flag skips the polygon.
     pub normal: u8,
-    /// Bit 7 of byte 2.
+    /// Bit 7 of byte 2: abandon the polygon when it reaches behind the near plane
+    /// instead of clipping it (F1726).
     pub flag: bool,
     /// Low 7 bits of the first segment byte: the vertex that keys the polygon.
     pub vertex: u8,
-    /// Segment bytes (byte 3 gives their length).
-    pub segments: Vec<u8>,
+    /// Decoded segments, without the terminator.
+    pub segments: Vec<crate::model_polygon::Segment>,
+    /// Raw segment bytes (byte 3 gives their length), terminator included. The
+    /// original's abandonment skip (F1726) can read them from inside a segment.
+    pub segment_bytes: Vec<u8>,
 }
 
 /// F1738 thruster operands: an exhaust glow between two vertices.
@@ -480,7 +484,9 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                 normal: payload[2] & 0x7f,
                 flag: payload[2] & 0x80 != 0,
                 vertex: payload[4] & 0x7f,
-                segments: payload[4..].to_vec(),
+                segments: crate::model_polygon::decode_segments(&payload[4..], vertex_count)
+                    .map_err(|error| format!("{error} (polygon at {offset:#x})"))?,
+                segment_bytes: payload[4..].to_vec(),
             };
             if u32::from(polygon.vertex) >= vertex_count {
                 return Err(format!(
