@@ -2,6 +2,9 @@
 
 Assessment date: 2026-10-20.
 Owner answers recorded: 2026-10-20.
+Development branch: `main` (owner, 2026-10-22). Work, commit and push directly
+on `main`; the earlier `claude/code-commit-capabilities-k4hm9l` history was
+fast-forwarded into it.
 Status: Rust inspection, embedded import, partial base cache and external export
 implemented; local JJFFE startup/new-game state and numeric traces verified.
 Pure Rust RNG/timer-counter/day-fraction primitives exist. An experimental
