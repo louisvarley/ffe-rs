@@ -163,3 +163,8 @@ _ref_child_frame equ FUNC_001740
 _ref_child_run equ FUNC_001773
 _ref_shades equ DATA_008831
 _ref_arena_index equ DATA_007823
+; Thruster oracle (--thruster-cases): F1738 itself and its narrow-line queueing.
+GLOBAL _ref_thruster
+GLOBAL _ref_line_queue
+_ref_thruster equ FUNC_001738
+_ref_line_queue equ FUNC_001704

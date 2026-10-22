@@ -49,3 +49,39 @@ fn viewer_executes_models_wraps_selection_and_fits_them_on_screen() {
     assert_ne!(viewer.render().unwrap(), frame);
     assert!(ModelViewer::from_models(Vec::new(), table()).is_err());
 }
+
+/// A ship-like thruster: skipped unless global 15 (the thrust) is non-zero, then a
+/// wide glow from (0, 0, 10) to (0, 0, 40).
+#[test]
+fn thruster_glows_follow_the_thrust_global() {
+    let vertices = [1, 0, 0, 0, 10, 0, 1, 0, 0, 0, 40, 0];
+    let commands: Vec<u8> = [0x0093u16, 143, 9, 0x0123, 0x0200, 4000, 0]
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect();
+    let model = ViewerModel::new(5, 4, 4, &vertices, &commands, &[], 2);
+    let mut viewer = ModelViewer::from_models(vec![model], table()).unwrap();
+    assert_eq!(viewer.thrust(), None);
+    let glows = |viewer: &ModelViewer| {
+        viewer
+            .render()
+            .unwrap()
+            .shapes
+            .iter()
+            .filter(|shape| matches!(shape, Shape::Glow(_)))
+            .count()
+    };
+    // Global 15 follows the animation input (0): the branch skips the thruster.
+    assert_eq!(glows(&viewer), 0);
+    viewer.set_thrust(Some(1000));
+    assert!(glows(&viewer) > 0);
+    let frame = viewer.render().unwrap();
+    let Some(Shape::Glow(glow)) = frame.shapes.first() else {
+        panic!("expected a glow: {:?}", frame.shapes);
+    };
+    assert!(matches!(glow.bitmap, 0x123 | 0x65));
+    assert_eq!(glow.points.len(), 4);
+    assert_eq!(glow.slots.len(), 7);
+    viewer.set_thrust(Some(0));
+    assert_eq!(glows(&viewer), 0);
+}

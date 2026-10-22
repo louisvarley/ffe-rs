@@ -51,6 +51,11 @@ ORACLES = [
     ("verify-child-models.py", ["--reference", "{commands}", "--game", "{game}",
                                 "--cache", "{cache}"]),
     ("verify-vertex-programs.py", ["--reference", "{commands}", "--game", "{game}"]),
+    ("verify-thrusters.py", ["--reference", "{commands}", "--cache", "{cache}"]),
+    # The same child-model comparison with the model deep enough (z 0x50000) for
+    # far thruster vertices to clear F1738's 0x200 depth test.
+    ("verify-child-models.py", ["--reference", "{commands}", "--game", "{game}",
+                                "--cache", "{cache}", "--depth", "0x50000"]),
 ]
 
 
@@ -103,9 +108,10 @@ def main() -> int:
         command += [argument.format(**paths) for argument in arguments]
         result = subprocess.run(command, cwd=root, capture_output=True, timeout=3600)
         status = "ok  " if result.returncode == 0 else "FAIL"
-        print(f"{status} {script}", flush=True)
+        label = script + (" --depth " + arguments[-1] if "--depth" in arguments else "")
+        print(f"{status} {label}", flush=True)
         if result.returncode != 0:
-            failed.append(script)
+            failed.append(label)
             tail = (result.stdout + result.stderr).decode(errors="replace").strip().splitlines()
             for line in tail[-12:]:
                 print(f"     {line}")

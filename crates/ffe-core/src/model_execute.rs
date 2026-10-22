@@ -130,12 +130,20 @@ pub struct SplineEmission {
     pub colour: [u8; 3],
 }
 
-/// A thruster operand event (F1738). Its glow/line queueing (depth-scaled width,
-/// F1467 screen length, F1704) is not ported, so it is absent from `ordered`.
+/// A thruster (F1738). [`execute_live`] resolves A (and B when A is deeper than
+/// 0x200) and queues what the original queues (see [`crate::model_thruster`]):
+/// nothing, an F1704 line, or one or two F1805 glow quads, each also in
+/// [`Execution::ordered`] as a [`Primitive::Thruster`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThrusterEmission {
     pub thruster: Thruster,
     pub context: VertexContext,
+    /// The entries queued, in queue order (empty for [`execute`]).
+    pub entries: Vec<crate::model_thruster::Entry>,
+    /// A's and B's screen points when both were resolved (A deeper than 0x200).
+    pub screens: Option<[[i16; 2]; 2]>,
+    /// The scaled width when F1738 computed it (both vertices deeper than 0x200).
+    pub width: Option<i32>,
 }
 
 /// A curved-surface operand event (F1874). F1876's patch rendering and its own
@@ -201,6 +209,10 @@ pub enum QueueEvent {
     Line(u32),
     Spline(u32),
     Label(u32),
+    /// An F1805 thruster glow quad (F1738).
+    Thruster(u32),
+    /// An F1803 line queued by F1704 for a narrow thruster.
+    ThrusterLine(u32),
 }
 
 /// One render-order entry.
@@ -212,6 +224,7 @@ pub enum Primitive {
     Line(LineEmission),
     Spline(SplineEmission),
     Label(LabelEmission),
+    Thruster(crate::model_thruster::Entry),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,7 +245,7 @@ pub struct Execution {
     pub colours: Vec<ColourEmission>,
     /// Complex polygons in command order ([`execute_live`] only).
     pub polygons: Vec<PolygonEmission>,
-    /// Thrusters in command order; never in [`Self::ordered`].
+    /// Thrusters in command order; their queued entries are also in [`Self::ordered`].
     pub thrusters: Vec<ThrusterEmission>,
     /// Curved surfaces in command order; never in [`Self::ordered`].
     pub surfaces: Vec<SurfaceEmission>,
@@ -1068,6 +1081,9 @@ fn run(
             }
             9 => {
                 for thruster in program.thrusters.iter().filter(|t| t.offset == offset) {
+                    let mut entries = Vec::new();
+                    let mut screens = None;
+                    let mut width = None;
                     // F1738 projects A, and B only when A is more than 0x200 deep.
                     if let Some(live) = vertices.as_deref_mut() {
                         let [a, b] = thruster.vertices;
@@ -1078,19 +1094,51 @@ fn run(
                             instance.generation,
                             true,
                         )?;
-                        if near.view[2] > 0x200 {
-                            live.resolve(
+                        let far = if near.view[2] > crate::model_thruster::MIN_DEPTH {
+                            Some(live.resolve(
                                 b as i8,
                                 working,
                                 instance.position,
                                 instance.generation,
                                 true,
-                            )?;
+                            )?)
+                        } else {
+                            None
+                        };
+                        screens = far.map(|far| [near.screen, far.screen]);
+                        let queued = crate::model_thruster::entries(
+                            thruster,
+                            &near,
+                            far.as_ref(),
+                            crate::model_thruster::Instance {
+                                scale: instance.operand_scale,
+                                key_scale: instance.key_scale,
+                                colour: working.colour,
+                            },
+                        )
+                        .map_err(|error| format!("{error} (thruster at {offset:#x})"))?;
+                        width = queued.width;
+                        entries = queued.entries;
+                        if let Some(queue) = shared.order.as_mut() {
+                            for entry in &entries {
+                                queue.push(entry.key, Primitive::Thruster(entry.clone()))?;
+                                shared.queue.push(match entry.shape {
+                                    crate::model_thruster::Shape::Line { .. } => {
+                                        QueueEvent::ThrusterLine(entry.key)
+                                    }
+                                    crate::model_thruster::Shape::Glow { .. } => {
+                                        QueueEvent::Thruster(entry.key)
+                                    }
+                                });
+                            }
                         }
                     }
                     result.thrusters.push(ThrusterEmission {
                         thruster: thruster.clone(),
                         context: working.clone(),
+                        entries,
+                        screens,
+                        width,
                     });
                 }
                 Some(command.size as i32)

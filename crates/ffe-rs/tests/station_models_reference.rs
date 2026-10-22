@@ -7,6 +7,7 @@ use ffe_core::model_execute::{execute_live, InstanceContext};
 use ffe_core::model_instance::Vertices;
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::Normal;
+use ffe_core::model_texture::Descriptors;
 use serde::Deserialize;
 
 /// Marks a textured polygon fill colour, whose F1691 texture addition is not ported.
@@ -63,6 +64,8 @@ fn executed_reference_station_models() {
         ffe_content::read(&std::fs::read(std::env::var_os("FFE_STATION_CACHE").unwrap()).unwrap())
             .unwrap();
     let table = SineTable::from_bytes(cache.asset("base:math/sine").unwrap()).unwrap();
+    let descriptors =
+        Descriptors::from_bytes(cache.asset("base:texture/descriptors").unwrap()).unwrap();
     let input =
         std::fs::read_to_string(std::env::var_os("FFE_STATION_MODELS_VECTORS").unwrap()).unwrap();
     assert!(input.len() < 16 << 20);
@@ -75,6 +78,7 @@ fn executed_reference_station_models() {
     ];
     let (mut compared, mut skipped, mut mismatches) = (0, Vec::new(), Vec::new());
     let (mut polygons, mut entries, mut textured) = (0usize, 0usize, 0usize);
+    let (mut glows, mut lines) = (0usize, 0usize);
     for line in input.lines() {
         let original: Model = serde_json::from_str(line).unwrap();
         let index = original.model;
@@ -144,7 +148,7 @@ fn executed_reference_station_models() {
             emitted.extend(event.context.basis.into_iter().flat_map(i32::to_le_bytes));
         }
         let (mut p, mut l, mut t, mut s, mut g, mut b, mut c) = (0, 0, 0, 0, 0, 0, 0);
-        let mut labels = 0;
+        let (mut labels, mut thrusters) = (0, 0);
         let (mut points, mut nested) = (Vec::new(), Vec::new());
         let mut projected = std::collections::HashSet::new();
         for offset in &result.commands {
@@ -212,6 +216,19 @@ fn executed_reference_station_models() {
                 }
                 c += 1;
             }
+            // F1738 thruster entries (41..48).
+            if let Some(thruster) = result
+                .thrusters
+                .get(thrusters)
+                .filter(|e| e.thruster.offset == *offset)
+            {
+                common::thruster_events(
+                    thruster,
+                    common::thruster_line_colour(thruster, &descriptors),
+                    &mut nested,
+                );
+                thrusters += 1;
+            }
             if let Some(text) = result.texts.get(t).filter(|e| e.text.offset == *offset) {
                 if !text.culled {
                     // F1747 calls F1470 only on a cache miss; F1470 does not stamp.
@@ -251,6 +268,9 @@ fn executed_reference_station_models() {
         };
         let (ours, mut theirs) = (lookups(&nested), lookups(&original.nested));
         let (fills, fill_entries, fills_textured) = common::mask_textured(&ours, &mut theirs);
+        common::mask_thruster_lines(&ours, &mut theirs);
+        glows += ours.iter().filter(|e| e[0] == 41).count();
+        lines += ours.iter().filter(|e| e[0] == 47).count();
         polygons += fills;
         entries += fill_entries;
         textured += fills_textured;
@@ -291,7 +311,8 @@ fn executed_reference_station_models() {
     }
     eprintln!(
         "compared {compared} models; {} not executed natively; {} mismatched; \
-         {polygons} polygon fills with {entries} entries ({textured} textured, colour not compared)",
+         {polygons} polygon fills with {entries} entries ({textured} textured, colour not compared); \
+         {glows} thruster glows, {lines} thruster lines",
         skipped.len(),
         mismatches.len()
     );

@@ -1,7 +1,8 @@
 //! F6 model viewer: every imported model executed by the verified port and drawn
 //! in the original render order. A development view, not the faithful renderer:
 //! the camera, light, flat colour mapping and fill are diagnostic choices, and
-//! polygons, curved surfaces, text, labels and child models are not drawn.
+//! curved surfaces, text and labels are not drawn. Thruster glows (F1738) are
+//! the original's queued F1805 quads drawn by the ported textured rasteriser.
 //! Textured faces follow the original F1708/F1712 entry and F1644/F1647
 //! rasterisers with the cache v8 descriptor table (verified, see
 //! `docs/notes/textures.md`); without v8 they show as a lit grey stand-in.
@@ -20,6 +21,7 @@ use ffe_core::model_normals::{self, NormalContext};
 use ffe_core::model_texture::{
     draw_quad, draw_triangle, flat_colour, quad_uv, textured_colours, textured_path, triangle_uv,
 };
+use ffe_core::model_thruster::{line_colour, Shape as ThrusterShape};
 
 /// One screen-space primitive in draw order (logical 320x158 view coordinates).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +30,10 @@ pub enum Shape {
     Line((i32, i32), (i32, i32), [u8; 3]),
     Point((i32, i32), [u8; 3]),
     Textured(Textured),
+    /// A thruster glow (F1738's F1805 entry): drawn like [`Shape::Textured`] (F1647
+    /// over bitmap 0x123 or 0x65), but left out of the viewer's fit so that the
+    /// model keeps its size as the plume grows with thrust.
+    Glow(Textured),
 }
 
 /// A textured F1807/F1805 queue entry: screen points in queue order (the face's
@@ -73,7 +79,19 @@ pub struct ModelViewer {
     lighting: Lighting,
     /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
     descriptors: Vec<[i32; 2]>,
+    /// Global word 15 (the ship's forward thrust, object +0xba); `None` leaves it
+    /// to the animation input. See [`ModelViewer::set_thrust`].
+    thrust: Option<u16>,
 }
+
+/// The model global that ship models read as their forward thrust: global word 15
+/// is object word `+0x9c + 2 * 15` = `+0xba` (F1473), the z word of the vector F598
+/// clamps to the ship's per-axis limits and stores at +0xb6/+0xb8/+0xba. The ships'
+/// thruster preamble skips the glows when this word is zero or has bit 15 set, sets
+/// local 1 to `min(thrust, 4095) << 4` (zero below 5120) and interpolates each
+/// plume end (vertex B, curve vertex opcode 19) by local 1. See
+/// `docs/notes/thrusters.md`.
+pub const THRUST_GLOBAL: usize = 15;
 
 /// The imported models as child calls see the model table.
 struct ChildTable<'a>(&'a ModelViewer);
@@ -245,6 +263,7 @@ impl ModelViewer {
             textures: TextureSet::default(),
             lighting: FALLBACK_LIGHTING,
             descriptors: Vec::new(),
+            thrust: None,
         })
     }
 
@@ -289,6 +308,17 @@ impl ModelViewer {
         self.animation
     }
 
+    /// Set the forward thrust ships read from global word 15 ([`THRUST_GLOBAL`],
+    /// object +0xba), or `None` to leave that word to the animation input. Ship
+    /// thruster glows appear for 320..=0x7fff and lengthen with it up to 4095.
+    pub fn set_thrust(&mut self, value: Option<u16>) {
+        self.thrust = value;
+    }
+
+    pub fn thrust(&self) -> Option<u16> {
+        self.thrust
+    }
+
     /// Execute the selected model and project its ordered primitives. A first pass
     /// at the bounding-radius distance measures the drawn extent; the second fits
     /// it to about 70 pixels from the centre, then applies the zoom.
@@ -304,6 +334,7 @@ impl ModelViewer {
                 Shape::Line(a, b, _) => vec![*a, *b],
                 Shape::Point(p, _) => vec![*p],
                 Shape::Textured(textured) => textured.points.clone(),
+                Shape::Glow(_) => Vec::new(),
             })
             .map(|(x, y)| (x - 160).abs().max((y - 79).abs()))
             .max()
@@ -442,11 +473,16 @@ impl ModelViewer {
         };
         // Light points (opcode 30 0x801e) count global word 4; keep it empty.
         context.globals[4] = 0;
+        if let Some(thrust) = self.thrust {
+            context.globals[THRUST_GLOBAL] = thrust;
+        }
+        // F1683 sets +0x148 from descriptor +0x14 (the model scale) and +0x130 to 0;
+        // thruster widths (F1738) shift by it.
         let instance = InstanceContext {
             position,
             generation: GENERATION,
             key_scale: 0,
-            operand_scale: 0,
+            operand_scale: model.scale as i32,
             textures: true,
         };
         // Detail branches see the nearest depth: the viewer wants full detail.
@@ -607,6 +643,38 @@ impl ModelViewer {
                         frame.shapes.push(Shape::Fill(points, self.rgb(colour)));
                     }
                 }
+                Primitive::Thruster(entry) => match &entry.shape {
+                    // F1805: the slot colours through F1326/F1327, then the original
+                    // textured quad (F1647) over bitmap 0x123 (core) or 0x65 (shaft).
+                    // Both bitmaps skip texel 0, so slot 0, which F1738 never writes
+                    // (stale queue memory in the original), is never drawn.
+                    ThrusterShape::Glow {
+                        points,
+                        texture,
+                        colours,
+                    } => {
+                        let mut slots = vec![[0; 3]];
+                        slots.extend(colours.iter().map(|c| self.rgb(*c)));
+                        frame.shapes.push(Shape::Glow(Textured {
+                            points: points
+                                .iter()
+                                .map(|[x, y]| (i32::from(*x), i32::from(*y)))
+                                .collect(),
+                            bitmap: *texture,
+                            slots,
+                        }));
+                    }
+                    // F1803: the stored end points (x - 1 when positive) in the F1691
+                    // colour; the line rasteriser (F1616) is the viewer's own.
+                    ThrusterShape::Line { points, colour } => {
+                        let colour = match self.textures.descriptors() {
+                            Some(table) => line_colour(entry.material, *colour, table)?,
+                            None => *colour,
+                        };
+                        let [a, b] = points.map(|[x, y]| (x, y));
+                        frame.shapes.push(Shape::Line(a, b, self.rgb(colour)));
+                    }
+                },
                 Primitive::Label(_) => frame.skipped += 1,
             }
         }

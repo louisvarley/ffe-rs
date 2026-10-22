@@ -313,6 +313,8 @@ fn executed_reference_station_queues() {
                 QueueEvent::Nested(key) => Some([4, u32::from(key.is_some()), key.unwrap_or(0)]),
                 QueueEvent::Spline(key) => Some([5, 0, *key]),
                 QueueEvent::Label(key) => Some([6, 0, *key]),
+                QueueEvent::Thruster(key) => Some([7, 0, *key]),
+                QueueEvent::ThrusterLine(key) => Some([8, 0, *key]),
                 // Points and lines stay hooked in the probe and are not queued there.
                 QueueEvent::Point(_) | QueueEvent::Line(_) => None,
             })

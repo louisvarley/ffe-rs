@@ -836,7 +836,7 @@ fn live_polygons_skip_by_their_length_and_queue_by_their_first_segment_vertex() 
 }
 
 #[test]
-fn thrusters_are_eight_byte_operand_events_outside_render_order() {
+fn thrusters_are_eight_byte_records_and_a_zero_width_queues_nothing() {
     // Thruster: material 0x0123, vertices 2/3, width -5; then a line on 1/2.
     let words = [9, 0x0123, 0x0302, 0xfffb, 2, 0x0456, 0x0201, 0];
     let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
@@ -856,6 +856,9 @@ fn thrusters_are_eight_byte_operand_events_outside_render_order() {
         (thruster.material, thruster.vertices, thruster.width),
         (0x0123, [2, 3], -5)
     );
+    // Width -5 at scale 0 is -1 after the shift, and -256 / 1079 is zero (F1666).
+    assert_eq!(result.thrusters[0].width, Some(0));
+    assert!(result.thrusters[0].entries.is_empty());
     assert!(result
         .ordered
         .iter()

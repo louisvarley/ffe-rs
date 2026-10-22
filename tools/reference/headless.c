@@ -278,6 +278,68 @@ unsigned long trace_spline_colour(unsigned long colour)
     nested_event(16,SPLINE_POINT(3),colour&0xffffff,0);
     return 0;
 }
+/* F1738 (opcode 9) thruster glows. Each F1805 entry logs its key (41) from F1777;
+   F1778 is logged as queue event 7. When the sixth F1326 of the entry's colour ramp
+   runs, the entry holds its four screen dwords (x | y << 16) and its texture word:
+   42 [p0, p1, p2], 43 [p3, texture, 0], then the six ramp colours as F1326 receives
+   them (r | g << 8 | b << 16): 44 [c1, c2, c3], 45 [c4, c5, c6]. Word 6 (slot 0) is
+   never written by F1738. The returned value is F1326's packed colour; its
+   upper-palette request flag (DATA_009139) is not modelled. */
+static unsigned long *thruster_entry;
+static unsigned long thruster_ramp[6];
+static int thruster_slot;
+static unsigned long pack_colour(unsigned long colour)
+{
+    return ((colour&0xff)<<8)+(((colour>>8)&0xff)<<4)+((colour>>16)&0xff) & 0xffff;
+}
+unsigned long trace_thruster_key(void *instance, const long *view)
+{
+    unsigned long key=ref_depth_key(instance,view);
+    nested_event(41,key,0,0);
+    return key;
+}
+unsigned long *trace_thruster_alloc(long words, unsigned long key, long force)
+{
+    if (queue_mode) queue_event(7,0,key);
+    thruster_entry=ref_order_allocate(words,key,force);
+    thruster_slot=0;
+    return thruster_entry;
+}
+unsigned long trace_thruster_colour(unsigned long colour)
+{
+    if (thruster_slot>=6) { fprintf(stderr,"too many thruster ramp colours\n"); exit(2); }
+    thruster_ramp[thruster_slot++]=colour&0xffffff;
+    if (thruster_slot==6) {
+        nested_event(42,thruster_entry[1],thruster_entry[2],thruster_entry[3]);
+        nested_event(43,thruster_entry[4],thruster_entry[5],0);
+        nested_event(44,thruster_ramp[0],thruster_ramp[1],thruster_ramp[2]);
+        nested_event(45,thruster_ramp[3],thruster_ramp[4],thruster_ramp[5]);
+    }
+    return pack_colour(colour);
+}
+/* A thruster of width 1..4 (or negative) is a line: F1738 calls F1704 with the two
+   resolved entries. 46 [A screen, B screen, colour] records the call; F1704 then
+   queues (queue event 8, nested 47 [key]) and fills its F1803 entry: 48 [x0 | y0 << 16,
+   x1 | y1 << 16] with the stored x (x - 1, or 0) and y dwords. */
+extern void ref_line_queue(void *instance, long *a, long *b, unsigned long colour);
+static unsigned long *line_entry;
+void trace_thruster_line(void *instance, long *a, long *b, unsigned long colour)
+{
+    nested_event(46,(unsigned long)a[0],(unsigned long)b[0],colour&0xffffff);
+    ref_line_queue(instance,a,b,colour);
+}
+unsigned long *trace_line_alloc(long words, unsigned long key, long force)
+{
+    if (queue_mode) queue_event(8,0,key);
+    nested_event(47,key,0,0);
+    line_entry=ref_order_allocate(words,key,force);
+    return line_entry;
+}
+unsigned long trace_line_colour(unsigned long colour)
+{
+    nested_event(48,(line_entry[1]&0xffff)|line_entry[2]<<16,(line_entry[3]&0xffff)|line_entry[4]<<16,0);
+    return pack_colour(colour);
+}
 long *trace_text_vertex(void *instance, long index) { nested_event(1,(unsigned char)index,0,0); return nested_station ? ref_view_vertex(instance,(signed char)index) : nested_vertex; }
 long *trace_text_font(long selector) { nested_event(2,(unsigned long)selector,0,0); return nested_descriptor; }
 void trace_text_frame(void *child, void *instance, long word) { (void)child; (void)instance; nested_event(3,(unsigned long)word,0,0); }
@@ -1274,7 +1336,7 @@ static int station_model_vector(int index)
 #endif
 }
 
-static int child_model_vector(int index)
+static int child_model_vector(int index, long depth)
 {
 #ifndef FFE_COMMAND_PROBE
     fail("--child-model requires the separate instrumented jjffe-commands.exe");
@@ -1295,7 +1357,9 @@ static int child_model_vector(int index)
     memset(slots,0,sizeof(slots));memset(normals,0,sizeof(normals));
     memcpy((char *)instance+0x14,identity,36);
     memcpy((char *)instance+0x9c,identity,36);
-    instance[0xc/4]=2000;
+    /* Position z 2000 by default; --child-model N Z places the model deeper (e.g.
+       0x50000) so far vertices clear F1738's 0x200 depth test. */
+    instance[0xc/4]=(unsigned long)depth;
     instance[0x148/4]=model[5];
     instance[0xf0/4]=2;
     instance[0x14c/4]=(unsigned long)globals;
@@ -1475,6 +1539,113 @@ static void texture_face_end(int kind, long material, unsigned long normal)
     row[4]=face_colour_called ? ((unsigned long)face_colour[0]|((unsigned long)face_colour[1]<<8)|((unsigned long)face_colour[2]<<16)) : 0xffffffffUL;
     row[5]=words;
     for(i=0;i<words;++i) row[6+i]=face_entry[1+i];
+}
+
+/* Thruster glows (opcode 9). thruster-cases calls the original F1738 handler directly
+   on a synthetic instance whose two vertex cache entries already carry the instance
+   generation (so F1738 uses them as they are: no F1471), with varied scales, widths,
+   depths, screen points, colours and materials; line cases call F1704 directly with
+   depths on both sides of the near plane. Every queue operation and entry is logged
+   through the thruster/line probes. Not pixels. */
+extern unsigned char *ref_thruster(void *instance, void *operands, unsigned long code);
+static unsigned long thruster_rng;
+static long thruster_random(long low, long high)
+{
+    thruster_rng=(thruster_rng*1103515245UL+12345UL)&0xffffffffUL;
+    return low+(long)(((thruster_rng>>8)|(thruster_rng<<24))%(unsigned long)(high-low+1));
+}
+static long thruster_depth(void)
+{
+    switch(thruster_random(0,5)) {
+    case 0: return thruster_random(-0x100,0x200);
+    case 1: return thruster_random(0x201,0x1000);
+    case 2: return thruster_random(0x1000,0x40000);
+    case 3: return thruster_random(0x40000,0x7fffffff);
+    case 4: return thruster_random(0x201,0x8000);
+    default: return thruster_random(0x400,0x20000);
+    }
+}
+static void thruster_screen(short *a, short *b)
+{
+    long form=thruster_random(0,5),span;
+    a[0]=(short)thruster_random(-40,360);a[1]=(short)thruster_random(-40,200);
+    switch(form) {
+    case 0: span=0; break;
+    case 1: span=3; break;
+    case 2: span=20; break;
+    case 3: span=200; break;
+    case 4: span=4000; break;
+    default: span=32767; break;
+    }
+    b[0]=(short)(a[0]+thruster_random(-span,span));b[1]=(short)(a[1]+thruster_random(-span,span));
+    if(form==5) {a[0]=(short)thruster_random(-32768,32767);a[1]=(short)thruster_random(-32768,32767);}
+    if(thruster_random(0,40)==0) a[0]=a[1]=(short)0x8002;
+    if(thruster_random(0,40)==0) b[0]=b[1]=(short)0x8002;
+}
+static int thruster_case_vectors(void)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--thruster-cases requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static unsigned long queue_buffer[65536];
+    static unsigned long instance[0x160/4],slots[4*9];
+    unsigned char record[8];
+    unsigned char *next;
+    long *a=(long *)slots,*b=(long *)slots+9,material,width,scale,key_scale,i,n,kind;
+    unsigned char *colour=(unsigned char *)instance+0xf4;
+    fprintf(stderr,"JJFFE thruster-cases-v1: original F1738 on synthetic instances with both vertex entries stamped with the instance generation (8192 cases), and original F1704 on synthetic entry pairs (4096 cases); keys, F1805/F1803 entries, ramp colours and queue operations logged. Not pixels.\n");
+    thruster_rng=0x6d2b79f5UL;
+    for(n=0;n<12288;++n) {
+        kind=n<8192 ? 0 : 1;
+        memset(instance,0,sizeof(instance));memset(slots,0,sizeof(slots));
+        scale=thruster_random(0,31);
+        key_scale=thruster_random(-4,8);
+        instance[0xf0/4]=2;
+        instance[0x148/4]=(unsigned long)scale;
+        instance[0x130/4]=(unsigned long)key_scale;
+        if(thruster_random(0,3)) {colour[0]=(unsigned char)thruster_random(0,15);colour[1]=(unsigned char)thruster_random(0,15);colour[2]=(unsigned char)thruster_random(0,15);}
+        else {colour[0]=(unsigned char)thruster_random(0,255);colour[1]=(unsigned char)thruster_random(0,255);colour[2]=(unsigned char)thruster_random(0,255);}
+        material=thruster_random(0,0xffff);
+        if(thruster_random(0,3)) material&=0x3fff;
+        else material=(material&0xf000)|thruster_random(1,147);
+        if(!(material&0xc000)) material&=0x3fff;
+        switch(thruster_random(0,3)) {
+        case 0: width=thruster_random(-8,8); break;
+        case 1: width=thruster_random(-300,300); break;
+        case 2: width=thruster_random(-4000,4000); break;
+        default: width=thruster_random(-32768,32767); break;
+        }
+        thruster_screen((short *)a,(short *)b);
+        for(i=0;i<2;++i) {
+            long *e=i?b:a;
+            e[1]=thruster_random(-0x40000,0x40000);e[2]=thruster_random(-0x40000,0x40000);
+            e[3]=kind ? thruster_random(-0x200,0x4000) : thruster_depth();
+            e[5]=2;
+        }
+        memset(queue_buffer,0,sizeof(queue_buffer));
+        ref_order_base=queue_buffer;ref_order_active=0;ref_order_state=0;
+        ref_order_init(queue_buffer);
+        ref_vertex_buffer=(long *)slots;
+        queue_mode=1;queue_count=0;nested_count=0;
+        record[0]=9;record[1]=0;
+        record[2]=(unsigned char)material;record[3]=(unsigned char)(material>>8);
+        record[4]=0;record[5]=1;
+        record[6]=(unsigned char)width;record[7]=(unsigned char)(width>>8);
+        if(kind) {ref_line_queue(instance,a,b,(unsigned long)colour[0]|(unsigned long)colour[1]<<8|(unsigned long)colour[2]<<16);next=record+8;}
+        else next=ref_thruster(instance,record+2,9);
+        queue_mode=0;
+        printf("{\"case\":%ld,\"kind\":%ld,\"scale\":%ld,\"key_scale\":%ld,\"colour\":[%u,%u,%u],\"material\":%ld,\"width\":%ld,\"a\":[%d,%d,%ld,%ld,%ld],\"b\":[%d,%d,%ld,%ld,%ld],\"advance\":%ld,\"nested\":[",
+            n,kind,scale,key_scale,colour[0],colour[1],colour[2],material,width,
+            ((short *)a)[0],((short *)a)[1],a[1],a[2],a[3],((short *)b)[0],((short *)b)[1],b[1],b[2],b[3],(long)(next-record));
+        for(i=0;i<(long)nested_count;++i)
+            printf("%s[%lu,%lu,%lu,%lu]",i?",":"",nested_kind[i],nested_value[i][0],nested_value[i][1],nested_value[i][2]);
+        printf("],\"queue\":[");
+        for(i=0;i<(long)queue_count;++i) printf("%s[%lu,%lu,%lu]",i?",":"",queue_log[i][0],queue_log[i][1],queue_log[i][2]);
+        printf("]}\n");
+    }
+    return 0;
+#endif
 }
 
 static int texture_queue_vector(int index)
@@ -1862,7 +2033,9 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--polygon-helpers")) return polygon_helper_vectors();
     if (argc == 2 && !strcmp(argv[1], "--texture-raster")) return texture_raster_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
-    if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]));
+    if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
+    if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));
+    if (argc == 2 && !strcmp(argv[1], "--thruster-cases")) return thruster_case_vectors();
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();
