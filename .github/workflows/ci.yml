@@ -29,7 +29,7 @@ jobs:
         run: python -m unittest ci.test_check_forbidden
 
       - name: Compile the local verification scripts
-        run: python -m py_compile tools/reference/*.py ci/*.py
+        run: python -m compileall -q tools/reference ci
 
   rust:
     name: Rust (${{ matrix.os }})

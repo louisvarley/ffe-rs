@@ -27,11 +27,11 @@ coverage and `docs/notes/` for the feature records.
 table slots execute natively**, all 448 the original also completes match it in
 command order, **440 match with their children run**, and all 454 comparable
 vertex programs match including each vertex entry's screen and view position.
-The 17 slots left are the ones the original cannot run standalone (external
-vertex references resolved through null pointers), model 89's release-data
-difference, the null entry, and two slots blocked by the original's own
-undefined child state. `verify-all.py` runs the whole local comparison set; all
-26 scripts pass.
+The 17 slots left are the 15 whose external vertex references the original
+resolves through null pointers (it crashes on them standalone), model 89's
+release-data difference and the null table entry at 149. Two more slots (94,
+148) execute standalone but stop a child scene on the original's own undefined
+child state.
 
 What is *not* done is presentation and gameplay, in this order of readiness:
 
