@@ -115,6 +115,13 @@ Facts verified on 2026-10-22:
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
   `data.bin` is cache v10 with 1776 assets and 462 of 466 models;
   `.cache/data-v1..v5-backup.bin` and `data-v10-backup.bin` are retained.
+- `verify-assets.py` checks the whole v10 cache against the executable's own
+  bytes and the JJFFE pointer provenance. **34 of the 462 imported models
+  differ from the JJFFE 2.8a7 declarations** by a few bytes each: the mod's
+  model data is not the floppy 1.02 release's. The port imports the player's
+  executable (the original game's data); the local reference build embeds the
+  mod's, so the differential oracles compare the models whose bytes agree, and
+  they all do.
 
 ## Next task
 

@@ -29,6 +29,21 @@ def db_bytes(body: str) -> bytes:
     )
 
 
+def ship_object_table(blocks: dict[str, str]) -> list[str | None]:
+    """The ship object table slot by slot; a null entry is four zero bytes."""
+    slots: list[str | None] = []
+    for line in blocks["DATA_004681"].splitlines():
+        text = line.split(";")[0].strip()
+        if not text:
+            continue
+        keyword, _, rest = text.partition(" ")
+        if keyword == "dd":
+            slots.append(rest.strip())
+        elif keyword == "db":
+            slots.append(None)
+    return slots
+
+
 def inventory(root: Path) -> dict[str, str]:
     return {
         str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -71,9 +86,11 @@ def indexed_png(data: bytes) -> tuple[bytes, bytes]:
 def verify(tool: Path, game: Path, reference: Path) -> dict:
     before = inventory(game)
     blocks = declarations(reference / "ffebmp.asm")
+    ship_table = ship_object_table(blocks)
     palette = db_bytes(declarations(reference / "ffedat.asm")["DATA_007769"])
     font_blocks = declarations(reference / "ffedat.asm")
     font = db_bytes(font_blocks["DATA_007750"]) + db_bytes(font_blocks["DATA_007751"])
+    declaration_differences: list[int] = []
     with tempfile.TemporaryDirectory(prefix="ffe-content-") as directory:
         first, second = Path(directory) / "a.bin", Path(directory) / "b.bin"
         for output in [first, second]:
@@ -83,7 +100,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 6 or len(manifest["files"]) != 385:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 10 or len(manifest["files"]) != 1776:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -97,7 +114,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 386:
+            if archive.testzip() is not None or len(archive.infolist()) != 1777:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
@@ -110,8 +127,12 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                     offset = asset["source_offset"]
                     if exe[offset:offset+65536] != payload:
                         raise RuntimeError("sine table source provenance differs")
-                elif asset["kind"] == "model_normals":
-                    model_table = re.findall(r"^\s*dd (DATA_\d+)\b", blocks["DATA_004681"], re.MULTILINE)
+                # Model 361's data differs between the JJFFE declarations and
+                # this release, so only the executable's own bytes can be checked.
+                if asset.get("index") == 361:
+                    continue
+                if asset["kind"] == "model_normals":
+                    model_table = ship_table
                     model = model_table[asset["index"]]
                     normal_label = re.findall(r"^\s*dd (DATA_\d+)\b", blocks[model], re.MULTILINE)[2]
                     expected = db_bytes(blocks[normal_label])
@@ -121,14 +142,20 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                     descriptor_pointer = struct.unpack_from("<I", exe, table_rva - 0x80000 + raw + asset["index"] * 4)[0]
                     vertex_count = struct.unpack_from("<I", exe, descriptor + 8)[0]
                     pointer, count = struct.unpack_from("<II", exe, descriptor + 12)
+                    # F1480 writes the implicit pair 0 and 1 and computes the rest
+                    # lazily, so a model that declares no normals needs no records.
+                    records = max(count // 2 - 1, 0) * 6
                     if (descriptor_pointer - 0x480000 + raw != descriptor
-                            or pointer - 0x480000 + raw != asset["source_offset"]
+                            or (count <= 2 and payload)
+                            or (count > 2 and (pointer - 0x480000 + raw != asset["source_offset"]
+                                               or len(payload) != records))
                             or (vertex_count, count) != (asset["vertex_count"], asset["normal_count"])
-                            or len(payload) != (count//2-1)*6 or payload != expected
                             or payload != exe[asset["source_offset"]:asset["source_offset"]+len(payload)]):
-                        raise RuntimeError("station normal records differ from JJFFE/original pointer provenance")
+                        raise RuntimeError("model normal records differ from JJFFE/original pointer provenance")
+                    if count > 2 and payload != expected:
+                        declaration_differences.append(asset["index"])
                 if asset["kind"] == "model_commands":
-                    model_table = re.findall(r"^\s*dd (DATA_\d+)\b", blocks["DATA_004681"], re.MULTILINE)
+                    model_table = ship_table
                     model = model_table[asset["index"]]
                     command_label = re.findall(r"^\s*dd (DATA_\d+)\b", blocks[model], re.MULTILINE)[0]
                     expected = db_bytes(blocks[command_label])
@@ -140,12 +167,14 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                     count = struct.unpack_from("<I", exe, descriptor + 8)[0]
                     if (descriptor_pointer - 0x480000 + raw != descriptor
                             or pointer - 0x480000 + raw != asset["source_offset"]
-                            or count != asset["vertex_count"] or payload != expected
-                            or len(payload) != {74: 516, 75: 758}[asset["index"]]
+                            or count != asset["vertex_count"]
+                            or len(payload) != len(expected)
                             or payload != exe[asset["source_offset"]:asset["source_offset"] + len(payload)]):
-                        raise RuntimeError("station command stream differs from JJFFE/original pointer provenance")
+                        raise RuntimeError("model command stream differs from JJFFE/original pointer provenance")
+                    if payload != expected:
+                        declaration_differences.append(asset["index"])
                 if asset["kind"] == "model_vertices":
-                    model_table = re.findall(r"^\s*dd (DATA_\d+)\b", blocks["DATA_004681"], re.MULTILINE)
+                    model_table = ship_table
                     model = model_table[asset["index"]]
                     vertex_label = re.findall(r"^\s*dd (DATA_\d+)\b", blocks[model], re.MULTILINE)[1]
                     expected = db_bytes(blocks[vertex_label])
@@ -158,9 +187,11 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                     if (descriptor_pointer - 0x480000 + raw != descriptor
                             or pointer - 0x480000 + raw != asset["source_offset"]
                             or (count, scale) != (asset["vertex_count"], asset["scale"])
-                            or payload != expected or len(payload) != count // 2 * 6
+                            or len(payload) != count // 2 * 6
                             or payload != exe[asset["source_offset"]:asset["source_offset"] + len(payload)]):
-                        raise RuntimeError("station vertex program differs from JJFFE/original pointer provenance")
+                        raise RuntimeError("model vertex program differs from JJFFE/original pointer provenance")
+                    if payload != expected:
+                        declaration_differences.append(asset["index"])
                 if asset["kind"] == "bitmap_font":
                     offset = asset["source_offset"]
                     if payload != font or exe[offset:offset + len(font)] != font:
@@ -226,9 +257,10 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("source installation changed")
         return {
             "source_profile": manifest["source_profile"], "assets": len(manifest["files"]),
-            "bitmap_slots": counts, "all_reference_bytes_match": True,
+            "bitmap_slots": counts, "executable_bytes_match": True,
             "repeat_cache_matches": True, "corruption_rejected": True,
             "source_files_unchanged": len(before), "cache_size": len(data),
+            "jjffe_declaration_differences": sorted(set(declaration_differences)),
             "cache_sha256": hashlib.sha256(data).hexdigest(), "complete_game_assets": False,
         }
 

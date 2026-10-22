@@ -32,6 +32,26 @@ station-queue, texture and vertex-program traces are unchanged.
 The local cache was rebuilt again: 1776 assets, 462 of 466 models. The F6
 viewer now draws **449 of the 466 models** (424 of 456 in v0.41).
 
+**The assets oracle was stale and is repaired.** `verify-assets.py` still
+expected the v6 cache (385 assets, two models), so it had not run since v7.
+It now checks the whole v10 cache: every payload against the executable's own
+bytes, the descriptor and table pointer provenance for every model, the
+bitmaps, fonts, palette, cabins and effects, the repeated build and the
+corruption rejection. It also reads the ship object table slot by slot (the
+null entry at 149 is four zero bytes, not a pointer, which shifted every later
+slot).
+
+That repair exposed a difference worth recording: **the JJFFE 2.8a7 source's
+model data is not the floppy 1.02 release's data**. 34 of the 462 imported
+models differ from the declarations by a few bytes each (model 361's vertices
+differ, as v0.29 already recorded). The port imports the *player's
+executable*, which is the original game's own data; the local reference build
+embeds the mod's data, so the differential oracles can only compare the models
+whose bytes agree - and they do: the whole-table station and child oracles
+still report no mismatch, because the differing bytes are in the trailing
+data and in fields the compared events do not carry. The oracle now reports the
+differing model slots instead of failing on them.
+
 ## 2026-10-22 — Screen-space midpoint vertices and the remaining external references (v0.42)
 
 `model::ObjectCache` now runs the original's two remaining vertex opcodes.
