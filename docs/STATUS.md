@@ -18,6 +18,8 @@ v0.11 design record and follow-ups.
 - `docs/REFERENCE_HARNESS.md` — how to add a differential test against the executed JJFFE reference.
 - `docs/MODEL_EXECUTION_PLAN.md` — design record for the implemented v0.11–v0.13 depth/point/line work and its follow-ups.
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
+- `docs/notes/` — per-feature records: polygons, textures, child models and the
+  thruster analysis.
 
 ## Verdict on handoff readiness
 
@@ -87,6 +89,7 @@ capture produced by two repeat runs of the local reference.
 | v0.41 child models in the viewer | `execute_scene`, cache v10 | `model_execute.rs`, `model_viewer.rs` | `verify-child-models.py` (417) | `eaee2ad1…` | the station's rings and side pods draw; 424 of 456 models render |
 | v0.42 screen-space midpoints | `model::{evaluate_entries, screen_midpoint}`, external references in the thruster/beam/chain | `model.rs`, `model_commands.rs` | `verify-vertex-programs.py` (454), `verify-child-models.py` (437), `verify-station-models.py` (445) | `1afe0c45…`, `cbe87dd9…`, `34c1bf26…` | vertex opcodes 3/4 and 13/14; census 446 of 466 |
 | v0.43 zero normals and the return record | `model_normals::validate_records`, `model_commands::decode` | `model_normals.rs`, `model_commands.rs` | `verify-station-models.py` (448), `verify-child-models.py` (440) | `34c1bf26…`, `cbe87dd9…` | F1754 returns for any opcode-0 word; F1480 needs no records for a count of zero; census 449 of 466 |
+| thruster analysis (withdrawn) | none | none | attempted `verify-thrusters.py`, withdrawn | — | `docs/notes/thrusters.md`: the original's three queue paths and the open screen-position question |
 
 Facts verified on 2026-10-22:
 
@@ -98,6 +101,9 @@ Facts verified on 2026-10-22:
   models that execute match, with 1330 child runs and no mismatch;
   `verify-vertex-programs.py`: all 454 comparable vertex programs match, now
   including every vertex entry's screen position and view position.
+  The child trace's SHA-256 moves with every rebuild of the reference: it
+  contains event 26, the original's uninitialised base handedness, which the
+  comparison excludes. Compare the reported *numbers*, not that one hash.
 - `ffe-tools model-census --game game` (floppy 1.02): 449 of 466 slots execute
   natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
 - `tools/reference/build-linux.sh` builds `jjffe-smoke`/`jjffe-commands` under
@@ -132,7 +138,10 @@ the v0.19 census ranks what blocks the other models. Next, in order:
    light-point tables, 30 light points and the F1467 square-root table for
    opcode 25 rotations. Five models are left, and the original cannot run four
    of them standalone either.
-2. Thruster glow queueing (F1666/F1467/F1704) with point/line queueing.
+2. Thruster glow queueing (F1738/F1704): analysed and documented in
+   `docs/notes/thrusters.md`, **not shipped** - the differential check found the
+   port's screen positions differ for the vertices involved, so start there
+   rather than with the glow arithmetic.
 3. **Polygon segments** (F1734/F1724/F1730/F1733/F1723/F1736 and their curve
    helpers) — needed for outline rasterising and for exact vertex-cache events.
 4. The command-order and queue oracles cover every slot since v0.20 and v0.38

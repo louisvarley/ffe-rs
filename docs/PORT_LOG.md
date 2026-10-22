@@ -4,6 +4,16 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Thruster glow analysis (not shipped)
+
+Opcode 9's queueing was read out of F1738/F1704 and attempted, then withdrawn
+rather than shipped unverified: the differential check exposed differences in
+the port's screen positions for the vertices involved, and no oracle could yet
+say the glow arithmetic was right. The full reading - the three queue paths,
+the entry layouts, the six-step colour fade, why only 7 of 466 slots reach the
+opcode in the synthetic scenes, and the hook/event-number recipe - is in
+`docs/notes/thrusters.md`. The operand event remains as v0.23 left it.
+
 ## 2026-10-22 — The last census blockers: zero normals and the return record (v0.43)
 
 Two small pieces of the original's own behaviour were still rejected by the
@@ -89,6 +99,13 @@ the original rather than merely accepted. Traces: station-models
 `34c1bf26…` (445 compared), child-models `cbe87dd9…` (437 compared),
 vertex-programs `1afe0c45…` (454 compared), station-queue `35e55a26…`,
 textures `f3164e1c…`.
+
+The child trace's SHA-256 is **not stable across reference rebuilds**: it
+carries event 26, the original's uninitialised base handedness, which the
+comparison deliberately excludes. Every measurement of the child oracle here
+should be read by its numbers (models compared, mismatches), not that hash;
+`cbe87dd9…` was one build, `3d334db8…` another, both 440 compared and 0
+mismatched.
 
 The local cache was rebuilt: 1767 assets, 459 of 466 models (the previous
 v10 file is kept at `.cache/data-v10-backup.bin`). The cache format did not
