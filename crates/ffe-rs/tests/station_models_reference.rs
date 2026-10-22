@@ -1,15 +1,15 @@
+mod common;
+
 use ffe_convert::embedded::{decode_model_normals, decode_model_vertices, model_command_bytes};
 use ffe_core::model::VertexContext;
-use ffe_core::model_commands::{material, VisibilityContext};
+use ffe_core::model_commands::VisibilityContext;
 use ffe_core::model_execute::{execute_live, InstanceContext};
 use ffe_core::model_instance::Vertices;
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::Normal;
-use ffe_core::model_polygon::Entry;
 use serde::Deserialize;
 
 /// Marks a textured polygon fill colour, whose F1691 texture addition is not ported.
-const TEXTURED: u32 = u32::MAX;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -180,40 +180,7 @@ fn executed_reference_station_models() {
                 .get(g)
                 .filter(|e| e.polygon.offset == *offset)
             {
-                // F1721: the key, then the queued entries (19/20) and the fill colour
-                // with the entry count (21), or the abandonment (22).
-                if let Some(key) = polygon.key {
-                    nested.push([11, key, 0, 0]);
-                    let pack = |[x, y]: [i16; 2]| u32::from(x as u16) | u32::from(y as u16) << 16;
-                    if polygon.outline.abandoned {
-                        nested.push([22, 1, 0, 0]);
-                    } else {
-                        for entry in &polygon.outline.entries {
-                            match *entry {
-                                Entry::Edge([a, b]) => nested.push([19, 1, pack(a), pack(b)]),
-                                Entry::To(a) => nested.push([19, 2, pack(a), 0]),
-                                Entry::Curve([a, b, c, d]) => {
-                                    nested.push([19, 3, pack(a), pack(b)]);
-                                    nested.push([20, pack(c), pack(d), 0]);
-                                }
-                            }
-                        }
-                        // F1691's texture colour is not ported: a textured fill's
-                        // colour is marked and not compared (see below).
-                        let [red, green, blue] = polygon.colour.map(u32::from);
-                        let textured = material(polygon.polygon.material).texture != 0;
-                        nested.push([
-                            21,
-                            if textured {
-                                TEXTURED
-                            } else {
-                                red | green << 8 | blue << 16
-                            },
-                            polygon.outline.entries.len() as u32,
-                            0,
-                        ]);
-                    }
-                }
+                common::polygon_events(polygon, &mut nested);
                 g += 1;
             }
             // F1759 sound requests: sample and volume.
@@ -283,16 +250,10 @@ fn executed_reference_station_models() {
                 .collect()
         };
         let (ours, mut theirs) = (lookups(&nested), lookups(&original.nested));
-        for (event, original_event) in ours.iter().zip(theirs.iter_mut()) {
-            if event[0] == 21 && original_event[0] == 21 {
-                polygons += 1;
-                entries += event[2] as usize;
-                if event[1] == TEXTURED {
-                    original_event[1] = TEXTURED;
-                    textured += 1;
-                }
-            }
-        }
+        let (fills, fill_entries, fills_textured) = common::mask_textured(&ours, &mut theirs);
+        polygons += fills;
+        entries += fill_entries;
+        textured += fills_textured;
         let nested_matches = ours == theirs;
         if !nested_matches {
             let at = (0..ours.len().max(theirs.len()))

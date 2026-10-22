@@ -154,3 +154,12 @@ _ref_tex_draw_quad equ FUNC_001805
 _ref_flat_draw_triangle equ FUNC_001804
 _ref_flat_draw_quad equ FUNC_001809
 _ref_face_colour equ FUNC_001691
+; Child-model oracle (--child-model): real F1740/F1773 and the globals they read.
+GLOBAL _ref_child_frame
+GLOBAL _ref_child_run
+GLOBAL _ref_shades
+GLOBAL _ref_arena_index
+_ref_child_frame equ FUNC_001740
+_ref_child_run equ FUNC_001773
+_ref_shades equ DATA_008831
+_ref_arena_index equ DATA_007823

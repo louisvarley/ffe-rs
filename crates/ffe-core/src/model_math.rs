@@ -211,34 +211,74 @@ impl SineTable {
     }
 }
 
-/// F1739: copy the instance frame's rows into a permutation of the current basis rows
-/// (code bits 7..9), negating source rows 0/1/2 on bits 12/11/10. Odd permutations (3..5) and each
-/// negation flip the handedness word; permutation 7 is undefined in the original.
+/// F1739 as opcode 28's base forms call it (F1741 passes `code << 1`).
 fn base_basis(context: &mut VertexContext, code: u16) -> Result<(), String> {
-    let destinations: [usize; 3] = match code >> 7 & 7 {
+    let (basis, handedness) = frame_rows(
+        &context.matrix,
+        context.base_handedness,
+        u32::from(code) << 1,
+    )
+    .map_err(|_| "Base transform row permutation 7 is undefined.".to_owned())?;
+    context.basis = basis;
+    context.handedness = handedness;
+    Ok(())
+}
+
+/// F1739: a permutation of the source frame's rows (`word >> 8 & 7`), negating
+/// source rows 0/1/2 on bits 0x2000/0x1000/0x800. Odd permutations (3..5) and each
+/// negation flip the handedness word; permutation 6 equals 0 and 7 is undefined in
+/// the original (it writes through uninitialised row pointers).
+pub fn frame_rows(
+    source: &[i32; 9],
+    handedness: u32,
+    word: u32,
+) -> Result<([i32; 9], u32), String> {
+    let destinations: [usize; 3] = match word >> 8 & 7 {
         0 | 6 => [0, 1, 2],
         1 => [1, 2, 0],
         2 => [2, 0, 1],
         3 => [2, 1, 0],
         4 => [1, 0, 2],
         5 => [0, 2, 1],
-        _ => return Err("Base transform row permutation 7 is undefined.".to_owned()),
+        _ => return Err("Frame row permutation 7 is undefined in the original.".to_owned()),
     };
-    let mut handedness = context.base_handedness;
-    if matches!(code >> 7 & 7, 3..=5) {
+    let mut handedness = handedness;
+    if matches!(word >> 8 & 7, 3..=5) {
         handedness = !handedness;
     }
+    let mut rows = [0; 9];
     for (row, destination) in destinations.into_iter().enumerate() {
-        let negate = code & (0x1000 >> row) != 0;
+        let negate = word & (0x2000 >> row) != 0;
         for component in 0..3 {
-            let value = context.matrix[row * 3 + component];
-            context.basis[destination * 3 + component] =
-                if negate { value.wrapping_neg() } else { value };
+            let value = source[row * 3 + component];
+            rows[destination * 3 + component] = if negate { value.wrapping_neg() } else { value };
         }
         if negate {
             handedness = !handedness;
         }
     }
-    context.handedness = handedness;
-    Ok(())
+    Ok((rows, handedness))
+}
+
+/// F1475: shift a vector right (arithmetically) until the OR of its component
+/// magnitudes is below 0x4000; returns the shifted vector and the shift.
+pub fn shift_down(vector: [i32; 3]) -> ([i32; 3], u32) {
+    let mut magnitude = vector
+        .iter()
+        .fold(0u32, |acc, value| acc | value.wrapping_abs() as u32);
+    let mut shift = 0;
+    while magnitude >= 0x4000 {
+        magnitude >>= 1;
+        shift += 1;
+    }
+    (vector.map(|value| value >> shift), shift)
+}
+
+/// F1670: each matrix row dotted with the vector through F1521 products.
+pub fn transform_rows(vector: [i32; 3], matrix: &[i32; 9]) -> [i32; 3] {
+    std::array::from_fn(|row| {
+        (0..3).fold(0i32, |sum, column| {
+            sum.wrapping_add(multiply(vector[column], matrix[row * 3 + column]))
+        })
+    })
 }

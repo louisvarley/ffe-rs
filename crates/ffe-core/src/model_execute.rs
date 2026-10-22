@@ -6,11 +6,11 @@
 //! [`crate::model_instance`], and returns a render-ordered face stream in
 //! [`Execution::ordered`]. Both variants are transactional: an error leaves the
 //! caller's context and vertex cache unchanged.
-use crate::model::variable;
 use crate::model::VertexContext;
+use crate::model::{variable, ExternalSource, ExternalVertices};
 use crate::model_commands::{
-    arithmetic_with_table, bit_branch, decode, material, visibility_branch, Colour, Face, Label,
-    Polygon, Spline, Submodel, Surface, Text, Thruster, VisibilityContext,
+    arithmetic_with_table, bit_branch, decode, material, visibility_branch, ChildScale, Colour,
+    Face, Label, Polygon, Spline, Submodel, Surface, Text, Thruster, VisibilityContext,
 };
 use crate::model_depth::{self, Command as DepthCommand};
 use crate::model_instance::Vertices;
@@ -202,7 +202,7 @@ pub enum Primitive {
     Label(LabelEmission),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Execution {
     /// Visited command offsets in execution order.
     pub commands: Vec<usize>,
@@ -232,16 +232,94 @@ pub struct Execution {
     pub labels: Vec<LabelEmission>,
     /// Nested depth block boundaries in command order ([`execute_live`] only).
     pub blocks: Vec<BlockEmission>,
+    /// Child-model calls in command order ([`execute_scene`] only): culled, skipped for
+    /// lack of arena room, or executed with the child's own command-order record.
+    pub children: Vec<ChildRun>,
     /// Final normal entry 0 colour if a colour command wrote it during this run.
     pub normal_zero_colour: Option<[u8; 3]>,
     /// Depth-queue operations in program order ([`execute_live`] only), excluding the
-    /// top-level close after return.
+    /// top-level close after return. Executed children add theirs here, interleaved
+    /// where they run; a child's own [`Execution::queue`] stays empty.
     pub queue: Vec<QueueEvent>,
     /// All emitted primitives in original render order. Populated only by
     /// [`execute_live`]; empty for [`execute`], which has no live vertex keys.
     pub ordered: Vec<Primitive>,
     /// Effective group/standalone keys aligned with [`Self::ordered`].
     pub ordered_keys: Vec<u32>,
+}
+
+/// The descriptor of a model a child call names (F1538 table entry): its three blocks
+/// and the dwords F1750 reads at +0x14, +0x18 and +0x1c.
+#[derive(Debug, Clone, Copy)]
+pub struct ChildModel<'a> {
+    pub commands: &'a [u8],
+    /// Six-byte vertex pair records (+0x4) and the expanded count (+0x8).
+    pub vertices: &'a [u8],
+    pub vertex_count: u32,
+    /// Normal pair records (+0xc) and the count (+0x10), including the implicit pair.
+    pub normals: &'a [u8],
+    pub normal_count: u32,
+    /// +0x14, added to the child scale.
+    pub scale: i32,
+    /// +0x18, also added to the child scale.
+    pub scale_offset: i32,
+    /// +0x1c, the F1687 cull radius before the scale shift.
+    pub radius: i32,
+}
+
+/// The model table as child calls see it. Unknown or undecodable slots are errors.
+pub trait ChildModels {
+    fn model(&self, index: u16) -> Result<ChildModel<'_>, String>;
+}
+
+/// Global state a child call reads besides its parent instance.
+pub struct ChildEnvironment<'a> {
+    pub models: &'a dyn ChildModels,
+    /// `DATA_008831`: eight RGB shades every instance copies to +0x84 (child locals
+    /// 12..17 and the F1480 colours of normals 0/1).
+    pub shades: [[u8; 3]; 8],
+    /// The top-level instance's light vector at +0x134 (`DATA_008821..8823` in F1683);
+    /// F1740 copies it to each child, and F1685 turns it into the child's +0x38.
+    pub light: [i32; 3],
+    /// Bytes of the 0x8000-byte F1745 arena in use when the top-level program starts
+    /// (the game's F1774 has pushed the top-level frame; the adapter runs F1772
+    /// directly, with 0).
+    pub arena: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChildOutcome {
+    /// F1687 culled the call: nothing was resolved or run.
+    Culled,
+    /// F1745 found no arena room; F1774 returned without running the child.
+    NoRoom,
+    /// The child's own command-order record (its primitives are in the root
+    /// [`Execution::ordered`]; its queue events in the root [`Execution::queue`]).
+    Executed(Box<Execution>),
+}
+
+/// The instance F1750/F1740/F1685/F1774 built for a child.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildSetup {
+    pub instance: InstanceContext,
+    /// Initial context. `basis`/`handedness` are placeholders (the original leaves them
+    /// undefined), as are locals in `undefined_locals`.
+    pub context: VertexContext,
+    /// F1685/F1774 observer scale (+0x44) and position (+0x48) when the frame word
+    /// lacks 0x4000; `None` when the original leaves them undefined.
+    pub observer: Option<(u32, [i32; 3])>,
+    pub externals: ExternalVertices,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildRun {
+    /// The calling command's offset in the parent program.
+    pub offset: usize,
+    pub model: u16,
+    /// The F1687 radius: descriptor +0x1c shifted left by the child scale.
+    pub radius: i32,
+    pub outcome: ChildOutcome,
+    pub setup: Option<ChildSetup>,
 }
 
 /// Instance fields needed to resolve live vertices and depth keys.
@@ -281,14 +359,14 @@ struct InnerInput<'a, 'v> {
     budget: usize,
 }
 
-fn selector(value: u8) -> Result<(), String> {
+fn selector(value: u8, context: &VertexContext) -> Result<(), String> {
     if value >= 0xd2 {
         return Err(
             "Execution cannot read local slots 18..63, which alias legacy instance fields."
                 .to_owned(),
         );
     }
-    Ok(())
+    crate::model::checked_variable(value, context).map(|_| ())
 }
 
 /// Execute without a live vertex cache. A reached depth-order command fails explicitly;
@@ -312,11 +390,13 @@ pub fn execute(
         },
         None,
         context,
+        None,
     )
 }
 
 /// Execute with a caller-owned live vertex cache. The cache is committed only after a
 /// real return, so view-space slots can be reused across invocations by generation.
+/// Child-model calls are recorded as operand events; see [`execute_scene`] to run them.
 pub fn execute_live(
     bytes: &[u8],
     vertices: &mut Vertices<'_>,
@@ -339,6 +419,40 @@ pub fn execute_live(
         },
         Some(vertices),
         context,
+        None,
+    )
+}
+
+/// [`execute_live`] that also runs every child model a call does not cull (F1750),
+/// recursively, as the original does: each child has its own instance, vertex cache,
+/// external-vertex table and normals, shares the depth queue, the command budget and
+/// the F1476 jitter state, and its primitives join [`Execution::ordered`] where the
+/// original queues them. Child runs are in [`Execution::children`]. Transactional.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_scene(
+    bytes: &[u8],
+    vertices: &mut Vertices<'_>,
+    context: &mut VertexContext,
+    visibility: &VisibilityContext<'_>,
+    table: Option<&SineTable>,
+    instance: InstanceContext,
+    budget: usize,
+    children: &ChildEnvironment<'_>,
+) -> Result<Execution, String> {
+    let vertex_count = u32::try_from(vertices.vertex_count())
+        .map_err(|_| "Live vertex count exceeds u32.".to_owned())?;
+    execute_inner(
+        InnerInput {
+            bytes,
+            vertex_count,
+            visibility,
+            table,
+            instance,
+            budget,
+        },
+        Some(vertices),
+        context,
+        Some(children),
     )
 }
 
@@ -483,10 +597,58 @@ fn resolve_depth_key(
     })
 }
 
+/// Which instance fields hold defined values. Top-level instances define all of them
+/// (the caller supplies them); a child instance (F1750) starts without a basis or its
+/// handedness, and without observer/light/direction when its frame word has 0x4000.
+#[derive(Debug, Clone, Copy)]
+struct Defined {
+    basis: bool,
+    handedness: bool,
+    base_handedness: bool,
+    direction: bool,
+    light: bool,
+}
+
+const ALL_DEFINED: Defined = Defined {
+    basis: true,
+    handedness: true,
+    base_handedness: true,
+    direction: true,
+    light: true,
+};
+
+/// Development bound on child nesting; the original's own bound is the 0x8000-byte
+/// F1745 arena, which [`ChildEnvironment::arena`] models exactly.
+pub const MAX_CHILD_DEPTH: usize = 32;
+const ARENA_SIZE: u32 = 0x8000;
+
+struct Frame<'a, 'v> {
+    bytes: &'a [u8],
+    vertex_count: u32,
+    visibility: &'v VisibilityContext<'v>,
+    table: Option<&'a SineTable>,
+    instance: InstanceContext,
+    defined: Defined,
+    /// Instance light vector at +0x134 (copied from parent to child by F1740).
+    light: [i32; 3],
+    child: bool,
+}
+
+struct Shared<'e> {
+    order: Option<Order<Primitive>>,
+    queue: Vec<QueueEvent>,
+    remaining: usize,
+    budget: usize,
+    children: Option<&'e ChildEnvironment<'e>>,
+    arena: u32,
+    depth: usize,
+}
+
 fn execute_inner(
     input: InnerInput<'_, '_>,
     vertices: Option<&mut Vertices<'_>>,
     context: &mut VertexContext,
+    children: Option<&ChildEnvironment<'_>>,
 ) -> Result<Execution, String> {
     let InnerInput {
         bytes,
@@ -499,7 +661,6 @@ fn execute_inner(
     if !(1..=4096).contains(&budget) {
         return Err("Model execution budget must be 1..=4096 commands.".to_owned());
     }
-    let program = decode(bytes, vertex_count)?;
     let mut working = context.clone();
     let mut working_vertices = match vertices.as_deref() {
         Some(value) => {
@@ -511,11 +672,76 @@ fn execute_inner(
         None => None,
     };
     // The command budget bounds execution; the order queue keeps its own 1..=4096 guard.
-    let mut order = if working_vertices.is_some() {
+    let order = if working_vertices.is_some() {
         Some(Order::new(4096)?)
     } else {
         None
     };
+    if let Some(environment) = children {
+        if environment.arena > ARENA_SIZE {
+            return Err("Child arena use exceeds its 0x8000 bytes.".to_owned());
+        }
+    }
+    let mut shared = Shared {
+        order,
+        queue: Vec::new(),
+        remaining: budget,
+        budget,
+        children,
+        arena: children.map_or(0, |environment| environment.arena),
+        depth: 0,
+    };
+    let frame = Frame {
+        bytes,
+        vertex_count,
+        visibility,
+        table,
+        instance,
+        defined: ALL_DEFINED,
+        light: children.map_or([0; 3], |environment| environment.light),
+        child: false,
+    };
+    let mut result = run(&frame, working_vertices.as_mut(), &mut working, &mut shared)?;
+    // Finalize before committing. Like the top-level object-draw callers (F1683/F1684
+    // call F1780(0,0) after the model returns), close a group the program left open;
+    // child runs (F1774) do not close it, so their groups stay open in the parent.
+    let (ordered, ordered_keys) = match shared.order.take() {
+        Some(mut order) => {
+            order.group(None)?;
+            let pairs = order.finish_with_keys()?;
+            let mut ordered = Vec::with_capacity(pairs.len());
+            let mut ordered_keys = Vec::with_capacity(pairs.len());
+            for (key, primitive) in pairs {
+                ordered.push(primitive);
+                ordered_keys.push(key);
+            }
+            (ordered, ordered_keys)
+        }
+        None => (Vec::new(), Vec::new()),
+    };
+    *context = working;
+    if let (Some(source), Some(destination)) = (working_vertices, vertices) {
+        *destination = source;
+    }
+    result.queue = shared.queue;
+    result.ordered = ordered;
+    result.ordered_keys = ordered_keys;
+    Ok(result)
+}
+
+/// One F1772 run of a program on `working`/`vertices` (already working copies).
+fn run(
+    frame: &Frame<'_, '_>,
+    mut vertices: Option<&mut Vertices<'_>>,
+    working: &mut VertexContext,
+    shared: &mut Shared<'_>,
+) -> Result<Execution, String> {
+    let bytes = frame.bytes;
+    let visibility = frame.visibility;
+    let table = frame.table;
+    let instance = frame.instance;
+    let program = decode(bytes, frame.vertex_count)?;
+    let mut defined = frame.defined;
     let mut result = Execution {
         commands: Vec::new(),
         emissions: Vec::new(),
@@ -531,6 +757,7 @@ fn execute_inner(
         labels: Vec::new(),
         sounds: Vec::new(),
         blocks: Vec::new(),
+        children: Vec::new(),
         normal_zero_colour: None,
         queue: Vec::new(),
         ordered: Vec::new(),
@@ -538,7 +765,8 @@ fn execute_inner(
     };
     let mut offset = 0usize;
     let mut returned = false;
-    for _ in 0..budget {
+    while shared.remaining > 0 {
+        shared.remaining -= 1;
         let index = program
             .commands
             .binary_search_by_key(&offset, |c| c.offset)
@@ -554,27 +782,32 @@ fn execute_inner(
             }
             1 => {
                 for point in program.points.iter().filter(|p| p.offset == offset) {
+                    if point.angle as u16 & 0xc0 == 0xc0 {
+                        crate::model::checked_variable(point.angle as u8, working)?;
+                    }
                     let emission = PointEmission {
                         offset: point.offset,
                         material: point.material,
                         encoded_angle: point.angle,
-                        angle: angle_operand(point.angle, &working),
+                        angle: angle_operand(point.angle, working),
                         flag: point.flag,
                         vertex: point.vertex,
                         context: working.clone(),
                     };
                     result.points.push(emission.clone());
-                    if let (Some(queue), Some(live)) = (order.as_mut(), working_vertices.as_mut()) {
+                    if let (Some(queue), Some(live)) =
+                        (shared.order.as_mut(), vertices.as_deref_mut())
+                    {
                         let vertex = live.resolve(
                             point.vertex as i8,
-                            &working,
+                            working,
                             instance.position,
                             instance.generation,
                             false,
                         )?;
                         let key = model_depth::key(vertex.view, instance.key_scale);
                         queue.push(key, Primitive::Point(emission))?;
-                        result.queue.push(QueueEvent::Point(key));
+                        shared.queue.push(QueueEvent::Point(key));
                     }
                 }
                 Some(command.size as i32)
@@ -588,17 +821,19 @@ fn execute_inner(
                         context: working.clone(),
                     };
                     result.lines.push(emission.clone());
-                    if let (Some(queue), Some(live)) = (order.as_mut(), working_vertices.as_mut()) {
+                    if let (Some(queue), Some(live)) =
+                        (shared.order.as_mut(), vertices.as_deref_mut())
+                    {
                         let vertex = live.resolve(
                             line.vertices[0] as i8,
-                            &working,
+                            working,
                             instance.position,
                             instance.generation,
                             false,
                         )?;
                         let key = model_depth::key(vertex.view, instance.key_scale);
                         queue.push(key, Primitive::Line(emission))?;
-                        result.queue.push(QueueEvent::Line(key));
+                        shared.queue.push(QueueEvent::Line(key));
                     }
                 }
                 Some(command.size as i32)
@@ -610,19 +845,21 @@ fn execute_inner(
                         context: working.clone(),
                     };
                     result.emissions.push(emission.clone());
-                    if let (Some(queue), Some(live)) = (order.as_mut(), working_vertices.as_mut()) {
+                    if let (Some(queue), Some(live)) =
+                        (shared.order.as_mut(), vertices.as_deref_mut())
+                    {
                         if let Some(key) =
-                            face_queue_key(face, live, &working, &instance, visibility)?
+                            face_queue_key(face, live, working, &instance, visibility)?
                         {
                             queue.push(key, Primitive::Face(emission))?;
-                            result.queue.push(QueueEvent::Face(key));
+                            shared.queue.push(QueueEvent::Face(key));
                         }
                     }
                 }
                 Some(command.size as i32)
             }
             5 => {
-                let Some(live) = working_vertices.as_mut() else {
+                let Some(live) = vertices.as_deref_mut() else {
                     return Err(format!(
                         "Unsupported executed command {code:#06x} at {offset:#x}."
                     ));
@@ -652,7 +889,7 @@ fn execute_inner(
                         // runs the segment handlers, which project through F1471.
                         let vertex = live.resolve(
                             polygon.vertex as i8,
-                            &working,
+                            working,
                             instance.position,
                             instance.generation,
                             false,
@@ -671,7 +908,7 @@ fn execute_inner(
                             &mut |index| {
                                 live.resolve(
                                     index as i8,
-                                    &working,
+                                    working,
                                     instance.position,
                                     instance.generation,
                                     true,
@@ -682,9 +919,9 @@ fn execute_inner(
                     }
                     let key = emission.key;
                     result.polygons.push(emission.clone());
-                    if let (Some(key), Some(queue)) = (key, order.as_mut()) {
+                    if let (Some(key), Some(queue)) = (key, shared.order.as_mut()) {
                         queue.push(key, Primitive::Polygon(emission))?;
-                        result.queue.push(QueueEvent::Polygon(key));
+                        shared.queue.push(QueueEvent::Polygon(key));
                     }
                 }
                 Some(command.size as i32)
@@ -705,7 +942,7 @@ fn execute_inner(
                 Some(command.size as i32)
             }
             18 => {
-                let Some(live) = working_vertices.as_mut() else {
+                let Some(live) = vertices.as_deref_mut() else {
                     return Err(format!(
                         "Unsupported executed command {code:#06x} at {offset:#x}."
                     ));
@@ -713,7 +950,7 @@ fn execute_inner(
                 for label in program.labels.iter().filter(|e| e.offset == offset) {
                     let vertex = live.resolve(
                         label.vertex as i8,
-                        &working,
+                        working,
                         instance.position,
                         instance.generation,
                         true,
@@ -726,16 +963,16 @@ fn execute_inner(
                         key,
                         screen: vertex.screen,
                     };
-                    if let (Some(key), Some(queue)) = (key, order.as_mut()) {
+                    if let (Some(key), Some(queue)) = (key, shared.order.as_mut()) {
                         queue.push(key, Primitive::Label(emission.clone()))?;
-                        result.queue.push(QueueEvent::Label(key));
+                        shared.queue.push(QueueEvent::Label(key));
                     }
                     result.labels.push(emission);
                 }
                 Some(command.size as i32)
             }
             22 => {
-                let Some(live) = working_vertices.as_mut() else {
+                let Some(live) = vertices.as_deref_mut() else {
                     return Err(format!(
                         "Unsupported executed command {code:#06x} at {offset:#x}."
                     ));
@@ -764,7 +1001,7 @@ fn execute_inner(
                         for slot in (0..4).rev() {
                             resolved[slot] = Some(live.resolve(
                                 spline.vertices[slot] as i8,
-                                &working,
+                                working,
                                 instance.position,
                                 instance.generation,
                                 true,
@@ -775,9 +1012,9 @@ fn execute_inner(
                             let key = model_depth::key(b4.view, instance.key_scale);
                             emission.key = Some(key);
                             emission.points = Some([b4.screen, b2.screen, b5.screen, b3.screen]);
-                            if let Some(queue) = order.as_mut() {
+                            if let Some(queue) = shared.order.as_mut() {
                                 queue.push(key, Primitive::Spline(emission.clone()))?;
-                                result.queue.push(QueueEvent::Spline(key));
+                                shared.queue.push(QueueEvent::Spline(key));
                             }
                         }
                     }
@@ -788,11 +1025,11 @@ fn execute_inner(
             9 => {
                 for thruster in program.thrusters.iter().filter(|t| t.offset == offset) {
                     // F1738 projects A, and B only when A is more than 0x200 deep.
-                    if let Some(live) = working_vertices.as_mut() {
+                    if let Some(live) = vertices.as_deref_mut() {
                         let [a, b] = thruster.vertices;
                         let near = live.resolve(
                             a as i8,
-                            &working,
+                            working,
                             instance.position,
                             instance.generation,
                             true,
@@ -800,7 +1037,7 @@ fn execute_inner(
                         if near.view[2] > 0x200 {
                             live.resolve(
                                 b as i8,
-                                &working,
+                                working,
                                 instance.position,
                                 instance.generation,
                                 true,
@@ -815,7 +1052,8 @@ fn execute_inner(
                 Some(command.size as i32)
             }
             21 => {
-                let (Some(live), Some(queue)) = (working_vertices.as_mut(), order.as_mut()) else {
+                let (Some(live), Some(queue)) = (vertices.as_deref_mut(), shared.order.as_mut())
+                else {
                     return Err(format!(
                         "Unsupported executed command {code:#06x} at {offset:#x}."
                     ));
@@ -825,7 +1063,7 @@ fn execute_inner(
                 } else {
                     let vertex = live.resolve(
                         (code >> 5) as u8 as i8,
-                        &working,
+                        working,
                         instance.position,
                         instance.generation,
                         false,
@@ -833,7 +1071,7 @@ fn execute_inner(
                     Some(model_depth::key(vertex.view, instance.key_scale))
                 };
                 queue.nested(key)?;
-                result.queue.push(QueueEvent::Nested(key));
+                shared.queue.push(QueueEvent::Nested(key));
                 result.blocks.push(BlockEmission { offset, key });
                 Some(command.size as i32)
             }
@@ -844,7 +1082,13 @@ fn execute_inner(
                 if code & 0x8000 != 0 {
                     // F1770 resets the current basis to identity.
                     working.basis = crate::model::IDENTITY;
+                    defined.basis = true;
                 } else {
+                    if !defined.direction {
+                        return Err(format!(
+                            "Direction alignment at {offset:#x} reads +0x38, undefined in this child instance."
+                        ));
+                    }
                     let d = working.direction;
                     let (a, b) = match code >> 5 & 3 {
                         0 => (d[1], d[2]),
@@ -883,6 +1127,11 @@ fn execute_inner(
                         "Vertex base offset command {code:#06x} at {offset:#x} is not ported."
                     ));
                 } else {
+                    if !defined.basis {
+                        return Err(format!(
+                            "Frame restore at {offset:#x} reads the basis, undefined in this child instance."
+                        ));
+                    }
                     working.matrix = working.basis;
                 }
                 Some(command.size as i32)
@@ -890,11 +1139,11 @@ fn execute_inner(
             31 => {
                 for surface in program.surfaces.iter().filter(|s| s.offset == offset) {
                     // F1874 resolves the origin (view) and three axis vertices (object).
-                    if let Some(live) = working_vertices.as_mut() {
+                    if let Some(live) = vertices.as_deref_mut() {
                         for index in std::iter::once(surface.origin).chain(surface.axes) {
                             live.resolve(
                                 index as i8,
-                                &working,
+                                working,
                                 instance.position,
                                 instance.generation,
                                 false,
@@ -917,10 +1166,10 @@ fn execute_inner(
                             format!("Text at {offset:#x} references an out-of-range normal.")
                         })?
                         .culled;
-                    if let (false, Some(live)) = (culled, working_vertices.as_mut()) {
+                    if let (false, Some(live)) = (culled, vertices.as_deref_mut()) {
                         live.resolve(
                             text.vertex as i8,
-                            &working,
+                            working,
                             instance.position,
                             instance.generation,
                             false,
@@ -936,19 +1185,32 @@ fn execute_inner(
             }
             14 | 27 => {
                 for submodel in program.submodels.iter().filter(|s| s.offset == offset) {
-                    if let Some(live) = working_vertices.as_mut() {
-                        live.resolve(
+                    let mut main = None;
+                    if let Some(live) = vertices.as_deref_mut() {
+                        main = Some(live.resolve(
                             submodel.vertex as i8,
-                            &working,
-                            instance.position,
-                            instance.generation,
+                            working,
+                            frame.instance.position,
+                            frame.instance.generation,
                             true,
-                        )?;
+                        )?);
                     }
                     result.submodels.push(SubmodelEmission {
                         submodel: submodel.clone(),
                         context: working.clone(),
                     });
+                    if let (Some(environment), Some(main), Some(live)) =
+                        (shared.children, main, vertices.as_deref_mut())
+                    {
+                        let call = Call {
+                            submodel,
+                            main,
+                            parent: working,
+                            defined: &defined,
+                        };
+                        let run = call_child(frame, call, live, environment, shared)?;
+                        result.children.push(run);
+                    }
                 }
                 Some(command.size as i32)
             }
@@ -957,8 +1219,8 @@ fn execute_inner(
                     let index = if colour.selector == 0 {
                         0
                     } else {
-                        selector(colour.selector)?;
-                        (variable(colour.selector, &working) & 7) as usize
+                        selector(colour.selector, working)?;
+                        (variable(colour.selector, working) & 7) as usize
                     };
                     let value = colour
                         .materials
@@ -1002,7 +1264,7 @@ fn execute_inner(
                 Some(command.size as i32)
             }
             6 => {
-                let Some(live) = working_vertices.as_mut() else {
+                let Some(live) = vertices.as_deref_mut() else {
                     return Err(format!(
                         "Unsupported executed command {code:#06x} at {offset:#x}."
                     ));
@@ -1014,23 +1276,31 @@ fn execute_inner(
                         command.size
                     ));
                 }
-                let key = resolve_depth_key(&depth, live, &working, &instance)?;
-                order
+                let key = resolve_depth_key(&depth, live, working, &instance)?;
+                shared
+                    .order
                     .as_mut()
                     .ok_or_else(|| "Depth execution requires an order queue.".to_owned())?
                     .group(key)?;
-                result.queue.push(QueueEvent::Group(key));
+                shared.queue.push(QueueEvent::Group(key));
                 Some(command.size as i32)
             }
             13 | 29 => {
-                selector(payload[0])?;
-                selector(payload[1])?;
-                arithmetic_with_table(code, [payload[0], payload[1]], &mut working, table)?;
+                selector(payload[0], working)?;
+                selector(payload[1], working)?;
+                let destination = usize::from(code >> 8 & 7);
+                if frame.child && destination == 7 {
+                    return Err(format!(
+                        "Arithmetic at {offset:#x} would overwrite the child's external vertex pointer (+0x70)."
+                    ));
+                }
+                arithmetic_with_table(code, [payload[0], payload[1]], working, table)?;
+                working.undefined_locals &= !(1 << destination);
                 Some(command.size as i32)
             }
             19 | 20 => {
-                selector(payload[0])?;
-                let branch = bit_branch(code, [payload[0], payload[1]], &working)?;
+                selector(payload[0], working)?;
+                let branch = bit_branch(code, [payload[0], payload[1]], working)?;
                 if branch.is_none() {
                     returned = true;
                 }
@@ -1050,29 +1320,36 @@ fn execute_inner(
             // F1741 0xc000: the basis from three vertices' object positions, each
             // through F1472 behind a cache check, in byte order.
             28 if code & 0xc000 == 0xc000 => {
-                let Some(live) = working_vertices.as_mut() else {
+                let Some(live) = vertices.as_deref_mut() else {
                     return Err(format!(
                         "Unsupported executed command {code:#06x} at {offset:#x}."
                     ));
                 };
                 let [a, b, c] = [payload[0], payload[1], payload[2]]
-                    .map(|index| live.object(index as i8, &working));
+                    .map(|index| live.object(index as i8, working));
                 working.basis = crate::model_math::vertex_basis(a?, b?, c?);
+                defined.basis = true;
                 Some(command.size as i32)
             }
             28 => {
                 let table =
                     table.ok_or("Model rotation execution needs the original sine table.")?;
+                if code & 0xc000 == 0x8000 && !defined.basis {
+                    return Err(format!(
+                        "Rotation at {offset:#x} reads the basis, undefined in this child instance."
+                    ));
+                }
                 if payload[0] & 0xc0 == 0xc0 {
-                    selector(payload[0])?;
+                    selector(payload[0], working)?;
                 }
                 table
-                    .rotate_command(
-                        &mut working,
-                        code,
-                        i16::from_le_bytes([payload[0], payload[1]]),
-                    )
+                    .rotate_command(working, code, i16::from_le_bytes([payload[0], payload[1]]))
                     .map_err(|error| format!("{error} ({code:#06x} at {offset:#x})"))?;
+                if code & 0xc000 != 0x8000 {
+                    // F1739 rewrote the basis and its handedness from the frame.
+                    defined.basis = true;
+                    defined.handedness = defined.base_handedness;
+                }
                 Some(command.size as i32)
             }
             _ => {
@@ -1090,31 +1367,276 @@ fn execute_inner(
     }
     if !returned {
         return Err(format!(
-            "Model execution exceeded its {budget}-command budget; context unchanged."
+            "Model execution exceeded its {}-command budget; context unchanged.",
+            shared.budget
         ));
     }
-    // Finalize before committing. Like the top-level object-draw callers (F1683/F1684
-    // call F1780(0,0) after the model returns), close a group the program left open;
-    // nested child/glyph runs, which do not close it, are not executed here.
-    let (ordered, ordered_keys) = match order {
-        Some(mut order) => {
-            order.group(None)?;
-            let pairs = order.finish_with_keys()?;
-            let mut ordered = Vec::with_capacity(pairs.len());
-            let mut ordered_keys = Vec::with_capacity(pairs.len());
-            for (key, primitive) in pairs {
-                ordered.push(primitive);
-                ordered_keys.push(key);
-            }
-            (ordered, ordered_keys)
-        }
-        None => (Vec::new(), Vec::new()),
-    };
-    *context = working;
-    if let (Some(source), Some(destination)) = (working_vertices, vertices) {
-        *destination = source;
-    }
-    result.ordered = ordered;
-    result.ordered_keys = ordered_keys;
     Ok(result)
+}
+
+struct Call<'c> {
+    submodel: &'c Submodel,
+    main: crate::model_instance::Vertex,
+    parent: &'c VertexContext,
+    defined: &'c Defined,
+}
+
+/// F1687: a child is culled when its sphere (view centre, radius) lies entirely behind
+/// z = 0x40 or entirely outside the x or y view cone (signed compares; |x| of
+/// `i32::MIN` stays negative, as `neg` leaves it).
+pub fn child_culled(view: [i32; 3], radius: i32) -> bool {
+    let near = view[2].wrapping_add(radius);
+    if near < 0x40 {
+        return true;
+    }
+    near < view[0].wrapping_abs().wrapping_sub(radius)
+        || near < view[1].wrapping_abs().wrapping_sub(radius)
+}
+
+/// F1748/F1749 -> F1750 -> F1740 -> F1773/F1774 for one child call whose position
+/// vertex `call.main` the parent has already projected.
+fn call_child(
+    frame: &Frame<'_, '_>,
+    call: Call<'_>,
+    parent_vertices: &mut Vertices<'_>,
+    environment: &ChildEnvironment<'_>,
+    shared: &mut Shared<'_>,
+) -> Result<ChildRun, String> {
+    let Call {
+        submodel,
+        main,
+        parent,
+        defined,
+    } = call;
+    let offset = submodel.offset;
+    // Opcode 14 passes the instance colour; opcode 27 its material through F1692/F1694:
+    // nibble RGB (zero when textured) plus the instance colour for local materials.
+    let colour = match submodel.material {
+        None => parent.colour,
+        Some(value) => {
+            let decoded = material(value);
+            if decoded.local_colour {
+                std::array::from_fn(|i| decoded.rgb[i].wrapping_add(parent.colour[i]))
+            } else {
+                decoded.rgb
+            }
+        }
+    };
+    let argument = match submodel.scale {
+        ChildScale::Literal(value) => i32::from(value),
+        ChildScale::Local(index) => crate::model::checked_variable(0xc0 | index, parent)?,
+    };
+    let model = environment.models.model(submodel.model)?;
+    // F1750: child scale = argument + descriptor +0x14 + +0x18 - parent +0x130.
+    let scale = argument
+        .wrapping_add(model.scale)
+        .wrapping_add(model.scale_offset)
+        .wrapping_sub(frame.instance.key_scale);
+    let radius = model.radius.wrapping_shl(scale as u32);
+    let mut record = ChildRun {
+        offset,
+        model: submodel.model,
+        radius,
+        outcome: ChildOutcome::Culled,
+        setup: None,
+    };
+    if child_culled(main.view, radius) {
+        return Ok(record);
+    }
+    // Extra vertices: +4 always, then +2, +3, +5 up to the first 0x7f, each through
+    // F1471 behind the generation check.
+    let mut sources = [None; 5];
+    sources[0] = Some(ExternalSource {
+        view: main.view,
+        screen: main.screen,
+    });
+    if let Some(extra) = submodel.extra {
+        for (k, index) in [extra[2], extra[0], extra[1], extra[3]]
+            .into_iter()
+            .enumerate()
+        {
+            if k > 0 && index == 0x7f {
+                break;
+            }
+            let vertex = parent_vertices.resolve(
+                index as i8,
+                parent,
+                frame.instance.position,
+                frame.instance.generation,
+                true,
+            )?;
+            sources[k + 1] = Some(ExternalSource {
+                view: vertex.view,
+                screen: vertex.screen,
+            });
+        }
+    }
+    // F1740: frame mode 6 copies the parent basis and its handedness; any other mode
+    // permutes/negates the parent frame through F1739.
+    let word = u32::from(submodel.frame);
+    let (matrix, base_handedness, base_handedness_defined) = if word >> 8 & 7 == 6 {
+        if !defined.basis {
+            return Err(format!(
+                "Child call at {offset:#x} copies the parent basis, which is undefined."
+            ));
+        }
+        (parent.basis, parent.handedness, defined.handedness)
+    } else {
+        let (matrix, handedness) =
+            crate::model_math::frame_rows(&parent.matrix, parent.base_handedness, word)
+                .map_err(|error| format!("{error} (child call at {offset:#x})"))?;
+        (matrix, handedness, defined.base_handedness)
+    };
+    // F1745 (inside F1774): two saved pointers, a frame word, six external and n own
+    // 36-byte cache slots and 8-byte normals; no room means the child is skipped.
+    let size = 12 + (6 + model.vertex_count) * 36 + model.normal_count * 8;
+    if shared.arena + size > ARENA_SIZE {
+        record.outcome = ChildOutcome::NoRoom;
+        return Ok(record);
+    }
+    if shared.depth >= MAX_CHILD_DEPTH {
+        return Err(format!(
+            "Child call at {offset:#x} exceeds the {MAX_CHILD_DEPTH}-level nesting bound."
+        ));
+    }
+    if !(0..=31).contains(&scale) {
+        return Err(format!(
+            "Child call at {offset:#x} gives model {} scale {scale}, outside 0..31.",
+            submodel.model
+        ));
+    }
+    let position = main.view;
+    let shade_bytes: Vec<u8> = environment.shades.iter().flatten().copied().collect();
+    let mut locals = [0i32; 64];
+    locals[0] = parent.locals[0].wrapping_add(1);
+    locals[1] = parent.locals[1];
+    locals[2] = parent.locals[2];
+    for (k, chunk) in shade_bytes.chunks_exact(4).enumerate() {
+        locals[12 + k] = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    }
+    let undefined_locals = (parent.undefined_locals & 0b111) | 0b1111_1111_1000;
+    // F1685 runs unless the frame word has 0x4000; F1774 then raises +0x44 to the
+    // child scale - 8 if lower, shifting the observer.
+    let lit = word & 0x4000 == 0;
+    if lit && !defined.light {
+        return Err(format!(
+            "Child call at {offset:#x} copies the light vector, undefined in this instance."
+        ));
+    }
+    let mut observer = None;
+    let mut direction = [0; 3];
+    if lit {
+        let (mut shifted, shift) = crate::model_math::shift_down(position);
+        let mut observer_scale = shift as i32;
+        let difference = observer_scale + 7 - scale;
+        if difference < 0 {
+            observer_scale -= difference;
+            let by = (difference.wrapping_neg() as u32) & 31;
+            shifted = shifted.map(|value| value >> by);
+        }
+        let mut point = crate::model_math::transform_rows(shifted.map(i32::wrapping_neg), &matrix);
+        direction = crate::model_math::transform_rows(frame.light, &matrix);
+        let raise = scale - 8 - observer_scale;
+        if raise > 0 {
+            observer_scale += raise;
+            point = point.map(|value| value.wrapping_shl(raise as u32));
+        }
+        observer = Some((observer_scale as u32, point));
+    }
+    let normals = match observer {
+        Some((observer_scale, point)) => crate::model_normals::evaluate(
+            model.normals,
+            model.normal_count,
+            model.vertices,
+            model.vertex_count,
+            &crate::model_normals::NormalContext {
+                scale: scale as u32,
+                observer_scale,
+                observer: point,
+                light: direction,
+                shades: environment.shades,
+            },
+        )
+        .map_err(|error| format!("Child model {} normals: {error}", submodel.model))?,
+        // F1480 still writes normals 0 and 1 from the shades; the others would be
+        // computed from undefined observer/light fields.
+        None => vec![
+            crate::model_normals::Normal {
+                culled: false,
+                colour: environment.shades[3],
+            },
+            crate::model_normals::Normal {
+                culled: false,
+                colour: environment.shades[4],
+            },
+        ],
+    };
+    let visibility = VisibilityContext {
+        depth: position[2],
+        scale,
+        detail: frame.visibility.detail,
+        normals: &normals,
+    };
+    let mut context = VertexContext {
+        matrix,
+        scale: scale as u32,
+        globals: parent.globals,
+        locals,
+        colour,
+        basis: crate::model::IDENTITY,
+        base_handedness,
+        handedness: 0,
+        direction,
+        undefined_locals,
+    };
+    let instance = InstanceContext {
+        position,
+        generation: 2,
+        key_scale: frame.instance.key_scale,
+        operand_scale: scale,
+        textures: frame.instance.textures,
+    };
+    let externals = ExternalVertices {
+        position,
+        generation: 2,
+        sources,
+    };
+    // F1774 points the child's +0x154 at its own normal records (polygon circles).
+    let mut vertices = Vertices::child(model.vertices, model.vertex_count, externals)
+        .map_err(|error| format!("Child model {} vertices: {error}", submodel.model))?
+        .with_normal_records(model.normals);
+    vertices.set_jitter(parent_vertices.jitter());
+    let setup = ChildSetup {
+        instance,
+        context: context.clone(),
+        observer,
+        externals,
+    };
+    let child = Frame {
+        bytes: model.commands,
+        vertex_count: model.vertex_count,
+        visibility: &visibility,
+        table: frame.table,
+        instance,
+        defined: Defined {
+            basis: false,
+            handedness: false,
+            base_handedness: base_handedness_defined,
+            direction: lit,
+            light: lit,
+        },
+        light: frame.light,
+        child: true,
+    };
+    shared.arena += size;
+    shared.depth += 1;
+    let execution = run(&child, Some(&mut vertices), &mut context, shared);
+    shared.depth -= 1;
+    shared.arena -= size;
+    let execution = execution
+        .map_err(|error| format!("Child model {} at {offset:#x}: {error}", submodel.model))?;
+    parent_vertices.set_jitter(vertices.jitter());
+    record.outcome = ChildOutcome::Executed(Box::new(execution));
+    record.setup = Some(setup);
+    Ok(record)
 }
