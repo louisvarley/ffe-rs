@@ -28,6 +28,9 @@ jobs:
       - name: Test forbidden-file rules and local input exclusions
         run: python -m unittest ci.test_check_forbidden
 
+      - name: Compile the local verification scripts
+        run: python -m py_compile tools/reference/*.py ci/*.py
+
   rust:
     name: Rust (${{ matrix.os }})
     strategy:
