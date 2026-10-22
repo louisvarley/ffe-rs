@@ -217,7 +217,15 @@ impl Screen {
         &self.frame
     }
 
-    pub fn draw(&mut self, state: &Flight, help: bool, modern: bool, message: &str) {
+    /// `scene`, when present, draws the station as the original model 74.
+    pub fn draw(
+        &mut self,
+        state: &Flight,
+        scene: Option<&ModelViewer>,
+        help: bool,
+        modern: bool,
+        message: &str,
+    ) {
         self.indexed.fill(0);
         self.panel.blit(&mut self.indexed, 0, 158);
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
@@ -245,6 +253,8 @@ impl Screen {
                     }
                 }
             }
+            let drawn = scene.is_some_and(|scene| self.draw_station(scene, state));
+            // Placeholder wireframe when the cache has no drawable model 74.
             let vertices = [
                 [-40.0, -40.0, -40.0],
                 [40.0, -40.0, -40.0],
@@ -269,6 +279,9 @@ impl Screen {
                 (2, 6),
                 (3, 7),
             ] {
+                if drawn {
+                    break;
+                }
                 if let (Some(a), Some(b)) = (
                     project(vertices[a], state, true),
                     project(vertices[b], state, true),
@@ -282,6 +295,9 @@ impl Screen {
                 ([14.0, 12.0, -41.0], [-14.0, 12.0, -41.0]),
                 ([-14.0, 12.0, -41.0], [-14.0, -12.0, -41.0]),
             ] {
+                if drawn {
+                    break;
+                }
                 if let (Some(a), Some(b)) = (project(a, state, true), project(b, state, true)) {
                     self.line(a, b, if state.docking_requested { 17 } else { 18 });
                 }
@@ -354,7 +370,7 @@ impl Screen {
             self.rect(0, 13, 320, 145, 1);
             for (index, line) in [
                 "NATIVE RUST PLAYABLE SLICE - STILL SYNTHETIC FLIGHT",
-                "Original font + console; not original world/models.",
+                "Original font, console and station model 74.",
                 "DEFAULT MODERN: W/S thrust; arrows yaw/pitch",
                 "CLASSIC-LIKE: Enter/Shift thrust; ,/. yaw; A/Z pitch",
                 "X brake   D request dock   L launch   B buy   N sell",
@@ -386,32 +402,59 @@ impl Screen {
     }
 
     /// F6: every imported model executed by the verified port, in original order.
+    /// Draw executed-model shapes in order into the 320x158 view.
+    fn draw_shapes(&mut self, viewer: &ModelViewer, shapes: &[Shape]) {
+        let value = |[r, g, b]: [u8; 3]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
+        for shape in shapes {
+            match shape {
+                Shape::Fill(points, rgb) => self.fill_value(points, value(*rgb)),
+                Shape::Line(a, b, rgb) => self.line_value(*a, *b, value(*rgb)),
+                Shape::Point((x, y), rgb) => {
+                    if (0..VIEW_HEIGHT as i32).contains(y) && (0..320).contains(x) {
+                        self.frame[*y as usize * 320 + *x as usize] = value(*rgb);
+                    }
+                }
+                Shape::Textured(textured) => {
+                    let frame = &mut self.frame;
+                    // The rasteriser clips to x 0..320, y 0..158 itself.
+                    viewer.rasterise(textured, |x, y, rgb| {
+                        frame[y as usize * 320 + x as usize] = value(rgb);
+                    });
+                }
+            }
+        }
+    }
+
+    /// The station as the original model 74, executed by the verified port and
+    /// placed by the synthetic flight camera. False when it cannot be drawn.
+    fn draw_station(&mut self, scene: &ModelViewer, state: &Flight) -> bool {
+        let Some(radius) = scene.find(STATION_MODEL).and_then(|m| m.radius()) else {
+            return false;
+        };
+        // Model units per flight unit: the model's extent fills the old 40-unit
+        // placeholder, so docking and safety distances are unchanged.
+        let scale = radius / STATION_RADIUS;
+        let to_view = |p: [f64; 3]| view_vector(p, state);
+        let rows = STATION_AXES.map(to_view);
+        let origin = to_view(state.position.map(|v| -v)).map(|v| v * scale);
+        let light = to_view([0.35, -0.55, 0.75]);
+        match scene.render_scene(STATION_MODEL, rows, origin, light) {
+            Ok(frame) => {
+                self.draw_shapes(scene, &frame.shapes);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     pub fn draw_model_viewer(&mut self, viewer: &ModelViewer) {
         // Dark blue backdrop so black (unlit) faces stay visible as silhouettes.
         self.frame[..320 * VIEW_HEIGHT].fill(0x00_00_10_28);
         let model = viewer.model();
         let frame = viewer.render();
-        let value = |[r, g, b]: [u8; 3]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
         let status = match &frame {
             Ok(frame) => {
-                for shape in &frame.shapes {
-                    match shape {
-                        Shape::Fill(points, rgb) => self.fill_value(points, value(*rgb)),
-                        Shape::Line(a, b, rgb) => self.line_value(*a, *b, value(*rgb)),
-                        Shape::Point((x, y), rgb) => {
-                            if (0..VIEW_HEIGHT as i32).contains(y) && (0..320).contains(x) {
-                                self.frame[*y as usize * 320 + *x as usize] = value(*rgb);
-                            }
-                        }
-                        Shape::Textured(textured) => {
-                            let frame = &mut self.frame;
-                            // The rasteriser clips to x 0..320, y 0..158 itself.
-                            viewer.rasterise(textured, |x, y, rgb| {
-                                frame[y as usize * 320 + x as usize] = value(rgb);
-                            });
-                        }
-                    }
-                }
+                self.draw_shapes(viewer, &frame.shapes);
                 if frame.skipped > 0 {
                     format!(
                         "{} SHAPES, {} NOT DRAWN YET",
@@ -560,19 +603,34 @@ fn station_relative(state: &Flight) -> [f64; 3] {
     ]
 }
 
-fn project(point: [f64; 3], state: &Flight, translated: bool) -> Option<(i32, i32)> {
-    let p = std::array::from_fn::<_, 3, _>(|i| {
-        point[i] - if translated { state.position[i] } else { 0.0 }
-    });
+/// Original model table slot drawn as the flight station.
+const STATION_MODEL: u32 = 74;
+/// Flight-space radius the station model is scaled to (the old placeholder size).
+const STATION_RADIUS: f64 = 40.0;
+/// Station object axes in flight space: model 74's docking port is at its +z end,
+/// turned to face the approach from -z.
+const STATION_AXES: [[f64; 3]; 3] = [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
+
+/// Rotate a flight-space vector into the camera's view space (yaw, then pitch).
+fn view_vector(p: [f64; 3], state: &Flight) -> [f64; 3] {
     let x = p[0] * state.yaw.cos() - p[2] * state.yaw.sin();
     let z = p[0] * state.yaw.sin() + p[2] * state.yaw.cos();
     let y = p[1] * state.pitch.cos() - z * state.pitch.sin();
     let z = p[1] * state.pitch.sin() + z * state.pitch.cos();
+    [x, y, z]
+}
+
+/// The original F1479 projection (x * 256 / z about 160, 79), as the station model.
+fn project(point: [f64; 3], state: &Flight, translated: bool) -> Option<(i32, i32)> {
+    let p = std::array::from_fn::<_, 3, _>(|i| {
+        point[i] - if translated { state.position[i] } else { 0.0 }
+    });
+    let [x, y, z] = view_vector(p, state);
     if z <= 2.0 {
         return None;
     }
-    let sx = 160.0 + 150.0 * x / z;
-    let sy = 79.0 - 150.0 * y / z;
+    let sx = 160.0 + 256.0 * x / z;
+    let sy = 79.0 - 256.0 * y / z;
     if sx.abs() > 2000.0 || sy.abs() > 2000.0 {
         return None;
     }

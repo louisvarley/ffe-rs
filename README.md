@@ -16,7 +16,8 @@ the current experimental example is not that faithful renderer.
 > program through the verified model executor and draws its faces, textured faces
 > (original bitmaps), complex polygons, lines, points and curves in the original
 > render order. Curved surfaces, text, labels and child models are not drawn yet.
-> The flight view still has placeholder geometry. No legacy runtime is linked.
+> In flight, the station is the original **model 74**, executed by the verified
+> model port with its textures; flight mechanics remain synthetic. No legacy runtime is linked.
 > Complete content, JJFFE-equivalent gameplay and graphics packs remain unfinished.
 > [CLAUDE.MD](CLAUDE.MD) records the owner's answers and current plan.
 

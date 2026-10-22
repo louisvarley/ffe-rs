@@ -285,7 +285,7 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
     let mut screen = Screen::from_assets(&cabin_png(), &font, panel, palette).unwrap();
     for state in [Flight::default(), Flight::free_flight(), Flight::approach()] {
         let before = state.clone();
-        screen.draw(&state, false, false, "test");
+        screen.draw(&state, None, false, false, "test");
         let image = screen.pixels.clone();
         assert_eq!(image.len(), 640 * 480);
         assert!(image.contains(&18));
@@ -298,7 +298,7 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
                 );
             }
         }
-        screen.draw(&state, true, true, "help");
+        screen.draw(&state, None, true, true, "help");
         assert_ne!(image, screen.pixels);
         screen.overlay("SCENARIOS", &["1 DOCKED", "2 APPROACH", "3 FLIGHT"]);
         let vertices = [1, 0, 10, 20, 30, 0];
@@ -362,4 +362,55 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
     }
     let panel = IndexedImage::new(320, 43, [0, 0], false, &vec![2; 320 * 43]).unwrap();
     assert!(Screen::from_assets(b"not png", &font, panel, palette).is_err());
+}
+
+#[test]
+fn flight_view_draws_the_station_model_in_place_of_the_placeholder() {
+    use ffe_rs::model_viewer::{ModelViewer, ViewerModel};
+    let mut font = vec![0xff; 1160];
+    for width in font.iter_mut().skip(9).step_by(10) {
+        *width = 5;
+    }
+    let panel = IndexedImage::new(320, 43, [0, 0], false, &vec![2; 320 * 43]).unwrap();
+    let palette = std::array::from_fn(|index| index as u32);
+    let mut screen = Screen::from_assets(&cabin_png(), &font, panel, palette).unwrap();
+    // Model 74 stand-in: one lit triangle across the origin, facing the camera.
+    let vertices = [1, 0, 10, 0, 0, 0, 1, 0, 0, 10, 0, 0];
+    let commands: Vec<u8> = [
+        3u16,
+        0x0123,
+        u16::from_le_bytes([1, 0]),
+        u16::from_le_bytes([0, 2]),
+        0,
+    ]
+    .iter()
+    .flat_map(|w| w.to_le_bytes())
+    .collect();
+    let model = ViewerModel::new(74, 4, 4, &vertices, &commands, &[], 2);
+    let table: Vec<u8> = (0..16384i32).flat_map(|i| (i * 4).to_le_bytes()).collect();
+    let table = ffe_core::model_math::SineTable::from_bytes(&table).unwrap();
+    let scene = ModelViewer::from_models(vec![model], table).unwrap();
+    let state = Flight::free_flight();
+    let before = state.clone();
+    screen.draw(&state, None, false, true, "placeholder");
+    let placeholder = screen.logical_pixels().to_vec();
+    screen.draw(&state, Some(&scene), false, true, "placeholder");
+    let station = screen.logical_pixels().to_vec();
+    assert_ne!(placeholder, station);
+    // Something the palette cannot produce: a direct RGB fill from the model.
+    assert!(station[..320 * 158].iter().any(|p| *p > 255));
+    assert_eq!(state, before);
+    // A cache without model 74 keeps the placeholder.
+    let other = ModelViewer::from_models(
+        vec![ViewerModel::new(9, 4, 4, &vertices, &commands, &[], 2)],
+        ffe_core::model_math::SineTable::from_bytes(
+            &(0..16384i32)
+                .flat_map(|i| (i * 4).to_le_bytes())
+                .collect::<Vec<u8>>(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    screen.draw(&state, Some(&other), false, true, "placeholder");
+    assert_eq!(screen.logical_pixels(), placeholder.as_slice());
 }

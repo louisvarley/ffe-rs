@@ -243,8 +243,32 @@ impl ModelViewer {
         self.render_at(fitted * 2f64.powf(-f64::from(self.zoom) / 4.0))
     }
 
+    /// The model with this table index, if imported.
+    pub fn find(&self, index: u32) -> Option<&ViewerModel> {
+        self.models.iter().find(|m| m.index == index)
+    }
+
+    /// Render model `index` in a scene camera. `rows[k]` is object axis k in view
+    /// space (unit vectors), `position` the model origin in view space, both in
+    /// the model's own (post-scale) units; `light_view` the light direction in
+    /// view space. Full detail, input 0.
+    pub fn render_scene(
+        &self,
+        index: u32,
+        rows: [[f64; 3]; 3],
+        position: [f64; 3],
+        light_view: [f64; 3],
+    ) -> Result<Frame, String> {
+        let model = self
+            .find(index)
+            .ok_or_else(|| format!("Model {index} is not in the cache."))?;
+        if position.iter().any(|v| v.abs() > 1.5e9) {
+            return Err("Model too far for the 32-bit view space.".to_owned());
+        }
+        self.render_with(model, rows, position.map(|v| v as i32), light_view, 0)
+    }
+
     fn render_at(&self, distance: f64) -> Result<Frame, String> {
-        let model = self.model();
         let distance = distance.max(128.0);
         let (yaw, pitch) = (
             f64::from(self.yaw).to_radians(),
@@ -260,20 +284,43 @@ impl ModelViewer {
         };
         // Row k is object axis k in view space, as vertex evaluation reads the frame.
         let rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(rotate);
+        if distance > 1.5e9 {
+            return Err("Model too large for the viewer's 32-bit view space.".to_owned());
+        }
+        self.render_with(
+            self.model(),
+            rows,
+            [0, 0, distance as i32],
+            [0.4, -0.5, 0.75],
+            self.animation,
+        )
+    }
+
+    fn render_with(
+        &self,
+        model: &ViewerModel,
+        rows: [[f64; 3]; 3],
+        position: [i32; 3],
+        light_view: [f64; 3],
+        animation: u16,
+    ) -> Result<Frame, String> {
         let mut matrix = [0i32; 9];
         for (k, row) in rows.iter().enumerate() {
             for (axis, value) in row.iter().enumerate() {
                 matrix[3 * k + axis] = (value * 2_147_483_647.0).round() as i32;
             }
         }
-        if distance > 1.5e9 {
-            return Err("Model too large for the viewer's 32-bit view space.".to_owned());
-        }
-        let position = [0, 0, distance as i32];
-        // Camera and light in object space, record units, for the original normal test.
+        // Camera and light in object space, record units, for the original normal
+        // test: the camera sits at -position in view space.
         let unit = 2f64.powi(model.scale as i32);
-        let observer = rows.map(|row| (-distance * row[2] / unit) as i32);
-        let light_view = [0.4, -0.5, 0.75];
+        let observer = rows.map(|row| {
+            let along: f64 = row
+                .iter()
+                .zip(position)
+                .map(|(a, p)| a * f64::from(p))
+                .sum();
+            (-along / unit) as i32
+        });
         let length = light_view.iter().map(|v| v * v).sum::<f64>().sqrt();
         let light = rows.map(|row| {
             (row.iter().zip(light_view).map(|(a, b)| a * b).sum::<f64>() / length * 33_000.0) as i32
@@ -297,8 +344,8 @@ impl ModelViewer {
             matrix,
             basis: matrix,
             scale: model.scale,
-            globals: [self.animation; 64],
-            locals: [i32::from(self.animation); 64],
+            globals: [animation; 64],
+            locals: [i32::from(animation); 64],
             ..Default::default()
         };
         // Light points (opcode 30 0x801e) count global word 4; keep it empty.
@@ -447,6 +494,11 @@ impl ModelViewer {
 }
 
 impl ViewerModel {
+    /// Largest object-space vertex distance at input 0, when evaluable alone.
+    pub fn radius(&self) -> Option<f64> {
+        self.radius.as_ref().ok().copied()
+    }
+
     pub fn new(
         index: u32,
         vertex_count: u32,

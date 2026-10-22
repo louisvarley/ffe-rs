@@ -155,6 +155,15 @@ fn run() -> Result<(), String> {
     let mut scenarios = false;
     let mut model_lab = None;
     let mut model_viewer: Option<ModelViewer> = None;
+    // The flight view's station is the original model 74 when the cache has it;
+    // otherwise the placeholder wireframe stays.
+    let scene = match ModelViewer::new(&cache) {
+        Ok(scene) => Some(scene),
+        Err(error) => {
+            eprintln!("Station model unavailable, using the placeholder: {error}");
+            None
+        }
+    };
     let mut paused = false;
     let mut message = String::from("Welcome. F1 closes help; F2 selects a playtest.");
     let mut last = Instant::now();
@@ -378,7 +387,7 @@ fn run() -> Result<(), String> {
         } else {
             accumulator = 0.0;
         }
-        screen.draw(&state, help, modern, &message);
+        screen.draw(&state, scene.as_ref(), help, modern, &message);
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);
         } else if let Some(lab) = &model_lab {

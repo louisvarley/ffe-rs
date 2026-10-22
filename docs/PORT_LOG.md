@@ -4,6 +4,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — The real station in the flight view (v0.39)
+
+The flight view draws the station as the original model 74 instead of the
+placeholder wireframe cube: `ModelViewer::render_scene` runs the same verified
+pipeline as F6 (executor, normals, textured faces, polygons) with any camera
+frame and position, and `Screen::draw_station` places it with the flight
+camera. The model's bounding radius is scaled to the old 40-unit placeholder,
+so docking and safety distances are unchanged. Model 74's docking port is at
+its +z end (an octagonal cap with the slot; the -z cap carries windows; four
+axis-facing side panels use unlit black `0x2000`), so it is turned 180 degrees
+about y to face the approach from -z. The flight projection now uses the
+original F1479 focal length (x * 256 / z) for stars, crosshair and station
+alike, instead of the scaffold's 150. Without a drawable model 74 the
+placeholder remains. Camera, light and colour mapping are the viewer's
+diagnostic choices; flight mechanics remain synthetic. One test added.
+
 ## 2026-10-22 — Fix: cache build with child-only models
 
 After the child-model merge the importer accepts programs that read parent
