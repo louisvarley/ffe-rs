@@ -118,3 +118,12 @@ _ref_order_flush equ FUNC_001789
 _ref_view_vertex equ FUNC_001470
 _ref_project_vertex equ FUNC_001471
 _ref_project_point equ FUNC_001479
+; Child-model oracle (--child-model): real F1740/F1773 and the globals they read.
+GLOBAL _ref_child_frame
+GLOBAL _ref_child_run
+GLOBAL _ref_shades
+GLOBAL _ref_arena_index
+_ref_child_frame equ FUNC_001740
+_ref_child_run equ FUNC_001773
+_ref_shades equ DATA_008831
+_ref_arena_index equ DATA_007823

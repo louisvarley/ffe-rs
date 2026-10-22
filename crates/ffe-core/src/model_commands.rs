@@ -227,6 +227,15 @@ fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
     Ok(u16::from_le_bytes([data[0], data[1]]))
 }
 
+/// A command vertex byte the original resolves through F1470/F1471, which sign-extend
+/// it: 0..count-1 are the model's own vertices; 0x80..0xff (-128..-1) are external
+/// vertices that F1478 copies from the parent instance's table at +0x6c (child models
+/// only, resolved at execution). Only the face, line, point, text and child-call operands use this;
+/// other command forms still reject bytes outside the model.
+pub fn vertex_reference(index: u8, vertex_count: u32) -> bool {
+    index >= 0x80 || u32::from(index) < vertex_count
+}
+
 /// Decode every physical record, including records after conditional/block terminators.
 /// Only known station-stream forms are accepted; no byte scanning for "likely" polygons.
 pub fn decode(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
@@ -390,7 +399,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                 flag: payload[4] & 0x80 != 0,
                 vertex: payload[5],
             };
-            if u32::from(point.vertex) >= vertex_count {
+            if !vertex_reference(point.vertex, vertex_count) {
                 return Err(format!(
                     "Point source references external/out-of-range vertex at {offset:#x}."
                 ));
@@ -407,7 +416,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             if line
                 .vertices
                 .iter()
-                .any(|index| u32::from(*index) >= vertex_count)
+                .any(|index| !vertex_reference(*index, vertex_count))
             {
                 return Err(format!(
                     "Line references external/out-of-range vertex at {offset:#x}."
@@ -427,7 +436,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                 frame: word(payload, 4)?,
                 string: word(payload, 6)?,
             };
-            if u32::from(text.vertex) >= vertex_count {
+            if !vertex_reference(text.vertex, vertex_count) {
                 return Err(format!(
                     "Text references external/out-of-range vertex at {offset:#x}."
                 ));
@@ -461,7 +470,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             };
             if std::iter::once(submodel.vertex)
                 .chain(submodel.extra_vertices())
-                .any(|index| u32::from(index) >= vertex_count)
+                .any(|index| !vertex_reference(index, vertex_count))
             {
                 return Err(format!(
                     "Submodel references external/out-of-range vertex at {offset:#x}."
@@ -637,7 +646,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             };
             if vertices
                 .iter()
-                .any(|index| u32::from(*index) >= vertex_count)
+                .any(|index| !vertex_reference(*index, vertex_count))
             {
                 return Err(format!(
                     "Face references external/out-of-range vertex at {offset:#x}."
@@ -648,7 +657,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                 let mirrored_vertices: Vec<_> = vertices.iter().map(|v| *v ^ 1).collect();
                 if mirrored_vertices
                     .iter()
-                    .any(|index| u32::from(*index) >= vertex_count)
+                    .any(|index| !vertex_reference(*index, vertex_count))
                 {
                     return Err(format!(
                         "Reflected face references out-of-range vertex at {offset:#x}."

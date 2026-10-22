@@ -46,14 +46,24 @@ pub fn decode_model_vertices(
         .ok_or("Vertex pointer precedes image base")?;
     let source_offset = section.offset(vertex_rva, vertex_count as usize / 2 * 6)?;
     let records = range(bytes, source_offset, vertex_count as usize / 2 * 6)?;
-    ffe_core::model::evaluate(
+    ffe_core::model::validate_records(records, vertex_count)?;
+    // Child models reference parent (external) vertices, which only a child instance
+    // resolves; their programs validate structurally and evaluate in that context.
+    let external = records
+        .chunks_exact(6)
+        .any(|r| matches!(r[0], 5..=8 | 11 | 12 | 15..=20) && r[2..5].iter().any(|b| *b >= 0x80));
+    if let Err(error) = ffe_core::model::evaluate(
         records,
         vertex_count,
         &ffe_core::model::VertexContext {
             scale,
             ..Default::default()
         },
-    )?;
+    ) {
+        if !(external && error.contains("External vertex")) {
+            return Err(error);
+        }
+    }
     Ok(EmbeddedModelVertices {
         index,
         descriptor_offset,
@@ -61,6 +71,44 @@ pub fn decode_model_vertices(
         vertex_count,
         scale,
         bytes: records.to_vec(),
+    })
+}
+
+/// The descriptor dwords a child-model call (F1750) reads besides the three blocks:
+/// +0x14 and +0x18 are both added to the child scale, +0x1c is the F1687 cull radius
+/// (shifted left by that scale).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddedModelDescriptor {
+    pub index: u32,
+    pub vertex_count: u32,
+    pub normal_count: u32,
+    pub scale: u32,
+    pub scale_offset: u32,
+    pub radius: u32,
+}
+
+pub fn decode_model_descriptor(
+    bytes: &[u8],
+    table_rva: u32,
+    index: u32,
+) -> Result<EmbeddedModelDescriptor, String> {
+    let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
+    // model_descriptor maps 24 bytes; the cull radius is at +0x1c.
+    let descriptor_rva = u32::try_from(
+        descriptor_offset
+            .checked_sub(section.raw)
+            .ok_or("Descriptor precedes its section")?,
+    )
+    .map_err(|_| "Descriptor offset overflow")?
+        + section.rva;
+    section.offset(descriptor_rva, 32)?;
+    Ok(EmbeddedModelDescriptor {
+        index,
+        vertex_count: dword(bytes, descriptor_offset + 8)?,
+        normal_count: dword(bytes, descriptor_offset + 16)?,
+        scale: dword(bytes, descriptor_offset + 20)?,
+        scale_offset: dword(bytes, descriptor_offset + 24)?,
+        radius: dword(bytes, descriptor_offset + 28)?,
     })
 }
 

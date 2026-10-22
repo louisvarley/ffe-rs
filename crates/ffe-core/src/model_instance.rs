@@ -1,5 +1,5 @@
 //! Bounded live vertex slots: object memoization, view translation and original projection.
-use crate::model::{CachedVertex, ObjectCache, VertexContext};
+use crate::model::{CachedVertex, ExternalVertices, ObjectCache, VertexContext};
 
 pub const NEAR_SENTINEL: [i16; 2] = [-32766; 2];
 
@@ -57,9 +57,22 @@ impl<'a> Vertices<'a> {
         })
     }
 
+    /// A child instance's fresh cache (F1689/F1690 zero every stamp, including the six
+    /// external slots) whose negative vertices resolve from `externals`.
+    pub fn child(
+        records: &'a [u8],
+        count: u32,
+        externals: ExternalVertices,
+    ) -> Result<Self, String> {
+        let mut objects = ObjectCache::new(records, count)?;
+        objects.externals = Some(externals);
+        Ok(Self { objects })
+    }
+
     /// Begin another invocation explicitly; context changes do not invalidate legacy slots.
     pub fn clear(&mut self) {
         self.objects.slots.fill(CachedVertex::default());
+        self.objects.external_slots.fill(CachedVertex::default());
     }
 
     pub fn slots(&self) -> Vec<Vertex> {
@@ -89,6 +102,12 @@ impl<'a> Vertices<'a> {
     /// F1472 behind the callers' cache check: the object-space position, evaluated
     /// (and stamped 1) only on a zero stamp. Transactional like [`Self::resolve`].
     pub fn object(&mut self, index: i8, context: &VertexContext) -> Result<[i32; 3], String> {
+        if index < 0 {
+            let mut working = self.objects.clone();
+            let object = working.external(index as u8)?.object;
+            self.objects = working;
+            return Ok(object);
+        }
         let slot =
             usize::try_from(index).map_err(|_| "External negative vertex index.".to_owned())?;
         if slot >= self.objects.slots.len() || context.scale > 31 {
@@ -112,6 +131,17 @@ impl<'a> Vertices<'a> {
         generation: u32,
         projected: bool,
     ) -> Result<Vertex, String> {
+        if index < 0 {
+            // F1478's external path stamps the copied slot with the instance generation,
+            // so F1470/F1471 reuse it; F1470's recomputed view is the copied one.
+            if generation == 0 {
+                return Err("Invalid live vertex generation.".to_owned());
+            }
+            let mut working = self.objects.clone();
+            let slot = working.external(index as u8)?;
+            self.objects = working;
+            return Ok(slot.into());
+        }
         let slot =
             usize::try_from(index).map_err(|_| "External negative vertex index.".to_owned())?;
         if slot >= self.objects.slots.len() || generation == 0 || context.scale > 31 {

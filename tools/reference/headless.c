@@ -63,10 +63,10 @@ extern int ref_face4(void *instance, long material, unsigned long a, unsigned lo
 extern void ref_order_group(long active,unsigned long key);
 extern unsigned long *ref_order_allocate(long words,unsigned long key,long force);
 static int queue_mode;
-static unsigned long queue_count, queue_log[1024][3];
+static unsigned long queue_count, queue_log[8192][3];
 static void queue_event(unsigned long kind, unsigned long active, unsigned long key)
 {
-    if (queue_count >= 1024) { fprintf(stderr,"too many queue events\n"); exit(2); }
+    if (queue_count >= 8192) { fprintf(stderr,"too many queue events\n"); exit(2); }
     queue_log[queue_count][0]=kind; queue_log[queue_count][1]=active; queue_log[queue_count][2]=key;
     queue_count++;
 }
@@ -86,6 +86,15 @@ unsigned long *trace_polygon_alloc(long words, unsigned long key, long force)
     return ref_order_allocate(words,key,force);
 }
 static unsigned long probe_faces[2][6];
+/* Child mode (--child-model): children really execute; every face is logged with its
+   nesting depth and then queued by the real F1708/F1712. */
+static int child_mode, child_depth;
+static void nested_event(unsigned long kind, unsigned long a, unsigned long b, unsigned long c);
+static void child_face(unsigned long material, unsigned long normal, unsigned long a, unsigned long b, unsigned long c, unsigned long d)
+{
+    nested_event(22,(unsigned long)child_depth,(material&0xffff)|(normal&0xffff)<<16,
+                 (a&0xff)|(b&0xff)<<8|(c&0xff)<<16|(d&0xff)<<24);
+}
 static int execution_probe;
 static unsigned long execution_faces;
 static uint64_t execution_hash;
@@ -93,6 +102,7 @@ static void execution_emission(void *instance,const unsigned long *face);
 int trace_triangle(void *instance, long material, unsigned long a, unsigned long b, unsigned long c, unsigned long normal)
 {
     unsigned long *face;
+    if(child_mode) { child_face((unsigned long)material,normal,a,b,c,255); return ref_face3(instance,material,a,b,c,normal); }
     if(queue_mode) return ref_face3(instance,material,a,b,c,normal);
     if(execution_probe) {
         unsigned long emitted[6]={(unsigned short)material,normal,a,b,c,255};
@@ -107,6 +117,7 @@ int trace_triangle(void *instance, long material, unsigned long a, unsigned long
 int trace_quad(void *instance, long material, unsigned long a, unsigned long b, unsigned long c, unsigned long d, unsigned long normal)
 {
     unsigned long *face;
+    if(child_mode) { child_face((unsigned long)material,normal,a,b,c,d); return ref_face4(instance,material,a,b,c,d,normal); }
     if(queue_mode) return ref_face4(instance,material,a,b,c,d,normal);
     if(execution_probe) {
         unsigned long emitted[6]={(unsigned short)material,normal,a,b,c,d};
@@ -119,11 +130,11 @@ int trace_quad(void *instance, long material, unsigned long a, unsigned long b, 
     return 0;
 }
 
-static unsigned long point_line_count, point_line_kind[256], point_line_a[256], point_line_b[256], point_line_c[256], point_line_d[256];
+static unsigned long point_line_count, point_line_kind[4096], point_line_a[4096], point_line_b[4096], point_line_c[4096], point_line_d[4096];
 void trace_point_args(void *instance, long material, long angle, long vertex, long flag)
 {
     (void)instance;
-    if (point_line_count >= 256) { fprintf(stderr,"too many point callbacks\n"); exit(2); }
+    if (point_line_count >= 4096) { fprintf(stderr,"too many point callbacks\n"); exit(2); }
     point_line_kind[point_line_count]=1;
     point_line_a[point_line_count]=(unsigned long)material;
     point_line_b[point_line_count]=(unsigned long)angle;
@@ -135,7 +146,7 @@ void trace_point_args(void *instance, long material, long angle, long vertex, lo
 void trace_line_args(void *instance, long material, long a, long b)
 {
     (void)instance;
-    if (point_line_count >= 256) { fprintf(stderr,"too many line callbacks\n"); exit(2); }
+    if (point_line_count >= 4096) { fprintf(stderr,"too many line callbacks\n"); exit(2); }
     point_line_kind[point_line_count]=2;
     point_line_a[point_line_count]=(unsigned long)material;
     point_line_b[point_line_count]=(unsigned long)a;
@@ -149,14 +160,14 @@ extern long *ref_project_vertex(void *instance,int index);
 /* Scoped text (F1747) and submodel (F1749/F1750) probes. Nested routines are
    replaced by recorders returning synthetic descriptors/vertices; the original
    handlers still decode their operands and compute the returned cursor. */
-static unsigned long nested_count, nested_kind[256], nested_value[256][3];
+static unsigned long nested_count, nested_kind[8192], nested_value[8192][3];
 static long nested_vertex[9], nested_descriptor[16];
 /* Station mode: vertex hooks resolve through the real F1470/F1471, text skips its
    glyphs (F1745 reports no room) and child descriptors always cull (negative radius). */
 static int nested_station;
 static void nested_event(unsigned long kind, unsigned long a, unsigned long b, unsigned long c)
 {
-    if (nested_count >= 256) { fprintf(stderr,"too many nested probe callbacks\n"); exit(2); }
+    if (nested_count >= 8192) { fprintf(stderr,"too many nested probe callbacks\n"); exit(2); }
     nested_kind[nested_count]=kind;
     nested_value[nested_count][0]=a; nested_value[nested_count][1]=b; nested_value[nested_count][2]=c;
     nested_count++;
@@ -211,7 +222,15 @@ long trace_text_push(long vertices, long normals, long extra) { nested_event(4,(
 void trace_text_string(char *output, long string, void *scratch) { (void)scratch; output[0]=0; nested_event(5,(unsigned long)string,0,0); }
 void trace_text_pop(void) { nested_event(6,0,0,0); }
 long *trace_submodel_vertex(void *instance, long index) { nested_event(7,(unsigned char)index,0,0); return nested_station ? ref_project_vertex(instance,(signed char)index) : nested_vertex; }
-long *trace_submodel_model(long index) { nested_event(8,(unsigned long)index,0,0); return nested_descriptor; }
+extern void ref_child_frame(void *child, void *parent, long word);
+extern void ref_child_run(void *child, void *descriptor);
+extern unsigned char ref_shades[24];
+extern unsigned long ref_arena_index;
+long *trace_submodel_model(long index)
+{
+    nested_event(8,(unsigned long)index,0,0);
+    return child_mode ? (long *)ref_model(index) : nested_descriptor;
+}
 extern void ref_nested_push(unsigned long key);
 extern void ref_nested_pop(void);
 void trace_nested_push(unsigned long key)
@@ -228,9 +247,52 @@ void trace_nested_pop(void)
 }
 extern long ref_cull(void *view, long radius);
 /* Station modes cull every child regardless of the scale adjustment. */
-long trace_submodel_cull(void *view, long radius) { return nested_station ? 1 : ref_cull(view,radius); }
-void trace_submodel_frame(void *child, void *instance, long word) { (void)child; (void)instance; nested_event(9,(unsigned long)word,0,0); }
-void trace_submodel_run(void *child, void *descriptor) { (void)child; (void)descriptor; nested_event(10,0,0,0); }
+long trace_submodel_cull(void *view, long radius)
+{
+    long culled;
+    if (!child_mode) return nested_station ? 1 : ref_cull(view,radius);
+    culled=ref_cull(view,radius);
+    nested_event(19,(unsigned long)culled,(unsigned long)radius,0);
+    return culled;
+}
+static unsigned long child_word;
+void trace_submodel_frame(void *child, void *instance, long word)
+{
+    nested_event(9,(unsigned long)word,0,0);
+    child_word=(unsigned long)word;
+    if (child_mode) ref_child_frame(child,instance,word);
+}
+static uint64_t child_hash(const unsigned char *data,size_t size,uint64_t hash)
+{
+    size_t i;
+    for(i=0;i<size;++i) {hash^=data[i];hash*=UINT64_C(1099511628211);}
+    return hash;
+}
+/* Child mode: record the instance F1750/F1740 built (only fields the original
+   defines), run the real F1773 and report whether F1774 ran it (+0xf0 becomes 2). */
+void trace_submodel_run(void *child, void *descriptor)
+{
+    unsigned char *c=(unsigned char *)child;
+    unsigned long *w=(unsigned long *)child;
+    uint64_t hash;
+    if (!child_mode) { (void)descriptor; nested_event(10,0,0,0); return; }
+    hash=child_hash(c+0x14,36,UINT64_C(14695981039346656037));
+    hash=child_hash(c+0xf8,4,hash);
+    hash=child_hash(c+0x54,12,hash);
+    nested_event(20,(unsigned long)child_depth+1,w[0x148/4],(unsigned long)c[0xf4]|(unsigned long)c[0xf5]<<8|(unsigned long)c[0xf6]<<16);
+    nested_event(23,w[1],w[2],w[3]);
+    nested_event(24,(unsigned long)hash,(unsigned long)(hash>>32),w[0x130/4]);
+    if (!(child_word&0x4000)) {
+        hash=child_hash(c+0x48,12,UINT64_C(14695981039346656037));
+        hash=child_hash(c+0x38,12,hash);
+        nested_event(25,w[0x44/4],(unsigned long)hash,(unsigned long)(hash>>32));
+    }
+    w[0xf0/4]=0;
+    ++child_depth;
+    ref_child_run(child,descriptor);
+    --child_depth;
+    nested_event(21,w[0xf0/4]==2,0,0);
+}
 
 static unsigned char pixels[320 * 200];
 static unsigned char palette[256 * 3];
@@ -1139,6 +1201,68 @@ static int station_model_vector(int index)
 #endif
 }
 
+static int child_model_vector(int index)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--child-model requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static unsigned char normals[32768*8];
+    static unsigned long model_queue[65536];
+    static unsigned long instance[0x160/4],globals[0x120/4],slots[128*9];
+    static const long identity[9]={2147483647,0,0,0,2147483647,0,0,0,2147483647};
+    static const long light[3]={0x3000,-0x5000,0x2000};
+    unsigned long *model,i;
+    unsigned char *colour;
+    fprintf(stderr,"JJFFE child-model-v1: one model table slot through original F1772 as in station-model-v1, but child calls run the real F1538/F1687/F1740/F1773 (text glyphs still skipped); faces drawn by the real F1708/F1712 with every queue operation logged. Not pixels.\n");
+    if(index<0 || index>465) fail("model index outside the table");
+    model=ref_model(index);
+    if(!model) { printf("{\"model\":%d,\"null\":1}\n",index); return 0; }
+    memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));
+    memset(slots,0,sizeof(slots));memset(normals,0,sizeof(normals));
+    memcpy((char *)instance+0x14,identity,36);
+    memcpy((char *)instance+0x9c,identity,36);
+    instance[0xc/4]=2000;
+    instance[0x148/4]=model[5];
+    instance[0xf0/4]=2;
+    instance[0x14c/4]=(unsigned long)globals;
+    instance[0x150/4]=model[1];
+    memcpy((char *)instance+0x134,light,12);
+    /* DATA_008831 shades: a test pattern, copied to +0x84 as F1683 would. */
+    for(i=0;i<24;++i) ref_shades[i]=(unsigned char)(i*29+3);
+    memcpy((char *)instance+0x84,ref_shades,24);
+    ref_arena_index=0;
+    ref_vertex_buffer=(long *)slots;
+    ref_normal_buffer=normals;
+    ref_detail_primary=ref_detail_secondary=0;
+    memset(model_queue,0,sizeof(model_queue));
+    ref_order_base=model_queue;ref_order_active=0;ref_order_state=0;
+    ref_order_init(model_queue);
+    ref_jitter_a=0x12345678UL;ref_jitter_b=0x456789abUL;
+    queue_mode=1;queue_count=0;child_mode=1;child_depth=0;
+    nested_station=1;nested_count=0;point_line_count=0;
+    ref_command_alive=1;
+    ref_execute(instance,(void *)model[0]);
+    queue_mode=0;child_mode=0;nested_station=0;
+    if(ref_vertex_buffer!=(long *)slots || ref_arena_index!=0) fail("child arena not restored");
+    colour=(unsigned char *)instance+0xf4;
+    printf("{\"model\":%d,\"points\":[",index);
+    for(i=0;i<point_line_count;++i) {
+        if(point_line_kind[i]==1) printf("%s[1,%lu,%ld,%lu,%lu]",i?",":"",point_line_a[i]&0xffff,(long)(short)point_line_b[i],point_line_c[i]&0xff,point_line_d[i]);
+        else printf("%s[2,%lu,%lu,%lu,0]",i?",":"",point_line_a[i]&0xffff,point_line_b[i]&0xff,point_line_c[i]&0xff);
+    }
+    printf("],\"nested\":[");
+    for(i=0;i<nested_count;++i)
+        printf("%s[%lu,%lu,%lu,%lu]",i?",":"",nested_kind[i],nested_value[i][0],nested_value[i][1],nested_value[i][2]);
+    printf("],\"queue\":[");
+    for(i=0;i<queue_count;++i) printf("%s[%lu,%lu,%lu]",i?",":"",queue_log[i][0],queue_log[i][1],queue_log[i][2]);
+    printf("],\"locals\":\"%016llx\",\"basis\":[",(unsigned long long)fingerprint((unsigned char *)instance+0x54,32));
+    for(i=0;i<9;++i) printf("%s%ld",i?",":"",(long)instance[0x9c/4+i]);
+    printf("],\"colour\":[%u,%u,%u],\"handedness\":%lu,\"alive\":%lu}\n",colour[0],colour[1],colour[2],instance[0xfc/4],ref_command_alive);
+    return 0;
+#endif
+}
+
 static int station_queue_vectors(void)
 {
 #ifndef FFE_COMMAND_PROBE
@@ -1424,6 +1548,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--station")) return station_vectors();
     if (argc == 3 && !strcmp(argv[1], "--station-model")) return station_model_vector(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--station-queue")) return station_queue_vectors();
+    if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

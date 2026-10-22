@@ -151,7 +151,8 @@ fn model_vertex_import_follows_bounded_pointers_counts_scale_and_rejects_bad_pro
         put32(&mut invalid, offset, value);
         assert!(decode_model_vertices(&invalid, 0x1000, 0).is_err());
     }
-    for bad in [[7, 0, 0, 0, 0, 0], [5, 0, 0, 0, 0, 0], [5, 0, 0, 0, 255, 0]] {
+    // Byte 255 would be external vertex -1 (valid in a child); 100 is outside the model.
+    for bad in [[7, 0, 0, 0, 0, 0], [5, 0, 0, 0, 0, 0], [5, 0, 0, 0, 100, 0]] {
         bytes[0x980..0x986].copy_from_slice(&bad);
         assert!(decode_model_vertices(&bytes, 0x1000, 0).is_err());
     }

@@ -21,6 +21,11 @@ pub struct VertexContext {
     pub handedness: u32,
     /// Instance vector at +0x38..+0x40 that opcode 25 aligns the basis with.
     pub direction: [i32; 3],
+    /// Bit `i` set: local `i` (+0x54 + 4i) holds no defined value in this instance.
+    /// The original leaves locals 3..=11 of a child instance (F1750) as stack data
+    /// or parent vertex pointers; reading one is an explicit error. Zero (every
+    /// local caller-defined) for a top-level instance.
+    pub undefined_locals: u32,
 }
 
 impl Default for VertexContext {
@@ -35,6 +40,7 @@ impl Default for VertexContext {
             base_handedness: 0,
             handedness: 0,
             direction: [0; 3],
+            undefined_locals: 0,
         }
     }
 }
@@ -64,6 +70,45 @@ pub fn variable(selector: u8, context: &VertexContext) -> i32 {
         2 => i32::from(context.globals[index]),
         _ => context.locals[index],
     }
+}
+
+/// [`variable`] that refuses a local the instance leaves undefined
+/// ([`VertexContext::undefined_locals`]).
+pub fn checked_variable(selector: u8, context: &VertexContext) -> Result<i32, String> {
+    let index = u32::from(selector & 63);
+    if selector >> 6 == 3 && index < 32 && context.undefined_locals & (1 << index) != 0 {
+        return Err(format!(
+            "Local {index} is uninitialised in this child instance in the original."
+        ));
+    }
+    Ok(variable(selector, context))
+}
+
+/// External vertex sources of a child instance: F1750 stores the parent's cache entry
+/// for the call's position vertex at +0x70 and up to four extra vertices at +0x74..+0x80;
+/// F1478 resolves vertex -k from the pointer at +0x6c + 4k. Entries are the parent's
+/// resolved (projected) vertices; `None` marks a pointer the call did not set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExternalVertices {
+    /// Child instance position (+0x4): an external object position is view - position.
+    pub position: [i32; 3],
+    /// Child instance generation (+0xf0) stamped on a copied external slot.
+    pub generation: u32,
+    /// Vertices -1..-5.
+    pub sources: [Option<ExternalSource>; 5],
+}
+
+/// The parts of a parent cache entry F1478 copies: screen (+0x0) and view (+0x4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExternalSource {
+    pub view: [i32; 3],
+    pub screen: [i16; 2],
+}
+
+/// Vertex opcodes whose dependency bytes the original reads sign-extended through
+/// F1472/F1478 (verified paths: 5..=8, 11/12, 15..=20), so 0x80..0xff are external.
+fn signed_dependencies(opcode: u8) -> bool {
+    matches!(opcode, 5..=8 | 11 | 12 | 15..=20)
 }
 
 pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
@@ -114,7 +159,9 @@ pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
                 ))
             }
         };
-        if references.iter().any(|value| u32::from(*value) >= count) {
+        if references.iter().any(|value| {
+            u32::from(*value) >= count && !(*value >= 0x80 && signed_dependencies(record[0]))
+        }) {
             return Err(format!(
                 "Vertex pair {index}: external/out-of-range vertex reference."
             ));
@@ -168,6 +215,10 @@ pub(crate) struct ObjectCache<'a> {
     visiting: Vec<bool>,
     /// F1476 state consumed by jittered vertices, in evaluation order.
     pub jitter: [u32; 2],
+    /// Parent vertices of a child instance; `None` at top level.
+    pub externals: Option<ExternalVertices>,
+    /// Cache slots -1..-6 (F1745 reserves six below the instance's own slots).
+    pub external_slots: [CachedVertex; 6],
 }
 
 impl<'a> ObjectCache<'a> {
@@ -178,7 +229,45 @@ impl<'a> ObjectCache<'a> {
             slots: vec![CachedVertex::default(); count as usize],
             visiting: vec![false; count as usize],
             jitter: JITTER_SEED,
+            externals: None,
+            external_slots: [CachedVertex::default(); 6],
         })
+    }
+
+    /// F1478's negative-index path: on a zero stamp, copy the parent's screen and view
+    /// from the pointer at +0x6c + 4k, set object = view - position and stamp the
+    /// slot with the instance generation (also when reached through F1472).
+    pub fn external(&mut self, index: u8) -> Result<CachedVertex, String> {
+        let k = usize::from((index as i8).unsigned_abs());
+        let Some(externals) = self.externals else {
+            return Err(format!(
+                "External vertex -{k} needs a parent instance (top-level model)."
+            ));
+        };
+        if k == 0 || k > 6 {
+            return Err(format!(
+                "External vertex -{k} lies outside the six reserved slots."
+            ));
+        }
+        if self.external_slots[k - 1].stamp != 0 {
+            return Ok(self.external_slots[k - 1]);
+        }
+        let source = externals
+            .sources
+            .get(k - 1)
+            .copied()
+            .flatten()
+            .ok_or_else(|| {
+                format!("External vertex -{k} has no parent vertex pointer in this call.")
+            })?;
+        let slot = CachedVertex {
+            object: std::array::from_fn(|i| source.view[i].wrapping_sub(externals.position[i])),
+            view: source.view,
+            screen: source.screen,
+            stamp: externals.generation,
+        };
+        self.external_slots[k - 1] = slot;
+        Ok(slot)
     }
 
     pub fn vertex(
@@ -187,6 +276,9 @@ impl<'a> ObjectCache<'a> {
         context: &VertexContext,
         depth: usize,
     ) -> Result<[i32; 3], String> {
+        if index >= 0x80 {
+            return Ok(self.external(index)?.object);
+        }
         let slot = usize::from(index);
         if slot >= self.slots.len() {
             return Err(format!("External/out-of-range vertex {index}."));
@@ -258,8 +350,11 @@ impl<'a> ObjectCache<'a> {
             }
             19..=22 => self.curve(index, 0, context, depth)?,
             23 | 24 => {
-                let offset =
-                    crate::model_math::angle_operand(i16::from_le_bytes([r[3], r[4]]), context);
+                let encoded = i16::from_le_bytes([r[3], r[4]]);
+                if encoded as u16 & 0xc0 >= 0x80 {
+                    checked_variable(encoded as u8, context)?;
+                }
+                let offset = crate::model_math::angle_operand(encoded, context);
                 self.curve(r[2], offset, context, depth)?
             }
             11 | 12 | 15..=18 => {
@@ -301,7 +396,7 @@ impl<'a> ObjectCache<'a> {
         let p0 = self.vertex(r[3] ^ m, context, depth + 1)?;
         let p1 = self.vertex(r[4] ^ m, context, depth + 1)?;
         if matches!(r[0], 19 | 20) {
-            let t = variable(r[2], context)
+            let t = checked_variable(r[2], context)?
                 .wrapping_add(offset)
                 .wrapping_shl(14);
             return Ok(std::array::from_fn(|i| {
@@ -310,7 +405,7 @@ impl<'a> ObjectCache<'a> {
         }
         let p2 = self.vertex(r[4].wrapping_add(2) ^ m, context, depth + 1)?;
         let p3 = self.vertex(r[3].wrapping_add(2) ^ m, context, depth + 1)?;
-        let t = variable(r[2], context)
+        let t = checked_variable(r[2], context)?
             .wrapping_add(offset)
             .wrapping_shl(14);
         let t2 = multiply(t, t);

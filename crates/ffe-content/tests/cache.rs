@@ -75,7 +75,8 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         vec![3, 0],
         vec![5, 0, 0, 0],
         vec![0x33, 0, 0, 0, 0, 0],
-        vec![3, 0, 0, 0, 0, 2, 4, 255, 0, 0],
+        // Vertex 7 is outside the six; 0x80..0xff are external (child) references.
+        vec![3, 0, 0, 0, 0, 2, 4, 7, 0, 0],
     ] {
         assert!(build(m.clone(), vec![make(bad)]).is_err());
     }
