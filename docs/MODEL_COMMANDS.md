@@ -17,7 +17,7 @@ explicit unsupported-command error.
 | 2 | `F1702` | line | 6 | yes | yes | payload verified against F1703: material word, vertices `[byte2, byte3]`. Operand event only; no clipping/pixels. |
 | 3 | `F1707` | non-reflected triangle | 8 | yes | yes | material, A/B, normal byte, C; perimeter B/A/C |
 | 4 | `F1711` | non-reflected quad | 10 | yes | yes | material, A/B/C/D, normal word; perimeter C/A/D/B |
-| 5 | `F1721` | complex polygon | 6 + L | yes | yes | v0.21: word +0 material, byte +2 normal (low 7) / flag (bit 7), byte +3 segment length L, then L segment bytes (`DATA_007817`, 7 handlers). Culled: skipped. Otherwise keyed by F1777 of the first segment vertex's view. Segments not executed. |
+| 5 | `F1721` | complex polygon | 6 + L | yes | yes | v0.21: word +0 material, byte +2 normal (low 7) / flag (bit 7), byte +3 segment length L, then L segment bytes (`DATA_007817`, 7 handlers). Culled: skipped. Otherwise keyed by F1777 of the first segment vertex's view. v0.38: segments decoded (`model_polygon`, six kinds) and executed: projections, near clipping (F1564), circles (F1554-F1557, `table_root`), abandonment, F1795/F1796/F1797 entries; see docs/notes/polygons.md. Textured fill colour (F1691) not ported. |
 | 6 | `F1696` | unified-z block start/end | variable | yes | yes | composed in v0.11; modes 0/4/5/6 close, 1/3 max/min, 2 vertex, 7 position/first/offset |
 | 7 | `F1706` | reflected triangle | 8 | yes | yes | emits XOR-1 mirrored face then ordinary face |
 | 8 | `F1710` | reflected quad | 10 | yes | yes | same reflection rule |
@@ -26,7 +26,7 @@ explicit unsupported-command error.
 | 11 | `F1752` | visibility branch | 4 | yes | yes | F1751 predicate |
 | 12 | `F1755` | inverse visibility branch | 4 | yes | yes | F1751 inverse |
 | 13 | `F1758` | arithmetic | 4 | yes | yes | 16 operations; trig needs the sine table |
-| 14 | `F1749` | child-model call (via `F1750`) | 4 or 8 | yes | yes | verified v0.14: model `code >> 5`, +0 vertex, word +0 frame; byte 1 bit 7 adds +2..+5 extra vertices (order +4,+2,+3,+5, `0x7f` ends). Operand event; child not executed. Earlier "text (second form)" label was wrong. |
+| 14 | `F1749` | child-model call (via `F1750`) | 4 or 8 | yes | yes | verified v0.14: model `code >> 5`, +0 vertex, word +0 frame; byte 1 bit 7 adds +2..+5 extra vertices (order +4,+2,+3,+5, `0x7f` ends). Earlier "text (second form)" label was wrong. v0.38: `execute_scene` runs the child (F1687 cull, F1750 instance, F1740 frame, F1774 arena, external vertices); see docs/notes/child-models.md. |
 | 15 | `F1759` | sound request | 2 | yes | yes | v0.36: sample `code >> 5 & 15` at volume 63 − (\|x\| + \|y\| + \|z\|) / 0x20000 of the instance position when positive (`SoundEmission`); F1908 playback not ported. |
 | 16 | `F1815` | — | — | **no** | no | unsupported record form |
 | 17 | `F1760` | two-vertex shape (`Beam`) | 14 | yes | yes | v0.28: word +0 material, word +2 vertices (low/high byte), words +4..+10 to F1761. Operand record; drawing not ported. |
@@ -39,7 +39,7 @@ explicit unsupported-command error.
 | 24 | `F1766` | vertex-pair chain (`Chain`) | 6 + 2k | yes | yes | v0.28: material, F1474 size, 2-byte pairs through the first holding 0x7f. Operand record; drawing not ported. |
 | 25 | `F1771` | align basis with instance direction | 2 | yes | partial | v0.28: bit 15 resets the basis (F1770); otherwise rotation from `VertexContext::direction` via F1467/F1523/F1744 — zero pairs exact, non-zero needs the sqrt table. |
 | 26 | `F1762` | set colour | 6 or 20 | yes | yes | verified v0.15: word +0 material, byte +2 normal (low 7) / normal-0 target (bit 7), byte +3 selector; non-zero selector adds seven alternative words (20 bytes). Updates instance colour or normal 0. |
-| 27 | `F1748` | coloured child-model call (via `F1750`) | 8 or 12 | yes | yes | v0.24: model `code >> 5`, byte +0 vertex, word +0 frame, byte +3 scale (signed high nibble, or local `>> 4` with bit 3), word +4 child material; extras at +6 when byte 1 bit 7. Operand event; child not executed. |
+| 27 | `F1748` | coloured child-model call (via `F1750`) | 8 or 12 | yes | yes | v0.24: model `code >> 5`, byte +0 vertex, word +0 frame, byte +3 scale (signed high nibble, or local `>> 4` with bit 3), word +4 child material; extras at +6 when byte 1 bit 7. v0.38: executed by `execute_scene` like opcode 14. |
 | 28 | `F1741` | `0x9c` matrix transformation | 4 (6 for `0xc000`) | yes | yes | `0x8000` local rotation (v0.6); `0x0000`/`0x4000` base-relative F1739 + optional F1743 verified v0.16 (6,048 cases); `0xc000` (v0.33): basis from object vertices +2, +3, +4 (A, B, C): z = norm(B − A), x = norm((C − A) × z), y = z × x, norm through F1466/F1502/F1523 |
 | 29 | `F1758` | arithmetic (second entry) | 4 | yes | yes | same helper as 13 |
 | 30 | `F1767` | 2 | — | bit 15 only | no | bit 15: vertex frame := basis (F1768); `0x801e` light points (F1769) run with a zero count in global word 4 (v0.35) and are errors otherwise (point tables not imported); the variable vertex-base offset (F1473) is an error |

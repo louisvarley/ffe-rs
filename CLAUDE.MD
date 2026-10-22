@@ -37,7 +37,9 @@ opcode 22 curves, v0.32 offset curve vertices, v0.33 vertex-defined basis (opcod
 `0xc000`), v0.34 screen labels (opcode 18), v0.35 empty light points, v0.36 sound requests: 439
 models now execute and all 434 the original completes match. v0.37 adds cache v7
 (every decodable model) and the F6 model viewer, the first visible use of the
-executor (diagnostic camera/colours, not the faithful renderer).
+executor (diagnostic camera/colours, not the faithful renderer). v0.38 (three
+parallel tasks) ports complex polygons, textured faces (cache v8) and child-model
+execution: 443 models execute and match; see docs/notes/.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.

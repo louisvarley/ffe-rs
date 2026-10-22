@@ -4,6 +4,46 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Polygons, textures and child models, in parallel (v0.38)
+
+Three tasks ran in parallel worktrees and were merged here; their full
+findings, formats and routine numbers are in `docs/notes/polygons.md`,
+`docs/notes/textures.md` and `docs/notes/child-models.md`.
+
+- **Complex polygons (opcode 5).** `model_polygon` decodes the six segment
+  kinds and runs the F1721 handlers: projections, near-plane clipping (F1564),
+  circles as two curves (F1554-F1557; F1467's `DATA_007977` is exactly
+  isqrt(i << 21), computed by `model_math::table_root`), abandonment, and the
+  F1795/F1796/F1797 queue entries. `model_polygon::edges` reproduces the curve
+  subdivision (F1547/F1549). `verify-polygon.py`: 12,328 helper calls match
+  (trace `fab32ea5…`). Station-model mode now sets +0x154 (normal records) as
+  F1774 does; 452 fills / 1,601 entries match. The textured fill colour
+  (F1691 reads past a small table) is not ported or compared.
+- **Textured faces.** F1708/F1712 take the textured path under exact
+  conditions; the 148-record descriptor table `DATA_007811` gives the bitmap
+  id (primary, then secondary from 96), quad orientation and up to 7 colours;
+  texels are colour slots; mapping is affine from corner tables. **Cache v8**
+  adds `base:texture/descriptors` and `base:palette/fixed-map` (`DATA_007770`)
+  from floppy 1.02 (a CD cache omits them). `verify-textures.py`: 4,096 raster
+  cases match the whole buffer (`640cc781…`); 2,677 textured queue entries in
+  1,720 model views match word for word (`65922b3c…`). The upper runtime
+  palette and real lighting values remain unknown.
+- **Child models (opcodes 14/27).** `execute_scene` runs children recursively
+  (F1687 cull, F1750 instance, F1740 frame, F1774 arena with silent no-room
+  skip, generation 2), with external vertices (−k from the parent pointers at
+  +0x6c) accepted where the original sign-extends. Undefined child state is an
+  explicit error. `verify-child-models.py` (`--child-model`): 417 models, 161
+  with children, 1,239 child runs, 0 mismatched.
+
+Merge fix-ups: both new oracles had used nested probe events 19-22; polygon
+events are now 30-33 and their encoding is shared (`tests/common`), so the
+child oracle also checks polygons inside children (trace `eaee2ad1…`). Child
+caches get their model's normal records. `verify-station-models.py`: 443
+compared, 0 mismatched (`b4c3aecf…`); station, station-queue, text/submodel and
+vertex-program traces unchanged. Census **443 of 466**. 202 `#[test]`, 29
+ignored, one Unix-only (172 runnable on Windows). The F6 viewer fills polygons
+and draws textured faces with the real bitmaps; it does not run children yet.
+
 ## 2026-10-21 — Cache v7 and the F6 model viewer (v0.37)
 
 The first visible use of the ported model executor. **Cache v7** imports the

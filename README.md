@@ -12,10 +12,10 @@ the current experimental example is not that faithful renderer.
 > Original cabin, proportional bitmap font and console artwork are imported.
 > Version 0.4 extends the **F4 station model lab** with original declared
 > triangle/quad outlines and individual-face inspection, not finished models.
-> The **F6 model viewer** (cache v7) runs every imported ship, station and object
-> program through the verified model executor and draws its faces, lines, points
-> and curves in the original render order. Textures show as grey; polygons,
-> curved surfaces, text, labels and child models are not drawn yet.
+> The **F6 model viewer** (cache v8) runs every imported ship, station and object
+> program through the verified model executor and draws its faces, textured faces
+> (original bitmaps), complex polygons, lines, points and curves in the original
+> render order. Curved surfaces, text, labels and child models are not drawn yet.
 > The flight view still has placeholder geometry. No legacy runtime is linked.
 > Complete content, JJFFE-equivalent gameplay and graphics packs remain unfinished.
 > [CLAUDE.MD](CLAUDE.MD) records the owner's answers and current plan.
@@ -301,13 +301,13 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v7** imports every model that decodes (439 of 466 on floppy 1.02) for the
-F6 viewer. `build-data` refuses an existing destination, so build to a new file,
+**Cache v8** imports every model that decodes (443 of 466 on floppy 1.02) plus the
+original texture descriptor table and fixed-colour map for the F6 viewer. `build-data` refuses an existing destination, so build to a new file,
 then replace your old `data.bin` with it:
 
 ```powershell
-.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v7.bin
-Move-Item -Force .\data-v7.bin .\data.bin
+.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v8.bin
+Move-Item -Force .\data-v8.bin .\data.bin
 ```
 
 The local cache has been generated on this checkout. It is ignored and must
