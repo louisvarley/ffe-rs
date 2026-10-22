@@ -295,14 +295,8 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
             scale,
             ..
         } => {
-            ffe_core::model::evaluate(
-                bytes,
-                *vertex_count,
-                &ffe_core::model::VertexContext {
-                    scale: *scale,
-                    ..Default::default()
-                },
-            )?;
+            // Child-only programs read parent vertices; those stand in at the origin.
+            ffe_core::model::validate_program(bytes, *vertex_count, *scale)?;
         }
         AssetKind::ModelCommands { vertex_count, .. } => {
             ffe_core::model_commands::decode(bytes, *vertex_count)?;

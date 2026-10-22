@@ -150,6 +150,9 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
     // v7 imports any original table slot (0..466), not only stations 74/75.
     m.format_version = 7;
     assert!(build(m.clone(), vec![make(good.clone(), 2, 13, 73)]).is_ok());
+    // A child-only program that reads its parent's vertex -1 still imports.
+    let child = vec![1, 0, 1, 2, 3, 0, 17, 0, 0, 0xff, 0, 0];
+    assert!(build(m.clone(), vec![make(child, 4, 13, 73)]).is_ok());
     assert!(build(m, vec![make(good, 2, 13, 466)]).is_err());
 }
 

@@ -200,6 +200,42 @@ pub fn evaluate_with_jitter(
     Ok(vertices)
 }
 
+/// Check that every vertex of a program evaluates. Child-only programs may read
+/// their parent's vertices (negative indices); with no parent here, slots -1..-5
+/// stand in at the origin and a vertex that needs any other parent slot is not
+/// checked. Every other error remains.
+pub fn validate_program(records: &[u8], count: u32, scale: u32) -> Result<(), String> {
+    validate_records(records, count)?;
+    if scale > 31 {
+        return Err("Vertex scale must be in 0..31.".to_owned());
+    }
+    let origin = ExternalSource {
+        view: [0; 3],
+        screen: [0; 2],
+    };
+    let context = VertexContext {
+        scale,
+        ..Default::default()
+    };
+    for index in 0..count as u8 {
+        // A fresh cache per vertex: a failed evaluation leaves no partial state.
+        let mut evaluator = ObjectCache::new(records, count)?;
+        evaluator.externals = Some(ExternalVertices {
+            position: [0; 3],
+            generation: 1,
+            sources: [Some(origin); 5],
+        });
+        match evaluator.vertex(index, &context, 0) {
+            // A parent slot only some callers supply (e.g. -6): not checkable alone.
+            Err(error) if error.starts_with("External vertex -") => {}
+            result => {
+                result?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct CachedVertex {
     pub object: [i32; 3],

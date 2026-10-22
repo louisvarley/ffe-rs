@@ -4,6 +4,21 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Fix: cache build with child-only models
+
+After the child-model merge the importer accepts programs that read parent
+vertices, but the cache's payload check still evaluated every vertex
+standalone, so `build-data` failed ("External vertex -1 needs a parent
+instance"). The merge had been verified against a cache built before it.
+`model::validate_program` now evaluates each vertex with parent slots -1..-5
+standing in at the origin and skips a vertex that needs another parent slot
+(e.g. -6); every other error remains. The v8 cache now holds **456 models**
+(1,749 assets). The F6 viewer draws 422 and shows a message for 34 child-only
+models. Oracles re-run on the freshly built cache: station-models 443 / 0,
+child-models 417 / 0, textures 1,736 views / 0 mismatched; traces unchanged
+apart from the texture count. The release game was launched under Xvfb with
+and without `--root` (30 frames each).
+
 ## 2026-10-22 — Polygons, textures and child models, in parallel (v0.38)
 
 Three tasks ran in parallel worktrees and were merged here; their full
