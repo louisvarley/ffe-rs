@@ -324,7 +324,7 @@ The local cache has been generated on this checkout. It is ignored and must
 not be distributed. Unlike the reference smoke executable, the Rust importer
 does not need JJFFE sources, NASM, or execution of the original game.
 
-The versioned, deterministic ZIP now contains **385 assets (cache v6)**:
+The versioned, deterministic ZIP now contains **1776 assets (cache v10)**:
 
 - 345 embedded indexed images, with original dimensions, signed drawing offsets,
   mask-zero flags, table/slot IDs and executable source offsets.
@@ -332,19 +332,16 @@ The versioned, deterministic ZIP now contains **385 assets (cache v6)**:
   zero height; they remain raw blocks, not guessed 64x512 images.
 - The original six-bit fixed low 128-colour palette. The upper 128 colours are
   assigned at runtime; no inferred full-colour embedded previews are generated.
+- The original 12-bit fixed colour map, the texture descriptor table and the
+  lighting tables (the default light, the shade table and the six star tables).
 - Six lossless indexed cabin PNGs, preserving their separate 8-bit palettes,
   and 23 lossless WAV effects.
 - The main original bitmap font: 116 records, each nine MSB-first row masks
   plus one proportional advance byte. No copied font data is compiled into Rust.
-- Two original station vertex programs, with source descriptor/record offsets,
-  original scale and count.
-- Two physical drawing-command streams (516/758 bytes), imported through the
-  descriptor pointers with verified extents. Native structural decoding checks
-  instruction boundaries, branch targets and face vertex references.
+- The vertex programs, drawing-command streams and normal blocks of **462 of the
+  466 model table slots**, with their source descriptor/record offsets, original
+  scale and counts, plus the descriptor fields the child-model calls need.
   These are original programs, not static meshes or captured geometry.
-- Two original station normal blocks (48/258 bytes), with expanded counts 18/88
-  including implicit entries 0/1. Imported via descriptor pointers; normal-anchor
-  bounds and literal vertex anchors are validated.
 - The 16,384-entry signed integer sine quarter-wave table (65,536 bytes), imported
   byte-exactly from the player's executable. No floating-point recreation.
 
@@ -359,9 +356,13 @@ game folder or automatically rebuild stale caches.
 
 V1 (377 assets), v2 (378) and v3 (380) remain readable. V4 is a deliberate schema
 bump: older tools reject it, rather than misinterpreting the new command kind.
+V7 to V10 add model, texture and lighting assets; the format did not change
+again, so a v10 cache rebuilt from the same files holds more models than the
+previous one.
 
-This is **not a complete game cache**: model normals/submodels, gameplay tables, additional fonts,
-journal, music and optional CD media remain unconverted. Scope is explicit in
+This is **not a complete game cache**: the four model slots that do not decode,
+the gameplay tables, additional fonts, the message strings, journal, music and
+optional CD media remain unconverted. Scope is explicit in
 the manifest (`complete_game_assets: false`). Automatic import/freshness checking/rebuild,
 the complete upscale export and replacement-pack loading are still planned.
 All build/inspection failures exit 2; existing outputs are never overwritten.
