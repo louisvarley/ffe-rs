@@ -4,6 +4,32 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Child models in the viewer and flight (v0.41)
+
+`execute_scene` (v0.38) now drives the F6 viewer and the flight station, so
+child models (station rings, lattice frames, ship parts) are drawn. **Cache
+v10** adds `base:model/descriptors`: per table slot, descriptor +0x18 (child
+scale offset) and +0x1c (F1687 cull radius), zero for slots not imported. The
+viewer's `ChildTable` serves child calls from the cache; the environment holds
+the original shades and the top-level light (length 0x8000, in the frame the
+children are set up in).
+
+Child primitives land in the root render order but index the child's own vertex
+cache, so emissions now carry what drawing needs: `Emission::screen` (the
+points F1708/F1712 projected when queuing) and `Emission::shade` (the face
+normal's colour in its own instance's table); `PointEmission::screen` and
+`LineEmission::screen` are F1479 projections of the resolved views, the line's
+second vertex resolved on a copy of the cache so the original cache state is
+unchanged (and a failure there leaves the line undrawn, never failing the
+execution). All oracles are unchanged (station-models 443 / 0, child-models 417
+/ 0, station, station-queue, textures).
+
+If a child cannot run yet (vertex opcode 0xd in 315/444, explicitly undefined
+child state), the viewer draws the parent without children and says so. 424 of
+456 models render; the rest are child-only parts or planet-sized objects.
+Station 74 is now the full station (drum, side pods, ring segments: 69 shapes);
+the drum stays scaled to the old 40-unit size. Two tests added.
+
 ## 2026-10-22 — Original lighting and colours in the viewer (v0.40)
 
 The viewer's shades had been a diagnostic 14..0 ramp, about double the

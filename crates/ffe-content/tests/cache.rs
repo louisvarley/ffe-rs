@@ -67,7 +67,7 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         read(&bytes).unwrap().asset("base:model-commands/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 10] {
+    for version in [1, 2, 3, 11] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
 
@@ -104,7 +104,7 @@ fn normal_payloads_require_v5_and_validate_counts_and_anchor_bounds() {
         read(&bytes).unwrap().asset("base:model-normals/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 10] {
+    for version in [1, 2, 3, 4, 11] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for count in [0, 1, 3, 6, 258, u32::MAX] {
@@ -135,7 +135,7 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
         read(&bytes).unwrap().asset("base:model-vertices/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 10] {
+    for version in [1, 2, 11] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for (program, count, scale, index) in [
@@ -223,7 +223,7 @@ fn stored_cache_is_deterministic_sorted_and_loads_by_stable_id() {
 fn malformed_manifests_cannot_claim_complete_content_or_escape_paths() {
     let bytes = build(manifest(), assets()).unwrap();
     for (key, value) in [
-        ("format_version", serde_json::json!(10)),
+        ("format_version", serde_json::json!(11)),
         ("format", serde_json::json!("other")),
         ("complete_game_assets", serde_json::json!(true)),
         ("unresolved", serde_json::json!([])),
@@ -446,4 +446,21 @@ fn lighting_tables_require_v9_and_validate_payloads() {
     assert!(build(m.clone(), vec![light(default[..35].to_vec())]).is_err());
     assert!(build(m.clone(), vec![shades(stars.clone(), 5)]).is_err());
     assert!(build(m, vec![shades(stars[..120].to_vec(), 6)]).is_err());
+}
+
+#[test]
+fn model_descriptor_table_requires_v10_and_one_entry_per_slot() {
+    let table = |bytes: Vec<u8>, count: u32| Asset {
+        id: "base:model/descriptors".to_owned(),
+        path: "models/descriptors.bin".to_owned(),
+        kind: AssetKind::ModelDescriptors { count },
+        bytes,
+    };
+    let mut m = manifest();
+    m.format_version = 9;
+    assert!(build(m.clone(), vec![table(vec![0; 466 * 8], 466)]).is_err());
+    m.format_version = 10;
+    assert!(build(m.clone(), vec![table(vec![1; 466 * 8], 466)]).is_ok());
+    assert!(build(m.clone(), vec![table(vec![0; 465 * 8], 465)]).is_err());
+    assert!(build(m, vec![table(vec![0; 466 * 8 - 1], 466)]).is_err());
 }

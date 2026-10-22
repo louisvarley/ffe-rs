@@ -12,10 +12,11 @@ the current experimental example is not that faithful renderer.
 > Original cabin, proportional bitmap font and console artwork are imported.
 > Version 0.4 extends the **F4 station model lab** with original declared
 > triangle/quad outlines and individual-face inspection, not finished models.
-> The **F6 model viewer** (cache v9) runs every imported ship, station and object
+> The **F6 model viewer** (cache v10) runs every imported ship, station and object
 > program through the verified model executor and draws its faces, textured faces
 > (original bitmaps), complex polygons, lines, points and curves in the original
-> render order. Curved surfaces, text, labels and child models are not drawn yet.
+> render order, including child models (station rings, ship parts). Curved
+> surfaces, text and labels are not drawn yet.
 > In flight, the station is the original **model 74**, executed by the verified
 > model port with its textures; flight mechanics remain synthetic. No legacy runtime is linked.
 > Complete content, JJFFE-equivalent gameplay and graphics packs remain unfinished.
@@ -33,10 +34,10 @@ The Windows executable is built in this checkout. From the repository root:
 
 **Easiest on Windows:** double-click `play.bat`. It builds the release game and
 tools, creates or updates `data.bin` from your files in `.\game` when it is
-missing or older than this build needs (currently cache v9), and launches the
+missing or older than this build needs (currently cache v10), and launches the
 game; on any error the window stays open with the message. Rebuilding by hand:
 `cargo build --release --locked -p ffe-rs -p ffe-tools`.
-The root directory must contain your locally generated **v9** `data.bin` (build command
+The root directory must contain your locally generated **v10** `data.bin` (build command
 below, or let `play.bat` make it). The game verifies it before opening a window.
 Without `--root`, it looks beside its own executable and then up to four parent
 folders, so `target\release\ffe-rs.exe` finds the checkout's `data.bin`. If
@@ -306,14 +307,14 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v9** imports every model that decodes (456 of 466 on floppy 1.02), the
-original texture descriptor table and fixed-colour map, and the original lighting
-tables (default light, shade tables). `build-data` refuses an existing destination, so build to a new file,
+**Cache v10** imports every model that decodes (456 of 466 on floppy 1.02) with
+its descriptor fields for child models, the original texture descriptor table and
+fixed-colour map, and the original lighting tables (default light, shade tables). `build-data` refuses an existing destination, so build to a new file,
 then replace your old `data.bin` with it:
 
 ```powershell
-.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v9.bin
-Move-Item -Force .\data-v9.bin .\data.bin
+.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v10.bin
+Move-Item -Force .\data-v10.bin .\data.bin
 ```
 
 The local cache has been generated on this checkout. It is ignored and must

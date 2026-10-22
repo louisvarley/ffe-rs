@@ -80,6 +80,11 @@ pub enum AssetKind {
     FixedColourMap {
         source_offset: u64,
     },
+    /// Per model table slot, descriptor +0x18 (child scale offset) and +0x1c (F1687
+    /// cull radius) as two little-endian dwords; zero for slots not imported (v10).
+    ModelDescriptors {
+        count: u32,
+    },
     /// The default light and shade table `DATA_007231..7234` (v9).
     DefaultLighting {
         source_offset: u64,
@@ -169,7 +174,7 @@ fn valid_digest(value: &str) -> bool {
 const MODEL_TABLE_SLOTS: u32 = 466;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=9) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=10) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -215,6 +220,11 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("Texture descriptors and the colour map require cache v8.".to_owned());
+        }
+        if manifest.format_version < 10
+            && matches!(record.asset, AssetKind::ModelDescriptors { .. })
+        {
+            return Err("The model descriptor table requires cache v10.".to_owned());
         }
         if manifest.format_version < 9
             && matches!(
@@ -355,6 +365,11 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::FixedColourMap { .. } => {
             ffe_core::model_texture::validate_colour_map(bytes)?;
+        }
+        AssetKind::ModelDescriptors { count } => {
+            if *count != MODEL_TABLE_SLOTS || bytes.len() != *count as usize * 8 {
+                return Err("invalid model descriptor table".to_owned());
+            }
         }
         AssetKind::DefaultLighting { .. } => {
             ffe_core::model_lighting::default_lighting(bytes)?;

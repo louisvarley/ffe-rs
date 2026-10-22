@@ -1228,3 +1228,55 @@ fn opcode_15_requests_a_sound_whose_volume_falls_with_instance_distance() {
     assert_eq!(run([-31 * 0x20000, 0, 31 * 0x20000])[0].volume, 1);
     assert!(run([0, -63 * 0x20000, 0]).is_empty());
 }
+
+#[test]
+fn queued_faces_lines_and_points_carry_their_screen_points() {
+    let mut words = Vec::new();
+    words.extend_from_slice(&triangle(0x0123, [1, 0, 2]));
+    words.extend_from_slice(&[2, 0x0456, u16::from_le_bytes([0, 2])]);
+    words.extend_from_slice(&[1, 0x0789, 0, 0]);
+    words.push(0);
+    let stream = bytes(&words);
+    let mut vertices = Vertices::new(&LIVE_RECORDS, 4).unwrap();
+    let result = execute_live(
+        &stream,
+        &mut vertices,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        live_instance([0, 0, 100], 0, 0),
+        32,
+    )
+    .unwrap();
+    let mut resolved = vertices.clone();
+    let screen = |cache: &mut Vertices, i: i8| {
+        cache
+            .resolve(i, &VertexContext::default(), [0, 0, 100], 2, true)
+            .unwrap()
+            .screen
+    };
+    for primitive in &result.ordered {
+        match primitive {
+            Primitive::Face(face) => {
+                let expected: Vec<_> = face
+                    .face
+                    .vertices
+                    .iter()
+                    .map(|v| screen(&mut resolved, *v as i8))
+                    .collect();
+                assert_eq!(face.screen, expected);
+                assert_eq!(face.shade, [0; 3]);
+            }
+            Primitive::Line(line) => assert_eq!(
+                line.screen,
+                Some([screen(&mut resolved, 0), screen(&mut resolved, 2)])
+            ),
+            Primitive::Point(point) => {
+                assert_eq!(point.screen, Some(screen(&mut resolved, 0)))
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    // The command-order record keeps faces without points (not queued there).
+    assert!(result.emissions[0].screen.is_empty());
+}

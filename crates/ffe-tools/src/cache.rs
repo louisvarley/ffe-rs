@@ -3,8 +3,8 @@ use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
     decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font, decode_model_commands,
-    decode_model_normals, decode_model_vertices, decode_sine_table, decode_star_shades,
-    decode_texture_descriptors, BitmapLayout,
+    decode_model_descriptor, decode_model_normals, decode_model_vertices, decode_sine_table,
+    decode_star_shades, decode_texture_descriptors, BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -88,6 +88,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     let (model_table_rva, sine_table_rva) = model_layout(profile.id)?;
     let mut assets = Vec::new();
     let mut models = 0;
+    let mut descriptor_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * 8];
     for record in &inspection.files {
         if record.path == "FIRSTENC.EXE" {
             let bytes = recorded_bytes(&root, record)?;
@@ -115,6 +116,13 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     Err(_) => continue,
                 };
                 models += 1;
+                // F1750 reads +0x18 (scale offset) and +0x1c (cull radius) for child calls.
+                let descriptor = decode_model_descriptor(&bytes, model_table_rva, index)?;
+                let entry = index as usize * 8;
+                descriptor_table[entry..entry + 4]
+                    .copy_from_slice(&descriptor.scale_offset.to_le_bytes());
+                descriptor_table[entry + 4..entry + 8]
+                    .copy_from_slice(&descriptor.radius.to_le_bytes());
                 assets.push(Asset {
                     id: format!("base:model-normals/{index:03}"),
                     path: format!("models/{index:03}.nrm"),
@@ -172,6 +180,14 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: map.bytes,
                 });
             }
+            assets.push(Asset {
+                id: "base:model/descriptors".to_owned(),
+                path: "models/descriptors.bin".to_owned(),
+                kind: AssetKind::ModelDescriptors {
+                    count: ffe_convert::model_extents::MODEL_COUNT as u32,
+                },
+                bytes: std::mem::take(&mut descriptor_table),
+            });
             if let Some((default_rva, stars_rva)) = lighting_layout(profile.id) {
                 let table = decode_default_lighting(&bytes, default_rva)?;
                 assets.push(Asset {
@@ -277,14 +293,15 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     } else {
         0
     };
-    if models < 2 || assets.len() != 379 + tables + 3 * models {
+    // Plus the v10 model descriptor table.
+    if models < 2 || assets.len() != 380 + tables + 3 * models {
         return Err(format!(
             "unexpected imported asset count {} ({models} models); no cache written",
             assets.len()
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 9,
+        format: "ffe-content-cache".to_owned(), format_version: 10,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

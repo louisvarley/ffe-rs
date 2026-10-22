@@ -456,6 +456,11 @@ impl Screen {
         let status = match &frame {
             Ok(frame) => {
                 self.draw_shapes(viewer, &frame.shapes);
+                if let Some(error) = &frame.children_error {
+                    self.text(3, 23, "PARTS NOT SHOWN YET:", 12);
+                    let words: String = error.to_ascii_uppercase().chars().take(60).collect();
+                    self.text(3, 34, &words, 12);
+                }
                 if frame.skipped > 0 {
                     format!(
                         "{} SHAPES, {} NOT DRAWN YET",

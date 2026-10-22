@@ -9,7 +9,10 @@ use crate::textures::TextureSet;
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::{evaluate, VertexContext};
 use ffe_core::model_commands::{material, VisibilityContext};
-use ffe_core::model_execute::{execute_live, resolve_colour, InstanceContext, Primitive};
+use ffe_core::model_execute::{
+    execute_live, execute_scene, resolve_colour, ChildEnvironment, ChildModel, ChildModels,
+    InstanceContext, Primitive,
+};
 use ffe_core::model_instance::{Vertices, NEAR_SENTINEL};
 use ffe_core::model_lighting::{default_lighting, pack, Lighting};
 use ffe_core::model_math::SineTable;
@@ -40,8 +43,10 @@ pub struct Textured {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub shapes: Vec<Shape>,
-    /// Ordered primitives the viewer does not draw yet (polygons, labels).
+    /// Ordered primitives the viewer does not draw yet (labels).
     pub skipped: usize,
+    /// Why child models were left out of this frame, if they were.
+    pub children_error: Option<String>,
 }
 
 pub struct ViewerModel {
@@ -66,6 +71,34 @@ pub struct ModelViewer {
     animation: u16,
     textures: TextureSet,
     lighting: Lighting,
+    /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
+    descriptors: Vec<[i32; 2]>,
+}
+
+/// The imported models as child calls see the model table.
+struct ChildTable<'a>(&'a ModelViewer);
+
+impl ChildModels for ChildTable<'_> {
+    fn model(&self, index: u16) -> Result<ChildModel<'_>, String> {
+        let viewer = self.0;
+        let model = viewer
+            .find(u32::from(index))
+            .ok_or_else(|| format!("Child model {index} is not in the cache."))?;
+        let [scale_offset, radius] = *viewer
+            .descriptors
+            .get(usize::from(index))
+            .ok_or_else(|| format!("Child model {index} has no descriptor."))?;
+        Ok(ChildModel {
+            commands: &model.commands,
+            vertices: &model.vertices,
+            vertex_count: model.vertex_count,
+            normals: &model.normals,
+            normal_count: model.normal_count,
+            scale: model.scale as i32,
+            scale_offset,
+            radius,
+        })
+    }
 }
 
 const GENERATION: u32 = 2;
@@ -129,6 +162,21 @@ impl ModelViewer {
             .and_then(|bytes| default_lighting(bytes).ok())
         {
             viewer.lighting = lighting;
+        }
+        if let Some(table) = cache.asset("base:model/descriptors") {
+            viewer.descriptors = table
+                .chunks_exact(8)
+                .map(|entry| {
+                    std::array::from_fn(|i| {
+                        i32::from_le_bytes([
+                            entry[4 * i],
+                            entry[4 * i + 1],
+                            entry[4 * i + 2],
+                            entry[4 * i + 3],
+                        ])
+                    })
+                })
+                .collect();
         }
         Ok(viewer)
     }
@@ -196,6 +244,7 @@ impl ModelViewer {
             animation: 0,
             textures: TextureSet::default(),
             lighting: FALLBACK_LIGHTING,
+            descriptors: Vec::new(),
         })
     }
 
@@ -391,62 +440,88 @@ impl ModelViewer {
             operand_scale: 0,
             textures: true,
         };
-        let result = execute_live(
-            &model.commands,
-            &mut vertices,
-            &mut context,
-            // Detail branches see the nearest depth: the viewer wants full detail.
-            &VisibilityContext {
-                depth: 1,
-                scale: 0,
-                detail: [0, 0],
-                normals: &normals,
-            },
-            Some(&self.table),
-            instance,
-            4096,
-        )?;
-        let mut frame = Frame::default();
-        let mut screen =
-            |index: u8, context: &VertexContext| -> Result<Option<(i32, i32)>, String> {
-                let vertex = vertices.resolve(index as i8, context, position, GENERATION, true)?;
-                Ok((vertex.screen != NEAR_SENTINEL)
-                    .then(|| (i32::from(vertex.screen[0]), i32::from(vertex.screen[1]))))
+        // Detail branches see the nearest depth: the viewer wants full detail.
+        let visibility = VisibilityContext {
+            depth: 1,
+            scale: 0,
+            detail: [0, 0],
+            normals: &normals,
+        };
+        // With the v10 descriptor table, child models run inside their parent
+        // (`execute_scene`); without it, child calls are only recorded.
+        let mut children_error = None;
+        let scene = if self.descriptors.is_empty() {
+            None
+        } else {
+            let environment = ChildEnvironment {
+                models: &ChildTable(self),
+                shades: self.lighting.shades,
+                // The top-level light (+0x134) in the frame children are set up in.
+                light: light_view.map(|v| (v / length * 32_768.0) as i32),
+                arena: 0,
             };
+            // Transactional: on an error, vertices and context are unchanged.
+            match execute_scene(
+                &model.commands,
+                &mut vertices,
+                &mut context,
+                &visibility,
+                Some(&self.table),
+                instance,
+                4096,
+                &environment,
+            ) {
+                Ok(result) => Some(result),
+                Err(error) => {
+                    children_error = Some(error);
+                    None
+                }
+            }
+        };
+        // Without children (no v10 table, or a child that cannot run yet).
+        let result = match scene {
+            Some(result) => result,
+            None => execute_live(
+                &model.commands,
+                &mut vertices,
+                &mut context,
+                &visibility,
+                Some(&self.table),
+                instance,
+                4096,
+            )?,
+        };
+        let mut frame = Frame {
+            children_error,
+            ..Frame::default()
+        };
+        let point =
+            |p: [i16; 2]| (p != NEAR_SENTINEL).then_some((i32::from(p[0]), i32::from(p[1])));
         for primitive in &result.ordered {
             match primitive {
                 Primitive::Face(emission) => {
                     let face = &emission.face;
-                    let normal = normals
-                        .get(usize::from(face.normal))
-                        .ok_or("Face normal outside the evaluated table.")?;
+                    // The shade of the face's own (parent or child) normal table.
+                    let shade = emission.shade;
                     let textured = material(face.material).texture != 0;
                     let descriptors = self.textures.descriptors();
                     let colour = emission.context.colour;
                     let rgb = self.rgb(match (textured, descriptors) {
                         // F1693/F1691 flat colour (the textured path is chosen below).
-                        (true, Some(table)) => {
-                            flat_colour(face.material, colour, normal.colour, table)?
-                        }
+                        (true, Some(table)) => flat_colour(face.material, colour, shade, table)?,
                         // No v8 descriptor table: lit grey stand-in.
-                        (true, None) => std::array::from_fn(|i| 5 + normal.colour[i]),
-                        (false, _) => resolve_colour(face.material, colour, normal.colour),
+                        (true, None) => std::array::from_fn(|i| 5 + shade[i]),
+                        (false, _) => resolve_colour(face.material, colour, shade),
                     });
-                    let mut points = Vec::with_capacity(face.vertices.len());
-                    for vertex in &face.vertices {
-                        match screen(*vertex, &emission.context)? {
-                            Some(point) => points.push(point),
-                            None => break,
-                        }
-                    }
-                    if points.len() != face.vertices.len() {
+                    let points: Vec<(i32, i32)> =
+                        emission.screen.iter().filter_map(|p| point(*p)).collect();
+                    if points.is_empty() || points.len() != face.vertices.len() {
                         continue;
                     }
                     let screens: Vec<[i32; 2]> = points.iter().map(|&(x, y)| [x, y]).collect();
                     if let Some(table) = descriptors.filter(|_| points.len() >= 3) {
                         if textured_path(true, face.material, &screens) {
-                            let entry =
-                                textured_colours(face.material, colour, normal.colour, table)?;
+                            let entry = textured_colours(face.material, colour, shade, table)?;
                             frame.shapes.push(Shape::Textured(Textured {
                                 points,
                                 bitmap: entry.bitmap,
@@ -467,17 +542,19 @@ impl ModelViewer {
                 }
                 Primitive::Line(line) => {
                     let rgb = self.rgb(resolve_colour(line.material, line.context.colour, [0; 3]));
-                    if let (Some(a), Some(b)) = (
-                        screen(line.vertices[0], &line.context)?,
-                        screen(line.vertices[1], &line.context)?,
-                    ) {
-                        frame.shapes.push(Shape::Line(a, b, rgb));
+                    if let Some([a, b]) = line.screen {
+                        if let (Some(a), Some(b)) = (point(a), point(b)) {
+                            frame.shapes.push(Shape::Line(a, b, rgb));
+                        }
                     }
                 }
-                Primitive::Point(point) => {
-                    let rgb =
-                        self.rgb(resolve_colour(point.material, point.context.colour, [0; 3]));
-                    if let Some(p) = screen(point.vertex, &point.context)? {
+                Primitive::Point(emitted) => {
+                    let rgb = self.rgb(resolve_colour(
+                        emitted.material,
+                        emitted.context.colour,
+                        [0; 3],
+                    ));
+                    if let Some(p) = emitted.screen.and_then(point) {
                         frame.shapes.push(Shape::Point(p, rgb));
                     }
                 }

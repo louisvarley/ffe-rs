@@ -22,6 +22,12 @@ use crate::model_polygon::{self, Outline};
 pub struct Emission {
     pub face: Face,
     pub context: VertexContext,
+    /// Screen points F1708/F1712 projected, in `face.vertices` order; empty unless
+    /// the face was queued. Child faces carry their own (child-cache) points.
+    pub screen: Vec<[i16; 2]>,
+    /// The face normal's colour in the evaluating instance's normal table (zero
+    /// when culled): what F1693 adds to a lit material.
+    pub shade: [u8; 3],
 }
 
 /// A point-source operand event. This is the original handler's decoded input,
@@ -37,6 +43,9 @@ pub struct PointEmission {
     pub flag: bool,
     pub vertex: u8,
     pub context: VertexContext,
+    /// F1479 projection of the vertex's view when queued (`None` if near or not
+    /// queued); computed from the resolved view, not by the original handler.
+    pub screen: Option<[i16; 2]>,
 }
 
 /// A line operand event. This is the original handler's decoded input, not a
@@ -47,6 +56,9 @@ pub struct LineEmission {
     pub material: u16,
     pub vertices: [u8; 2],
     pub context: VertexContext,
+    /// F1479 projections of both views when queued; the second vertex is resolved
+    /// on a copy of the cache, so the original's cache state is unchanged.
+    pub screen: Option<[[i16; 2]; 2]>,
 }
 
 /// A text operand event (F1747). `culled` is the original normal-flag skip; the
@@ -473,6 +485,9 @@ fn view_point(
         .view)
 }
 
+/// A queued face's depth key and its projected screen points.
+type QueuedFace = (u32, Vec<[i16; 2]>);
+
 /// F1708/F1712 face queueing. A culled normal queues nothing. Otherwise every vertex is
 /// projected (F1471) in the original order: b, c, (d,) then a. A textured face whose
 /// screen points are all within the guard range and whose screen perimeter is at
@@ -486,7 +501,7 @@ fn face_queue_key(
     context: &VertexContext,
     instance: &InstanceContext,
     visibility: &VisibilityContext<'_>,
-) -> Result<Option<u32>, String> {
+) -> Result<Option<QueuedFace>, String> {
     let culled = visibility
         .normals
         .get(usize::from(face.normal))
@@ -527,12 +542,13 @@ fn face_queue_key(
         })
         .sum();
     let key = model_depth::key(points[0].view, instance.key_scale);
+    let projected = points.iter().map(|p| p.screen).collect();
     if instance.textures && decoded.texture != 0 && guarded && perimeter >= 6 {
-        return Ok(Some(key));
+        return Ok(Some((key, projected)));
     }
     let on_screen = |[x, y]: [i32; 2]| (x as u32) < 320 && (y as u32) < 158;
     if screens.iter().any(|s| on_screen(*s)) {
-        return Ok(Some(key));
+        return Ok(Some((key, projected)));
     }
     // F1715/F1716 outcodes over a, b, c and (for triangles, c again) d.
     let code = |value: i32, limit: i32| match value {
@@ -546,7 +562,7 @@ fn face_queue_key(
         // DATA_007818 rejects all-left (1), all-right (4) and all-behind (8).
         matches!(combined, 1 | 4 | 8)
     };
-    Ok((!rejected(0, 320) && !rejected(1, 158)).then_some(key))
+    Ok((!rejected(0, 320) && !rejected(1, 158)).then_some((key, projected)))
 }
 
 fn resolve_depth_key(
@@ -793,6 +809,7 @@ fn run(
                         flag: point.flag,
                         vertex: point.vertex,
                         context: working.clone(),
+                        screen: None,
                     };
                     result.points.push(emission.clone());
                     if let (Some(queue), Some(live)) =
@@ -806,6 +823,8 @@ fn run(
                             false,
                         )?;
                         let key = model_depth::key(vertex.view, instance.key_scale);
+                        let mut emission = emission;
+                        emission.screen = crate::model_instance::project(vertex.view);
                         queue.push(key, Primitive::Point(emission))?;
                         shared.queue.push(QueueEvent::Point(key));
                     }
@@ -819,6 +838,7 @@ fn run(
                         material: line.material,
                         vertices: line.vertices,
                         context: working.clone(),
+                        screen: None,
                     };
                     result.lines.push(emission.clone());
                     if let (Some(queue), Some(live)) =
@@ -832,6 +852,22 @@ fn run(
                             false,
                         )?;
                         let key = model_depth::key(vertex.view, instance.key_scale);
+                        // For drawing only: a failure here leaves the line undrawn
+                        // rather than failing an execution the original completes.
+                        let other = live
+                            .clone()
+                            .resolve(
+                                line.vertices[1] as i8,
+                                working,
+                                instance.position,
+                                instance.generation,
+                                false,
+                            )
+                            .ok();
+                        let mut emission = emission;
+                        emission.screen = crate::model_instance::project(vertex.view)
+                            .zip(other.and_then(|v| crate::model_instance::project(v.view)))
+                            .map(|(a, b)| [a, b]);
                         queue.push(key, Primitive::Line(emission))?;
                         shared.queue.push(QueueEvent::Line(key));
                     }
@@ -840,17 +876,25 @@ fn run(
             }
             3 | 4 | 7 | 8 => {
                 for face in program.faces.iter().filter(|f| f.offset == offset) {
-                    let emission = Emission {
+                    let shade = visibility
+                        .normals
+                        .get(usize::from(face.normal))
+                        .filter(|normal| !normal.culled)
+                        .map_or([0; 3], |normal| normal.colour);
+                    let mut emission = Emission {
                         face: face.clone(),
                         context: working.clone(),
+                        screen: Vec::new(),
+                        shade,
                     };
                     result.emissions.push(emission.clone());
                     if let (Some(queue), Some(live)) =
                         (shared.order.as_mut(), vertices.as_deref_mut())
                     {
-                        if let Some(key) =
+                        if let Some((key, screen)) =
                             face_queue_key(face, live, working, &instance, visibility)?
                         {
+                            emission.screen = screen;
                             queue.push(key, Primitive::Face(emission))?;
                             shared.queue.push(QueueEvent::Face(key));
                         }
