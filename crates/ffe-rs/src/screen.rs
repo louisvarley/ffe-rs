@@ -2,7 +2,7 @@ use crate::camera::{ship_axes, Camera, ViewMode, ViewState};
 use crate::flight::{Flight, Mode};
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::model_lab::{LabView, ModelLab};
-use crate::model_viewer::{ModelViewer, Shape};
+use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
 use ffe_content::{AssetKind, VerifiedCache};
 use std::io::Cursor;
 
@@ -332,7 +332,7 @@ impl Screen {
                     self.draw_ship(scene, state, &camera);
                 }
             }
-            let drawn = scene.is_some_and(|scene| self.draw_station(scene, &camera));
+            let drawn = scene.is_some_and(|scene| self.draw_station(scene, state, &camera));
             // Only the external view draws the player's own ship (FUNC_001054 hides
             // it in the front view; the rear view's eye offset is not modelled).
             if !ship_first && external_view {
@@ -520,15 +520,24 @@ impl Screen {
 
     /// The station as the original model 74, executed by the verified port and
     /// placed by the synthetic flight camera. False when it cannot be drawn.
-    fn draw_station(&mut self, scene: &ModelViewer, camera: &Camera) -> bool {
+    fn draw_station(&mut self, scene: &ModelViewer, state: &Flight, camera: &Camera) -> bool {
         let Some(scale) = model_scale(scene) else {
             return false;
         };
-        let rows = STATION_AXES.map(|axis| camera.direction(axis));
+        // Station rotation (docs/notes/animation.md): F866 spins the station
+        // about its own z (docking) axis at the generated rate; the flight's
+        // 50 Hz ticks are 994 game tics each from the new-game GameTics.
+        let tics = flight_tics(state);
+        let spin = scene.station_rows(tics, STATION_SPEED);
+        let axes: [[f64; 3]; 3] = std::array::from_fn(|k| {
+            std::array::from_fn(|i| (0..3).map(|j| spin[k][j] * STATION_AXES[j][i]).sum())
+        });
+        let rows = axes.map(|axis| camera.direction(axis));
         let origin = camera.point([0.0; 3]).map(|v| v * scale);
         // The original default light (F960), fixed in flight space.
         let light = camera.direction(scene.light_direction());
-        match scene.render_scene(STATION_MODEL, rows, origin, light) {
+        let inputs = AnimationInputs::original(tics, 0, &scene.shades());
+        match scene.render_scene_with(STATION_MODEL, rows, origin, light, &inputs) {
             Ok(frame) => {
                 self.draw_shapes(scene, &frame.shapes);
                 true
@@ -545,7 +554,13 @@ impl Screen {
         let rows = ship_axes(state).map(|axis| camera.direction(axis));
         let origin = camera.point(state.position).map(|v| v * scale);
         let light = camera.direction(scene.light_direction());
-        match scene.render_scene(state.ship, rows, origin, light) {
+        // The original inputs over flight time (gear up), with global 15 as the
+        // forward thrust the engine glows read. Full thrust maps to 4095, where
+        // ship models stop lengthening the plume (docs/notes/thrusters.md); the
+        // original's word is the ship's thrust clamped to its own limits.
+        let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
+        inputs.globals[THRUST_GLOBAL] = (state.thrust.max(0.0) * 4095.0) as u16;
+        match scene.render_scene_with(state.ship, rows, origin, light, &inputs) {
             Ok(frame) => {
                 self.draw_shapes(scene, &frame.shapes);
                 true
@@ -589,17 +604,27 @@ impl Screen {
             3,
             1,
             &format!(
-                "MODEL VIEWER {}/{}  MODEL {}  INPUT {}",
+                "MODEL VIEWER {}/{}  MODEL {}",
                 viewer.selected() + 1,
                 viewer.len(),
                 model.index,
-                viewer.animation()
             ),
             18,
         );
         self.text(3, 12, &status, 15);
+        // The animation inputs: the test constant, or the original inputs over
+        // the viewer's clock (global 0 = tics >> 10, global 1 = gear/door word).
+        let (tics, door, rate) = viewer.clock();
+        let inputs = match viewer.animation() {
+            Some(value) => format!("TEST INPUT {value}"),
+            None => format!(
+                "TIME {:04X}  GEAR/DOOR {door:04X}  X{rate}",
+                ffe_core::model_animation::time_word(tics)
+            ),
+        };
+        self.text(3, 126, &inputs, 15);
         self.text(3, 137, "PGUP/PGDN MODEL  ARROWS TURN  +/- ZOOM", 15);
-        self.text(3, 148, "0/5/9 INPUT  M RETURN - GAME PAUSED", 18);
+        self.text(3, 148, "0/5/9 TEST  C CLOCK  G GEAR  T RATE  M BACK", 18);
         self.present();
     }
 
@@ -722,6 +747,16 @@ const STATION_RADIUS: f64 = 40.0;
 /// Station object axes in flight space: model 74's docking port is at its +z end,
 /// turned to face the approach from -z.
 const STATION_AXES: [[f64; 3]; 3] = [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
+/// F866 rotation speed of a generated station with model 74 (F892 case 2,
+/// template `DATA_008795`: hand-coded Abraham Lincoln, speed 10).
+const STATION_SPEED: i8 = ffe_core::model_animation::ORBITAL_CITY_SPEED;
+
+/// The game clock the flight view shows: the new-game `GameTics` plus 994 tics
+/// (20 ms at acceleration 1) per 50 Hz flight step.
+pub fn flight_tics(state: &Flight) -> u32 {
+    ffe_core::model_animation::START_TICS
+        .wrapping_add((state.ticks as u32).wrapping_mul(ffe_core::model_animation::TICS_PER_FRAME))
+}
 
 /// Model units per flight unit: station 74's extent fills the old 40-unit
 /// placeholder (docking and safety distances unchanged), and every other model

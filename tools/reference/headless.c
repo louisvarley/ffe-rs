@@ -2016,6 +2016,289 @@ static int polygon_helper_vectors(void)
     return 0;
 }
 
+/* Animation oracle (--animation, both binaries): the original F1675 MatBuildYZT
+   and F866 (orbital update: F865 door word and the rotation step) on synthetic
+   object records. Object-instance oracle (--object-instance, probe binary): the
+   original F1537 frame loop and F1680 draw set-up on a synthetic object list,
+   and F1683 on synthetic display objects, with F1773 (model run) and F1700 (dot)
+   redirected inside F1680/F1683 so the instance is captured, not executed. */
+extern void ref_mat_build_yzt(long *matrix, long a, long b);
+extern void ref_orbital_update(void *parameters);
+extern unsigned long ref_frame_time;
+static unsigned long animation_state = 0x2468ace1UL;
+static unsigned long animation_random(void)
+{
+    animation_state ^= animation_state << 13; animation_state &= 0xffffffffUL;
+    animation_state ^= animation_state >> 17;
+    animation_state ^= animation_state << 5; animation_state &= 0xffffffffUL;
+    return animation_state;
+}
+
+static int animation_vectors(void)
+{
+    static const long specials[] = {-1, 0x10000, 0x7fffffffL, (-0x7fffffffL - 1), 0x12345678L, 0x4000, 0x3fff, 0xc001};
+    static const long seconds[] = {0, 0x4000, 0x8000, 0xc000, 1, 0x1234, 0xffff, -0x4000, 0x10000, 0x7fffffffL};
+    static const long speeds[] = {0, 1, 2, 9, 10, 11, 12, 13, 31, 32, 33, 127, -1, -128};
+    static const unsigned long frames[] = {0, 1, 2, 994, 9940, 0x1fffeUL, 0x7fffffffUL, 0xffffffffUL};
+    static const signed char states[] = {-128, -3, -2, -1, 0, 1, 2, 3, 127};
+    static const unsigned char flags[] = {0x10, 0x00, 0x20, 0x30, 0x11};
+    static unsigned char object[0x160];
+    long matrix[9], a, b;
+    unsigned long i, j, k;
+    fprintf(stderr, "JJFFE animation-v1: original F1675 MatBuildYZT and F866 orbital update (F865 door word, rotation step) on synthetic orbital records; zero angular velocity, so no orbital position update. Not model execution.\n");
+    for (i = 0; i < 264; ++i) for (j = 0; j < 10; ++j) {
+        a = i < 256 ? (long)(i * 0x101) : specials[i - 256];
+        b = seconds[j];
+        for (k = 0; k < 9; ++k) matrix[k] = 0x5a5a5a5aL;
+        ref_mat_build_yzt(matrix, a, b);
+        printf("{\"k\":\"yzt\",\"a\":%ld,\"b\":%ld,\"m\":[", a, b);
+        for (k = 0; k < 9; ++k) printf("%s%ld", k ? "," : "", matrix[k]);
+        printf("]}\n");
+    }
+    for (i = 0; i < 4096; ++i) {
+        unsigned long parameters[3], previous, tics, frame, word;
+        long speed, orientation;
+        signed char state;
+        unsigned char flag;
+        unsigned long *m = (unsigned long *)object;
+        memset(object, 0, sizeof(object));
+        for (k = 0; k < 9; ++k) m[k] = 0x5a5a5a5aUL;
+        previous = animation_random();
+        switch (i % 4) {
+        case 0: tics = animation_random(); break;
+        case 1: tics = previous + (animation_random() & 0x3ff); break;
+        case 2: tics = previous + 994; break;
+        default: tics = previous + (animation_random() & 0xfffff); break;
+        }
+        tics &= 0xffffffffUL;
+        flag = flags[animation_random() % 5];
+        speed = speeds[animation_random() % 14];
+        orientation = (long)(short)(animation_random() & 0xffff);
+        if (animation_random() % 3 == 0) orientation = 0;
+        state = states[animation_random() % 9];
+        word = animation_random() % 3 == 0 ? (animation_random() % 2 ? 0xffff : 0) : (animation_random() & 0xffff);
+        frame = frames[animation_random() % 8];
+        *(unsigned long *)(object + 0xa8) = previous;
+        *(unsigned long *)(object + 0xac) = 0x121cf7UL;
+        object[0x14c] = flag;
+        object[0xc8] = (unsigned char)speed;
+        *(unsigned short *)(object + 0xcc) = (unsigned short)orientation;
+        *(unsigned short *)(object + 0x9e) = (unsigned short)word;
+        object[0xc9] = (unsigned char)state;
+        ref_frame_time = frame;
+        parameters[0] = tics; parameters[1] = 0x121cf8UL; parameters[2] = (unsigned long)object;
+        ref_orbital_update(parameters);
+        printf("{\"k\":\"orbital\",\"flags\":%u,\"speed\":%ld,\"orientation\":%ld,\"previous\":%lu,\"tics\":%lu,\"frame\":%lu,\"word\":%lu,\"state\":%d,\"out_word\":%u,\"out_state\":%d,\"out_tics\":%lu,\"out_days\":%lu,\"m\":",
+               flag, speed, orientation, previous, tics, frame, word, state,
+               *(unsigned short *)(object + 0x9e), (signed char)object[0xc9],
+               *(unsigned long *)(object + 0xa8), *(unsigned long *)(object + 0xac));
+        if (m[0] == 0x5a5a5a5aUL && m[8] == 0x5a5a5a5aUL) printf("null}\n");
+        else {
+            printf("[");
+            for (k = 0; k < 9; ++k) printf("%s%ld", k ? "," : "", (long)m[k]);
+            printf("]}\n");
+        }
+    }
+    if (fflush(stdout)) fail("cannot flush animation vectors");
+    return 0;
+}
+
+#ifdef FFE_COMMAND_PROBE
+extern void ref_object_frame(void *list, void *camera);
+extern void ref_display_object(void *object, void *descriptor);
+extern long ref_light[3], ref_star_light[3];
+extern long ref_light_timer;
+#define OBJECT_SIZE 0x152
+#define OBJECT_SLOTS 0x73
+static unsigned char object_list[0x74 + OBJECT_SIZE * OBJECT_SLOTS];
+static unsigned char object_capture[OBJECT_SLOTS + 1][0x160];
+static int object_outcome[OBJECT_SLOTS + 1];
+static int object_capture_mode;
+static unsigned char *display_target;
+/* Inside F1680 / F1683: F1773(instance, descriptor) runs the model; capture the
+   instance the original built and return without running it. */
+static void capture_instance(void *instance, int kind)
+{
+    unsigned char *c = (unsigned char *)instance;
+    unsigned char *owner = *(unsigned char **)(c + 0x14c);
+    long slot;
+    if (!object_capture_mode) fail("instance capture outside the object-instance mode");
+    if (owner == display_target) slot = 0;
+    else {
+        slot = (long)(owner - (object_list + 0x74)) / OBJECT_SIZE;
+        if (slot < 1 || slot > OBJECT_SLOTS - 1 || owner != object_list + 0x74 + slot * OBJECT_SIZE)
+            fail("captured instance names an unknown object");
+    }
+    if (object_outcome[slot]) fail("object drawn twice");
+    memcpy(object_capture[slot], c, 0x160);
+    object_outcome[slot] = kind;
+}
+void trace_object_run(void *instance, void *descriptor) { (void)descriptor; capture_instance(instance, 1); }
+void trace_display_run(void *instance, void *descriptor) { (void)descriptor; capture_instance(instance, 1); }
+/* F1700(instance, ...): the distant-dot entry. Only the call is recorded. */
+void trace_object_dot(void *instance) { capture_instance(instance, 2); }
+
+static void print_instance(const unsigned char *c, const unsigned char *owner)
+{
+    const long *w = (const long *)c;
+    unsigned long k;
+    printf("{\"position\":[%ld,%ld,%ld],\"matrix\":[", w[1], w[2], w[3]);
+    for (k = 0; k < 9; ++k) printf("%s%ld", k ? "," : "", w[0x14 / 4 + k]);
+    printf("],\"direction\":[%ld,%ld,%ld],\"observer_scale\":%ld,\"observer\":[%ld,%ld,%ld],\"local0\":%ld,\"shades\":%d,\"key_scale\":%ld,\"light\":[%ld,%ld,%ld],\"scale\":%ld,\"owner\":%d,\"colour\":[%u,%u,%u],\"base_handedness\":%ld}",
+           w[0x38 / 4], w[0x3c / 4], w[0x40 / 4], w[0x44 / 4], w[0x48 / 4], w[0x4c / 4], w[0x50 / 4],
+           w[0x54 / 4], memcmp(c + 0x84, ref_shades, 24) == 0, w[0x130 / 4],
+           w[0x134 / 4], w[0x138 / 4], w[0x13c / 4], w[0x148 / 4],
+           *(const unsigned char * const *)(c + 0x14c) == owner, c[0xf4], c[0xf5], c[0xf6], w[0xf8 / 4]);
+}
+
+static void random_matrix(long *m)
+{
+    unsigned long k;
+    for (k = 0; k < 9; ++k) m[k] = animation_random() % 4 == 0 ? (k % 4 == 0 ? 0x7fffffffL : 0) : (long)animation_random();
+}
+
+/* A 64-bit coordinate of random magnitude (2^0 .. 2^50), as two dwords. */
+static void random_coordinate(unsigned char *at)
+{
+    unsigned long bits = animation_random() % 51, low, high;
+    uint64_t value = ((uint64_t)animation_random() << 32 | animation_random());
+    value = bits >= 63 ? value : value >> (63 - bits);
+    if (animation_random() & 1) value = (uint64_t)0 - value;
+    low = (unsigned long)(value & 0xffffffffUL); high = (unsigned long)(value >> 32);
+    memcpy(at, &low, 4); memcpy(at + 4, &high, 4);
+}
+
+static void print_coordinates(const unsigned char *at)
+{
+    unsigned long k;
+    for (k = 0; k < 3; ++k) {
+        unsigned long low, high;
+        memcpy(&low, at + 8 * k, 4); memcpy(&high, at + 8 * k + 4, 4);
+        printf("%s%lld", k ? "," : "", (long long)(int64_t)((uint64_t)high << 32 | low));
+    }
+}
+
+static int object_instance_vectors(void)
+{
+    static unsigned char camera[0x160], display[0x160];
+    static unsigned long queue[65536];
+    unsigned long frame, slot, k, i;
+    int models[466], model_count = 0;
+    fprintf(stderr, "JJFFE object-instance-v1: original F1537 frame loop (F1534 global word 0, light) and F1680 set-up on a synthetic list of objects sharing the camera's frame of reference, and F1683 on synthetic display objects; F1773/F1700 captured, models not executed.\n");
+    for (i = 0; i < 466; ++i) if (ref_model((int)i)) models[model_count++] = (int)i;
+    for (i = 0; i < 24; ++i) ref_shades[i] = (unsigned char)(i * 29 + 3);
+    object_capture_mode = 1;
+    for (frame = 0; frame < 96; ++frame) {
+        unsigned long tics = animation_random(), count = 1 + frame % 40;
+        memset(object_list, 0, sizeof(object_list)); memset(camera, 0, sizeof(camera));
+        memset(object_outcome, 0, sizeof(object_outcome));
+        random_matrix((long *)camera);
+        random_coordinate(camera + 0x3e); random_coordinate(camera + 0x46); random_coordinate(camera + 0x4e);
+        for (k = 0; k < 3; ++k) ref_star_light[k] = (long)(short)(animation_random() & 0xffff);
+        ref_light_timer = 0x7fffffffL;
+        *(unsigned long *)ref_state = tics;
+        for (slot = 1; slot <= count; ++slot) {
+            unsigned char *o = object_list + 0x74 + slot * OBJECT_SIZE;
+            object_list[slot] = 8;
+            random_matrix((long *)o);
+            if (frame % 3 == 0) {
+                /* Near the camera: magnitudes the far/dot thresholds do not reject. */
+                memcpy(o + 0x3e, camera + 0x3e, 24);
+                for (k = 0; k < 3; ++k) {
+                    long delta = (long)(animation_random() % 0x200000) - 0x100000;
+                    unsigned long low, high; int64_t value;
+                    memcpy(&low, o + 0x3e + 8 * k, 4); memcpy(&high, o + 0x42 + 8 * k, 4);
+                    value = (int64_t)((uint64_t)high << 32 | low) + delta;
+                    if (k == 2 && slot % 2) value += 0x40000;
+                    low = (unsigned long)((uint64_t)value & 0xffffffffUL); high = (unsigned long)((uint64_t)value >> 32);
+                    memcpy(o + 0x3e + 8 * k, &low, 4); memcpy(o + 0x42 + 8 * k, &high, 4);
+                }
+            } else {
+                random_coordinate(o + 0x3e); random_coordinate(o + 0x46); random_coordinate(o + 0x4e);
+            }
+            *(long *)(o + 0x7e) = (long)(animation_random() % 12) - 3;
+            *(long *)(o + 0x82) = models[animation_random() % model_count];
+            o[0x86] = (unsigned char)slot;
+            o[0x8b] = animation_random() % 8 == 0 ? (unsigned char)(1 + animation_random() % 3) : 0;
+            for (k = 0; k < 64; ++k) *(unsigned short *)(o + 0x9c + 2 * k) = (unsigned short)animation_random();
+        }
+        memset(queue, 0, sizeof(queue));
+        ref_order_base = queue; ref_order_active = 0; ref_order_state = 0;
+        ref_order_init(queue);
+        /* Inputs are printed from a copy taken before the frame runs. */
+        {
+            static unsigned char before[sizeof(object_list)];
+            memcpy(before, object_list, sizeof(object_list));
+            ref_object_frame(object_list, camera);
+            printf("{\"k\":\"frame\",\"tics\":%lu,\"camera\":{\"matrix\":[", tics);
+            for (k = 0; k < 9; ++k) printf("%s%ld", k ? "," : "", ((long *)camera)[k]);
+            printf("],\"position\":["); print_coordinates(camera + 0x3e);
+            printf("]},\"star\":[%ld,%ld,%ld],\"light\":[%ld,%ld,%ld],\"objects\":[",
+                   ref_star_light[0], ref_star_light[1], ref_star_light[2], ref_light[0], ref_light[1], ref_light[2]);
+            for (slot = 1; slot <= count; ++slot) {
+                const unsigned char *o = before + 0x74 + slot * OBJECT_SIZE;
+                const unsigned char *after = object_list + 0x74 + slot * OBJECT_SIZE;
+                unsigned long *d = ref_model(*(const long *)(o + 0x82));
+                printf("%s{\"slot\":%lu,\"model\":%ld,\"descriptor\":[%ld,%ld,%ld,%ld,%ld],\"matrix\":[",
+                       slot > 1 ? "," : "", slot, *(const long *)(o + 0x82),
+                       (long)d[5], (long)d[6], (long)d[7], (long)d[8], (long)d[10]);
+                for (k = 0; k < 9; ++k) printf("%s%ld", k ? "," : "", ((const long *)o)[k]);
+                printf("],\"position\":["); print_coordinates(o + 0x3e);
+                printf("],\"scale\":%ld,\"sleep\":%u,\"word0\":%u,\"words_kept\":%d,\"out_sleep\":%u,\"out_word0\":%u,\"distance\":%u,\"outside\":%u,\"screen\":[%u,%u],\"outcome\":%d,\"instance\":",
+                       *(const long *)(o + 0x7e), o[0x8b], *(const unsigned short *)(o + 0x9c),
+                       memcmp(o + 0x9e, after + 0x9e, 126) == 0, after[0x8b], *(const unsigned short *)(after + 0x9c),
+                       after[0x88], after[0x8a], *(const unsigned short *)(after + 0x98), *(const unsigned short *)(after + 0x9a),
+                       object_outcome[slot]);
+                if (object_outcome[slot] == 1) print_instance(object_capture[slot], after);
+                else printf("null");
+                printf("}");
+            }
+            printf("]}\n");
+        }
+    }
+    for (i = 0; i < 4096; ++i) {
+        int model = models[i % model_count];
+        unsigned long *d = ref_model(model);
+        long *w = (long *)display;
+        memset(display, 0, sizeof(display));
+        memset(object_outcome, 0, sizeof(object_outcome));
+        random_matrix(w);
+        for (k = 0; k < 3; ++k) {
+            long v = (long)animation_random() >> (animation_random() % 32);
+            if (k == 2 && i % 2) v = (long)(animation_random() % 0x100000);
+            *(long *)(display + 0x26 + 8 * k) = v;
+        }
+        for (k = 0; k < 3; ++k) ref_light[k] = (long)(short)(animation_random() & 0xffff);
+        display_target = display;
+        memset(queue, 0, sizeof(queue));
+        ref_order_base = queue; ref_order_active = 0; ref_order_state = 0;
+        ref_order_init(queue);
+        ref_display_object(display, d);
+        printf("{\"k\":\"display\",\"model\":%d,\"descriptor\":[%ld,%ld,%ld],\"matrix\":[", model, (long)d[5], (long)d[6], (long)d[7]);
+        for (k = 0; k < 9; ++k) printf("%s%ld", k ? "," : "", w[k]);
+        printf("],\"position\":[%ld,%ld,%ld],\"in_light\":[%ld,%ld,%ld],\"outcome\":%d,\"instance\":",
+               *(long *)(display + 0x26), *(long *)(display + 0x2e), *(long *)(display + 0x36),
+               ref_light[0], ref_light[1], ref_light[2], object_outcome[0]);
+        if (object_outcome[0] == 1) print_instance(object_capture[0], display);
+        else printf("null");
+        printf("}\n");
+    }
+    object_capture_mode = 0;
+    display_target = NULL;
+    if (fflush(stdout)) fail("cannot flush object-instance vectors");
+    return 0;
+}
+#else
+void trace_object_run(void *instance, void *descriptor) { (void)instance; (void)descriptor; }
+void trace_display_run(void *instance, void *descriptor) { (void)instance; (void)descriptor; }
+void trace_object_dot(void *instance) { (void)instance; }
+static int object_instance_vectors(void)
+{
+    fail("--object-instance requires the separate instrumented jjffe-commands binary");
+    return 2;
+}
+#endif
+
 int main(int argc, char **argv)
 {
     const char *count;
@@ -2037,6 +2320,8 @@ int main(int argc, char **argv)
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));
     if (argc == 2 && !strcmp(argv[1], "--thruster-cases")) return thruster_case_vectors();
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--animation")) return animation_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--object-instance")) return object_instance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();
     if (argc == 2 && !strcmp(argv[1], "--order")) return order_vectors();

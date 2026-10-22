@@ -56,6 +56,7 @@ ORACLES = [
     # far thruster vertices to clear F1738's 0x200 depth test.
     ("verify-child-models.py", ["--reference", "{commands}", "--game", "{game}",
                                 "--cache", "{cache}", "--depth", "0x50000"]),
+    ("verify-animation.py", ["--reference", "{commands}", "--cache", "{cache}"]),
 ]
 
 

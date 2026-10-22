@@ -4,6 +4,36 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Engine glows, moving parts and the spinning station
+
+Two parallel tasks, merged with the ships/views work; details in
+`docs/notes/thrusters.md` and `docs/notes/animation.md`.
+
+- **Thruster glows (opcode 9, F1738)**, `model_thruster`: nothing, a line (width
+  <= 4) or one/two glow quads (core 0x123, shaft 0x65) keyed by vertex A, with
+  six colour slots fading the material in sevenths; B is resolved only when A
+  is deeper than 0x200. Thrust is **global 15** (object word +0xba, the forward
+  thrust); most ship programs skip glows at or below zero and lengthen the plume
+  up to 4095. `verify-thrusters.py`: 12,288 direct cases, 0 mismatched
+  (`5a8eddfe…`); whole-table oracles carry the thruster events. The earlier
+  "screen position" question does not reproduce. The viewer now passes the model
+  scale as +0x148, as F1683 does.
+- **Animation inputs**, `model_animation`: globals are the object's own words
+  (global 0 = `GameTics >> 10` written by F1534 before drawing; global 1 the
+  gear/door word, F865 moving it by half the frame's tic delta); top-level
+  locals are 0 apart from the shades. **Station rotation** (F866/F1675) spins a
+  station about its docking axis at `(tics << (speed - 1)) >> 16`; model 74 is
+  generated with speed 10 (about 169 s per turn). `verify-animation.py`: 2,640
+  rotation and 4,096 orbital-update cases, and the real F1537/F1680/F1683
+  set-ups on synthetic objects, 0 mismatched (`10ed4039…`, `2ab63f4d…`).
+
+In flight the station spins at its original rate and animates its time-driven
+parts; in the external view the player's ship is drawn with the original inputs
+over flight time and its engines glow with the commanded thrust (full thrust =
+4095, a diagnostic mapping until ship thrust limits are modelled; `Flight::thrust`
+is saved). The F6 viewer animates over the original clock: C clock, 0/5/9 test
+input, G gear/door, T time rate (x1..x1000, diagnostic). All 29 oracles pass.
+
 ## 2026-10-22 — Ships and the original's views
 
 The scenarios now fly a real ship. **Cache v11** imports the original model name

@@ -85,3 +85,35 @@ fn thruster_glows_follow_the_thrust_global() {
     viewer.set_thrust(Some(0));
     assert_eq!(glows(&viewer), 0);
 }
+
+#[test]
+fn viewer_clock_drives_the_original_animation_inputs() {
+    use ffe_core::model_animation::START_TICS;
+    let mut viewer = ModelViewer::from_models(vec![triangle_model(3)], table()).unwrap();
+    assert_eq!(viewer.animation(), None);
+    assert_eq!(viewer.clock(), (START_TICS, 0, 1));
+    // One second at acceleration 1: 49,700 tics; global 0 is tics >> 10.
+    viewer.advance(1000);
+    assert_eq!(viewer.clock().0, START_TICS + 49_700);
+    assert_eq!(
+        viewer.inputs().globals[0],
+        ((START_TICS + 49_700) >> 10) as u16
+    );
+    // The gear/door word opens at half the frame time per frame (F865).
+    viewer.toggle_door();
+    viewer.advance(20);
+    assert_eq!(viewer.clock().1, 497);
+    viewer.cycle_rate();
+    assert_eq!(viewer.clock().2, 10);
+    // The test input overrides every global and local, then the clock resumes.
+    viewer.set_animation(32768);
+    assert_eq!(viewer.inputs().globals[7], 32768);
+    viewer.use_clock();
+    assert_eq!(viewer.inputs().locals[0], 0);
+    // Station orientation: identity for speed 0, a turn about z otherwise.
+    let rows = viewer.station_rows(0x1234_5678, 0);
+    assert!((rows[0][0] - 1.0).abs() < 1e-6 && rows[2][2] > 0.999);
+    let rows = viewer.station_rows(0x0040_0000, 10);
+    // (The synthetic sine table is small: only the signs are meaningful.)
+    assert!(rows[0][0] < 0.0 && rows[1][1] < 0.0 && rows[0][1] == 0.0);
+}

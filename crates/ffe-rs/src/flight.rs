@@ -28,6 +28,10 @@ pub struct Flight {
     /// before ship selection load with the Eagle long range fighter.
     #[serde(default = "default_ship")]
     pub ship: u32,
+    /// The forward thrust last commanded (-1..1), for drawing engine glows. Saves
+    /// from before it load with 0.
+    #[serde(default)]
+    pub thrust: f64,
 }
 
 fn default_ship() -> u32 {
@@ -56,6 +60,7 @@ impl Default for Flight {
             ticks: 0,
             docking_requested: false,
             ship: default_ship(),
+            thrust: 0.0,
         }
     }
 }
@@ -97,6 +102,7 @@ impl Flight {
             || self.stock > 1000
             || self.credits > 1_000_000_000
             || !(crate::ships::FIRST_SHIP..=crate::ships::LAST_SHIP).contains(&self.ship)
+            || !(self.thrust.is_finite() && self.thrust.abs() <= 1.0)
         {
             return Err("save contains out-of-range prototype state".to_owned());
         }
@@ -201,8 +207,10 @@ impl Flight {
             return Err("Invalid flight control input.".to_owned());
         }
         if self.mode == Mode::Docked {
+            self.thrust = 0.0;
             return Ok(None);
         }
+        self.thrust = input.thrust;
         self.yaw = (self.yaw + input.yaw * STEP).rem_euclid(std::f64::consts::TAU);
         self.pitch = (self.pitch + input.pitch * STEP).clamp(-1.4, 1.4);
         let forward = self.forward();

@@ -66,6 +66,13 @@ SCOPED_HOOKS = [
         ("FUNC_001778", "trace_line_alloc", 1),           # line queue allocation (F1803)
         ("near [DATA_007629]", "trace_line_colour", 1),   # F1326 after the entry is filled
     ]),
+    ("FUNC_001680", "FUNC_001681", [
+        ("FUNC_001773", "trace_object_run", 1),           # top-level model run (captured)
+        ("FUNC_001700", "trace_object_dot", 1),           # distant dot
+    ]),
+    ("FUNC_001683", "FUNC_001684", [
+        ("FUNC_001773", "trace_display_run", 1),          # display object model run
+    ]),
     ("FUNC_001749", "FUNC_001751", [
         ("near [DATA_007727]", "trace_submodel_vertex", 5),  # F1471 projected vertex
         ("near [DATA_007756]", "trace_submodel_model", 1),   # F1538 model descriptor

@@ -9,6 +9,9 @@
 use crate::textures::TextureSet;
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::{evaluate, VertexContext};
+use ffe_core::model_animation::{
+    door_step, time_word, top_level_locals, START_TICS, TICS_PER_FRAME,
+};
 use ffe_core::model_commands::{material, VisibilityContext};
 use ffe_core::model_execute::{
     execute_live, execute_scene, resolve_colour, ChildEnvironment, ChildModel, ChildModels,
@@ -67,6 +70,45 @@ pub struct ViewerModel {
     radius: Result<f64, String>,
 }
 
+/// The global words and locals a top-level model runs with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnimationInputs {
+    pub globals: [u16; 64],
+    pub locals: [i32; 64],
+}
+
+impl AnimationInputs {
+    /// What the original passes a drawn object whose other words are zero
+    /// (`ffe_core::model_animation`, `docs/notes/animation.md`): global 0 is
+    /// `GameTics >> 10` (F1534), global 1 the gear/door word; local 0 is 0 and
+    /// locals 12..17 hold the shades (F1680). Locals 1..11 are stale stack data
+    /// in the original; zero here.
+    pub fn original(tics: u32, state_word: u16, shades: &[[u8; 3]; 8]) -> Self {
+        let mut globals = [0u16; 64];
+        globals[0] = time_word(tics);
+        globals[1] = state_word;
+        Self {
+            globals,
+            locals: top_level_locals(shades).0,
+        }
+    }
+
+    /// The diagnostic test input: every global and local holds `value`, except
+    /// global word 4 (opcode 30 light points, whose tables are not imported).
+    pub fn test(value: u16) -> Self {
+        let mut globals = [value; 64];
+        globals[4] = 0;
+        Self {
+            globals,
+            locals: [i32::from(value); 64],
+        }
+    }
+}
+
+/// Time-acceleration multipliers the viewer cycles through (diagnostic; the
+/// original's own acceleration levels are not modelled here).
+const RATES: [u32; 4] = [1, 10, 100, 1000];
+
 pub struct ModelViewer {
     models: Vec<ViewerModel>,
     table: SineTable,
@@ -74,7 +116,15 @@ pub struct ModelViewer {
     yaw: i32,
     pitch: i32,
     zoom: i32,
-    animation: u16,
+    /// `Some(value)`: the constant test input; `None`: the original inputs over
+    /// the viewer's own game clock.
+    test: Option<u16>,
+    /// The viewer's `GameTics` (day fraction), advanced at the original rate.
+    tics: u32,
+    rate: usize,
+    /// Global word 1 and its F865 direction byte.
+    door: u16,
+    door_state: i8,
     textures: TextureSet,
     lighting: Lighting,
     /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
@@ -259,7 +309,11 @@ impl ModelViewer {
             yaw: 30,
             pitch: -20,
             zoom: 0,
-            animation: 0,
+            test: None,
+            tics: START_TICS,
+            rate: 0,
+            door: 0,
+            door_state: 0,
             textures: TextureSet::default(),
             lighting: FALLBACK_LIGHTING,
             descriptors: Vec::new(),
@@ -300,12 +354,84 @@ impl ModelViewer {
         self.zoom = (self.zoom + step.clamp(-1, 1)).clamp(-8, 12);
     }
 
+    /// Use the constant test input `value` instead of the clock.
     pub fn set_animation(&mut self, value: u16) {
-        self.animation = value;
+        self.test = Some(value);
     }
 
-    pub fn animation(&self) -> u16 {
-        self.animation
+    /// Back to the original inputs over the viewer's clock.
+    pub fn use_clock(&mut self) {
+        self.test = None;
+    }
+
+    /// The test input in use, if any.
+    pub fn animation(&self) -> Option<u16> {
+        self.test
+    }
+
+    /// The clock's `GameTics`, the gear/door word and the acceleration.
+    pub fn clock(&self) -> (u32, u16, u32) {
+        (self.tics, self.door, RATES[self.rate])
+    }
+
+    pub fn set_clock(&mut self, tics: u32) {
+        self.tics = tics;
+    }
+
+    /// Advance the clock by real milliseconds: `timer_delta(ms, 994 * rate)` tics,
+    /// as the original's accelerated counter, and move the gear/door word by
+    /// F865 with that frame time. Runs in test mode too, so returning to the
+    /// clock continues from where it is.
+    pub fn advance(&mut self, elapsed_ms: u32) {
+        let acceleration = TICS_PER_FRAME * RATES[self.rate];
+        let Ok(delta) = ffe_core::timer_delta(elapsed_ms, acceleration) else {
+            return;
+        };
+        self.tics = self.tics.wrapping_add(delta);
+        (self.door, self.door_state) = door_step(self.door, self.door_state, delta);
+    }
+
+    /// Start moving the gear/door word the other way (F865's +0xc9 = 1 opens
+    /// towards 0xffff, -1 closes towards 0).
+    pub fn toggle_door(&mut self) {
+        self.door_state = if self.door_state > 0 || (self.door_state == 0 && self.door == 0xffff) {
+            -1
+        } else {
+            1
+        };
+    }
+
+    pub fn cycle_rate(&mut self) {
+        self.rate = (self.rate + 1) % RATES.len();
+    }
+
+    /// The inputs the selected model runs with now.
+    pub fn inputs(&self) -> AnimationInputs {
+        match self.test {
+            Some(value) => AnimationInputs::test(value),
+            None => AnimationInputs::original(self.tics, self.door, &self.lighting.shades),
+        }
+    }
+
+    /// A generated station's orientation at game time `tics` (F866: rotation
+    /// speed `speed`, orientation word 0): row k is station axis k in its
+    /// parent's frame, as unit vectors. The station spins about its own z axis,
+    /// the docking axis, by `((tics << (speed - 1)) >> 16)` / 65536 turns; model
+    /// 74 is generated with speed 10 (one turn per 2^23 tics, about 169 s at
+    /// acceleration 1). Identity for speed 0.
+    pub fn station_rows(&self, tics: u32, speed: i8) -> [[f64; 3]; 3] {
+        let rotation = ffe_core::model_animation::OrbitalRotation::station(speed);
+        let matrix = rotation
+            .matrix(&self.table, tics)
+            .unwrap_or(ffe_core::model::IDENTITY);
+        std::array::from_fn(|k| {
+            std::array::from_fn(|j| f64::from(matrix[3 * k + j]) / 2_147_483_648.0)
+        })
+    }
+
+    /// The shades every instance copies (locals 12..17).
+    pub fn shades(&self) -> [[u8; 3]; 8] {
+        self.lighting.shades
     }
 
     /// Set the forward thrust ships read from global word 15 ([`THRUST_GLOBAL`],
@@ -380,13 +506,27 @@ impl ModelViewer {
         position: [f64; 3],
         light_view: [f64; 3],
     ) -> Result<Frame, String> {
+        self.render_scene_with(index, rows, position, light_view, &AnimationInputs::test(0))
+    }
+
+    /// [`Self::render_scene`] with explicit animation inputs, e.g.
+    /// `AnimationInputs::original(tics, 0, &viewer.shades())` for a model at a
+    /// game time.
+    pub fn render_scene_with(
+        &self,
+        index: u32,
+        rows: [[f64; 3]; 3],
+        position: [f64; 3],
+        light_view: [f64; 3],
+        inputs: &AnimationInputs,
+    ) -> Result<Frame, String> {
         let model = self
             .find(index)
             .ok_or_else(|| format!("Model {index} is not in the cache."))?;
         if position.iter().any(|v| v.abs() > 1.5e9) {
             return Err("Model too far for the 32-bit view space.".to_owned());
         }
-        self.render_with(model, rows, position.map(|v| v as i32), light_view, 0)
+        self.render_with(model, rows, position.map(|v| v as i32), light_view, inputs)
     }
 
     fn render_at(&self, distance: f64) -> Result<Frame, String> {
@@ -414,7 +554,7 @@ impl ModelViewer {
             [0, 0, distance as i32],
             // The default light, taken as view-relative in this inspection view.
             self.light_direction(),
-            self.animation,
+            &self.inputs(),
         )
     }
 
@@ -424,7 +564,7 @@ impl ModelViewer {
         rows: [[f64; 3]; 3],
         position: [i32; 3],
         light_view: [f64; 3],
-        animation: u16,
+        inputs: &AnimationInputs,
     ) -> Result<Frame, String> {
         let mut matrix = [0i32; 9];
         for (k, row) in rows.iter().enumerate() {
@@ -467,8 +607,8 @@ impl ModelViewer {
             matrix,
             basis: matrix,
             scale: model.scale,
-            globals: [animation; 64],
-            locals: [i32::from(animation); 64],
+            globals: inputs.globals,
+            locals: inputs.locals,
             ..Default::default()
         };
         // Light points (opcode 30 0x801e) count global word 4; keep it empty.

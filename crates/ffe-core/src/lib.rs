@@ -1,6 +1,7 @@
 //! Native simulation primitives: no I/O, wall clock, GPU, or legacy runtime.
 
 pub mod model;
+pub mod model_animation;
 pub mod model_commands;
 pub mod model_depth;
 pub mod model_execute;

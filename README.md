@@ -78,6 +78,7 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | Station model lab (pauses gameplay) / return | F4 |
 | Model viewer, every imported model (pauses gameplay) / return | M |
 | Viewer: previous / next model; turn; zoom; test input | Page Up / Page Down; arrows; + / -; 0 / 5 / 9 |
+| Viewer: original animation clock / landing gear or door / time rate | C / G / T |
 | Launch / request or cancel docking | L / D |
 | Classic-like thrust / reverse; yaw; pitch | Enter / Left Shift; comma / period; A / Z |
 | Modern thrust / reverse; yaw; pitch | W / S; Left / Right; Up / Down |
