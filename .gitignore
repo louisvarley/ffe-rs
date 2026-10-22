@@ -19,6 +19,7 @@ legacy/ffed3d-master/
 # Converted original content and working art.
 /data.bin
 /data.bin.tmp
+/data-*.bin
 /upscaled.bin
 /upscaled.bin.tmp
 /to-be-upscaled/

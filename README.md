@@ -30,14 +30,18 @@ The Windows executable is built in this checkout. From the repository root:
 .\target\release\ffe-rs.exe --root .
 ```
 
-To rebuild: `cargo build --release --locked -p ffe-rs`, or run `build.bat` on
-Windows to build debug and release `ffe-rs.exe` and `ffe-tools.exe` into
-`target\debug` and `target\release`.
-The root directory must contain your locally generated **v6** `data.bin` (build command
-below). The game verifies it before opening a window. Without `--root`, it looks
-beside its own executable. Startup does **not** yet auto-import missing/stale
-assets. No original assets, reference source or x86 executable are linked into
-the native game binary. Do not distribute the cache or captures.
+**Easiest on Windows:** double-click `play.bat`. It builds the release game and
+tools, creates or updates `data.bin` from your files in `.\game` when it is
+missing or older than this build needs (currently cache v8), and launches the
+game; on any error the window stays open with the message. Rebuilding by hand:
+`cargo build --release --locked -p ffe-rs -p ffe-tools`.
+The root directory must contain your locally generated **v8** `data.bin` (build command
+below, or let `play.bat` make it). The game verifies it before opening a window.
+Without `--root`, it looks beside its own executable and then up to four parent
+folders, so `target\release\ffe-rs.exe` finds the checkout's `data.bin`. If
+startup fails, the console waits for Enter so the error can be read. No original
+assets, reference source or x86 executable are linked into the native game
+binary. Do not distribute the cache or captures.
 
 Build ID: **0.9 experimental**. Resizable 1280x960 initial window. Rendering
 uses a **320x200 logical canvas**, with 320x158 view plus console starting at

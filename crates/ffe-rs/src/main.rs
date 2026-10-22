@@ -41,11 +41,17 @@ fn options() -> Result<Options, String> {
     }
     let root = match root {
         Some(root) => root,
-        None => std::env::current_exe()
-            .map_err(|e| e.to_string())?
-            .parent()
-            .ok_or("executable has no parent")?
-            .to_owned(),
+        // Beside the executable, else the nearest of up to four parent folders with
+        // a data.bin (so target\release\ffe-rs.exe finds the checkout's cache).
+        None => {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let beside = exe.parent().ok_or("executable has no parent")?.to_owned();
+            beside
+                .ancestors()
+                .take(5)
+                .find(|dir| dir.join("data.bin").is_file())
+                .map_or(beside.clone(), Path::to_path_buf)
+        }
     };
     Ok(Options {
         root: root
@@ -413,6 +419,12 @@ fn run() -> Result<(), String> {
 fn main() {
     if let Err(error) = run() {
         eprintln!("FFE-RS ERROR: {error}");
+        // Started by double-click, the console closes on exit: keep the message
+        // readable. Piped or scripted runs (no terminal on stdin) exit at once.
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            eprintln!("Press Enter to close.");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
         std::process::exit(2);
     }
 }
