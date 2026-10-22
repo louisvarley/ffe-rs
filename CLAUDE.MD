@@ -7,6 +7,10 @@ on `main`; the earlier `claude/code-commit-capabilities-k4hm9l` history was
 fast-forwarded into it.
 Status: Rust inspection, embedded import, partial base cache and external export
 implemented; local JJFFE startup/new-game state and numeric traces verified.
+**For the current state, the verified figures and the next tasks, read
+[docs/STATUS.md](docs/STATUS.md) first**: it is the handoff document and
+supersedes the status narrative below where they disagree. The rest of this
+file records the owner's decisions, scope and gates.
 Pure Rust RNG/timer-counter/day-fraction primitives exist. An experimental
 native playable example now supports launch/fly/dock/trade/save/reload with
 cached cabin art and synthetic mechanics/geometry/economy. V0.2 adds the original

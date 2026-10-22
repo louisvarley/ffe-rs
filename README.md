@@ -476,9 +476,21 @@ python ci\check_forbidden.py
 ```
 
 Automated Rust tests use synthetic data, not proprietary game files.
-Windows validation currently runs 127 synthetic tests; an additional case/link-handling
-test is enabled on Unix. CI is configured for Windows and Linux; remote CI
-has not been run by this local implementation session.
+Windows validation currently runs 203 synthetic tests; an additional
+case/link-handling test is enabled on Unix. CI is configured for Windows and
+Linux; remote CI has not been run by this local implementation session.
+
+**All the local reference comparisons in one command** (needs the reference
+binaries, `data.bin`, `game/`, the release tools and the supplied sources):
+
+```powershell
+python .\tools\reference\verify-all.py
+```
+
+It checks the inputs exist, runs all 26 oracles against the executed JJFFE
+reference, prints one line each and a pass/fail summary, and exits non-zero on
+the first failure. The individual commands below remain useful when working on
+one family of helpers.
 
 For the local-only original-font/bitmap comparison (requires the rebuilt
 reference and your v2 cache; two tests are deliberately ignored in public CI):

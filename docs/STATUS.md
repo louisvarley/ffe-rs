@@ -2,37 +2,66 @@
 
 Authoritative, current status of the reimplementation. This file supersedes the
 status snippets in `README.md`, `CLAUDE.MD` and `docs/PORT_LOG.md` where they
-disagree with it. Read this first, then `docs/MODEL_EXECUTION_PLAN.md` for the
-v0.11 design record and follow-ups.
+disagree with it. Read this first, then `docs/MODEL_COMMANDS.md` for the opcode
+coverage and `docs/notes/` for the feature records.
 
 ## How to read this repo
 
 - `CLAUDE.MD` — owner decisions, scope, phases/exit gates, and per-milestone narrative.
 - `docs/PORT_LOG.md` — append-only record of decisions, discrepancies, trace hashes, newest first.
-- `docs/FORMATS.md` — the implemented partial `data.bin` cache contract (v1..v6) and the model/command/vertex/normal/depth helper semantics.
+- `docs/FORMATS.md` — the implemented partial `data.bin` cache contract (v1..v10) and the model/command/vertex/normal/depth helper semantics.
 - `docs/ARCHITECTURE.md` — proposed workspace, crate responsibilities, determinism rules.
 - `docs/INVENTORY.md` — reference-source inventory: formats, numeric model, timing, gotchas.
 - `docs/KNOWN_ISSUES.md` — FFED3D-vs-JJFFE differences and port gaps.
 - `docs/DEVIATIONS.md` — register of intentional deviations (approved / implemented / rejected).
 - `docs/CONVENTIONS.md` — code conventions for this workspace.
 - `docs/REFERENCE_HARNESS.md` — how to add a differential test against the executed JJFFE reference.
-- `docs/MODEL_EXECUTION_PLAN.md` — design record for the implemented v0.11–v0.13 depth/point/line work and its follow-ups.
+- `docs/MODEL_EXECUTION_PLAN.md` — design record for the v0.11 depth/point/line work and its follow-ups.
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
 - `docs/notes/` — per-feature records: polygons, textures, child models and the
   thruster analysis.
 
 ## Verdict on handoff readiness
 
-**READY for the next model task.** The v0.10 projection/live-slot work, v0.11
-depth composition, v0.12 composed-order oracle, v0.13 point/line emission and
-v0.14 text/child-model operand events, v0.15 colour commands and v0.16
-base-relative transforms are implemented; both real station programs run to
-completion and, since v0.17, match the original F1772 run of the same programs
-event for event in command order; since v0.18 their face draw queues match too, tested and recorded. The
-reference adapter now also builds on Linux (`tools/reference/build-linux.sh`)
-and reproduces every recorded trace hash. The next task (text, submodels, other transform
-forms and colour) is scoped in `docs/MODEL_EXECUTION_PLAN.md` §8 and
-`docs/MODEL_COMMANDS.md`. Remaining gaps are explicit below.
+**READY.** The model port is as complete as the original allows: **449 of 466
+table slots execute natively**, all 448 the original also completes match it in
+command order, **440 match with their children run**, and all 454 comparable
+vertex programs match including each vertex entry's screen and view position.
+The 17 slots left are the ones the original cannot run standalone (external
+vertex references resolved through null pointers), model 89's release-data
+difference, the null entry, and two slots blocked by the original's own
+undefined child state. `verify-all.py` runs the whole local comparison set; all
+26 scripts pass.
+
+What is *not* done is presentation and gameplay, in this order of readiness:
+
+1. Drawing features the executor already queues but the viewer does not draw:
+   text (opcode 10) and labels (18) need the message-string handlers and the
+   font models; curved surfaces (31) need F1876; thruster glows (9) are analysed
+   in `docs/notes/thrusters.md` but were withdrawn unverified.
+2. Rasterisation fidelity: flat polygon fills use a diagnostic scanline fill
+   (the original's F1795/F1796/F1797 spans), and curves draw a stand-in cubic
+   (F1811 is not ported). Both need a pixel-level oracle, not the current
+   command/queue one.
+3. The gameplay slice itself: flight physics, economy, missions, saves and
+   audio are still the synthetic scaffolding described in `CLAUDE.MD`; the
+   model port is not a substitute for that port.
+
+## Getting to a verified state
+
+```powershell
+cargo build --release --locked -p ffe-tools -p ffe-rs
+.\tools\reference\build-smoke.ps1 -Nasm .\.cache\tools\nasm-3.01\nasm.exe
+.\target\release\ffe-tools.exe build-data --game .\game --out .\data-new.bin
+Move-Item -Force .\data-new.bin .\data.bin
+python .\tools\reference\verify-all.py
+```
+
+`verify-all.py` checks that every input exists first and then runs all 26
+oracles (about five minutes), printing one line each and a final pass/fail. It
+needs the player's own files, NASM and the MSVC x86 tools; none of it is public
+CI. Rebuild the reference after any change to `tools/reference/`, and note that
+the child oracle's trace SHA-256 changes with every rebuild (see below).
 
 ## Milestone status
 
@@ -128,33 +157,41 @@ Facts verified on 2026-10-22:
   executable (the original game's data); the local reference build embeds the
   mod's, so the differential oracles compare the models whose bytes agree, and
   they all do.
+- `python tools/reference/verify-all.py` runs the whole set: **26 of 26
+  oracles pass** in about five minutes on this checkout.
 
 ## Next task
 
-Stations are verified for command flow (v0.17) and face draw queues (v0.18);
-the v0.19 census ranks what blocks the other models. Next, in order:
+The model port's own list is nearly empty. In order:
 
-1. The remaining census blockers (see `docs/MODEL_COMMANDS.md`): opcode 30
-   light-point tables, 30 light points and the F1467 square-root table for
-   opcode 25 rotations. Five models are left, and the original cannot run four
-   of them standalone either.
-2. Thruster glow queueing (F1738/F1704): analysed and documented in
-   `docs/notes/thrusters.md`, **not shipped** - the differential check found the
-   port's screen positions differ for the vertices involved, so start there
-   rather than with the glow arithmetic.
-3. **Polygon segments** (F1734/F1724/F1730/F1733/F1723/F1736 and their curve
-   helpers) — needed for outline rasterising and for exact vertex-cache events.
-4. The command-order and queue oracles cover every slot since v0.20 and v0.38
-   (`verify-station-models.py`, `verify-child-models.py`).
-5. Primitive colour, rasterisation, and glyph/child execution as before.
+1. **Thruster glow (opcode 9).** Analysed and documented in
+   `docs/notes/thrusters.md`, **not shipped**: the differential check found the
+   port's screen positions differ for the vertices involved, so resolve that
+   first (model 311, key 53439) rather than starting from the glow arithmetic.
+2. **Text (10) and labels (18).** Both need F1344's message-string handlers
+   (the record's "string" word is an FF-code, e.g. 0x3022, expanded by the
+   `DATA_007649`/`DATA_007652` handler tables, several of which read game state)
+   and the per-glyph font models run through `execute_scene`. Start by probing
+   F1344's arguments and recording which handlers the station's four labels use.
+3. **Curved surfaces (31).** F1876's patch rendering and its queueing; the
+   operand event exists (v0.25).
+4. **Rasterisation oracles.** Replace the diagnostic polygon fill and the
+   stand-in curve with the original's F1795/F1796/F1797 spans and F1811, with a
+   pixel comparison - the current oracles stop at the queue.
+5. The remaining census blockers are all explained (`docs/MODEL_COMMANDS.md`);
+   the F1467 square-root table for opcode 25's direction alignment is the only
+   unported helper, and it only matters once real flight feeds a direction.
 
 Run the census after each step; check the CD 1.01 executable with it when
 available.
 
 ## Known stale spots
 
-- None of the earlier v0.10/v0.11 discrepancies remain; they were corrected on
-  2026-10-21. `README.md` and the executable title still say "0.9" because the
-  product version label has not been bumped (cosmetic).
-- `tests/golden/` still does not exist; it is now labelled "planned" in
-  `README.md`.
+- `README.md` and the executable title still say "0.9" because the product
+  version label has not been bumped (cosmetic).
+- `tests/golden/` still does not exist; it is labelled "planned" in `README.md`.
+- The child oracle's trace SHA-256 is not reproducible across reference
+  rebuilds; read that oracle by its counts (440 compared, 0 mismatched).
+- `docs/FORMATS.md` documents the cache through v10, but several older sections
+  still describe v6-era totals; the authoritative cache figures are in the
+  facts above and in the cache section of `README.md`.
