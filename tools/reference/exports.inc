@@ -163,3 +163,21 @@ _ref_child_frame equ FUNC_001740
 _ref_child_run equ FUNC_001773
 _ref_shades equ DATA_008831
 _ref_arena_index equ DATA_007823
+; Animation oracles (--animation, --object-instance): orbital update, MatBuildYZT,
+; the F1537 frame loop, F1683 and the light/frame-time globals they read.
+GLOBAL _ref_mat_build_yzt
+GLOBAL _ref_orbital_update
+GLOBAL _ref_frame_time
+GLOBAL _ref_object_frame
+GLOBAL _ref_display_object
+GLOBAL _ref_light
+GLOBAL _ref_star_light
+GLOBAL _ref_light_timer
+_ref_mat_build_yzt equ FUNC_001675_MatBuildYZT
+_ref_orbital_update equ FUNC_000866
+_ref_frame_time equ DATA_009155
+_ref_object_frame equ FUNC_001537
+_ref_display_object equ FUNC_001683
+_ref_light equ DATA_008821
+_ref_star_light equ DATA_008827
+_ref_light_timer equ DATA_008830
