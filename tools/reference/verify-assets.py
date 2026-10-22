@@ -17,7 +17,7 @@ import zlib
 def declarations(path: Path) -> dict[str, str]:
     return dict(re.findall(
         r"^(DATA_\d+):[^\n]*\n(.*?)(?=^DATA_\d+:|\Z)",
-        path.read_text(encoding="ascii"), re.MULTILINE | re.DOTALL,
+        path.read_text(encoding="latin-1"), re.MULTILINE | re.DOTALL,
     ))
 
 
@@ -27,6 +27,22 @@ def db_bytes(body: str) -> bytes:
         for line in body.splitlines() if line.strip().startswith("db ")
         for value in line.strip()[3:].split(",")
     )
+
+
+def db_text_bytes(body: str) -> bytes:
+    """db lines that may mix quoted Latin-1 strings and numbers."""
+    out = bytearray()
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("db "):
+            continue
+        for token in re.findall(r"'[^']*'|[^,\s][^,]*", line[3:]):
+            token = token.strip()
+            if token.startswith("'"):
+                out += token[1:-1].encode("latin-1")
+            else:
+                out.append(int(token, 0))
+    return bytes(out)
 
 
 def ship_object_table(blocks: dict[str, str]) -> list[str | None]:
@@ -100,7 +116,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 10 or len(manifest["files"]) != 1776:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 11 or len(manifest["files"]) != 1777:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -114,13 +130,25 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1777:
+            if archive.testzip() is not None or len(archive.infolist()) != 1778:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
                 if len(payload) != record["size"] or hashlib.sha256(payload).hexdigest() != record["sha256"]:
                     raise RuntimeError("cache payload digest mismatch")
                 asset = record["asset"]
+                if asset["kind"] == "model_names":
+                    # DATA_004682, the "Ship string table": each pointer's string, NUL-terminated.
+                    data_blocks = declarations(reference / "ffedat.asm")
+                    labels = re.findall(r"^\s*dd (DATA_\d+)\b", data_blocks["DATA_004682"], re.MULTILINE)
+                    expected = [db_text_bytes(data_blocks[label]).split(b"\0")[0] for label in labels]
+                    names = payload.split(b"\0")[:-1]
+                    # Entries 0..110 (every craft and more) match; from 111 floppy 1.02
+                    # inserts ten digit entries ("0".."9") and differs in decal texts.
+                    if (len(labels) != asset["count"] or len(names) != asset["count"]
+                            or names[:111] != expected[:111]
+                            or names[111:121] != [str(d).encode() for d in range(10)]):
+                        raise RuntimeError("model name table differs from JJFFE DATA_004682")
                 if asset["kind"] == "sine_table":
                     if payload != db_bytes(blocks["DATA_007975"]) or len(payload) != 65536:
                         raise RuntimeError("original sine table differs")

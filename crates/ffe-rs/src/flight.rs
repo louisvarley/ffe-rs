@@ -24,6 +24,14 @@ pub struct Flight {
     pub stock: u32,
     pub ticks: u64,
     pub docking_requested: bool,
+    /// The player's craft: an original model table slot (see `ships`). Saves from
+    /// before ship selection load with the Eagle long range fighter.
+    #[serde(default = "default_ship")]
+    pub ship: u32,
+}
+
+fn default_ship() -> u32 {
+    crate::ships::DEFAULT_SHIP
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -47,6 +55,7 @@ impl Default for Flight {
             stock: 50,
             ticks: 0,
             docking_requested: false,
+            ship: default_ship(),
         }
     }
 }
@@ -87,6 +96,7 @@ impl Flight {
             || self.cargo > CARGO_CAPACITY
             || self.stock > 1000
             || self.credits > 1_000_000_000
+            || !(crate::ships::FIRST_SHIP..=crate::ships::LAST_SHIP).contains(&self.ship)
         {
             return Err("save contains out-of-range prototype state".to_owned());
         }

@@ -1,3 +1,4 @@
+use crate::camera::{ship_axes, Camera, ViewMode, ViewState};
 use crate::flight::{Flight, Mode};
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::model_lab::{LabView, ModelLab};
@@ -18,7 +19,18 @@ pub struct Screen {
     palette: [u32; 128],
     indexed: Box<[u8; 64000]>,
     stars: Vec<[f64; 3]>,
+    /// The original console view icons (secondary bitmaps 63..81), when cached.
+    icons: Vec<Option<IndexedImage>>,
 }
+
+/// Console view buttons (`DATA_005100`): position, off and on bitmap ids, and the
+/// view they select. Turret (0x16), missile (0x14) and combat (0x13) need
+/// equipment that is not modelled, so they stay hidden as the original hides them.
+const VIEW_BUTTONS: [(i32, i32, u8, u8, ViewMode); 3] = [
+    (142, 163, 0xa2, 0xb1, ViewMode::Front),
+    (162, 163, 0xa1, 0xb0, ViewMode::Rear),
+    (198, 165, 0x9f, 0xae, ViewMode::External),
+];
 
 impl Screen {
     pub fn new(cache: &VerifiedCache) -> Result<Self, String> {
@@ -44,12 +56,56 @@ impl Screen {
             } => IndexedImage::new(320, 43, [offset_x, offset_y], masked_zero, asset(panel_id)?)?,
             _ => return Err("Invalid original console panel descriptor.".to_owned()),
         };
-        Self::from_assets(
+        let mut screen = Self::from_assets(
             asset("base:cockpit/cabin0")?,
             asset("base:font/main")?,
             panel,
             palette_rgb6(asset("base:palette/low")?)?,
-        )
+        )?;
+        // Console bitmap ids 96 and up are the secondary table.
+        screen.icons = (0..=0xb1u32)
+            .map(|id| {
+                let index = id.checked_sub(96)?;
+                let asset_id = format!("base:bitmap/secondary/{index:03}");
+                let record = cache.manifest().files.iter().find(|r| r.id == asset_id)?;
+                match record.asset {
+                    AssetKind::IndexedBitmap {
+                        width,
+                        height,
+                        offset_x,
+                        offset_y,
+                        masked_zero,
+                        ..
+                    } => IndexedImage::new(
+                        width,
+                        height,
+                        [offset_x, offset_y],
+                        masked_zero,
+                        cache.asset(&asset_id)?,
+                    )
+                    .ok(),
+                    _ => None,
+                }
+            })
+            .collect();
+        Ok(screen)
+    }
+
+    /// The console view button under logical pixel (x, y), if any (`DATA_007684`
+    /// hot areas), or the F1 cycle area.
+    pub fn view_button(x: i32, y: i32) -> Option<ViewButton> {
+        let inside = |x0, y0, x1, y1| (x0..=x1).contains(&x) && (y0..=y1).contains(&y);
+        if inside(146, 163, 161, 182) {
+            Some(ViewButton::Select(ViewMode::Front))
+        } else if inside(166, 163, 181, 182) {
+            Some(ViewButton::Select(ViewMode::Rear))
+        } else if inside(202, 165, 217, 184) {
+            Some(ViewButton::Select(ViewMode::External))
+        } else if inside(64, 172, 79, 191) {
+            Some(ViewButton::Cycle)
+        } else {
+            None
+        }
     }
 
     pub fn from_assets(
@@ -98,6 +154,7 @@ impl Screen {
             palette,
             indexed: Box::new([0; 64000]),
             stars,
+            icons: Vec::new(),
         })
     }
 
@@ -221,6 +278,7 @@ impl Screen {
     pub fn draw(
         &mut self,
         state: &Flight,
+        views: ViewState,
         scene: Option<&ModelViewer>,
         help: bool,
         modern: bool,
@@ -228,6 +286,16 @@ impl Screen {
     ) {
         self.indexed.fill(0);
         self.panel.blit(&mut self.indexed, 0, 158);
+        let view = views.mode;
+        if state.mode != Mode::Docked {
+            // Only the current view's icon is lit (radio group 1).
+            for (x, y, off, on, mode) in VIEW_BUTTONS {
+                let id = if mode == view { on } else { off };
+                if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
+                    icon.blit(&mut self.indexed, x, y);
+                }
+            }
+        }
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
             *pixel = self.palette[usize::from(*index)];
         }
@@ -243,17 +311,35 @@ impl Screen {
                 17,
             );
             self.text(36, 73, "B BUY ONE     N SELL ONE", 15);
-            self.text(36, 87, "L LAUNCH   F5 SAVE   F9 LOAD", 15);
+            self.text(36, 87, "L LAUNCH  F5 SAVE  SHIFT+F5 LOAD", 15);
             self.text(36, 101, "F2 SCENARIOS / RESET", 12);
         } else {
+            let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
+            let camera = Camera::new(state, view, views.external, scale);
             for index in 0..self.stars.len() {
-                if let Some((x, y)) = project(self.stars[index], state, false) {
+                if let Some((x, y)) = camera.project(self.stars[index], false) {
                     if y < 158 {
                         self.pixel(x, y, 12);
                     }
                 }
             }
-            let drawn = scene.is_some_and(|scene| self.draw_station(scene, state));
+            // Painter's order between the two objects: the farther one first.
+            let external_view = view == ViewMode::External;
+            let ship_first = external_view
+                && distance(camera.position, state.position) > distance(camera.position, [0.0; 3]);
+            if ship_first {
+                if let Some(scene) = scene {
+                    self.draw_ship(scene, state, &camera);
+                }
+            }
+            let drawn = scene.is_some_and(|scene| self.draw_station(scene, &camera));
+            // Only the external view draws the player's own ship (FUNC_001054 hides
+            // it in the front view; the rear view's eye offset is not modelled).
+            if !ship_first && external_view {
+                if let Some(scene) = scene {
+                    self.draw_ship(scene, state, &camera);
+                }
+            }
             // Placeholder wireframe when the cache has no drawable model 74.
             let vertices = [
                 [-40.0, -40.0, -40.0],
@@ -283,8 +369,8 @@ impl Screen {
                     break;
                 }
                 if let (Some(a), Some(b)) = (
-                    project(vertices[a], state, true),
-                    project(vertices[b], state, true),
+                    camera.project(vertices[a], true),
+                    camera.project(vertices[b], true),
                 ) {
                     self.line(a, b, 12);
                 }
@@ -298,21 +384,23 @@ impl Screen {
                 if drawn {
                     break;
                 }
-                if let (Some(a), Some(b)) = (project(a, state, true), project(b, state, true)) {
+                if let (Some(a), Some(b)) = (camera.project(a, true), camera.project(b, true)) {
                     self.line(a, b, if state.docking_requested { 17 } else { 18 });
                 }
             }
-            if let Some((x, y)) = project([0.0; 3], state, true) {
+            if let Some((x, y)) = camera.project([0.0; 3], true) {
                 if x > 8 && x < 260 && y > 12 && y < 115 {
                     self.text(x as usize + 5, y as usize, "STATION", 17);
                 }
             } else {
                 self.text(8, 16, "STATION BEHIND / OFF VIEW", 18);
             }
-            self.line((155, 79), (158, 79), 18);
-            self.line((162, 79), (165, 79), 18);
-            self.line((160, 74), (160, 77), 18);
-            self.line((160, 81), (160, 84), 18);
+            if view == ViewMode::Front {
+                self.line((155, 79), (158, 79), 18);
+                self.line((162, 79), (165, 79), 18);
+                self.line((160, 74), (160, 77), 18);
+                self.line((160, 81), (160, 84), 18);
+            }
             // Prototype contact on the original scanner artwork, not original scanner math.
             let relative = station_relative(state);
             let scale = state.distance().max(200.0);
@@ -324,6 +412,11 @@ impl Screen {
         }
         self.rect(0, 0, 320, 11, 0);
         self.text(3, 1, "FFE-RS 0.9 EXPERIMENTAL - SYNTHETIC FLIGHT", 18);
+        if state.mode != Mode::Docked {
+            let name = view.name().to_ascii_uppercase();
+            let width = self.font.width(&name).unwrap_or(0);
+            self.text(317usize.saturating_sub(width), 1, &name, 15);
+        }
         self.rect(0, 119, 320, 39, 0);
         self.text(
             3,
@@ -341,7 +434,7 @@ impl Screen {
             3,
             130,
             &format!(
-                "DOCK {}  {}  F1 HELP  F2 RESET  F3 INPUT",
+                "DOCK {}  {}  H HELP  F2 RESET  F3 INPUT",
                 if state.docking_requested { "ON" } else { "OFF" },
                 if modern { "MODERN" } else { "CLASSIC-LIKE" }
             ),
@@ -370,18 +463,18 @@ impl Screen {
             self.rect(0, 13, 320, 145, 1);
             for (index, line) in [
                 "NATIVE RUST PLAYABLE SLICE - STILL SYNTHETIC FLIGHT",
-                "Original font, console and station model 74.",
+                "Original console, station and ship models.",
                 "DEFAULT MODERN: W/S thrust; arrows yaw/pitch",
                 "CLASSIC-LIKE: Enter/Shift thrust; ,/. yaw; A/Z pitch",
-                "X brake   D request dock   L launch   B buy   N sell",
-                "Dock: range <80, speed <20, aim at station.",
-                "F3 input. F4 lab. F6 models. P pause. Esc quit.",
-                "F5 new save snapshot; F9 load newest snapshot.",
+                "X brake  D dock  L launch  B buy  N sell  PGUP/DN ship",
+                "VIEWS: F1 cycle, F6 front, F7 rear, F9 external",
+                "External: arrows turn, +/- zoom (as the original)",
+                "F3 input. F4 lab. M models. P pause. Esc quit.",
+                "F5 save snapshot; Shift+F5 load newest snapshot.",
                 "F2 scenarios: 1 Docked / 2 Approach / 3 Free Flight",
-                "Scenarios RESET progress, but keep saved snapshots.",
-                "Help/menus/focus loss pause without time catch-up.",
+                "Dock: range <80, speed <20, aim at station.",
                 "No audio/combat/hyperspace/old saves/HD packs yet.",
-                "F1 closes help. F2 opens playtest scenarios.",
+                "H closes help. F2 opens playtest scenarios.",
             ]
             .iter()
             .enumerate()
@@ -427,19 +520,32 @@ impl Screen {
 
     /// The station as the original model 74, executed by the verified port and
     /// placed by the synthetic flight camera. False when it cannot be drawn.
-    fn draw_station(&mut self, scene: &ModelViewer, state: &Flight) -> bool {
-        let Some(radius) = scene.find(STATION_MODEL).and_then(|m| m.radius()) else {
+    fn draw_station(&mut self, scene: &ModelViewer, camera: &Camera) -> bool {
+        let Some(scale) = model_scale(scene) else {
             return false;
         };
-        // Model units per flight unit: the model's extent fills the old 40-unit
-        // placeholder, so docking and safety distances are unchanged.
-        let scale = radius / STATION_RADIUS;
-        let to_view = |p: [f64; 3]| view_vector(p, state);
-        let rows = STATION_AXES.map(to_view);
-        let origin = to_view(state.position.map(|v| -v)).map(|v| v * scale);
+        let rows = STATION_AXES.map(|axis| camera.direction(axis));
+        let origin = camera.point([0.0; 3]).map(|v| v * scale);
         // The original default light (F960), fixed in flight space.
-        let light = to_view(scene.light_direction());
+        let light = camera.direction(scene.light_direction());
         match scene.render_scene(STATION_MODEL, rows, origin, light) {
+            Ok(frame) => {
+                self.draw_shapes(scene, &frame.shapes);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// The player's ship (its own model, at the station's scale) seen by `camera`.
+    fn draw_ship(&mut self, scene: &ModelViewer, state: &Flight, camera: &Camera) -> bool {
+        let Some(scale) = model_scale(scene) else {
+            return false;
+        };
+        let rows = ship_axes(state).map(|axis| camera.direction(axis));
+        let origin = camera.point(state.position).map(|v| v * scale);
+        let light = camera.direction(scene.light_direction());
+        match scene.render_scene(state.ship, rows, origin, light) {
             Ok(frame) => {
                 self.draw_shapes(scene, &frame.shapes);
                 true
@@ -493,7 +599,7 @@ impl Screen {
         );
         self.text(3, 12, &status, 15);
         self.text(3, 137, "PGUP/PGDN MODEL  ARROWS TURN  +/- ZOOM", 15);
-        self.text(3, 148, "0/5/9 INPUT  F6 RETURN - GAME PAUSED", 18);
+        self.text(3, 148, "0/5/9 INPUT  M RETURN - GAME PAUSED", 18);
         self.present();
     }
 
@@ -617,28 +723,31 @@ const STATION_RADIUS: f64 = 40.0;
 /// turned to face the approach from -z.
 const STATION_AXES: [[f64; 3]; 3] = [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
 
-/// Rotate a flight-space vector into the camera's view space (yaw, then pitch).
-fn view_vector(p: [f64; 3], state: &Flight) -> [f64; 3] {
-    let x = p[0] * state.yaw.cos() - p[2] * state.yaw.sin();
-    let z = p[0] * state.yaw.sin() + p[2] * state.yaw.cos();
-    let y = p[1] * state.pitch.cos() - z * state.pitch.sin();
-    let z = p[1] * state.pitch.sin() + z * state.pitch.cos();
-    [x, y, z]
+/// Model units per flight unit: station 74's extent fills the old 40-unit
+/// placeholder (docking and safety distances unchanged), and every other model
+/// shares that scale, so ships keep their true size relative to the station.
+pub fn model_scale(scene: &ModelViewer) -> Option<f64> {
+    scene
+        .find(STATION_MODEL)
+        .and_then(|m| m.radius())
+        .map(|radius| radius / STATION_RADIUS)
 }
 
-/// The original F1479 projection (x * 256 / z about 160, 79), as the station model.
-fn project(point: [f64; 3], state: &Flight, translated: bool) -> Option<(i32, i32)> {
-    let p = std::array::from_fn::<_, 3, _>(|i| {
-        point[i] - if translated { state.position[i] } else { 0.0 }
-    });
-    let [x, y, z] = view_vector(p, state);
-    if z <= 2.0 {
-        return None;
-    }
-    let sx = 160.0 + 256.0 * x / z;
-    let sy = 79.0 - 256.0 * y / z;
-    if sx.abs() > 2000.0 || sy.abs() > 2000.0 {
-        return None;
-    }
-    Some((sx as i32, sy as i32))
+/// Model units per flight unit when the cache has no station model.
+const DEFAULT_MODEL_SCALE: f64 = 9700.0;
+
+/// A console button click: select a view (F6/F7/F9) or cycle (F1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewButton {
+    Select(ViewMode),
+    Cycle,
+}
+
+/// A model's bounding radius in flight units, at the shared model scale.
+pub fn model_radius(scene: &ModelViewer, model: u32) -> Option<f64> {
+    Some(scene.find(model)?.radius()? / model_scale(scene)?)
+}
+
+fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
 }

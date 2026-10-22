@@ -12,7 +12,7 @@ the current experimental example is not that faithful renderer.
 > Original cabin, proportional bitmap font and console artwork are imported.
 > Version 0.4 extends the **F4 station model lab** with original declared
 > triangle/quad outlines and individual-face inspection, not finished models.
-> The **F6 model viewer** (cache v10) runs every imported ship, station and object
+> The **F6 model viewer** (cache v11) runs every imported ship, station and object
 > program through the verified model executor and draws its faces, textured faces
 > (original bitmaps), complex polygons, lines, points and curves in the original
 > render order, including child models (station rings, ship parts). Curved
@@ -37,10 +37,10 @@ The Windows executable is built in this checkout. From the repository root:
 
 **Easiest on Windows:** double-click `play.bat`. It builds the release game and
 tools, creates or updates `data.bin` from your files in `.\game` when it is
-missing or older than this build needs (currently cache v10), and launches the
+missing or older than this build needs (currently cache v11), and launches the
 game; on any error the window stays open with the message. Rebuilding by hand:
 `cargo build --release --locked -p ffe-rs -p ffe-tools`.
-The root directory must contain your locally generated **v10** `data.bin` (build command
+The root directory must contain your locally generated **v11** `data.bin` (build command
 below, or let `play.bat` make it). The game verifies it before opening a window.
 Without `--root`, it looks beside its own executable and then up to four parent
 folders, so `target\release\ffe-rs.exe` finds the checkout's `data.bin`. If
@@ -71,16 +71,19 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 
 | Action | Binding |
 |---|---|
-| Help / named reset scenarios / input preset | F1 / F2 / F3 |
+| Help / named reset scenarios / input preset | H / F2 / F3 |
+| Views (as the original): cycle / front / rear / external; or click the console view icons | F1 / F6 / F7 / F9 |
+| External view: turn camera; zoom out / in (both of a pair resets) | arrows; + / - |
+| Change ship (the original's named craft) | Page Up / Page Down |
 | Station model lab (pauses gameplay) / return | F4 |
-| Model viewer, every imported model (pauses gameplay) / return | F6 |
+| Model viewer, every imported model (pauses gameplay) / return | M |
 | Viewer: previous / next model; turn; zoom; test input | Page Up / Page Down; arrows; + / -; 0 / 5 / 9 |
 | Launch / request or cancel docking | L / D |
 | Classic-like thrust / reverse; yaw; pitch | Enter / Left Shift; comma / period; A / Z |
 | Modern thrust / reverse; yaw; pitch | W / S; Left / Right; Up / Down |
 | Brake / pause / quit | X / P / Escape |
 | Buy / sell one unit of food (docked only) | B / N |
-| New save snapshot / load newest snapshot | F5 / F9 |
+| New save snapshot / load newest snapshot | F5 / Shift+F5 |
 
 Modern input (W/S and arrows) is the initial preset on every launch. F3 switches
 to the optional Classic-like preset; these are **not yet verified original
@@ -310,14 +313,15 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v10** imports every model that decodes (462 of 466 on floppy 1.02) with
+**Cache v11** imports every model that decodes (462 of 466 on floppy 1.02) with
 its descriptor fields for child models, the original texture descriptor table and
-fixed-colour map, and the original lighting tables (default light, shade tables). `build-data` refuses an existing destination, so build to a new file,
+fixed-colour map, the original lighting tables (default light, shade tables) and the original model
+name table (ship names). `build-data` refuses an existing destination, so build to a new file,
 then replace your old `data.bin` with it:
 
 ```powershell
-.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v10.bin
-Move-Item -Force .\data-v10.bin .\data.bin
+.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v11.bin
+Move-Item -Force .\data-v11.bin .\data.bin
 ```
 
 The local cache has been generated on this checkout. It is ignored and must

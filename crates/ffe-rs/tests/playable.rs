@@ -285,7 +285,14 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
     let mut screen = Screen::from_assets(&cabin_png(), &font, panel, palette).unwrap();
     for state in [Flight::default(), Flight::free_flight(), Flight::approach()] {
         let before = state.clone();
-        screen.draw(&state, None, false, false, "test");
+        screen.draw(
+            &state,
+            ffe_rs::camera::ViewState::default(),
+            None,
+            false,
+            false,
+            "test",
+        );
         let image = screen.pixels.clone();
         assert_eq!(image.len(), 640 * 480);
         assert!(image.contains(&18));
@@ -298,7 +305,14 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
                 );
             }
         }
-        screen.draw(&state, None, true, true, "help");
+        screen.draw(
+            &state,
+            ffe_rs::camera::ViewState::default(),
+            None,
+            true,
+            true,
+            "help",
+        );
         assert_ne!(image, screen.pixels);
         screen.overlay("SCENARIOS", &["1 DOCKED", "2 APPROACH", "3 FLIGHT"]);
         let vertices = [1, 0, 10, 20, 30, 0];
@@ -392,9 +406,23 @@ fn flight_view_draws_the_station_model_in_place_of_the_placeholder() {
     let scene = ModelViewer::from_models(vec![model], table).unwrap();
     let state = Flight::free_flight();
     let before = state.clone();
-    screen.draw(&state, None, false, true, "placeholder");
+    screen.draw(
+        &state,
+        ffe_rs::camera::ViewState::default(),
+        None,
+        false,
+        true,
+        "placeholder",
+    );
     let placeholder = screen.logical_pixels().to_vec();
-    screen.draw(&state, Some(&scene), false, true, "placeholder");
+    screen.draw(
+        &state,
+        ffe_rs::camera::ViewState::default(),
+        Some(&scene),
+        false,
+        true,
+        "placeholder",
+    );
     let station = screen.logical_pixels().to_vec();
     assert_ne!(placeholder, station);
     // Something the palette cannot produce: a direct RGB fill from the model.
@@ -411,6 +439,13 @@ fn flight_view_draws_the_station_model_in_place_of_the_placeholder() {
         .unwrap(),
     )
     .unwrap();
-    screen.draw(&state, Some(&other), false, true, "placeholder");
+    screen.draw(
+        &state,
+        ffe_rs::camera::ViewState::default(),
+        Some(&other),
+        false,
+        true,
+        "placeholder",
+    );
     assert_eq!(screen.logical_pixels(), placeholder.as_slice());
 }

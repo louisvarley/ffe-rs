@@ -1,10 +1,15 @@
+use ffe_rs::camera::{ExternalCamera, ExternalKeys, ViewMode};
 use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::saves;
+use ffe_rs::screen::ViewButton;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
+use ffe_rs::ships::ShipList;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{MouseButton, MouseMode};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -119,7 +124,7 @@ fn snapshot(directory: &Path, state: &Flight) -> Result<String, String> {
     let name = format!("prototype-{next:08}.json");
     saves::save_new(&directory.join(&name), state)?;
     Ok(format!(
-        "Saved {name}. F9 reloads it; prior snapshots kept."
+        "Saved {name}. Shift+F5 reloads it; prior snapshots kept."
     ))
 }
 
@@ -154,6 +159,11 @@ fn run() -> Result<(), String> {
     let mut help = true;
     let mut scenarios = false;
     let mut model_lab = None;
+    let mut view = ViewMode::Front;
+    let mut external = ExternalCamera::default();
+    // When each external-view key went down, for the original's held-key ramp.
+    let mut held_since: HashMap<Key, Instant> = HashMap::new();
+    let mut mouse_was_down = false;
     let mut model_viewer: Option<ModelViewer> = None;
     // The flight view's station is the original model 74 when the cache has it;
     // otherwise the placeholder wireframe stays.
@@ -164,8 +174,13 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // The original's named craft (cache v11); Page Up/Down changes the player's ship.
+    let ships = scene
+        .as_ref()
+        .map(|scene| ShipList::from_cache(&cache, scene))
+        .unwrap_or_default();
     let mut paused = false;
-    let mut message = String::from("Welcome. F1 closes help; F2 selects a playtest.");
+    let mut message = String::from("Welcome. H closes help; F2 selects a playtest.");
     let mut last = Instant::now();
     let mut accumulator = 0.0;
     let mut frames = 0;
@@ -188,7 +203,8 @@ fn run() -> Result<(), String> {
         );
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
         if active {
-            if pressed(Key::F1) {
+            // F1 is the original's view key; help moves to H.
+            if pressed(Key::H) {
                 help = !help;
                 scenarios = false;
                 model_lab = None;
@@ -219,7 +235,8 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
-            if pressed(Key::F6) {
+            // F6 is the original's front view; the model viewer moves to M.
+            if pressed(Key::M) {
                 held_controls.disarm(&keys_down);
                 if model_viewer.is_some() {
                     model_viewer = None;
@@ -304,9 +321,91 @@ fn run() -> Result<(), String> {
                     state = next;
                     scenarios = false;
                     paused = false;
-                    message = "Scenario reset. Saves kept. F1 for controls.".to_owned();
+                    message = "Scenario reset. Saves kept. H for controls.".to_owned();
                 }
             } else if !help && !paused {
+                // The original's view keys (FUNC_001001/FUNC_001056): F1 cycles,
+                // F6 front, F7 rear, F9 external; the console icons do the same.
+                if state.mode == ffe_rs::flight::Mode::Flight {
+                    let mouse_down = window.get_mouse_down(MouseButton::Left);
+                    let clicked = if mouse_down && !mouse_was_down {
+                        window.get_mouse_pos(MouseMode::Discard).and_then(|(x, y)| {
+                            let (width, height) = window.get_size();
+                            Screen::view_button(
+                                (x * 320.0 / width.max(1) as f32) as i32,
+                                (y * 200.0 / height.max(1) as f32) as i32,
+                            )
+                        })
+                    } else {
+                        None
+                    };
+                    mouse_was_down = mouse_down;
+                    let chosen = if pressed(Key::F1) || clicked == Some(ViewButton::Cycle) {
+                        Some(view.next())
+                    } else if pressed(Key::F6) {
+                        Some(ViewMode::Front)
+                    } else if pressed(Key::F7) {
+                        Some(ViewMode::Rear)
+                    } else if pressed(Key::F9) {
+                        Some(ViewMode::External)
+                    } else if let Some(ViewButton::Select(mode)) = clicked {
+                        Some(mode)
+                    } else {
+                        None
+                    };
+                    if let Some(next) = chosen {
+                        view = next;
+                        message = format!("{}.", view.name());
+                    }
+                }
+                if view == ViewMode::External {
+                    let now = Instant::now();
+                    let mut held = |keys: &[Key]| {
+                        let down = keys.iter().find(|key| window.is_key_down(**key)).copied();
+                        for key in keys {
+                            if Some(*key) != down {
+                                held_since.remove(key);
+                            }
+                        }
+                        down.map(|key| {
+                            let since = *held_since.entry(key).or_insert(now);
+                            // 50 Hz ticks held (DATA_KeyAccumTable).
+                            (now.duration_since(since).as_secs_f64() * 50.0) as u32
+                        })
+                    };
+                    let keys = ExternalKeys {
+                        left: held(&[Key::Left]),
+                        right: held(&[Key::Right]),
+                        up: held(&[Key::Up]),
+                        down: held(&[Key::Down]),
+                        zoom_out: held(&[Key::NumPadPlus, Key::Equal]),
+                        zoom_in: held(&[Key::NumPadMinus, Key::Minus]),
+                    };
+                    let minimum = scene
+                        .as_ref()
+                        .and_then(|scene| scene.camera_minimum(state.ship))
+                        .unwrap_or(0);
+                    external.step(keys, (elapsed * 1000.0) as u32, minimum);
+                }
+                let ship_step = i32::from(pressed(Key::PageDown)) - i32::from(pressed(Key::PageUp));
+                if ship_step != 0 {
+                    message = match ships.step(state.ship, ship_step) {
+                        Some(ship) => {
+                            state.ship = ship;
+                            // FUNC_001110 re-applies the closest-camera limit.
+                            let minimum = scene
+                                .as_ref()
+                                .and_then(|scene| scene.camera_minimum(ship))
+                                .unwrap_or(0);
+                            external.distance = external.distance.min(minimum.saturating_neg());
+                            format!(
+                                "Ship: {} (model {ship}).",
+                                ships.name(ship).unwrap_or("unnamed")
+                            )
+                        }
+                        None => "No ship list: rebuild data.bin (cache v11).".to_owned(),
+                    };
+                }
                 let action = if pressed(Key::L) {
                     Some(state.launch())
                 } else if pressed(Key::D) {
@@ -327,7 +426,9 @@ fn run() -> Result<(), String> {
                         }
                     };
                 }
-                if pressed(Key::F5) {
+                let shift =
+                    window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
+                if pressed(Key::F5) && !shift {
                     message = match snapshot(&save_dir, &state) {
                         Ok(text) => text,
                         Err(e) => {
@@ -336,11 +437,12 @@ fn run() -> Result<(), String> {
                         }
                     };
                 }
-                if pressed(Key::F9) {
+                // Load moved from F9 (the original's external view) to Shift+F5.
+                if pressed(Key::F5) && shift {
                     let loaded = snapshots(&save_dir).and_then(|paths| {
                         paths
                             .last()
-                            .ok_or("No prototype snapshots. F5 saves.".to_owned())
+                            .ok_or("No prototype snapshots. F5 saves; Shift+F5 loads.".to_owned())
                             .and_then(|path| saves::load(path))
                     });
                     match loaded {
@@ -362,11 +464,21 @@ fn run() -> Result<(), String> {
                 f64::from(u8::from(held_controls.contains(&positive)))
                     - f64::from(u8::from(held_controls.contains(&negative)))
             };
-            let input = if modern {
+            // In the external view the arrows move the camera, so Modern steering
+            // falls back to the Classic-like keys there.
+            let external_view = view == ViewMode::External;
+            let input = if modern && !external_view {
                 Controls {
                     thrust: axis(Key::W, Key::S),
                     yaw: axis(Key::Right, Key::Left),
                     pitch: axis(Key::Up, Key::Down),
+                    brake: held_controls.contains(&Key::X),
+                }
+            } else if modern {
+                Controls {
+                    thrust: axis(Key::W, Key::S),
+                    yaw: axis(Key::Period, Key::Comma),
+                    pitch: axis(Key::A, Key::Z),
                     brake: held_controls.contains(&Key::X),
                 }
             } else {
@@ -387,7 +499,29 @@ fn run() -> Result<(), String> {
         } else {
             accumulator = 0.0;
         }
-        screen.draw(&state, scene.as_ref(), help, modern, &message);
+        // FUNC_001110's closest-camera limit for the current ship (applied when the
+        // original sets a ship; doing it every frame is equivalent).
+        if let Some(minimum) = scene
+            .as_ref()
+            .and_then(|scene| scene.camera_minimum(state.ship))
+        {
+            external.distance = external.distance.min(minimum.saturating_neg());
+        }
+        // The original returns to the front view when docking (FUNC_001048).
+        if state.mode == ffe_rs::flight::Mode::Docked {
+            view = ViewMode::Front;
+        }
+        screen.draw(
+            &state,
+            ffe_rs::camera::ViewState {
+                mode: view,
+                external,
+            },
+            scene.as_ref(),
+            help,
+            modern,
+            &message,
+        );
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);
         } else if let Some(lab) = &model_lab {
@@ -406,7 +540,7 @@ fn run() -> Result<(), String> {
             screen.overlay(
                 "PAUSED",
                 &[
-                    "P RESUMES. F1 HELP. F2 SCENARIOS.",
+                    "P RESUMES. H HELP. F2 SCENARIOS.",
                     "FOCUS LOSS PAUSES WITHOUT CATCH-UP.",
                 ],
             );

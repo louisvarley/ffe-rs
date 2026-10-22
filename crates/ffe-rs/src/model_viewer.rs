@@ -324,6 +324,15 @@ impl ModelViewer {
         light.map(|v| v / length)
     }
 
+    /// FUNC_001110's closest external camera for a ship model: its descriptor
+    /// radius word (+0x1c) shifted left by its scale (+0x14) + 8, in the camera's
+    /// distance units. `None` without the v10 descriptor table.
+    pub fn camera_minimum(&self, index: u32) -> Option<i32> {
+        let model = self.find(index)?;
+        let [_, radius] = *self.descriptors.get(index as usize)?;
+        Some(((radius & 0xffff) as u32).wrapping_shl(model.scale + 8) as i32)
+    }
+
     /// The model with this table index, if imported.
     pub fn find(&self, index: u32) -> Option<&ViewerModel> {
         self.models.iter().find(|m| m.index == index)

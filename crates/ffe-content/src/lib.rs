@@ -85,6 +85,12 @@ pub enum AssetKind {
     ModelDescriptors {
         count: u32,
     },
+    /// The model name table `DATA_004682`: `count` NUL-terminated Latin-1 strings,
+    /// entry n naming model table slot n (v11).
+    ModelNames {
+        count: u32,
+        source_offset: u64,
+    },
     /// The default light and shade table `DATA_007231..7234` (v9).
     DefaultLighting {
         source_offset: u64,
@@ -174,7 +180,7 @@ fn valid_digest(value: &str) -> bool {
 const MODEL_TABLE_SLOTS: u32 = 466;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=10) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=11) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -220,6 +226,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("Texture descriptors and the colour map require cache v8.".to_owned());
+        }
+        if manifest.format_version < 11 && matches!(record.asset, AssetKind::ModelNames { .. }) {
+            return Err("The model name table requires cache v11.".to_owned());
         }
         if manifest.format_version < 10
             && matches!(record.asset, AssetKind::ModelDescriptors { .. })
@@ -369,6 +378,16 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         AssetKind::ModelDescriptors { count } => {
             if *count != MODEL_TABLE_SLOTS || bytes.len() != *count as usize * 8 {
                 return Err("invalid model descriptor table".to_owned());
+            }
+        }
+        AssetKind::ModelNames { count, .. } => {
+            if *count == 0
+                || *count > MODEL_TABLE_SLOTS
+                || bytes.last() != Some(&0)
+                || bytes.iter().filter(|b| **b == 0).count() != *count as usize
+                || bytes.split(|b| *b == 0).any(|name| name.len() > 255)
+            {
+                return Err("invalid model name table".to_owned());
             }
         }
         AssetKind::DefaultLighting { .. } => {

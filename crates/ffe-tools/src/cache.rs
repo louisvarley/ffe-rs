@@ -3,8 +3,8 @@ use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
     decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font, decode_model_commands,
-    decode_model_descriptor, decode_model_normals, decode_model_vertices, decode_sine_table,
-    decode_star_shades, decode_texture_descriptors, BitmapLayout,
+    decode_model_descriptor, decode_model_names, decode_model_normals, decode_model_vertices,
+    decode_sine_table, decode_star_shades, decode_texture_descriptors, BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -26,6 +26,15 @@ pub(crate) fn model_layout(profile: &str) -> Result<(u32, u32), String> {
 pub(crate) fn texture_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0x102da8, 0x101b10)),
+        _ => None,
+    }
+}
+
+/// Model name table (`DATA_004682`) RVA (v11), matched against JJFFE 2.8a7 in
+/// floppy 1.02 only.
+pub(crate) fn names_layout(profile: &str) -> Option<u32> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some(0xd1444),
         _ => None,
     }
 }
@@ -188,6 +197,18 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                 },
                 bytes: std::mem::take(&mut descriptor_table),
             });
+            if let Some(names_rva) = names_layout(profile.id) {
+                let table = decode_model_names(&bytes, names_rva)?;
+                assets.push(Asset {
+                    id: "base:text/model-names".to_owned(),
+                    path: "text/model-names.bin".to_owned(),
+                    kind: AssetKind::ModelNames {
+                        count: ffe_convert::embedded::MODEL_NAME_COUNT as u32,
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             if let Some((default_rva, stars_rva)) = lighting_layout(profile.id) {
                 let table = decode_default_lighting(&bytes, default_rva)?;
                 assets.push(Asset {
@@ -292,7 +313,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         2
     } else {
         0
-    };
+    } + usize::from(names_layout(profile.id).is_some());
     // Plus the v10 model descriptor table.
     if models < 2 || assets.len() != 380 + tables + 3 * models {
         return Err(format!(
@@ -301,7 +322,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 10,
+        format: "ffe-content-cache".to_owned(), format_version: 11,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

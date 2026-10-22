@@ -276,6 +276,38 @@ pub fn decode_texture_descriptors(bytes: &[u8], rva: u32) -> Result<EmbeddedTabl
     })
 }
 
+/// Entries in the original model name table (`DATA_004682`, "Ship string table").
+pub const MODEL_NAME_COUNT: usize = 209;
+
+/// The model name table: 209 pointers to NUL-terminated Latin-1 strings, entry n
+/// naming model table slot n. Stored as the strings joined by NUL bytes (each one
+/// terminated), in table order.
+pub fn decode_model_names(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, MODEL_NAME_COUNT * 4)?;
+    let mut joined = Vec::new();
+    for entry in 0..MODEL_NAME_COUNT {
+        let pointer = dword(bytes, source_offset + 4 * entry)?;
+        let string_rva = pointer
+            .checked_sub(section.image_base)
+            .ok_or("Model name pointer precedes the image base")?;
+        let start = section.offset(string_rva, 1)?;
+        let text = bytes
+            .get(start..start.saturating_add(256).min(bytes.len()))
+            .ok_or("Model name outside the executable")?;
+        let end = text
+            .iter()
+            .position(|b| *b == 0)
+            .ok_or("Model name longer than 255 bytes")?;
+        joined.extend_from_slice(&text[..end]);
+        joined.push(0);
+    }
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: joined,
+    })
+}
+
 /// The default light and shade table (`DATA_007231..7234`, 36 bytes).
 pub fn decode_default_lighting(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
     use ffe_core::model_lighting::{default_lighting, DEFAULT_LIGHTING_BYTES};

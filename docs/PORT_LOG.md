@@ -4,6 +4,32 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Ships and the original's views
+
+The scenarios now fly a real ship. **Cache v11** imports the original model name
+table (`DATA_004682`, RVA 0xd1444, 209 entries, identical to JJFFE); slots
+14..=70 are the craft, and `ffe_rs::ships::ShipList` keeps those with a real
+name and a drawable model (entries 0..110 match JJFFE; from 111 floppy 1.02
+inserts ten digit entries and differs in decal texts, which `verify-assets.py`
+reports as a data difference). Page Up/Down changes ship; the ship is saved
+(`Flight::ship`, older saves load the Eagle long range fighter, slot 20).
+
+Views follow the original (research in `docs/notes/views.md`): F1 cycles front,
+rear, external (turret views skipped, as for a ship with <= 2 gun mounts);
+F6/F7/F9 select directly; the console shows the original view icons
+(secondary bitmaps 63..81) with the current one lit, and their hot areas take
+mouse clicks. The external camera keeps the original's yaw/pitch/distance
+units, start values, held-key ramp, opposite-key resets and zoom limits, and
+FUNC_001054's two rotations of the ship's axes. In the external view the
+player's ship is drawn (at the station's model scale: true relative size), the
+crosshair hidden, and the arrows move the camera, so Modern steering uses the
+Classic keys there. Docking returns to the front view. ffe-rs's own keys moved
+off the original's: help H, model viewer M, load Shift+F5. Flight drawing now
+goes through `camera::Camera` (one projection for stars, station and ships).
+Not ported: turret/missile/combat views, eye offsets. Seven tests added. All 26
+local oracles pass (`verify-all.py`; on Linux, link the reference binaries to
+the `.exe` names it expects).
+
 ## 2026-10-22 — Thruster glow analysis (not shipped)
 
 Opcode 9's queueing was read out of F1738/F1704 and attempted, then withdrawn
