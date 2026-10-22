@@ -265,6 +265,17 @@ fn run() -> Result<(), String> {
                 if pressed(Key::Key9) {
                     viewer.set_animation(65535);
                 }
+                // Animation: original inputs over the viewer's clock.
+                if pressed(Key::C) {
+                    viewer.use_clock();
+                }
+                if pressed(Key::G) {
+                    viewer.toggle_door();
+                }
+                if pressed(Key::T) {
+                    viewer.cycle_rate();
+                }
+                viewer.advance((elapsed * 1000.0).round() as u32);
             } else if let Some(lab) = model_lab.as_mut() {
                 if pressed(Key::Tab) {
                     lab.cycle_view();
