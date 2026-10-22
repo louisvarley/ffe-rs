@@ -12,6 +12,7 @@ use ffe_core::model_execute::{
 use ffe_core::model_instance::Vertices;
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::Normal;
+use ffe_core::model_texture::Descriptors;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -104,6 +105,8 @@ struct Stats {
     no_room: usize,
     depth: usize,
     child_faces: usize,
+    glows: usize,
+    lines: usize,
 }
 
 /// The probe's event streams for one frame, recursing into child runs where the
@@ -114,9 +117,11 @@ fn events(
     nested: &mut Vec<[u32; 4]>,
     points: &mut Vec<[i64; 5]>,
     stats: &mut Stats,
+    descriptors: &Descriptors,
 ) {
     let (mut f, mut p, mut l, mut t, mut s, mut g, mut b, mut c, mut labels, mut k) =
         (0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    let mut thrusters = 0;
     stats.depth = stats.depth.max(depth as usize);
     for offset in &result.commands {
         while let Some(event) = result.emissions.get(f).filter(|e| e.face.offset == *offset) {
@@ -199,6 +204,24 @@ fn events(
             }
             c += 1;
         }
+        if let Some(thruster) = result
+            .thrusters
+            .get(thrusters)
+            .filter(|e| e.thruster.offset == *offset)
+        {
+            common::thruster_events(
+                thruster,
+                common::thruster_line_colour(thruster, descriptors),
+                nested,
+            );
+            for entry in &thruster.entries {
+                match entry.shape {
+                    ffe_core::model_thruster::Shape::Glow { .. } => stats.glows += 1,
+                    ffe_core::model_thruster::Shape::Line { .. } => stats.lines += 1,
+                }
+            }
+            thrusters += 1;
+        }
         if let Some(text) = result.texts.get(t).filter(|e| e.text.offset == *offset) {
             if !text.culled {
                 nested.push([2, u32::from(text.text.glyphs), 0, 0]);
@@ -260,7 +283,7 @@ fn events(
                 match &run.outcome {
                     ChildOutcome::Executed(child) => {
                         stats.executed += 1;
-                        events(child, depth + 1, nested, points, stats);
+                        events(child, depth + 1, nested, points, stats, descriptors);
                         nested.push([21, 1, 0, 0]);
                     }
                     _ => {
@@ -297,8 +320,12 @@ fn executed_reference_child_models() {
         ffe_content::read(&std::fs::read(std::env::var_os("FFE_CHILD_CACHE").unwrap()).unwrap())
             .unwrap();
     let table = SineTable::from_bytes(cache.asset("base:math/sine").unwrap()).unwrap();
+    let descriptors =
+        Descriptors::from_bytes(cache.asset("base:texture/descriptors").unwrap()).unwrap();
     let input = std::fs::read_to_string(std::env::var_os("FFE_CHILD_VECTORS").unwrap()).unwrap();
     assert!(input.len() < 64 << 20);
+    // The model's position z (`--child-model N Z`; 2000 by default).
+    let depth: i32 = std::env::var("FFE_CHILD_DEPTH").map_or(2000, |value| value.parse().unwrap());
     let models = Table((0..466).map(|index| load(&exe, rva, index)).collect());
     let shade_bytes: Vec<u8> = (0..24u32).map(|i| (i * 29 + 3) as u8).collect();
     let shades: [[u8; 3]; 8] = std::array::from_fn(|i| {
@@ -341,7 +368,7 @@ fn executed_reference_child_models() {
         };
         let scale = vertices.scale;
         let visibility = VisibilityContext {
-            depth: 2000,
+            depth,
             scale: scale as i32,
             detail: [0, 0],
             normals: &normals,
@@ -355,7 +382,7 @@ fn executed_reference_child_models() {
             context.locals[12 + k] = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
         let instance = InstanceContext {
-            position: [0, 0, 2000],
+            position: [0, 0, depth],
             generation: 2,
             key_scale: 0,
             operand_scale: scale as i32,
@@ -382,7 +409,14 @@ fn executed_reference_child_models() {
         };
         let (mut nested, mut points) = (Vec::new(), Vec::new());
         let before = stats.executed + stats.culled + stats.no_room;
-        events(&result, 0, &mut nested, &mut points, &mut stats);
+        events(
+            &result,
+            0,
+            &mut nested,
+            &mut points,
+            &mut stats,
+            &descriptors,
+        );
         if stats.executed + stats.culled + stats.no_room > before {
             with_children += 1;
         }
@@ -396,6 +430,8 @@ fn executed_reference_child_models() {
                 QueueEvent::Nested(key) => Some([4, u32::from(key.is_some()), key.unwrap_or(0)]),
                 QueueEvent::Spline(key) => Some([5, 0, *key]),
                 QueueEvent::Label(key) => Some([6, 0, *key]),
+                QueueEvent::Thruster(key) => Some([7, 0, *key]),
+                QueueEvent::ThrusterLine(key) => Some([8, 0, *key]),
                 QueueEvent::Point(_) | QueueEvent::Line(_) => None,
             })
             .collect();
@@ -418,6 +454,7 @@ fn executed_reference_child_models() {
         );
         let (ours, mut theirs) = (lookups(&nested), lookups(&original.nested));
         common::mask_textured(&ours, &mut theirs);
+        common::mask_thruster_lines(&ours, &mut theirs);
         let checks = [
             ("nested/face/child events", ours == theirs),
             ("points/lines", points == original.points),
@@ -465,6 +502,10 @@ fn executed_reference_child_models() {
     eprintln!(
         "children: {} executed ({} child faces, depth up to {}), {} culled, {} without arena room",
         stats.executed, stats.child_faces, stats.depth, stats.culled, stats.no_room
+    );
+    eprintln!(
+        "thrusters: {} glow entries, {} line entries queued",
+        stats.glows, stats.lines
     );
     eprintln!("not executed natively: {skipped:?}");
     for mismatch in &mismatches {

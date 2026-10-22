@@ -17,10 +17,11 @@ TABLES = {
 }
 
 
-def capture(reference, directory):
+def capture(reference, directory, depth):
     rows, crashed = [], []
+    extra = [] if depth == 2000 else [str(depth)]
     for index in range(SLOTS):
-        result = subprocess.run([str(reference), "--child-model", str(index)],
+        result = subprocess.run([str(reference), "--child-model", str(index)] + extra,
                                 cwd=directory, capture_output=True, timeout=30)
         if result.returncode:
             crashed.append(index)
@@ -38,6 +39,8 @@ def main():
     parser.add_argument("--cache", required=True, type=Path, help="data.bin with the sine table")
     parser.add_argument("--minimum", type=int, default=400,
                         help="fewest models that must be compared")
+    parser.add_argument("--depth", type=lambda v: int(v, 0), default=2000,
+                        help="instance position z (2000 by default; e.g. 0x50000 for thrusters)")
     parser.add_argument("--verbose", action="store_true",
                         help="print skip reasons and first differences")
     args = parser.parse_args()
@@ -50,15 +53,15 @@ def main():
     root = Path(__file__).resolve().parents[2]
     cargo = shutil.which("cargo") or str(Path.home() / ".cargo" / "bin" / "cargo.exe")
     with tempfile.TemporaryDirectory(prefix="ffe-child-models-") as directory:
-        first, crashed = capture(reference, directory)
-        second, crashed_again = capture(reference, directory)
+        first, crashed = capture(reference, directory, args.depth)
+        second, crashed_again = capture(reference, directory, args.depth)
         if first != second or crashed != crashed_again:
             raise RuntimeError("child-model traces differ between runs")
         trace = Path(directory) / "child-models.jsonl"
         trace.write_bytes(first)
         env = dict(os.environ, FFE_CHILD_VECTORS=str(trace), FFE_CHILD_EXE=str(exe),
                    FFE_CHILD_TABLE_RVA=table, FFE_CHILD_CACHE=str(args.cache.resolve(strict=True)),
-                   FFE_CHILD_MINIMUM=str(args.minimum))
+                   FFE_CHILD_MINIMUM=str(args.minimum), FFE_CHILD_DEPTH=str(args.depth))
         if args.verbose:
             env["FFE_CHILD_VERBOSE"] = "1"
         command = [cargo, "test", "--locked", "-p", "ffe-rs", "--test",
@@ -66,16 +69,18 @@ def main():
                    "--", "--ignored", "--exact", "--nocapture"]
         result = subprocess.run(command, cwd=root, env=env, capture_output=True, timeout=900)
         summary = [line for line in result.stderr.decode(errors="replace").splitlines()
-                   if line.startswith(("compared", "children", "not executed", "  model", "  skipped"))]
+                   if line.startswith(("compared", "children", "thrusters", "not executed", "  model",
+                                       "  skipped"))]
         if result.returncode:
             raise RuntimeError("Rust/original mismatch:\n" + "\n".join(summary))
         rows = [json.loads(line) for line in first.splitlines()]
         position = {row["model"]: number for number, row in enumerate(rows)}
-        # Tamper: a child face's depth, a child set-up field, a cull outcome, a queue key.
+        # Tamper: a child face's depth, a child set-up field, a cull outcome, a thruster
+        # glow point, ramp colour and line point, a queue key.
         tampers = []
         for row in rows:
             nested = row.get("nested", [])
-            for kind, field in [(22, 1), (24, 1), (19, 1), (25, 2)]:
+            for kind, field in [(22, 1), (24, 1), (19, 1), (25, 2), (42, 2), (45, 3), (48, 1)]:
                 hit = next((i for i, e in enumerate(nested)
                             if e[0] == kind and (kind != 22 or e[1] > 0)), None)
                 if hit is not None and not any(t[1] == kind for t in tampers):
@@ -100,6 +105,7 @@ def main():
     print(json.dumps({
         "scenario": "jjffe-child-model-v1",
         "slots": SLOTS,
+        "depth": args.depth,
         "original_crashed_slots": crashed,
         "summary": summary,
         "repeat_matches": True,
