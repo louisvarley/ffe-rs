@@ -80,6 +80,15 @@ pub enum AssetKind {
     FixedColourMap {
         source_offset: u64,
     },
+    /// The default light and shade table `DATA_007231..7234` (v9).
+    DefaultLighting {
+        source_offset: u64,
+    },
+    /// The star shade tables `DATA_007759` (v9).
+    StarShades {
+        count: u32,
+        source_offset: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,7 +169,7 @@ fn valid_digest(value: &str) -> bool {
 const MODEL_TABLE_SLOTS: u32 = 466;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=8) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=9) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -206,6 +215,14 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("Texture descriptors and the colour map require cache v8.".to_owned());
+        }
+        if manifest.format_version < 9
+            && matches!(
+                record.asset,
+                AssetKind::DefaultLighting { .. } | AssetKind::StarShades { .. }
+            )
+        {
+            return Err("Lighting tables require cache v9.".to_owned());
         }
         if manifest.format_version < 6 && matches!(record.asset, AssetKind::SineTable { .. }) {
             return Err("Sine tables require cache v6 or later.".to_owned());
@@ -338,6 +355,15 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::FixedColourMap { .. } => {
             ffe_core::model_texture::validate_colour_map(bytes)?;
+        }
+        AssetKind::DefaultLighting { .. } => {
+            ffe_core::model_lighting::default_lighting(bytes)?;
+        }
+        AssetKind::StarShades { count, .. } => {
+            if *count as usize != ffe_core::model_lighting::STAR_SHADE_TABLES {
+                return Err("invalid star shade table count".to_owned());
+            }
+            ffe_core::model_lighting::star_shades(bytes)?;
         }
         AssetKind::EffectWav => {
             if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt " {

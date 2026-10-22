@@ -11,6 +11,7 @@ use ffe_core::model::{evaluate, VertexContext};
 use ffe_core::model_commands::{material, VisibilityContext};
 use ffe_core::model_execute::{execute_live, resolve_colour, InstanceContext, Primitive};
 use ffe_core::model_instance::{Vertices, NEAR_SENTINEL};
+use ffe_core::model_lighting::{default_lighting, pack, Lighting};
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::{self, NormalContext};
 use ffe_core::model_texture::{
@@ -64,9 +65,18 @@ pub struct ModelViewer {
     zoom: i32,
     animation: u16,
     textures: TextureSet,
+    lighting: Lighting,
 }
 
 const GENERATION: u32 = 2;
+
+/// Without the v9 lighting tables: a diagnostic light and a plain 7..0 ramp.
+const FALLBACK_LIGHTING: Lighting = Lighting {
+    light: [13107, -16384, 24576],
+    shades: [
+        [7; 3], [6; 3], [5; 3], [4; 3], [3; 3], [2; 3], [1; 3], [0; 3],
+    ],
+};
 
 impl ModelViewer {
     pub fn new(cache: &VerifiedCache) -> Result<Self, String> {
@@ -114,6 +124,12 @@ impl ModelViewer {
         }
         let mut viewer = Self::from_models(models, table)?;
         viewer.textures = TextureSet::from_cache(cache);
+        if let Some(lighting) = cache
+            .asset("base:lighting/default")
+            .and_then(|bytes| default_lighting(bytes).ok())
+        {
+            viewer.lighting = lighting;
+        }
         Ok(viewer)
     }
 
@@ -158,6 +174,13 @@ impl ModelViewer {
         true
     }
 
+    /// A nibble colour as the original shows it: packed by F1326 (no clamp), then
+    /// the fixed low palette where `DATA_007770` maps it, else 4-bit VGA levels.
+    /// The 12-bit mask only guards the table lookup against an out-of-range sum.
+    fn rgb(&self, colour: [u8; 3]) -> [u8; 3] {
+        self.textures.rgb(pack(colour) & 0xfff)
+    }
+
     pub fn from_models(mut models: Vec<ViewerModel>, table: SineTable) -> Result<Self, String> {
         if models.is_empty() {
             return Err("The cache holds no models. Build a v7 data.bin to view them.".to_owned());
@@ -172,6 +195,7 @@ impl ModelViewer {
             zoom: 0,
             animation: 0,
             textures: TextureSet::default(),
+            lighting: FALLBACK_LIGHTING,
         })
     }
 
@@ -243,6 +267,14 @@ impl ModelViewer {
         self.render_at(fitted * 2f64.powf(-f64::from(self.zoom) / 4.0))
     }
 
+    /// The light direction as a unit vector: the original default light (F960,
+    /// `DATA_007231`) from a v9 cache.
+    pub fn light_direction(&self) -> [f64; 3] {
+        let light = self.lighting.light.map(f64::from);
+        let length = light.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0);
+        light.map(|v| v / length)
+    }
+
     /// The model with this table index, if imported.
     pub fn find(&self, index: u32) -> Option<&ViewerModel> {
         self.models.iter().find(|m| m.index == index)
@@ -291,7 +323,8 @@ impl ModelViewer {
             self.model(),
             rows,
             [0, 0, distance as i32],
-            [0.4, -0.5, 0.75],
+            // The default light, taken as view-relative in this inspection view.
+            self.light_direction(),
             self.animation,
         )
     }
@@ -323,7 +356,8 @@ impl ModelViewer {
         });
         let length = light_view.iter().map(|v| v * v).sum::<f64>().sqrt();
         let light = rows.map(|row| {
-            (row.iter().zip(light_view).map(|(a, b)| a * b).sum::<f64>() / length * 33_000.0) as i32
+            // F1518 normalises the light to length 0x8000.
+            (row.iter().zip(light_view).map(|(a, b)| a * b).sum::<f64>() / length * 32_768.0) as i32
         });
         let normals = model_normals::evaluate(
             &model.normals,
@@ -335,7 +369,7 @@ impl ModelViewer {
                 observer_scale: model.scale,
                 observer,
                 light,
-                shades: std::array::from_fn(|i| [2 * (7 - i as u8); 3]),
+                shades: self.lighting.shades,
             },
         )?;
         let mut vertices =
@@ -389,7 +423,7 @@ impl ModelViewer {
                     let textured = material(face.material).texture != 0;
                     let descriptors = self.textures.descriptors();
                     let colour = emission.context.colour;
-                    let rgb = rgb(match (textured, descriptors) {
+                    let rgb = self.rgb(match (textured, descriptors) {
                         // F1693/F1691 flat colour (the textured path is chosen below).
                         (true, Some(table)) => {
                             flat_colour(face.material, colour, normal.colour, table)?
@@ -432,7 +466,7 @@ impl ModelViewer {
                     });
                 }
                 Primitive::Line(line) => {
-                    let rgb = rgb(resolve_colour(line.material, line.context.colour, [0; 3]));
+                    let rgb = self.rgb(resolve_colour(line.material, line.context.colour, [0; 3]));
                     if let (Some(a), Some(b)) = (
                         screen(line.vertices[0], &line.context)?,
                         screen(line.vertices[1], &line.context)?,
@@ -441,7 +475,8 @@ impl ModelViewer {
                     }
                 }
                 Primitive::Point(point) => {
-                    let rgb = rgb(resolve_colour(point.material, point.context.colour, [0; 3]));
+                    let rgb =
+                        self.rgb(resolve_colour(point.material, point.context.colour, [0; 3]));
                     if let Some(p) = screen(point.vertex, &point.context)? {
                         frame.shapes.push(Shape::Point(p, rgb));
                     }
@@ -458,7 +493,7 @@ impl ModelViewer {
                             let y: f64 = (0..4).map(|i| w[i] * p[i].1).sum();
                             (x.round() as i32, y.round() as i32)
                         };
-                        let colour = rgb(spline.colour);
+                        let colour = self.rgb(spline.colour);
                         for step in 0..16 {
                             frame.shapes.push(Shape::Line(
                                 at(f64::from(step) / 16.0),
@@ -483,7 +518,7 @@ impl ModelViewer {
                             .iter()
                             .map(|[x, y]| (i32::from(*x), i32::from(*y)))
                             .collect();
-                        frame.shapes.push(Shape::Fill(points, rgb(colour)));
+                        frame.shapes.push(Shape::Fill(points, self.rgb(colour)));
                     }
                 }
                 Primitive::Label(_) => frame.skipped += 1,
@@ -533,10 +568,4 @@ impl ViewerModel {
             radius,
         }
     }
-}
-
-/// Diagnostic mapping of the original's additive nibble colours (material plus
-/// normal shade, up to 22 per channel) to 8-bit RGB; not the original palette.
-fn rgb(colour: [u8; 3]) -> [u8; 3] {
-    colour.map(|c| (u32::from(c).min(21) * 12) as u8)
 }

@@ -67,7 +67,7 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         read(&bytes).unwrap().asset("base:model-commands/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 9] {
+    for version in [1, 2, 3, 10] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
 
@@ -104,7 +104,7 @@ fn normal_payloads_require_v5_and_validate_counts_and_anchor_bounds() {
         read(&bytes).unwrap().asset("base:model-normals/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 9] {
+    for version in [1, 2, 3, 4, 10] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for count in [0, 1, 3, 6, 258, u32::MAX] {
@@ -135,7 +135,7 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
         read(&bytes).unwrap().asset("base:model-vertices/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 9] {
+    for version in [1, 2, 10] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for (program, count, scale, index) in [
@@ -223,7 +223,7 @@ fn stored_cache_is_deterministic_sorted_and_loads_by_stable_id() {
 fn malformed_manifests_cannot_claim_complete_content_or_escape_paths() {
     let bytes = build(manifest(), assets()).unwrap();
     for (key, value) in [
-        ("format_version", serde_json::json!(9)),
+        ("format_version", serde_json::json!(10)),
         ("format", serde_json::json!("other")),
         ("complete_game_assets", serde_json::json!(true)),
         ("unresolved", serde_json::json!([])),
@@ -392,4 +392,58 @@ fn texture_tables_require_v8_and_validate_payloads() {
     assert!(build(m.clone(), vec![descriptors(table[..4410].to_vec(), 148)]).is_err());
     assert!(build(m.clone(), vec![map(vec![129; 4096])]).is_err());
     assert!(build(m, vec![map(vec![0; 4095])]).is_err());
+}
+
+#[test]
+fn lighting_tables_require_v9_and_validate_payloads() {
+    // Synthetic default light (0x8000 along z) with a 7..0 ramp, and six ramps.
+    let ramp: Vec<u8> = (0..8u8).flat_map(|i| [7 - i; 3]).collect();
+    let mut default = Vec::new();
+    for v in [0i32, 0, 0x8000] {
+        default.extend_from_slice(&v.to_le_bytes());
+    }
+    default.extend_from_slice(&ramp);
+    let stars: Vec<u8> = ramp.iter().copied().cycle().take(6 * 24).collect();
+    let light = |bytes: Vec<u8>| Asset {
+        id: "base:lighting/default".to_owned(),
+        path: "lighting/default.bin".to_owned(),
+        kind: AssetKind::DefaultLighting { source_offset: 1 },
+        bytes,
+    };
+    let shades = |bytes: Vec<u8>, count: u32| Asset {
+        id: "base:lighting/star-shades".to_owned(),
+        path: "lighting/star-shades.bin".to_owned(),
+        kind: AssetKind::StarShades {
+            count,
+            source_offset: 2,
+        },
+        bytes,
+    };
+    let mut m = manifest();
+    m.format_version = 8;
+    assert!(build(m.clone(), vec![light(default.clone())]).is_err());
+    assert!(build(m.clone(), vec![shades(stars.clone(), 6)]).is_err());
+    m.format_version = 9;
+    let bytes = build(
+        m.clone(),
+        vec![light(default.clone()), shades(stars.clone(), 6)],
+    )
+    .unwrap();
+    assert_eq!(
+        read(&bytes)
+            .unwrap()
+            .asset("base:lighting/default")
+            .unwrap(),
+        default.as_slice()
+    );
+    // Not a normalised light, a shade above 15, wrong sizes and counts.
+    let mut bad = default.clone();
+    bad[9] = 0;
+    assert!(build(m.clone(), vec![light(bad)]).is_err());
+    let mut bad = default.clone();
+    bad[12] = 16;
+    assert!(build(m.clone(), vec![light(bad)]).is_err());
+    assert!(build(m.clone(), vec![light(default[..35].to_vec())]).is_err());
+    assert!(build(m.clone(), vec![shades(stars.clone(), 5)]).is_err());
+    assert!(build(m, vec![shades(stars[..120].to_vec(), 6)]).is_err());
 }

@@ -2,8 +2,9 @@ use crate::external::{output_destination, recorded_bytes};
 use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
-    decode_bitmaps, decode_colour_map, decode_font, decode_model_commands, decode_model_normals,
-    decode_model_vertices, decode_sine_table, decode_texture_descriptors, BitmapLayout,
+    decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font, decode_model_commands,
+    decode_model_normals, decode_model_vertices, decode_sine_table, decode_star_shades,
+    decode_texture_descriptors, BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -25,6 +26,15 @@ pub(crate) fn model_layout(profile: &str) -> Result<(u32, u32), String> {
 pub(crate) fn texture_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0x102da8, 0x101b10)),
+        _ => None,
+    }
+}
+
+/// Default lighting (`DATA_007231`) and star shade table (`DATA_007759`) RVAs (v9),
+/// matched byte for byte against JJFFE 2.8a7 in floppy 1.02 only.
+pub(crate) fn lighting_layout(profile: &str) -> Option<(u32, u32)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0xeec60, 0x101858)),
         _ => None,
     }
 }
@@ -162,6 +172,27 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: map.bytes,
                 });
             }
+            if let Some((default_rva, stars_rva)) = lighting_layout(profile.id) {
+                let table = decode_default_lighting(&bytes, default_rva)?;
+                assets.push(Asset {
+                    id: "base:lighting/default".to_owned(),
+                    path: "lighting/default.bin".to_owned(),
+                    kind: AssetKind::DefaultLighting {
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+                let table = decode_star_shades(&bytes, stars_rva)?;
+                assets.push(Asset {
+                    id: "base:lighting/star-shades".to_owned(),
+                    path: "lighting/star-shades.bin".to_owned(),
+                    kind: AssetKind::StarShades {
+                        count: ffe_core::model_lighting::STAR_SHADE_TABLES as u32,
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             let font = decode_font(&bytes, font_rva)?;
             assets.push(Asset {
                 id: "base:font/main".to_owned(),
@@ -235,9 +266,13 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             });
         }
     }
-    // 379 non-model assets (381 with the v8 texture tables) plus vertices, commands
+    // 379 non-model assets (+2 v8 texture tables, +2 v9 lighting tables) plus vertices, commands
     // and normals per imported model.
     let tables = if texture_layout(profile.id).is_some() {
+        2
+    } else {
+        0
+    } + if lighting_layout(profile.id).is_some() {
         2
     } else {
         0
@@ -249,7 +284,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 8,
+        format: "ffe-content-cache".to_owned(), format_version: 9,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,
@@ -262,6 +297,11 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                 "Texture descriptors and the 12-bit colour map are not imported: their RVAs are verified for floppy 1.02 only.".to_owned()
             } else {
                 "Texture descriptors and the 12-bit fixed colour map are imported; textured faces are drawn only by the diagnostic F6 viewer.".to_owned()
+            },
+            if lighting_layout(profile.id).is_some() {
+                "The default light and shade table and the star shade tables are imported (v9).".to_owned()
+            } else {
+                "Lighting tables are not imported: their RVAs are verified for floppy 1.02 only.".to_owned()
             },
             "Station commands are structurally decoded, not fully executed; submodels, other fonts, gameplay tables, journal, music and optional CD media remain unconverted.".to_owned(),
             "Not a playable game cache or installable graphics pack; patch-output layouts are unsupported.".to_owned(),

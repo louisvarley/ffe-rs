@@ -4,6 +4,28 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Original lighting and colours in the viewer (v0.40)
+
+The viewer's shades had been a diagnostic 14..0 ramp, about double the
+original, which washed faces towards white. The original's inputs are now
+imported: F960 sets the default light `DATA_007231..7233` ((-18919, -18919,
+18919), length 0x8000) and copies the default shade table `DATA_007234`
+(7,7,7 7,7,7 6,6,6 5,5,5 4,4,4 3,3,3 2,2,2 1,1,1) to `DATA_008831`; F1535 swaps
+in one of six star tables from `DATA_007759`; F1683/F1684 and F1740 copy the
+eight shades into every instance and child. **Cache v9** adds
+`base:lighting/default` (RVA 0xeec60) and `base:lighting/star-shades` (RVA
+0x101858), byte-identical to JJFFE in floppy 1.02 (`model_lighting` parses
+them; a CD cache omits them).
+
+The viewer and flight station use those shades, a light of length 0x8000 as
+F1518 normalises it (fixed in flight space; view-relative in F6), and every
+flat colour goes through F1326 (`model_lighting::pack`: `r << 8 + g << 4 + b`,
+no clamp) and the original fixed colour map / low palette, the route textured
+faces already used. Still diagnostic: which star table applies (F1535's star
+type), the light's direction relative to a real star, and the runtime upper
+palette for colours outside `DATA_007770`. Oracles unchanged on the v9 cache.
+Two tests added; version-rejection tests move to 10.
+
 ## 2026-10-22 — The real station in the flight view (v0.39)
 
 The flight view draws the station as the original model 74 instead of the

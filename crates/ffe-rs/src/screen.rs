@@ -437,7 +437,8 @@ impl Screen {
         let to_view = |p: [f64; 3]| view_vector(p, state);
         let rows = STATION_AXES.map(to_view);
         let origin = to_view(state.position.map(|v| -v)).map(|v| v * scale);
-        let light = to_view([0.35, -0.55, 0.75]);
+        // The original default light (F960), fixed in flight space.
+        let light = to_view(scene.light_direction());
         match scene.render_scene(STATION_MODEL, rows, origin, light) {
             Ok(frame) => {
                 self.draw_shapes(scene, &frame.shapes);

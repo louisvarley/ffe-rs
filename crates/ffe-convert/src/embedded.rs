@@ -274,6 +274,32 @@ pub fn decode_texture_descriptors(bytes: &[u8], rva: u32) -> Result<EmbeddedTabl
     })
 }
 
+/// The default light and shade table (`DATA_007231..7234`, 36 bytes).
+pub fn decode_default_lighting(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    use ffe_core::model_lighting::{default_lighting, DEFAULT_LIGHTING_BYTES};
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, DEFAULT_LIGHTING_BYTES)?;
+    let table = range(bytes, source_offset, DEFAULT_LIGHTING_BYTES)?;
+    default_lighting(table)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table.to_vec(),
+    })
+}
+
+/// The star shade tables (`DATA_007759`, six of 24 bytes).
+pub fn decode_star_shades(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    use ffe_core::model_lighting::{star_shades, STAR_SHADE_TABLES};
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, STAR_SHADE_TABLES * 24)?;
+    let table = range(bytes, source_offset, STAR_SHADE_TABLES * 24)?;
+    star_shades(table)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table.to_vec(),
+    })
+}
+
 /// The original 12-bit colour to fixed low-palette map (`DATA_007770`, 4096 bytes).
 pub fn decode_colour_map(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
     use ffe_core::model_texture::{validate_colour_map, COLOUR_MAP_ENTRIES};
