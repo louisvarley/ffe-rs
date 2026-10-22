@@ -2,16 +2,23 @@
 //!
 //! The view mode is the player's `DATA_008872` (0 front, 1 rear, 2/3 turrets,
 //! 4 external; 5 missile and 6 combat computer need equipment not modelled
-//! here). F1 cycles front, rear, (turret), external; F6/F7/F9 select directly.
+//! here). F1 cycles front, rear, turret, external; F6-F9 select directly.
 //! The external camera keeps the original's yaw and pitch (16-bit angles,
 //! `+0x128`/`+0x12c`) and signed distance (`+0x130`, negative = behind), turned
-//! by FUNC_001054's two rotations of the ship's axes. The projection is F1479's.
+//! by FUNC_001054's two rotations of the ship's axes; the turrets keep theirs at
+//! `+0x204`/`+0x206`. The eye sits at offsets from the ship's statistics block
+//! (descriptor +0x38). The projection is F1479's.
 use crate::flight::Flight;
+use crate::ships::ShipStats;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
     Front,
     Rear,
+    /// Mode 2: the turret looking above the ship (turret pitch < 0).
+    TopTurret,
+    /// Mode 3: the turret looking below (ships with 4 or more gun mounts).
+    BottomTurret,
     External,
 }
 
@@ -20,19 +27,91 @@ impl ViewMode {
         match self {
             ViewMode::Front => "Front View",
             ViewMode::Rear => "Rear View",
+            ViewMode::TopTurret => "Top Turret View",
+            ViewMode::BottomTurret => "Bottom Turret View",
             ViewMode::External => "External View",
         }
     }
 
-    /// FUNC_001001 (F1): front -> rear -> turret -> external -> front. The turret
-    /// views are skipped, as for a ship with no more than two gun mounts.
-    pub fn next(self) -> ViewMode {
+    pub fn is_turret(self) -> bool {
+        matches!(self, ViewMode::TopTurret | ViewMode::BottomTurret)
+    }
+
+    /// FUNC_001001 (F1): front -> rear -> turret -> external -> front. The rear
+    /// view skips to external unless the ship has more than two gun mounts
+    /// (signed byte `ship[+0xd1]`); the turret is the top one while its pitch is
+    /// negative, otherwise the bottom one.
+    pub fn next(self, gun_mounts: i8, turret_pitch: i16) -> ViewMode {
         match self {
             ViewMode::Front => ViewMode::Rear,
-            ViewMode::Rear => ViewMode::External,
+            ViewMode::Rear => {
+                ViewMode::turret(gun_mounts, turret_pitch).unwrap_or(ViewMode::External)
+            }
+            ViewMode::TopTurret | ViewMode::BottomTurret => ViewMode::External,
             ViewMode::External => ViewMode::Front,
         }
     }
+
+    /// FUNC_001056's F8 (and the turret console button): `None`, leaving the view
+    /// unchanged, without more than two gun mounts.
+    pub fn turret(gun_mounts: i8, turret_pitch: i16) -> Option<ViewMode> {
+        (gun_mounts > 2).then_some(if turret_pitch < 0 {
+            ViewMode::TopTurret
+        } else {
+            ViewMode::BottomTurret
+        })
+    }
+}
+
+/// The turret angles (player `+0x204` yaw, `+0x206` pitch, 16-bit). The player
+/// structure starts zeroed, as these are taken to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TurretCamera {
+    pub yaw: i16,
+    pub pitch: i16,
+}
+
+impl TurretCamera {
+    /// FUNC_001038 in a turret view, where the steering keys turn the turret
+    /// instead of the ship: `pitch_input` is A minus Z and `yaw_input` comma minus
+    /// period, as FUNC_CalcKeyInput amounts. Returns the view the pitch selects:
+    /// above the ship (pitch clamped to -0x3fff) or, with 4 or more mounts, below
+    /// it (clamped to 0x3fff); with fewer, the pitch is held at -1 (the mode
+    /// itself switches on the next step, as in the original).
+    pub fn step(
+        &mut self,
+        mode: ViewMode,
+        pitch_input: i16,
+        yaw_input: i16,
+        gun_mounts: i8,
+    ) -> ViewMode {
+        self.yaw = self.yaw.wrapping_sub(yaw_input);
+        self.pitch = self.pitch.wrapping_add(pitch_input);
+        if self.pitch < 0 {
+            if self.pitch <= -0x4000 {
+                self.pitch = -0x3fff;
+            }
+            ViewMode::TopTurret
+        } else if gun_mounts >= 4 {
+            if self.pitch >= 0x4000 {
+                self.pitch = 0x3fff;
+            }
+            ViewMode::BottomTurret
+        } else {
+            self.pitch = -1;
+            mode
+        }
+    }
+}
+
+/// FUNC_CalcKeyInput: the frame's time in 1/49710 s units (`elapsed_ms`), scaled
+/// by how long the key has been held in 50 Hz ticks (capped at 70), over 64.
+pub fn key_amount(elapsed_ms: u32, held: Option<u32>) -> i32 {
+    let Some(held) = held else {
+        return 0;
+    };
+    let elapsed = (u64::from(elapsed_ms) * 0x3e2 / 20) as i64;
+    ((elapsed * (i64::from(held.min(70)) + 2)) >> 6) as i32
 }
 
 /// The original external camera: angles where 0x10000 is a full turn, and the
@@ -79,8 +158,7 @@ impl ExternalCamera {
     pub fn step(&mut self, keys: ExternalKeys, elapsed_ms: u32, minimum: i32) {
         // FUNC_CalcKeyInputNoPause: the frame's time in 1/49710 s units, scaled by
         // how long the key has been held (capped at 70 ticks).
-        let elapsed = (u64::from(elapsed_ms) * 0x3e2 / 20) as i64;
-        let amount = |held: u32| ((elapsed * (i64::from(held.min(70)) + 2)) >> 6) as i32;
+        let amount = |held: u32| key_amount(elapsed_ms, Some(held));
         match (keys.left, keys.right) {
             (Some(_), Some(_)) => self.yaw = 0,
             (Some(held), None) => self.yaw = self.yaw.wrapping_add(amount(held) as u16),
@@ -110,11 +188,13 @@ impl ExternalCamera {
     }
 }
 
-/// The player's view: the mode and the external camera (kept across modes).
+/// The player's view: the mode, the external camera and the turret angles (both
+/// kept across modes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewState {
     pub mode: ViewMode,
     pub external: ExternalCamera,
+    pub turret: TurretCamera,
 }
 
 impl Default for ViewState {
@@ -122,6 +202,7 @@ impl Default for ViewState {
         Self {
             mode: ViewMode::Front,
             external: ExternalCamera::default(),
+            turret: TurretCamera::default(),
         }
     }
 }
@@ -159,23 +240,62 @@ fn rotate(v1: [f64; 3], v2: [f64; 3], angle: u16) -> ([f64; 3], [f64; 3]) {
 }
 
 impl Camera {
-    /// The camera for `mode`. `model_scale` is model units per flight unit, which
-    /// converts the external distance (model units * 256).
-    pub fn new(state: &Flight, mode: ViewMode, external: ExternalCamera, model_scale: f64) -> Self {
+    /// The camera for `views`. `stats` places the eye (none: the ship's centre);
+    /// `model_scale` is model units per flight unit, which converts the eye
+    /// offsets and the external distance (model units * 256).
+    pub fn new(
+        state: &Flight,
+        views: &ViewState,
+        stats: Option<&ShipStats>,
+        model_scale: f64,
+    ) -> Self {
         let [right, up, forward] = ship_axes(state);
-        match mode {
+        // FUNC_001053/FUNC_001054: the eye is `along` the forward axis and `above`
+        // along the up axis, each word times the axis' top 16 bits (1.0 = 0x7fff)
+        // over 4096, in model units.
+        let eye = |forward: [f64; 3], words: [i32; 2]| -> [f64; 3] {
+            let [along, above] = words.map(|w| f64::from(w) * 32767.0 / 4096.0 / model_scale);
+            std::array::from_fn(|i| state.position[i] + forward[i] * along + up[i] * above)
+        };
+        let words = |pick: fn(&ShipStats) -> [i16; 2], adjust: i32| {
+            stats.map_or([0, 0], |stats| {
+                let [along, above] = pick(stats);
+                [i32::from(along), i32::from(above) + adjust]
+            })
+        };
+        match views.mode {
             ViewMode::Front => Self {
-                position: state.position,
+                position: eye(forward, words(|s| s.eye, 0)),
                 axes: [right, up, forward],
             },
-            // FUNC_001054 negates A and C: a half turn about the up axis.
-            ViewMode::Rear => Self {
-                position: state.position,
-                axes: [right.map(|v| -v), up, forward.map(|v| -v)],
-            },
+            // FUNC_001054 negates A and C (a half turn about the up axis) before
+            // placing the eye, which mirrors the front offset.
+            ViewMode::Rear => {
+                let back = forward.map(|v| -v);
+                Self {
+                    position: eye(back, words(|s| s.eye, 0)),
+                    axes: [right.map(|v| -v), up, back],
+                }
+            }
+            // The eye at the turret's offset (0x3e above or below it), then the
+            // axes turned as the external camera's, by the turret angles.
+            ViewMode::TopTurret | ViewMode::BottomTurret => {
+                let position = if views.mode == ViewMode::TopTurret {
+                    eye(forward, words(|s| s.top_turret, 0x3e))
+                } else {
+                    eye(forward, words(|s| s.bottom_turret, -0x3e))
+                };
+                let (forward, right) = rotate(forward, right, views.turret.yaw as u16);
+                let (up, forward) = rotate(up, forward, views.turret.pitch as u16);
+                Self {
+                    position,
+                    axes: [right, up, forward],
+                }
+            }
             // rot(C, A, yaw), then rot(B, C, pitch); the camera sits at
             // distance / 256 along the turned forward axis ("lock to ship" on).
             ViewMode::External => {
+                let external = views.external;
                 let (forward, right) = rotate(forward, right, external.yaw);
                 let (up, forward) = rotate(up, forward, external.pitch);
                 let offset = f64::from(external.distance) / 256.0 / model_scale;

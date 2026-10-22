@@ -113,6 +113,36 @@ pub fn decode_model_descriptor(
     })
 }
 
+/// Bytes in one ship statistics block (every block the floppy 1.02 table points to).
+pub const SHIP_STATS_BYTES: usize = 48;
+
+/// The 48-byte statistics block descriptor +0x38 points to (object set-up reads
+/// forward thrust at +0x0, reverse thrust at +0x2, gun mounts at +0x4, mass at
+/// +0x6), or `None` when the pointer is null.
+pub fn decode_ship_stats(
+    bytes: &[u8],
+    table_rva: u32,
+    index: u32,
+) -> Result<Option<Vec<u8>>, String> {
+    let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
+    let descriptor_rva = u32::try_from(
+        descriptor_offset
+            .checked_sub(section.raw)
+            .ok_or("Descriptor precedes its section")?,
+    )
+    .map_err(|_| "Descriptor offset overflow")?
+        + section.rva;
+    let pointer = dword(bytes, section.offset(descriptor_rva + 0x38, 4)?)?;
+    if pointer == 0 {
+        return Ok(None);
+    }
+    let stats_rva = pointer
+        .checked_sub(section.image_base)
+        .ok_or("Ship stats pointer precedes image base")?;
+    let offset = section.offset(stats_rva, SHIP_STATS_BYTES)?;
+    Ok(Some(bytes[offset..offset + SHIP_STATS_BYTES].to_vec()))
+}
+
 #[derive(Debug)]
 pub struct EmbeddedModelCommands {
     pub descriptor_offset: usize,

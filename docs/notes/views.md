@@ -70,3 +70,14 @@ ported: turret, missile and combat views (equipment and mounts are not
 modelled), eye offsets (the rear view does not draw the own ship), the
 Alt-arrow mouse nudge. ffe-rs moved its own development keys off the original
 ones: help F1 -> H, model viewer F6 -> M, load F9 -> Shift+F5.
+
+## Turrets and eyes (ported)
+
+Ship statistics (descriptor +0x38, 48 bytes, cache v12 `base:ship/stats`): +0x0
+forward thrust, +0x2 reverse thrust, +0x4 gun mounts, +0x6 mass, +0x18/+0x1a
+cockpit eye (forward, up), +0x28/+0x2a top turret, +0x2c/+0x2e bottom turret.
+FUNC_001053 places the eye at C*w0 + B*w1, each word * 0x7fff >> 12 model units;
+rear negates A and C first; turrets add +/-0x3e to the up word and turn by
+`+0x204`/`+0x206` (FUNC_001038 clamps; pitch < 0 = top). F8 and the turret
+button need more than two mounts. The own ship is now drawn in every view but
+front. Turret angles are assumed to start at 0.

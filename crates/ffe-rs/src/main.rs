@@ -1,4 +1,4 @@
-use ffe_rs::camera::{ExternalCamera, ExternalKeys, ViewMode};
+use ffe_rs::camera::{key_amount, ExternalKeys, ViewMode, ViewState};
 use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
@@ -159,9 +159,9 @@ fn run() -> Result<(), String> {
     let mut help = true;
     let mut scenarios = false;
     let mut model_lab = None;
-    let mut view = ViewMode::Front;
-    let mut external = ExternalCamera::default();
-    // When each external-view key went down, for the original's held-key ramp.
+    let mut views = ViewState::default();
+    // When each external-view or turret key went down, for the original's
+    // held-key ramp.
     let mut held_since: HashMap<Key, Instant> = HashMap::new();
     let mut mouse_was_down = false;
     let mut model_viewer: Option<ModelViewer> = None;
@@ -337,6 +337,11 @@ fn run() -> Result<(), String> {
             } else if !help && !paused {
                 // The original's view keys (FUNC_001001/FUNC_001056): F1 cycles,
                 // F6 front, F7 rear, F9 external; the console icons do the same.
+                // The ship's gun mounts (cache v12): more than two offer the turrets.
+                let gun_mounts = scene
+                    .as_ref()
+                    .and_then(|scene| scene.ship_stats(state.ship))
+                    .map_or(0, |stats| stats.gun_mounts);
                 if state.mode == ffe_rs::flight::Mode::Flight {
                     let mouse_down = window.get_mouse_down(MouseButton::Left);
                     let clicked = if mouse_down && !mouse_was_down {
@@ -351,12 +356,15 @@ fn run() -> Result<(), String> {
                         None
                     };
                     mouse_was_down = mouse_down;
+                    let turret = ViewMode::turret(gun_mounts, views.turret.pitch);
                     let chosen = if pressed(Key::F1) || clicked == Some(ViewButton::Cycle) {
-                        Some(view.next())
+                        Some(views.mode.next(gun_mounts, views.turret.pitch))
                     } else if pressed(Key::F6) {
                         Some(ViewMode::Front)
                     } else if pressed(Key::F7) {
                         Some(ViewMode::Rear)
+                    } else if pressed(Key::F8) || clicked == Some(ViewButton::Turret) {
+                        turret
                     } else if pressed(Key::F9) {
                         Some(ViewMode::External)
                     } else if let Some(ViewButton::Select(mode)) = clicked {
@@ -365,25 +373,36 @@ fn run() -> Result<(), String> {
                         None
                     };
                     if let Some(next) = chosen {
-                        view = next;
-                        message = format!("{}.", view.name());
+                        views.mode = next;
+                        message = format!("{}.", views.mode.name());
                     }
                 }
-                if view == ViewMode::External {
-                    let now = Instant::now();
-                    let mut held = |keys: &[Key]| {
-                        let down = keys.iter().find(|key| window.is_key_down(**key)).copied();
-                        for key in keys {
-                            if Some(*key) != down {
-                                held_since.remove(key);
-                            }
+                let now = Instant::now();
+                let mut held = |keys: &[Key]| {
+                    let down = keys.iter().find(|key| window.is_key_down(**key)).copied();
+                    for key in keys {
+                        if Some(*key) != down {
+                            held_since.remove(key);
                         }
-                        down.map(|key| {
-                            let since = *held_since.entry(key).or_insert(now);
-                            // 50 Hz ticks held (DATA_KeyAccumTable).
-                            (now.duration_since(since).as_secs_f64() * 50.0) as u32
-                        })
-                    };
+                    }
+                    down.map(|key| {
+                        let since = *held_since.entry(key).or_insert(now);
+                        // 50 Hz ticks held (DATA_KeyAccumTable).
+                        (now.duration_since(since).as_secs_f64() * 50.0) as u32
+                    })
+                };
+                let elapsed_ms = (elapsed * 1000.0) as u32;
+                if views.mode.is_turret() {
+                    // FUNC_001038: A/Z and comma/period aim the turret (the arrows
+                    // too, in either control scheme); the ship holds its course.
+                    let amount = |held| key_amount(elapsed_ms, held) as i16;
+                    let pitch = amount(held(&[Key::A, Key::Up]))
+                        .wrapping_sub(amount(held(&[Key::Z, Key::Down])));
+                    let yaw = amount(held(&[Key::Comma, Key::Left]))
+                        .wrapping_sub(amount(held(&[Key::Period, Key::Right])));
+                    views.mode = views.turret.step(views.mode, pitch, yaw, gun_mounts);
+                }
+                if views.mode == ViewMode::External {
                     let keys = ExternalKeys {
                         left: held(&[Key::Left]),
                         right: held(&[Key::Right]),
@@ -396,7 +415,7 @@ fn run() -> Result<(), String> {
                         .as_ref()
                         .and_then(|scene| scene.camera_minimum(state.ship))
                         .unwrap_or(0);
-                    external.step(keys, (elapsed * 1000.0) as u32, minimum);
+                    views.external.step(keys, elapsed_ms, minimum);
                 }
                 let ship_step = i32::from(pressed(Key::PageDown)) - i32::from(pressed(Key::PageUp));
                 if ship_step != 0 {
@@ -408,7 +427,16 @@ fn run() -> Result<(), String> {
                                 .as_ref()
                                 .and_then(|scene| scene.camera_minimum(ship))
                                 .unwrap_or(0);
-                            external.distance = external.distance.min(minimum.saturating_neg());
+                            views.external.distance =
+                                views.external.distance.min(minimum.saturating_neg());
+                            // ffe-rs: a ship without turrets leaves a turret view.
+                            let mounts = scene
+                                .as_ref()
+                                .and_then(|scene| scene.ship_stats(ship))
+                                .map_or(0, |stats| stats.gun_mounts);
+                            if views.mode.is_turret() && mounts <= 2 {
+                                views.mode = ViewMode::Front;
+                            }
                             format!(
                                 "Ship: {} (model {ship}).",
                                 ships.name(ship).unwrap_or("unnamed")
@@ -477,8 +505,20 @@ fn run() -> Result<(), String> {
             };
             // In the external view the arrows move the camera, so Modern steering
             // falls back to the Classic-like keys there.
-            let external_view = view == ViewMode::External;
-            let input = if modern && !external_view {
+            let external_view = views.mode == ViewMode::External;
+            let input = if views.mode.is_turret() {
+                // The steering keys aim the turret (FUNC_001038).
+                Controls {
+                    thrust: if modern {
+                        axis(Key::W, Key::S)
+                    } else {
+                        axis(Key::Enter, Key::LeftShift)
+                    },
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    brake: held_controls.contains(&Key::X),
+                }
+            } else if modern && !external_view {
                 Controls {
                     thrust: axis(Key::W, Key::S),
                     yaw: axis(Key::Right, Key::Left),
@@ -516,23 +556,13 @@ fn run() -> Result<(), String> {
             .as_ref()
             .and_then(|scene| scene.camera_minimum(state.ship))
         {
-            external.distance = external.distance.min(minimum.saturating_neg());
+            views.external.distance = views.external.distance.min(minimum.saturating_neg());
         }
         // The original returns to the front view when docking (FUNC_001048).
         if state.mode == ffe_rs::flight::Mode::Docked {
-            view = ViewMode::Front;
+            views.mode = ViewMode::Front;
         }
-        screen.draw(
-            &state,
-            ffe_rs::camera::ViewState {
-                mode: view,
-                external,
-            },
-            scene.as_ref(),
-            help,
-            modern,
-            &message,
-        );
+        screen.draw(&state, views, scene.as_ref(), help, modern, &message);
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);
         } else if let Some(lab) = &model_lab {

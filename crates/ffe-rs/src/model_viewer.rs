@@ -6,6 +6,7 @@
 //! Textured faces follow the original F1708/F1712 entry and F1644/F1647
 //! rasterisers with the cache v8 descriptor table (verified, see
 //! `docs/notes/textures.md`); without v8 they show as a lit grey stand-in.
+use crate::ships::ShipStats;
 use crate::textures::TextureSet;
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::{evaluate, VertexContext};
@@ -129,6 +130,7 @@ pub struct ModelViewer {
     lighting: Lighting,
     /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
     descriptors: Vec<[i32; 2]>,
+    ship_stats: Vec<Option<ShipStats>>,
     /// Global word 15 (the ship's forward thrust, object +0xba); `None` leaves it
     /// to the animation input. See [`ModelViewer::set_thrust`].
     thrust: Option<u16>,
@@ -246,7 +248,15 @@ impl ModelViewer {
                 })
                 .collect();
         }
+        if let Some(table) = cache.asset("base:ship/stats") {
+            viewer.ship_stats = table.chunks_exact(48).map(ShipStats::from_block).collect();
+        }
         Ok(viewer)
+    }
+
+    /// The model's original ship statistics (cache v12), if it has any.
+    pub fn ship_stats(&self, index: u32) -> Option<ShipStats> {
+        self.ship_stats.get(index as usize).copied().flatten()
     }
 
     /// Use these textures (bitmaps, descriptor table, colour map).
@@ -317,6 +327,7 @@ impl ModelViewer {
             textures: TextureSet::default(),
             lighting: FALLBACK_LIGHTING,
             descriptors: Vec::new(),
+            ship_stats: Vec::new(),
             thrust: None,
         })
     }

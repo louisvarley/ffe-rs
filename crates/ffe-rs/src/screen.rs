@@ -24,12 +24,14 @@ pub struct Screen {
 }
 
 /// Console view buttons (`DATA_005100`): position, off and on bitmap ids, and the
-/// view they select. Turret (0x16), missile (0x14) and combat (0x13) need
-/// equipment that is not modelled, so they stay hidden as the original hides them.
-const VIEW_BUTTONS: [(i32, i32, u8, u8, ViewMode); 3] = [
-    (142, 163, 0xa2, 0xb1, ViewMode::Front),
-    (162, 163, 0xa1, 0xb0, ViewMode::Rear),
-    (198, 165, 0x9f, 0xae, ViewMode::External),
+/// button. The turret button (0x16) shows only for ships with more than two gun
+/// mounts (as the original shows and hides it); missile (0x14) and combat (0x13)
+/// need equipment that is not modelled, so they stay hidden.
+const VIEW_BUTTONS: [(i32, i32, u8, u8, ViewButton); 4] = [
+    (142, 163, 0xa2, 0xb1, ViewButton::Select(ViewMode::Front)),
+    (162, 163, 0xa1, 0xb0, ViewButton::Select(ViewMode::Rear)),
+    (181, 163, 0xa0, 0xaf, ViewButton::Turret),
+    (198, 165, 0x9f, 0xae, ViewButton::Select(ViewMode::External)),
 ];
 
 impl Screen {
@@ -99,6 +101,8 @@ impl Screen {
             Some(ViewButton::Select(ViewMode::Front))
         } else if inside(166, 163, 181, 182) {
             Some(ViewButton::Select(ViewMode::Rear))
+        } else if inside(185, 163, 200, 182) {
+            Some(ViewButton::Turret)
         } else if inside(202, 165, 217, 184) {
             Some(ViewButton::Select(ViewMode::External))
         } else if inside(64, 172, 79, 191) {
@@ -287,10 +291,18 @@ impl Screen {
         self.indexed.fill(0);
         self.panel.blit(&mut self.indexed, 0, 158);
         let view = views.mode;
+        let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
+        let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
         if state.mode != Mode::Docked {
             // Only the current view's icon is lit (radio group 1).
-            for (x, y, off, on, mode) in VIEW_BUTTONS {
-                let id = if mode == view { on } else { off };
+            for (x, y, off, on, button) in VIEW_BUTTONS {
+                let lit = match button {
+                    ViewButton::Select(mode) => mode == view,
+                    ViewButton::Turret if !turrets => continue,
+                    ViewButton::Turret => view.is_turret(),
+                    ViewButton::Cycle => false,
+                };
+                let id = if lit { on } else { off };
                 if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
                     icon.blit(&mut self.indexed, x, y);
                 }
@@ -315,7 +327,7 @@ impl Screen {
             self.text(36, 101, "F2 SCENARIOS / RESET", 12);
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
-            let camera = Camera::new(state, view, views.external, scale);
+            let camera = Camera::new(state, &views, stats.as_ref(), scale);
             for index in 0..self.stars.len() {
                 if let Some((x, y)) = camera.project(self.stars[index], false) {
                     if y < 158 {
@@ -323,9 +335,10 @@ impl Screen {
                     }
                 }
             }
+            // FUNC_001054 hides the player's own ship only in the front view.
             // Painter's order between the two objects: the farther one first.
-            let external_view = view == ViewMode::External;
-            let ship_first = external_view
+            let own_ship = view != ViewMode::Front;
+            let ship_first = own_ship
                 && distance(camera.position, state.position) > distance(camera.position, [0.0; 3]);
             if ship_first {
                 if let Some(scene) = scene {
@@ -333,9 +346,7 @@ impl Screen {
                 }
             }
             let drawn = scene.is_some_and(|scene| self.draw_station(scene, state, &camera));
-            // Only the external view draws the player's own ship (FUNC_001054 hides
-            // it in the front view; the rear view's eye offset is not modelled).
-            if !ship_first && external_view {
+            if !ship_first && own_ship {
                 if let Some(scene) = scene {
                     self.draw_ship(scene, state, &camera);
                 }
@@ -467,8 +478,8 @@ impl Screen {
                 "DEFAULT MODERN: W/S thrust; arrows yaw/pitch",
                 "CLASSIC-LIKE: Enter/Shift thrust; ,/. yaw; A/Z pitch",
                 "X brake  D dock  L launch  B buy  N sell  PGUP/DN ship",
-                "VIEWS: F1 cycle, F6 front, F7 rear, F9 external",
-                "External: arrows turn, +/- zoom (as the original)",
+                "VIEWS: F1 cycle F6 front F7 rear F8 turret F9 external",
+                "External: arrows turn, +/- zoom. Turret: arrows aim",
                 "F3 input. F4 lab. M models. P pause. Esc quit.",
                 "F5 save snapshot; Shift+F5 load newest snapshot.",
                 "F2 scenarios: 1 Docked / 2 Approach / 3 Free Flight",
@@ -555,11 +566,14 @@ impl Screen {
         let origin = camera.point(state.position).map(|v| v * scale);
         let light = camera.direction(scene.light_direction());
         // The original inputs over flight time (gear up), with global 15 as the
-        // forward thrust the engine glows read. Full thrust maps to 4095, where
-        // ship models stop lengthening the plume (docs/notes/thrusters.md); the
-        // original's word is the ship's thrust clamped to its own limits.
+        // object's z thrust word the engine glows read: the throttle scaled to the
+        // ship's own limits (F600). Without statistics (a cache before v12), full
+        // thrust maps to 4095, where ship models stop lengthening the plume.
         let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
-        inputs.globals[THRUST_GLOBAL] = (state.thrust.max(0.0) * 4095.0) as u16;
+        inputs.globals[THRUST_GLOBAL] = match scene.ship_stats(state.ship) {
+            Some(stats) => stats.thrust_word(state.thrust),
+            None => (state.thrust.max(0.0) * 4095.0) as u16,
+        };
         match scene.render_scene_with(state.ship, rows, origin, light, &inputs) {
             Ok(frame) => {
                 self.draw_shapes(scene, &frame.shapes);
@@ -771,10 +785,12 @@ pub fn model_scale(scene: &ModelViewer) -> Option<f64> {
 /// Model units per flight unit when the cache has no station model.
 const DEFAULT_MODEL_SCALE: f64 = 9700.0;
 
-/// A console button click: select a view (F6/F7/F9) or cycle (F1).
+/// A console button click: select a view (F6/F7/F9), the turret (F8) or cycle
+/// (F1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewButton {
     Select(ViewMode),
+    Turret,
     Cycle,
 }
 

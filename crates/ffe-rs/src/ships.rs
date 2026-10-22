@@ -11,6 +11,61 @@ pub const LAST_SHIP: u32 = 70;
 /// The Eagle long range fighter (slot 20), used when a save names no ship.
 pub const DEFAULT_SHIP: u32 = 20;
 
+/// The fields of a model's 48-byte statistics block (descriptor +0x38, cache v12)
+/// that object set-up (the routine at 0x125c0 in floppy 1.02) copies onto a ship.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShipStats {
+    /// +0x0, the forward thrust limit (object +0xc4).
+    pub forward_thrust: i16,
+    /// +0x2, the reverse thrust limit (object +0xc6; negated for +0xbc/+0xc0).
+    pub reverse_thrust: i16,
+    /// +0x4, gun mounts (object +0xd1, compared as a signed byte); F1 offers the
+    /// turret views above 2, and the bottom turret from 4.
+    pub gun_mounts: i8,
+    /// +0x6, hull mass in tonnes (object +0xe4 holds it times 4).
+    pub mass: u16,
+    /// +0x12, missile mounts.
+    pub missiles: u16,
+    /// +0x18/+0x1a, the cockpit eye: along the forward axis, along the up axis
+    /// (FUNC_001054 front and rear views).
+    pub eye: [i16; 2],
+    /// +0x28/+0x2a, the top turret (view 2; the eye is 0x3e above it).
+    pub top_turret: [i16; 2],
+    /// +0x2c/+0x2e, the bottom turret (view 3; the eye is 0x3e below it).
+    pub bottom_turret: [i16; 2],
+}
+
+impl ShipStats {
+    /// `None` for an all-zero block (a slot without statistics).
+    pub fn from_block(block: &[u8]) -> Option<Self> {
+        let word = |offset: usize| u16::from_le_bytes([block[offset], block[offset + 1]]);
+        (block.len() == 48 && block.iter().any(|b| *b != 0)).then(|| Self {
+            forward_thrust: word(0) as i16,
+            reverse_thrust: word(2) as i16,
+            gun_mounts: block[4] as i8,
+            mass: word(6),
+            missiles: word(0x12),
+            eye: [word(0x18) as i16, word(0x1a) as i16],
+            top_turret: [word(0x28) as i16, word(0x2a) as i16],
+            bottom_turret: [word(0x2c) as i16, word(0x2e) as i16],
+        })
+    }
+
+    /// The object's z thrust word (+0xba, model global 15) for a throttle in
+    /// -1..=1. F600 scales the requested thrust to fit the limits, so full
+    /// throttle gives the forward limit and full reverse the (negative) reverse
+    /// limit; between them the word is proportional.
+    pub fn thrust_word(&self, throttle: f64) -> u16 {
+        let throttle = throttle.clamp(-1.0, 1.0);
+        let limit = if throttle >= 0.0 {
+            f64::from(self.forward_thrust)
+        } else {
+            -f64::from(self.reverse_thrust)
+        };
+        ((throttle * limit) as i16) as u16
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ShipList {
     ships: Vec<(u32, String)>,

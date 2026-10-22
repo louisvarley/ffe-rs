@@ -91,6 +91,12 @@ pub enum AssetKind {
         count: u32,
         source_offset: u64,
     },
+    /// Per model table slot, the 48-byte statistics block descriptor +0x38 points to
+    /// (thrust limits, gun mounts, mass, name, drive); zero where the pointer is null
+    /// or the slot is not imported (v12).
+    ShipStats {
+        count: u32,
+    },
     /// The default light and shade table `DATA_007231..7234` (v9).
     DefaultLighting {
         source_offset: u64,
@@ -178,9 +184,11 @@ fn valid_digest(value: &str) -> bool {
 
 /// Original model table slots (DATA_004681).
 const MODEL_TABLE_SLOTS: u32 = 466;
+/// Bytes per ship statistics block (descriptor +0x38).
+pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=11) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=12) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -229,6 +237,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         }
         if manifest.format_version < 11 && matches!(record.asset, AssetKind::ModelNames { .. }) {
             return Err("The model name table requires cache v11.".to_owned());
+        }
+        if manifest.format_version < 12 && matches!(record.asset, AssetKind::ShipStats { .. }) {
+            return Err("The ship statistics table requires cache v12.".to_owned());
         }
         if manifest.format_version < 10
             && matches!(record.asset, AssetKind::ModelDescriptors { .. })
@@ -378,6 +389,11 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         AssetKind::ModelDescriptors { count } => {
             if *count != MODEL_TABLE_SLOTS || bytes.len() != *count as usize * 8 {
                 return Err("invalid model descriptor table".to_owned());
+            }
+        }
+        AssetKind::ShipStats { count } => {
+            if *count != MODEL_TABLE_SLOTS || bytes.len() != *count as usize * SHIP_STATS_BYTES {
+                return Err("invalid ship statistics table".to_owned());
             }
         }
         AssetKind::ModelNames { count, .. } => {

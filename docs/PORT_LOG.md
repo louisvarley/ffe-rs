@@ -1847,3 +1847,13 @@ See `docs/INVENTORY.md` §10 and `docs/PHASE0_SUMMARY.md`. The blocking ones are
 - Added `ci/check_forbidden.py` and a GitHub Actions job that fails if forbidden material is tracked (game data, legacy source, `data.bin`, original art, frames, FFED3D binaries).
 - Added `LICENSE` placeholder (no licence chosen), `docs/LEGAL.md`, `docs/TAKEDOWN.md`.
 - Did **not** add a Rust workspace: the port starts only after Phase 0 approval.
+
+## Ship statistics, eyes and turret views
+
+Cache v12 adds `base:ship/stats` (466 x 48-byte blocks from descriptor +0x38).
+The engine glow now uses the original thrust word (F600: throttle times the
+ship's forward or reverse limit) instead of the 4095 approximation. Front and
+rear views sit at the ship's eye offset (FUNC_001053), and the top/bottom turret
+views (F1 cycle, F8, console button 0x16, FUNC_001038 aiming) are ported for
+ships with more than two gun mounts. verify-assets counts were bumped to v12;
+its byte-for-byte check of the stats blocks against JJFFE is still to be added.

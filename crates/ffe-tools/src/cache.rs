@@ -4,7 +4,8 @@ use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
     decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font, decode_model_commands,
     decode_model_descriptor, decode_model_names, decode_model_normals, decode_model_vertices,
-    decode_sine_table, decode_star_shades, decode_texture_descriptors, BitmapLayout,
+    decode_ship_stats, decode_sine_table, decode_star_shades, decode_texture_descriptors,
+    BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -98,6 +99,8 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     let mut assets = Vec::new();
     let mut models = 0;
     let mut descriptor_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * 8];
+    let stats_bytes = ffe_convert::embedded::SHIP_STATS_BYTES;
+    let mut stats_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * stats_bytes];
     for record in &inspection.files {
         if record.path == "FIRSTENC.EXE" {
             let bytes = recorded_bytes(&root, record)?;
@@ -132,6 +135,11 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     .copy_from_slice(&descriptor.scale_offset.to_le_bytes());
                 descriptor_table[entry + 4..entry + 8]
                     .copy_from_slice(&descriptor.radius.to_le_bytes());
+                // Object set-up copies thrust limits, gun mounts and mass from here (v12).
+                if let Some(stats) = decode_ship_stats(&bytes, model_table_rva, index)? {
+                    let entry = index as usize * stats_bytes;
+                    stats_table[entry..entry + stats_bytes].copy_from_slice(&stats);
+                }
                 assets.push(Asset {
                     id: format!("base:model-normals/{index:03}"),
                     path: format!("models/{index:03}.nrm"),
@@ -196,6 +204,14 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     count: ffe_convert::model_extents::MODEL_COUNT as u32,
                 },
                 bytes: std::mem::take(&mut descriptor_table),
+            });
+            assets.push(Asset {
+                id: "base:ship/stats".to_owned(),
+                path: "ships/stats.bin".to_owned(),
+                kind: AssetKind::ShipStats {
+                    count: ffe_convert::model_extents::MODEL_COUNT as u32,
+                },
+                bytes: std::mem::take(&mut stats_table),
             });
             if let Some(names_rva) = names_layout(profile.id) {
                 let table = decode_model_names(&bytes, names_rva)?;
@@ -314,15 +330,15 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     } else {
         0
     } + usize::from(names_layout(profile.id).is_some());
-    // Plus the v10 model descriptor table.
-    if models < 2 || assets.len() != 380 + tables + 3 * models {
+    // Plus the v10 model descriptor table and the v12 ship statistics table.
+    if models < 2 || assets.len() != 381 + tables + 3 * models {
         return Err(format!(
             "unexpected imported asset count {} ({models} models); no cache written",
             assets.len()
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 11,
+        format: "ffe-content-cache".to_owned(), format_version: 12,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

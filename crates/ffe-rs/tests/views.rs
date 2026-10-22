@@ -1,14 +1,123 @@
-use ffe_rs::camera::{Camera, ExternalCamera, ExternalKeys, ViewMode, DEFAULT_DISTANCE};
+use ffe_rs::camera::{
+    key_amount, Camera, ExternalCamera, ExternalKeys, TurretCamera, ViewMode, ViewState,
+    DEFAULT_DISTANCE,
+};
 use ffe_rs::flight::Flight;
 use ffe_rs::screen::{Screen, ViewButton};
-use ffe_rs::ships::ShipList;
+use ffe_rs::ships::{ShipList, ShipStats};
+
+fn views(mode: ViewMode, external: ExternalCamera) -> ViewState {
+    ViewState {
+        mode,
+        external,
+        ..ViewState::default()
+    }
+}
+
+/// The Eagle long range fighter's statistics block (model 20, JJFFE `DATA_002592`).
+const EAGLE: [u8; 48] = [
+    0xde, 0x3f, 0xd7, 0xec, 0x1, 0x0, 0x10, 0x0, 0xb, 0x0, 0x2e, 0x0, 0x64, 0x0, 0x10, 0x40, 0x1,
+    0x0, 0x2, 0x0, 0xa, 0x80, 0x0, 0x1, 0x4e, 0x7, 0x7f, 0x0, 0x25, 0x5, 0x7f, 0x0, 0xa2, 0x8, 0x0,
+    0x0, 0x2c, 0x0, 0x1e, 0x0, 0xc0, 0x0, 0x2a, 0x0, 0x4, 0x0, 0x7, 0x0,
+];
 
 #[test]
-fn f1_cycles_front_rear_external_without_turrets() {
-    assert_eq!(ViewMode::Front.next(), ViewMode::Rear);
-    assert_eq!(ViewMode::Rear.next(), ViewMode::External);
-    assert_eq!(ViewMode::External.next(), ViewMode::Front);
+fn f1_cycles_front_rear_turret_external() {
+    // Two or fewer mounts (signed): no turret.
+    assert_eq!(ViewMode::Front.next(2, 0), ViewMode::Rear);
+    assert_eq!(ViewMode::Rear.next(2, 0), ViewMode::External);
+    assert_eq!(ViewMode::Rear.next(-1, 0), ViewMode::External);
+    assert_eq!(ViewMode::External.next(2, 0), ViewMode::Front);
+    // More: the top turret while its pitch is negative, else the bottom one.
+    assert_eq!(ViewMode::Rear.next(3, -1), ViewMode::TopTurret);
+    assert_eq!(ViewMode::Rear.next(3, 0), ViewMode::BottomTurret);
+    assert_eq!(ViewMode::TopTurret.next(4, 0), ViewMode::External);
+    assert_eq!(ViewMode::BottomTurret.next(4, 0), ViewMode::External);
+    // F8.
+    assert_eq!(ViewMode::turret(2, -1), None);
+    assert_eq!(ViewMode::turret(4, 100), Some(ViewMode::BottomTurret));
     assert_eq!(ViewMode::External.name(), "External View");
+}
+
+#[test]
+fn turret_aiming_follows_the_original_clamps() {
+    let mut turret = TurretCamera::default();
+    // Three mounts: a non-negative pitch is held at -1, then the top view follows.
+    assert_eq!(
+        turret.step(ViewMode::BottomTurret, 0, 0, 3),
+        ViewMode::BottomTurret
+    );
+    assert_eq!(turret.pitch, -1);
+    assert_eq!(
+        turret.step(ViewMode::BottomTurret, 0, 0, 3),
+        ViewMode::TopTurret
+    );
+    // Yaw subtracts the comma-minus-period amount; pitch stops at -0x3fff.
+    assert_eq!(
+        turret.step(ViewMode::TopTurret, -0x5000, 100, 3),
+        ViewMode::TopTurret
+    );
+    assert_eq!((turret.yaw, turret.pitch), (-100, -0x3fff));
+    // Four mounts: pitching down past 0 moves to the bottom turret, up to 0x3fff.
+    assert_eq!(
+        turret.step(ViewMode::TopTurret, 0x7fff, 0, 4),
+        ViewMode::BottomTurret
+    );
+    assert_eq!(turret.pitch, 0x3fff);
+    // The FUNC_CalcKeyInput amount: 20 ms, freshly pressed.
+    assert_eq!(key_amount(20, Some(0)), 31);
+    assert_eq!(key_amount(20, None), 0);
+}
+
+#[test]
+fn ship_stats_decode_the_original_block() {
+    let eagle = ShipStats::from_block(&EAGLE).unwrap();
+    assert_eq!(
+        (eagle.forward_thrust, eagle.reverse_thrust, eagle.gun_mounts),
+        (16350, -4905, 1)
+    );
+    assert_eq!((eagle.mass, eagle.missiles), (16, 2));
+    assert_eq!(eagle.eye, [1870, 127]);
+    assert_eq!((eagle.top_turret, eagle.bottom_turret), ([192, 42], [4, 7]));
+    assert_eq!(ShipStats::from_block(&[0; 48]), None);
+    // F600: full throttle gives the forward limit, full reverse the reverse one.
+    assert_eq!(eagle.thrust_word(1.0), 16350);
+    assert_eq!(eagle.thrust_word(0.5), 8175);
+    assert_eq!(eagle.thrust_word(0.0), 0);
+    assert_eq!(eagle.thrust_word(-1.0), (-4905i16) as u16);
+}
+
+#[test]
+fn eyes_sit_at_the_ship_statistics_offsets() {
+    let state = Flight {
+        position: [10.0, 20.0, 30.0],
+        ..Flight::free_flight()
+    };
+    let mut stats = ShipStats::from_block(&EAGLE).unwrap();
+    // 4096 * 32767 / 4096 model units, at 32767 per flight unit: one unit.
+    stats.eye = [4096, -4096];
+    // The turret eye is 0x3e above the top turret, 0x3e below the bottom one.
+    stats.top_turret = [0, 4096 - 0x3e];
+    stats.bottom_turret = [4096, 0x3e];
+    let at = |mode: ViewMode| {
+        Camera::new(
+            &state,
+            &views(mode, ExternalCamera::default()),
+            Some(&stats),
+            32767.0,
+        )
+        .position
+    };
+    let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-9);
+    assert!(near(at(ViewMode::Front), [10.0, 19.0, 31.0]));
+    assert!(near(at(ViewMode::Rear), [10.0, 19.0, 29.0]));
+    assert!(near(at(ViewMode::TopTurret), [10.0, 21.0, 30.0]));
+    assert!(near(at(ViewMode::BottomTurret), [10.0, 20.0, 31.0]));
+    // Turret angles turn the view as the external camera's do.
+    let mut turned = views(ViewMode::TopTurret, ExternalCamera::default());
+    turned.turret.pitch = -0x4000;
+    let camera = Camera::new(&state, &turned, Some(&stats), 32767.0);
+    assert!((camera.axes[2][1] - 1.0).abs() < 1e-9, "{:?}", camera.axes);
 }
 
 #[test]
@@ -109,10 +218,11 @@ fn cameras_sit_on_the_ship_or_behind_it_along_the_turned_axes() {
         position: [10.0, 20.0, 30.0],
         ..Flight::free_flight()
     };
-    let front = Camera::new(&state, ViewMode::Front, ExternalCamera::default(), 100.0);
+    let at = |mode, external| Camera::new(&state, &views(mode, external), None, 100.0);
+    let front = at(ViewMode::Front, ExternalCamera::default());
     assert_eq!(front.position, state.position);
     assert_eq!(front.axes[2], [0.0, 0.0, 1.0]);
-    let rear = Camera::new(&state, ViewMode::Rear, ExternalCamera::default(), 100.0);
+    let rear = at(ViewMode::Rear, ExternalCamera::default());
     assert_eq!(rear.axes[2], [-0.0, -0.0, -1.0]);
     // Yaw and pitch 0: distance / 256 model units behind, here / 100 per flight unit.
     let level = ExternalCamera {
@@ -120,7 +230,7 @@ fn cameras_sit_on_the_ship_or_behind_it_along_the_turned_axes() {
         pitch: 0,
         distance: -256 * 1000,
     };
-    let external = Camera::new(&state, ViewMode::External, level, 100.0);
+    let external = at(ViewMode::External, level);
     let expected = [10.0, 20.0, 20.0];
     for (actual, wanted) in external.position.iter().zip(expected) {
         assert!((actual - wanted).abs() < 1e-9);
@@ -128,14 +238,12 @@ fn cameras_sit_on_the_ship_or_behind_it_along_the_turned_axes() {
     // The ship is straight ahead of the external camera.
     assert_eq!(external.project(state.position, true), Some((160, 79)));
     // A quarter-turn yaw moves the camera to the ship's side.
-    let side = Camera::new(
-        &state,
+    let side = at(
         ViewMode::External,
         ExternalCamera {
             yaw: 0x4000,
             ..level
         },
-        100.0,
     );
     assert!((side.position[2] - 30.0).abs() < 1e-9 && (side.position[0] - 10.0).abs() > 9.0);
     assert_eq!(side.project(state.position, true), Some((160, 79)));
@@ -155,6 +263,7 @@ fn console_hot_areas_select_views() {
         Screen::view_button(210, 175),
         Some(ViewButton::Select(ViewMode::External))
     );
+    assert_eq!(Screen::view_button(190, 170), Some(ViewButton::Turret));
     assert_eq!(Screen::view_button(70, 180), Some(ViewButton::Cycle));
     assert_eq!(Screen::view_button(10, 10), None);
 }
