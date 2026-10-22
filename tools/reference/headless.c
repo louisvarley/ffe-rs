@@ -340,11 +340,14 @@ void trace_submodel_run(void *child, void *descriptor)
     uint64_t hash;
     if (!child_mode) { (void)descriptor; nested_event(10,0,0,0); return; }
     hash=child_hash(c+0x14,36,UINT64_C(14695981039346656037));
-    hash=child_hash(c+0xf8,4,hash);
     hash=child_hash(c+0x54,12,hash);
     nested_event(20,(unsigned long)child_depth+1,w[0x148/4],(unsigned long)c[0xf4]|(unsigned long)c[0xf5]<<8|(unsigned long)c[0xf6]<<16);
     nested_event(23,w[1],w[2],w[3]);
     nested_event(24,(unsigned long)hash,(unsigned long)(hash>>32),w[0x130/4]);
+    /* The child's +0xf8 base handedness is stack memory the original never writes
+       for a child whose own handedness is undefined, so it is reported apart and
+       is not compared. */
+    nested_event(26,w[0xf8/4],0,0);
     if (!(child_word&0x4000)) {
         hash=child_hash(c+0x48,12,UINT64_C(14695981039346656037));
         hash=child_hash(c+0x38,12,hash);
@@ -714,6 +717,7 @@ static int vertex_program_vector(int index)
 {
     static unsigned long instance[0x160/4], globals[0x120/4];
     static long vertices[256*9], coordinates[128*3];
+    static unsigned char entries[128*16];
     unsigned long *model,i;
     fprintf(stderr,"JJFFE vertex-program-v1: every vertex of one model slot through F1472/F1478 in index order, cache-checked like command callers; identity frame, descriptor scale, start-up F1476 seed. No commands or projection.\n");
     if(index<0 || index>465) fail("model index outside the table");
@@ -731,11 +735,14 @@ static int vertex_program_vector(int index)
         long *vertex=ref_vertex_buffer+i*9;
         if(!vertex[5]) vertex=ref_vertex(instance,(int)i);
         memcpy(coordinates+i*3,vertex+6,12);
+        /* The entry's screen words (+0,+2) and view dwords (+4,+8,+0xc). */
+        memcpy(entries+i*16,vertex,16);
     }
     if(getenv("FFE_VERTEX_DUMP")) for(i=0;i<model[2];++i) fprintf(stderr,"v%lu %ld %ld %ld\n",i,coordinates[i*3],coordinates[i*3+1],coordinates[i*3+2]);
-    printf("{\"model\":%d,\"vertices\":%lu,\"records\":\"%016llx\",\"coordinates\":\"%016llx\",\"state\":[%lu,%lu]}\n",
+    printf("{\"model\":%d,\"vertices\":%lu,\"records\":\"%016llx\",\"coordinates\":\"%016llx\",\"entries\":\"%016llx\",\"state\":[%lu,%lu]}\n",
         index,model[2],(unsigned long long)fingerprint((const unsigned char *)model[1],model[2]/2*6),
-        (unsigned long long)fingerprint((unsigned char *)coordinates,model[2]*12),ref_jitter_a,ref_jitter_b);
+        (unsigned long long)fingerprint((unsigned char *)coordinates,model[2]*12),
+        (unsigned long long)fingerprint(entries,model[2]*16),ref_jitter_a,ref_jitter_b);
     return 0;
 }
 

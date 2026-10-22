@@ -49,9 +49,10 @@ pub fn decode_model_vertices(
     ffe_core::model::validate_records(records, vertex_count)?;
     // Child models reference parent (external) vertices, which only a child instance
     // resolves; their programs validate structurally and evaluate in that context.
-    let external = records
-        .chunks_exact(6)
-        .any(|r| matches!(r[0], 5..=8 | 11 | 12 | 15..=20) && r[2..5].iter().any(|b| *b >= 0x80));
+    let external = records.chunks_exact(6).any(|r| {
+        matches!(r[0], 3 | 4 | 5..=8 | 11 | 12 | 13 | 14 | 15..=20)
+            && r[2..5].iter().any(|b| *b >= 0x80)
+    });
     if let Err(error) = ffe_core::model::evaluate(
         records,
         vertex_count,

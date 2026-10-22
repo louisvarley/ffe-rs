@@ -7,8 +7,8 @@ the current experimental example is not that faithful renderer.
 
 > **Status: experimental Windows x64 playable example, plus verified asset/core tools.**
 > Launch, fly, dock, trade and save/reload now work in a native Rust window.
-> This is **not yet faithful First Encounters**: flight mechanics, the wireframe
-> station, starfield and one-item economy are synthetic development scaffolding.
+> This is **not yet faithful First Encounters**: flight mechanics, the starfield
+> and one-item economy are synthetic development scaffolding.
 > Original cabin, proportional bitmap font and console artwork are imported.
 > Version 0.4 extends the **F4 station model lab** with original declared
 > triangle/quad outlines and individual-face inspection, not finished models.
@@ -19,6 +19,9 @@ the current experimental example is not that faithful renderer.
 > surfaces, text and labels are not drawn yet.
 > In flight, the station is the original **model 74**, executed by the verified
 > model port with its textures; flight mechanics remain synthetic. No legacy runtime is linked.
+> **446 of the 466 original model programs** now execute natively and match the
+> original command for command; the rest are the slots the original itself
+> cannot run.
 > Complete content, JJFFE-equivalent gameplay and graphics packs remain unfinished.
 > [CLAUDE.MD](CLAUDE.MD) records the owner's answers and current plan.
 
@@ -307,7 +310,7 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v10** imports every model that decodes (456 of 466 on floppy 1.02) with
+**Cache v10** imports every model that decodes (459 of 466 on floppy 1.02) with
 its descriptor fields for child models, the original texture descriptor table and
 fixed-colour map, and the original lighting tables (default light, shade tables). `build-data` refuses an existing destination, so build to a new file,
 then replace your old `data.bin` with it:

@@ -234,8 +234,10 @@ fn word(bytes: &[u8], offset: usize) -> Result<u16, String> {
 /// A command vertex byte the original resolves through F1470/F1471, which sign-extend
 /// it: 0..count-1 are the model's own vertices; 0x80..0xff (-128..-1) are external
 /// vertices that F1478 copies from the parent instance's table at +0x6c (child models
-/// only, resolved at execution). Only the face, line, point, text and child-call operands use this;
-/// other command forms still reject bytes outside the model.
+/// only, resolved at execution). The face, line, point, text and child-call operands
+/// use this, as do the thruster (F1738), beam (F1761) and chain (F1766) forms, which
+/// read their vertex bytes sign-extended too; other command forms still reject bytes
+/// outside the model.
 pub fn vertex_reference(index: u8, vertex_count: u32) -> bool {
     index >= 0x80 || u32::from(index) < vertex_count
 }
@@ -515,7 +517,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
             if thruster
                 .vertices
                 .iter()
-                .any(|index| u32::from(*index) >= vertex_count)
+                .any(|index| !vertex_reference(*index, vertex_count))
             {
                 return Err(format!(
                     "Thruster references external/out-of-range vertex at {offset:#x}."
@@ -565,7 +567,11 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                     i16::from_le_bytes([payload[4 + i * 2], payload[5 + i * 2]])
                 }),
             };
-            if beam.vertices.iter().any(|v| u32::from(*v) >= vertex_count) {
+            if beam
+                .vertices
+                .iter()
+                .any(|v| !vertex_reference(*v, vertex_count))
+            {
                 return Err(format!(
                     "Beam references external/out-of-range vertex at {offset:#x}."
                 ));
@@ -584,7 +590,7 @@ fn decode_prefix(bytes: &[u8], vertex_count: u32) -> Result<Program, String> {
                 .pairs
                 .iter()
                 .flatten()
-                .any(|v| *v != 0x7f && u32::from(*v) >= vertex_count)
+                .any(|v| *v != 0x7f && !vertex_reference(*v, vertex_count))
             {
                 return Err(format!(
                     "Vertex-pair command references external/out-of-range vertex at {offset:#x}."

@@ -101,7 +101,13 @@ fn literal_pairs_memoize_until_cleared_and_projection_stamps_one_slot() {
 
 #[test]
 fn live_vertices_reject_unsupported_forms_indices_scales_and_cycles_atomically() {
-    for unsupported in [[3, 0, 0, 0, 0, 0], [21, 0, 0, 0, 0, 0], [13, 0, 0, 0, 0, 0]] {
+    // Opcodes 3/4 and 13/14 are the original's screen-space midpoints; 21 is a
+    // cubic curve whose control points run past the pair, and 25/26 are unknown.
+    for unsupported in [
+        [21, 0, 0, 0, 0, 0],
+        [25, 0, 0, 0, 0, 0],
+        [26, 0, 0, 0, 0, 0],
+    ] {
         assert!(Vertices::new(&unsupported, 2).is_err());
     }
     let records = [1, 0, 4, 0, 0, 0, 17, 0, 0, 0, 2, 0];

@@ -106,9 +106,10 @@ pub struct ExternalSource {
 }
 
 /// Vertex opcodes whose dependency bytes the original reads sign-extended through
-/// F1472/F1478 (verified paths: 5..=8, 11/12, 15..=20), so 0x80..0xff are external.
+/// F1472/F1478 (verified paths: 3/4, 5..=8, 11/12, 13/14, 15..=20), so 0x80..0xff
+/// are external.
 fn signed_dependencies(opcode: u8) -> bool {
-    matches!(opcode, 5..=8 | 11 | 12 | 15..=20)
+    matches!(opcode, 3 | 4 | 5..=8 | 11 | 12 | 13 | 14 | 15..=20)
 }
 
 pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
@@ -121,6 +122,9 @@ pub fn validate_records(records: &[u8], count: u32) -> Result<(), String> {
             0..=2 | 9 | 10 => &[],
             5..=8 => &record[4..5],
             11 | 12 | 17..=20 => &record[3..5],
+            // F1478's screen-space midpoints: the two sources are bytes 3 and 4
+            // (case 11) or their partners (case 6).
+            3 | 4 | 13 | 14 => &record[3..5],
             // Curve control points are bytes 3 and 4 and those plus 2 (mirror-adjusted).
             21 | 22 => &[
                 record[3],
@@ -200,6 +204,53 @@ pub fn evaluate_with_jitter(
     Ok(vertices)
 }
 
+/// A vertex's screen and view position, as the original's cache entry holds them:
+/// the two screen words and the three view dwords (entry +0..+0x10).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Entry {
+    pub screen: [i16; 2],
+    pub view: [i32; 3],
+}
+
+/// The screen and view position every vertex ends up with, in index order. The
+/// original's object-space path (F1472) leaves the screen and view of a vertex
+/// unwritten unless something projected it: the screen-space opcodes project
+/// their two sources, so those entries and their sources carry a position.
+/// Each vertex is read as the original's caller reads it, right after its own
+/// evaluation, so a later vertex cannot change what an earlier one reported.
+pub fn evaluate_entries(
+    records: &[u8],
+    count: u32,
+    context: &VertexContext,
+) -> Result<Vec<Entry>, String> {
+    evaluate_entry_slots(records, count, context, &mut JITTER_SEED.clone())
+}
+
+fn evaluate_entry_slots(
+    records: &[u8],
+    count: u32,
+    context: &VertexContext,
+    jitter: &mut [u32; 2],
+) -> Result<Vec<Entry>, String> {
+    validate_records(records, count)?;
+    if context.scale > 31 {
+        return Err("Vertex scale must be in 0..31.".to_owned());
+    }
+    let mut evaluator = ObjectCache::new(records, count)?;
+    evaluator.jitter = *jitter;
+    let mut entries = Vec::with_capacity(count as usize);
+    for index in 0..count as u8 {
+        evaluator.vertex(index, context, 0)?;
+        let slot = evaluator.slots[usize::from(index)];
+        entries.push(Entry {
+            screen: slot.screen,
+            view: slot.view,
+        });
+    }
+    *jitter = evaluator.jitter;
+    Ok(entries)
+}
+
 /// Check that every vertex of a program evaluates. Child-only programs may read
 /// their parent's vertices (negative indices); with no parent here, slots -1..-5
 /// stand in at the origin and a vertex that needs any other parent slot is not
@@ -242,6 +293,9 @@ pub(crate) struct CachedVertex {
     pub view: [i32; 3],
     pub screen: [i16; 2],
     pub stamp: u32,
+    /// Set for the screen-space opcodes (3/4, 13/14): the original writes their
+    /// screen position itself, so the caller must not project them again.
+    pub screen_space: bool,
 }
 
 #[derive(Clone)]
@@ -301,6 +355,7 @@ impl<'a> ObjectCache<'a> {
             view: source.view,
             screen: source.screen,
             stamp: externals.generation,
+            screen_space: false,
         };
         self.external_slots[k - 1] = slot;
         Ok(slot)
@@ -385,6 +440,40 @@ impl<'a> ObjectCache<'a> {
                 self.slots[slot].object
             }
             19..=22 => self.curve(index, 0, context, depth)?,
+            3 | 4 => {
+                // F1478's case 11: a screen-space midpoint of two vertices. The
+                // original writes no object coordinates and no view x/y for it
+                // (the entry keeps the arena's stale bytes), takes the nearer of
+                // the two depths and averages the two screen positions. The
+                // ordinary entry uses the plain sources, the mirror their
+                // partners; both are written together, as the original does.
+                let pair = slot & !1;
+                let ordinary = self.screen_midpoint(r[3], r[4], context, depth + 1)?;
+                let reflected = self.screen_midpoint(r[3] ^ 1, r[4] ^ 1, context, depth + 1)?;
+                // Case 11 leaves the view x/y stale as well: only the screen
+                // position and the nearer depth are written.
+                let ordinary = CachedVertex {
+                    view: [0, 0, ordinary.view[2]],
+                    ..ordinary
+                };
+                let reflected = CachedVertex {
+                    view: [0, 0, reflected.view[2]],
+                    ..reflected
+                };
+                self.slots[pair] = ordinary;
+                self.slots[pair + 1] = reflected;
+                self.slots[slot].object
+            }
+            13 | 14 => {
+                // F1478's case 6: the same midpoint, but the original keeps the
+                // first source's view x/y and writes only the requested entry,
+                // so the mirror is computed on its own request.
+                let mirror = index & 1;
+                let entry =
+                    self.screen_midpoint(r[3] ^ mirror, r[4] ^ mirror, context, depth + 1)?;
+                self.slots[slot] = entry;
+                self.slots[slot].object
+            }
             23 | 24 => {
                 let encoded = i16::from_le_bytes([r[3], r[4]]);
                 if encoded as u16 & 0xc0 >= 0x80 {
@@ -413,6 +502,53 @@ impl<'a> ObjectCache<'a> {
             self.slots[slot].stamp = 1;
         }
         Ok(value)
+    }
+
+    /// F1472's view of a resolved vertex: the object position plus the instance
+    /// position, projected. An external vertex keeps the screen and view the
+    /// parent copied into it, and a screen-space vertex keeps the screen
+    /// position the original computed for it.
+    fn entry(
+        &mut self,
+        index: u8,
+        context: &VertexContext,
+        depth: usize,
+    ) -> Result<CachedVertex, String> {
+        if index >= 0x80 {
+            // F1478's external path copies the parent's screen and view.
+            return self.external(index);
+        }
+        // F1472: the object path writes no screen or view, so the source keeps
+        // whatever it had - the screen-space opcodes average that, not a fresh
+        // projection.
+        self.vertex(index, context, depth)?;
+        Ok(self.slots[usize::from(index)])
+    }
+
+    /// The screen-space midpoint of two resolved vertices (F1478): the average
+    /// of their screen positions and the nearer of their two depths.
+    fn screen_midpoint(
+        &mut self,
+        first: u8,
+        second: u8,
+        context: &VertexContext,
+        depth: usize,
+    ) -> Result<CachedVertex, String> {
+        let a = self.entry(first, context, depth)?;
+        let b = self.entry(second, context, depth)?;
+        let screen = [
+            (i32::from(a.screen[0]) + i32::from(b.screen[0])) / 2,
+            (i32::from(a.screen[1]) + i32::from(b.screen[1])) / 2,
+        ];
+        Ok(CachedVertex {
+            // The original writes no object coordinates for these vertices: the
+            // entry keeps the arena's stale bytes, which are zero in a fresh one.
+            object: [0; 3],
+            view: [a.view[0], a.view[1], a.view[2].min(b.view[2])],
+            screen: [screen[0] as i16, screen[1] as i16],
+            stamp: 1,
+            screen_space: true,
+        })
     }
 
     /// F1477 on the record holding `selector` (mirror bit `selector & 1`), with

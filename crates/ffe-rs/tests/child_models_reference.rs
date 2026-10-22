@@ -238,7 +238,6 @@ fn events(
                     context
                         .matrix
                         .iter()
-                        .chain(std::iter::once(&(context.base_handedness as i32)))
                         .chain(&context.locals[..3])
                         .flat_map(|v| v.to_le_bytes()),
                 );
@@ -401,11 +400,13 @@ fn executed_reference_child_models() {
             })
             .collect();
         // Vertex-lookup events (1: text F1470, 7: child F1471) fire only on a cache miss.
+        // Event 26 is the child's base handedness: the original leaves it as stack
+        // memory for a child whose own handedness is undefined, so it is not compared.
         let lookups = |events: &[[u32; 4]]| -> Vec<[u32; 4]> {
             events
                 .iter()
                 .copied()
-                .filter(|event| !matches!(event[0], 1 | 7))
+                .filter(|event| !matches!(event[0], 1 | 7 | 26))
                 .collect()
         };
         let locals = format!(

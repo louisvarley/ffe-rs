@@ -169,10 +169,15 @@ impl<'a> Vertices<'a> {
         let mut working = self.objects.clone();
         let object = working.vertex(index as u8, context, 0)?;
         let value = &mut working.slots[slot];
-        value.view = std::array::from_fn(|axis| object[axis].wrapping_add(position[axis]));
-        if projected {
-            value.screen = project(value.view).unwrap_or(NEAR_SENTINEL);
+        if value.screen_space {
+            // The original writes these vertices' screen position itself.
             value.stamp = generation;
+        } else {
+            value.view = std::array::from_fn(|axis| object[axis].wrapping_add(position[axis]));
+            if projected {
+                value.screen = project(value.view).unwrap_or(NEAR_SENTINEL);
+                value.stamp = generation;
+            }
         }
         let result = (*value).into();
         self.objects = working;

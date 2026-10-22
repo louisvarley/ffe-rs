@@ -57,6 +57,43 @@ fn midpoint_truncates_negative_wrapped_sum_towards_zero() {
 }
 
 #[test]
+fn screen_space_midpoints_average_the_sources_screen_and_keep_the_nearer_depth() {
+    // Two literal vertices, a 13/14 midpoint (F1478's case 6) and a 3/4
+    // midpoint (case 11). The original resolves the two sources through F1472,
+    // which writes no screen position, so the midpoint averages what its
+    // sources already had; the original writes no object coordinates for it.
+    let records = [
+        1, 0, 0, 0, 0, 0, // vertices 0/1: the origin
+        1, 0, 100, 0, 0, 0, // vertices 2/3: 100 units along x
+        13, 0, 0, 0, 2, 0, // vertices 4/5: the midpoint of 0 and 2
+        3, 0, 0, 0, 2, 0, // vertices 6/7: the same midpoint, case 11
+    ];
+    let context = VertexContext {
+        scale: 0,
+        ..Default::default()
+    };
+    let points = evaluate(&records, 8, &context).unwrap();
+    // The original leaves the object coordinates of these vertices untouched.
+    assert_eq!(points[4], [0; 3]);
+    assert_eq!(points[6], [0; 3]);
+    // Without a projection the sources have no screen position either, so the
+    // midpoint has none: the original averages zero with zero.
+    let mut live = ffe_core::model_instance::Vertices::new(&records, 8).unwrap();
+    let position = [0, 0, 1000];
+    // Project the two sources first: the midpoint then averages their screen
+    // positions and keeps the first source's view x/y with the nearer depth.
+    live.resolve(0, &context, position, 2, true).unwrap();
+    live.resolve(2, &context, position, 2, true).unwrap();
+    let vertex = live.resolve(4, &context, position, 2, true).unwrap();
+    assert_eq!(vertex.screen, [172, 79]);
+    assert_eq!(vertex.view, [0, 0, 1000]);
+    // Case 11 leaves the view x/y as the original's arena holds them.
+    let other = live.resolve(6, &context, position, 2, true).unwrap();
+    assert_eq!(other.screen, [172, 79]);
+    assert_eq!(other.view, [0, 0, 1000]);
+}
+
+#[test]
 fn malformed_unsupported_external_and_cyclic_programs_fail_explicitly() {
     for (records, count) in [
         (&[][..], 0),
@@ -66,7 +103,7 @@ fn malformed_unsupported_external_and_cyclic_programs_fail_explicitly() {
     ] {
         assert!(validate_records(records, count).is_err());
     }
-    for opcode in [3, 4, 7, 8, 13, 14, 21, 23, 255] {
+    for opcode in [7, 8, 21, 23, 255] {
         assert!(evaluate(&[opcode, 0, 0, 0, 0, 0], 2, &VertexContext::default()).is_err());
     }
     assert!(evaluate(&[5, 0, 0, 0, 255, 0], 2, &VertexContext::default()).is_err());

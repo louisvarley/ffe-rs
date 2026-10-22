@@ -82,16 +82,22 @@ capture produced by two repeat runs of the local reference.
 | v0.36 sound requests | opcode 15, `SoundEmission` | `model_execute.rs` (+1) | `verify-station-models.py` (434 models) | `4bcf902e…` (Linux LF) | sample and volume match; playback not ported; 439 of 466 models execute |
 | v0.37 cache v7; F6 model viewer | `ffe-tools build-data` (all decodable models), `ffe_rs::model_viewer`, `Screen::draw_model_viewer` | `model_viewer.rs` (1), cache/sine version tests | executor output only (diagnostic camera/colours) | — | first visible models: 420 of 439 render; textures grey; polygons/surfaces/text/children not drawn |
 | v0.38 polygons, textures, child models | `model_polygon`, `model_texture`, `execute_scene`, cache v8 | `model_polygon.rs`, `model_texture.rs`, `model_children.rs` | `verify-polygon.py`, `verify-textures.py`, `verify-child-models.py`, `verify-station-models.py` (443) | `fab32ea5…`, `640cc781…`/`65922b3c…`, `eaee2ad1…`, `b4c3aecf…` | 0 mismatched everywhere; viewer does not run children yet; upper palette unknown |
+| v0.39 the real station in flight | `ModelViewer::render_scene`, `Screen::draw_station` | `model_viewer.rs`, `screen.rs` | none (diagnostic camera) | — | the flight view draws original model 74; mechanics stay synthetic |
+| v0.40 original lighting and colours | `model_lighting`, cache v9 | `model_lighting.rs` | (lighting tables imported) | — | the default light, the shade table and F1326 colour packing |
+| v0.41 child models in the viewer | `execute_scene`, cache v10 | `model_execute.rs`, `model_viewer.rs` | `verify-child-models.py` (417) | `eaee2ad1…` | the station's rings and side pods draw; 424 of 456 models render |
+| v0.42 screen-space midpoints | `model::{evaluate_entries, screen_midpoint}`, external references in the thruster/beam/chain | `model.rs`, `model_commands.rs` | `verify-vertex-programs.py` (454), `verify-child-models.py` (437), `verify-station-models.py` (445) | `1afe0c45…`, `cbe87dd9…`, `34c1bf26…` | vertex opcodes 3/4 and 13/14; census 446 of 466 |
 
-Facts verified on 2026-10-21:
+Facts verified on 2026-10-22:
 
-- `cargo test --workspace --locked` passes. 202 `#[test]` functions total; 29 are
+- `cargo test --workspace --locked` passes. 203 `#[test]` functions total; 29 are
   `#[ignore]` local-only reference tests; one more is `#[cfg(unix)]`. On Windows
-  that is **172 runnable synthetic tests** (173 on Linux).
-- `verify-station-models.py`: all 443 models that both sides complete match the
-  original command flow and final state; `verify-vertex-programs.py`: all 452
-  comparable vertex programs match.
-- `ffe-tools model-census --game game` (floppy 1.02): 180 of 466 slots execute
+  that is **173 runnable synthetic tests** (174 on Linux).
+- `verify-station-models.py`: all 445 models that both sides complete match the
+  original command flow and final state; `verify-child-models.py`: all 437
+  models that execute match, with 1330 child runs and no mismatch;
+  `verify-vertex-programs.py`: all 454 comparable vertex programs match, now
+  including every vertex entry's screen position and view position.
+- `ffe-tools model-census --game game` (floppy 1.02): 446 of 466 slots execute
   natively with synthetic inputs; see the blocker table in `docs/MODEL_COMMANDS.md`.
 - `tools/reference/build-linux.sh` builds `jjffe-smoke`/`jjffe-commands` under
   `.cache/jjffe-reference-linux/`; their traces, hashed with CRLF endings, match
@@ -106,25 +112,24 @@ Facts verified on 2026-10-21:
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v6; `.cache/data-v1..v5-backup.bin` are retained.
+  `data.bin` is cache v10 with 1767 assets and 459 of 466 models;
+  `.cache/data-v1..v5-backup.bin` and `data-v10-backup.bin` are retained.
 
 ## Next task
 
 Stations are verified for command flow (v0.17) and face draw queues (v0.18);
 the v0.19 census ranks what blocks the other models. Next, in order:
 
-1. The remaining census blockers (see `docs/MODEL_COMMANDS.md`): opcode 30 light-point tables, 30 light points, vertex opcodes 3/4 and 0xd; import the F1467 square-root table
-   (cache v7) for opcode 25 rotations.
-2. Extend the queue oracle (`--station-queue`) to any model so nested blocks,
-   polygons and their sort order are compared with the original queue.
-3. Thruster glow queueing (F1666/F1467/F1704) with point/line queueing.
-3. **Vertex opcode 0x15** (13 models; F1477 forms) and 3/4, 13/14, 23/24.
+1. The remaining census blockers (see `docs/MODEL_COMMANDS.md`): opcode 30
+   light-point tables, 30 light points, a declared normal count of zero
+   (models 0-2) and the F1467 square-root table for opcode 25 rotations.
+2. Thruster glow queueing (F1666/F1467/F1704) with point/line queueing.
+3. **Vertex opcode 0x15** (13 models; F1477 forms) and 23/24.
 4. **Polygon segments** (F1734/F1724/F1730/F1733/F1723/F1736 and their curve
    helpers) — needed for outline rasterising and for exact vertex-cache events.
-4. The command-order oracle covers every slot since v0.20
-   (`verify-station-models.py`); extend the queue oracle the same way.
-5. Primitive colour, point/line queueing (F1700/F1704), rasterisation, and
-   glyph/child execution as before.
+5. The command-order and queue oracles cover every slot since v0.20 and v0.38
+   (`verify-station-models.py`, `verify-child-models.py`).
+6. Primitive colour, rasterisation, and glyph/child execution as before.
 
 Run the census after each step; check the CD 1.01 executable with it when
 available.

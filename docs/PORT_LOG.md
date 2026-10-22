@@ -4,6 +4,48 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-22 — Screen-space midpoint vertices and the remaining external references (v0.42)
+
+`model::ObjectCache` now runs the original's two remaining vertex opcodes.
+**3/4** are F1478's case 11 and **13/14** its case 6: a *screen-space* midpoint
+of two vertices. The original resolves both sources through **F1472** (the object
+path), which writes no screen position, so the midpoint averages what its
+sources already had - zero in a fresh arena, the projected position when a
+drawing command projected the source first. It writes no object coordinates
+either, and keeps the nearer of the two depths; case 6 also keeps the first
+source's view x/y, while case 11 leaves them as the arena holds them. The port
+mirrors all of that: the object stays zero, the screen and the view come from
+the sources' entries, and `model_instance::Vertices::resolve` does not project
+these vertices again. `VertexContext` gained the instance position because the
+sources' own evaluation needs it.
+
+**Census 443 -> 446 of 466** (models 315, 316 and 444 now execute) and the
+child oracle **417 -> 437 models compared, 0 mismatched** (models 346-360,
+448, 450 and 452 now run with their children). The three models that still do
+not execute are unchanged: 0/1/2 (a declared normal count of zero), 89 (the
+release data differs from the JJFFE declarations), 94 (the original's own
+undefined child state), 148 (a child scale of 32), 229/319 (top-level external
+references) and the 15 slots the original itself cannot run standalone.
+
+Two smaller decoder changes came with it: the thruster (F1738), beam (F1761)
+and chain (F1766) records read their vertex bytes sign-extended, so 0x80..0xff
+are external references there too, exactly as for faces, lines, points, text
+and child calls. Model 316's chain uses them.
+
+Two oracle changes: the child oracle no longer compares the child's base
+handedness (+0xf8), which the original leaves as stack memory for a child whose
+own handedness is undefined - it is reported apart as event 26 - and the
+vertex-program oracle now compares every vertex entry's screen words and view
+dwords, not only the object coordinates, so the new opcodes are checked against
+the original rather than merely accepted. Traces: station-models
+`34c1bf26…` (445 compared), child-models `cbe87dd9…` (437 compared),
+vertex-programs `1afe0c45…` (454 compared), station-queue `35e55a26…`,
+textures `f3164e1c…`.
+
+The local cache was rebuilt: 1767 assets, 459 of 466 models (the previous
+v10 file is kept at `.cache/data-v10-backup.bin`). The cache format did not
+change, so the version stays v10; `build-data` now imports three more models.
+
 ## 2026-10-22 — Child models in the viewer and flight (v0.41)
 
 `execute_scene` (v0.38) now drives the F6 viewer and the flight station, so

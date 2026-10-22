@@ -1,5 +1,5 @@
 use ffe_convert::embedded::decode_model_vertices;
-use ffe_core::model::{evaluate_with_jitter, VertexContext, JITTER_SEED};
+use ffe_core::model::{evaluate_entries, evaluate_with_jitter, VertexContext, JITTER_SEED};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -15,6 +15,9 @@ struct Program {
     records: String,
     #[serde(default)]
     coordinates: String,
+    /// FNV-1a of every vertex entry's screen words and view dwords.
+    #[serde(default)]
+    entries: String,
     #[serde(default)]
     state: [u32; 2],
 }
@@ -68,7 +71,17 @@ fn executed_reference_vertex_programs() {
         let points =
             evaluate_with_jitter(&model.bytes, model.vertex_count, &context, &mut state).unwrap();
         let actual = hash(points.iter().flatten().flat_map(|c| c.to_le_bytes()));
-        if actual != v.coordinates || state != v.state {
+        // The entry bytes the original's cache holds: the screen words and the
+        // three view dwords of every vertex, in index order.
+        let entries = evaluate_entries(&model.bytes, model.vertex_count, &context).unwrap();
+        let actual_entries = hash(entries.iter().flat_map(|entry| {
+            entry
+                .screen
+                .iter()
+                .flat_map(|s| s.to_le_bytes())
+                .chain(entry.view.iter().flat_map(|v| v.to_le_bytes()))
+        }));
+        if actual != v.coordinates || actual_entries != v.entries || state != v.state {
             mismatched.push(v.model);
         }
         compared += 1;

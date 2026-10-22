@@ -90,25 +90,52 @@ explicit unsupported-command error.
 
 `ffe-tools model-census --game <dir>` runs every model table slot through the
 native importer, decoder and executor with synthetic inputs. Floppy 1.02 after
-v0.36: **439 of 466** execute, and all that the original completes match
+v0.42: **446 of 466** execute, and all that the original completes match
 (`verify-station-models.py`). Remaining blockers:
 
 | Blocker (first failing stage) | Models |
 |---|---:|
 | decode: model 89 release program runs past the JJFFE extent (data differs) | 1 |
-| vertices: vertex opcode 0xd (13) | 2 |
-| other vertex/normal/reference validation errors | ~24 |
+| normals: a declared normal count of zero | 3 |
+| execute: an external vertex with no parent instance (the original crashes) | 15 |
+| execute: the original's own undefined child state or an out-of-range child scale | 2 |
 
 Some declaration blocks hold data after the final terminator; the decoder takes
 the longest self-contained prefix (`Program::trailing`, v0.27).
 
-Vertex opcodes supported: 0-2, 5-12, 15-24 (7/8 since v0.22, 21/22 since
-v0.29, 23/24 since v0.32). Not yet: 3/4 and 13/14 (screen-space midpoints). All supported vertex programs match the original
-(`verify-vertex-programs.py`).
+Vertex opcodes supported: 0-2, 3/4 (the screen-space midpoints, v0.42), 5-12,
+13/14 (the screen-space midpoints, v0.42), 15-24 (7/8 since v0.22, 21/22 since
+v0.29, 23/24 since v0.32). Not yet: 25/26/27 and above. All supported vertex
+programs match the original (`verify-vertex-programs.py`), including every
+vertex entry's screen position and view position.
 
 Use it to choose the next opcode; re-run it after each one. Every model that
 executes natively is compared with the original F1772 by
 `verify-station-models.py` (v0.20: all 180 match in command order).
+
+## The screen-space vertex opcodes (3/4 and 13/14)
+
+F1478's dispatcher (`DATA_000044`/`DATA_000045`) sends **3/4** to its case 11
+and **13/14** to its case 6: a midpoint of two vertices in *screen* space.
+
+- Both cases resolve their two sources through **F1472**, the object path,
+  which writes no screen position; the midpoint therefore averages what its
+  sources already held - zero in a fresh arena, and the projected position
+  when a drawing command projected the source earlier in the frame.
+- Neither case writes object coordinates: the entry keeps the arena's stale
+  bytes. The port keeps them zeroed, which is what a fresh arena holds.
+- Both take the nearer of the two source depths.
+- Case 6 (13/14) keeps the first source's view x/y; case 11 (3/4) leaves them
+  as the arena holds them (zero in a fresh arena). Case 11 writes the ordinary
+  and the mirrored entry together, from the plain and the partner sources;
+  case 6 writes only the entry that was asked for.
+- The port therefore does not project these vertices again, and
+  `model_instance::Vertices::resolve` keeps the screen position the evaluation
+  computed.
+
+`verify-vertex-programs.py` compares every vertex entry's screen words and view
+dwords against the original, so these two opcodes are checked and not merely
+accepted.
 
 ## Next: executing glyphs and children
 

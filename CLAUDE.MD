@@ -42,7 +42,12 @@ models now execute and all 434 the original completes match. v0.37 adds cache v7
 (every decodable model) and the F6 model viewer, the first visible use of the
 executor (diagnostic camera/colours, not the faithful renderer). v0.38 (three
 parallel tasks) ports complex polygons, textured faces (cache v8) and child-model
-execution: 443 models execute and match; see docs/notes/.
+execution: 443 models execute and match; see docs/notes/. v0.39-v0.41 draw the
+original station in the flight view, use the original lighting tables and colour
+packing (cache v9) and draw child models in the viewer and the station (cache
+v10). v0.42 ports the original's screen-space midpoint vertex opcodes (3/4 and
+13/14) and the remaining external vertex references: 446 of 466 models execute
+and 437 models with their children match the original.
 It does not execute the complete model program or display completed models,
 and does not replace synthetic flight geometry/physics. It is not JJFFE-equivalent
 or the completed faithful phase-3 slice. Full content/gameplay remain unfinished.

@@ -94,6 +94,10 @@ defines local 0; the port keeps treating top-level inputs as caller-supplied.
   the +0x70 pointer), reading an undefined basis (opcode 28 0x8000, opcode 30
   restore, a mode-6 grandchild frame), opcode 25 alignment without +0x38, frame
   permutation 7, child scale outside 0..31, normals ≥ 2 of a 0x4000 child.
+- A child's base handedness (+0xf8) is copied from the parent's +0xfc by F1740's
+  mode 6, but for a child whose own handedness (+0xfc) was never written the
+  original leaves it as stack memory. The child oracle therefore reports it apart
+  (event 26) and does not compare it; the frame and the locals are compared.
 - `model_math::{frame_rows (F1739), shift_down (F1475), transform_rows (F1670)}`;
   opcode 28's base forms now use `frame_rows` (same results; base-transform oracle
   unchanged).
@@ -122,7 +126,8 @@ locals 0..2, key scale, and when defined +0x44 and the observer/light hash),
 whether F1774 ran it, all nested events, points/lines, the whole queue log, final
 root state.
 
-Result (floppy 1.02, Linux reference):
+Result (floppy 1.02, Linux reference; the v0.42 numbers are in
+`docs/PORT_LOG.md`, this is the v0.38 record):
 
 - **417 models compared, 0 mismatched**; 161 make child calls. **1,239 child runs
   executed** (8,866 child faces, nesting depth up to 4), 696 culled, 0 without
@@ -161,8 +166,10 @@ out-of-range bytes.
 - The child's lazily evaluated normals are computed eagerly with
   `model_normals::evaluate`, which still requires literal anchor records; no
   compared child hit that restriction.
-- External references in beams, chains, thrusters, surfaces, labels, polygons,
-  depth commands and curve vertices 21..24 remain decoder errors (not verified).
+- External references in surfaces, labels, polygons, depth commands and curve
+  vertices 21..24 remain decoder errors (not verified). The beams, chains and
+  thrusters accept them since v0.42: F1761, F1766 and F1738 read their vertex
+  bytes sign-extended.
 - Point/line queueing, thruster glow, polygon segments, pixels: unchanged.
 - The F6 viewer and the cache format do not use `execute_scene` yet (the cache
   lacks descriptor +0x18/+0x1c); wiring it in needs those fields.
