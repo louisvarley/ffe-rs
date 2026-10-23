@@ -20,6 +20,9 @@ coverage and `docs/notes/` for the feature records.
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
 - `docs/notes/` — per-feature records: polygons, textures, child models,
   thrusters, animation, views, text/labels and curved surfaces.
+- `dashboard/` — the milestone burndown (`index.html`, data in `burndown.js`).
+  **Update it in the same commit as any progress change**: statuses plus a new
+  dated history point. Its last point is checked against the task list.
 
 ## Verdict on handoff readiness
 
@@ -188,6 +191,9 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 ## Next milestone: v0.48 "Every model fully drawn"
 
+**Progress.** Tracked in `dashboard/` (12 items at planning, 8 left on
+2026-10-23). Keep it current with every progress commit.
+
 **Goal.** The F6 viewer and the flight view draw every primitive the executor
 queues, with the original's own rasterisers, verified at the pixel level. Today
 the viewer still reports "NOT DRAWN YET" for labels, skips text and curved
@@ -228,6 +234,11 @@ tests and an oracle, as the earlier milestones did.
      before the quads are drawn.
 3. **Lines and curves.** F1616 (DrawLine) for F1803 entries (opcode 2 lines,
    narrow thrusters) and F1811 for opcode 22 curves, replacing the stand-ins.
+5. **A planet in the flight scenario.** Once F1876 draws, put a planet-scale
+   surface model (slots 113-148, 445, 447, 449) in the flight scene at a
+   distance where its patch is visible, with the original's parameters, and
+   capture the probe at that distance as its oracle.
+
 4. **Pixel oracle.** Add a framebuffer mode to the reference adapter that
    draws one queued scene with the original's F1795/F1796/F1797 spans, F1647
    textures, F1616 lines and F1811 curves. Then replace the viewer's diagnostic
@@ -244,10 +255,12 @@ tests and an oracle, as the earlier milestones did.
   a recorded gap unless it is ported along the way.
 - Census unchanged at 449 of 466 (re-run after each step; also check the CD
   1.01 executable).
+- A planet-scale surface model draws in flight at a plausible distance (see
+  step 5), with the probe's captured quads as its oracle.
 - Owner check (2 minutes): in M, page to models 66 and 453 and see their name
   labels; then to the station and an Eagle and see rounded parts (and, once
   the glyph step lands, their registration text); in flight, F9 shows the
-  ship's plume flickering under W.
+  ship's plume flickering under W, and a planet is visible in the scenario.
 
 **Risks.** Text handlers that read game state may need small pieces of
 the flight/commander state that do not exist yet; record those as explicit

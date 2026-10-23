@@ -1357,6 +1357,9 @@ static int surface_sign_vectors(void)
 #endif
 }
 
+/* Optional instance z for the surface runs: these patches are planet-scale and
+   a z of 2000 clips them all. */
+static long station_depth;
 static int station_model_vector(int index)
 {
 #ifndef FFE_COMMAND_PROBE
@@ -1380,7 +1383,7 @@ static int station_model_vector(int index)
         memset(nested_descriptor,0,sizeof(nested_descriptor));
         memcpy((char *)instance+0x14,identity,36);
         memcpy((char *)instance+0x9c,identity,36);
-        instance[0xc/4]=2000;
+        instance[0xc/4]=station_depth ? station_depth : 2000;
         instance[0x148/4]=model[5];
         instance[0xf0/4]=2;
         instance[0x14c/4]=(unsigned long)globals;
@@ -2396,6 +2399,10 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--station")) return station_vectors();
     if (argc == 2 && !strcmp(argv[1], "--surface-sign")) return surface_sign_vectors();
     if (argc == 2 && !strcmp(argv[1], "--surface-helpers")) return surface_helper_vectors();
+    if (argc == 4 && !strcmp(argv[1], "--station-model")) {
+        station_depth=strtol(argv[3],0,0);
+        return station_model_vector(atoi(argv[2]));
+    }
     if (argc == 3 && !strcmp(argv[1], "--station-model")) return station_model_vector(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--station-queue")) return station_queue_vectors();
     if (argc == 2 && !strcmp(argv[1], "--polygon-helpers")) return polygon_helper_vectors();

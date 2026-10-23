@@ -705,6 +705,7 @@ proposals. Technical approval does not resolve source or derived-art rights.
 | `docs/MODEL_COMMANDS.md` | Full F1772 opcode map and current Rust coverage; probe-first notes for point/line/text/submodel. |
 | `docs/REFERENCE_HARNESS.md` | How to add a differential test against the executed JJFFE reference. |
 | `docs/CONVENTIONS.md` | Code conventions: errors, numeric model, budgets, safety, process. |
+| `dashboard/` | Milestone burndown page and its data; update both with progress. |
 
 ## Repository layout
 
@@ -725,6 +726,7 @@ crates/ffe-platform/    window/input/audio/config
 crates/ffe-tools/       inspect-game/export-external/build-data/inspect-data/verify-reference
 crates/ffe-rs/          experimental playable binary; not the faithful engine yet
 tests/golden/           planned: hashes and numeric dumps only (not yet present)
+dashboard/              milestone burndown page (open index.html locally)
 ```
 
 ## Data pipeline (to be implemented)
