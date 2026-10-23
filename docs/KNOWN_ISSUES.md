@@ -168,9 +168,15 @@ rolls, agent behaviour) will not match the original roll for roll. Recorded in
 `docs/DEVIATIONS.md`.
 
 
-## Rotating frames and station velocity are not ported (frames)
+## Station velocity and collision contact are not ported (frames, collision)
 
-`ffe_core::frames` covers non-rotating frames only. A body with `+0x57` set (a
-station's rotating frame: F1677 multiplies by the parent's matrix, F1517,
-F1669) and a station's velocity (F595 through F1533/F866) return `None`.
-Needed for docking and for flying near a spinning station.
+`ffe_core::frames` handles rotating frames (F1677, F572, F573) but not a
+station's own velocity (F595 through F1533/F866), which returns `None`.
+`ffe_core::collision` covers the contact-free path of F570/F575/F577: a complex
+shape (`+0x14c` negative; F576, F579-F582) and an actual contact (F577 reporting
+collision, leading to the landing, crash and bounce code of the F575 tail and
+F578) return `None`. Note that F577's far branch (distance beyond 2^30 units)
+tests the sum of the bodies' outer radii (`+0x138`), not the collision radii
+(`+0x140`) that its near branch uses (a JJFFE "FIX" applied to one branch only),
+so a planet's atmosphere counts as contact at long range; the port keeps this.
+Needed for landing and for flying through an atmosphere.

@@ -517,6 +517,177 @@ fn executed_reference_advance() {
     assert_eq!(cases, 4096);
 }
 
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+struct CollideState {
+    parent: u8,
+    rotating: u8,
+    updated: u8,
+    hidden: u8,
+    model: u32,
+    outer: i64,
+    inner: i64,
+    shape: u8,
+    delay: i32,
+    physical: u8,
+    stamp: u8,
+    position: [i64; 3],
+    velocity: [i32; 3],
+    cache: [i64; 3],
+    orientation: [i32; 9],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CollideBody {
+    before: CollideState,
+    after: CollideState,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Collide {
+    case: usize,
+    stamp: u8,
+    tics: u32,
+    high: i32,
+    bodies: Vec<CollideBody>,
+    result: u8,
+    flags: u8,
+    distance: i32,
+    object: u8,
+    pad: u8,
+    register: [u32; 2],
+}
+
+/// Original F569/F570 (`--collide`): the distance to the parent body, the
+/// switch between linear and rotating frames, and the scan of the other
+/// physical bodies, on 4096 seven-body trees aimed into the band where the
+/// player is in reach of its parent without touching it. Cases where the
+/// original reports a contact (an object index or the crash/landing flags) are
+/// not ported and must be the ones the port declines; every other case must
+/// match in the return value, flags, distance, registers and every body.
+#[test]
+#[ignore = "Local-only original physics; use tools/reference/verify-physics.py"]
+fn executed_reference_collide() {
+    let input = std::fs::read_to_string(std::env::var_os("FFE_COLLIDE_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 96 << 20);
+    let (mut cases, mut compared, mut declined, mut valid, mut switched) = (0, 0, 0, 0, 0);
+    for line in input.lines() {
+        let case: Collide = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        cases += 1;
+        let mut world = Bodies {
+            stamp: case.stamp,
+            frame_tics: case.tics,
+            distance: (i64::from(case.high) << 32) | 0x1234_5678,
+            ..Bodies::default()
+        };
+        for (i, row) in case.bodies.iter().enumerate() {
+            let b = &row.before;
+            world.physical[i + 1] = b.physical != 0;
+            world.body[i + 1] = Body {
+                position: b.position,
+                velocity: b.velocity,
+                parent: b.parent,
+                rotating: b.rotating,
+                index: (i + 1) as u8,
+                kind: 2,
+                stamp: b.stamp,
+                cache: b.cache,
+                orientation: b.orientation,
+                updated: b.updated,
+                hidden: b.hidden,
+                model: b.model,
+                outer_radius: b.outer,
+                inner_radius: b.inner,
+                shape: b.shape,
+                delay: b.delay,
+                ..Body::default()
+            };
+        }
+        let contact_in_original = case.object != 0 || case.flags & 0xc0 != 0;
+        let Some(contact) = world.collide(7) else {
+            assert!(
+                contact_in_original,
+                "declined a contact-free case {}",
+                case.case
+            );
+            declined += 1;
+            continue;
+        };
+        assert!(
+            !contact_in_original,
+            "case {} had a contact the port missed",
+            case.case
+        );
+        assert_eq!(
+            (
+                contact.flags,
+                contact.flags,
+                contact.distance,
+                contact.object,
+                contact.pad
+            ),
+            (
+                case.result,
+                case.flags,
+                case.distance,
+                case.object,
+                case.pad
+            ),
+            "collide case {}",
+            case.case
+        );
+        assert_eq!(
+            [world.distance as u32, (world.distance >> 32) as u32],
+            case.register,
+            "collide case {} registers",
+            case.case
+        );
+        for (i, row) in case.bodies.iter().enumerate() {
+            let body = &world.body[i + 1];
+            let a = &row.after;
+            assert_eq!(
+                (
+                    body.parent,
+                    body.rotating,
+                    body.updated,
+                    body.delay,
+                    body.stamp,
+                    body.position,
+                    body.velocity,
+                    body.cache,
+                    body.orientation
+                ),
+                (
+                    a.parent,
+                    a.rotating,
+                    a.updated,
+                    a.delay,
+                    a.stamp,
+                    a.position,
+                    a.velocity,
+                    a.cache,
+                    a.orientation
+                ),
+                "collide case {} body {}",
+                case.case,
+                i + 1
+            );
+        }
+        compared += 1;
+        valid += usize::from(contact.distance != -1);
+        switched += usize::from(case.bodies[6].before.rotating != case.bodies[6].after.rotating);
+    }
+    assert_eq!(cases, 4096);
+    assert!(
+        compared > 2500 && valid > 500 && switched > 500,
+        "too little coverage: {compared} {valid} {switched}"
+    );
+    eprintln!("compared {compared} collide cases ({valid} with a distance, {switched} frame switches), {declined} declined for a contact");
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorldBody {

@@ -5,10 +5,11 @@
 //! frame, F590 measures the distance between two bodies through the cached
 //! chain F1677/F1678 builds, and F595 gives a body's velocity.
 //!
-//! Only non-rotating frames are ported: a body with `rotating` set (`+0x57`,
-//! the stations) and a station's velocity (`+0x87` of 1, which F595 takes from
-//! its spin) return `None`, and `docs/KNOWN_ISSUES.md` records the gap.
-//! Verified against the executed original (`docs/notes/frames.md`).
+//! A rotating frame (`rotating`, `+0x57`) is supported in F1677 (the position
+//! is turned by the parent's orientation) and in the switches F572/F573; a
+//! station's own velocity (`+0x87` of 1, which F595 takes from its spin) returns
+//! `None`, and `docs/KNOWN_ISSUES.md` records the gap. Verified against the
+//! executed original (`docs/notes/frames.md`, `docs/notes/collision.md`).
 
 /// Objects in the original's list: indexes `0..=0x72` (`index * 0x152 + 0x74`).
 pub const OBJECTS: usize = 0x73;
@@ -39,6 +40,24 @@ pub struct Body {
     pub stamp: u8,
     /// The cached absolute position (`+0x26`).
     pub cache: [i64; 3],
+    /// The orientation (`+0x0..+0x23`), the rows right, up, forward in Q31.
+    pub orientation: [i32; 9],
+    /// The frame in which the rotating-frame orientation was last updated
+    /// (`+0x58`), set by F572.
+    pub updated: u8,
+    /// Non-zero hides the body from collisions (`+0x8b`).
+    pub hidden: u8,
+    /// The model dword (`+0x82`); 0x99 is special-cased by the collision scan.
+    pub model: u32,
+    /// The outer (influence) radius (`+0x138`) and the collision radius
+    /// (`+0x140`), 64-bit.
+    pub outer_radius: i64,
+    pub inner_radius: i64,
+    /// The class byte (`+0x14c`): negative for a complex collision shape.
+    pub shape: u8,
+    /// The countdown before the frame may switch between linear and rotating
+    /// (`+0x148`).
+    pub delay: i32,
 }
 
 /// The object list with the per-object in-use flag (bit 0x10 of the byte at
@@ -48,8 +67,60 @@ pub struct Bodies {
     pub body: Vec<Body>,
     pub live: Vec<bool>,
     pub stamp: u8,
+    /// Bit 2 of the per-object flag byte: a physical object for the collision scan.
+    pub physical: Vec<bool>,
+    /// `DATA_008704:DATA_008703`, the collision distance, which persists
+    /// between scans (F570 resets only the low dword).
+    pub distance: i64,
+    /// The frame's time (`DATA_009155`), which counts the frame-switch delay down.
+    pub frame_tics: u32,
     /// The `(a, b)` pairs passed to F148 (always `(0xb, 0)`: frame changed).
     pub events: Vec<(u32, u32)>,
+}
+
+/// F1658: shift a vector right until its highest bit is `bits` or lower;
+/// returns the vector and the shift taken (zero when it already fit).
+pub fn truncate(vector: [i64; 3], bits: u32) -> ([i64; 3], u32) {
+    let cut = crate::model_animation::vector_msb(vector) as i32 - bits as i32;
+    if cut > 0 {
+        (
+            crate::model_animation::shift_vector(vector, cut as u32),
+            cut as u32,
+        )
+    } else {
+        (vector, 0)
+    }
+}
+
+/// F1517: a 32-bit vector turned into 64-bit coordinates, shifted left by `bits`
+/// (the high dword takes the 32-bit shift once `bits` reaches 32).
+pub fn shift_up(vector: [i32; 3], bits: u32) -> [i64; 3] {
+    vector.map(|v| {
+        if bits >= 0x20 {
+            i64::from(v.wrapping_shl(bits - 0x20)) << 32
+        } else {
+            i64::from(v) << bits
+        }
+    })
+}
+
+/// F1669: the vector times the matrix, summing F1521 products down columns.
+pub fn vec_mat_mul(v: [i32; 3], m: &[i32; 9]) -> [i32; 3] {
+    std::array::from_fn(|j| {
+        (0..3).fold(0i32, |sum, k| {
+            sum.wrapping_add(crate::model::multiply(v[k], m[3 * k + j]))
+        })
+    })
+}
+
+/// F1672: the matrix product `a * b` through F1521 products.
+pub fn mat_mat_mul(a: &[i32; 9], b: &[i32; 9]) -> [i32; 9] {
+    std::array::from_fn(|k| {
+        let (i, j) = (k / 3, k % 3);
+        (0..3).fold(0i32, |sum, c| {
+            sum.wrapping_add(crate::model::multiply(a[3 * i + c], b[3 * c + j]))
+        })
+    })
 }
 
 impl Default for Bodies {
@@ -58,6 +129,9 @@ impl Default for Bodies {
             body: vec![Body::default(); OBJECTS],
             live: vec![false; OBJECTS],
             stamp: 0,
+            physical: vec![false; OBJECTS],
+            distance: 0,
+            frame_tics: 0,
             events: Vec::new(),
         }
     }
@@ -84,11 +158,21 @@ impl Bodies {
         } else if body.stamp == self.stamp {
             return Some(body.cache);
         } else {
+            let parent_index = usize::from(body.parent);
+            let parent = self.absolute(parent_index)?;
             if body.rotating != 0 {
-                return None;
+                // The position is turned by the parent's orientation (F1669)
+                // and shifted back (F1517) before it is added.
+                let (vector, shift) = truncate(body.position, 0x1c);
+                let turned = vec_mat_mul(
+                    vector.map(|v| v as i32),
+                    &self.body[parent_index].orientation,
+                );
+                let offset = shift_up(turned, shift);
+                std::array::from_fn(|axis| parent[axis].wrapping_add(offset[axis]))
+            } else {
+                std::array::from_fn(|axis| parent[axis].wrapping_add(body.position[axis]))
             }
-            let parent = self.absolute(usize::from(body.parent))?;
-            std::array::from_fn(|axis| parent[axis].wrapping_add(body.position[axis]))
         };
         self.body[index].cache = result;
         self.body[index].stamp = self.stamp;
@@ -209,5 +293,37 @@ impl Bodies {
             self.enter(a, current)?;
         }
         Some(())
+    }
+}
+
+impl Bodies {
+    /// F572: switch body `a` into the rotating frame of `parent`: position,
+    /// orientation and velocity are turned by the parent's orientation (F1670,
+    /// F1673), the position shifted back (F1517); the update stamp is set to the
+    /// previous frame.
+    pub fn to_rotating(&mut self, a: usize, parent: usize) {
+        let matrix = self.body[parent].orientation;
+        let stamp = self.stamp;
+        let body = &mut self.body[a];
+        let (vector, shift) = truncate(body.position, 0x1c);
+        let turned = crate::model_math::transform_rows(vector.map(|v| v as i32), &matrix);
+        body.position = shift_up(turned, shift);
+        body.orientation = crate::model_animation::rows_product(&body.orientation, &matrix);
+        body.updated = stamp.wrapping_sub(1);
+        body.rotating = 1;
+        body.velocity = crate::model_math::transform_rows(body.velocity, &matrix);
+    }
+
+    /// F573: switch body `a` back to the linear frame of `parent` (the inverse
+    /// of [`Bodies::to_rotating`] through F1669 and F1672).
+    pub fn to_linear(&mut self, a: usize, parent: usize) {
+        let matrix = self.body[parent].orientation;
+        let body = &mut self.body[a];
+        let (vector, shift) = truncate(body.position, 0x1c);
+        let turned = vec_mat_mul(vector.map(|v| v as i32), &matrix);
+        body.position = shift_up(turned, shift);
+        body.orientation = mat_mat_mul(&body.orientation, &matrix);
+        body.rotating = 0;
+        body.velocity = vec_mat_mul(body.velocity, &matrix);
     }
 }

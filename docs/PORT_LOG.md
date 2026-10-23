@@ -4,6 +4,27 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Collision distance and frame switching (v0.49m)
+
+Notes: `docs/notes/collision.md`.
+
+- `ffe_core::collision`: F569/F570 with F575/F577 for the contact-free path,
+  the altitude (`Contact::altitude`) and the linear/rotating frame switch
+  (F572/F573, with F1669/F1672/F1517 and the rotating branch of F1677).
+  3,103 oracle cases without contact match (892 with a distance, 962 switches);
+  the 993 contact cases are the ones the port declines.
+- F577's far branch tests the outer radii (`+0x138`) while its near branch
+  tests the collision radii (`+0x140`): a JJFFE "FIX" applied to one branch.
+  A planet's atmosphere therefore counts as contact at long range. Kept as is
+  (`docs/KNOWN_ISSUES.md`).
+- A harness bug found on the way: the physical flags printed after the call,
+  when F578 had already cleared some. They are captured before now.
+- Still missing: the contact paths (landing, crash, bounce), complex shapes,
+  F1033's flag handling, wiring altitude into the player's tick, a planet in the
+  flight scenario, the surface drawing.
+
+---
+
 ## 2026-10-23 — Auto-roll F609 and the whole tick in a world (v0.49l)
 
 Notes: `docs/notes/physics.md`.

@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "ffeapi.h"
@@ -2522,6 +2523,112 @@ static int world_step_vectors(void)
     return 0;
 }
 
+/* Collision distance. collide drives the original F569/F570 (the player's
+   distance to the body it orbits, the frame switch F572/F573 as it enters and
+   leaves the body's influence radius, and the scan of the other physical bodies
+   in its frame; F575 and F577 per pair) on a synthetic seven-body tree with the
+   player last, random radii, rotating-frame bytes, orientations and a stale
+   DATA_008704. Positions keep every pair clear of an actual collision and no
+   body is complex; those paths are not ported. */
+extern int ref_collide(unsigned char *object,unsigned char *list,unsigned char *flags,unsigned char *parent,unsigned char **parent_pointer,unsigned long *distance,unsigned char *pad);
+extern unsigned char ref_coll_flags;
+extern unsigned long ref_coll_distance, ref_coll_distance_high;
+static long long get64(const unsigned char *object,unsigned long offset);
+static void print_collision_body(const unsigned char *b,unsigned physical)
+{
+    unsigned long i;
+    printf("{\"parent\":%u,\"rotating\":%u,\"updated\":%u,\"hidden\":%u,\"model\":%lu,\"outer\":%lld,\"inner\":%lld,\"shape\":%u,\"delay\":%ld,\"physical\":%u,\"stamp\":%u,\"position\":[%lld,%lld,%lld],\"velocity\":[%ld,%ld,%ld],\"cache\":[%lld,%lld,%lld],\"orientation\":[",
+        b[0x56],b[0x57],b[0x58],b[0x8b],(unsigned long)get32(b,0x82)&0xffffffffUL,get64(b,0x138),get64(b,0x140),b[0x14c],get32(b,0x148),physical,b[0x25],
+        get64(b,0x3e),get64(b,0x46),get64(b,0x4e),get32(b,0x8c),get32(b,0x90),get32(b,0x94),get64(b,0x26),get64(b,0x2e),get64(b,0x36));
+    for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(b,4*i));
+    printf("]}");
+}
+static int collide_vectors(void)
+{
+    static unsigned char list[0x20000];
+    unsigned char *o[8];
+    unsigned char before[8][0x152],physical_before[8];
+    unsigned char flags=0,parent_index=0,pad=0,*parent_pointer=0;
+    unsigned long n,i,k,distance=0,high_before;
+    int result;
+    fprintf(stderr,"JJFFE collide-v1: original F569/F570 (distance to the parent body, the F572/F573 switch between linear and rotating frames, the scan of the other physical bodies; F575, F577 per pair) on a synthetic seven-body tree with the player last, random outer radii, rotating bytes, orientations and a stale DATA_008704; positions keep every pair clear of a collision and no body is complex; the bodies before and after, the return value, flags, distance and the distance registers.\n");
+    texture_rng=0x6d2b79f5UL;
+    for(n=0;n<4096;++n) {
+        memset(list,0,0x74+0x152*8+0x100);
+        for(k=0;k<8;++k) o[k]=list+0x74+0x152*k;
+        ref_pl_object_list=list;
+        ref_list_pointer=list;
+        ref_frame_stamp=(unsigned char)texture_random(0,3);
+        ref_pl_frame_tics=(unsigned long)texture_random(0,(n&1)?0x80000:200);
+        for(k=1;k<8;++k) {
+            long long position,outer,inner;
+            unsigned int scale;
+            o[k][0x56]=(unsigned char)(k==1?0:texture_random(0,(long)k-1));
+            o[k][0x86]=(unsigned char)k;
+            o[k][0x87]=(unsigned char)texture_random(2,9);
+            o[k][0x57]=(unsigned char)(texture_random(0,2)==0?1:0);
+            o[k][0x58]=(unsigned char)texture_random(0,255);
+            o[k][0x8b]=(unsigned char)(texture_random(0,9)==0?1:0);
+            { unsigned long model=(unsigned long)(texture_random(0,9)==0?0x99:texture_random(0,0x80)); memcpy(o[k]+0x82,&model,4); }
+            o[k][0x14c]=(unsigned char)texture_random(0,0x7f);
+            { long delay=(texture_random(0,3)==0)?texture_random(1,300000):0; memcpy(o[k]+0x148,&delay,4); }
+            scale=(unsigned int)texture_random(8,48);
+            outer=(long long)((((unsigned long long)(unsigned long)texture_random(0,0x7fffffff)<<32)|(unsigned long long)(unsigned long)texture_random(0,0x7fffffff))>>scale);
+            memcpy(o[k]+0x138,&outer,8);
+            inner=(long long)texture_random(1,0x400);
+            if(texture_random(0,2)==0) {outer=inner;memcpy(o[k]+0x138,&outer,8);}
+            memcpy(o[k]+0x140,&inner,8);
+            o[k][0x25]=(unsigned char)texture_random(0,3);
+            list[k]=(unsigned char)((texture_random(0,3)?0x10:0)|(texture_random(0,5)?0x4:0));
+            for(i=0;i<3;++i) {
+                scale=(unsigned int)texture_random(0,36);
+                position=(long long)((((unsigned long long)(unsigned long)texture_random(0,0x7fffffff)<<32)|(unsigned long long)(unsigned long)texture_random(0,0x7fffffff))>>scale)+0x1000000LL;
+                if(texture_random(0,1)) position=-position;
+                memcpy(o[k] + 0x3e + 8*i,&position,8);
+                position=(long long)((((unsigned long long)(unsigned long)texture_random(0,0x7fffffff)<<32)|(unsigned long long)(unsigned long)texture_random(0,0x7fffffff))>>scale);
+                memcpy(o[k] + 0x26 + 8*i,&position,8);
+                put32(o[k],0x8c+4*i,(long)texture_random(-100000,100000));
+            }
+            for(i=0;i<9;++i) put32(o[k],4*i,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)));
+        }
+        o[7][0x8b]=0; o[7][0x57]=(unsigned char)texture_random(0,1);
+        /* Aim the player (and sibling 6) into the band where the pair is in
+           reach but not in contact: distance 0.4 to 2.5 of the radius sum. */
+        {
+            unsigned int target;
+            for(target=0;target<2;++target) {
+                unsigned long ka=target?6:7;
+                unsigned long kb=target?7:o[7][0x56];
+                long long radius_a,radius_b,position;
+                double sum,length,scale,component[3];
+                if(kb==0) continue;
+                if(target) {o[6][0x56]=o[7][0x56];o[6][0x57]=o[7][0x57];if(o[6][0x56]==6) o[6][0x56]=0;}
+                memcpy(&radius_a,o[ka]+0x138,8);memcpy(&radius_b,o[kb]+0x138,8);
+                sum=(double)radius_a+(double)radius_b;
+                for(i=0;i<3;++i) component[i]=(double)texture_random(1,0x7fffffff)*(texture_random(0,1)?1.0:-1.0);
+                length=component[0]*component[0]+component[1]*component[1]+component[2]*component[2];
+                length=sqrt(length);
+                scale=sum*(double)texture_random(400,2500)/1000.0/length;
+                for(i=0;i<3;++i) {
+                    position=(long long)(component[i]*scale);
+                    if(target) {long long base; memcpy(&base,o[7] + 0x3e + 8*i,8); position=base-position;}
+                    memcpy(o[ka] + 0x3e + 8*i,&position,8);
+                }
+            }
+        }
+        high_before=(unsigned long)(texture_random(0,3)==0?texture_random(-1,1):0);
+        ref_coll_distance_high=high_before;
+        ref_coll_distance=0x12345678UL;
+        for(k=0;k<8;++k) {memcpy(before[k],o[k],0x152);physical_before[k]=(unsigned char)(list[k]&4?1:0);}
+        result=ref_collide(o[7],list,&flags,&parent_index,&parent_pointer,&distance,&pad);
+        printf("{\"case\":%lu,\"stamp\":%u,\"tics\":%lu,\"high\":%ld,\"bodies\":[",n,(unsigned)ref_frame_stamp,ref_pl_frame_tics,(long)(int)high_before);
+        for(k=1;k<8;++k) {printf("%s",k>1?",":"");printf("{\"before\":");print_collision_body(before[k],physical_before[k]);printf(",\"after\":");print_collision_body(o[k],list[k]&4?1u:0u);printf("}");}
+        printf("],\"result\":%d,\"flags\":%u,\"distance\":%ld,\"object\":%u,\"pad\":%u,\"register\":[%lu,%lu]}\n",result&0xff,(unsigned)flags,(long)(int)distance,(unsigned)parent_index,(unsigned)pad,ref_coll_distance&0xffffffffUL,ref_coll_distance_high&0xffffffffUL);
+    }
+    if (fflush(stdout)) fail("cannot flush collide vectors");
+    return 0;
+}
+
 /* Steering input. steer drives the original F1037 (set speed from Return and
    Shift through F1121, then F1038: mouse and key deltas into the rates, or the
    turret angles in a turret view) on the player struct (DATA_008804) and a
@@ -3429,6 +3536,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
     if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--collide")) return collide_vectors();
     if (argc == 2 && !strcmp(argv[1], "--world-step")) return world_step_vectors();
     if (argc == 2 && !strcmp(argv[1], "--orient")) return orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--player-orient")) return player_orient_vectors();

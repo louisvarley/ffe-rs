@@ -10,7 +10,7 @@ thrust request, with F607, F1043 and F599) in free space; the orientation, rates
 thrust words and caps are compared. --advance: F1512/F1511 (velocity over a
 64-bit time added to the 64-bit position); the position after is compared. Needs
 no cache. --flight-step: one whole free-flight tick (F1041, F601/F602 and F1512 in
-the order F1021 runs them). --steer: F1037/F1038/F1121 (set speed and heading input). --gravity: F603 (the parent body's pull, with the ffp helpers F1482/F1483/F1496 and F1658). --frames: F590, F604, F605 and F606 (frames of reference, with the cached chain F1677/F1678 and F595). --world-step: a whole tick in a world of bodies (F1041 with gravity F603, auto-roll F609 and the F606 countdown, then F601/F602 and F1512).
+the order F1021 runs them). --steer: F1037/F1038/F1121 (set speed and heading input). --gravity: F603 (the parent body's pull, with the ffp helpers F1482/F1483/F1496 and F1658). --frames: F590, F604, F605 and F606 (frames of reference, with the cached chain F1677/F1678 and F595). --world-step: a whole tick in a world of bodies (F1041 with gravity F603, auto-roll F609 and the F606 countdown, then F601/F602 and F1512). --collide: F569/F570 (the distance to the parent body and the linear/rotating frame switch F572/F573; F575, F577), contact-free cases.
 """
 import argparse
 import hashlib
@@ -52,6 +52,10 @@ SCENARIOS = [
      ["time", "stamp", "live", "matrix", "drift", "rate", "limits", "model", "craft", "player",
       "scanner", "counter", "tics", "altitude", "mode", "flags", "combat", "combat_velocity",
       "set_speed", "gravity", "keys", "bodies", "after"]),
+    ("collide", "--collide", b"JJFFE collide-v1", "FFE_COLLIDE_VECTORS",
+     "executed_reference_collide",
+     ["stamp", "tics", "high", "bodies", "result", "flags", "distance", "object", "pad",
+      "register"]),
     ("gravity", "--gravity", b"JJFFE gravity-v1", "FFE_GRAVITY_VECTORS",
      "executed_reference_gravity",
      ["parent", "mass", "time", "position", "velocity", "fraction", "after"]),
@@ -76,8 +80,12 @@ def alter(row, field):
         inner = value[key]
         value[key] = [v + 1 for v in inner] if isinstance(inner, list) else inner + 1
     elif field == "bodies":
-        row[field] = [dict(b, position=[v + (1 << 40) for v in b["position"]],
-                           velocity=[v + 1 for v in b["velocity"]]) for b in value]
+        def tamper(b):
+            if "before" in b:
+                return dict(b, before=tamper(b["before"]))
+            return dict(b, position=[v + (1 << 40) for v in b["position"]],
+                        velocity=[v + 1 for v in b["velocity"]])
+        row[field] = [tamper(b) for b in value]
     elif field == "altitude":
         row[field] = 0 if value > 0x2625a00 else 0x7fffffff
     elif field == "live":
@@ -164,7 +172,7 @@ def main():
                 "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
             }
     print(json.dumps({
-        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1 + jjffe-flight-step-v1 + jjffe-steer-v1 + jjffe-gravity-v1 + jjffe-frames-v1 + jjffe-world-step-v1",
+        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1 + jjffe-flight-step-v1 + jjffe-steer-v1 + jjffe-gravity-v1 + jjffe-frames-v1 + jjffe-world-step-v1 + jjffe-collide-v1",
         "repeat_matches": True,
         "empty_traces_rejected": True,
         **summary,

@@ -333,6 +333,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 85,
       note: "v0.49l: auto-roll F609 and a whole tick in a world (gravity, frames, auto-roll) verified (4096 cases); the altitude/collision routines remain."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 85,
+      note: "v0.49m: collision distance F569/F570 (F575, F577) and the rotating-frame switch F572/F573 ported and verified (3,103 contact-free cases); contact, landing and complex shapes remain."
     }
   ]
 };
