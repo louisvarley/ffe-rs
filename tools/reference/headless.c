@@ -1855,6 +1855,70 @@ static int thrust_limit_vectors(void)
     return 0;
 }
 
+/* Motion. accelerate drives the original F601 (velocity from thrust over a
+   time step) on a zeroed object with a synthetic orientation, thrust words,
+   fractional accumulators, velocity and caps, over time steps in all three
+   regimes (below 0x4014 after >> 3, up to 0x7fff, and beyond it). */
+extern void ref_accelerate(unsigned char *object,unsigned long tics);
+extern void ref_accelerate_uncapped(unsigned char *object,unsigned long tics);
+static void put32(unsigned char *object,unsigned long offset,long value) { memcpy(object+offset,&value,4); }
+static long get32(const unsigned char *object,unsigned long offset) { long v; int w; memcpy(&w,object+offset,4); v=w; return v; }
+static int accelerate_vectors(void)
+{
+    static unsigned char object[0x200];
+    unsigned long n,i,tics;
+    long cap;
+    fprintf(stderr,"JJFFE accelerate-v1: original F601 and F602 (without the caps) on a zeroed object with a synthetic orientation (+0x0), thrust words (+0xb6), fraction words (+0xec), velocity (+0x8c) and caps (+0xf2) over time steps in the small, medium and large regimes; the velocity dwords and fraction words after.\n");
+    texture_rng=0x165667b1UL;
+    for(n=0;n<4096;++n) {
+        switch(n%4) {
+        case 0: tics=(unsigned long)texture_random(0,0x20000); break;
+        case 1: tics=(unsigned long)texture_random(0x20000,0x40000); break;
+        case 2: tics=(unsigned long)texture_random(0x40000,0x400000); break;
+        default: tics=(unsigned long)texture_random(0,0x7fffffff); break;
+        }
+        memset(object,0,sizeof(object));
+        for(i=0;i<9;++i) put32(object,4*i,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)));
+        for(i=0;i<3;++i) {
+            short w=(short)texture_random(-20000,20000);
+            if(n%5==i) w=0;
+            memcpy(object+0xb6+2*i,&w,2);
+            w=(short)texture_random(0,0xffff);
+            memcpy(object+0xec+2*i,&w,2);
+            put32(object,0x8c+4*i,(long)texture_random(-1000000,1000000));
+            switch(texture_random(0,3)) {
+            case 0: cap=texture_random(0,5000); break;
+            case 1: cap=-texture_random(0,5000); break;
+            case 2: cap=texture_random(-2000000,2000000); break;
+            default: cap=0; break;
+            }
+            put32(object,0xf2+4*i,cap);
+        }
+        {
+            unsigned char before[0x200];
+            memcpy(before,object,sizeof(before));
+            if((n/4)&1) ref_accelerate_uncapped(object,tics); else ref_accelerate(object,tics);
+            printf("{\"case\":%lu,\"function\":%u,\"tics\":%lu,\"matrix\":[",n,601u+(unsigned)((n/4)&1),tics);
+            for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(before,4*i));
+            printf("],\"thrust\":[");
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(before+0xb6+2*i));
+            printf("],\"fraction\":[");
+            for(i=0;i<3;++i) printf("%s%u",i?",":"",*(unsigned short *)(before+0xec+2*i));
+            printf("],\"velocity\":[");
+            for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(before,0x8c+4*i));
+            printf("],\"cap\":[");
+            for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(before,0xf2+4*i));
+            printf("],\"after\":{\"velocity\":[");
+            for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(object,0x8c+4*i));
+            printf("],\"fraction\":[");
+            for(i=0;i<3;++i) printf("%s%u",i?",":"",*(unsigned short *)(object+0xec+2*i));
+            printf("]}}\n");
+        }
+    }
+    if (fflush(stdout)) fail("cannot flush accelerate vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
 static unsigned long texture_faces[1024][48];
 static void texture_face_begin(void)
@@ -2676,6 +2740,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--fill-raster")) return fill_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--span-raster")) return span_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--thrust-limits")) return thrust_limit_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

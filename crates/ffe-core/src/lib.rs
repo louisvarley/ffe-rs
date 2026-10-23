@@ -16,6 +16,7 @@ pub mod model_polygon;
 pub mod model_surface;
 pub mod model_texture;
 pub mod model_thruster;
+pub mod physics;
 pub mod thrust;
 
 /// JJFFE's two-word generator. The returned low 16 bits are not the full state.

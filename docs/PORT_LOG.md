@@ -2083,3 +2083,12 @@ craft its limits (`ShipStats::limits`). The first flight-core step: the
 in-game thrust is not wired to them yet. Notes: `docs/notes/thrust.md`. Also
 recorded: the owner decision to isolate drawing from the simulation RNG
 (SIM-010).
+
+## Velocity from thrust (v0.49b)
+
+F601 and F602 (velocity from thrust over a time step: the Q31 transform of the
+thrust words, the three time-step regimes, F601's caps) are ported in
+`ffe-core::physics` and verified by the new `--accelerate` mode and
+`verify-physics.py` (4096 cases, 0 mismatched). F602 differs from F601 in its
+halving start (0xf, not 0x10) and its arithmetic shift of the time. Notes:
+`docs/notes/physics.md`.

@@ -79,6 +79,8 @@ GLOBAL _ref_span_draw
 GLOBAL _ref_thrust_request
 GLOBAL _ref_thrust_clamp
 GLOBAL _ref_thrust_scale
+GLOBAL _ref_accelerate
+GLOBAL _ref_accelerate_uncapped
 GLOBAL _ref_tex_quad
 GLOBAL _ref_tex_slots
 GLOBAL _ref_tex_draw_triangle
@@ -167,6 +169,8 @@ _ref_span_draw equ FUNC_001613_DrawSpans
 _ref_thrust_request equ FUNC_000598
 _ref_thrust_clamp equ FUNC_000599
 _ref_thrust_scale equ FUNC_000600
+_ref_accelerate equ FUNC_000601
+_ref_accelerate_uncapped equ FUNC_000602
 _ref_tex_quad equ FUNC_001647_DrawTexQuad
 _ref_tex_slots equ DATA_009252
 _ref_tex_draw_triangle equ FUNC_001807

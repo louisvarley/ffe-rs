@@ -47,6 +47,7 @@ ORACLES = [
     ("verify-lines.py", ["--reference", "{commands}"]),
     ("verify-fills.py", ["--reference", "{commands}"]),
     ("verify-thrust.py", ["--reference", "{commands}"]),
+    ("verify-physics.py", ["--reference", "{commands}"]),
     ("verify-station.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-station-queue.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-station-models.py", ["--reference", "{commands}", "--game", "{game}",
