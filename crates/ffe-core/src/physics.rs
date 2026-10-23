@@ -406,10 +406,12 @@ impl Motion {
             let count = -i32::from(pull_exponent);
             vector = vector.map(|v| v >> (count & 31));
         }
-        for axis in 0..3 {
-            let total = i32::from(self.fraction[axis]).wrapping_add(vector[axis]);
-            self.fraction[axis] = total as u16;
-            self.velocity[axis] = self.velocity[axis].wrapping_add(total >> 16);
+        for ((fraction, velocity), delta) in
+            self.fraction.iter_mut().zip(&mut self.velocity).zip(vector)
+        {
+            let total = i32::from(*fraction).wrapping_add(delta);
+            *fraction = total as u16;
+            *velocity = velocity.wrapping_add(total >> 16);
         }
         Some(published)
     }
