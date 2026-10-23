@@ -953,6 +953,32 @@ fn surfaces_span_their_entry_list_and_terminator() {
         .ordered
         .iter()
         .all(|p| matches!(p, Primitive::Line(_))));
+    // F1874: the origin resolves in view space, the axes as object vectors
+    // relative to the origin's object position.
+    // Vertices: 0/1 (10, 20, 30), 2/3 (13, 20, 30), 4/5 (10, 24, 30), 6/7 (10, 20, 38).
+    let records = [
+        1u8, 0, 10, 20, 30, 0, 1, 0, 13, 20, 30, 0, 1, 0, 10, 24, 30, 0, 1, 0, 10, 20, 38, 0,
+    ];
+    // Origin 0 and the ordinary (not mirrored) vertices 2, 4 and 6 as the axes.
+    let mut words = vec![31, 7, 0x0200, 0x0604, 4, 5, 6];
+    words.extend([1u16; 8]);
+    words.extend([0, 0]); // entry-list terminator, then the program's return
+    let mut vertices = Vertices::new(&records, 8).unwrap();
+    let result = execute_live(
+        &bytes(&words),
+        &mut vertices,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        live_instance([100, 200, 300], 0, 0),
+        8,
+    )
+    .unwrap();
+    let emission = &result.surfaces[0];
+    // The Q31 identity matrix truncates each coordinate by one unit (10 * (2^31-1)
+    // >> 31 = 9); the axis differences are exact.
+    assert_eq!(emission.origin, Some([109, 219, 329]));
+    assert_eq!(emission.axes, Some([[3, 0, 0], [0, 4, 0], [0, 0, 8]]));
     // An unterminated entry list is a truncated command, never a guessed length.
     let mut open = vec![31, 7, 0x0100, 0x0302, 4, 5, 6];
     open.extend([1u16; 8]);

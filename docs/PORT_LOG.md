@@ -4,6 +4,23 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Curved surface resolution (v0.48c)
+
+Milestone v0.48 step 2, first part. Notes: `docs/notes/surfaces.md`.
+
+- **F1874's geometry is ported.** The executor resolves the surface's origin
+  through F1470 (view) and each axis through F1472 (object), and records the
+  three `axis - origin` vectors F1874 passes to F1876, in
+  `SurfaceEmission::{origin, axes}`. A synthetic test checks the resolved origin
+  and vectors (including the Q31 identity's one-unit truncation).
+- **The census:** 40 opcode 31 records in 39 models, 224 entries.
+- **F1876 is not ported.** It is about 1,580 lines with nine helper routines and
+  two 480/240-byte topology tables (`DATA_007893`/`DATA_007894`). The note
+  records the twelve-argument call contract, the helper call counts and a
+  bottom-up port plan with scoped probe hooks (`trace_spline_*` covers opcode 22,
+  not surfaces) and a `verify-surfaces.py` oracle. No approximate patch
+  rendering was invented.
+
 ## 2026-10-23 — 3D text: the glyph programs (v0.48b)
 
 Milestone v0.48 step 1, second half. Notes: `docs/notes/text.md`.

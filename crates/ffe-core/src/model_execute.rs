@@ -152,6 +152,12 @@ pub struct ThrusterEmission {
 pub struct SurfaceEmission {
     pub surface: Surface,
     pub context: VertexContext,
+    /// F1874's resolved origin (F1470, view space) when live vertices exist.
+    pub origin: Option<[i32; 3]>,
+    /// F1874's three axis vectors, each `axis.object - origin.object` in record
+    /// units, in the record's byte +3..+5 order (`None` without live vertices).
+    /// F1876 turns these into the patch; its rendering is not ported.
+    pub axes: Option<[[i32; 3]; 3]>,
 }
 
 /// An opcode 21 nested depth block boundary (F1697): `Some(key)` starts a block
@@ -1230,21 +1236,39 @@ fn run(
             }
             31 => {
                 for surface in program.surfaces.iter().filter(|s| s.offset == offset) {
-                    // F1874 resolves the origin (view) and three axis vertices (object).
+                    // F1874 resolves the origin through F1470 (view) and each axis
+                    // through F1472 (object), then passes `axis - origin` vectors.
+                    let mut origin_view = None;
+                    let mut axis_vectors = None;
                     if let Some(live) = vertices.as_deref_mut() {
-                        for index in std::iter::once(surface.origin).chain(surface.axes) {
-                            live.resolve(
-                                index as i8,
+                        let origin = live.resolve(
+                            surface.origin as i8,
+                            working,
+                            instance.position,
+                            instance.generation,
+                            false,
+                        )?;
+                        let mut vectors = [[0i32; 3]; 3];
+                        for (position, index) in surface.axes.iter().enumerate() {
+                            let axis = live.resolve(
+                                *index as i8,
                                 working,
                                 instance.position,
                                 instance.generation,
                                 false,
                             )?;
+                            vectors[position] = std::array::from_fn(|i| {
+                                axis.object[i].wrapping_sub(origin.object[i])
+                            });
                         }
+                        origin_view = Some(origin.view);
+                        axis_vectors = Some(vectors);
                     }
                     result.surfaces.push(SurfaceEmission {
                         surface: surface.clone(),
                         context: working.clone(),
+                        origin: origin_view,
+                        axes: axis_vectors,
                     });
                 }
                 Some(command.size as i32)

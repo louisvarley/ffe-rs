@@ -46,6 +46,38 @@ fn model_text_and_label_census() {
             label_codes.entry(label.string).or_default().insert(index);
         }
     }
+    // Curved surfaces (opcode 31) in the same pass: how many models use them.
+    let mut surfaces = 0;
+    let mut surface_entries = 0;
+    let mut surface_models = BTreeSet::new();
+    for record in &cache.manifest().files {
+        let AssetKind::ModelCommands {
+            index,
+            vertex_count,
+            ..
+        } = record.asset
+        else {
+            continue;
+        };
+        let Ok(program) =
+            ffe_core::model_commands::decode(cache.asset(&record.id).unwrap(), vertex_count)
+        else {
+            continue;
+        };
+        if !program.surfaces.is_empty() {
+            surface_models.insert(index);
+            surfaces += program.surfaces.len();
+            surface_entries += program
+                .surfaces
+                .iter()
+                .map(|s| s.entries.len())
+                .sum::<usize>();
+        }
+    }
+    println!(
+        "surfaces={surfaces} in {} models, entries={surface_entries}",
+        surface_models.len()
+    );
     println!("texts={texts} codes={text_codes:?}");
     println!("glyph_sets={glyph_sets:?}");
     println!("labels={labels} codes={label_codes:?}");
