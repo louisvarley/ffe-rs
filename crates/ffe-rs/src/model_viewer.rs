@@ -57,8 +57,8 @@ pub struct Textured {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub shapes: Vec<Shape>,
-    /// Ordered primitives the viewer does not draw yet (labels whose string is
-    /// missing from the cache).
+    /// Primitives the viewer does not draw yet: labels whose string is missing
+    /// from the cache, and every curved surface (F1876 is not ported).
     pub skipped: usize,
     /// Opcode 10 text records the executor ran but the viewer does not draw yet
     /// (the glyph programs are not imported or executed).
@@ -846,6 +846,9 @@ impl ModelViewer {
         };
         self.draw_primitives(&result, &mut frame)?;
         self.draw_texts(&result, model.index, &mut vertices, instance, &mut frame)?;
+        // Opcode 31's patch rendering (F1876) is not ported: report every surface
+        // rather than leaving it out of the count.
+        frame.skipped += result.surfaces.len();
         Ok(frame)
     }
 
