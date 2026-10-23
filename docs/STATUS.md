@@ -20,9 +20,10 @@ coverage and `docs/notes/` for the feature records.
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
 - `docs/notes/` — per-feature records: polygons, textures, child models,
   thrusters, animation, views, text/labels and curved surfaces.
-- `dashboard/` — the milestone burndown (`index.html`, data in `burndown.js`).
-  **Update it in the same commit as any progress change**: statuses plus a new
-  dated history point. Its last point is checked against the task list.
+- `dashboard/` — the whole-port burndown at milestone level (`index.html`, data
+  in `burndown.js`; 6 milestones, 38 items, 34 left on 2026-10-23). **Update it
+  in the same commit as any progress change**: statuses plus a new dated history
+  point. Its last point is checked against the task lists.
 
 ## Verdict on handoff readiness
 
@@ -191,8 +192,9 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 ## Next milestone: v0.48 "Every model fully drawn"
 
-**Progress.** Tracked in `dashboard/` (12 items at planning, 8 left on
-2026-10-23). Keep it current with every progress commit.
+**Progress.** Tracked in `dashboard/`: 12 v0.48 items (8 left on 2026-10-23)
+inside the whole-port backlog (38 items, 34 left). Keep it current with every
+progress commit.
 
 **Goal.** The F6 viewer and the flight view draw every primitive the executor
 queues, with the original's own rasterisers, verified at the pixel level. Today

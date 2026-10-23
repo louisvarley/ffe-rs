@@ -21,7 +21,8 @@ Every time a build or commit changes the milestone's progress, update
 The page shows a warning if the last history point disagrees with the task list,
 so a missed update is visible rather than silent.
 
-The chart is a burndown of the **current milestone** (see
-`docs/STATUS.md`), not of the whole project: when a milestone completes, start a
-fresh task list and history and put the completed milestone's final numbers in
-`docs/STATUS.md`.
+The chart is a burndown of the **whole port to completion**: every milestone
+from the current one to release hardening is a milestone section in the data,
+and the chart sums the items that are not done. Completed milestones stay in the
+data with all items `done` (they keep the history honest); add a new milestone
+section when scope is planned, and say so in the history point.

@@ -96,8 +96,9 @@ For agents working on this project:
 - **Keep the burndown current.** Every build or commit that changes milestone
   progress must update `dashboard/burndown.js` in the same commit: set the item
   statuses and append a dated history point with the new remaining count (see
-  `dashboard/README.md`). The dashboard is the milestone burndown, not a
-  whole-project estimate.
+  `dashboard/README.md`). The dashboard is the whole-port burndown at milestone
+  level (current milestone through release hardening), so new milestones are
+  added there as scope is planned.
 
 The exact requested filename is `CLAUDE.MD`. Automatic discovery of this uppercase
 extension is agent/platform dependent; this document does not replace existing
