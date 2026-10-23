@@ -520,6 +520,9 @@ fn executed_reference_advance() {
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 struct CollideState {
+    kind: u8,
+    radius: i16,
+    mass: [i16; 2],
     parent: u8,
     rotating: u8,
     updated: u8,
@@ -592,7 +595,10 @@ fn executed_reference_collide() {
                 parent: b.parent,
                 rotating: b.rotating,
                 index: (i + 1) as u8,
-                kind: 2,
+                kind: b.kind,
+                locked: b.kind == 1,
+                radius: b.radius,
+                mass: u32::from(b.mass[0] as u16) | u32::from(b.mass[1] as u16) << 16,
                 stamp: b.stamp,
                 cache: b.cache,
                 orientation: b.orientation,
@@ -603,7 +609,6 @@ fn executed_reference_collide() {
                 inner_radius: b.inner,
                 shape: b.shape,
                 delay: b.delay,
-                ..Body::default()
             };
         }
         let contact_in_original = case.object != 0 || case.flags & 0xc0 != 0;
@@ -903,6 +908,288 @@ fn executed_reference_world_step() {
         "too little coverage: {changed} frame changes, {pulled} pulls"
     );
     eprintln!("compared {cases} world steps ({changed} frame changes, {pulled} gravity pulls)");
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TickContact {
+    result: u8,
+    flags: u8,
+    distance: i32,
+    object: u8,
+    pad: u8,
+    register: [u32; 2],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TickCase {
+    case: usize,
+    time: i64,
+    stamp: u8,
+    high: i32,
+    live: [u8; 7],
+    matrix: [i32; 9],
+    drift: i8,
+    rate: [i16; 3],
+    limits: [i16; 6],
+    model: u32,
+    craft: u8,
+    player: u32,
+    scanner: u16,
+    counter: i8,
+    tics: u32,
+    altitude: i32,
+    mode: u8,
+    flags: u8,
+    combat: u8,
+    combat_velocity: [i32; 3],
+    set_speed: i32,
+    gravity: [i32; 3],
+    keys: [u8; 10],
+    bodies: Vec<CollideBody>,
+    after: WorldAfter,
+    contact: TickContact,
+}
+
+/// One whole player tick in a world (`--world-tick`): the original F1041
+/// (gravity, auto-roll, the frame countdown), F601/F602, F1512 and the
+/// collision scan with its linear/rotating frame switch, against
+/// `Player::tick_in`. Cases where the original reports a contact are the ones
+/// the port declines; every other case must match in the player's fields, the
+/// altitude, the contact flags and every body.
+#[test]
+#[ignore = "Local-only original player update; use tools/reference/verify-physics.py"]
+fn executed_reference_world_tick() {
+    let input = std::fs::read_to_string(std::env::var_os("FFE_TICK_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 160 << 20);
+    let (mut cases, mut compared, mut declined, mut valid, mut switched, mut moved) =
+        (0, 0, 0, 0, 0, 0);
+    for line in input.lines() {
+        let case: TickCase = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        cases += 1;
+        let mut world = Bodies {
+            stamp: case.stamp,
+            frame_tics: case.tics,
+            distance: (i64::from(case.high) << 32) | 0x1234_5678,
+            ..Bodies::default()
+        };
+        for (i, row) in case.bodies.iter().enumerate() {
+            let b = &row.before;
+            world.live[i + 1] = case.live[i] != 0;
+            world.physical[i + 1] = b.physical != 0;
+            world.body[i + 1] = Body {
+                position: b.position,
+                velocity: b.velocity,
+                parent: b.parent,
+                rotating: b.rotating,
+                index: (i + 1) as u8,
+                kind: b.kind,
+                locked: b.kind == 1,
+                radius: b.radius,
+                mass: u32::from(b.mass[0] as u16) | u32::from(b.mass[1] as u16) << 16,
+                stamp: b.stamp,
+                cache: b.cache,
+                orientation: b.orientation,
+                updated: b.updated,
+                hidden: b.hidden,
+                model: b.model,
+                outer_radius: b.outer,
+                inner_radius: b.inner,
+                shape: b.shape,
+                delay: b.delay,
+            };
+        }
+        let me = &case.bodies[6].before;
+        let m = case.matrix;
+        let l = case.limits;
+        let mut player = Player {
+            motion: Motion {
+                orientation: [[m[0], m[1], m[2]], [m[3], m[4], m[5]], [m[6], m[7], m[8]]],
+                drift: case.drift,
+                rate: case.rate,
+                velocity: me.velocity,
+                model: case.model,
+                craft: case.craft,
+                parent: me.parent,
+                position: me.position,
+                rotating: me.rotating,
+                switch_delay: me.delay,
+                updated: me.updated,
+                ..Motion::default()
+            },
+            limits: Limits {
+                axes: [[l[0], l[1]], [l[2], l[3]], [l[4], l[5]]],
+            },
+            set_speed: case.set_speed,
+            mode: case.mode,
+            flags: case.flags,
+            altitude: case.altitude,
+            frame_tics: case.tics,
+            reference_counter: case.counter,
+            combat: case.combat & 2 != 0,
+            combat_velocity: case.combat_velocity,
+            scanner: Scanner {
+                player: case.player,
+                rotation: case.scanner,
+            },
+            gravity_vector: case.gravity,
+            ..Player::default()
+        };
+        // The player's own orientation lives in its body for the scan.
+        world.body[7].orientation = m;
+        let k = case.keys.map(|k| k != 0);
+        let keys = ThrusterKeys {
+            forward: k[0],
+            reverse: k[1],
+            numpad_forward: k[2],
+            numpad_reverse: k[3],
+            up_a: k[4],
+            up_b: k[5],
+            down_a: k[6],
+            down_b: k[7],
+            right: k[8],
+            left: k[9],
+        };
+        let contact_in_original = case.contact.object != 0 || case.contact.flags & 0xc0 != 0;
+        let contact = player.tick_in(&keys, case.time, &mut world, 7);
+        let Ok(contact) = contact else {
+            assert!(
+                contact_in_original,
+                "declined a contact-free tick {}",
+                case.case
+            );
+            declined += 1;
+            continue;
+        };
+        assert!(
+            !contact_in_original,
+            "tick {} had a contact the port missed",
+            case.case
+        );
+        let a = &case.after;
+        let expected = [
+            [a.matrix[0], a.matrix[1], a.matrix[2]],
+            [a.matrix[3], a.matrix[4], a.matrix[5]],
+            [a.matrix[6], a.matrix[7], a.matrix[8]],
+        ];
+        assert_eq!(
+            (
+                player.motion.orientation,
+                player.motion.drift,
+                player.motion.rate,
+                player.motion.thrust,
+                player.motion.cap,
+                player.motion.fraction,
+                player.reference_counter,
+                player.scanner.rotation,
+                player.motion.autopilot[1],
+                player.gravity_vector,
+            ),
+            (
+                expected,
+                a.drift,
+                a.rate,
+                a.thrust,
+                a.cap,
+                a.fraction,
+                a.counter,
+                a.scanner,
+                a.autopilot,
+                a.gravity
+            ),
+            "tick {}",
+            case.case
+        );
+        assert_eq!(
+            (
+                contact.flags,
+                contact.flags,
+                contact.distance,
+                contact.object,
+                contact.pad,
+                [world.distance as u32, (world.distance >> 32) as u32]
+            ),
+            (
+                case.contact.result,
+                case.contact.flags,
+                case.contact.distance,
+                case.contact.object,
+                case.contact.pad,
+                case.contact.register
+            ),
+            "tick {} contact",
+            case.case
+        );
+        for (i, row) in case.bodies.iter().enumerate() {
+            let body = &world.body[i + 1];
+            let (position, velocity, parent, rotating, delay, updated, orientation) = if i == 6 {
+                let motion = &player.motion;
+                let o = motion.orientation;
+                (
+                    motion.position,
+                    motion.velocity,
+                    motion.parent,
+                    motion.rotating,
+                    motion.switch_delay,
+                    motion.updated,
+                    [
+                        o[0][0], o[0][1], o[0][2], o[1][0], o[1][1], o[1][2], o[2][0], o[2][1],
+                        o[2][2],
+                    ],
+                )
+            } else {
+                (
+                    body.position,
+                    body.velocity,
+                    body.parent,
+                    body.rotating,
+                    body.delay,
+                    body.updated,
+                    body.orientation,
+                )
+            };
+            let after = &row.after;
+            assert_eq!(
+                (
+                    parent,
+                    rotating,
+                    updated,
+                    delay,
+                    body.stamp,
+                    position,
+                    velocity,
+                    body.cache,
+                    orientation
+                ),
+                (
+                    after.parent,
+                    after.rotating,
+                    after.updated,
+                    after.delay,
+                    after.stamp,
+                    after.position,
+                    after.velocity,
+                    after.cache,
+                    after.orientation
+                ),
+                "tick {} body {}",
+                case.case,
+                i + 1
+            );
+        }
+        compared += 1;
+        valid += usize::from(contact.distance != -1);
+        switched += usize::from(me.rotating != case.bodies[6].after.rotating);
+        moved += usize::from(me.parent != case.bodies[6].after.parent);
+    }
+    assert_eq!(cases, 4096);
+    assert!(
+        compared > 2500 && valid > 150 && switched > 300,
+        "too little coverage: {compared} {valid} {switched}"
+    );
+    eprintln!("compared {compared} world ticks ({valid} with a distance, {switched} frame switches, {moved} parent changes), {declined} declined for a contact");
 }
 
 #[derive(Deserialize)]

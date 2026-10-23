@@ -60,6 +60,44 @@ pub struct Body {
     pub delay: i32,
 }
 
+impl Body {
+    /// Copy the fields the player's [`Motion`](crate::physics::Motion) owns
+    /// into this body.
+    pub fn take_motion(&mut self, motion: &crate::physics::Motion) {
+        self.position = motion.position;
+        self.velocity = motion.velocity;
+        self.parent = motion.parent;
+        self.rotating = motion.rotating;
+        self.index = motion.craft;
+        self.delay = motion.switch_delay;
+        self.updated = motion.updated;
+        for (row, target) in motion
+            .orientation
+            .iter()
+            .zip(self.orientation.chunks_mut(3))
+        {
+            target.copy_from_slice(row);
+        }
+    }
+
+    /// Copy the fields a frame switch can change back into the player's motion.
+    pub fn give_motion(&self, motion: &mut crate::physics::Motion) {
+        motion.position = self.position;
+        motion.velocity = self.velocity;
+        motion.parent = self.parent;
+        motion.rotating = self.rotating;
+        motion.switch_delay = self.delay;
+        motion.updated = self.updated;
+        for (row, source) in motion
+            .orientation
+            .iter_mut()
+            .zip(self.orientation.chunks(3))
+        {
+            row.copy_from_slice(source);
+        }
+    }
+}
+
 /// The object list with the per-object in-use flag (bit 0x10 of the byte at
 /// `list + index`), the frame stamp (`DATA_008811`) and the F148 events raised.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,6 +349,13 @@ impl Bodies {
         body.orientation = crate::model_animation::rows_product(&body.orientation, &matrix);
         body.updated = stamp.wrapping_sub(1);
         body.rotating = 1;
+        // When a body is its own parent the original's orientation update is
+        // in place, so the velocity is turned by the new orientation.
+        let matrix = if parent == a {
+            body.orientation
+        } else {
+            matrix
+        };
         body.velocity = crate::model_math::transform_rows(body.velocity, &matrix);
     }
 
@@ -324,6 +369,11 @@ impl Bodies {
         body.position = shift_up(turned, shift);
         body.orientation = mat_mat_mul(&body.orientation, &matrix);
         body.rotating = 0;
+        let matrix = if parent == a {
+            body.orientation
+        } else {
+            matrix
+        };
         body.velocity = vec_mat_mul(body.velocity, &matrix);
     }
 }

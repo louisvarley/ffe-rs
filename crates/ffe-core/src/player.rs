@@ -7,6 +7,7 @@
 //! nothing, and anything that would need them is reported as an error rather
 //! than guessed. Verified against the executed original
 //! (`docs/notes/player.md`).
+use crate::collision::Contact;
 use crate::frames::Bodies;
 use crate::model::multiply;
 use crate::physics::{Motion, Scanner};
@@ -82,6 +83,8 @@ pub struct Player {
     /// The truncated relative position F603 last left in
     /// `DATA_008708..DATA_008710`, which F609's auto-roll reads.
     pub gravity_vector: [i32; 3],
+    /// The collision flags F1033 keeps at `+0x212` (`DATA_008934`).
+    pub contact_flags: u8,
 }
 
 /// How long each steering key has been held, in 50 Hz ticks (zero: not held):
@@ -339,19 +342,11 @@ impl Player {
         }
         self.reference_counter = self.reference_counter.wrapping_sub(1);
         if self.reference_counter < 0 {
-            let body = &mut world.body[index];
-            body.position = self.motion.position;
-            body.velocity = self.motion.velocity;
-            body.parent = self.motion.parent;
-            body.rotating = 0;
-            body.index = self.motion.craft;
+            world.body[index].take_motion(&self.motion);
             if world.select_frame(index).is_none() {
-                return Err("A rotating frame of reference is not ported.".to_owned());
+                return Err("A station's velocity is not ported.".to_owned());
             }
-            let body = &world.body[index];
-            self.motion.position = body.position;
-            self.motion.velocity = body.velocity;
-            self.motion.parent = body.parent;
+            world.body[index].give_motion(&mut self.motion);
             self.reference_counter = 0xd;
         }
         let request = if self.mode == 0x24 {
@@ -381,6 +376,30 @@ impl Player {
         }
         self.motion.advance(time);
         Ok(())
+    }
+
+    /// One whole tick in a world, as F1021 runs it: [`Player::step_in`], then
+    /// the collision scan (F1033 calls F569): the player is copied into its
+    /// body, [`Bodies::collide`] may switch it between the linear and rotating
+    /// frames, and the altitude is set from the distance. Errors where the
+    /// original reaches the contact code, which is not ported.
+    pub fn tick_in(
+        &mut self,
+        keys: &ThrusterKeys,
+        time: i64,
+        world: &mut Bodies,
+        index: usize,
+    ) -> Result<Contact, String> {
+        self.step_in(keys, time, world, index)?;
+        world.body[index].take_motion(&self.motion);
+        world.frame_tics = self.frame_tics;
+        let Some(contact) = world.collide(index) else {
+            return Err("Contact with a body is not ported.".to_owned());
+        };
+        world.body[index].give_motion(&mut self.motion);
+        self.altitude = contact.altitude();
+        self.contact_flags = contact.flags;
+        Ok(contact)
     }
 
     /// One free-flight tick over the 64-bit `time` (`DATA_008869:DATA_008868`):

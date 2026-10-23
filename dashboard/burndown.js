@@ -109,9 +109,9 @@ window.FFE_BURNDOWN = {
         { id: "flight-4", title: "Flight integration decoupled from the frame; fixed 50 Hz step", status: "in-progress", version: "v0.49h" },
         { id: "flight-5", title: "Original input processing, key accumulation and remapping", status: "in-progress", version: "v0.49g" },
         { id: "flight-6", title: "Time acceleration and its RNG consumption", status: "in-progress", version: "v0.49i" },
-        { id: "flight-7", title: "Collision detection and response (ccoll)", status: "todo" },
+        { id: "flight-7", title: "Collision detection and response (ccoll)", status: "in-progress", version: "v0.49n" },
         { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "todo" },
-        { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "todo" },
+        { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "todo" },
         { id: "flight-11", title: "Launch sequence", status: "todo" },
         { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "todo" }
@@ -338,6 +338,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 85,
       note: "v0.49m: collision distance F569/F570 (F575, F577) and the rotating-frame switch F572/F573 ported and verified (3,103 contact-free cases); contact, landing and complex shapes remain."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 85,
+      note: "v0.49n: the player's whole tick with the collision scan verified (3,476 contact-free ticks); collision (ccoll) and rotating-frame items now in progress."
     }
   ]
 };

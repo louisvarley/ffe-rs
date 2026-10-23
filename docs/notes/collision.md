@@ -45,3 +45,23 @@ at 0.4 to 2.5 times the radius sum so many pairs are in reach but not touching):
 distance registers and every body (892 with a distance, 962 frame switches), and
 the 993 cases the original reports a contact for are exactly the ones the port
 declines; every tampered field and an empty trace are rejected.
+
+## The player's tick (F1021) with the scan
+
+`Player::tick_in` runs `step_in` (F1041, F601/F602, F1512) and then the scan
+(F1033 calls F569): the player is copied into its body (`Body::take_motion`),
+`Bodies::collide` runs, and the body is copied back (`give_motion`), which carries
+a frame switch's new position, velocity, orientation, rotating byte, delay and
+update stamp. The altitude is the distance or 0x7fffffff.
+
+A body that is its own parent (possible only if the player's own list flag marks
+it live to F606) aliases the matrix in F572/F573: the orientation is updated in
+place, so the velocity is turned by the **new** orientation. The port reproduces
+this.
+
+`--world-tick` runs the original on 4096 whole ticks in a seven-body world (ffp
+masses, radii, rotating bytes, orientations, ship models for the player, a stale
+`DATA_008704`): 3,476 match in every player field, the altitude registers,
+flags and every body (193 with a distance, 1,124 frame switches, 186 parent
+changes); the 620 contact cases are exactly those the port declines.
+

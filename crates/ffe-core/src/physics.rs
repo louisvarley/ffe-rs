@@ -38,6 +38,12 @@ pub struct Motion {
     pub position: [i64; 3],
     /// Gun mounts (`+0xd1`, a signed byte): four or more allow the bottom turret.
     pub gun_mounts: i8,
+    /// Non-zero while in the parent's rotating frame (`+0x57`).
+    pub rotating: u8,
+    /// The countdown before the frame may switch (`+0x148`), see F570.
+    pub switch_delay: i32,
+    /// The frame in which the rotating-frame orientation was last updated (`+0x58`).
+    pub updated: u8,
 }
 
 /// The scanner state F585 touches: the player's craft number (`DATA_008857`)

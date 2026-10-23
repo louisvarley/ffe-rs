@@ -4,6 +4,24 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — The player's whole tick with the collision scan (v0.49n)
+
+Notes: `docs/notes/collision.md`.
+
+- `Player::tick_in`: F1041 (gravity, auto-roll, F606), F601/F602, F1512, then
+  F569/F570 with the F572/F573 switch and the altitude. `--world-tick` (4096
+  ticks) matches in 3,476 contact-free cases; the 620 contacts are declined.
+- Found by the oracle: a body that is its own parent aliases the matrix in
+  F572/F573 (the velocity is turned by the updated orientation); ported.
+- Harness lessons: the player's `+0x86` must equal its list index or the scan
+  collides it with itself, and the contact code crashes on models without
+  collision data (the player uses ship models 14-70 here).
+- Still missing: the contact paths (landing, crash, bounce), complex shapes, a
+  station's velocity, F1033's remaining effects, a planet in the flight
+  scenario, the surface drawing.
+
+---
+
 ## 2026-10-23 — Collision distance and frame switching (v0.49m)
 
 Notes: `docs/notes/collision.md`.
