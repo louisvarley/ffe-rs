@@ -7,6 +7,7 @@
 //! nothing, and anything that would need them is reported as an error rather
 //! than guessed. Verified against the executed original
 //! (`docs/notes/player.md`).
+use crate::frames::Bodies;
 use crate::model::multiply;
 use crate::physics::{Motion, Scanner};
 use crate::thrust::{clamp, Limits};
@@ -78,6 +79,9 @@ pub struct Player {
     pub view: u8,
     /// The turret angles (`+0x204` yaw, `+0x206` pitch).
     pub turret: [i16; 2],
+    /// The truncated relative position F603 last left in
+    /// `DATA_008708..DATA_008710`, which F609's auto-roll reads.
+    pub gravity_vector: [i32; 3],
 }
 
 /// How long each steering key has been held, in 50 Hz ticks (zero: not held):
@@ -301,28 +305,53 @@ impl Player {
         request
     }
 
-    /// F1041 in free space: the orientation is updated twice over half the
-    /// frame's time (F585, autopilot off), the frame-of-reference counter ticks
-    /// (F606 has nothing to do without a parent), and the thrust request - take-off
-    /// thrust in mode 0x24, the engines-off keys, or the set speed - is clamped
-    /// to the limits (F599) into the thrust words. Errors where the original would
-    /// run steps this port does not have: a parent frame (F603/F606) or an altitude
-    /// at or below [`AUTO_ROLL_ALTITUDE`] (F609).
+    /// F1041 in free space (no parent frame, an empty world): see
+    /// [`Player::orient_and_thrust_in`]. Errors for an object with a parent.
     pub fn orient_and_thrust(&mut self, keys: &ThrusterKeys) -> Result<(), String> {
         if self.motion.parent != 0 {
-            return Err(
-                "Free flight needs F603/F606 for an object with a parent frame.".to_owned(),
-            );
+            return Err("A parent frame needs a world: use orient_and_thrust_in.".to_owned());
         }
-        if self.altitude <= AUTO_ROLL_ALTITUDE {
-            return Err("Free flight near a planet needs F609's auto-roll.".to_owned());
-        }
+        self.orient_and_thrust_in(keys, &mut Bodies::default(), 1)
+    }
+
+    /// F1041 in a world of bodies, where the player is body `index`: the
+    /// orientation twice (F585), the parent's gravity (F603) and, at or below
+    /// [`AUTO_ROLL_ALTITUDE`], the auto-roll (F609) into the roll rate; then the
+    /// frame countdown, which runs F606 on reaching below zero (the player is
+    /// copied into the world for it and back), and the thrust request.
+    pub fn orient_and_thrust_in(
+        &mut self,
+        keys: &ThrusterKeys,
+        world: &mut Bodies,
+        index: usize,
+    ) -> Result<(), String> {
         let half = (self.frame_tics >> 1) as i32;
         for _ in 0..2 {
             self.motion.orient(half, false, half, &mut self.scanner);
         }
+        let mass = world.body[usize::from(self.motion.parent)].mass;
+        if let Some(vector) = self.motion.gravity(mass, self.frame_tics as i32) {
+            self.gravity_vector = vector;
+        }
+        if self.altitude <= AUTO_ROLL_ALTITUDE {
+            self.motion.auto_roll(self.gravity_vector);
+            self.motion.rate[1] = self.motion.autopilot[1];
+        }
         self.reference_counter = self.reference_counter.wrapping_sub(1);
         if self.reference_counter < 0 {
+            let body = &mut world.body[index];
+            body.position = self.motion.position;
+            body.velocity = self.motion.velocity;
+            body.parent = self.motion.parent;
+            body.rotating = 0;
+            body.index = self.motion.craft;
+            if world.select_frame(index).is_none() {
+                return Err("A rotating frame of reference is not ported.".to_owned());
+            }
+            let body = &world.body[index];
+            self.motion.position = body.position;
+            self.motion.velocity = body.velocity;
+            self.motion.parent = body.parent;
             self.reference_counter = 0xd;
         }
         let request = if self.mode == 0x24 {
@@ -336,10 +365,27 @@ impl Player {
         Ok(())
     }
 
+    /// [`Player::step`] in a world of bodies where the player is body `index`.
+    pub fn step_in(
+        &mut self,
+        keys: &ThrusterKeys,
+        time: i64,
+        world: &mut Bodies,
+        index: usize,
+    ) -> Result<(), String> {
+        self.orient_and_thrust_in(keys, world, index)?;
+        if self.flags & 1 != 0 {
+            self.motion.accelerate_uncapped(time as u32);
+        } else {
+            self.motion.accelerate(time as u32);
+        }
+        self.motion.advance(time);
+        Ok(())
+    }
+
     /// One free-flight tick over the 64-bit `time` (`DATA_008869:DATA_008868`):
     /// F1041, then the velocity (F602 with the engines off, F601 otherwise, over
-    /// the low dword) and the position (F1512). The same limits as
-    /// [`Player::orient_and_thrust`] apply.
+    /// the low dword) and the position (F1512), in free space.
     pub fn step(&mut self, keys: &ThrusterKeys, time: i64) -> Result<(), String> {
         self.orient_and_thrust(keys)?;
         if self.flags & 1 != 0 {

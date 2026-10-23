@@ -519,6 +519,223 @@ fn executed_reference_advance() {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct WorldBody {
+    parent: u8,
+    kind: u8,
+    radius: i16,
+    mass: [i16; 2],
+    stamp: u8,
+    position: [i64; 3],
+    velocity: [i32; 3],
+    cache: [i64; 3],
+    after: FrameAfter,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorldAfter {
+    matrix: [i32; 9],
+    drift: i8,
+    rate: [i16; 3],
+    thrust: [i16; 3],
+    cap: [i32; 3],
+    fraction: [u16; 3],
+    counter: i8,
+    scanner: u16,
+    autopilot: i16,
+    gravity: [i32; 3],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorldCase {
+    case: usize,
+    time: i64,
+    stamp: u8,
+    live: [u8; 7],
+    matrix: [i32; 9],
+    drift: i8,
+    rate: [i16; 3],
+    limits: [i16; 6],
+    model: u32,
+    craft: u8,
+    player: u32,
+    scanner: u16,
+    counter: i8,
+    tics: u32,
+    altitude: i32,
+    mode: u8,
+    flags: u8,
+    combat: u8,
+    combat_velocity: [i32; 3],
+    set_speed: i32,
+    gravity: [i32; 3],
+    keys: [u8; 10],
+    bodies: Vec<WorldBody>,
+    after: WorldAfter,
+}
+
+/// One whole tick in a world (`--world-step`): the original F1041 (gravity F603,
+/// auto-roll F609, the F606 countdown) with F601/F602 and F1512, against
+/// `Player::step_in`, for the player as the last of seven bodies in a tree.
+/// Every body's parent, position, velocity, stamp and cache, and the player's
+/// matrix, rates, thrust, caps, fractions, countdown, scanner, auto-roll rate
+/// and gravity globals must match.
+#[test]
+#[ignore = "Local-only original player update; use tools/reference/verify-physics.py"]
+fn executed_reference_world_step() {
+    let input = std::fs::read_to_string(std::env::var_os("FFE_WORLD_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 64 << 20);
+    let (mut cases, mut changed, mut pulled) = (0, 0, 0);
+    for line in input.lines() {
+        let case: WorldCase = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        let mut world = Bodies {
+            stamp: case.stamp,
+            ..Bodies::default()
+        };
+        for (i, row) in case.bodies.iter().enumerate() {
+            world.live[i + 1] = case.live[i] != 0;
+            world.body[i + 1] = Body {
+                position: row.position,
+                velocity: row.velocity,
+                parent: row.parent,
+                index: (i + 1) as u8,
+                kind: row.kind,
+                locked: row.kind == 1,
+                radius: row.radius,
+                mass: u32::from(row.mass[0] as u16) | u32::from(row.mass[1] as u16) << 16,
+                stamp: row.stamp,
+                cache: row.cache,
+                ..Body::default()
+            };
+        }
+        let me = &case.bodies[6];
+        let m = case.matrix;
+        let l = case.limits;
+        let mut player = Player {
+            motion: Motion {
+                orientation: [[m[0], m[1], m[2]], [m[3], m[4], m[5]], [m[6], m[7], m[8]]],
+                drift: case.drift,
+                rate: case.rate,
+                velocity: me.velocity,
+                model: case.model,
+                craft: case.craft,
+                parent: me.parent,
+                position: me.position,
+                ..Motion::default()
+            },
+            limits: Limits {
+                axes: [[l[0], l[1]], [l[2], l[3]], [l[4], l[5]]],
+            },
+            set_speed: case.set_speed,
+            mode: case.mode,
+            flags: case.flags,
+            altitude: case.altitude,
+            frame_tics: case.tics,
+            reference_counter: case.counter,
+            combat: case.combat & 2 != 0,
+            combat_velocity: case.combat_velocity,
+            scanner: Scanner {
+                player: case.player,
+                rotation: case.scanner,
+            },
+            gravity_vector: case.gravity,
+            ..Player::default()
+        };
+        let k = case.keys.map(|k| k != 0);
+        let keys = ThrusterKeys {
+            forward: k[0],
+            reverse: k[1],
+            numpad_forward: k[2],
+            numpad_reverse: k[3],
+            up_a: k[4],
+            up_b: k[5],
+            down_a: k[6],
+            down_b: k[7],
+            right: k[8],
+            left: k[9],
+        };
+        player.step_in(&keys, case.time, &mut world, 7).unwrap();
+        let a = &case.after;
+        let expected = [
+            [a.matrix[0], a.matrix[1], a.matrix[2]],
+            [a.matrix[3], a.matrix[4], a.matrix[5]],
+            [a.matrix[6], a.matrix[7], a.matrix[8]],
+        ];
+        assert_eq!(
+            (
+                player.motion.orientation,
+                player.motion.drift,
+                player.motion.rate,
+                player.motion.thrust,
+                player.motion.cap,
+                player.motion.fraction,
+                player.reference_counter,
+                player.scanner.rotation,
+                player.motion.autopilot[1],
+                player.gravity_vector,
+            ),
+            (
+                expected,
+                a.drift,
+                a.rate,
+                a.thrust,
+                a.cap,
+                a.fraction,
+                a.counter,
+                a.scanner,
+                a.autopilot,
+                a.gravity
+            ),
+            "world case {}",
+            case.case
+        );
+        for (i, row) in case.bodies.iter().enumerate() {
+            let body = &world.body[i + 1];
+            let (position, velocity, parent) = if i == 6 {
+                (
+                    player.motion.position,
+                    player.motion.velocity,
+                    player.motion.parent,
+                )
+            } else {
+                (body.position, body.velocity, body.parent)
+            };
+            assert_eq!(
+                FrameAfterRef {
+                    parent,
+                    stamp: body.stamp,
+                    position,
+                    velocity,
+                    cache: body.cache
+                },
+                FrameAfterRef {
+                    parent: row.after.parent,
+                    stamp: row.after.stamp,
+                    position: row.after.position,
+                    velocity: row.after.velocity,
+                    cache: row.after.cache,
+                },
+                "world case {} body {}",
+                case.case,
+                i + 1
+            );
+        }
+        changed += usize::from(me.parent != case.bodies[6].after.parent);
+        pulled += usize::from(a.gravity != case.gravity);
+        cases += 1;
+    }
+    assert_eq!(cases, 4096);
+    assert!(
+        changed > 100 && pulled > 1000,
+        "too little coverage: {changed} frame changes, {pulled} pulls"
+    );
+    eprintln!("compared {cases} world steps ({changed} frame changes, {pulled} gravity pulls)");
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StepAfter {
     matrix: [i32; 9],
     drift: i8,

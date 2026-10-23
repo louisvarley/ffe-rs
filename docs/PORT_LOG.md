@@ -4,6 +4,21 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Auto-roll F609 and the whole tick in a world (v0.49l)
+
+Notes: `docs/notes/physics.md`.
+
+- `Motion::auto_roll` (F609) and `Player::orient_and_thrust_in` / `step_in`:
+  gravity, auto-roll, and the F606 countdown now run inside the player's tick
+  with a world of bodies. `--world-step` (4096 whole ticks, 482 frame changes,
+  3,183 pulls) matches the original, every body's cache included.
+- `Player::orient_and_thrust` (free space) no longer rejects a low altitude; it
+  still rejects a parent frame, which needs a world.
+- Still missing for planet flight: the altitude itself (F569/F1033 collisions
+  compute `DATA_008867`), a planet in the flight scenario, the surface drawing.
+
+---
+
 ## 2026-10-23 — Frames of reference ported and verified (v0.49k)
 
 Notes: `docs/notes/frames.md`.

@@ -335,6 +335,20 @@ impl Motion {
         }
     }
 
+    /// F609: the roll the autopilot applies to keep the right axis level
+    /// against `up`, the truncated relative position F603 leaves in
+    /// `DATA_008708..DATA_008710`: the right row's high words dotted with it,
+    /// shifted right 18 and negated into the 16-bit rate at `+0x112`.
+    pub fn auto_roll(&mut self, up: [i32; 3]) {
+        let dot = self.orientation[0]
+            .iter()
+            .zip(up)
+            .fold(0i32, |sum, (row, up)| {
+                sum.wrapping_add((row >> 16).wrapping_mul(up))
+            });
+        self.autopilot[1] = ((dot >> 0x12) as i16).wrapping_neg();
+    }
+
     /// F603: the pull of the parent body on an object in its frame of
     /// reference. `mass` is the parent's dword at `+0xa4` (an ffp number: a
     /// 16-bit mantissa and exponent; a zero mantissa means no gravity) and

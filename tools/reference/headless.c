@@ -2375,6 +2375,153 @@ static int flight_step_vectors(void)
     return 0;
 }
 
+/* World step. world-step runs one whole tick of the original (F1041 with
+   F585 twice, F603 gravity, F609 auto-roll, the F606 countdown and the thrust
+   request, then F601/F602 and F1512) for the player as the last body of a
+   synthetic seven-body tree, with a parent frame, an ffp mass on every body,
+   altitudes either side of the auto-roll limit and random positions. Every
+   body's parent, position, velocity, stamp and cache, the player's matrix,
+   rates, thrust, caps, fractions, countdown, scanner, auto-roll rate and the
+   gravity globals (DATA_008708..DATA_008710) after. */
+static int world_step_vectors(void)
+{
+    static unsigned char list[0x20000];
+    unsigned char *o[8];
+    unsigned char *object;
+    unsigned char before[8][0x152];
+    unsigned long n,i,k,model,time_low,time_high,gravity_before[3];
+    long long time64;
+    static const int key_offsets[10]={0x1c,0x36,0x48,0x4c,0x4b,0x4d,0x4f,0x51,0x49,0x47};
+    int pressed[10];
+    fprintf(stderr,"JJFFE world-step-v1: one whole tick of the original (F1041 with F585 twice, F603 gravity, F609 auto-roll, the F606 countdown and the thrust request, then F601/F602 and F1512) for the player as the last body of a synthetic seven-body tree with ffp masses, altitudes either side of the auto-roll limit and random positions; every body's parent, position, velocity, stamp and cache, the player's matrix, rates, thrust, caps, fractions, countdown, scanner, auto-roll rate and the gravity globals after.\n");
+    texture_rng=0x51ed270bUL;
+    for(n=0;n<4096;++n) {
+        memset(list,0,0x74+0x152*8+0x100);
+        for(k=0;k<8;++k) o[k]=list+0x74+0x152*k;
+        object=o[7];
+        ref_pl_object_list=list;
+        ref_list_pointer=list;
+        ref_frame_stamp=(unsigned char)texture_random(0,3);
+        for(k=1;k<8;++k) {
+            long radius;
+            short mantissa,exponent;
+            long long position;
+            unsigned int scale;
+            o[k][0x56]=(unsigned char)(k==1?0:texture_random(0,(long)k-1));
+            if(k<7) o[k][0x86]=(unsigned char)k;
+            o[k][0x87]=(unsigned char)(texture_random(0,5)==0?1:texture_random(2,9));
+            if(o[k][0x87]==1) o[k][0x14c]=0x20;
+            radius=texture_random(0,40);
+            memcpy(o[k]+0xda,&radius,2);
+            mantissa=(texture_random(0,9)==0)?0:(short)texture_random(0x4000,0x7fff);
+            exponent=(short)texture_random(-8,70);
+            memcpy(o[k]+0xa4,&mantissa,2);
+            memcpy(o[k]+0xa6,&exponent,2);
+            o[k][0x25]=(unsigned char)texture_random(0,3);
+            list[k]=(unsigned char)(texture_random(0,3)?0x10:0);
+            for(i=0;i<3;++i) {
+                scale=(unsigned int)texture_random(0,56);
+                position=(long long)((((unsigned long long)(unsigned long)texture_random(0,0x7fffffff)<<32)|(unsigned long long)(unsigned long)texture_random(0,0x7fffffff))>>scale);
+                if(texture_random(0,1)) position=-position;
+                memcpy(o[k] + 0x3e + 8*i,&position,8);
+                position=(long long)((((unsigned long long)(unsigned long)texture_random(0,0x7fffffff)<<32)|(unsigned long long)(unsigned long)texture_random(0,0x7fffffff))>>scale);
+                memcpy(o[k] + 0x26 + 8*i,&position,8);
+                put32(o[k],0x8c+4*i,(long)texture_random(-100000,100000));
+            }
+        }
+        if(n&1) {
+            for(i=0;i<3;++i) put32(object,12*i+4*i,0x7fffffffL-texture_random(0,100000));
+            for(i=0;i<9;++i) if(i%4) put32(object,4*i,(long)texture_random(-3000000,3000000));
+        } else for(i=0;i<9;++i) put32(object,4*i,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)));
+        object[0x24]=(unsigned char)(signed char)texture_random(-2,0x40);
+        for(i=0;i<3;++i) {
+            short rate,lim;
+            switch(texture_random(0,3)) {
+            case 0: rate=0; break;
+            case 1: rate=(short)texture_random(-14,14); break;
+            default: rate=(short)texture_random(-4000,4000); break;
+            }
+            memcpy(object+0xb0+2*i,&rate,2);
+            lim=(short)texture_random(0,(n&16)?32767:6000); memcpy(object + 0xbc + 4*i,&lim,2);
+            lim=(short)-texture_random(0,(n&32)?32767:6000); memcpy(object + 0xbe + 4*i,&lim,2);
+            ref_pl_combat_velocity[i]=(long)texture_random(-3000000,3000000);
+        }
+        model=(unsigned long)texture_random(0,0x80);
+        memcpy(object+0x82,&model,4);
+        object[0x86]=(unsigned char)texture_random(0,3);
+        object[0x14d]=(unsigned char)(signed char)texture_random(-1,0xd);
+        ref_player_craft=(unsigned long)texture_random(0,3);
+        ref_scanner=(unsigned short)texture_random(0,0xffff);
+        ref_pl_frame_tics=(unsigned long)texture_random(0,(n&64)?0x80000:0x4000);
+        ref_pl_altitude=(unsigned long)(texture_random(0,1)?texture_random(-1000,0x2625a00):0x2625a01L+texture_random(0,0x7fffffff-0x2625a01));
+        ref_pl_mode=(unsigned char)(texture_random(0,5)==0?0x24:0);
+        ref_pl_flags=(unsigned char)texture_random(0,1);
+        ref_pl_combat=(unsigned char)(texture_random(0,1)?2:0);
+        switch(texture_random(0,3)) {
+        case 0: ref_pl_set_speed=0; break;
+        case 1: ref_pl_set_speed=(unsigned long)texture_random(-5000,5000); break;
+        case 2: ref_pl_set_speed=(unsigned long)texture_random(-3000000,3000000); break;
+        default: ref_pl_set_speed=(unsigned long)texture_random(-100000000,100000000); break;
+        }
+        memset(ref_pl_keys,0x80,sizeof(ref_pl_keys));
+        for(i=0;i<10;++i) {pressed[i]=texture_random(0,3)==0;if(pressed[i]) ref_pl_keys[key_offsets[i]]=0;}
+        switch(texture_random(0,3)) {
+        case 0: time64=(long long)texture_random(0,2000); break;
+        case 1: time64=(long long)texture_random(0,100000); break;
+        case 2: time64=(long long)texture_random(0,0x7fffffff); break;
+        default: time64=((long long)texture_random(0,0xff)<<32)|(long long)texture_random(0,0x7fffffff); break;
+        }
+        time_low=(unsigned long)(time64&0xffffffffLL);time_high=(unsigned long)(time64>>32);
+        gravity_before[0]=ref_gravity_x=(unsigned long)texture_random(-2000,2000);
+        gravity_before[1]=ref_gravity_y=(unsigned long)texture_random(-2000,2000);
+        gravity_before[2]=ref_gravity_z=(unsigned long)texture_random(-2000,2000);
+        for(k=0;k<8;++k) memcpy(before[k],o[k],0x152);
+        {
+            unsigned long player=ref_player_craft; unsigned short scanner=ref_scanner;
+            ref_player_orient(object);
+            if(ref_pl_flags&1) ref_accelerate_uncapped(object,time_low); else ref_accelerate(object,time_low);
+            ref_advance(object,time_high,time_low);
+            printf("{\"case\":%lu,\"time\":%lld,\"stamp\":%u,\"live\":[",n,time64,(unsigned)ref_frame_stamp);
+            for(k=1;k<8;++k) printf("%s%u",k>1?",":"",list[k]&0x10?1u:0u);
+            printf("],\"matrix\":[");
+            for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(before[7],4*i));
+            printf("],\"drift\":%d,\"rate\":[",(int)(signed char)before[7][0x24]);
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(before[7]+0xb0+2*i));
+            printf("],\"limits\":[");
+            for(i=0;i<3;++i) printf("%s%d,%d",i?",":"",*(short *)(before[7] + 0xbc + 4*i),*(short *)(before[7] + 0xbe + 4*i));
+            printf("],\"model\":%lu,\"craft\":%u,\"player\":%lu,\"scanner\":%u,\"counter\":%d,\"tics\":%lu,\"altitude\":%ld,\"mode\":%u,\"flags\":%u,\"combat\":%u,\"combat_velocity\":[%ld,%ld,%ld],\"set_speed\":%ld,\"gravity\":[%ld,%ld,%ld],\"keys\":[",
+                   model,before[7][0x86],player,scanner,(int)(signed char)before[7][0x14d],ref_pl_frame_tics,(long)ref_pl_altitude,ref_pl_mode,ref_pl_flags,ref_pl_combat,
+                   ref_pl_combat_velocity[0],ref_pl_combat_velocity[1],ref_pl_combat_velocity[2],(long)ref_pl_set_speed,
+                   (long)(int)gravity_before[0],(long)(int)gravity_before[1],(long)(int)gravity_before[2]);
+            for(i=0;i<10;++i) printf("%s%d",i?",":"",pressed[i]);
+            printf("],\"bodies\":[");
+            for(k=1;k<8;++k) {
+                printf("%s{\"parent\":%u,\"kind\":%u,\"radius\":%d,\"mass\":[%d,%d],\"stamp\":%u,\"position\":[%lld,%lld,%lld],\"velocity\":[%ld,%ld,%ld],\"cache\":[%lld,%lld,%lld],\"after\":{\"parent\":%u,\"stamp\":%u,\"position\":[%lld,%lld,%lld],\"velocity\":[%ld,%ld,%ld],\"cache\":[%lld,%lld,%lld]}}",
+                    k>1?",":"",before[k][0x56],before[k][0x87],(int)*(short *)(before[k]+0xda),(int)*(short *)(before[k]+0xa4),(int)*(short *)(before[k]+0xa6),before[k][0x25],
+                    get64(before[k],0x3e),get64(before[k],0x46),get64(before[k],0x4e),
+                    get32(before[k],0x8c),get32(before[k],0x90),get32(before[k],0x94),
+                    get64(before[k],0x26),get64(before[k],0x2e),get64(before[k],0x36),
+                    o[k][0x56],o[k][0x25],get64(o[k],0x3e),get64(o[k],0x46),get64(o[k],0x4e),
+                    get32(o[k],0x8c),get32(o[k],0x90),get32(o[k],0x94),
+                    get64(o[k],0x26),get64(o[k],0x2e),get64(o[k],0x36));
+            }
+            printf("],\"after\":{\"matrix\":[");
+            for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(object,4*i));
+            printf("],\"drift\":%d,\"rate\":[",(int)(signed char)object[0x24]);
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(object+0xb0+2*i));
+            printf("],\"thrust\":[");
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(object+0xb6+2*i));
+            printf("],\"cap\":[");
+            for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(object,0xf2+4*i));
+            printf("],\"fraction\":[");
+            for(i=0;i<3;++i) printf("%s%u",i?",":"",*(unsigned short *)(object+0xec+2*i));
+            printf("],\"counter\":%d,\"scanner\":%u,\"autopilot\":%d,\"gravity\":[%ld,%ld,%ld]}}\n",(int)(signed char)object[0x14d],ref_scanner,(int)*(short *)(object+0x112),(long)(int)ref_gravity_x,(long)(int)ref_gravity_y,(long)(int)ref_gravity_z);
+        }
+    }
+    if (fflush(stdout)) fail("cannot flush world-step vectors");
+    return 0;
+}
+
 /* Steering input. steer drives the original F1037 (set speed from Return and
    Shift through F1121, then F1038: mouse and key deltas into the rates, or the
    turret angles in a turret view) on the player struct (DATA_008804) and a
@@ -3282,6 +3429,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
     if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--world-step")) return world_step_vectors();
     if (argc == 2 && !strcmp(argv[1], "--orient")) return orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--player-orient")) return player_orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--advance")) return advance_vectors();

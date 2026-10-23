@@ -130,3 +130,22 @@ positions from zero to 2^62, times of both signs and zero): 4096 compared, 1818
 of them changed the velocity, 0 mismatched; every tampered field and an empty
 trace are rejected.
 
+## Auto-roll F609 and the whole tick in a world
+
+F609 is one line: the autopilot roll rate (`+0x112`) is `-(dot >> 18)` as a
+16-bit word, where `dot` is the orientation's right row (high words) dotted
+with the truncated relative position F603 left in `DATA_008708..DATA_008710`.
+F1041 runs it when the altitude (`DATA_008867`) is at or below 0x2625a00 and
+copies it into the roll rate (`+0xb2`). The globals persist: when F603 returns
+early (no parent, no mass) F609 reads the previous values.
+
+F1041's full order is: F585 twice (half the frame time each), F603 (time = frame
+time), F609 if low, then the countdown `+0x14d`: below zero it runs F606 and
+resets to 13; then the thrust request. `Player::orient_and_thrust_in` and
+`step_in` take the world (`frames::Bodies`) and the player's body index; the
+player's position, velocity and parent are copied into its slot for F606 and
+back. `--world-step` runs the original on 4096 whole ticks with the player the
+last of seven bodies (ffp masses, altitudes on both sides of the limit): 482
+frame changes and 3,183 gravity pulls among them, 0 mismatched; every tampered
+field and an empty trace are rejected.
+

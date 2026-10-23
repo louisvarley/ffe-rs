@@ -32,6 +32,9 @@ pub struct Body {
     pub locked: bool,
     /// The body's radius exponent (`+0xda`).
     pub radius: i16,
+    /// The body's gravity: an ffp number, mantissa word and exponent word
+    /// (`+0xa4`), read by F603 for the object in its frame.
+    pub mass: u32,
     /// The frame stamp of the cached absolute position (`+0x25`).
     pub stamp: u8,
     /// The cached absolute position (`+0x26`).
