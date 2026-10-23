@@ -2063,3 +2063,12 @@ mismatched (model 361 left out: its data differs between JJFFE and this
 release). The executor keeps each queued face's views for it. Polygons and all
 queued flat faces now use the original rasterisers, and faces crossing the
 near plane, previously skipped, are drawn.
+
+## Oracle repairs (v0.48j)
+
+`verify-assets.py` now expects cache v14 with 1,781 files, and the child-model
+oracle masks the surface-resolution events 50-54 (F1874, verified for 448
+models by `verify-station-models.py`) and 60/61 (F1876 queue words, not ported
+yet), which the original now emits and the child execution does not model.
+Both child runs report 0 mismatched (440 and 437 models) and the full set
+passes: 31 of 31 oracles.

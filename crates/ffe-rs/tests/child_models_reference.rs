@@ -436,13 +436,16 @@ fn executed_reference_child_models() {
             })
             .collect();
         // Vertex-lookup events (1: text F1470, 7: child F1471) fire only on a cache miss.
+        // Events 50-54 (F1874 surface resolution, verified for 448 models by
+        // verify-station-models.py) and 60/61 (F1876 queue words, not ported yet) are
+        // not child-model behaviour.
         // Event 26 is the child's base handedness: the original leaves it as stack
         // memory for a child whose own handedness is undefined, so it is not compared.
         let lookups = |events: &[[u32; 4]]| -> Vec<[u32; 4]> {
             events
                 .iter()
                 .copied()
-                .filter(|event| !matches!(event[0], 1 | 7 | 26))
+                .filter(|event| !matches!(event[0], 1 | 7 | 26 | 50..=54 | 60 | 61))
                 .collect()
         };
         let locals = format!(

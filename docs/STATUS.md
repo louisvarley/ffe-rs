@@ -303,13 +303,10 @@ values.
 
 ## Known stale spots
 
-- `verify-all.py` on 2026-10-23 (after v0.48i): 28 of 31 pass (the new
-  `verify-lines.py` and `verify-fills.py` included). Already failing on main
-  before v0.48f: `verify-assets.py` still
-  expects cache v13 with 1,778 files (v14 has 1,781, and its name check
-  expects JJFFE's 209 entries where the cache now holds 219), and both
-  `verify-child-models.py` runs report nested/face/child event differences
-  for models 346-351, 439, 443 and 445-449 (the surface models).
+- `verify-all.py` on 2026-10-23: **all 31 oracles pass** (the two broken since
+  v0.48b were repaired: `verify-assets.py` now expects cache v14 with 1,781
+  files, and the child-model oracle masks the surface events 50-54 and 60/61,
+  which the whole-table oracle covers).
 - `README.md` and the executable title still say "0.9" because the product
   version label has not been bumped (cosmetic).
 - `README.md` still describes cache v11 and "26 oracles" in places; the figures

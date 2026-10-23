@@ -90,7 +90,7 @@ window.FFE_BURNDOWN = {
         { id: "v0.48-10", title: "F1811 curve rasteriser", status: "done", version: "v0.48g" },
         { id: "v0.48-11", title: "F1604 / F1607 flat face rasterisers", status: "done", version: "v0.48h" },
         { id: "v0.48-12", title: "Polygon spans (F1560/F1613) and F1714 off-view outlines", status: "done", version: "v0.48i" },
-        { id: "v0.48-13", title: "Fix the verify-assets and child-model oracles broken since v0.48b", status: "todo" },
+        { id: "v0.48-13", title: "Fix the verify-assets and child-model oracles broken since v0.48b", status: "done", version: "v0.48j" },
         { id: "v0.48-14", title: "Pixel-level whole-frame oracle (framebuffer mode, station and three ships)", status: "todo" },
         { id: "v0.48-15", title: "Upper runtime palette", status: "todo" },
         { id: "v0.48-16", title: "Sprites, particles and circles (F1609-F1612)", status: "todo" },
@@ -267,6 +267,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 88,
       note: "v0.48a-i: labels, 3D text, surface resolution, line, curve, flat and polygon rasterisers."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 87,
+      note: "v0.48j: the verify-assets and child-model oracles repaired; all 31 local oracles pass."
     }
   ]
 };
