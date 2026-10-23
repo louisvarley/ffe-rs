@@ -122,4 +122,23 @@ fn model_text_and_label_census() {
         drawn >= 6,
         "expected the six station/ship labels, drew {drawn}"
     );
+
+    // 3D text: the glyph programs run through the executor, so models whose
+    // strings are all model strings gain the glyph faces.
+    for index in [15u32, 30, 453] {
+        if viewer.find(index).is_none() {
+            continue;
+        }
+        let mut viewer = ffe_rs::model_viewer::ModelViewer::new(&cache).unwrap();
+        while viewer.model().index != index {
+            viewer.step(1);
+        }
+        let frame = viewer.render().unwrap();
+        println!(
+            "text model {index}: {} shapes, {} skipped, {} text records",
+            frame.shapes.len(),
+            frame.skipped,
+            frame.texts
+        );
+    }
 }

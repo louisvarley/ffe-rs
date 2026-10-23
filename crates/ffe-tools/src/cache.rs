@@ -176,6 +176,30 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: model.bytes,
                 });
             }
+            // The font models' per-character glyph programs (v14). A set whose
+            // table cannot be read is a build error, not silence: text would
+            // silently lose that set.
+            for index in 0..=2u32 {
+                let glyphs = ffe_convert::embedded::glyph_programs(&bytes, model_table_rva, index)?;
+                let mut payload = Vec::with_capacity(glyphs.starts.len() * 4 + glyphs.bytes.len());
+                for start in &glyphs.starts {
+                    payload.extend_from_slice(&start.to_le_bytes());
+                }
+                payload.extend_from_slice(&glyphs.bytes);
+                assets.push(Asset {
+                    id: format!("base:model-glyphs/{index:03}"),
+                    path: format!("models/{index:03}.glp"),
+                    kind: AssetKind::GlyphPrograms {
+                        index,
+                        count: glyphs.starts.len() as u32,
+                        first_char: u32::from(ffe_convert::embedded::GLYPH_FIRST_CHAR),
+                        vertex_count: glyphs.vertex_count,
+                        scale: glyphs.scale,
+                        source_offset: glyphs.source_offset as u64,
+                    },
+                    bytes: payload,
+                });
+            }
             if let Some((descriptor_rva, colour_map_rva)) = texture_layout(profile.id) {
                 let table = decode_texture_descriptors(&bytes, descriptor_rva)?;
                 assets.push(Asset {
@@ -319,8 +343,9 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             });
         }
     }
-    // 379 non-model assets (+2 v8 texture tables, +2 v9 lighting tables) plus vertices, commands
-    // and normals per imported model.
+    // Non-model assets: +2 v8 texture tables, +2 v9 lighting tables, one name
+    // table and three v14 glyph sets, plus vertices, commands and normals per
+    // imported model.
     let tables = if texture_layout(profile.id).is_some() {
         2
     } else {
@@ -329,7 +354,8 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         2
     } else {
         0
-    } + usize::from(names_layout(profile.id).is_some());
+    } + usize::from(names_layout(profile.id).is_some())
+        + 3;
     // Plus the v10 model descriptor table and the v12 ship statistics table.
     if models < 2 || assets.len() != 381 + tables + 3 * models {
         return Err(format!(
@@ -338,7 +364,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 13,
+        format: "ffe-content-cache".to_owned(), format_version: 14,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

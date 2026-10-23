@@ -128,6 +128,7 @@ capture produced by two repeat runs of the local reference.
 | v0.45 thruster glows | `ffe-core::model_thruster`, opcode 9 queueing, `Shape::Glow` | `model_thruster.rs` (5), `model_viewer.rs` (+1) | `verify-thrusters.py` (12,288) + thruster events in the whole-table oracles | `5a8eddfe…` | F1738/F1704/F1805; the first attempt's screen-position difference does not reproduce |
 | v0.45 animation inputs, station spin | `ffe-core::model_animation` | `model_animation.rs` (6) | `verify-animation.py` (2,640 rotation + 4,096 orbital + F1537/F1680/F1683 set-ups) | `10ed4039…`, `2ab63f4d…` | global 0 = GameTics >> 10, global 1 gear/door (F865); F866/F1675 spin, model 74 at speed 10 |
 | v0.46 ship statistics, eyes, turrets | cache v12 `base:ship/stats`, `ShipStats`, `camera` eye/turret views | `views.rs` | none (data imported byte-exact; views from the assembly) | — | thrust limits feed global 15; F8 turret views for > 2 gun mounts |
+| v0.48b 3D text | `ffe-convert::glyph_programs`, `GlyphSet`, `ModelViewer::draw_texts`, cache v14 | `text.rs` (1), `glyphs.rs` (1, ignored), `embedded.rs` (+1), `cache.rs` (+1) | census: all three font sets import; models 15/30/66/453 draw text with nothing skipped | — | F1747: each character's program runs through `execute_live` in an F1740 frame, its return word sets the next pen; `0x3016`/`0x3022` expand the object string |
 | v0.48a labels, full string table | `ModelViewer::model_strings`, `Shape::Label`, scanned `decode_model_names`, cache v13 | `model_viewer.rs` (+1), `embedded.rs` (+1), `text_census.rs` (1, ignored) | census: all 6 label codes resolve | — | F1812/F1583 labels drawn at the queued point in font 15; string table scanned to 219 entries (209 in v11/v12 left six codes unresolved) |
 | v0.47 console clicks, plume flicker | `Screen::logical_point`, `AnimationInputs::jitter`, `Frame::jitter`, viewer `cycle_thrust` | `views.rs` (+1), `model_viewer.rs` (+1) | none (presentation) | — | view icons now take clicks at any window size; F1476 stream runs across frames so plumes flicker; viewer E key sets engine thrust |
 
@@ -135,11 +136,11 @@ Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 239 `#[test]` functions total; 34 are `#[ignore]`
-  local-only reference tests; one more is `#[cfg(unix)]`. On Windows that is
-  **204 runnable synthetic tests** (205 on Linux).
+  `cargo clippy -D warnings`. 242 `#[test]` functions total; 36 are `#[ignore]`
+  local-only tests; one more is `#[cfg(unix)]`. On Windows that is
+  **205 runnable synthetic tests** (206 on Linux).
 - `ffe-rs.exe --root . --smoke-frames 30` presents frames with the local
-  cache v13.
+  cache v14.
 - `verify-all.py`: **29 of 29 oracles pass** (the 26 below plus
   `verify-thrusters.py`, the deep child-model run and `verify-animation.py`).
 - `verify-station-models.py`: all 448 models that both sides complete match the
@@ -165,9 +166,11 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v13 (1778 assets, 462 of 466 models, 219 model strings);
-  `.cache/data-v1..v5-backup.bin`, `data-v10-backup.bin` and
-  `data-v12-backup.bin` are retained.
+  `data.bin` is cache v14 (1781 assets, 462 of 466 models, 219 model strings,
+  3 glyph sets); `.cache/data-v1..v5-backup.bin`, `data-v10-backup.bin`,
+  `data-v12-backup.bin` and `data-v13-backup.bin` are retained.
+- The three glyph sets import with 95, 52 and 95 programs (3,008 / 874 / 624
+  bytes); every program decodes and names an in-range pen vertex.
 - `text_census` (local-only): 236 text records with 136 codes (130 model
   strings, all resolvable; `0x3016`, `0x3022`, `0x9c00`-`0x9c03` need handlers);
   glyph sets 0/1/2 = model slots 0/1/2; 6 labels, all model strings.
@@ -199,15 +202,17 @@ tests and an oracle, as the earlier milestones did.
      string table (v11/v12 held JJFFE's declared 209, so six codes above 208
      could not resolve); opcode 18 labels now draw at their queued point in
      the original font (F1812 -> F1583, colour 15), all six of them resolving.
-   - **Next:** import the per-character glyph program extents (font model
-     descriptor +0x40, outside the font's 10-byte top-level program), port
-     F1747's glyph placement (F1740/F1745 nested frame, F1470 per-character
-     vertex, F1746 pop) and run each glyph program through `execute_scene`.
-     Then add `0x3016`/`0x3022` (the object string at +0x124; `0x3022` also
-     needs the `DATA_007648` width table for F1398's wrap) and `0x9c00`-`0x9c03`
-     (`DATA_005104`).
+   - **Done (v0.48b):** cache v14 imports each font model's per-character
+     programs; F1747's placement is ported (F1740 frame, `execute_live` per
+     glyph, return-word pen), and `0x3016`/`0x3022` expand the object string.
+     Ships and the station now draw their registrations; models 15, 30, 66 and
+     453 render with nothing skipped.
+   - **Left in this step:** control codes below 0x20 (the font's `+0x3c`
+     component anchors, needed by the logo/station multi-line strings),
+     `0x3022`'s wrap (`DATA_007648` width table), `0x9c00`-`0x9c03`
+     (`DATA_005104`), depth interleaving and glyph lighting.
    - Oracle: the existing `trace_text_*`/`trace_label_*` probe hooks, extended
-     to a whole-table text/label comparison.
+     to a whole-table text/label comparison (not yet run for text).
 2. **Curved surfaces (opcode 31).** The rounded hulls and station parts.
    - Port F1874/F1876 patch generation and queueing from the existing v0.25
      operand event (`program.surfaces`).

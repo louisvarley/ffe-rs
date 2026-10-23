@@ -1,6 +1,11 @@
 //! Structural station-program decoding and verified command helpers, not a full executor.
 use crate::model::{variable, VertexContext};
 
+/// First character the font models place (code 0x20 is space).
+pub const GLYPH_FIRST_CHAR: u8 = 0x20;
+/// Most characters a font set defines (`0x20..=0x7e`, 95 entries).
+pub const GLYPH_CHAR_LIMIT: usize = 0x5f;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Face {
     pub offset: usize,

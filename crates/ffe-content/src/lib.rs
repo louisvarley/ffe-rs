@@ -106,6 +106,18 @@ pub enum AssetKind {
         count: u32,
         source_offset: u64,
     },
+    /// One font model's per-character glyph command programs (v14): `count`
+    /// little-endian u32 start offsets relative to the payload's program block,
+    /// then the block itself. The block follows the offsets at
+    /// `4 * count` bytes in. `vertex_count` and `scale` are the font model's.
+    GlyphPrograms {
+        index: u32,
+        count: u32,
+        first_char: u32,
+        vertex_count: u32,
+        scale: u32,
+        source_offset: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,7 +200,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=13) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=14) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -240,6 +252,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         }
         if manifest.format_version < 12 && matches!(record.asset, AssetKind::ShipStats { .. }) {
             return Err("The ship statistics table requires cache v12.".to_owned());
+        }
+        if manifest.format_version < 14 && matches!(record.asset, AssetKind::GlyphPrograms { .. }) {
+            return Err("The glyph programs require cache v14.".to_owned());
         }
         if manifest.format_version < 10
             && matches!(record.asset, AssetKind::ModelDescriptors { .. })
@@ -394,6 +409,51 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         AssetKind::ShipStats { count } => {
             if *count != MODEL_TABLE_SLOTS || bytes.len() != *count as usize * SHIP_STATS_BYTES {
                 return Err("invalid ship statistics table".to_owned());
+            }
+        }
+        AssetKind::GlyphPrograms {
+            index,
+            count,
+            first_char,
+            vertex_count,
+            ..
+        } => {
+            if *index > 2
+                || *first_char != u32::from(ffe_core::model_commands::GLYPH_FIRST_CHAR)
+                || *count == 0
+                || *count as usize > ffe_core::model_commands::GLYPH_CHAR_LIMIT
+                || !(1..=128).contains(vertex_count)
+                || vertex_count % 2 != 0
+            {
+                return Err("invalid glyph program descriptor".to_owned());
+            }
+            let offsets = *count as usize * 4;
+            if bytes.len() <= offsets {
+                return Err("glyph program payload is too short".to_owned());
+            }
+            let starts: Vec<u32> = bytes[..offsets]
+                .chunks_exact(4)
+                .map(|entry| u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]))
+                .collect();
+            let block = &bytes[offsets..];
+            // Characters may alias another program (lowercase to uppercase, and
+            // fonts with a partial set), so the starts are not sorted; the
+            // distinct ones delimit the programs.
+            if starts[0] != 0 || starts.iter().any(|start| *start as usize >= block.len()) {
+                return Err("invalid glyph program starts".to_owned());
+            }
+            let mut distinct = starts.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            for (position, start) in distinct.iter().enumerate() {
+                let end = distinct
+                    .get(position + 1)
+                    .map_or(block.len(), |next| *next as usize);
+                let program = block
+                    .get(*start as usize..end)
+                    .ok_or("glyph program outside the block")?;
+                ffe_core::model_commands::decode(program, *vertex_count)
+                    .map_err(|error| format!("glyph program at {start:#x}: {error}"))?;
             }
         }
         AssetKind::ModelNames { count, .. } => {

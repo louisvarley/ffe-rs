@@ -67,7 +67,7 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         read(&bytes).unwrap().asset("base:model-commands/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 14] {
+    for version in [1, 2, 3, 15] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
 
@@ -104,7 +104,7 @@ fn normal_payloads_require_v5_and_validate_counts_and_anchor_bounds() {
         read(&bytes).unwrap().asset("base:model-normals/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 14] {
+    for version in [1, 2, 3, 4, 15] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for count in [0, 1, 3, 6, 258, u32::MAX] {
@@ -135,7 +135,7 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
         read(&bytes).unwrap().asset("base:model-vertices/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 14] {
+    for version in [1, 2, 15] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for (program, count, scale, index) in [
@@ -223,7 +223,7 @@ fn stored_cache_is_deterministic_sorted_and_loads_by_stable_id() {
 fn malformed_manifests_cannot_claim_complete_content_or_escape_paths() {
     let bytes = build(manifest(), assets()).unwrap();
     for (key, value) in [
-        ("format_version", serde_json::json!(14)),
+        ("format_version", serde_json::json!(15)),
         ("format", serde_json::json!("other")),
         ("complete_game_assets", serde_json::json!(true)),
         ("unresolved", serde_json::json!([])),
@@ -463,6 +463,43 @@ fn model_descriptor_table_requires_v10_and_one_entry_per_slot() {
     assert!(build(m.clone(), vec![table(vec![1; 466 * 8], 466)]).is_ok());
     assert!(build(m.clone(), vec![table(vec![0; 465 * 8], 465)]).is_err());
     assert!(build(m, vec![table(vec![0; 466 * 8 - 1], 466)]).is_err());
+}
+
+#[test]
+fn glyph_programs_require_v14_and_validate_their_programs() {
+    // One character aliasing one 10-byte program (a point on vertex 0 and a return).
+    let payload = || {
+        let mut bytes = 0u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&[1, 0, 0xff, 0x0f, 0, 0, 0, 0, 0, 0]);
+        bytes
+    };
+    let asset = |bytes: Vec<u8>, count: u32| Asset {
+        id: "base:model-glyphs/000".to_owned(),
+        path: "models/000.glp".to_owned(),
+        kind: AssetKind::GlyphPrograms {
+            index: 0,
+            count,
+            first_char: 0x20,
+            vertex_count: 2,
+            scale: 0,
+            source_offset: 1,
+        },
+        bytes,
+    };
+    let mut m = manifest();
+    m.format_version = 13;
+    assert!(build(m.clone(), vec![asset(payload(), 1)]).is_err());
+    m.format_version = 14;
+    assert!(build(m.clone(), vec![asset(payload(), 1)]).is_ok());
+    // A count that does not match the offset block, a bad first start and a
+    // program that does not decode are all rejected.
+    assert!(build(m.clone(), vec![asset(payload(), 2)]).is_err());
+    let mut bad = payload();
+    bad[0] = 1;
+    assert!(build(m.clone(), vec![asset(bad, 1)]).is_err());
+    let mut bad = payload();
+    bad[4] = 5;
+    assert!(build(m, vec![asset(bad, 1)]).is_err());
 }
 
 #[test]

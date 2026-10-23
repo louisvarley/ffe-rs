@@ -170,6 +170,15 @@ contract, not the full schema/examples in sections 2.1 onward.
 - V13 extends that table to the scanned length (219 entries; v11/v12 caches hold
   the first 209, which left six text/label codes above 208 unresolvable). No new
   asset kind or path changed, so only the payload and its `count` differ.
+- V14 adds `models/000.glp` ... `002.glp`, IDs `base:model-glyphs/000..002`,
+  type `glyph_programs` with `index`, `count`, `first_char` (0x20),
+  `vertex_count`, `scale` and `source_offset`: each font model's per-character
+  command programs, as `count` little-endian u32 start offsets relative to the
+  payload's block, then the block. Characters may alias a program (lowercase to
+  uppercase; font 1 defines 52 of the 95 possible entries), so the starts are
+  not sorted. Every distinct start must begin a program that decodes over the
+  font model's vertices. Semantics: `docs/notes/text.md`.
+- V13 has 1778 assets; v14 has 1781.
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
   v10). Tools read every version. The playable requires v2 font content;

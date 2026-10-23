@@ -1,10 +1,12 @@
 # Model text (opcode 10, F1747) and labels (opcode 18, F1763/F1764)
 
-Status (2026-10-23): **labels ported and verified structurally**; the string
-table the text commands index is imported in full (cache v13). The 3D glyph
-placement F1747 performs is **read but not ported**. This note is the starting
-point for that step; `docs/STATUS.md` records it as the open part of milestone
-v0.48.
+Status (2026-10-23): **ported**. Labels (opcode 18) draw in the original font;
+3D text (opcode 10) runs each character's glyph program through the executor in
+a frame at the text's position, following the original F1747. The string table
+is imported in full (cache v13) and the per-character glyph programs in cache
+v14. What remains is listed under "Not done" (control codes, `0x3022`'s wrap,
+`0x9c0x`, depth interleaving, glyph lighting, and a reference oracle for text
+pixels/queue order).
 
 Rust: `ffe_rs::model_viewer::Shape::Label` (F1812: the string at the projected
 screen point, colour 15, clipped, unshadowed), `ModelViewer::model_strings`
@@ -55,29 +57,46 @@ other game state is read for the codes the models actually use. `0x3022` adds
 F1398's word wrap, which needs the 256-byte character-width table
 `DATA_007648` (not yet imported).
 
-## F1747's glyph placement (read, not ported)
+## F1747's glyph placement (ported)
 
 The handler resolves the position vertex (F1470) and calls F1740 with the
 record's frame word, then F1745 (push a nested command/instance frame). It
 expands the string with F1344 and walks the **expanded** bytes:
 
+- `byte >= 0x20` loads the pointer at descriptor **+0x40 + 4 * (byte - 0x20)**.
+  That pointer is the start of the character's own command program inside the
+  font model's command block. F1747 calls **F1772** on it in the nested frame
+  (so the glyph's faces/points are queued), then reads the word at the returned
+  cursor - 2: that is the program's **return record**, and its bits 6.. name the
+  font vertex that becomes the **next pen position** (F1470, copied into the
+  nested frame's position).
+- If the glyph is culled (F1686 returns non-zero), F1747 does not execute the
+  program: it reads the *next* entry (the same table at +0x40 + 4*(byte-0x20),
+  which is +0x44 relative to the previous entry) minus 2 — the current program's
+  return word — and only advances the pen.
 - `byte < 0x20` is a control/selector byte: the handler advances a component
-  counter and, when the counter matches a selector byte at `glyph+0x3c`,
-  resolves that glyph-model vertex and copies its view position into the nested
-  instance.
-- `byte >= 0x20` indexes the glyph model's per-character dword table at
-  descriptor **+0x40 + 4 * (byte - 0x20)**. When the first word at that pointer
-  is non-zero, its bits 6.. identify a glyph-model vertex; the handler resolves
-  it (F1470) and copies the view position into the nested instance.
+  counter and, when it matches a selector byte at `glyph+0x3c`, resolves that
+  glyph-model vertex and moves the pen. These are the font's own layout anchors,
+  not a generic newline, and are not imported.
 
-Finally F1746 pops the frame. So the glyph geometry itself is a nested model
-instance whose per-character positions the text handler computes; the glyph
-programs live outside the font model's 10-byte top-level extent and are not
-imported yet. That is the next step: import the per-character program extents
-(bounded, from descriptor +0x40) as a new cache asset, run each glyph program
-through `execute_scene` at the computed position, and compare against the
-original with the existing `trace_text_*` probe hooks (which already record
-F1470/F1539/F1740/F1745/F1344/F1746 arguments).
+Finally F1746 pops the frame.
+
+**Imported (cache v14).** `glyph_programs` reads the three font models' tables
+(slots 0, 1, 2). Font 0 defines all 95 characters (0x20..=0x7e), font 1 the
+first 52 and font 2 all 95; several entries **alias** one program (lowercase
+shares the uppercase glyph), so the starts are not sorted and the distinct ones
+delimit the programs. Every program must decode as a command stream over the
+font model's vertices and end in a return word naming an in-range pen vertex; a
+set whose layout differs fails the import. The asset is
+`base:model-glyphs/NNN` (starts then the block).
+
+**Rust.** `ModelViewer::draw_texts` resolves the text vertex, builds the F1740
+frame from the record's word, then for each character runs the glyph program
+with `execute_live` (a fresh font vertex cache, the text frame, full detail) and
+converts its primitives through the same path as the model's own. The pen moves
+to the resolved anchor vertex. `0x3016` and `0x3022` expand the drawn object's
+string (object +0x124); the F6 viewer defaults it to the model's own name, and
+`set_registration` supplies a real one.
 
 ## Labels (ported)
 
@@ -93,10 +112,23 @@ Station 453's five labels and ship 66's one label resolve with cache v13.
 
 ## Not done
 
-- The 3D glyph instance above (opcode 10 geometry).
-- `0x3016`/`0x3022` expansion: needs `vars+0xc` (the object's string at +0x124)
-  and, for `0x3022`, the `DATA_007648` width table for F1398's wrap.
-- `0x9c00`–`0x9c03`: `DATA_005104` string table (planet/system names) and its
-  FF80 handler.
+- **Control codes below 0x20** (the font's `+0x3c` component anchors): a string
+  containing one stops there and the record is counted in `Frame::skipped`.
+  This affects the multi-line logo/station strings, not the ship registrations.
+- **`0x3022`'s wrap.** It is expanded unwrapped: F1398 needs the 256-byte
+  character-width table `DATA_007648`, which is not imported.
+- **`0x9c00`–`0x9c03`**: `DATA_005104` string table (planet/system names) and its
+  FF80 handler (index 14).
+- **Depth interleaving.** The original queues glyph geometry into the same depth
+  order as the hull; the viewer draws text after the model's primitives.
+- **Glyph lighting.** The glyph faces are drawn with all normals visible and no
+  normal colour (material + instance colour only); the font model's own normal
+  block is not evaluated in the text frame.
+- **The culled-glyph path** (F1686/F1687 screen cull): every glyph is executed.
+  The pen anchors make both paths equivalent in position.
 - F1583's clipping metrics and the pointer pick test in F1764.
-- Any pixel comparison of drawn text.
+- **No reference oracle for text yet.** The `trace_text_*` hooks record the
+  F1747 nested calls, but no probe mode runs a real text record against the
+  original and compares queued glyph geometry. That is the next verification
+  step; the port is currently checked by synthetic tests and the local census
+  (models 15, 30, 66, 453 render text with nothing skipped).

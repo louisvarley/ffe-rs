@@ -4,6 +4,37 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — 3D text: the glyph programs (v0.48b)
+
+Milestone v0.48 step 1, second half. Notes: `docs/notes/text.md`.
+
+- **F1747 executes a program per character.** The descriptor's table at +0x40
+  points at small command programs inside the font model's command block. F1747
+  calls F1772 on each one in a nested frame, then reads the word at the returned
+  cursor - 2: the program's return record, whose bits 6.. name the font vertex
+  that becomes the next pen. The table holds 95 entries (0x20..=0x7e); font 1
+  defines 52, and lowercase letters alias the uppercase programs (the starts are
+  therefore not sorted).
+- **Cache v14** imports all three sets (`base:model-glyphs/000..002`, starts
+  plus block): 95/52/95 programs, 3,008/874/624 bytes. Each program must decode
+  over the font model's vertices and name an in-range pen vertex, or the build
+  fails. 1,781 assets.
+- **Rust** (`ModelViewer::draw_texts`): the text vertex (F1470) and the record's
+  frame word set the frame (F1740 rules); each character runs through
+  `execute_live` with a fresh font vertex cache, and its primitives go through
+  the same drawing path as the model's. `0x3016`/`0x3022` expand the drawn
+  object's string (+0x124); the viewer defaults it to the model's name.
+- **Results:** models 15 and 30 went from 5/7 shapes to 24/26 with nothing
+  skipped (their registrations now draw); model 66 from 59 to 74. All six
+  labels still draw.
+- **Not done:** control codes below 0x20 (the font's +0x3c anchors, used by the
+  logo/station multi-line strings), `0x3022`'s 35-column wrap (`DATA_007648`),
+  `0x9c00`-`0x9c03` (`DATA_005104`), depth interleaving of glyph geometry, and
+  the font model's own normal evaluation in the text frame. No reference oracle
+  for text yet; the synthetic test and the census are the current checks.
+
+The previous v13 cache is retained at `.cache/data-v13-backup.bin`.
+
 ## 2026-10-23 — Labels, and the string table the text commands index (v0.48a)
 
 Milestone v0.48 step 1, first half. Notes: `docs/notes/text.md`; census:

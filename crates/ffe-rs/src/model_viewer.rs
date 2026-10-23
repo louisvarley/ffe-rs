@@ -16,12 +16,12 @@ use ffe_core::model_animation::{
 use ffe_core::model_commands::{material, VisibilityContext};
 use ffe_core::model_execute::{
     execute_live, execute_scene, resolve_colour, ChildEnvironment, ChildModel, ChildModels,
-    InstanceContext, Primitive,
+    Execution, InstanceContext, Primitive,
 };
 use ffe_core::model_instance::{Vertices, NEAR_SENTINEL};
 use ffe_core::model_lighting::{default_lighting, pack, Lighting};
 use ffe_core::model_math::SineTable;
-use ffe_core::model_normals::{self, NormalContext};
+use ffe_core::model_normals::{self, Normal, NormalContext};
 use ffe_core::model_texture::{
     draw_quad, draw_triangle, flat_colour, quad_uv, textured_colours, textured_path, triangle_uv,
 };
@@ -150,6 +150,12 @@ pub struct ModelViewer {
     ship_stats: Vec<Option<ShipStats>>,
     /// `DATA_004682`, split into its NUL-terminated entries (cache v11).
     model_strings: Vec<Vec<u8>>,
+    /// Font model slots 0..2's glyph programs (cache v14).
+    glyphs: Vec<Option<GlyphSet>>,
+    /// The object string F1747's `0x3016`/`0x3022` expand (the drawn object's
+    /// word at +0x124, its registration). Empty falls back to the model's own
+    /// name, so the viewer shows something instead of nothing.
+    registration: Vec<u8>,
     /// Global word 15 (the ship's forward thrust, object +0xba); `None` leaves it
     /// to the animation input. See [`ModelViewer::set_thrust`].
     thrust: Option<u16>,
@@ -162,6 +168,51 @@ pub struct ModelViewer {
 /// The engine settings the viewer's E key steps through: off (the animation
 /// input), half and full plume (4095, where ship models stop lengthening it).
 const THRUST_STEPS: [Option<u16>; 3] = [None, Some(2048), Some(4095)];
+
+/// One font model's per-character command programs (cache v14): F1747 executes
+/// the program for each character and reads its final return word for the next
+/// pen vertex. Starts are relative to `bytes`; characters may alias a program.
+#[derive(Debug, Clone)]
+pub struct GlyphSet {
+    vertex_count: u32,
+    scale: u32,
+    starts: Vec<u32>,
+    bytes: Vec<u8>,
+}
+
+impl GlyphSet {
+    /// Decode a `base:model-glyphs/NNN` payload: `count` u32 starts, then the
+    /// program block.
+    pub fn from_payload(payload: &[u8], count: u32, vertex_count: u32, scale: u32) -> Option<Self> {
+        let offsets = count as usize * 4;
+        if payload.len() <= offsets || count == 0 {
+            return None;
+        }
+        Some(Self {
+            vertex_count,
+            scale,
+            starts: payload[..offsets]
+                .chunks_exact(4)
+                .map(|entry| u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]))
+                .collect(),
+            bytes: payload[offsets..].to_vec(),
+        })
+    }
+
+    /// The program for `code`, when the set defines it.
+    pub fn program(&self, code: u8) -> Option<&[u8]> {
+        let index = usize::from(code.checked_sub(ffe_core::model_commands::GLYPH_FIRST_CHAR)?);
+        let start = *self.starts.get(index)? as usize;
+        let end = self
+            .starts
+            .iter()
+            .map(|offset| *offset as usize)
+            .filter(|offset| *offset > start)
+            .min()
+            .unwrap_or(self.bytes.len());
+        self.bytes.get(start..end)
+    }
+}
 
 /// The model global that ship models read as their forward thrust: global word 15
 /// is object word `+0x9c + 2 * 15` = `+0xba` (F1473), the z word of the vector F598
@@ -286,6 +337,22 @@ impl ModelViewer {
             }
             viewer.model_strings = strings;
         }
+        viewer.glyphs = (0..3)
+            .map(|index| {
+                let id = format!("base:model-glyphs/{index:03}");
+                let record = cache.manifest().files.iter().find(|r| r.id == id)?;
+                let AssetKind::GlyphPrograms {
+                    count,
+                    vertex_count,
+                    scale,
+                    ..
+                } = record.asset
+                else {
+                    return None;
+                };
+                GlyphSet::from_payload(cache.asset(&id)?, count, vertex_count, scale)
+            })
+            .collect();
         Ok(viewer)
     }
 
@@ -364,6 +431,8 @@ impl ModelViewer {
             descriptors: Vec::new(),
             ship_stats: Vec::new(),
             model_strings: Vec::new(),
+            glyphs: Vec::new(),
+            registration: Vec::new(),
             thrust: None,
             jitter: JITTER_SEED,
             jitter_next: Cell::new(JITTER_SEED),
@@ -503,6 +572,17 @@ impl ModelViewer {
     /// Supply the F1345 (`0x40xx`) strings to a synthetic viewer.
     pub fn set_model_strings(&mut self, strings: Vec<Vec<u8>>) {
         self.model_strings = strings;
+    }
+
+    /// The drawn object's registration string (object +0x124), which F1747's
+    /// `0x3016`/`0x3022` expand. Empty uses the model's own name.
+    pub fn set_registration(&mut self, text: &[u8]) {
+        self.registration = text.to_vec();
+    }
+
+    /// Supply the glyph sets for synthetic viewers (index = font model slot).
+    pub fn set_glyph_sets(&mut self, sets: Vec<Option<GlyphSet>>) {
+        self.glyphs = sets;
     }
 
     /// F1343/F1345's direct model-string case. Other FF-code families need
@@ -764,6 +844,13 @@ impl ModelViewer {
             texts: result.texts.iter().filter(|text| !text.culled).count(),
             ..Frame::default()
         };
+        self.draw_primitives(&result, &mut frame)?;
+        self.draw_texts(&result, model.index, &mut vertices, instance, &mut frame)?;
+        Ok(frame)
+    }
+
+    /// Turn one executed stream's render-ordered primitives into shapes.
+    fn draw_primitives(&self, result: &Execution, frame: &mut Frame) -> Result<(), String> {
         let point =
             |p: [i16; 2]| (p != NEAR_SENTINEL).then_some((i32::from(p[0]), i32::from(p[1])));
         for primitive in &result.ordered {
@@ -908,8 +995,169 @@ impl ModelViewer {
                 },
             }
         }
-        Ok(frame)
+        Ok(())
     }
+
+    /// Opcode 10 text (F1747): run each character's glyph program through the
+    /// executor in a frame at the text's position, and move the pen to the font
+    /// vertex the program's final return word names. The glyph geometry is drawn
+    /// after the model's own primitives (the original queues it into the same
+    /// depth order, which is not modelled yet). Control codes below 0x20 use the
+    /// font's component anchors, which are not imported: a string stops there and
+    /// is reported in [`Frame::skipped`] rather than guessed.
+    fn draw_texts(
+        &self,
+        result: &Execution,
+        model: u32,
+        parent: &mut Vertices<'_>,
+        instance: InstanceContext,
+        frame: &mut Frame,
+    ) -> Result<(), String> {
+        for emission in &result.texts {
+            if emission.culled {
+                continue;
+            }
+            let text = &emission.text;
+            let Some(set) = self
+                .glyphs
+                .get(usize::from(text.glyphs))
+                .and_then(Option::as_ref)
+            else {
+                frame.skipped += 1;
+                continue;
+            };
+            let Some(font) = self.find(u32::from(text.glyphs)) else {
+                frame.skipped += 1;
+                continue;
+            };
+            // The programs must belong to this font model: same vertex list and scale.
+            if set.vertex_count != font.vertex_count || set.scale != font.scale {
+                frame.skipped += 1;
+                continue;
+            }
+            let Ok(string) = self.expanded_text(text.string, model) else {
+                frame.skipped += 1;
+                continue;
+            };
+            let position = parent.resolve(
+                text.vertex as i8,
+                &emission.context,
+                instance.position,
+                instance.generation,
+                true,
+            )?;
+            // F1740: frame mode 6 copies the parent basis; otherwise the record's
+            // word permutes it through F1739.
+            let word = u32::from(text.frame);
+            let matrix = if word >> 8 & 7 == 6 {
+                emission.context.basis
+            } else {
+                ffe_core::model_math::frame_rows(
+                    &emission.context.matrix,
+                    emission.context.base_handedness,
+                    word,
+                )
+                .map_err(|error| format!("{error} (text at {:#x})", text.offset))?
+                .0
+            };
+            let mut pen = position.view;
+            let mut glyph_vertices = Vertices::new(&font.vertices, font.vertex_count)?
+                .with_normal_records(&font.normals);
+            let mut glyph_context = VertexContext {
+                matrix,
+                basis: matrix,
+                scale: font.scale,
+                globals: emission.context.globals,
+                locals: emission.context.locals,
+                colour: emission.context.colour,
+                ..Default::default()
+            };
+            // The glyph faces are flat decals: every normal is visible and lit only
+            // by the material and instance colour (the font's own lighting is not
+            // evaluated yet).
+            let normals = vec![
+                Normal {
+                    culled: false,
+                    colour: [0; 3],
+                };
+                32_768
+            ];
+            let visibility = VisibilityContext {
+                depth: 1,
+                scale: 0,
+                detail: [0, 0],
+                normals: &normals,
+            };
+            for &code in &string {
+                if code < 0x20 {
+                    frame.skipped += 1;
+                    break;
+                }
+                let Some(program) = set.program(code) else {
+                    frame.skipped += 1;
+                    break;
+                };
+                let Some(anchor) = pen_vertex(program) else {
+                    frame.skipped += 1;
+                    break;
+                };
+                let glyph_instance = InstanceContext {
+                    position: pen,
+                    generation: instance.generation,
+                    key_scale: 0,
+                    operand_scale: font.scale as i32,
+                    textures: true,
+                };
+                let execution = execute_live(
+                    program,
+                    &mut glyph_vertices,
+                    &mut glyph_context,
+                    &visibility,
+                    Some(&self.table),
+                    glyph_instance,
+                    4096,
+                )
+                .map_err(|error| {
+                    format!("{error} (glyph {code:?} of text at {:#x})", text.offset)
+                })?;
+                self.draw_primitives(&execution, frame)?;
+                let next = glyph_vertices.resolve(
+                    anchor as i8,
+                    &glyph_context,
+                    pen,
+                    instance.generation,
+                    true,
+                )?;
+                pen = next.view;
+            }
+        }
+        Ok(())
+    }
+
+    /// F1344 expansion for the families the models' text commands use: the model
+    /// string table (`0x4000..0x8000`) and the drawn object's own string
+    /// (`0x3016`, and `0x3022` unwrapped — F1398's width table is not imported).
+    fn expanded_text(&self, code: u16, model: u32) -> Result<Vec<u8>, String> {
+        match code {
+            0x3016 | 0x3022 => {
+                if !self.registration.is_empty() {
+                    return Ok(self.registration.clone());
+                }
+                self.model_strings
+                    .get(model as usize)
+                    .cloned()
+                    .ok_or_else(|| format!("Model {model} has no name string."))
+            }
+            0x4000..=0x7fff => self.model_string(code).map(<[u8]>::to_vec),
+            _ => Err(format!("Unsupported text code {code:#06x}.")),
+        }
+    }
+}
+
+/// The next pen vertex a glyph program names: bits 6.. of its final return word.
+fn pen_vertex(program: &[u8]) -> Option<u8> {
+    let last = program.chunks_exact(2).next_back()?;
+    Some((u16::from_le_bytes([last[0], last[1]]) >> 6) as u8)
 }
 
 impl ViewerModel {

@@ -113,6 +113,171 @@ pub fn decode_model_descriptor(
     })
 }
 
+/// Most characters a font set can define (`0x20..=0x7e`, 95 entries). Several
+/// entries alias one program (lowercase letters share the uppercase glyph), and
+/// a set's table may end earlier: font 0 defines all 95, font 1 only its first
+/// 52. Beyond the defined entries the bytes are not pointers.
+pub use ffe_core::model_commands::GLYPH_CHAR_LIMIT;
+/// First character the font models place (code 0x20 is space).
+pub use ffe_core::model_commands::GLYPH_FIRST_CHAR;
+
+/// The per-character command programs of a font model (model table slots 0, 1
+/// and 2). F1747 executes the program for each character through F1772 in a
+/// nested frame and then reads its final return word: bits 6.. name the font
+/// vertex that is the next pen position. The programs are contiguous slices of
+/// the font model's command block; the descriptor's table at +0x40 gives each
+/// entry's start (the table at +0x44 holds the same anchors for culled glyphs).
+#[derive(Debug)]
+pub struct EmbeddedGlyphPrograms {
+    pub source_offset: usize,
+    pub vertex_count: u32,
+    pub scale: u32,
+    /// Start offset of each character's program in `bytes`, in code order from
+    /// [`GLYPH_FIRST_CHAR`]; the last program runs to the end of `bytes`.
+    pub starts: Vec<u32>,
+    pub bytes: Vec<u8>,
+}
+
+impl EmbeddedGlyphPrograms {
+    /// The program starting at `start`: to the next distinct start, or the end
+    /// of the block for the last one.
+    pub fn slice(&self, start: usize) -> Option<&[u8]> {
+        let end = self
+            .starts
+            .iter()
+            .map(|offset| *offset as usize)
+            .filter(|offset| *offset > start)
+            .min()
+            .unwrap_or(self.bytes.len());
+        self.bytes.get(start..end)
+    }
+
+    /// The program for character `code`, when the set defines it and it is not a
+    /// control code. Lowercase letters may share the uppercase program.
+    pub fn program(&self, code: u8) -> Option<&[u8]> {
+        let index = usize::from(code.checked_sub(GLYPH_FIRST_CHAR)?);
+        let start = *self.starts.get(index)? as usize;
+        self.slice(start)
+    }
+}
+
+/// Import a font model's per-character programs. Each slice must decode as a
+/// command program over the font model's vertices and end in a return record
+/// whose bits 6.. are an in-range vertex (the next pen); a font set whose
+/// layout differs fails explicitly rather than being guessed.
+pub fn glyph_programs(
+    bytes: &[u8],
+    table_rva: u32,
+    index: u32,
+) -> Result<EmbeddedGlyphPrograms, String> {
+    if index > 2 {
+        return Err("Only model slots 0, 1 and 2 are font glyph sets.".to_owned());
+    }
+    let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
+    let vertex_count = dword(bytes, descriptor_offset + 8)?;
+    let scale = dword(bytes, descriptor_offset + 20)?;
+    if vertex_count == 0 || vertex_count > 128 || vertex_count % 2 != 0 {
+        return Err("Invalid font model vertex count.".to_owned());
+    }
+    let descriptor_rva = u32::try_from(
+        descriptor_offset
+            .checked_sub(section.raw)
+            .ok_or("Descriptor precedes its section")?,
+    )
+    .map_err(|_| "Descriptor offset overflow")?
+        + section.rva;
+    let mut absolute = Vec::with_capacity(GLYPH_CHAR_LIMIT);
+    for entry in 0..GLYPH_CHAR_LIMIT {
+        let pointer = dword(
+            bytes,
+            section.offset(descriptor_rva + 0x40 + 4 * entry as u32, 4)?,
+        )?;
+        let Some(rva) = pointer.checked_sub(section.image_base) else {
+            break;
+        };
+        let Ok(offset) = section.offset(rva, 2) else {
+            break;
+        };
+        absolute.push(u32::try_from(offset).map_err(|_| "Glyph offset overflow")?);
+    }
+    if absolute.is_empty() {
+        return Err("Font set defines no glyph programs.".to_owned());
+    }
+    let first = *absolute.first().ok_or("No glyph programs")?;
+    // Several characters share one program (lowercase aliases uppercase), so the
+    // distinct starts, in file order, delimit the programs.
+    let mut distinct = absolute.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    if distinct.first() != Some(&first) {
+        return Err("The first glyph program is not the block start.".to_owned());
+    }
+    let mut end = 0;
+    for (index, start) in distinct.iter().enumerate() {
+        end = match distinct.get(index + 1) {
+            Some(next) => *next,
+            // The last program is ended by its own return record.
+            None => {
+                // A glyph program is small; the decoder caps streams at 16 KiB.
+                let tail = bytes
+                    .get(*start as usize..)
+                    .and_then(|rest| rest.get(..rest.len().min(4096)))
+                    .ok_or("Glyph program outside file")?;
+                let decoded = ffe_core::model_commands::decode(tail, vertex_count)
+                    .map_err(|error| format!("Last glyph program: {error}"))?;
+                let last = decoded
+                    .commands
+                    .last()
+                    .ok_or("Last glyph program is empty.")?;
+                *start + u32::try_from(last.offset + last.size).map_err(|_| "Glyph size")?
+            }
+        };
+        let program = bytes
+            .get(*start as usize..end as usize)
+            .ok_or("Glyph program slice outside the file")?;
+        validate_glyph(program, vertex_count, *start)?;
+    }
+    let starts = absolute
+        .iter()
+        .map(|offset| {
+            offset
+                .checked_sub(first)
+                .ok_or("Glyph program precedes the font block")
+        })
+        .collect::<Result<Vec<u32>, _>>()?;
+    Ok(EmbeddedGlyphPrograms {
+        source_offset: first as usize,
+        vertex_count,
+        scale,
+        starts,
+        bytes: bytes
+            .get(first as usize..end as usize)
+            .ok_or("Glyph program block outside the executable")?
+            .to_vec(),
+    })
+}
+
+fn validate_glyph(program: &[u8], vertex_count: u32, start: u32) -> Result<(), String> {
+    let decoded = ffe_core::model_commands::decode(program, vertex_count)
+        .map_err(|error| format!("Glyph program at {start:#x}: {error}"))?;
+    // Any opcode-zero word is the return; its bits 6.. are the next pen vertex.
+    let last = decoded
+        .commands
+        .last()
+        .ok_or_else(|| format!("Glyph program at {start:#x} is empty."))?;
+    if last.word & 31 != 0 {
+        return Err(format!(
+            "Glyph program at {start:#x} does not end in a return record."
+        ));
+    }
+    if u32::from((last.word >> 6) as u8) >= vertex_count {
+        return Err(format!(
+            "Glyph program at {start:#x} names an out-of-range pen vertex."
+        ));
+    }
+    Ok(())
+}
+
 /// Bytes in one ship statistics block (every block the floppy 1.02 table points to).
 pub const SHIP_STATS_BYTES: usize = 48;
 
