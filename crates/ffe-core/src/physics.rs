@@ -3,6 +3,8 @@
 //! orientation update F585 with F584, F611 and F1520 (F1519, F1552) so far.
 //! Verified against the executed original (`docs/notes/physics.md`).
 
+use crate::ffp::{self, Ffp};
+
 /// The fields of a physics object (`PhysObj`) the motion routines read and
 /// write, at their original offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -140,43 +142,6 @@ fn signed_multiply(a: u32, b: i32) -> i32 {
             .wrapping_neg()
     } else {
         split_multiply(a, b).wrapping_mul(2)
-    }
-}
-
-/// F1496: normalise an ffp number (mantissa, exponent): shift the mantissa left,
-/// decrementing the exponent, until bit 14 is set. A zero mantissa is returned
-/// unchanged.
-fn normalise_ffp(mantissa: u16, exponent: u16) -> (u16, u16) {
-    let (mut mantissa, mut exponent) = (mantissa, exponent);
-    if mantissa == 0 {
-        return (mantissa, exponent);
-    }
-    while mantissa & 0x4000 == 0 {
-        mantissa <<= 1;
-        exponent = exponent.wrapping_sub(1);
-    }
-    (mantissa, exponent)
-}
-
-/// F1482: ffp multiply: exponents add, mantissas multiply `>> 15`.
-fn multiply_ffp(a: (u16, u16), b: (u16, u16)) -> (u16, u16) {
-    let product = (i32::from(a.0 as i16) * i32::from(b.0 as i16)) >> 15;
-    (product as u16, a.1.wrapping_add(b.1))
-}
-
-/// F1483: ffp divide. A zero divisor gives the largest number (mantissa
-/// 0x7fff, exponent 0x7f); otherwise the exponents subtract and the mantissa
-/// quotient `(a << 14) / b` is doubled unless it reached 0x4000.
-fn divide_ffp(a: (u16, u16), b: (u16, u16)) -> (u16, u16) {
-    if b.0 == 0 {
-        return (0x7fff, 0x7f);
-    }
-    let exponent = a.1.wrapping_sub(b.1);
-    let quotient = ((i32::from(a.0 as i16) << 14) / i32::from(b.0 as i16)) as i16;
-    if i32::from(quotient).abs() >= 0x4000 {
-        (quotient as u16, exponent.wrapping_add(1))
-    } else {
-        ((quotient as u16) << 1, exponent)
     }
 }
 
@@ -382,18 +347,19 @@ impl Motion {
         let relative = relative.map(|v| v as i32);
         let published = relative;
         let length = crate::model_math::length(relative);
-        let near = normalise_ffp(length as u16, exponent as u16);
-        if near.0 == 0 {
+        let near = Ffp::new(length as i16, exponent as i16);
+        let near = ffp::normalise(near);
+        if near.mantissa == 0 {
             return Some(published);
         }
-        let square = multiply_ffp(near, near);
-        let cube = (
-            ((i32::from(near.0) * i32::from(square.0)) >> 15) as u16,
-            square.1,
+        let square = ffp::multiply(near, near);
+        let cube = Ffp::new(
+            ((i32::from(near.mantissa) * i32::from(square.mantissa)) >> 15) as i16,
+            square.exponent,
         );
-        let cube = normalise_ffp(cube.0, cube.1);
-        let pull = divide_ffp(((mass & 0xffff) as u16, (mass >> 16) as u16), cube);
-        let (pull_mantissa, mut pull_exponent) = (pull.0, pull.1 as i16);
+        let cube = ffp::normalise(cube);
+        let pull = ffp::divide(Ffp::from_dword(mass), cube);
+        let (pull_mantissa, mut pull_exponent) = (pull.mantissa, pull.exponent);
         let mut time = time;
         if time < 0 {
             while time < -0x7fff {
@@ -406,7 +372,7 @@ impl Motion {
                 time >>= 1;
             }
         }
-        let scale = (i32::from(pull_mantissa as i16).wrapping_mul(time) >> 15).wrapping_neg();
+        let scale = (i32::from(pull_mantissa).wrapping_mul(time) >> 15).wrapping_neg();
         let mut vector = relative.map(|v| v.wrapping_mul(scale));
         if pull_exponent > 0 {
             let remaining = pull_exponent.wrapping_sub(0x10);

@@ -4,6 +4,23 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — System generation (v0.50b)
+
+Notes: `docs/notes/sysgen.md`.
+
+- `ffe_core::sysgen::Generator` ports F872-F897 (generated and hand-coded
+  systems) on `ffe_core::ffp` (F1463, F1482, F1483, F1486, F1489, F1491, F1496)
+  and the F875 data (`handcoded.rs`, generated from the assembly). 4,156
+  systems / 63,810 objects match byte for byte, names aside.
+- The csysgen notes are wrong in several places (F894's rotate, F887's mass
+  exponent, F882's stray shifts, `0x42`'s parent term, the polarity of F884's
+  last test); the assembly was the source throughout. Every divergence the
+  oracle found was a transcription error of mine, not a surprise in the data.
+- Names wait for the message-string engine; F880 (turning objects into physics
+  objects) and F879 (starport placement) are next.
+
+---
+
 ## 2026-10-23 — Galaxy table and system parameters, cache v15 (v0.50a)
 
 Notes: `docs/notes/galaxy.md`. Start of the world milestone (system generation).

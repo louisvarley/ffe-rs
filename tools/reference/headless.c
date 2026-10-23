@@ -1,6 +1,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <math.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <sys/time.h>
 #include <stdlib.h>
 #include <string.h>
 #include "ffeapi.h"
@@ -2839,7 +2842,7 @@ static int galaxy_vectors(void)
         unsigned long population,danger,allegiance,federal,imperial,maximum,control_allegiance,minor,major;
         int index=ref_galaxy_index(code);
         printf("{\"code\":%lu,\"index\":%d",code,index);
-        if(index>=0) {
+        if(index>=0 || index<0) {
             ref_galaxy_rank_a=(unsigned long)texture_random(0,100);ref_galaxy_rank_b=(unsigned long)texture_random(0,100);
             ref_galaxy_details(code,&a[0],&a[1],&a[2],&a[3],&a[4],&a[5],&a[6],&a[7]);
             printf(",\"details\":[%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu]",a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7]);
@@ -2855,6 +2858,92 @@ static int galaxy_vectors(void)
         printf("}\n");
     }
     if (fflush(stdout)) fail("cannot flush galaxy vectors");
+    return 0;
+}
+
+/* System generation. sysgen drives the original F878 on a zeroed object list
+   for synthetic parameters (seeds, total mass, star count, system code and the
+   population-like DATA_008854), after building the hand-coded objects with
+   F875 (the templates F891 and F892 copy), and prints the generated objects
+   (names zeroed: the Rust port does not generate them), the counters and the
+   generator's random state. A separate record gives the hand-coded array. */
+extern void ref_sysgen(unsigned char *list,unsigned char *params);
+extern void ref_handcoded_init(void);
+extern unsigned long ref_sg_index_table[];
+extern unsigned char ref_handcoded_base[];
+extern unsigned long ref_sg_a,ref_sg_b,ref_sg_seed_a,ref_sg_seed_b,ref_sg_government,ref_sg_population;
+extern unsigned char ref_sg_ports,ref_sg_stations;
+static void sysgen_object(const unsigned char *o)
+{
+    unsigned char copy[68];
+    unsigned long i;
+    memcpy(copy,o,68);
+    memset(copy+0x26,0,20);
+    printf("[");
+    for(i=0;i<68;++i) printf("%s%u",i?",":"",copy[i]);
+    printf("]");
+}
+static sigjmp_buf sysgen_jump;
+static void sysgen_alarm(int signal_number) {(void)signal_number;siglongjmp(sysgen_jump,1);}
+static int sysgen_vectors(void)
+{
+    static unsigned char list[0x50*68+0x100];
+    unsigned char params[0x40];
+    unsigned long n,i,count;
+    fprintf(stderr,"JJFFE sysgen-v1: original F878 for synthetic seeds, total mass, star counts, system codes and populations, after F875 builds the hand-coded objects; the hand-coded array first, then the generated objects (names zeroed), station counters and the random state.\n");
+    texture_rng=0x1b873593UL;
+    ref_sg_seed_a=0x1234;ref_sg_seed_b=0x5678;
+    ref_handcoded_init();
+    printf("{\"handcoded\":[");
+    for(i=0;i<146;++i) {printf("%s",i?",":"");sysgen_object(ref_handcoded_base+68*i);}
+    printf("],\"seeds\":[%lu,%lu]}\n",ref_sg_seed_a,ref_sg_seed_b);
+    for(n=0;n<4160;++n) {
+        unsigned long seed,mass,stars,code,population,shift;
+        memset(list,0,sizeof(list));
+        memset(params,0,sizeof(params));
+        seed=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(1,0xffff);
+        shift=(unsigned long)texture_random(0,8);
+        mass=0x1036640UL+((((unsigned long)texture_random(0,0x7fff)<<17)|(unsigned long)texture_random(0,0x1ffff))>>shift);
+        switch(texture_random(0,7)) {
+        case 0: case 1: case 2: case 3: stars=0; break;
+        case 4: case 5: stars=1; break;
+        default: stars=(unsigned long)texture_random(2,7); break;
+        }
+        code=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+        population=(unsigned long)texture_random(0,(n&1)?255:60);
+        if(n>=4096) {
+            /* Hand-coded systems: a zero first seed; the codes the index table knows, then others. */
+            seed=0;
+            code=(n-4096<12)?ref_sg_index_table[2*(n-4096)]:code;
+        }
+        memcpy(params,&seed,4);memcpy(params+4,&mass,4);memcpy(params+8,&stars,4);memcpy(params+0xc,&code,4);memcpy(params+0x10,&population,4);
+        strcpy((char *)params+0x14,"Testname");
+        ref_sg_population=population;
+        if(getenv("SYSGEN_DEBUG")) {fprintf(stderr,"case %lu seed %lu mass %lu stars %lu code %lu pop %lu\n",n,seed,mass,stars,code,population);fflush(stderr);}
+        {
+            struct itimerval timer;
+            int hung;
+            memset(&timer,0,sizeof(timer));
+            signal(SIGALRM,sysgen_alarm);
+            hung=sigsetjmp(sysgen_jump,1);
+            if(!hung) {
+                timer.it_value.tv_usec=300000;
+                setitimer(ITIMER_REAL,&timer,0);
+                ref_sysgen(list,params);
+            }
+            memset(&timer,0,sizeof(timer));
+            setitimer(ITIMER_REAL,&timer,0);
+            if(hung) {
+                printf("{\"case\":%lu,\"seed\":%lu,\"mass\":%lu,\"stars\":%lu,\"code\":%lu,\"population\":%lu,\"hung\":true}\n",n,seed,mass,stars,code,population);
+                continue;
+            }
+        }
+        for(count=0;count<0x50 && memcmp(list+68*count,"\0\0\0\0",4)!=0;++count) ;
+        printf("{\"case\":%lu,\"seed\":%lu,\"mass\":%lu,\"stars\":%lu,\"code\":%lu,\"population\":%lu,\"count\":%lu,\"ports\":%u,\"stations\":%u,\"state\":[%lu,%lu],\"allegiance\":%lu,\"objects\":[",n,seed,mass,stars,code,population,count,ref_sg_ports,ref_sg_stations,ref_sg_a&0xffffffffUL,ref_sg_b&0xffffffffUL,ref_sg_government&0xffffffffUL);
+        for(i=0;i<=count && i<0x50;++i) {printf("%s",i?",":"");sysgen_object(list+68*i);}
+        printf("]}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush sysgen vectors");
     return 0;
 }
 
@@ -3765,6 +3854,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
     if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--sysgen")) return sysgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--galaxy")) return galaxy_vectors();
     if (argc == 2 && !strcmp(argv[1], "--collide")) return collide_vectors();
     if (argc == 2 && !strcmp(argv[1], "--world-step")) return world_step_vectors();

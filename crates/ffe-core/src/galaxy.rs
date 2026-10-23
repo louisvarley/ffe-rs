@@ -90,12 +90,17 @@ impl<'a> Tables<'a> {
         Ok(tables)
     }
 
-    fn dword(&self, offset: usize) -> u32 {
+    /// A dword of the block.
+    pub fn dword(&self, offset: usize) -> u32 {
         u32::from_le_bytes(self.bytes[offset..offset + 4].try_into().unwrap())
     }
 
-    fn record(&self, index: usize) -> &[u8] {
-        let start = GALAXY_OFFSET + index * RECORD_BYTES;
+    /// The 54 bytes at `index` records from `DATA_007110`. The classes -2 to -8
+    /// of a system outside the table read the eight records' worth of tables
+    /// before it (`DATA_007106..7109`), as the original does.
+    fn record(&self, index: i32) -> &[u8] {
+        let start = GALAXY_OFFSET as i64 + i64::from(index) * RECORD_BYTES as i64;
+        let start = usize::try_from(start).expect("a system class reads inside the block");
         &self.bytes[start..start + RECORD_BYTES]
     }
 
@@ -133,36 +138,36 @@ impl<'a> Tables<'a> {
     }
 
     /// F869: the details of a system (the record the index selects; a negative
-    /// index reads before the table, which this reports as `None`).
-    pub fn details(&self, code: u32) -> Option<Details> {
-        let r = self.record(usize::try_from(self.index(code)).ok()?);
+    /// index reads the tables before the galaxy, as the original does).
+    pub fn details(&self, code: u32) -> Details {
+        let r = self.record(self.index(code));
         let dword = |at: usize| u32::from_le_bytes(r[at..at + 4].try_into().unwrap());
-        Some(Details {
+        Details {
             words: [dword(46), dword(50)],
             bytes: std::array::from_fn(|i| u32::from(r[5 + i])),
             allegiance: u32::from(u16::from_le_bytes([r[10], r[11]])),
-        })
+        }
     }
 
     /// F870: the market parameters of a system.
-    pub fn market(&self, code: u32) -> Option<Market> {
-        let r = self.record(usize::try_from(self.index(code)).ok()?);
+    pub fn market(&self, code: u32) -> Market {
+        let r = self.record(self.index(code));
         let mut stock = [0u8; 37];
         stock[..31].copy_from_slice(&r[13..44]);
         stock[32] = 0x0d;
-        Some(Market {
+        Market {
             population: u32::from(r[4]),
             danger: u32::from(r[12]),
             allegiance: u32::from(u16::from_le_bytes([r[10], r[11]])),
             stock,
-        })
+        }
     }
 
     /// F871: the control of a system. `ranks` are the player's two values
     /// (`DATA_008912`, `DATA_008913`), assigned to the major and minor rank by
     /// which control is greater.
-    pub fn control(&self, code: u32, ranks: [u32; 2]) -> Option<Control> {
-        let r = self.record(usize::try_from(self.index(code)).ok()?);
+    pub fn control(&self, code: u32, ranks: [u32; 2]) -> Control {
+        let r = self.record(self.index(code));
         let imperial = u32::from(r[44] >> 4);
         let federal = u32::from(r[44] & 0xf);
         let allegiance = u32::from(u16::from_le_bytes([r[10], r[11]])) >> 6;
@@ -172,13 +177,13 @@ impl<'a> Tables<'a> {
             } else {
                 (ranks[1], ranks[0], federal)
             };
-        Some(Control {
+        Control {
             imperial,
             federal,
             allegiance,
             maximum,
             minor_rank,
             major_rank,
-        })
+        }
     }
 }

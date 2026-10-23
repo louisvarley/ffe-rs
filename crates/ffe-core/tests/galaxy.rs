@@ -37,14 +37,13 @@ fn control_takes_the_greater_nibble_and_swaps_the_ranks() {
     let bytes = blob();
     let tables = Tables::new(&bytes).unwrap();
     // Imperial 2, federal 1: imperial is greater, the first rank is the minor.
-    let control = tables.control(0x100, [7, 9]).unwrap();
+    let control = tables.control(0x100, [7, 9]);
     assert_eq!(
         (control.imperial, control.federal, control.maximum),
         (2, 1, 2)
     );
     assert_eq!((control.minor_rank, control.major_rank), (7, 9));
     assert_eq!(control.allegiance, 1);
-    let market = tables.market(0x100).unwrap();
+    let market = tables.market(0x100);
     assert_eq!(market.stock[32], 0x0d);
-    assert!(tables.market(0).is_none());
 }

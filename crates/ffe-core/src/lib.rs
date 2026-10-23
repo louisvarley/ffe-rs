@@ -1,8 +1,10 @@
 //! Native simulation primitives: no I/O, wall clock, GPU, or legacy runtime.
 
 pub mod collision;
+pub mod ffp;
 pub mod frames;
 pub mod galaxy;
+pub mod handcoded;
 pub mod model;
 pub mod model_animation;
 pub mod model_commands;
@@ -21,6 +23,7 @@ pub mod model_texture;
 pub mod model_thruster;
 pub mod physics;
 pub mod player;
+pub mod sysgen;
 pub mod thrust;
 
 /// JJFFE's two-word generator. The returned low 16 bits are not the full state.

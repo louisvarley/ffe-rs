@@ -96,6 +96,18 @@ GLOBAL _ref_pl_keys
 GLOBAL _ref_player_orient
 GLOBAL _ref_advance
 GLOBAL _ref_gravity
+GLOBAL _ref_sysgen
+GLOBAL _ref_sg_index_table
+GLOBAL _ref_handcoded_init
+GLOBAL _ref_handcoded_base
+GLOBAL _ref_sg_a
+GLOBAL _ref_sg_b
+GLOBAL _ref_sg_ports
+GLOBAL _ref_sg_stations
+GLOBAL _ref_sg_seed_a
+GLOBAL _ref_sg_seed_b
+GLOBAL _ref_sg_government
+GLOBAL _ref_sg_population
 GLOBAL _ref_galaxy_index
 GLOBAL _ref_galaxy_details
 GLOBAL _ref_galaxy_market
@@ -231,6 +243,18 @@ _ref_pl_keys equ DATA_007691
 _ref_player_orient equ FUNC_001041
 _ref_advance equ FUNC_001512
 _ref_gravity equ FUNC_000603
+_ref_sysgen equ FUNC_000878
+_ref_sg_index_table equ DATA_007133
+_ref_handcoded_init equ FUNC_000875
+_ref_handcoded_base equ DATA_008792
+_ref_sg_a equ DATA_008843
+_ref_sg_b equ DATA_008844
+_ref_sg_ports equ DATA_008855
+_ref_sg_stations equ DATA_008856
+_ref_sg_seed_a equ DATA_007126
+_ref_sg_seed_b equ DATA_007127
+_ref_sg_government equ DATA_007128
+_ref_sg_population equ DATA_008854
 _ref_galaxy_index equ FUNC_000868
 _ref_galaxy_details equ FUNC_000869
 _ref_galaxy_market equ FUNC_000870

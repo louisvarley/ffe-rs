@@ -1,6 +1,7 @@
 """Compare the galaxy and system-generation routines with the executed original.
 
---galaxy (jjffe-commands): F868 (system index or class by distance from the
+--sysgen: F875 and F878 (system generation: the hand-coded objects and 4,160 generated
+or hand-coded systems; object bytes with the names zeroed). --galaxy (jjffe-commands): F868 (system index or class by distance from the
 galactic centre), and for table systems F869, F870 (with the stock string left in
 DATA_008790) and F871 (with the player's ranks) over every table code, the special
 codes and random codes near and far. Needs the content cache (v15 system tables).
@@ -17,6 +18,10 @@ import subprocess
 import tempfile
 
 SCENARIOS = [
+    ("sysgen", "--sysgen", b"JJFFE sysgen-v1", "FFE_SYSGEN_VECTORS", "world_reference",
+     "executed_reference_sysgen",
+     ["handcoded", "seed", "mass", "stars", "code", "population", "count", "ports", "stations",
+      "state", "allegiance", "objects"]),
     ("galaxy", "--galaxy", b"JJFFE galaxy-v1", "FFE_GALAXY_VECTORS", "world_reference",
      "executed_reference_galaxy", ["code", "index", "details", "market", "control"]),
 ]
@@ -38,6 +43,8 @@ def alter(row, field):
         key = "population" if "population" in value else next(iter(value))
         inner = value[key]
         value[key] = [v + 1 for v in inner] if isinstance(inner, list) else inner + 1
+    elif isinstance(value, list) and value and isinstance(value[0], list):
+        row[field] = [[(b + 1) & 0xff for b in inner] for inner in value]
     elif isinstance(value, list):
         row[field] = [v + 1 for v in value]
     else:
@@ -94,7 +101,7 @@ def main():
                 "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
             }
     print(json.dumps({
-        "scenario": "jjffe-galaxy-v1",
+        "scenario": "jjffe-galaxy-v1 + jjffe-sysgen-v1",
         "repeat_matches": True,
         "empty_traces_rejected": True,
         **summary,
