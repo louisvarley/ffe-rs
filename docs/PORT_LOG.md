@@ -2109,3 +2109,12 @@ engines-off thrust), and verified by the new `--player-orient` mode and
 `verify-physics.py` (4096 cases, 0 mismatched). Frames of reference, gravity and
 the planet auto-roll are not ported yet and the port refuses those cases.
 Notes: `docs/notes/player.md`.
+
+## Position from velocity (v0.49e)
+
+F1512/F1511 (the velocity over a 64-bit time added to the 64-bit position,
+with the original's shift normalisation) is ported as `Motion::advance` and
+verified by the new `--advance` mode in `verify-physics.py` (4096 cases, 0
+mismatched). With F601, F585 and F1041 this completes the physics core of one
+free-flight step; the input layer (F1037/F1038), frames of reference and the
+unit calibration for the playable still remain.

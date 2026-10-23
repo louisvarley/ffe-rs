@@ -2085,6 +2085,55 @@ static int player_orient_vectors(void)
     return 0;
 }
 
+/* Position. advance drives the original F1512/F1511 (velocity over a 64-bit
+   time added to a 64-bit position) on a zeroed object with a synthetic position
+   (+0x3e), velocity (+0x8c) and 64-bit time (high dword first, as F1045 passes
+   DATA_008869 and DATA_008868), over small, large, huge and negative times. */
+extern void ref_advance(unsigned char *object,unsigned long high,unsigned long low);
+static void put64(unsigned char *object,unsigned long offset,unsigned long long value) { memcpy(object+offset,&value,8); }
+static long long get64(const unsigned char *object,unsigned long offset) { long long v; memcpy(&v,object+offset,8); return v; }
+static int advance_vectors(void)
+{
+    static unsigned char object[0x200];
+    unsigned long n,i,high,low;
+    unsigned long long time;
+    unsigned char before[0x200];
+    fprintf(stderr,"JJFFE advance-v1: original F1512/F1511 on a zeroed object with a synthetic position (+0x3e, three 64-bit values), velocity (+0x8c) and 64-bit time; the position before and after.\n");
+    texture_rng=0x1f83d9abUL;
+    for(n=0;n<4096;++n) {
+        memset(object,0,sizeof(object));
+        for(i=0;i<3;++i) {
+            put64(object,0x3e + 8*i,((unsigned long long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff))<<16)^(unsigned long long)texture_random(0,0xffff));
+            if(n%7==i) put64(object,0x3e + 8*i,0);
+            switch(texture_random(0,2)) {
+            case 0: put32(object,0x8c+4*i,(long)texture_random(-2000,2000)); break;
+            case 1: put32(object,0x8c+4*i,(long)texture_random(-3000000,3000000)); break;
+            default: put32(object,0x8c+4*i,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff))); break;
+            }
+        }
+        switch(n%6) {
+        case 0: time=(unsigned long long)texture_random(0,100000); break;
+        case 1: time=(unsigned long long)texture_random(0,0x7fffffff); break;
+        case 2: time=((unsigned long long)texture_random(0,0x3ff)<<32)|(unsigned long long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)); break;
+        case 3: time=(unsigned long long)(-(long long)texture_random(0,100000)); break;
+        case 4: time=(unsigned long long)(-(long long)(((unsigned long long)texture_random(0,0x7fffff)<<8)|(unsigned long long)texture_random(0,255))); break;
+        default: time=((unsigned long long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff))<<32)|(unsigned long long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)); break;
+        }
+        high=(unsigned long)(time>>32);low=(unsigned long)(time&0xffffffffUL);
+        memcpy(before,object,sizeof(before));
+        ref_advance(object,high,low);
+        printf("{\"case\":%lu,\"time\":%lld,\"position\":[",n,(long long)time);
+        for(i=0;i<3;++i) printf("%s%lld",i?",":"",get64(before,0x3e + 8*i));
+        printf("],\"velocity\":[");
+        for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(before,0x8c+4*i));
+        printf("],\"after\":[");
+        for(i=0;i<3;++i) printf("%s%lld",i?",":"",get64(object,0x3e + 8*i));
+        printf("]}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush advance vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
 static unsigned long texture_faces[1024][48];
 static void texture_face_begin(void)
@@ -2909,6 +2958,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
     if (argc == 2 && !strcmp(argv[1], "--orient")) return orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--player-orient")) return player_orient_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--advance")) return advance_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

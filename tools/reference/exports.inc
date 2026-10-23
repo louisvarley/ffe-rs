@@ -94,6 +94,7 @@ GLOBAL _ref_pl_combat
 GLOBAL _ref_pl_combat_velocity
 GLOBAL _ref_pl_keys
 GLOBAL _ref_player_orient
+GLOBAL _ref_advance
 GLOBAL _ref_tex_quad
 GLOBAL _ref_tex_slots
 GLOBAL _ref_tex_draw_triangle
@@ -197,6 +198,7 @@ _ref_pl_combat equ DATA_009046
 _ref_pl_combat_velocity equ DATA_008839
 _ref_pl_keys equ DATA_007691
 _ref_player_orient equ FUNC_001041
+_ref_advance equ FUNC_001512
 _ref_tex_quad equ FUNC_001647_DrawTexQuad
 _ref_tex_slots equ DATA_009252
 _ref_tex_draw_triangle equ FUNC_001807

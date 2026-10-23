@@ -74,3 +74,24 @@ random orientations, drift counters around zero, rates from zero to full range,
 every model band, autopilot on and off, time steps from negative to huge): 4096
 compared, 447 of them through F1520, 0 mismatched; every tampered field and an
 empty trace are rejected.
+
+## Position: F1512 / F1511
+
+The position (`+0x3e`, `+0x46`, `+0x4e`) is three 64-bit signed coordinates; the
+parent byte `+0x56` follows them. F1045 calls `F1512(obj, DATA_008869,
+DATA_008868)`, the 64-bit time as its high and low dwords, and F1512 passes the
+velocity (`+0x8c`) to F1511:
+
+1. A negative time is negated (two's complement over the 64 bits) and the sign
+   applied to every delta at the end.
+2. The magnitude is shifted right seven; if its high dword is non-zero the whole
+   value is shifted right by `msb(high) + 1` into the low dword (that count is
+   remembered); then the low dword is shifted right until its MSB is at most 14
+   (the extra count is added).
+3. Each velocity coordinate times that low value, as a signed 64-bit product,
+   arithmetically shifted right two, then shifted left by the remembered count
+   in the original's two 32-bit halves (so a count of 32 or more wraps), and
+   negated if the time was negative, is added to the coordinate (wrapping).
+
+`--advance` runs the original on 4096 synthetic positions and velocities over
+small, large, huge and negative times: 4096 compared, 0 mismatched.

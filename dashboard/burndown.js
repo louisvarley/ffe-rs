@@ -292,6 +292,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 87,
       note: "v0.49d: the player's free-flight orientation and thrust request (F1041, F607, F1043) ported and verified (4096 cases)."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 87,
+      note: "v0.49e: position from velocity (F1512/F1511) ported and verified (4096 cases)."
     }
   ]
 };

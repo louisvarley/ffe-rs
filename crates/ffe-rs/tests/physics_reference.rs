@@ -268,3 +268,42 @@ fn executed_reference_player_orient() {
     eprintln!("compared {cases} player cases, 0 mismatched");
     assert_eq!(cases, 4096);
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Advance {
+    case: usize,
+    time: i64,
+    position: [i64; 3],
+    velocity: [i32; 3],
+    after: [i64; 3],
+}
+
+/// Original F1512/F1511 (`--advance`): 4096 synthetic positions and velocities
+/// over small, large, huge and negative 64-bit times. The position after must
+/// match, the original's wrapped 32-bit shift counts included.
+#[test]
+#[ignore = "Local-only original physics; use tools/reference/verify-physics.py"]
+fn executed_reference_advance() {
+    let input = std::fs::read_to_string(std::env::var_os("FFE_ADVANCE_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 16 << 20);
+    let mut cases = 0;
+    for line in input.lines() {
+        let case: Advance = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        let mut motion = Motion {
+            position: case.position,
+            velocity: case.velocity,
+            ..Motion::default()
+        };
+        motion.advance(case.time);
+        assert_eq!(
+            motion.position, case.after,
+            "advance case {} time {}",
+            case.case, case.time
+        );
+        cases += 1;
+    }
+    eprintln!("compared {cases} advance cases, 0 mismatched");
+    assert_eq!(cases, 4096);
+}

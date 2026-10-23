@@ -7,7 +7,9 @@ regimes; the velocity dwords and fraction words are compared. --orient: F585
 on 4096 synthetic objects; the matrix, drift counter, rates and scanner word
 are compared. --player-orient: F1041 (the player's free-flight orientation and
 thrust request, with F607, F1043 and F599) in free space; the orientation, rates,
-thrust words and caps are compared. Needs no cache.
+thrust words and caps are compared. --advance: F1512/F1511 (velocity over a
+64-bit time added to the 64-bit position); the position after is compared. Needs
+no cache.
 """
 import argparse
 import hashlib
@@ -31,6 +33,8 @@ SCENARIOS = [
      ["matrix", "drift", "rate", "limits", "velocity", "model", "craft", "player", "scanner",
       "counter", "tics", "mode", "flags", "combat", "combat_velocity", "set_speed", "keys",
       "after"]),  # (altitude is only a guard, so it is not tampered)
+    ("advance", "--advance", b"JJFFE advance-v1", "FFE_ADVANCE_VECTORS",
+     "executed_reference_advance", ["time", "position", "velocity", "after"]),
 ]
 
 
@@ -61,6 +65,8 @@ def alter(row, field):
         # Only a matrix coordinate's high 16 bits matter.
         step = 0x10000 if field == "matrix" else 1
         row[field] = [v + step for v in value]
+    elif field == "time":
+        row[field] = value + (1 << 20)
     elif field == "tics":
         row[field] = value + 0x2000
     elif field == "set_speed":
@@ -115,7 +121,7 @@ def main():
                 "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
             }
     print(json.dumps({
-        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1",
+        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1",
         "repeat_matches": True,
         "empty_traces_rejected": True,
         **summary,

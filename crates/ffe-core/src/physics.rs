@@ -34,6 +34,8 @@ pub struct Motion {
     /// The parent object's index (`+0x56`): zero when the object is in free
     /// space and no frame of reference applies.
     pub parent: u8,
+    /// The position (`+0x3e`, `+0x46`, `+0x4e`): three 64-bit coordinates.
+    pub position: [i64; 3],
 }
 
 /// The scanner state F585 touches: the player's craft number (`DATA_008857`)
@@ -133,7 +135,50 @@ fn signed_multiply(a: u32, b: i32) -> i32 {
     }
 }
 
+/// A 64-bit value as the original's pair of dwords (`high`, `low`).
+fn split64(value: i64) -> (u32, u32) {
+    ((value >> 32) as u32, value as u32)
+}
+
+fn join64(high: u32, low: u32) -> i64 {
+    (u64::from(high) << 32 | u64::from(low)) as i64
+}
+
 impl Motion {
+    /// F1512/F1511: add the velocity over a 64-bit signed `time` to the
+    /// position. The magnitude is shifted right seven and then until it fits
+    /// fifteen bits, remembering the shift count; each velocity coordinate
+    /// times that value, arithmetically shifted down two and back up by the
+    /// count (in the original's 32-bit halves, whose shift counts wrap at 32),
+    /// negated for a negative time, is added to the 64-bit coordinate.
+    pub fn advance(&mut self, time: i64) {
+        let negative = time < 0;
+        let magnitude = if negative { time.wrapping_neg() } else { time };
+        let shifted = (magnitude as u64) >> 7;
+        let (high, mut low) = ((shifted >> 32) as u32, shifted as u32);
+        let mut count = 0u32;
+        if high != 0 {
+            count = find_msb(high) + 1;
+            low = (low >> count) | high.wrapping_shl(32 - count);
+        }
+        let extra = (find_msb(low) as i32 - 14).max(0) as u32;
+        count += extra;
+        low >>= extra;
+        for (coordinate, velocity) in self.position.iter_mut().zip(self.velocity) {
+            let product = (i64::from(velocity) * i64::from(low)) >> 2;
+            let (mut h, mut l) = split64(product);
+            if count != 0 {
+                h = h.wrapping_shl(count) | l.wrapping_shr(32u32.wrapping_sub(count));
+                l = l.wrapping_shl(count);
+            }
+            let mut delta = join64(h, l);
+            if negative {
+                delta = delta.wrapping_neg();
+            }
+            *coordinate = coordinate.wrapping_add(delta);
+        }
+    }
+
     /// F607: the thrust request that brings the object to `speed` along its
     /// forward axis. `speed + speed / 100` (truncating) times the forward row's
     /// high words (F1516) less the current velocity gives the velocity change,
