@@ -10,7 +10,7 @@ thrust request, with F607, F1043 and F599) in free space; the orientation, rates
 thrust words and caps are compared. --advance: F1512/F1511 (velocity over a
 64-bit time added to the 64-bit position); the position after is compared. Needs
 no cache. --flight-step: one whole free-flight tick (F1041, F601/F602 and F1512 in
-the order F1021 runs them). --steer: F1037/F1038/F1121 (set speed and heading input). --gravity: F603 (the parent body's pull, with the ffp helpers F1482/F1483/F1496 and F1658). --frames: F590, F604, F605 and F606 (frames of reference, with the cached chain F1677/F1678 and F595). --world-step: a whole tick in a world of bodies (F1041 with gravity F603, auto-roll F609 and the F606 countdown, then F601/F602 and F1512). --collide: F569/F570 (the distance to the parent body and the linear/rotating frame switch F572/F573; F575, F577), contact-free cases. --world-tick: a whole player tick in a world, the collision scan and frame switch included.
+the order F1021 runs them). --steer: F1037/F1038/F1121 (set speed and heading input). --gravity: F603 (the parent body's pull, with the ffp helpers F1482/F1483/F1496 and F1658). --frames: F590, F604, F605 and F606 (frames of reference, with the cached chain F1677/F1678 and F595). --world-step: a whole tick in a world of bodies (F1041 with gravity F603, auto-roll F609 and the F606 countdown, then F601/F602 and F1512). --collide: F569/F570 (the distance to the parent body and the linear/rotating frame switch F572/F573; F575, F577; half the parents are planets: F576-F583 and the terrain query), contact-free cases. --world-tick: a whole player tick in a world, the collision scan and frame switch included. Needs the content cache (v17) for the models' collision streams.
 """
 import argparse
 import hashlib
@@ -134,8 +134,11 @@ def alter(row, field):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", required=True, type=Path, help="jjffe-commands")
+    parser.add_argument("--cache", required=True, type=Path,
+                        help="data.bin (cache v17: the collision streams and terrain tables)")
     args = parser.parse_args()
     reference = args.reference.resolve(strict=True)
+    cache = args.cache.resolve(strict=True)
     root = Path(__file__).resolve().parents[2]
     cargo = shutil.which("cargo") or str(Path.home() / ".cargo" / "bin" / "cargo.exe")
     summary = {}
@@ -146,7 +149,7 @@ def main():
                 raise RuntimeError(f"{flag} traces differ between runs")
             trace = Path(directory) / f"{name}.jsonl"
             trace.write_bytes(trace_bytes)
-            env = dict(os.environ, **{variable: str(trace)})
+            env = dict(os.environ, **{variable: str(trace), "FFE_WORLD_CACHE": str(cache)})
             command = [cargo, "test", "--release", "--locked", "-p", "ffe-rs", "--test",
                        "physics_reference", test, "--", "--ignored", "--exact", "--nocapture"]
             result = subprocess.run(command, cwd=root, env=env, capture_output=True,

@@ -97,7 +97,31 @@ pub struct Hull {
     pub words: Vec<u16>,
 }
 
+/// What the complex shapes need: where the models' collision data comes from, the
+/// terrain tables and height maps, and the game's detail setting.
+pub struct SurfaceTools<'a> {
+    pub shapes: &'a dyn Shapes,
+    pub terrain_table: &'a [u8],
+    pub terrain_maps: &'a [u8],
+    pub detail: i32,
+}
+
 impl Hull {
+    /// A body's fields.
+    pub fn from_body(body: &crate::frames::Body) -> Self {
+        Self {
+            index: body.index,
+            parent: body.parent,
+            rotating: body.rotating,
+            complex: body.shape & 0x80 != 0,
+            orientation: body.orientation,
+            outer: body.outer_radius,
+            inner: body.inner_radius,
+            seed: body.seed,
+            words: body.words.0.to_vec(),
+        }
+    }
+
     /// A physics object's fields (its `0x152` bytes).
     pub fn from_object(object: &[u8]) -> Self {
         let dword = |at: usize| u32::from_le_bytes(object[at..at + 4].try_into().unwrap());

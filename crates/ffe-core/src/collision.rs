@@ -11,6 +11,8 @@
 //! `None`. Verified against the executed original (`docs/notes/collision.md`).
 
 use crate::frames::Bodies;
+use crate::surface::{Hull, Registers, Scene, SurfaceTools};
+use crate::terrain::Terrain;
 
 /// The flag bits of `DATA_008696`.
 pub const DIFFERENT_RADII: u8 = 0x01;
@@ -133,8 +135,15 @@ impl Bodies {
     /// F575 for the pair (`a`, `other`) with `relative` the position of `a`
     /// relative to `other`. Returns the original's return value: zero when the
     /// bodies are out of each other's reach, otherwise the flags
-    /// (`DATA_008696`, which this updates).
-    fn pair(&mut self, flags: &mut u8, relative: [i64; 3], a: usize, other: usize) -> Option<u8> {
+    /// (`DATA_008696`, held in `regs`, which this updates).
+    fn pair(
+        &mut self,
+        regs: &mut Registers,
+        tools: Option<&SurfaceTools>,
+        relative: [i64; 3],
+        a: usize,
+        other: usize,
+    ) -> Option<u8> {
         let (pa, pb) = (self.body[a], self.body[other]);
         let radii_a = Radii {
             outer: pa.outer_radius,
@@ -145,33 +154,63 @@ impl Bodies {
             inner: pb.inner_radius,
         };
         match reach(relative, radii_a, radii_b, pb.shape & 0x80 != 0)? {
-            Reach::Contact { .. } | Reach::Shape => None,
+            Reach::Contact { .. } => None,
             Reach::Far => Some(0),
+            Reach::Shape => {
+                let tools = tools?;
+                let ship_shape = tools.shapes.shape(pa.model)?;
+                let planet_shape = tools.shapes.shape(pb.model)?;
+                let mut terrain = Terrain::new(tools.terrain_table, tools.terrain_maps);
+                let mut scene = Scene {
+                    terrain: &mut terrain,
+                    shapes: tools.shapes,
+                    detail: tools.detail,
+                };
+                regs.planet = 0;
+                regs.distance = self.distance;
+                let hit = scene
+                    .hit(
+                        regs,
+                        &Hull::from_body(&pa),
+                        &ship_shape,
+                        &Hull::from_body(&pb),
+                        &planet_shape,
+                        relative,
+                    )
+                    .ok()?;
+                self.distance = regs.distance;
+                if hit == 0 {
+                    // A touch: the landing, crash and bounce code is not ported.
+                    return None;
+                }
+                Some(regs.flags)
+            }
             Reach::Near {
                 distance,
                 different,
             } => {
-                *flags |= DISTANCE_VALID;
+                regs.flags |= DISTANCE_VALID;
                 self.distance = distance;
                 if different {
-                    *flags |= DIFFERENT_RADII;
+                    regs.flags |= DIFFERENT_RADII;
                 }
-                Some(*flags)
+                Some(regs.flags)
             }
         }
     }
 
     /// F569/F570 for body `a` (the player): the distance to its parent, the
     /// frame switch, and the scan of the other physical bodies in the same frame.
-    pub fn collide(&mut self, a: usize) -> Option<Contact> {
-        let mut flags = 0u8;
+    /// Complex shapes need `tools`; without them they are declined.
+    pub fn collide_with(&mut self, a: usize, tools: Option<&SurfaceTools>) -> Option<Contact> {
+        let mut regs = Registers::default();
         self.distance = (self.distance & !0xffff_ffff) | 0xffff_ffff;
         let parent = self.body[a].parent;
         let mut before = 0u8;
         if parent != 0 {
             let parent = usize::from(parent);
             let position = self.body[a].position;
-            let result = self.pair(&mut flags, position, a, parent)?;
+            let result = self.pair(&mut regs, tools, position, a, parent)?;
             let delay = self.body[a].delay;
             if delay != 0 {
                 let half = (self.frame_tics as i32) >> 1;
@@ -186,7 +225,7 @@ impl Bodies {
                 self.to_linear(a, parent);
                 self.body[a].delay = 0x7f;
             }
-            before = flags;
+            before = regs.flags;
         }
         let me = self.body[a];
         for k in (1..crate::frames::OBJECTS).rev() {
@@ -207,20 +246,25 @@ impl Bodies {
             } else {
                 std::array::from_fn(|i| self.body[a].position[i].wrapping_sub(other.position[i]))
             };
-            self.pair(&mut flags, relative, a, k)?;
+            self.pair(&mut regs, tools, relative, a, k)?;
         }
-        flags |= before;
+        regs.flags |= before;
         let distance = if self.distance >> 32 != 0 || (self.distance as i32) < 0 {
             -1
         } else {
             self.distance as i32
         };
         Some(Contact {
-            flags,
+            flags: regs.flags,
             distance,
-            object: 0,
-            pad: 0,
+            object: regs.object,
+            pad: regs.chunk & 0x1f,
         })
+    }
+
+    /// [`collide_with`](Self::collide_with) without complex shapes.
+    pub fn collide(&mut self, a: usize) -> Option<Contact> {
+        self.collide_with(a, None)
     }
 }
 

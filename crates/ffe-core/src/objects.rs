@@ -12,7 +12,8 @@ use crate::galaxy::{tables, Tables};
 use crate::landing::{settle, Pair, Surface};
 use crate::model::multiply;
 use crate::model_math::SineTable;
-use crate::surface::{Hull, Registers, Scene, Shapes};
+pub use crate::surface::SurfaceTools;
+use crate::surface::{Hull, Registers, Scene};
 use crate::sysgen::OBJECT_BYTES as SYSTEM_OBJECT_BYTES;
 use crate::terrain::Terrain;
 
@@ -428,15 +429,6 @@ impl PhysList {
         }
         self.interpolate(object, phase & 0xfffff);
     }
-}
-
-/// What the complex shapes need: where the models' collision data comes from, the
-/// terrain tables and height maps, and the game's detail setting.
-pub struct SurfaceTools<'a> {
-    pub shapes: &'a dyn Shapes,
-    pub terrain_table: &'a [u8],
-    pub terrain_maps: &'a [u8],
-    pub detail: i32,
 }
 
 /// F574: the distance from a body to a planet along a vector, with the body put

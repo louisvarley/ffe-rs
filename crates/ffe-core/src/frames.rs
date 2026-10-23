@@ -14,6 +14,17 @@
 /// Objects in the original's list: indexes `0..=0x72` (`index * 0x152 + 0x74`).
 pub const OBJECTS: usize = 0x73;
 
+/// The animation words of an object (`+0x9c` to the end of the object), which a
+/// shape's collision stream may test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Words(pub [u16; 91]);
+
+impl Default for Words {
+    fn default() -> Self {
+        Self([0; 91])
+    }
+}
+
 /// The fields of an object the frame routines read and write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Body {
@@ -58,6 +69,10 @@ pub struct Body {
     /// The countdown before the frame may switch between linear and rotating
     /// (`+0x148`).
     pub delay: i32,
+    /// The terrain seed (`+0xa0`) and the animation words (`+0x9c`), which the
+    /// complex shapes' collision tests read.
+    pub seed: u32,
+    pub words: Words,
 }
 
 impl Body {

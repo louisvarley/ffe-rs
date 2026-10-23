@@ -2533,6 +2533,8 @@ static int world_step_vectors(void)
    player last, random radii, rotating-frame bytes, orientations and a stale
    DATA_008704. Positions keep every pair clear of an actual collision and no
    body is complex; those paths are not ported. */
+static void planet_parent(unsigned char *object);
+static int has_shape(unsigned long model);
 extern int ref_collide(unsigned char *object,unsigned char *list,unsigned char *flags,unsigned char *parent,unsigned char **parent_pointer,unsigned long *distance,unsigned char *pad);
 extern unsigned char ref_coll_flags;
 extern unsigned long ref_coll_distance, ref_coll_distance_high;
@@ -2544,6 +2546,8 @@ static void print_collision_body(const unsigned char *b,unsigned physical)
         b[0x87],(int)*(short *)(b+0xda),(int)*(short *)(b+0xa4),(int)*(short *)(b+0xa6),b[0x56],b[0x57],b[0x58],b[0x8b],(unsigned long)get32(b,0x82)&0xffffffffUL,get64(b,0x138),get64(b,0x140),b[0x14c],get32(b,0x148),physical,b[0x25],
         get64(b,0x3e),get64(b,0x46),get64(b,0x4e),get32(b,0x8c),get32(b,0x90),get32(b,0x94),get64(b,0x26),get64(b,0x2e),get64(b,0x36));
     for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(b,4*i));
+    printf("],\"seed\":%lu,\"words\":[",(unsigned long)get32(b,0xa0)&0xffffffffUL);
+    for(i=0;i<91;++i) printf("%s%u",i?",":"",(unsigned)*(const unsigned short *)(b+0x9c+2*i));
     printf("]}");
 }
 static int collide_vectors(void)
@@ -2595,6 +2599,7 @@ static int collide_vectors(void)
             for(i=0;i<9;++i) put32(o[k],4*i,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)));
         }
         o[7][0x8b]=0; o[7][0x57]=(unsigned char)texture_random(0,1);
+        if(o[7][0x56] && has_shape((unsigned long)get32(o[7],0x82)) && texture_random(0,1)) planet_parent(o[o[7][0x56]]);
         /* Aim the player (and sibling 6) into the band where the pair is in
            reach but not in contact: distance 0.4 to 2.5 of the radius sum. */
         {
@@ -2689,6 +2694,7 @@ static int world_tick_vectors(void)
             for(i=0;i<9;++i) put32(o[k],4*i,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)));
         }
         o[7][0x8b]=0; o[7][0x57]=(unsigned char)texture_random(0,1);
+        if(o[7][0x56] && has_shape((unsigned long)get32(o[7],0x82)) && texture_random(0,1)) planet_parent(o[o[7][0x56]]);
         /* Aim the player (and sibling 6) into the band where the pair is in
            reach but not in contact: distance 0.4 to 2.5 of the radius sum. */
         {
@@ -3302,6 +3308,31 @@ static double planet_extent(const unsigned long *model)
     }
     return best;
 }
+/* A body made into a planet: a planet model standing for the complex shape, radii
+   from its extent, a rotation and a seed (the animation words are the object's own
+   bytes). */
+static void planet_parent(unsigned char *object)
+{
+    int model=(int)texture_random(113,148);
+    unsigned long *m=ref_model(model);
+    double radius=planet_extent(m)*ldexp(1.0,(int)(m[0x14/4]+m[0x18/4]));
+    long long outer=(long long)(radius*(1.0+0.5*terrain_unit())),inner=(long long)(radius*(0.8+0.2*terrain_unit()));
+    unsigned long seed=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+    put32(object,0x82,(long)model);
+    object[0x14c]=0x80;
+    memcpy(object+0x138,&outer,8);memcpy(object+0x140,&inner,8);
+    memcpy(object+0xa0,&seed,4);
+    planet_matrix(object);
+}
+
+static int has_shape(unsigned long model)
+{
+    unsigned long *m;
+    if(model>=466) return 0;
+    m=ref_model((int)model);
+    return m && m[0x34/4];
+}
+
 static int planet_vectors(void)
 {
     static unsigned char ship[0x200],planet[0x200];

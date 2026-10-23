@@ -1,4 +1,7 @@
-use ffe_core::frames::{Bodies, Body};
+mod library;
+
+use ffe_core::frames::{Bodies, Body, Words};
+use ffe_core::objects::SurfaceTools;
 use ffe_core::physics::{Motion, Scanner};
 use ffe_core::player::{Controls, Player, SteerKeys, ThrusterKeys};
 use ffe_core::thrust::Limits;
@@ -538,6 +541,8 @@ struct CollideState {
     velocity: [i32; 3],
     cache: [i64; 3],
     orientation: [i32; 9],
+    seed: u32,
+    words: Vec<u16>,
 }
 
 #[derive(Deserialize)]
@@ -574,8 +579,16 @@ struct Collide {
 #[ignore = "Local-only original physics; use tools/reference/verify-physics.py"]
 fn executed_reference_collide() {
     let input = std::fs::read_to_string(std::env::var_os("FFE_COLLIDE_VECTORS").unwrap()).unwrap();
+    let library = library::Library::load();
+    let tools = SurfaceTools {
+        shapes: &library,
+        terrain_table: library.cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: library.cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
     assert!(input.len() < 96 << 20);
-    let (mut cases, mut compared, mut declined, mut valid, mut switched) = (0, 0, 0, 0, 0);
+    let (mut cases, mut compared, mut declined, mut valid, mut switched, mut planets) =
+        (0, 0, 0, 0, 0, 0);
     for line in input.lines() {
         let case: Collide = serde_json::from_str(line).unwrap();
         assert_eq!(case.case, cases);
@@ -609,10 +622,12 @@ fn executed_reference_collide() {
                 inner_radius: b.inner,
                 shape: b.shape,
                 delay: b.delay,
+                seed: b.seed,
+                words: Words(b.words.clone().try_into().unwrap()),
             };
         }
-        let contact_in_original = case.object != 0 || case.flags & 0xc0 != 0;
-        let Some(contact) = world.collide(7) else {
+        let contact_in_original = case.flags & 0xc0 != 0;
+        let Some(contact) = world.collide_with(7, Some(&tools)) else {
             assert!(
                 contact_in_original,
                 "declined a contact-free case {}",
@@ -684,13 +699,15 @@ fn executed_reference_collide() {
         compared += 1;
         valid += usize::from(contact.distance != -1);
         switched += usize::from(case.bodies[6].before.rotating != case.bodies[6].after.rotating);
+        let parent = usize::from(case.bodies[6].before.parent);
+        planets += usize::from(parent != 0 && case.bodies[parent - 1].before.shape & 0x80 != 0);
     }
     assert_eq!(cases, 4096);
     assert!(
-        compared > 2500 && valid > 500 && switched > 500,
+        compared > 2500 && valid > 500 && switched > 500 && planets > 300,
         "too little coverage: {compared} {valid} {switched}"
     );
-    eprintln!("compared {compared} collide cases ({valid} with a distance, {switched} frame switches), {declined} declined for a contact");
+    eprintln!("compared {compared} collide cases ({valid} with a distance, {switched} frame switches, {planets} around a planet), {declined} declined for a contact");
 }
 
 #[derive(Deserialize)]
@@ -962,6 +979,13 @@ struct TickCase {
 #[ignore = "Local-only original player update; use tools/reference/verify-physics.py"]
 fn executed_reference_world_tick() {
     let input = std::fs::read_to_string(std::env::var_os("FFE_TICK_VECTORS").unwrap()).unwrap();
+    let library = library::Library::load();
+    let tools = SurfaceTools {
+        shapes: &library,
+        terrain_table: library.cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: library.cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
     assert!(input.len() < 160 << 20);
     let (mut cases, mut compared, mut declined, mut valid, mut switched, mut moved) =
         (0, 0, 0, 0, 0, 0);
@@ -999,6 +1023,8 @@ fn executed_reference_world_tick() {
                 inner_radius: b.inner,
                 shape: b.shape,
                 delay: b.delay,
+                seed: b.seed,
+                words: Words(b.words.clone().try_into().unwrap()),
             };
         }
         let me = &case.bodies[6].before;
@@ -1052,8 +1078,8 @@ fn executed_reference_world_tick() {
             right: k[8],
             left: k[9],
         };
-        let contact_in_original = case.contact.object != 0 || case.contact.flags & 0xc0 != 0;
-        let contact = player.tick_in(&keys, case.time, &mut world, 7);
+        let contact_in_original = case.contact.flags & 0xc0 != 0;
+        let contact = player.tick_with(&keys, case.time, &mut world, 7, Some(&tools));
         let Ok(contact) = contact else {
             assert!(
                 contact_in_original,

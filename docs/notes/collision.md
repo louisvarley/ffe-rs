@@ -65,3 +65,14 @@ masses, radii, rotating bytes, orientations, ship models for the player, a stale
 flags and every body (193 with a distance, 1,124 frame switches, 186 parent
 changes); the 620 contact cases are exactly those the port declines.
 
+
+## Planets in the scan
+
+`Bodies::collide_with(a, Some(&SurfaceTools))` runs the scan with complex shapes:
+bodies carry their terrain seed (`+0xa0`) and animation words (`+0x9c`). Half of the
+`--collide` and `--world-tick` cases make the player's parent a planet (one of models
+113 to 148, radii from the model's extent, a rotation, a seed): 1,361 of the 3,143
+compared collide cases and a similar share of the ticks are around a planet, matching
+in flags, object index, pad, distance registers and every body. A hit on the planet
+(landing, crash) is declined as before, and the oracle now compares the object index
+and pad (a planet's stream entries set both) instead of declining on a non-zero object.

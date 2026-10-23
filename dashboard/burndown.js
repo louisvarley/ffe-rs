@@ -131,7 +131,8 @@ window.FFE_BURNDOWN = {
         { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "todo" },
         { id: "world-8", title: "Navigation: system and galaxy maps", status: "todo" },
         { id: "world-9", title: "Lighting by the local star and day/night", status: "todo" },
-        { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" }
+        { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" },
+        { id: "world-11", title: "Terrain distance query and complex-shape collisions (F1876 mode 1, F576-F583), starports placed on planets", status: "done", version: "v0.51e" }
       ]
     },
     {

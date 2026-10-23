@@ -11,6 +11,7 @@ use crate::collision::Contact;
 use crate::frames::Bodies;
 use crate::model::multiply;
 use crate::physics::{Motion, Scanner};
+use crate::surface::SurfaceTools;
 use crate::thrust::{clamp, Limits};
 
 /// Altitude (`DATA_008867`) at and below which F1041 rolls toward the planet (F609).
@@ -390,10 +391,22 @@ impl Player {
         world: &mut Bodies,
         index: usize,
     ) -> Result<Contact, String> {
+        self.tick_with(keys, time, world, index, None)
+    }
+
+    /// [`Player::tick_in`] with the data complex shapes (planets) need.
+    pub fn tick_with(
+        &mut self,
+        keys: &ThrusterKeys,
+        time: i64,
+        world: &mut Bodies,
+        index: usize,
+        tools: Option<&SurfaceTools>,
+    ) -> Result<Contact, String> {
         self.step_in(keys, time, world, index)?;
         world.body[index].take_motion(&self.motion);
         world.frame_tics = self.frame_tics;
-        let Some(contact) = world.collide(index) else {
+        let Some(contact) = world.collide_with(index, tools) else {
             return Err("Contact with a body is not ported.".to_owned());
         };
         world.body[index].give_motion(&mut self.motion);
