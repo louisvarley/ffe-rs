@@ -1,33 +1,24 @@
-# Unfinished background work (stopped 2026-10-22)
+# Unfinished background work (stopped 2026-10-22; superseded 2026-10-23)
 
-Both tasks are now steps 1 and 2 of the v0.48 milestone in `docs/STATUS.md`.
+Both tasks were restarted and landed as v0.48a/b (text, labels, glyph programs)
+and v0.48c (surface resolution), with the details in `docs/notes/text.md` and
+`docs/notes/surfaces.md` and the milestone list in `docs/STATUS.md`. This file
+is kept only for the history below.
 
 Two background agents started after the "Engine glows, moving parts and the
 spinning station" round stopped (most likely at a usage limit) before writing
 any code. Both worked from main at b1d19c4. Neither committed anything; their
-research was not saved. Restart them from current main.
+research was not saved.
 
 ## Text and labels
 
-Goal: port model text (opcode 10, F1747 with the F1344 string expansion and
-F1539 glyph models) and labels (opcode 18, F1764/F1812), so ships and stations
-show their registration and name decals. Notes were to go in
-`docs/notes/text.md`, checked against the probe's existing scoped hooks
-(`trace_text_*`, `trace_label_*` in `tools/reference/make-probe.py`).
-
-How far it got: a throwaway census test that listed every decoded text and
-label record (`program.texts`, `program.labels` from
-`ffe_core::model_commands::decode`) across the cache's models. No port.
-
-Cache: v12 is taken by ship statistics, so a new asset needs v13 (and
-future-version tests then use 14).
+Ported: the F1344 string expansion for the families the models use, cache v14's
+per-character glyph programs, F1747's placement, and F1764/F1812 labels with
+cache v13's full string table. Still open: control codes below 0x20, `0x3022`'s
+wrap, `0x9c00`-`0x9c03`, depth interleaving and glyph lighting.
 
 ## Curved surfaces
 
-Goal: port opcode 31 curved surface patches (F1874/F1876) so rounded hulls and
-station parts draw, with notes in `docs/notes/surfaces.md` and the spline
-probe hooks (`trace_spline_*`) as the oracle.
-
-How far it got: a throwaway example that listed every opcode-31 record
-(`program.surfaces`: offset, word, origin, axes, params) from the floppy 1.02
-executable, and a rebuild of the Linux reference. No port.
+Ported and verified: F1874's origin/axis resolution (whole-table oracle, 40
+surfaces). Still open: F1876's patch rendering, which is the next milestone step
+and needs its own probe hooks (see `docs/notes/surfaces.md`).
