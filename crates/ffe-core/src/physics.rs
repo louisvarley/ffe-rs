@@ -62,6 +62,8 @@ impl Motion {
         self.integrate(tics, false, 0xf);
     }
 
+    // Each axis indexes four parallel arrays (thrust, cap, velocity, fraction).
+    #[allow(clippy::needless_range_loop)]
     fn integrate(&mut self, tics: u32, caps: bool, halvings: i32) {
         // F601 shifts `tics` logically, F602 arithmetically.
         let mut time = if caps {
@@ -82,10 +84,10 @@ impl Motion {
             if *word == 0 {
                 continue;
             }
-            for axis in 0..3 {
+            for (sum, coordinate) in thrust.iter_mut().zip(row) {
                 let part =
-                    ((row[axis] >> 16).wrapping_mul(time) >> 15).wrapping_mul(i32::from(*word));
-                thrust[axis] = thrust[axis].wrapping_add(part);
+                    ((coordinate >> 16).wrapping_mul(time) >> 15).wrapping_mul(i32::from(*word));
+                *sum = sum.wrapping_add(part);
             }
         }
         let thrust = thrust.map(|v| v.wrapping_shl(1));
