@@ -2,10 +2,11 @@ use crate::external::{output_destination, recorded_bytes};
 use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
-    decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font, decode_model_commands,
-    decode_model_descriptor, decode_model_names, decode_model_normals, decode_model_vertices,
-    decode_ship_stats, decode_sine_table, decode_star_shades, decode_system_tables,
-    decode_texture_descriptors, BitmapLayout,
+    decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font,
+    decode_gameplay_tables, decode_model_commands, decode_model_descriptor, decode_model_names,
+    decode_model_normals, decode_model_record, decode_model_vertices, decode_ship_stats,
+    decode_sine_table, decode_star_shades, decode_system_tables, decode_texture_descriptors,
+    BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -54,6 +55,14 @@ pub(crate) fn lighting_layout(profile: &str) -> Option<(u32, u32)> {
 pub(crate) fn system_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xe71d8),
+        _ => None,
+    }
+}
+
+/// Gameplay tables (`DATA_007207`) RVA (v16), floppy 1.02 only.
+pub(crate) fn gameplay_layout(profile: &str) -> Option<u32> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some(0xee98c),
         _ => None,
     }
 }
@@ -108,6 +117,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     let mut assets = Vec::new();
     let mut models = 0;
     let mut descriptor_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * 8];
+    let mut record_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * 20];
     let stats_bytes = ffe_convert::embedded::SHIP_STATS_BYTES;
     let mut stats_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * stats_bytes];
     for record in &inspection.files {
@@ -122,6 +132,14 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                 },
                 bytes: table.bytes,
             });
+            // The descriptor fields object set-up reads, for every slot with a
+            // descriptor, imported or not (v16).
+            for index in 0..ffe_convert::model_extents::MODEL_COUNT as u32 {
+                if let Ok(record) = decode_model_record(&bytes, model_table_rva, index) {
+                    record_table[index as usize * 20..index as usize * 20 + 20]
+                        .copy_from_slice(&record);
+                }
+            }
             // Every table slot whose normals, commands and vertices all decode (v7).
             // Stations 74/75 must decode; other slots that cannot are skipped.
             for index in 0..ffe_convert::model_extents::MODEL_COUNT as u32 {
@@ -239,6 +257,14 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                 bytes: std::mem::take(&mut descriptor_table),
             });
             assets.push(Asset {
+                id: "base:model/records".to_owned(),
+                path: "models/records.bin".to_owned(),
+                kind: AssetKind::ModelRecords {
+                    count: ffe_convert::model_extents::MODEL_COUNT as u32,
+                },
+                bytes: std::mem::take(&mut record_table),
+            });
+            assets.push(Asset {
                 id: "base:ship/stats".to_owned(),
                 path: "ships/stats.bin".to_owned(),
                 kind: AssetKind::ShipStats {
@@ -274,6 +300,17 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     path: "lighting/star-shades.bin".to_owned(),
                     kind: AssetKind::StarShades {
                         count: ffe_core::model_lighting::STAR_SHADE_TABLES as u32,
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
+            if let Some(gameplay_rva) = gameplay_layout(profile.id) {
+                let table = decode_gameplay_tables(&bytes, gameplay_rva)?;
+                assets.push(Asset {
+                    id: "base:gameplay/tables".to_owned(),
+                    path: "gameplay/tables.bin".to_owned(),
+                    kind: AssetKind::GameplayTables {
                         source_offset: table.source_offset as u64,
                     },
                     bytes: table.bytes,
@@ -376,16 +413,18 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         0
     } + usize::from(names_layout(profile.id).is_some())
         + usize::from(system_layout(profile.id).is_some())
+        + usize::from(gameplay_layout(profile.id).is_some())
         + 3;
-    // Plus the v10 model descriptor table and the v12 ship statistics table.
-    if models < 2 || assets.len() != 381 + tables + 3 * models {
+    // Plus the v10 model descriptor table, the v12 ship statistics table and the
+    // v16 model record table.
+    if models < 2 || assets.len() != 382 + tables + 3 * models {
         return Err(format!(
             "unexpected imported asset count {} ({models} models); no cache written",
             assets.len()
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 15,
+        format: "ffe-content-cache".to_owned(), format_version: 16,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

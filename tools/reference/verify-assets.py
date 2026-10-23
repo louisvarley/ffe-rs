@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 15 or len(manifest["files"]) != 1782:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 16 or len(manifest["files"]) != 1784:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,13 +143,26 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1783:
+            if archive.testzip() is not None or len(archive.infolist()) != 1785:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
                 if len(payload) != record["size"] or hashlib.sha256(payload).hexdigest() != record["sha256"]:
                     raise RuntimeError("cache payload digest mismatch")
                 asset = record["asset"]
+                if asset["kind"] == "gameplay_tables":
+                    blocks_g = declarations(reference / "ffedat.asm")
+                    for n, at in [(7207, 0), (7208, 60), (7209, 100), (7210, 144), (7211, 204),
+                                  (7212, 324), (7214, 368), (7220, 508), (7221, 548),
+                                  (7223, 592), (7225, 632)]:
+                        body = blocks_g[f"DATA_00{n}"]
+                        if re.search(r"^\s*dd [A-Za-z]", body, re.M):
+                            continue
+                        piece = db_text_bytes(body)
+                        if payload[at:at + len(piece)] != piece:
+                            raise RuntimeError(f"gameplay table differs from JJFFE DATA_00{n}")
+                    if len(payload) != 647:
+                        raise RuntimeError("gameplay table block size")
                 if asset["kind"] == "system_tables":
                     # DATA_007106..7138: the galaxy table (JJFFE appends systems after the
                     # original's 329), the specials and the generator's tables.

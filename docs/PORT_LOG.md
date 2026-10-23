@@ -4,6 +4,24 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Physics objects from system objects (v0.50c)
+
+Notes: `docs/notes/objects.md`. Cache v16 adds model records and gameplay tables.
+
+- `ffe_core::objects`: F927, F1533, F880, F879 (partly) and the orbit helpers
+  F1506-F1510, F1674, F1675. 1,024 systems / 17,762 physics objects match byte for
+  byte; a starport's position, orientation and velocity are masked because
+  F879 measures the planet through the terrain query (F1876's distance mode,
+  reached via F574 -> F575 -> F576 -> F579 -> F582 -> F581), and planets are
+  complex collision shapes. That query is also what altitude over a planet needs,
+  so it is the next target.
+- The harness lessons: `DATA_008807` is `DATA_008804 + 4` (label granularity);
+  JJFFE passes the clock to F1510 with the low word in the high position (kept).
+- Model records now cover every slot (`models 89` etc. are not imported as
+  models but their descriptors are needed).
+
+---
+
 ## 2026-10-23 — System generation (v0.50b)
 
 Notes: `docs/notes/sysgen.md`.

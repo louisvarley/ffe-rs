@@ -846,3 +846,10 @@ parts are future scope, not requirements for the first image exporter.
 5. The `data.bin`/`upscaled.bin` manifest fields and asset-ID scheme.
 6. The exclusion rule and resize policy.
 7. The canonical/deterministic serialization rules.
+- V16 has 1784 assets (adds `base:model/records`, `models/records.bin`, 20 bytes per model
+  table slot (20 bytes, not 16): the descriptor dwords `+0x14` and `+0x18`, the byte `+0x24`, the
+  words `+0x2c` and `+0x30`, a flag that the collision pointer `+0x34` is non-null with a
+  non-zero first byte, a flag that the statistics pointer `+0x38` is non-null, and the word
+  `+0x2e` at 16; and
+  `base:gameplay/tables`, `gameplay/tables.bin`, 647 raw bytes of `DATA_007207..7225`).
+

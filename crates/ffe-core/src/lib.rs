@@ -21,6 +21,7 @@ pub mod model_polygon;
 pub mod model_surface;
 pub mod model_texture;
 pub mod model_thruster;
+pub mod objects;
 pub mod physics;
 pub mod player;
 pub mod sysgen;

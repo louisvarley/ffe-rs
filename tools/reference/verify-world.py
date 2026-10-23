@@ -1,6 +1,8 @@
 """Compare the galaxy and system-generation routines with the executed original.
 
---sysgen: F875 and F878 (system generation: the hand-coded objects and 4,160 generated
+--worldgen: F880 (with F927, F1533, F879 and the orbit helpers) on generated systems at
+synthetic clocks; physics object bytes with names zeroed and starport placement masked
+(it needs the terrain query). --sysgen: F875 and F878 (system generation: the hand-coded objects and 4,160 generated
 or hand-coded systems; object bytes with the names zeroed). --galaxy (jjffe-commands): F868 (system index or class by distance from the
 galactic centre), and for table systems F869, F870 (with the stock string left in
 DATA_008790) and F871 (with the player's ranks) over every table code, the special
@@ -18,6 +20,10 @@ import subprocess
 import tempfile
 
 SCENARIOS = [
+    ("worldgen", "--worldgen", b"JJFFE worldgen-v1", "FFE_WORLDGEN_VECTORS", "world_reference",
+     "executed_reference_worldgen",
+     ["seed", "mass", "stars", "code", "population", "low", "high", "stamp", "count", "counter",
+      "system", "flags"]),
     ("sysgen", "--sysgen", b"JJFFE sysgen-v1", "FFE_SYSGEN_VECTORS", "world_reference",
      "executed_reference_sysgen",
      ["handcoded", "seed", "mass", "stars", "code", "population", "count", "ports", "stations",
@@ -101,7 +107,7 @@ def main():
                 "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
             }
     print(json.dumps({
-        "scenario": "jjffe-galaxy-v1 + jjffe-sysgen-v1",
+        "scenario": "jjffe-galaxy-v1 + jjffe-sysgen-v1 + jjffe-worldgen-v1",
         "repeat_matches": True,
         "empty_traces_rejected": True,
         **summary,

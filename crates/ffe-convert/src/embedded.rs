@@ -281,6 +281,56 @@ fn validate_glyph(program: &[u8], vertex_count: u32, start: u32) -> Result<(), S
 /// Bytes in one ship statistics block (every block the floppy 1.02 table points to).
 pub const SHIP_STATS_BYTES: usize = 48;
 
+/// Bytes of one model record (see [`decode_model_record`]).
+pub const MODEL_RECORD_BYTES: usize = 20;
+
+/// The model descriptor fields object set-up (F1533, F879) read, as 20 bytes: the
+/// dwords at `+0x14` and `+0x18` (the scales), the byte at `+0x24`, the words at
+/// `+0x2c` and `+0x30` (the two radii), a flag byte that is 1 when the pointer at
+/// `+0x34` is non-null and the byte it points to is non-zero (a complex collision
+/// shape) and a flag byte that is 1 when the statistics pointer at `+0x38` is
+/// non-null, and (at 16) the word at `+0x2e`, which with `+0x2c` forms the dword F879
+/// reads as the planet's radius.
+pub fn decode_model_record(
+    bytes: &[u8],
+    table_rva: u32,
+    index: u32,
+) -> Result<[u8; MODEL_RECORD_BYTES], String> {
+    let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
+    let record = range(bytes, descriptor_offset, 0x40)?;
+    let mut out = [0u8; MODEL_RECORD_BYTES];
+    out[0..4].copy_from_slice(&record[0x14..0x18]);
+    out[4..8].copy_from_slice(&record[0x18..0x1c]);
+    out[8] = record[0x24];
+    out[10..12].copy_from_slice(&record[0x2c..0x2e]);
+    out[12..14].copy_from_slice(&record[0x30..0x32]);
+    let shape = dword(record, 0x34)?;
+    if shape != 0 {
+        let rva = shape
+            .checked_sub(section.image_base)
+            .ok_or("Collision pointer precedes image base")?;
+        let offset = section.offset(rva, 1)?;
+        out[9] = u8::from(bytes[offset] != 0);
+    }
+    out[14] = u8::from(dword(record, 0x38)? != 0);
+    out[16..18].copy_from_slice(&record[0x2e..0x30]);
+    Ok(out)
+}
+
+/// The gameplay tables `DATA_007207..7225` (hyperdrive masses, damage codes and
+/// the other equipment tables), 647 bytes copied raw.
+pub const GAMEPLAY_TABLES_BYTES: usize = 647;
+
+pub fn decode_gameplay_tables(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, GAMEPLAY_TABLES_BYTES)?;
+    let table = range(bytes, source_offset, GAMEPLAY_TABLES_BYTES)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table.to_vec(),
+    })
+}
+
 /// The 48-byte statistics block descriptor +0x38 points to (object set-up reads
 /// forward thrust at +0x0, reverse thrust at +0x2, gun mounts at +0x4, mass at
 /// +0x6), or `None` when the pointer is null.

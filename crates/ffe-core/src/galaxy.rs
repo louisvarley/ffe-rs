@@ -90,6 +90,11 @@ impl<'a> Tables<'a> {
         Ok(tables)
     }
 
+    /// A slice of the block.
+    pub fn bytes(&self, offset: usize, length: usize) -> &[u8] {
+        &self.bytes[offset..offset + length]
+    }
+
     /// A dword of the block.
     pub fn dword(&self, offset: usize) -> u32 {
         u32::from_le_bytes(self.bytes[offset..offset + 4].try_into().unwrap())

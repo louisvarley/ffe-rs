@@ -97,6 +97,8 @@ GLOBAL _ref_player_orient
 GLOBAL _ref_advance
 GLOBAL _ref_gravity
 GLOBAL _ref_sysgen
+GLOBAL _ref_worldgen
+GLOBAL _ref_worldgen_counter
 GLOBAL _ref_sg_index_table
 GLOBAL _ref_handcoded_init
 GLOBAL _ref_handcoded_base
@@ -244,6 +246,8 @@ _ref_player_orient equ FUNC_001041
 _ref_advance equ FUNC_001512
 _ref_gravity equ FUNC_000603
 _ref_sysgen equ FUNC_000878
+_ref_worldgen equ FUNC_000880
+_ref_worldgen_counter equ DATA_008834
 _ref_sg_index_table equ DATA_007133
 _ref_handcoded_init equ FUNC_000875
 _ref_handcoded_base equ DATA_008792

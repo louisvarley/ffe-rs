@@ -111,6 +111,16 @@ pub enum AssetKind {
     SystemTables {
         source_offset: u64,
     },
+    /// Per model table slot, the 20-byte record of the descriptor fields object
+    /// set-up reads (scales, radii, shape and statistics flags; v16); see
+    /// `ffe_convert::embedded::decode_model_record`.
+    ModelRecords {
+        count: u32,
+    },
+    /// The gameplay tables `DATA_007207..7225` (647 raw bytes; v16).
+    GameplayTables {
+        source_offset: u64,
+    },
     /// One font model's per-character glyph command programs (v14): `count`
     /// little-endian u32 start offsets relative to the payload's program block,
     /// then the block itself. The block follows the offsets at
@@ -205,7 +215,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=15) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=16) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -257,6 +267,14 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         }
         if manifest.format_version < 12 && matches!(record.asset, AssetKind::ShipStats { .. }) {
             return Err("The ship statistics table requires cache v12.".to_owned());
+        }
+        if manifest.format_version < 16
+            && matches!(
+                record.asset,
+                AssetKind::ModelRecords { .. } | AssetKind::GameplayTables { .. }
+            )
+        {
+            return Err("The model records and gameplay tables require cache v16.".to_owned());
         }
         if manifest.format_version < 15 && matches!(record.asset, AssetKind::SystemTables { .. }) {
             return Err("The system tables require cache v15.".to_owned());
@@ -482,6 +500,16 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
                 return Err("invalid star shade table count".to_owned());
             }
             ffe_core::model_lighting::star_shades(bytes)?;
+        }
+        AssetKind::ModelRecords { count } => {
+            if *count != MODEL_TABLE_SLOTS || bytes.len() != *count as usize * 20 {
+                return Err("invalid model record table".to_owned());
+            }
+        }
+        AssetKind::GameplayTables { .. } => {
+            if bytes.len() != 647 {
+                return Err("invalid gameplay table block".to_owned());
+            }
         }
         AssetKind::SystemTables { .. } => {
             ffe_core::galaxy::Tables::new(bytes)?;

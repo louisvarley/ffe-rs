@@ -1,4 +1,6 @@
 use ffe_core::galaxy::Tables;
+use ffe_core::model_math::SineTable;
+use ffe_core::objects::{Models, PhysList, Placement};
 use ffe_core::sysgen::{handcoded, Generator, Params};
 use serde::Deserialize;
 
@@ -223,4 +225,140 @@ fn executed_reference_sysgen() {
     }
     assert!(compared > 4100, "too few systems: {compared}");
     eprintln!("compared hand-coded objects and {compared} systems ({objects} objects), {hung} skipped as non-terminating");
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorldCase {
+    case: usize,
+    #[serde(default)]
+    hung: bool,
+    #[serde(default)]
+    seed: u32,
+    #[serde(default)]
+    mass: u32,
+    #[serde(default)]
+    stars: u32,
+    #[serde(default)]
+    code: u32,
+    #[serde(default)]
+    population: i32,
+    #[serde(default)]
+    low: u32,
+    #[serde(default)]
+    high: u32,
+    #[serde(default)]
+    stamp: u8,
+    #[serde(default)]
+    count: u32,
+    #[serde(default)]
+    counter: i32,
+    #[serde(default)]
+    system: Vec<Vec<u8>>,
+    #[serde(default)]
+    flags: Vec<u8>,
+    #[serde(default)]
+    objects: std::collections::BTreeMap<String, Vec<u8>>,
+}
+
+/// Original F880 with F927, F1533, F879 and the orbit helpers (`--worldgen`): the
+/// physics objects created for synthetic systems at synthetic clocks. Every
+/// flag byte and every object's 0x152 bytes (names zeroed) must match, and so
+/// must the system objects' physics indexes.
+#[test]
+#[ignore = "Local-only original world generation; use tools/reference/verify-world.py"]
+fn executed_reference_worldgen() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let blob = cache.asset("base:world/system-tables").unwrap();
+    let tables = Tables::new(blob).unwrap();
+    let models = Models {
+        records: cache.asset("base:model/records").unwrap(),
+        stats: cache.asset("base:ship/stats").unwrap(),
+        gameplay: cache.asset("base:gameplay/tables").unwrap(),
+    };
+    let sine = SineTable::from_bytes(cache.asset("base:math/sine").unwrap()).unwrap();
+    let placement = Placement {
+        tables: &tables,
+        models: &models,
+        sine: &sine,
+    };
+    let input = std::fs::read_to_string(std::env::var_os("FFE_WORLDGEN_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 400 << 20);
+    let (mut cases, mut compared, mut bodies) = (0, 0, 0);
+    for line in input.lines() {
+        let case: WorldCase = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        cases += 1;
+        if case.hung {
+            continue;
+        }
+        let mut generator = Generator::new(Tables::new(blob).unwrap());
+        generator
+            .generate(&Params {
+                seed: case.seed,
+                mass: case.mass,
+                stars: case.stars,
+                code: case.code,
+                population: case.population,
+            })
+            .unwrap();
+        let mut system = generator.list.clone();
+        let mut list = PhysList {
+            stamp: case.stamp,
+            clock: [case.low, case.high],
+            ..PhysList::default()
+        };
+        placement.create(&mut list, &mut system, [case.low, case.high]);
+        assert_eq!(
+            case.system.len() as u32,
+            case.count,
+            "worldgen case {} count",
+            case.case
+        );
+        for (i, want) in case.system.iter().enumerate() {
+            let mut got = system[i * 68..i * 68 + 68].to_vec();
+            got[0x26..0x3a].fill(0);
+            assert_eq!(&got, want, "worldgen case {} system object {i}", case.case);
+        }
+        assert_eq!(
+            &list.bytes[..0x73],
+            &case.flags[..],
+            "worldgen case {} flags",
+            case.case
+        );
+        assert_eq!(
+            list.counter, case.counter,
+            "worldgen case {} counter",
+            case.case
+        );
+        for (index, want) in &case.objects {
+            let index: usize = index.parse().unwrap();
+            let at = 0x74 + 0x152 * index;
+            let mut got = list.bytes[at..at + 0x152].to_vec();
+            got[0x124..0x138].fill(0);
+            // A starport's position, orientation and velocity come from the planet's
+            // terrain query (F1876's distance mode, through F574), not ported yet.
+            let starport = list.flag(index) == 0x0f;
+            let differing: Vec<usize> = (0..got.len())
+                .filter(|i| {
+                    got[*i] != want[*i]
+                        && !(starport
+                            && (*i < 0x24 || (0x3e..0x56).contains(i) || (0x8c..0x98).contains(i)))
+                })
+                .collect();
+            assert!(
+                differing.is_empty(),
+                "worldgen case {} physics object {index}: bytes differ at {differing:x?} (got {:?}, want {:?})",
+                case.case,
+                differing.iter().map(|i| got[*i]).collect::<Vec<_>>(),
+                differing.iter().map(|i| want[*i]).collect::<Vec<_>>()
+            );
+            bodies += 1;
+        }
+        compared += 1;
+    }
+    assert!(compared > 900, "too few systems: {compared}");
+    eprintln!("compared {compared} created systems ({bodies} physics objects)");
 }

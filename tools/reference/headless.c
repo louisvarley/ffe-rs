@@ -2947,6 +2947,94 @@ static int sysgen_vectors(void)
     return 0;
 }
 
+/* World objects. worldgen drives the original F880 (and through it F927,
+   F1533, F879 and the orbit helpers) on the objects F878 generates for a
+   synthetic system, at a synthetic clock, into a zeroed physics list; it prints
+   the generated system objects (names zeroed, +0x18 as a physics index) and every
+   flagged physics object (names zeroed). */
+extern void ref_worldgen(unsigned char *list,unsigned char *system,unsigned long low,unsigned long high);
+extern long ref_worldgen_counter;
+extern unsigned char ref_player_struct[0x4000];
+static int worldgen_vectors(void)
+{
+    static unsigned char system[0x50*68+0x100];
+    static unsigned char physics[0x74+0x152*0x73+0x100];
+    unsigned char params[0x40];
+    unsigned long n,i,count,low,high;
+    fprintf(stderr,"JJFFE worldgen-v1: original F880 (F927, F1533, F879, F1506-F1510, F1674, F1675) for the objects F878 generates for synthetic systems, at synthetic clocks, into a zeroed physics list; the system objects (names zeroed, +0x18 as an index) and every flagged physics object (names zeroed).\n");
+    texture_rng=0x2c1b3c6dUL;
+    ref_sg_seed_a=0x1234;ref_sg_seed_b=0x5678;
+    ref_handcoded_init();
+    for(n=0;n<1024;++n) {
+        unsigned long seed,mass,stars,code,population,shift,k;
+        struct itimerval timer;
+        int hung;
+        memset(system,0,sizeof(system));
+        memset(physics,0,sizeof(physics));
+        memset(params,0,sizeof(params));
+        seed=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(1,0xffff);
+        shift=(unsigned long)texture_random(0,8);
+        mass=0x1036640UL+((((unsigned long)texture_random(0,0x7fff)<<17)|(unsigned long)texture_random(0,0x1ffff))>>shift);
+        stars=(unsigned long)(texture_random(0,3)==0?texture_random(1,3):0);
+        code=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+        population=(unsigned long)texture_random(0,255);
+        if(n>=1000) {seed=0;code=ref_sg_index_table[2*(n-1000)%24];}
+        memcpy(params,&seed,4);memcpy(params+4,&mass,4);memcpy(params+8,&stars,4);memcpy(params+0xc,&code,4);memcpy(params+0x10,&population,4);
+        strcpy((char *)params+0x14,"Testname");
+        ref_sg_population=population;
+        low=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+        high=(unsigned long)texture_random(0,3000);
+        memcpy(ref_player_struct,&low,4);memcpy(ref_player_struct+4,&high,4);
+        ref_pl_object_list=physics;ref_list_pointer=physics;
+        ref_frame_stamp=(unsigned char)texture_random(0,200);
+        ref_worldgen_counter=0;ref_coll_distance_high=0;
+        memset(&timer,0,sizeof(timer));
+        signal(SIGALRM,sysgen_alarm);
+        hung=sigsetjmp(sysgen_jump,1);
+        if(!hung) {
+            timer.it_value.tv_usec=500000;
+            setitimer(ITIMER_REAL,&timer,0);
+            ref_sysgen(system,params);
+            ref_worldgen(physics,system,low,high);
+        }
+        memset(&timer,0,sizeof(timer));
+        setitimer(ITIMER_REAL,&timer,0);
+        if(hung) {printf("{\"case\":%lu,\"hung\":true}\n",n);continue;}
+        for(count=0;count<0x50 && memcmp(system+68*count,"\0\0\0\0",4)!=0;++count) ;
+        printf("{\"case\":%lu,\"seed\":%lu,\"mass\":%lu,\"stars\":%lu,\"code\":%lu,\"population\":%lu,\"low\":%lu,\"high\":%lu,\"stamp\":%u,\"count\":%lu,\"counter\":%ld,\"system\":[",n,seed,mass,stars,code,population,low,high,(unsigned)ref_frame_stamp,count,ref_worldgen_counter);
+        for(i=0;i<count;++i) {
+            unsigned char copy[68];
+            unsigned long pointer;
+            memcpy(copy,system+68*i,68);
+            memset(copy+0x26,0,20);
+            memcpy(&pointer,copy+0x18,4);
+            if(pointer) pointer=(pointer-(unsigned long)physics-0x74)/0x152;
+            memcpy(copy+0x18,&pointer,4);
+            printf("%s[",i?",":"");
+            for(k=0;k<68;++k) printf("%s%u",k?",":"",copy[k]);
+            printf("]");
+        }
+        printf("],\"flags\":[");
+        for(i=0;i<0x73;++i) printf("%s%u",i?",":"",physics[i]);
+        printf("],\"objects\":{");
+        {
+            int first=1;
+            for(i=0;i<0x73;++i) {
+                unsigned char copy[0x152];
+                if(!physics[i]) continue;
+                memcpy(copy,physics+0x74+0x152*i,0x152);
+                memset(copy+0x124,0,20);
+                printf("%s\"%lu\":[",first?"":",",i);first=0;
+                for(k=0;k<0x152;++k) printf("%s%u",k?",":"",copy[k]);
+                printf("]");
+            }
+        }
+        printf("}}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush worldgen vectors");
+    return 0;
+}
+
 /* Steering input. steer drives the original F1037 (set speed from Return and
    Shift through F1121, then F1038: mouse and key deltas into the rates, or the
    turret angles in a turret view) on the player struct (DATA_008804) and a
@@ -3855,6 +3943,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sysgen")) return sysgen_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--worldgen")) return worldgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--galaxy")) return galaxy_vectors();
     if (argc == 2 && !strcmp(argv[1], "--collide")) return collide_vectors();
     if (argc == 2 && !strcmp(argv[1], "--world-step")) return world_step_vectors();
