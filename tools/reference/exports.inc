@@ -99,6 +99,23 @@ GLOBAL _ref_gravity
 GLOBAL _ref_sysgen
 GLOBAL _ref_worldgen
 GLOBAL _ref_worldgen_counter
+GLOBAL _ref_tr_reset
+GLOBAL _ref_tr_init
+GLOBAL _ref_tr_node
+GLOBAL _ref_tr_edge
+GLOBAL _ref_tr_midtab
+GLOBAL _ref_tr_fn
+GLOBAL _ref_tr_level_base
+GLOBAL _ref_tr_layers
+GLOBAL _ref_tr_nodes_used
+GLOBAL _ref_tr_edges_used
+GLOBAL _ref_tr_map0
+GLOBAL _ref_tr_map1
+GLOBAL _ref_tr_pool
+GLOBAL _ref_tr_edge_pool
+GLOBAL _ref_tr_f1831
+GLOBAL _ref_tr_f1832
+GLOBAL _ref_tr_f1848
 GLOBAL _ref_sg_index_table
 GLOBAL _ref_handcoded_init
 GLOBAL _ref_handcoded_base
@@ -260,6 +277,23 @@ _ref_sg_seed_b equ DATA_007127
 _ref_sg_government equ DATA_007128
 _ref_sg_population equ DATA_008854
 _ref_galaxy_index equ FUNC_000868
+_ref_tr_reset equ FUNC_001817
+_ref_tr_init equ FUNC_001816
+_ref_tr_node equ FUNC_001818
+_ref_tr_edge equ FUNC_001820
+_ref_tr_midtab equ DATA_007844
+_ref_tr_fn equ DATA_009278
+_ref_tr_level_base equ DATA_009269
+_ref_tr_layers equ DATA_009260
+_ref_tr_nodes_used equ DATA_009273
+_ref_tr_edges_used equ DATA_009276
+_ref_tr_map0 equ DATA_007637
+_ref_tr_map1 equ DATA_007638
+_ref_tr_pool equ DATA_009274
+_ref_tr_edge_pool equ DATA_009277
+_ref_tr_f1831 equ FUNC_001831
+_ref_tr_f1832 equ FUNC_001832
+_ref_tr_f1848 equ FUNC_001848
 _ref_galaxy_details equ FUNC_000869
 _ref_galaxy_market equ FUNC_000870
 _ref_galaxy_control equ FUNC_000871

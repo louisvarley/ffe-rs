@@ -3035,6 +3035,117 @@ static int worldgen_vectors(void)
     return 0;
 }
 
+/* Terrain midpoints. terrain-mid drives the original midpoint routines
+   F1849-F1867 (chosen through the table at DATA_007844), with F1829, F1846 and
+   the distance-mode vertex functions F1831, F1832 and F1848, on synthetic
+   triangle-edge nodes from the original arenas (F1816, F1818, F1820): the three
+   nodes (0x48 bytes), the edge record and the layer tables (DATA_009260) before
+   and after. */
+extern void ref_tr_reset(void);
+extern void ref_tr_init(void);
+extern unsigned char *ref_tr_node(void);
+extern unsigned char *ref_tr_edge(void);
+extern unsigned long ref_tr_midtab[32];
+extern unsigned long ref_tr_fn[5];
+extern unsigned long ref_tr_level_base;
+extern unsigned long ref_tr_layers[128];
+extern unsigned long ref_tr_nodes_used,ref_tr_edges_used;
+extern unsigned char ref_tr_map0[16384],ref_tr_map1[16384];
+extern unsigned char ref_tr_pool[108000],ref_tr_edge_pool[48000];
+extern unsigned char ref_tr_f1831[],ref_tr_f1832[],ref_tr_f1848[];
+static unsigned long terrain_word(void)
+{
+    unsigned long a=(unsigned long)texture_random(0,0xffff),b=(unsigned long)texture_random(0,0xffff);
+    switch(texture_random(0,5)) {
+        case 0: return a&0x7f;
+        case 1: return (a&0x7f)|((b&0x7f)<<16);
+        case 2: return (a<<16|b)>>(unsigned)texture_random(0,31);
+        default: return (a<<16)|b;
+    }
+}
+static void terrain_node_print(const unsigned char *n)
+{
+    int k;
+    for(k=0;k<0x48;++k) printf("%s%u",k?",":"",n[k]);
+}
+static int terrain_mid_vectors(void)
+{
+    unsigned long n;
+    fprintf(stderr,"JJFFE terrain-mid-v1: original F1849-F1867 midpoint routines (F1829, F1846, F1831, F1832, F1848) on synthetic nodes from the F1816 arenas, with random layer tables over the two height maps.\n");
+    texture_rng=0x51f3a7c5UL;
+    for(n=0;n<6144;++n) {
+        unsigned char *node[4],*edge,*link;
+        unsigned char before[4][0x48];
+        unsigned long which=n%19,slot,level,k,j,layer[128];
+        unsigned long used_nodes,used_edges;
+        int preset=texture_random(0,5)==0;
+        memset(ref_tr_pool,0,sizeof(ref_tr_pool));memset(ref_tr_edge_pool,0,sizeof(ref_tr_edge_pool));
+        ref_tr_reset();ref_tr_init();
+        for(k=0;k<4;++k) {
+            node[k]=ref_tr_node();
+            for(j=0;j<0x48;j+=4) {
+                unsigned long w=terrain_word();
+                if(j==0x44) w=(unsigned long)texture_random(0,11);
+                if(j==0x3c || j==0x40) w=(unsigned long)((long)terrain_word()>>(unsigned)texture_random(0,12));
+                if(j==0xc && texture_random(0,2)==0) w=(unsigned long)texture_random(0,200);
+                memcpy(node[k]+j,&w,4);
+            }
+            if(k==3 && preset) continue;
+            memcpy(before[k],node[k],0x48);
+        }
+        edge=ref_tr_edge();
+        {unsigned long first=texture_random(0,1)?(unsigned long)node[0]:(unsigned long)node[1];memcpy(edge,&first,4);}
+        if(preset) memcpy(edge+8,&node[3],4);
+        memcpy(before[3],node[3],0x48);
+        ref_tr_fn[2]=(unsigned long)ref_tr_f1831;ref_tr_fn[3]=(unsigned long)ref_tr_f1832;ref_tr_fn[4]=(unsigned long)ref_tr_f1848;
+        ref_tr_level_base=(unsigned long)texture_random(0,14);
+        for(k=0;k<128;++k) {
+            unsigned long choice=(unsigned long)texture_random(0,3);
+            layer[k]=choice==0?0:choice==1?(unsigned long)ref_tr_map0:(unsigned long)ref_tr_map1;
+            if(k&1) layer[k]=(unsigned long)(texture_random(0,2)==0?0:(texture_random(0,1)?(unsigned long)ref_tr_map0:(unsigned long)ref_tr_map1));
+            if(k<64 && (k&1)==0 && texture_random(0,3)==0) layer[k]=0;
+            ref_tr_layers[k]=layer[k];
+        }
+        level=(unsigned long)texture_random(0,10);
+        {
+            void (*fn)(void *,void *,void *,void *,unsigned long);
+            slot=which==0?0:which<=16?7+which:which==17?24:28;
+            memcpy(&fn,&ref_tr_midtab[slot],sizeof(fn));
+            fn(edge,node[0],node[1],node[2],level);
+        }
+        used_nodes=ref_tr_nodes_used;used_edges=ref_tr_edges_used;
+        printf("{\"case\":%lu,\"which\":%lu,\"level\":%lu,\"base\":%lu,\"preset\":%d,\"pool\":%lu,\"layers\":[",n,which,level,ref_tr_level_base,preset,(unsigned long)ref_tr_pool);
+        for(k=0;k<128;++k) printf("%s%d",k?",":"",layer[k]==0?0:layer[k]==(unsigned long)ref_tr_map0?1:2);
+        printf("],\"before\":[");
+        for(k=0;k<4;++k) {printf("%s[",k?",":"");terrain_node_print(before[k]);printf("]");}
+        printf("],\"after\":[");
+        for(k=0;k<4;++k) {printf("%s[",k?",":"");terrain_node_print(node[k]);printf("]");}
+        {
+            unsigned long mid,a,b,first;
+            memcpy(&first,edge,4);
+            printf("],\"edge\":{\"head\":%d",first==(unsigned long)node[0]?0:1);
+            memcpy(&mid,edge+8,4);
+            printf(",\"mid\":");
+            if(mid==0) printf("null,\"node\":[]");
+            else if(mid==(unsigned long)node[3]) printf("3,\"node\":[]");
+            else {printf("1,\"node\":[");terrain_node_print((unsigned char *)mid);printf("]");}
+            memcpy(&a,edge+4,4);memcpy(&b,edge+0xc,4);
+            printf(",\"links\":[");
+            link=(unsigned char *)a;
+            for(k=0;k<2;++k) {
+                unsigned long target=0;int id=-1;
+                if(link) {memcpy(&target,link,4);id=target==(unsigned long)node[0]?0:target==(unsigned long)node[1]?1:target==(unsigned long)node[2]?2:9;}
+                printf("%s%d",k?",":"",id);
+                link=(unsigned char *)b;
+            }
+            printf("]}");
+        }
+        printf(",\"nodes\":%lu,\"edges\":%lu}\n",used_nodes,used_edges);
+    }
+    if (fflush(stdout)) fail("cannot flush terrain-mid vectors");
+    return 0;
+}
+
 /* Steering input. steer drives the original F1037 (set speed from Return and
    Shift through F1121, then F1038: mouse and key deltas into the rates, or the
    turret angles in a turret view) on the player struct (DATA_008804) and a
@@ -3942,6 +4053,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
     if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--terrain-mid")) return terrain_mid_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sysgen")) return sysgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--worldgen")) return worldgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--galaxy")) return galaxy_vectors();
