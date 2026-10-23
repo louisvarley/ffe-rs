@@ -2126,3 +2126,12 @@ them, and `--flight-step` compares it with the original chain over 4096
 synthetic players (orientation, thrust, velocity and 64-bit position all
 match). The physics core of free flight is now verified end to end; the unit
 calibration for the playable, the input layer and frames of reference are next.
+
+## The input layer (v0.49g)
+
+F1037 (set speed from Return and Shift), F1038 (mouse and key steering, or the
+turret in a turret view) and F1121 (the set-speed step) are ported in
+`ffe-core::player` and verified by the new `--steer` mode (4096 cases, 0
+mismatched). The comparison found an original quirk, now kept: with mouse roll
+on, the roll's low byte is replaced by the view mode. Notes:
+`docs/notes/player.md`.

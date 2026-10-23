@@ -36,6 +36,8 @@ pub struct Motion {
     pub parent: u8,
     /// The position (`+0x3e`, `+0x46`, `+0x4e`): three 64-bit coordinates.
     pub position: [i64; 3],
+    /// Gun mounts (`+0xd1`, a signed byte): four or more allow the bottom turret.
+    pub gun_mounts: i8,
 }
 
 /// The scanner state F585 touches: the player's craft number (`DATA_008857`)

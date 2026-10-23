@@ -71,3 +71,40 @@ frame countdown, scanner word, velocity and 64-bit position.
 Still outside it: the set-speed and heading input (F1037/F1038), F1046's smoke
 and engine noise, the collision and altitude test (F1033), and frames of
 reference, gravity and the planet auto-roll.
+
+## The input layer: F1037, F1038, F1121
+
+Ported as `Player::update_set_speed`, `Player::steer` and `Player::set_speed_step`
+(`--steer`, v0.49g). The JJFFE build differs from the older `cplayer.txt`
+notes: steering is key driven through `FUNC_CalcKeyInput` as well as the mouse.
+
+- **CalcKeyInput(scancode)**: nothing when key input is off (`DATA_007706`
+  zero) or the key's accumulator (`DATA_KeyAccumTable`, in 50 Hz ticks) is
+  zero; otherwise `input time (DATA_009122) * (min(held, 70) + 2) >> 6`.
+- **F1121 (set-speed step)**: the speed doubled up to five times while its top
+  bit is clear (0x7ffeffff if it gets there), `(v >> 16) + 1`, scaled by
+  `DATA_007690 / 16` when that dword's low byte exceeds 0x10 (capped at 0x7fff),
+  times the input time, `>> 6`.
+- **F1037**: nothing unless the ship module is active (`DATA_008630` negative).
+  With the engines on (`DATA_008871` bit 0 clear): Return held raises the set
+  speed (`DATA_008918`) by F1121 (to 0x7fffffff on overflow), but a negative set
+  speed is only reset to zero and then just the heading is updated; Shift held
+  lowers it: a positive speed by F1121's step (flag 0x80 set, floored at zero), a
+  non-positive one by `input time >> 8` per tick unless flag 0x80 is already set
+  (and it cannot pass 0x80000000); Shift released clears flag 0x80. Then F1038.
+- **F1038 (heading)**: the mouse accumulator (`DATA_009188`, x low word, y high
+  word) minus the previous one (kept at `+0xd0`), each difference shifted left 6
+  as a 16-bit value, negated when the option byte (`+0x3f54` x, `+0x3f55` y) is
+  zero. With the mouse-roll byte (`+0x3f56`) set outside the turret views the x
+  delta becomes the roll, **with its low byte replaced by the view mode
+  (`+0xea`)**: the original's `mov al,[+0xea]` clobbers it, kept as it is. Held
+  keys add or subtract: 0x2c/0x1e to pitch, 0x33/0x34 to yaw, 0x1a/0x1b to roll.
+  Outside the turret views the deltas are added to the rates with 16-bit
+  saturation (pitch to `+0xb0`, roll to `+0xb2`, the negated yaw to `+0xb4`); in
+  a turret view they turn the turret (`+0x204` yaw, `+0x206` pitch) and select
+  view 2 (pitch negative, clamped at -0x3fff) or, with 4 or more gun mounts, 3
+  (clamped at 0x3fff); with fewer the pitch is held at -1.
+
+`--steer` runs the original F1037 on the player struct with synthetic keys,
+accumulators, mouse words and every view: 4096 compared, 0 mismatched (the first
+run exposed the roll low-byte quirk).

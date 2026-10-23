@@ -1,5 +1,5 @@
 use ffe_core::physics::{Motion, Scanner};
-use ffe_core::player::{Player, ThrusterKeys};
+use ffe_core::player::{Controls, Player, SteerKeys, ThrusterKeys};
 use ffe_core::thrust::Limits;
 use serde::Deserialize;
 
@@ -224,6 +224,7 @@ fn executed_reference_player_orient() {
                 player: case.player,
                 rotation: case.scanner,
             },
+            ..Player::default()
         };
         let k = case.keys.map(|k| k != 0);
         let keys = ThrusterKeys {
@@ -389,6 +390,7 @@ fn executed_reference_flight_step() {
                 player: case.player,
                 rotation: case.scanner,
             },
+            ..Player::default()
         };
         let k = case.keys.map(|k| k != 0);
         let keys = ThrusterKeys {
@@ -435,5 +437,115 @@ fn executed_reference_flight_step() {
         cases += 1;
     }
     eprintln!("compared {cases} flight step cases, 0 mismatched");
+    assert_eq!(cases, 4096);
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SteerAfter {
+    flags: u8,
+    view: u8,
+    speed: i32,
+    previous: u32,
+    turret: [i16; 2],
+    rate: [i16; 3],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SteerCase {
+    case: usize,
+    active: u8,
+    keys_on: u32,
+    time: u32,
+    boost: u32,
+    flags: u8,
+    view: u8,
+    speed: i32,
+    previous: u32,
+    mouse: u32,
+    flip: [u8; 2],
+    roll: u8,
+    turret: [i16; 2],
+    gun_mounts: i8,
+    rate: [i16; 3],
+    #[serde(rename = "return")]
+    return_key: u8,
+    shift: u8,
+    hold: [u32; 6],
+    after: SteerAfter,
+}
+
+/// Original F1037 (`--steer`): 4096 synthetic inputs (Return and Shift held or not,
+/// set speeds across the whole range including the wrap edges, the slow-down flag,
+/// mouse motion, flipped axes, mouse roll, held steering keys, rates at their limits,
+/// every view mode and gun-mount count). The set speed, flags, mouse word, view,
+/// turret angles and rates after must match.
+#[test]
+#[ignore = "Local-only original steering input; use tools/reference/verify-physics.py"]
+fn executed_reference_steer() {
+    let input = std::fs::read_to_string(std::env::var_os("FFE_STEER_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 16 << 20);
+    let mut cases = 0;
+    for line in input.lines() {
+        let case: SteerCase = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        let mut player = Player {
+            motion: Motion {
+                rate: case.rate,
+                gun_mounts: case.gun_mounts,
+                ..Motion::default()
+            },
+            set_speed: case.speed,
+            flags: case.flags,
+            active: (case.active as i8) < 0,
+            input_time: case.time,
+            speed_boost: case.boost,
+            keys_enabled: case.keys_on != 0,
+            mouse_previous: case.previous,
+            mouse_flip: [case.flip[0] != 0, case.flip[1] != 0],
+            mouse_roll: case.roll != 0,
+            view: case.view,
+            turret: case.turret,
+            ..Player::default()
+        };
+        let h = case.hold;
+        let controls = Controls {
+            mouse: case.mouse,
+            faster: case.return_key != 0,
+            slower: case.shift != 0,
+            steer: SteerKeys {
+                pitch_down: h[0],
+                pitch_up: h[1],
+                left: h[2],
+                right: h[3],
+                roll_left: h[4],
+                roll_right: h[5],
+            },
+        };
+        player.update_set_speed(&controls);
+        assert_eq!(
+            (
+                player.flags,
+                player.view,
+                player.set_speed,
+                player.mouse_previous,
+                player.turret,
+                player.motion.rate
+            ),
+            (
+                case.after.flags,
+                case.after.view,
+                case.after.speed,
+                case.after.previous,
+                case.after.turret,
+                case.after.rate
+            ),
+            "steer case {}",
+            case.case
+        );
+        cases += 1;
+    }
+    eprintln!("compared {cases} steer cases, 0 mismatched");
     assert_eq!(cases, 4096);
 }

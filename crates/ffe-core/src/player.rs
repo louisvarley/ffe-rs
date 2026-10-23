@@ -1,7 +1,7 @@
 //! The player's free-flight update, ported from `ffe.asm` and `cplayer.txt`:
 //! F1041 (orientation, thrust request) with F1043 (engines-off thrust), and the
 //! full free-flight tick F1021 makes of it: velocity (F601/F602) and position
-//! (F1512). This
+//! (F1512), and the input layer F1037/F1038 (set speed, steering) with F1121. This
 //! covers flight in free space: with no parent frame of reference (F606) and
 //! far from any planet (F603's gravity, F609's auto-roll) those steps do
 //! nothing, and anything that would need them is reported as an error rather
@@ -59,9 +59,194 @@ pub struct Player {
     pub combat: bool,
     pub combat_velocity: [i32; 3],
     pub scanner: Scanner,
+    /// The ship module is active (`DATA_008630` negative); F1037 does nothing otherwise.
+    pub active: bool,
+    /// The input time (`DATA_009122`): the elapsed time key amounts scale with.
+    pub input_time: u32,
+    /// `DATA_007690`: when its low byte exceeds 0x10, F1121 scales the set-speed step by it / 16.
+    pub speed_boost: u32,
+    /// Key input is live (`DATA_007706` non-zero).
+    pub keys_enabled: bool,
+    /// The previous mouse accumulator (`+0xd0`): x in the low word, y in the high.
+    pub mouse_previous: u32,
+    /// The mouse axes are flipped when the original's bytes `+0x3f54` (x) and
+    /// `+0x3f55` (y) are zero.
+    pub mouse_flip: [bool; 2],
+    /// The mouse's x motion rolls instead of yawing (`+0x3f56` non-zero).
+    pub mouse_roll: bool,
+    /// The view mode (`+0xea`): 2 and 3 are the turrets, which steer instead.
+    pub view: u8,
+    /// The turret angles (`+0x204` yaw, `+0x206` pitch).
+    pub turret: [i16; 2],
+}
+
+/// How long each steering key has been held, in 50 Hz ticks (zero: not held):
+/// the key-accumulator entries F1038 reads, by scancode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SteerKeys {
+    /// 0x2c: pitch down (lowers the pitch input).
+    pub pitch_down: u32,
+    /// 0x1e: pitch up.
+    pub pitch_up: u32,
+    /// 0x33: yaw left.
+    pub left: u32,
+    /// 0x34: yaw right.
+    pub right: u32,
+    /// 0x1a: roll one way, 0x1b: the other.
+    pub roll_left: u32,
+    pub roll_right: u32,
+}
+
+/// What the keyboard and mouse layer hands F1037/F1038 for one tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Controls {
+    /// The mouse accumulator (`DATA_009188`): x in the low word, y in the high.
+    pub mouse: u32,
+    /// Return held (`DATA_007692` zero): raise the set speed.
+    pub faster: bool,
+    /// Shift held (`DATA_007694` zero): lower the set speed.
+    pub slower: bool,
+    pub steer: SteerKeys,
+}
+
+/// F1038's saturating 16-bit add of a steering delta to a rate.
+fn wrap_add(rate: i16, delta: i16) -> i16 {
+    rate.saturating_add(delta)
 }
 
 impl Player {
+    /// FUNC_CalcKeyInput: the turn a key held for `held` ticks gives this
+    /// frame: the input time times `min(held, 70) + 2`, over 64; nothing when
+    /// the key is up or key input is off.
+    fn key_amount(&self, held: u32) -> i16 {
+        if !self.keys_enabled || held == 0 {
+            return 0;
+        }
+        (self.input_time.wrapping_mul(held.min(70) + 2) >> 6) as i16
+    }
+
+    /// F1121: the set-speed step. The speed is doubled up to five times while
+    /// its top bit is clear (0x7ffeffff if it gets there), taken from the high
+    /// word plus one, scaled by `speed_boost / 16` when that byte exceeds 0x10
+    /// (capped at 0x7fff), times the input time over 64.
+    pub fn set_speed_step(&self, speed: i32) -> i32 {
+        let mut value = speed as u32;
+        for _ in 0..5 {
+            if value & 0x8000_0000 != 0 {
+                value = 0x7ffe_ffff;
+                break;
+            }
+            value = value.wrapping_add(value);
+        }
+        let mut step = (value >> 16).wrapping_add(1);
+        if (self.speed_boost & 0xff) > 0x10 {
+            step = self.speed_boost.wrapping_mul(step) >> 4;
+            if step > 0x7fff {
+                step = 0x7fff;
+            }
+        }
+        (step.wrapping_mul(self.input_time) >> 6) as i32
+    }
+
+    /// F1038: the heading input. The mouse motion since last tick (x and y in
+    /// the accumulator's words, times 64, flipped by the options) and the held
+    /// keys give pitch, yaw and roll deltas; in a turret view they turn the
+    /// turret (clamped as the view's rules say), otherwise they are added to the
+    /// rates with saturation.
+    pub fn steer(&mut self, controls: &Controls) {
+        let previous = self.mouse_previous;
+        self.mouse_previous = controls.mouse;
+        let delta = |new: u32, old: u32| ((new as u16).wrapping_sub(old as u16) << 6) as i16;
+        let mut pitch = delta(controls.mouse >> 16, previous >> 16);
+        if self.mouse_flip[1] {
+            pitch = pitch.wrapping_neg();
+        }
+        let mut yaw = delta(controls.mouse, previous);
+        if self.mouse_flip[0] {
+            yaw = yaw.wrapping_neg();
+        }
+        let mut roll = 0i16;
+        if self.mouse_roll && self.view != 2 && self.view != 3 {
+            // The original's `mov al,[+0xea]` overwrites the delta's low byte with
+            // the view mode before storing it as the roll: kept as it is.
+            roll = ((yaw as u16 & 0xff00) | u16::from(self.view)) as i16;
+            yaw = 0;
+        }
+        let keys = &controls.steer;
+        pitch = pitch.wrapping_sub(self.key_amount(keys.pitch_down));
+        pitch = pitch.wrapping_add(self.key_amount(keys.pitch_up));
+        yaw = yaw.wrapping_add(self.key_amount(keys.left));
+        yaw = yaw.wrapping_sub(self.key_amount(keys.right));
+        roll = roll.wrapping_add(self.key_amount(keys.roll_left));
+        roll = roll.wrapping_sub(self.key_amount(keys.roll_right));
+        if self.view != 2 && self.view != 3 {
+            self.motion.rate[0] = wrap_add(self.motion.rate[0], pitch);
+            self.motion.rate[2] = wrap_add(self.motion.rate[2], yaw.wrapping_neg());
+            self.motion.rate[1] = wrap_add(self.motion.rate[1], roll);
+            return;
+        }
+        self.turret[0] = self.turret[0].wrapping_sub(yaw);
+        self.turret[1] = self.turret[1].wrapping_add(pitch);
+        if self.turret[1] < 0 {
+            self.view = 2;
+            if self.turret[1] <= -0x4000 {
+                self.turret[1] = -0x3fff;
+            }
+        } else if self.motion.gun_mounts >= 4 {
+            self.view = 3;
+            if self.turret[1] >= 0x4000 {
+                self.turret[1] = 0x3fff;
+            }
+        } else {
+            self.turret[1] = -1;
+        }
+    }
+
+    /// F1037: the set-speed and heading update. Nothing unless the ship module
+    /// is active. With the engines on, Return raises the set speed (a negative
+    /// one is first brought to zero, and then only the heading is updated) and
+    /// Shift lowers it (a non-positive speed falls at a steady rate unless the
+    /// slow-down flag 0x80 is set; a positive one by F1121's step, to zero at
+    /// most); releasing Shift clears the flag. The heading input runs last.
+    pub fn update_set_speed(&mut self, controls: &Controls) {
+        if !self.active {
+            return;
+        }
+        if self.flags & 1 == 0 {
+            if controls.faster {
+                if self.set_speed < 0 {
+                    self.set_speed = 0;
+                    self.steer(controls);
+                    return;
+                }
+                self.set_speed = self
+                    .set_speed
+                    .wrapping_add(self.set_speed_step(self.set_speed));
+                if self.set_speed < 0 {
+                    self.set_speed = 0x7fff_ffff;
+                }
+            }
+            if controls.slower {
+                let before = self.set_speed;
+                if before > 0 {
+                    self.flags |= 0x80;
+                    self.set_speed = before.wrapping_sub(self.set_speed_step(before));
+                    if before < self.set_speed || self.set_speed < 0 {
+                        self.set_speed = 0;
+                    }
+                } else if self.flags & 0x80 == 0 {
+                    self.set_speed = before.wrapping_sub((self.input_time >> 8) as i32);
+                    if self.set_speed > 0 {
+                        self.set_speed = i32::MIN;
+                    }
+                }
+            } else {
+                self.flags &= 0x7f;
+            }
+        }
+        self.steer(controls);
+    }
+
     /// F1043: the engines-off thrust request (x lateral, y vertical, z forward).
     /// In combat mode the velocity relative to the reference, projected on the
     /// right and up axes, beyond +-256 is opposed (times four); then each

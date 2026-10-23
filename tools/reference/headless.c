@@ -2230,6 +2230,89 @@ static int flight_step_vectors(void)
     return 0;
 }
 
+/* Steering input. steer drives the original F1037 (set speed from Return and
+   Shift through F1121, then F1038: mouse and key deltas into the rates, or the
+   turret angles in a turret view) on the player struct (DATA_008804) and a
+   zeroed object, with the key accumulator table, key bytes, input time and mouse
+   global set per case; the state before and after is printed. */
+extern void ref_steer(unsigned char *object);
+extern unsigned char ref_player_struct[0x4000],ref_st_active,ref_pl_keys[0x60];
+extern unsigned long ref_st_accum[0x100],ref_st_keys_on,ref_st_time,ref_st_boost,ref_st_mouse;
+static int steer_vectors(void)
+{
+    static unsigned char object[0x400];
+    unsigned long n,i;
+    static const int codes[6]={0x2c,0x1e,0x33,0x34,0x1a,0x1b};
+    unsigned long hold[6];
+    unsigned char before_p[0x400],before_o[0x400];
+    int return_key,shift_key;
+    fprintf(stderr,"JJFFE steer-v1: original F1037 (F1121 set-speed steps, then F1038 heading input via the mouse accumulator DATA_009188 and the key accumulator table) on the player struct DATA_008804 and a zeroed object; the set speed, flags, mouse word, view, turret angles and rates before and after.\n");
+    texture_rng=0x4a7c15e1UL;
+    for(n=0;n<4096;++n) {
+        memset(object,0,sizeof(object));
+        memset(ref_player_struct,0,0x4000);
+        memset(ref_st_accum,0,sizeof(unsigned long)*0x100);
+        memset(ref_pl_keys,0x80,0x60);
+        ref_st_active=(unsigned char)(texture_random(0,9)==0?0x7f:0xff);
+        ref_st_keys_on=(unsigned long)texture_random(0,4)!=0;
+        ref_st_time=(unsigned long)((n&1)?texture_random(0,30000):texture_random(0,5000000));
+        ref_st_boost=(unsigned long)(texture_random(0,2)==0?texture_random(0,0x40):texture_random(0,0xffffff));
+        {
+            unsigned char fl=(unsigned char)texture_random(0,3)==0?(unsigned char)texture_random(0,255):(unsigned char)(texture_random(0,1)?0x80:0);
+            ref_player_struct[0xe9]=fl;
+        }
+        ref_player_struct[0xea]=(unsigned char)texture_random(0,4);
+        {long speed; switch(texture_random(0,4)) {
+            case 0: speed=0; break;
+            case 1: speed=texture_random(-100000,100000); break;
+            case 2: speed=texture_random(-2000000000L,2000000000L); break;
+            case 3: speed=0x7fffffffL-texture_random(0,100000); break;
+            default: speed=-0x7fffffffL-1+texture_random(0,100000); break;}
+         put32(ref_player_struct,0x1b8,speed);}
+        put32(ref_player_struct,0xd0,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)));
+        ref_st_mouse=(texture_random(0,2)==0)?(unsigned long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)):(unsigned long)(*(unsigned long *)(ref_player_struct+0xd0)+(unsigned long)texture_random(-200,200)+((unsigned long)texture_random(-200,200)<<16));
+        ref_player_struct[0x3f54]=(unsigned char)texture_random(0,1);
+        ref_player_struct[0x3f55]=(unsigned char)texture_random(0,1);
+        ref_player_struct[0x3f56]=(unsigned char)texture_random(0,1);
+        {short w=(short)texture_random(-32768,32767); memcpy(ref_player_struct+0x204,&w,2);
+         w=(short)texture_random(-32768,32767); memcpy(ref_player_struct+0x206,&w,2);}
+        object[0xd1]=(unsigned char)(signed char)texture_random(-1,6);
+        for(i=0;i<3;++i) {
+            short rate=(short)(texture_random(0,2)==0?texture_random(-32768,32767):texture_random(-5000,5000));
+            memcpy(object+0xb0+2*i,&rate,2);
+        }
+        for(i=0;i<6;++i) {
+            hold[i]=(unsigned long)(texture_random(0,2)==0?0:texture_random(1,120));
+            ref_st_accum[codes[i]]=hold[i];
+        }
+        return_key=texture_random(0,2)==0; shift_key=texture_random(0,2)==0;
+        if(return_key) ref_pl_keys[0x1c]=0;
+        if(shift_key) ref_pl_keys[0x36]=0;
+        memcpy(before_p,ref_player_struct,sizeof(before_p));
+        memcpy(before_o,object,sizeof(before_o));
+        {
+            unsigned long mouse=ref_st_mouse;
+            int flip_x=ref_player_struct[0x3f54]==0,flip_y=ref_player_struct[0x3f55]==0,roll_mode=ref_player_struct[0x3f56]!=0;
+            ref_steer(object);
+            printf("{\"case\":%lu,\"active\":%u,\"keys_on\":%lu,\"time\":%lu,\"boost\":%lu,\"flags\":%u,\"view\":%u,\"speed\":%ld,\"previous\":%lu,\"mouse\":%lu,\"flip\":[%d,%d],\"roll\":%d,\"turret\":[%d,%d],\"gun_mounts\":%d,\"rate\":[",
+                   n,ref_st_active,ref_st_keys_on,ref_st_time,ref_st_boost,before_p[0xe9],before_p[0xea],get32(before_p,0x1b8),
+                   (unsigned long)get32(before_p,0xd0)&0xffffffffUL,mouse,flip_x,flip_y,roll_mode,
+                   *(short *)(before_p+0x204),*(short *)(before_p+0x206),(int)(signed char)before_o[0xd1]);
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(before_o+0xb0+2*i));
+            printf("],\"return\":%d,\"shift\":%d,\"hold\":[",return_key,shift_key);
+            for(i=0;i<6;++i) printf("%s%lu",i?",":"",hold[i]);
+            printf("],\"after\":{\"flags\":%u,\"view\":%u,\"speed\":%ld,\"previous\":%lu,\"turret\":[%d,%d],\"rate\":[",
+                   ref_player_struct[0xe9],ref_player_struct[0xea],get32(ref_player_struct,0x1b8),
+                   (unsigned long)get32(ref_player_struct,0xd0)&0xffffffffUL,
+                   *(short *)(ref_player_struct+0x204),*(short *)(ref_player_struct+0x206));
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(object+0xb0+2*i));
+            printf("]}}\n");
+        }
+    }
+    if (fflush(stdout)) fail("cannot flush steer vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
 static unsigned long texture_faces[1024][48];
 static void texture_face_begin(void)
@@ -3056,6 +3139,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--player-orient")) return player_orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--advance")) return advance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--flight-step")) return flight_step_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--steer")) return steer_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

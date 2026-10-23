@@ -95,6 +95,14 @@ GLOBAL _ref_pl_combat_velocity
 GLOBAL _ref_pl_keys
 GLOBAL _ref_player_orient
 GLOBAL _ref_advance
+GLOBAL _ref_st_active
+GLOBAL _ref_st_accum
+GLOBAL _ref_st_keys_on
+GLOBAL _ref_st_time
+GLOBAL _ref_st_boost
+GLOBAL _ref_st_mouse
+GLOBAL _ref_player_struct
+GLOBAL _ref_steer
 GLOBAL _ref_tex_quad
 GLOBAL _ref_tex_slots
 GLOBAL _ref_tex_draw_triangle
@@ -199,6 +207,14 @@ _ref_pl_combat_velocity equ DATA_008839
 _ref_pl_keys equ DATA_007691
 _ref_player_orient equ FUNC_001041
 _ref_advance equ FUNC_001512
+_ref_st_active equ DATA_008630
+_ref_st_accum equ DATA_KeyAccumTable
+_ref_st_keys_on equ DATA_007706
+_ref_st_time equ DATA_009122
+_ref_st_boost equ DATA_007690
+_ref_st_mouse equ DATA_009188
+_ref_player_struct equ DATA_008804
+_ref_steer equ FUNC_001037
 _ref_tex_quad equ FUNC_001647_DrawTexQuad
 _ref_tex_slots equ DATA_009252
 _ref_tex_draw_triangle equ FUNC_001807

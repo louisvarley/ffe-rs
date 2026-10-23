@@ -10,7 +10,7 @@ thrust request, with F607, F1043 and F599) in free space; the orientation, rates
 thrust words and caps are compared. --advance: F1512/F1511 (velocity over a
 64-bit time added to the 64-bit position); the position after is compared. Needs
 no cache. --flight-step: one whole free-flight tick (F1041, F601/F602 and F1512 in
-the order F1021 runs them) on the player cases with a 64-bit time and position.
+the order F1021 runs them). --steer: F1037/F1038/F1121 (set speed and heading input). on the player cases with a 64-bit time and position.
 """
 import argparse
 import hashlib
@@ -41,6 +41,9 @@ SCENARIOS = [
      ["time", "position", "matrix", "drift", "rate", "limits", "velocity", "model", "craft",
       "player", "scanner", "counter", "tics", "mode", "flags", "combat", "combat_velocity",
       "set_speed", "keys", "after"]),
+    ("steer", "--steer", b"JJFFE steer-v1", "FFE_STEER_VECTORS", "executed_reference_steer",
+     ["active", "keys_on", "time", "boost", "flags", "view", "speed", "previous", "mouse", "flip",
+      "roll", "turret", "gun_mounts", "rate", "return", "shift", "hold", "after"]),
 ]
 
 
@@ -61,8 +64,24 @@ def alter(row, field):
         key = next(iter(value))
         inner = value[key]
         value[key] = [v + 1 for v in inner] if isinstance(inner, list) else inner + 1
-    elif field == "keys":
+    elif field in ("keys", "flip"):
         row[field] = [1 - v for v in value]
+    elif field in ("keys_on", "roll", "return", "shift"):
+        row[field] = 1 - value
+    elif field == "active":
+        row[field] = value ^ 0x80
+    elif field == "boost":
+        row[field] = value ^ 0x7f
+    elif field == "view":
+        row[field] = value ^ 1
+    elif field == "hold":
+        row[field] = [v + 40 for v in value]
+    elif field in ("previous", "mouse"):
+        row[field] = (value + (1 << 22)) & 0xffffffff
+    elif field == "gun_mounts":
+        row[field] = value + 3
+    elif field == "speed":
+        row[field] = value // 2 + 1000
     elif field in ("mode", "flags"):
         row[field] = value ^ 1
     elif field == "combat":
@@ -127,7 +146,7 @@ def main():
                 "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
             }
     print(json.dumps({
-        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1 + jjffe-flight-step-v1",
+        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1 + jjffe-flight-step-v1 + jjffe-steer-v1",
         "repeat_matches": True,
         "empty_traces_rejected": True,
         **summary,

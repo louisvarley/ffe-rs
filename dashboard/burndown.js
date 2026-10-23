@@ -107,7 +107,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-2", title: "Original thrust vector and ship limits (F598/F600)", status: "done", version: "v0.49d" },
         { id: "flight-3", title: "Physics: position and orientation update (cphys)", status: "done", version: "v0.49f" },
         { id: "flight-4", title: "Flight integration decoupled from the frame; fixed 50 Hz step", status: "todo" },
-        { id: "flight-5", title: "Original input processing, key accumulation and remapping", status: "todo" },
+        { id: "flight-5", title: "Original input processing, key accumulation and remapping", status: "in-progress", version: "v0.49g" },
         { id: "flight-6", title: "Time acceleration and its RNG consumption", status: "todo" },
         { id: "flight-7", title: "Collision detection and response (ccoll)", status: "todo" },
         { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "todo" },
@@ -302,6 +302,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 85,
       note: "v0.49f: a whole free-flight tick (F1041 + F601/F602 + F1512) verified end to end; the thrust and physics items are done for free space."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 85,
+      note: "v0.49g: set-speed and heading input (F1037/F1038/F1121) ported and verified (4096 cases); input item in progress (key accumulation and remapping remain)."
     }
   ]
 };
