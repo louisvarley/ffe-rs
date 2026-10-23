@@ -1,9 +1,10 @@
 # Curved surfaces (opcode 31, F1874 / F1876)
 
-Status (2026-10-23): **operands and F1874's resolution ported; F1876's patch
-rendering is not ported.** The executor now resolves the surface's origin and
-axis vectors exactly as F1874 does, so the remaining work starts from verified
-geometry. Nothing curved is drawn yet.
+Status (2026-10-23): **operands and F1874's resolution ported and verified;
+F1876's patch rendering is not ported.** The executor resolves the surface's
+origin and axis vectors exactly as F1874 does — the whole-table oracle compares
+all 40 surfaces in 39 models against the original, 0 mismatched. Nothing curved
+is drawn yet.
 
 Rust: `ffe_core::model_commands::Surface` (decoded, cache independent),
 `model_execute::SurfaceEmission::{origin, axes}` (F1874). The viewer does not
@@ -37,6 +38,21 @@ Synthetic test: `surfaces_span_their_entry_list_and_terminator` in
 `crates/ffe-core/tests/model_execute.rs` checks the resolved origin and the three
 vectors (the Q31 identity truncates each coordinate by one unit, so a record
 coordinate of 10 resolves to 9; the differences are exact).
+
+**Oracle.** `make-probe.py` now redirects F1874's `call FUNC_001876` to
+`trace_surface`, which records five nested events and then calls the original:
+
+| Event | Fields |
+|---|---|
+| 50 | `word0`, `word6`, `word10` |
+| 51 | the origin's view position (`x`, `y`, `z`) |
+| 52 / 53 / 54 | each axis vector (`x`, `y`, `z`) |
+
+`verify-station-models.py` runs every slot through the probe and the Rust
+executor compares these events with the rest of the nested stream: **448 models,
+0 mismatched, 40 surface resolutions** (trace
+`2036461aa89920b50b20586b28eb3c07dac73b0ad356f5bc9f2852386dac2266`). Tampering
+model 118's nested events (which carry surfaces) is rejected.
 
 ## F1874's call into F1876
 
@@ -98,11 +114,10 @@ The final entry loop walks 0x14 (20) 24-byte records in a local table, calling
    assets when their use is understood (they are small and fixed).
 2. **Port F1876's control flow** against those helpers, keeping 64-bit
    intermediates exactly (`Int64MulCreate`/`Int64Sub64` in F1875).
-3. **Probe first.** The existing `trace_spline_*` hooks cover opcode 22, not
-   surfaces. Add scoped hooks inside F1874/F1876 (origin/axis resolution, the
-   entry decode, each emitted quad's points and key, and the tail's distance
-   write) in `tools/reference/make-probe.py`, then add a `verify-surfaces.py`
-   comparing the port's queued quads over the whole table.
+3. **Probe first.** Done for F1874 (events 50-54, above). Still needed for F1876:
+   hook the entry decode, each emitted quad's points and key, and the tail's
+   distance write, then extend the whole-table oracle to compare them before
+   drawing anything.
 4. **Draw** the quads in the viewer through the existing polygon/textured paths,
    then include surfaces in the census's "renders" check.
 

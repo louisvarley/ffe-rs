@@ -79,6 +79,7 @@ fn executed_reference_station_models() {
     let (mut compared, mut skipped, mut mismatches) = (0, Vec::new(), Vec::new());
     let (mut polygons, mut entries, mut textured) = (0usize, 0usize, 0usize);
     let (mut glows, mut lines) = (0usize, 0usize);
+    let mut surface_total = 0usize;
     for line in input.lines() {
         let original: Model = serde_json::from_str(line).unwrap();
         let index = original.model;
@@ -149,6 +150,7 @@ fn executed_reference_station_models() {
         }
         let (mut p, mut l, mut t, mut s, mut g, mut b, mut c) = (0, 0, 0, 0, 0, 0, 0);
         let (mut labels, mut thrusters) = (0, 0);
+        let mut surfaces = 0;
         let (mut points, mut nested) = (Vec::new(), Vec::new());
         let mut projected = std::collections::HashSet::new();
         for offset in &result.commands {
@@ -241,6 +243,34 @@ fn executed_reference_station_models() {
                 }
                 t += 1;
             }
+            // F1874's surface resolution: word0/word6/word10, the origin's view
+            // position and the three axis vectors, exactly as the probe records them
+            // at the F1876 call.
+            if let Some(surface) = result
+                .surfaces
+                .get(surfaces)
+                .filter(|e| e.surface.offset == *offset)
+            {
+                nested.push([
+                    50,
+                    u32::from(surface.surface.word as u16),
+                    u32::from(surface.surface.parameters[0] as u16),
+                    u32::from(surface.surface.parameters[2] as u16),
+                ]);
+                if let (Some(origin), Some(axes)) = (surface.origin, surface.axes) {
+                    nested.push([51, origin[0] as u32, origin[1] as u32, origin[2] as u32]);
+                    for (position, axis) in axes.iter().enumerate() {
+                        nested.push([
+                            52 + position as u32,
+                            axis[0] as u32,
+                            axis[1] as u32,
+                            axis[2] as u32,
+                        ]);
+                    }
+                }
+                surfaces += 1;
+                surface_total += 1;
+            }
             if let Some(call) = result
                 .submodels
                 .get(s)
@@ -312,7 +342,7 @@ fn executed_reference_station_models() {
     eprintln!(
         "compared {compared} models; {} not executed natively; {} mismatched; \
          {polygons} polygon fills with {entries} entries ({textured} textured, colour not compared); \
-         {glows} thruster glows, {lines} thruster lines",
+         {glows} thruster glows, {lines} thruster lines, {surface_total} surface resolutions",
         skipped.len(),
         mismatches.len()
     );

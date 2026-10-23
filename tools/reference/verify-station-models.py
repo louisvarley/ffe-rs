@@ -66,7 +66,10 @@ def main():
             raise RuntimeError("Rust/original mismatch:\n" + "\n".join(summary))
         rows = [json.loads(line) for line in first.splitlines()]
         position = {row["model"]: number for number, row in enumerate(rows)}
-        for model, field in [(74, "emissions"), (75, "faces"), (86, "nested"), (380, "nested")]:
+        # 118 carries opcode 31 surfaces (events 50..54), so its nested field also
+        # covers F1874's resolution.
+        for model, field in [(74, "emissions"), (75, "faces"), (86, "nested"),
+                             (118, "nested"), (380, "nested")]:
             altered = [dict(row) for row in rows]
             row = altered[position[model]]
             if field == "emissions":

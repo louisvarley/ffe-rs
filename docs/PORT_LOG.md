@@ -14,6 +14,12 @@ Milestone v0.48 step 2, first part. Notes: `docs/notes/surfaces.md`.
   `SurfaceEmission::{origin, axes}`. A synthetic test checks the resolved origin
   and vectors (including the Q31 identity's one-unit truncation).
 - **The census:** 40 opcode 31 records in 39 models, 224 entries.
+- **Verified against the original.** `make-probe.py` now redirects F1874's F1876
+  call to `trace_surface`, which records events 50-54 (word0/6/10, the origin's
+  view position, the three axis vectors) and then calls the original F1876.
+  `verify-station-models.py` compares them over the whole table: 448 models,
+  **0 mismatched, 40 surface resolutions** (trace `2036461a…`); tampering model
+  118's nested events is rejected. The test summary now reports the count.
 - **F1876 is not ported.** It is about 1,580 lines with nine helper routines and
   two 480/240-byte topology tables (`DATA_007893`/`DATA_007894`). The note
   records the twelve-argument call contract, the helper call counts and a

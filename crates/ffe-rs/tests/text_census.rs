@@ -75,7 +75,7 @@ fn model_text_and_label_census() {
         }
     }
     println!(
-        "surfaces={surfaces} in {} models, entries={surface_entries}",
+        "surfaces={surfaces} in {} models, entries={surface_entries}: {surface_models:?}",
         surface_models.len()
     );
     println!("texts={texts} codes={text_codes:?}");

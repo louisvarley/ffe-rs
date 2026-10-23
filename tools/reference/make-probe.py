@@ -56,6 +56,9 @@ SCOPED_HOOKS = [
         ("FUNC_001778", "trace_spline_alloc", 1),         # curve queue allocation
         ("near [DATA_007629]", "trace_spline_colour", 1),  # F1326 after the entry is filled
     ]),
+    ("FUNC_001874", "FUNC_001875", [
+        ("FUNC_001876", "trace_surface", 1),              # F1874 -> F1876 arguments
+    ]),
     ("FUNC_001738", "FUNC_001739", [
         ("FUNC_001777", "trace_thruster_key", 2),         # glow depth keys (core, shaft)
         ("FUNC_001778", "trace_thruster_alloc", 2),       # glow queue allocations (F1805)

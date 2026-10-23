@@ -127,7 +127,7 @@ capture produced by two repeat runs of the local reference.
 | v0.45 thruster glows | `ffe-core::model_thruster`, opcode 9 queueing, `Shape::Glow` | `model_thruster.rs` (5), `model_viewer.rs` (+1) | `verify-thrusters.py` (12,288) + thruster events in the whole-table oracles | `5a8eddfe…` | F1738/F1704/F1805; the first attempt's screen-position difference does not reproduce |
 | v0.45 animation inputs, station spin | `ffe-core::model_animation` | `model_animation.rs` (6) | `verify-animation.py` (2,640 rotation + 4,096 orbital + F1537/F1680/F1683 set-ups) | `10ed4039…`, `2ab63f4d…` | global 0 = GameTics >> 10, global 1 gear/door (F865); F866/F1675 spin, model 74 at speed 10 |
 | v0.46 ship statistics, eyes, turrets | cache v12 `base:ship/stats`, `ShipStats`, `camera` eye/turret views | `views.rs` | none (data imported byte-exact; views from the assembly) | — | thrust limits feed global 15; F8 turret views for > 2 gun mounts |
-| v0.48c surface resolution | `SurfaceEmission::{origin, axes}` (F1874) | `model_execute.rs` (+1) | census: 40 surfaces in 39 models, 224 entries | — | origin (F1470 view) and the three axis vectors ported; F1876's patch rendering not ported (see `docs/notes/surfaces.md`) |
+| v0.48c surface resolution | `SurfaceEmission::{origin, axes}` (F1874), `trace_surface` probe | `model_execute.rs` (+1) | `verify-station-models.py`: 448 models, 40 surface resolutions, 0 mismatched | `2036461a…` | origin (F1470 view), word0/6/10 and the three axis vectors verified; F1876's patch rendering not ported (see `docs/notes/surfaces.md`) |
 | v0.48b 3D text | `ffe-convert::glyph_programs`, `GlyphSet`, `ModelViewer::draw_texts`, cache v14 | `text.rs` (1), `glyphs.rs` (1, ignored), `embedded.rs` (+1), `cache.rs` (+1) | census: all three font sets import; models 15/30/66/453 draw text with nothing skipped | — | F1747: each character's program runs through `execute_live` in an F1740 frame, its return word sets the next pen; `0x3016`/`0x3022` expand the object string |
 | v0.48a labels, full string table | `ModelViewer::model_strings`, `Shape::Label`, scanned `decode_model_names`, cache v13 | `model_viewer.rs` (+1), `embedded.rs` (+1), `text_census.rs` (1, ignored) | census: all 6 label codes resolve | — | F1812/F1583 labels drawn at the queued point in font 15; string table scanned to 219 entries (209 in v11/v12 left six codes unresolved) |
 | v0.47 console clicks, plume flicker | `Screen::logical_point`, `AnimationInputs::jitter`, `Frame::jitter`, viewer `cycle_thrust` | `views.rs` (+1), `model_viewer.rs` (+1) | none (presentation) | — | view icons now take clicks at any window size; F1476 stream runs across frames so plumes flicker; viewer E key sets engine thrust |
@@ -215,10 +215,11 @@ tests and an oracle, as the earlier milestones did.
      to a whole-table text/label comparison (not yet run for text).
 2. **Curved surfaces (opcode 31).** The rounded hulls and station parts.
    - **Started (v0.48c):** F1874's resolution is ported (origin through F1470,
-     the three axis vectors) and tested; the census counts 40 surfaces in 39
-     models (224 entries). `docs/notes/surfaces.md` records the full F1874 →
-     F1876 contract, F1876's size (~1,580 lines), its helper set and the
-     two constant topology tables.
+     the three axis vectors) and **verified against the original**: the probe
+     records events 50-54 at the F1876 call and the whole-table oracle compares
+     40 surface resolutions across 448 models, 0 mismatched. `docs/notes/
+     surfaces.md` records the full F1874 → F1876 contract, F1876's size
+     (~1,580 lines), its helper set and the two constant topology tables.
    - **Next:** port F1876 bottom-up (F1875's 64-bit cross-product sign first,
      then F1816/F1820/F1823/F1824/F1825, then F1833/F1834/F1835), with scoped
      probe hooks in F1874/F1876 and a `verify-surfaces.py` whole-table oracle

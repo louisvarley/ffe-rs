@@ -186,3 +186,8 @@ _ref_display_object equ FUNC_001683
 _ref_light equ DATA_008821
 _ref_star_light equ DATA_008827
 _ref_light_timer equ DATA_008830
+
+GLOBAL _ref_surface_cmd
+_ref_surface_cmd equ FUNC_001874
+GLOBAL _ref_surface
+_ref_surface equ FUNC_001876

@@ -340,6 +340,26 @@ unsigned long trace_line_colour(unsigned long colour)
     nested_event(48,(line_entry[1]&0xffff)|line_entry[2]<<16,(line_entry[3]&0xffff)|line_entry[4]<<16,0);
     return pack_colour(colour);
 }
+/* F1874 -> F1876: record the surface's word, its resolved origin (view) and the
+   three axis vectors, then return without running F1876 (surface mode only; the
+   ordinary station run never reaches F1874's call in the models compared today).
+   Event 50 [word0, word6, word10]; 51 [origin x,y,z]; 52..54 each axis vector. */
+extern long ref_surface(long output, long compare, long object, long instance, long entries,
+                        long origin, long vectors, long word6, long word10, long word8,
+                        long word0, long flag);
+long trace_surface(long output, long compare, long object, long instance, long entries,
+                   long origin, long vectors, long word6, long word10, long word8,
+                   long word0, long flag)
+{
+    long *o=(long *)origin, *v=(long *)vectors;
+    nested_event(50,(unsigned long)(word0&0xffff),(unsigned long)(word6&0xffff),(unsigned long)(word10&0xffff));
+    nested_event(51,(unsigned long)o[0],(unsigned long)o[1],(unsigned long)o[2]);
+    nested_event(52,(unsigned long)v[0],(unsigned long)v[1],(unsigned long)v[2]);
+    nested_event(53,(unsigned long)v[3],(unsigned long)v[4],(unsigned long)v[5]);
+    nested_event(54,(unsigned long)v[6],(unsigned long)v[7],(unsigned long)v[8]);
+    return ref_surface(output,compare,object,instance,entries,origin,vectors,
+                       word6,word10,word8,word0,flag);
+}
 long *trace_text_vertex(void *instance, long index) { nested_event(1,(unsigned char)index,0,0); return nested_station ? ref_view_vertex(instance,(signed char)index) : nested_vertex; }
 long *trace_text_font(long selector) { nested_event(2,(unsigned long)selector,0,0); return nested_descriptor; }
 void trace_text_frame(void *child, void *instance, long word) { (void)child; (void)instance; nested_event(3,(unsigned long)word,0,0); }
