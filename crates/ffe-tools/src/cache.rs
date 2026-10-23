@@ -3,10 +3,10 @@ use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
     decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font,
-    decode_gameplay_tables, decode_model_commands, decode_model_descriptor, decode_model_names,
-    decode_model_normals, decode_model_record, decode_model_vertices, decode_ship_stats,
-    decode_sine_table, decode_star_shades, decode_system_tables, decode_texture_descriptors,
-    BitmapLayout,
+    decode_gameplay_tables, decode_model_collision, decode_model_commands, decode_model_descriptor,
+    decode_model_names, decode_model_normals, decode_model_record, decode_model_vertices,
+    decode_ship_stats, decode_sine_table, decode_star_shades, decode_system_tables,
+    decode_terrain_maps, decode_terrain_tables, decode_texture_descriptors, BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -63,6 +63,16 @@ pub(crate) fn system_layout(profile: &str) -> Option<u32> {
 pub(crate) fn gameplay_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xee98c),
+        _ => None,
+    }
+}
+
+/// Terrain tables (`DATA_007836`) and height maps (`DATA_007637`) RVAs (v17),
+/// matched byte for byte against JJFFE 2.8a7 in floppy 1.02 only (the code
+/// pointers aside).
+pub(crate) fn terrain_layout(profile: &str) -> Option<(u32, u32)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0x104165, 0xf7d6c)),
         _ => None,
     }
 }
@@ -134,12 +144,33 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             });
             // The descriptor fields object set-up reads, for every slot with a
             // descriptor, imported or not (v16).
-            for index in 0..ffe_convert::model_extents::MODEL_COUNT as u32 {
+            let slots = ffe_convert::model_extents::MODEL_COUNT;
+            let mut collision_index = vec![0u8; slots * 8];
+            let mut collision_data = Vec::new();
+            for index in 0..slots as u32 {
                 if let Ok(record) = decode_model_record(&bytes, model_table_rva, index) {
                     record_table[index as usize * 20..index as usize * 20 + 20]
                         .copy_from_slice(&record);
                 }
+                // The collision stream, where the descriptor has one (v17).
+                if let Ok(Some(stream)) = decode_model_collision(&bytes, model_table_rva, index) {
+                    let entry = index as usize * 8;
+                    collision_index[entry..entry + 4]
+                        .copy_from_slice(&(collision_data.len() as u32).to_le_bytes());
+                    collision_index[entry + 4..entry + 8]
+                        .copy_from_slice(&(stream.len() as u32).to_le_bytes());
+                    collision_data.extend_from_slice(&stream);
+                }
             }
+            collision_index.extend_from_slice(&collision_data);
+            assets.push(Asset {
+                id: "base:model/collision".to_owned(),
+                path: "models/collision.bin".to_owned(),
+                kind: AssetKind::ModelCollision {
+                    count: slots as u32,
+                },
+                bytes: collision_index,
+            });
             // Every table slot whose normals, commands and vertices all decode (v7).
             // Stations 74/75 must decode; other slots that cannot are skipped.
             for index in 0..ffe_convert::model_extents::MODEL_COUNT as u32 {
@@ -316,6 +347,26 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some((tables_rva, maps_rva)) = terrain_layout(profile.id) {
+                let table = decode_terrain_tables(&bytes, tables_rva, maps_rva)?;
+                assets.push(Asset {
+                    id: "base:terrain/tables".to_owned(),
+                    path: "terrain/tables.bin".to_owned(),
+                    kind: AssetKind::TerrainTables {
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+                let maps = decode_terrain_maps(&bytes, maps_rva)?;
+                assets.push(Asset {
+                    id: "base:terrain/maps".to_owned(),
+                    path: "terrain/maps.bin".to_owned(),
+                    kind: AssetKind::TerrainMaps {
+                        source_offset: maps.source_offset as u64,
+                    },
+                    bytes: maps.bytes,
+                });
+            }
             if let Some(tables_rva) = system_layout(profile.id) {
                 let table = decode_system_tables(&bytes, tables_rva)?;
                 assets.push(Asset {
@@ -414,7 +465,12 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     } + usize::from(names_layout(profile.id).is_some())
         + usize::from(system_layout(profile.id).is_some())
         + usize::from(gameplay_layout(profile.id).is_some())
-        + 3;
+        + if terrain_layout(profile.id).is_some() {
+            2
+        } else {
+            0
+        }
+        + 4;
     // Plus the v10 model descriptor table, the v12 ship statistics table and the
     // v16 model record table.
     if models < 2 || assets.len() != 382 + tables + 3 * models {
@@ -424,7 +480,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 16,
+        format: "ffe-content-cache".to_owned(), format_version: 17,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

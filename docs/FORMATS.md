@@ -852,4 +852,16 @@ parts are future scope, not requirements for the first image exporter.
   non-zero first byte, a flag that the statistics pointer `+0x38` is non-null, and the word
   `+0x2e` at 16; and
   `base:gameplay/tables`, `gameplay/tables.bin`, 647 raw bytes of `DATA_007207..7225`).
+- V17 has 1787 assets (adds the planet engine's data):
+  `base:terrain/tables`, `terrain/tables.bin`, 7,539 bytes of `DATA_007836..7899`
+  (RVA `0x104165`) with the code pointers replaced by ranks (type table: first
+  column 1 to 4, second column 1 to 3; midpoint table 1 to 19, one per routine
+  F1849 to F1867; the height-map pointers 1 and 2), checked against the known
+  pattern on import;
+  `base:terrain/maps`, `terrain/maps.bin`, the two 128 by 128 signed height maps
+  `DATA_007637` and `DATA_007638` (RVA `0xf7d6c`, 32,768 bytes); and
+  `base:model/collision`, `models/collision.bin`, one pair of little-endian u32
+  (offset, length; length 0 for none) per model table slot followed by the
+  collision streams (descriptor `+0x34`) cut by walking the stream grammar of F582
+  (465 of 466 slots have one).
 

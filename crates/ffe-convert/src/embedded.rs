@@ -625,6 +625,166 @@ pub fn decode_system_tables(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, Str
     })
 }
 
+/// Bytes of the planet engine's tables (`DATA_007836..7899`).
+pub const TERRAIN_TABLE_BYTES: usize = 7539;
+/// Bytes of the two terrain height maps (`DATA_007637`, `DATA_007638`).
+pub const TERRAIN_MAP_BYTES: usize = 32768;
+
+/// Offsets of the code pointers in the terrain table block and the rank each
+/// must decode to (ranks count distinct targets in order of first appearance within
+/// a class: the two columns of the type table, then the midpoint table).
+const TERRAIN_FIRST_COLUMN: [u8; 14] = [1, 1, 1, 2, 1, 2, 2, 1, 3, 4, 1, 1, 1, 1];
+const TERRAIN_SECOND_COLUMN: [u8; 14] = [1, 1, 1, 2, 1, 2, 2, 1, 3, 3, 1, 1, 1, 1];
+const TERRAIN_MIDPOINTS: [u8; 32] = [
+    1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 18, 18, 18,
+    19, 19, 19, 19,
+];
+
+/// The planet engine's tables, `DATA_007836..7899`. The code pointers in the type
+/// and midpoint tables become the ranks above (1 upward, as the routines are
+/// ordered) and the two height-map pointers become 1 and 2, so the block holds no
+/// addresses. The map RVAs are those of floppy 1.02 (`maps_rva`, `DATA_007637`).
+pub fn decode_terrain_tables(
+    bytes: &[u8],
+    rva: u32,
+    maps_rva: u32,
+) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, TERRAIN_TABLE_BYTES)?;
+    let mut table = range(bytes, source_offset, TERRAIN_TABLE_BYTES)?.to_vec();
+    let word = |table: &[u8], at: usize| u32::from_le_bytes(table[at..at + 4].try_into().unwrap());
+    let put = |table: &mut Vec<u8>, at: usize, value: u32| {
+        table[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    };
+    for (at, map) in [(471, 1u32), (479, 0), (483, 1), (495, 1)] {
+        let target = word(&table, at).checked_sub(section.image_base);
+        if target != Some(maps_rva + 0x4000 * map) {
+            return Err(
+                "Terrain table height map pointer is not at its expected address".to_owned(),
+            );
+        }
+        put(&mut table, at, map + 1);
+    }
+    let rank = |table: &mut Vec<u8>,
+                slots: &mut dyn Iterator<Item = usize>,
+                expected: &[u8]|
+     -> Result<(), String> {
+        let mut seen: Vec<u32> = Vec::new();
+        for (slot, want) in slots.zip(expected) {
+            let value = word(table, slot);
+            let index = match seen.iter().position(|v| *v == value) {
+                Some(index) => index,
+                None => {
+                    seen.push(value);
+                    seen.len() - 1
+                }
+            };
+            if index as u8 + 1 != *want || value < section.image_base {
+                return Err(
+                    "Terrain table code pointers do not match the original layout".to_owned(),
+                );
+            }
+            put(table, slot, u32::from(*want));
+        }
+        Ok(())
+    };
+    rank(
+        &mut table,
+        &mut (0..14).map(|k| 503 + 48 * k),
+        &TERRAIN_FIRST_COLUMN,
+    )?;
+    rank(
+        &mut table,
+        &mut (0..14).map(|k| 507 + 48 * k),
+        &TERRAIN_SECOND_COLUMN,
+    )?;
+    rank(
+        &mut table,
+        &mut (0..32).map(|k| 1175 + 4 * k),
+        &TERRAIN_MIDPOINTS,
+    )?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table,
+    })
+}
+
+/// The two 128 by 128 terrain height maps `DATA_007637` and `DATA_007638`, which
+/// are adjacent.
+pub fn decode_terrain_maps(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, TERRAIN_MAP_BYTES)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: range(bytes, source_offset, TERRAIN_MAP_BYTES)?.to_vec(),
+    })
+}
+
+/// A model's collision stream (descriptor `+0x34`), or `None` for a null pointer.
+/// The stream has no length field, so it is walked as F582 reads it: entries of a
+/// type byte and a flag byte (two more bytes when the type has `0x20`), then by
+/// `type & 0xc0` a surface list, a terrain record (the `0xff` marker, six bytes,
+/// 16-byte records to a zero word and its two bytes), a hierarchical reference
+/// (four bytes) or a list, to a zero type byte.
+pub fn decode_model_collision(
+    bytes: &[u8],
+    table_rva: u32,
+    index: u32,
+) -> Result<Option<Vec<u8>>, String> {
+    let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
+    let pointer = dword(bytes, descriptor_offset + 0x34)?;
+    if pointer == 0 {
+        return Ok(None);
+    }
+    let rva = pointer
+        .checked_sub(section.image_base)
+        .ok_or("Collision pointer precedes the image base")?;
+    let start = section.offset(rva, 1)?;
+    let at = |i: usize| -> Result<u8, String> {
+        bytes
+            .get(i)
+            .copied()
+            .ok_or_else(|| "Collision stream runs off the file".to_owned())
+    };
+    let list = |mut i: usize| -> Result<usize, String> {
+        while at(i)? != 0 {
+            i += 1;
+        }
+        Ok(i + 1)
+    };
+    let mut i = start;
+    loop {
+        let kind = at(i)?;
+        i += 1;
+        if kind == 0 {
+            break;
+        }
+        i += 1;
+        if kind & 0x20 != 0 {
+            i += 2;
+        }
+        match kind & 0xc0 {
+            0 => {
+                if at(i)? == 0xff {
+                    i += 1 + 6;
+                    while at(i)? != 0 || at(i + 1)? != 0 {
+                        i += 16;
+                    }
+                    i += 2;
+                } else {
+                    i = list(i)?;
+                }
+            }
+            0x80 => i += 4,
+            _ => i = list(i)?,
+        }
+        if i - start > 0x10000 {
+            return Err("Collision stream is implausibly long".to_owned());
+        }
+    }
+    Ok(Some(bytes[start..i].to_vec()))
+}
+
 /// The original 12-bit colour to fixed low-palette map (`DATA_007770`, 4096 bytes).
 pub fn decode_colour_map(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
     use ffe_core::model_texture::{validate_colour_map, COLOUR_MAP_ENTRIES};

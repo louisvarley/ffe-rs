@@ -117,6 +117,22 @@ pub enum AssetKind {
     ModelRecords {
         count: u32,
     },
+    /// The planet engine's tables `DATA_007836..7899` with the code pointers
+    /// replaced by ranks (v17); see `ffe_convert::embedded::decode_terrain_tables`.
+    TerrainTables {
+        source_offset: u64,
+    },
+    /// The two 128 by 128 terrain height maps `DATA_007637` and `DATA_007638`
+    /// (v17).
+    TerrainMaps {
+        source_offset: u64,
+    },
+    /// Per model table slot, the collision stream: `count` pairs of little-endian
+    /// u32 (offset into the data that follows the pairs, length; zero length for
+    /// none) and then the streams (v17).
+    ModelCollision {
+        count: u32,
+    },
     /// The gameplay tables `DATA_007207..7225` (647 raw bytes; v16).
     GameplayTables {
         source_offset: u64,
@@ -215,7 +231,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=16) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=17) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -275,6 +291,16 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("The model records and gameplay tables require cache v16.".to_owned());
+        }
+        if manifest.format_version < 17
+            && matches!(
+                record.asset,
+                AssetKind::TerrainTables { .. }
+                    | AssetKind::TerrainMaps { .. }
+                    | AssetKind::ModelCollision { .. }
+            )
+        {
+            return Err("The terrain tables and collision streams require cache v17.".to_owned());
         }
         if manifest.format_version < 15 && matches!(record.asset, AssetKind::SystemTables { .. }) {
             return Err("The system tables require cache v15.".to_owned());
@@ -509,6 +535,30 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         AssetKind::GameplayTables { .. } => {
             if bytes.len() != 647 {
                 return Err("invalid gameplay table block".to_owned());
+            }
+        }
+        AssetKind::TerrainTables { .. } => {
+            if bytes.len() != 7539 {
+                return Err("invalid terrain table block".to_owned());
+            }
+        }
+        AssetKind::TerrainMaps { .. } => {
+            if bytes.len() != 32768 {
+                return Err("invalid terrain height maps".to_owned());
+            }
+        }
+        AssetKind::ModelCollision { count } => {
+            let header = *count as usize * 8;
+            if *count != MODEL_TABLE_SLOTS || bytes.len() < header {
+                return Err("invalid model collision table".to_owned());
+            }
+            let data = bytes.len() - header;
+            for entry in bytes[..header].chunks_exact(8) {
+                let offset = u32::from_le_bytes(entry[0..4].try_into().unwrap()) as usize;
+                let length = u32::from_le_bytes(entry[4..8].try_into().unwrap()) as usize;
+                if offset.checked_add(length).is_none_or(|end| end > data) {
+                    return Err("invalid model collision stream bounds".to_owned());
+                }
             }
         }
         AssetKind::SystemTables { .. } => {

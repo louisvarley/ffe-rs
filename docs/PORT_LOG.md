@@ -2293,3 +2293,15 @@ not its key time), the pause mark pauses, and the screens that are not ported
 say so. Hot areas follow the original: inclusive edges, last match wins. A
 readout shows speed, set speed and the time scale. The original console has no
 speed or engines button in this build.
+
+---
+
+## 2026-10-23 — Terrain data in the cache, v17 (v0.51a)
+
+- Cache v17 adds the planet engine's data: `base:terrain/tables`
+  (`DATA_007836..7899` with the code pointers as ranks, checked against the known
+  pattern), `base:terrain/maps` (the two height maps) and `base:model/collision`
+  (each model's collision stream, cut by walking F582's grammar; 465 of 466 slots
+  have one, 36 planet models carry the `0xff` terrain record). 1787 assets.
+- Next: the terrain query (F1876 distance mode), starting with the midpoint
+  routines F1849-F1867 against a node-level oracle.
