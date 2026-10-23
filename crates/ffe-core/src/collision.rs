@@ -47,15 +47,18 @@ pub enum Reach {
     /// Out of each other's reach (F575 returns zero).
     Far,
     /// Touching (F577 reports a collision): the landing, crash and bounce code
-    /// follows in the original and is not ported.
-    Contact,
+    /// follows in the original (`landing.rs` ports its reorienting branch), with
+    /// the sum of squares F577 leaves.
+    Contact { squares: u32 },
+    /// In reach of a complex shape: F576 decides (`surface.rs`).
+    Shape,
     /// In reach without touching: the distance F577 leaves in
     /// `DATA_008704:DATA_008703`, and whether the second body's radii differ.
     Near { distance: i64, different: bool },
 }
 
-/// F575 and F577 for the simple-radius case: `None` for a complex shape
-/// (`complex`), which is not ported.
+/// F575 and F577 for the simple-radius case; a complex shape in reach is
+/// `Reach::Shape` (F576 decides). `None` only if the arithmetic cannot follow.
 pub fn reach(relative: [i64; 3], a: Radii, b: Radii, complex: bool) -> Option<Reach> {
     let magnitude = relative.map(|v| v.wrapping_abs());
     let sum = magnitude[0]
@@ -67,7 +70,7 @@ pub fn reach(relative: [i64; 3], a: Radii, b: Radii, complex: bool) -> Option<Re
         return Some(Reach::Far);
     }
     if complex {
-        return None;
+        return Some(Reach::Shape);
     }
     // F577: the simple-radius test on a copy scaled to fit 32 bits.
     let high = (magnitude[0] >> 32) | (magnitude[1] >> 32) | (magnitude[2] >> 32) | (b.outer >> 32);
@@ -94,7 +97,9 @@ pub fn reach(relative: [i64; 3], a: Radii, b: Radii, complex: bool) -> Option<Re
         .wrapping_add(square_high(axes[1]))
         .wrapping_add(square_high(axes[2]));
     if square_high(radius as i32) > distance_squared {
-        return Some(Reach::Contact);
+        return Some(Reach::Contact {
+            squares: distance_squared,
+        });
     }
     let mut low = crate::model_math::square_root(distance_squared >> 1).wrapping_mul(2) as i32;
     if low < 0 {
@@ -140,7 +145,7 @@ impl Bodies {
             inner: pb.inner_radius,
         };
         match reach(relative, radii_a, radii_b, pb.shape & 0x80 != 0)? {
-            Reach::Contact => None,
+            Reach::Contact { .. } | Reach::Shape => None,
             Reach::Far => Some(0),
             Reach::Near {
                 distance,

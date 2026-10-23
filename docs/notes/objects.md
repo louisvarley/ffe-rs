@@ -28,18 +28,24 @@ The physics list is a flag byte per object (indexes 0 to 0x72) followed by
   interpolation between two steps) and F1675 builds its orientation.
 - **F879** places a starport at a latitude and longitude on its planet.
 
-## What is not verified
+## Starports
 
-A starport's position (`+0x3e`), orientation (`+0x00`) and velocity (`+0x8c`):
-F879 measures the planet's surface with F574, which for a planet (a complex
-collision shape) runs the terrain query through F576, F579, F582 and F581 into
-F1876's distance mode, and the contact code after it also reorients the
-starport. The Rust port treats the planet as simple and the test masks those
-three ranges for starports (flag byte 0x0f) until the terrain query is ported.
+F879 measures the planet's surface with F574 twice (at the nominal radius and at
+the radius less 7/8 of the first altitude), then places the starport from the
+second result. For a planet (a complex collision shape) F574 runs F575, which sends
+the pair through F576 (`surface.md`) and the terrain query (`terrain.md`). When the
+second query lands inside the terrain F575's contact code settles the body: it is
+moved up by the difference between its inner radius and the altitude, its second row
+becomes the surface's up, the matrix is rotated (F571), re-orthogonalised (F1520) and
+rotated back, and its velocity is cleared (`landing.rs`: the branch where the crash
+mask `DATA_008700` is zero, which is F574's). A moon (a simple sphere) that the
+starport touches takes the other branch of the same code: the body's position is set
+from the planet's radius word and the sum of squares F577 left. The crash and bounce
+branch (mask non-zero) is not ported.
 
 ## Oracle
 
 `--worldgen`: 1,000 generated and 24 hand-coded systems, each created at a random
 clock into a zeroed list: 1,024 systems, 17,762 physics objects, every flag byte,
-the counter and every object byte (names zeroed, starport ranges masked) match;
+the counter and every object byte (names zeroed) match, starports included;
 every tampered field and an empty trace are rejected.

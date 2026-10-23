@@ -1,53 +1,9 @@
-use ffe_core::surface::{Fault, Hull, Mesh, Registers, Scene, Shape, Shapes};
+mod library;
+
+use ffe_core::surface::{Fault, Hull, Registers, Scene, Shapes};
 use ffe_core::terrain::Terrain;
+use library::Library;
 use serde::Deserialize;
-
-struct Library {
-    cache: ffe_content::VerifiedCache,
-}
-
-impl Library {
-    fn load() -> Self {
-        Self {
-            cache: ffe_content::read(
-                &std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap(),
-            )
-            .unwrap(),
-        }
-    }
-}
-
-impl Shapes for Library {
-    fn shape(&self, model: u32) -> Option<Shape<'_>> {
-        let vertices = self
-            .cache
-            .asset(&format!("base:model-vertices/{model:03}"))?;
-        let normals = self
-            .cache
-            .asset(&format!("base:model-normals/{model:03}"))
-            .unwrap_or(&[]);
-        let records = self.cache.asset("base:model/records")?;
-        let record = &records[20 * model as usize..20 * model as usize + 20];
-        let table = self.cache.asset("base:model/collision")?;
-        let entry = &table[12 * model as usize..12 * model as usize + 12];
-        let word = |at: usize| u32::from_le_bytes(entry[at..at + 4].try_into().unwrap()) as usize;
-        let (offset, length, back) = (word(0), word(4), word(8));
-        if length == 0 {
-            return None;
-        }
-        let data = &table[12 * 466 + offset..];
-        Some(Shape {
-            mesh: Mesh {
-                vertices,
-                normals,
-                scale: i32::from_le_bytes(record[0..4].try_into().unwrap()),
-                offset: i32::from_le_bytes(record[4..8].try_into().unwrap()),
-            },
-            stream: &data[back..back + length],
-            back: &data[..back],
-        })
-    }
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -9,9 +9,12 @@
 use crate::collision::{reach, Radii, Reach};
 use crate::ffp::{self, Ffp};
 use crate::galaxy::{tables, Tables};
+use crate::landing::{settle, Pair, Surface};
 use crate::model::multiply;
 use crate::model_math::SineTable;
+use crate::surface::{Hull, Registers, Scene, Shapes};
 use crate::sysgen::OBJECT_BYTES as SYSTEM_OBJECT_BYTES;
+use crate::terrain::Terrain;
 
 /// Bytes per physics object.
 pub const OBJECT_BYTES: usize = 0x152;
@@ -427,12 +430,25 @@ impl PhysList {
     }
 }
 
-/// F574 for the simple case: the distance from a body to a planet along a vector.
+/// What the complex shapes need: where the models' collision data comes from, the
+/// terrain tables and height maps, and the game's detail setting.
+pub struct SurfaceTools<'a> {
+    pub shapes: &'a dyn Shapes,
+    pub terrain_table: &'a [u8],
+    pub terrain_maps: &'a [u8],
+    pub detail: i32,
+}
+
+/// F574: the distance from a body to a planet along a vector, with the body put
+/// on the surface and turned to it when they touch (F575's reorienting branch).
+/// `None` when the touch is of another kind or a complex shape cannot be tested.
 fn surface_distance(
     list: &mut PhysList,
     vector: [i64; 3],
     body: usize,
     planet: usize,
+    tools: Option<&SurfaceTools>,
+    models: &Models,
 ) -> Option<i32> {
     let radii = |list: &PhysList, object: usize| Radii {
         outer: list.qword(object, 0x138),
@@ -441,11 +457,77 @@ fn surface_distance(
     let complex = list.byte(planet, 0x14c) & 0x80 != 0;
     let mut distance = (i64::from(list.distance_high) << 32) | 0xffff_ffff;
     let found = reach(vector, radii(list, body), radii(list, planet), complex)?;
-    if let Reach::Near {
-        distance: value, ..
-    } = found
-    {
-        distance = value;
+    let object = |list: &PhysList, index: usize| {
+        let at = FIRST_OBJECT + OBJECT_BYTES * index;
+        list.bytes[at..at + OBJECT_BYTES].to_vec()
+    };
+    let settle_on = |list: &mut PhysList, surface: Surface| {
+        let planet_bytes = object(list, planet);
+        let at = FIRST_OBJECT + OBJECT_BYTES * body;
+        let (body_model, planet_model) = (
+            models.info(list.dword(body, 0x82)),
+            models.info(list.dword(planet, 0x82)),
+        );
+        let mut pair = Pair {
+            body: &mut list.bytes[at..at + OBJECT_BYTES],
+            planet: &planet_bytes,
+            body_model,
+            planet_model,
+        };
+        settle(&mut pair, vector, surface, 0);
+    };
+    match found {
+        Reach::Near {
+            distance: value, ..
+        } => distance = value,
+        Reach::Contact { squares } => {
+            // Only a touch of the body's own parent is settled here.
+            if list.byte(planet, 0x86) != list.byte(body, 0x56) {
+                return None;
+            }
+            settle_on(list, Surface::Sphere { squares });
+        }
+        Reach::Shape => {
+            let tools = tools?;
+            let (ship, planet_bytes) = (object(list, body), object(list, planet));
+            let model = |bytes: &[u8]| u32::from_le_bytes(bytes[0x82..0x86].try_into().unwrap());
+            let ship_shape = tools.shapes.shape(model(&ship))?;
+            let planet_shape = tools.shapes.shape(model(&planet_bytes))?;
+            let mut terrain = Terrain::new(tools.terrain_table, tools.terrain_maps);
+            let mut scene = Scene {
+                terrain: &mut terrain,
+                shapes: tools.shapes,
+                detail: tools.detail,
+            };
+            let mut regs = Registers {
+                distance,
+                ..Registers::default()
+            };
+            let hit = scene
+                .hit(
+                    &mut regs,
+                    &Hull::from_object(&ship),
+                    &ship_shape,
+                    &Hull::from_object(&planet_bytes),
+                    &planet_shape,
+                    vector,
+                )
+                .ok()?;
+            distance = regs.distance;
+            if hit == 0 {
+                // A hit on the terrain settles the body; any other is not ported.
+                if regs.planet != 1 {
+                    return None;
+                }
+                settle_on(
+                    list,
+                    Surface::Terrain {
+                        altitude: regs.altitude,
+                    },
+                );
+            }
+        }
+        Reach::Far => {}
     }
     list.distance_high = (distance >> 32) as i32;
     Some(if distance >> 32 != 0 || (distance as i32) < 0 {
@@ -460,6 +542,8 @@ pub struct Placement<'a> {
     pub tables: &'a Tables<'a>,
     pub models: &'a Models<'a>,
     pub sine: &'a SineTable,
+    /// The complex shapes' data; without it a starport on a planet cannot be placed.
+    pub surface: Option<&'a SurfaceTools<'a>>,
 }
 
 impl Placement<'_> {
@@ -491,7 +575,8 @@ impl Placement<'_> {
             })
         };
         let first = scaled(surface, bits);
-        let mut distance = surface_distance(list, first, object, planet)?;
+        let mut distance =
+            surface_distance(list, first, object, planet, self.surface, self.models)?;
         distance -= distance >> 3;
         let mut factor = surface;
         if bits < 0 {
@@ -508,7 +593,7 @@ impl Placement<'_> {
                 .wrapping_sub((distance >> (bits as u32 & 31)) as u32);
         }
         let second = scaled(factor, bits);
-        let distance = surface_distance(list, second, object, planet)?;
+        let distance = surface_distance(list, second, object, planet, self.surface, self.models)?;
         factor = if bits < 0 {
             factor.wrapping_sub((distance as u32).wrapping_shl((-bits) as u32))
         } else {

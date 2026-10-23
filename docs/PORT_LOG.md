@@ -8,13 +8,9 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 Notes: `docs/notes/objects.md`. Cache v16 adds model records and gameplay tables.
 
-- `ffe_core::objects`: F927, F1533, F880, F879 (partly) and the orbit helpers
+- `ffe_core::objects`: F927, F1533, F880, F879 and the orbit helpers
   F1506-F1510, F1674, F1675. 1,024 systems / 17,762 physics objects match byte for
-  byte; a starport's position, orientation and velocity are masked because
-  F879 measures the planet through the terrain query (F1876's distance mode,
-  reached via F574 -> F575 -> F576 -> F579 -> F582 -> F581), and planets are
-  complex collision shapes. That query is also what altitude over a planet needs,
-  so it is the next target.
+  byte (starports were masked here until the terrain query was ported, below).
 - The harness lessons: `DATA_008807` is `DATA_008804 + 4` (label granularity);
   JJFFE passes the clock to F1510 with the low word in the high position (kept).
 - Model records now cover every slot (`models 89` etc. are not imported as
@@ -2305,3 +2301,26 @@ speed or engines button in this build.
   have one, 36 planet models carry the `0xff` terrain record). 1787 assets.
 - Next: the terrain query (F1876 distance mode), starting with the midpoint
   routines F1849-F1867 against a node-level oracle.
+
+---
+
+## 2026-10-23 — The terrain query, shape collisions and starports (v0.51)
+
+Notes: `docs/notes/terrain.md`, `surface.md`, `objects.md`.
+
+- Cache v17 adds the planet engine's tables, the height maps and each model's
+  collision stream with its region words.
+- `ffe_core::terrain`: the arenas, the nineteen midpoint routines F1849-F1867 (one
+  pattern with six switches), F1823's feature tree, F1834 and F1876 in distance
+  mode. `--terrain-mid` (6,144 node cases) and `--terrain` (2,048 planets) match.
+- `ffe_core::surface`: F576, F579-F583 (the collision streams, child models and the
+  terrain record). `--planet` (4,076 tests, planets and ordinary models as the
+  shape) matches.
+- `ffe_core::landing`: F575's reorienting contact (terrain and sphere). With it all
+  17,762 physics objects of `--worldgen` match byte for byte with no mask: a
+  starport's position, orientation and velocity come out of the terrain query.
+- Harness lessons: a record on a planet's face tree must not sit above another (the
+  original indexes a table with a pool address); features of kind 12 only (the other
+  kinds have no height map); planet types 3, 5 and 6 have no routine pair for faces
+  with features; animation words overlap `+0x138` (write them first); the midpoint
+  table's second label (`DATA_007845`) is four slots on.

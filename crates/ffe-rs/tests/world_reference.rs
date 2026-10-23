@@ -1,6 +1,8 @@
+mod library;
+
 use ffe_core::galaxy::Tables;
 use ffe_core::model_math::SineTable;
-use ffe_core::objects::{Models, PhysList, Placement};
+use ffe_core::objects::{Models, PhysList, Placement, SurfaceTools};
 use ffe_core::sysgen::{handcoded, Generator, Params};
 use serde::Deserialize;
 
@@ -279,10 +281,18 @@ fn executed_reference_worldgen() {
         gameplay: cache.asset("base:gameplay/tables").unwrap(),
     };
     let sine = SineTable::from_bytes(cache.asset("base:math/sine").unwrap()).unwrap();
+    let library = library::Library::load();
+    let surface = SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
     let placement = Placement {
         tables: &tables,
         models: &models,
         sine: &sine,
+        surface: Some(&surface),
     };
     let input = std::fs::read_to_string(std::env::var_os("FFE_WORLDGEN_VECTORS").unwrap()).unwrap();
     assert!(input.len() < 400 << 20);
@@ -338,16 +348,7 @@ fn executed_reference_worldgen() {
             let at = 0x74 + 0x152 * index;
             let mut got = list.bytes[at..at + 0x152].to_vec();
             got[0x124..0x138].fill(0);
-            // A starport's position, orientation and velocity come from the planet's
-            // terrain query (F1876's distance mode, through F574), not ported yet.
-            let starport = list.flag(index) == 0x0f;
-            let differing: Vec<usize> = (0..got.len())
-                .filter(|i| {
-                    got[*i] != want[*i]
-                        && !(starport
-                            && (*i < 0x24 || (0x3e..0x56).contains(i) || (0x8c..0x98).contains(i)))
-                })
-                .collect();
+            let differing: Vec<usize> = (0..got.len()).filter(|i| got[*i] != want[*i]).collect();
             assert!(
                 differing.is_empty(),
                 "worldgen case {} physics object {index}: bytes differ at {differing:x?} (got {:?}, want {:?})",

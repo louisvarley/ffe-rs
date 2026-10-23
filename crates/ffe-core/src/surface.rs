@@ -97,6 +97,28 @@ pub struct Hull {
     pub words: Vec<u16>,
 }
 
+impl Hull {
+    /// A physics object's fields (its `0x152` bytes).
+    pub fn from_object(object: &[u8]) -> Self {
+        let dword = |at: usize| u32::from_le_bytes(object[at..at + 4].try_into().unwrap());
+        let qword = |at: usize| i64::from_le_bytes(object[at..at + 8].try_into().unwrap());
+        Self {
+            index: object[0x86],
+            parent: object[0x56],
+            rotating: object[0x57],
+            complex: object[0x14c] & 0x80 != 0,
+            orientation: std::array::from_fn(|k| dword(4 * k) as i32),
+            outer: qword(0x138),
+            inner: qword(0x140),
+            seed: dword(0xa0),
+            words: (0x9c..0x152)
+                .step_by(2)
+                .map(|at| u16::from_le_bytes([object[at], object[at + 1]]))
+                .collect(),
+        }
+    }
+}
+
 /// Why a test could not follow the original.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {

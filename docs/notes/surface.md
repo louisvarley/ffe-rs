@@ -19,11 +19,13 @@ model's collision stream (`+0x34`), read from the cache's `base:model/collision`
   orientation's rows (F1670) unless the ship is rotating in that shape's frame. Then F582.
 - **F582**: entries of a type byte and a flag byte; type `0x20` gates the entry on a
   bit of one of the shape's animation words (`+0x9c`). By `type & 0xc0`: 0 a list of
-  surfaces the sphere must not be outside of (or the `0xff` terrain record), 0x40 a
-  list the sphere must be outside of at least one of... (outside all of them clears
-  it), 0x80 a child model at one of the parent's vertices (F580: the position
-  minus the vertex, with sign flips and one of six axis permutations) and 0xc0 a list
-  the sphere is inside of. Flags (`flag & 0x7f`, with bit 7 meaning a hit) collect in
+  surfaces the sphere must not be outside of (any surface it is outside of ends the
+  test as clear), or the `0xff` terrain record; 0x40 a list the sphere is outside of
+  all of (inside one skips the entry; outside all ends the test as clear); 0x80 a
+  child model at one of the parent's vertices (F580: the position minus the vertex,
+  with sign flips and one of six axis permutations); 0xc0 a list the sphere is inside
+  of (a hit if inside all and bit 7 of the flags is set). Flags (`flag & 0x7f`, with
+  bit 7 meaning a hit) collect in
   `DATA_008697`.
 - **F583**: a sphere against surface `index` of the mesh: the normal record is
   `normals[(index >> 1) - 1]`, its vertex reference gives the plane's point

@@ -86,7 +86,7 @@ fn find_msb(value: u32) -> u32 {
 
 /// F1519: a vector scaled to unit length (Q31): the reciprocal of its length
 /// through F1523, applied with F1521 and shifted back up.
-fn normalise(vector: [i32; 3]) -> [i32; 3] {
+pub(crate) fn normalise(vector: [i32; 3]) -> [i32; 3] {
     let mut scaled = crate::model_math::length(vector).wrapping_add(1);
     let shift = 31 - find_msb(scaled);
     scaled = scaled.wrapping_shl(shift) >> 1;
@@ -95,7 +95,7 @@ fn normalise(vector: [i32; 3]) -> [i32; 3] {
 }
 
 /// F1552: the cross product `a x b` with F1521 products.
-fn cross(a: [i32; 3], b: [i32; 3]) -> [i32; 3] {
+pub(crate) fn cross(a: [i32; 3], b: [i32; 3]) -> [i32; 3] {
     use crate::model::multiply as m;
     [
         m(a[1], b[2]).wrapping_sub(m(a[2], b[1])),

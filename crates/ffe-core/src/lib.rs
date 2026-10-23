@@ -5,6 +5,7 @@ pub mod ffp;
 pub mod frames;
 pub mod galaxy;
 pub mod handcoded;
+pub mod landing;
 pub mod model;
 pub mod model_animation;
 pub mod model_commands;

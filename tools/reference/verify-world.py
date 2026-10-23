@@ -4,8 +4,8 @@
 distance-mode vertex functions) on synthetic nodes. --planet: F576 (F579-F583) for a ship sphere against the collision streams of the game's models,
 terrain records included. --terrain: the terrain query F1876 in distance mode (F1823, F1833, F1834, F1875 and the arenas) on
 synthetic planets. --worldgen: F880 (with F927, F1533, F879 and the orbit helpers) on generated systems at
-synthetic clocks; physics object bytes with names zeroed and starport placement masked
-(it needs the terrain query). --sysgen: F875 and F878 (system generation: the hand-coded objects and 4,160 generated
+synthetic clocks; physics object bytes with names zeroed (starports included: F879 uses the terrain
+query through F574 and F575's reorienting contact). --sysgen: F875 and F878 (system generation: the hand-coded objects and 4,160 generated
 or hand-coded systems; object bytes with the names zeroed). --galaxy (jjffe-commands): F868 (system index or class by distance from the
 galactic centre), and for table systems F869, F870 (with the stock string left in
 DATA_008790) and F871 (with the player's ranks) over every table code, the special
