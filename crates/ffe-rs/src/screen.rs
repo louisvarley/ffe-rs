@@ -93,7 +93,7 @@ impl Screen {
             palette_rgb6(asset("base:palette/low")?)?,
         )?;
         // Console bitmap ids 96 and up are the secondary table.
-        screen.icons = (0..=0xb1u32)
+        screen.icons = (0..=0xfdu32)
             .map(|id| {
                 let index = id.checked_sub(96)?;
                 let asset_id = format!("base:bitmap/secondary/{index:03}");
@@ -124,20 +124,20 @@ impl Screen {
     /// The console view button under logical pixel (x, y), if any (`DATA_007684`
     /// hot areas), or the F1 cycle area.
     pub fn view_button(x: i32, y: i32) -> Option<ViewButton> {
-        let inside = |x0, y0, x1, y1| (x0..=x1).contains(&x) && (y0..=y1).contains(&y);
-        if inside(146, 163, 161, 182) {
-            Some(ViewButton::Select(ViewMode::Front))
-        } else if inside(166, 163, 181, 182) {
-            Some(ViewButton::Select(ViewMode::Rear))
-        } else if inside(185, 163, 200, 182) {
-            Some(ViewButton::Turret)
-        } else if inside(202, 165, 217, 184) {
-            Some(ViewButton::Select(ViewMode::External))
-        } else if inside(64, 172, 79, 191) {
-            Some(ViewButton::Cycle)
-        } else {
-            None
+        match crate::console::click(x, y)? {
+            crate::console::Click::Front => Some(ViewButton::Select(ViewMode::Front)),
+            crate::console::Click::Rear => Some(ViewButton::Select(ViewMode::Rear)),
+            crate::console::Click::External => Some(ViewButton::Select(ViewMode::External)),
+            crate::console::Click::Turret => Some(ViewButton::Turret),
+            crate::console::Click::CycleView => Some(ViewButton::Cycle),
+            _ => None,
         }
+    }
+
+    /// Any console click under logical pixel (x, y): the views, the time
+    /// acceleration meter and the buttons whose screens are not ported.
+    pub fn console_click(x: i32, y: i32) -> Option<crate::console::Click> {
+        crate::console::click(x, y)
     }
 
     /// The logical 320x200 pixel under a mouse position in window client pixels
@@ -361,6 +361,21 @@ impl Screen {
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
         if state.mode != Mode::Docked {
+            // The screen buttons (0x0b-0x0e): the views button is lit (F1).
+            for (x, y, off, on, key) in crate::console::SCREEN_BUTTONS {
+                let id = if key == 1 { on } else { off };
+                if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
+                    icon.blit(&mut self.indexed, x, y);
+                }
+            }
+            // The time acceleration meter (0x26-0x2b): one lit step, a radio group.
+            let lit = views.console.lit_step();
+            for (step, (x, y, grey, red)) in crate::console::BAR.into_iter().enumerate() {
+                let id = if step == lit { red } else { grey };
+                if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
+                    icon.blit(&mut self.indexed, x, y);
+                }
+            }
             // Only the current view's icon is lit (radio group 1).
             for (x, y, off, on, button) in VIEW_BUTTONS {
                 let lit = match button {
@@ -497,6 +512,22 @@ impl Screen {
         }
         self.rect(0, 0, 320, 11, 0);
         self.text(3, 1, "FFE-RS 0.9 EXPERIMENTAL - SYNTHETIC FLIGHT", 18);
+        if state.mode != Mode::Docked {
+            // ffe-rs readout (not the original's): speed, set speed, time scale.
+            let console = views.console;
+            let mut line = format!("SPEED {} M/S", console.speed);
+            if let Some(set) = console.set_speed {
+                line.push_str(&format!("  SET {set} M/S"));
+            }
+            line.push_str(&format!(
+                "  TIME {}",
+                crate::console::ACCELERATION_NAMES[console.acceleration.min(4)]
+            ));
+            if console.paused {
+                line.push_str("  PAUSED");
+            }
+            self.text(3, 13, &line, 15);
+        }
         if state.mode != Mode::Docked {
             let name = view.name().to_ascii_uppercase();
             let width = self.font.width(&name).unwrap_or(0);

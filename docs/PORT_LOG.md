@@ -2146,3 +2146,15 @@ views, engine glows, docking checks and the safety reset. Saves, docking and the
 prototype model are unchanged; the save validator's speed bound rose from 250 to
 5,000 flight units per second for the original ship's real acceleration. Notes:
 `docs/notes/player.md`.
+
+## Console buttons and time acceleration (v0.49i)
+
+The console's real buttons are decoded from `DATA_005100` and `DATA_007684`
+(`docs/notes/console.md`): the lower-left bar is the time acceleration meter
+(not a throttle), beside four screen buttons. The meter and buttons are drawn
+from the cache, the meter's steps and the 6 7 8 9 0 keys set the time
+acceleration (1x to 10000x, scaling the original flight model's world time but
+not its key time), the pause mark pauses, and the screens that are not ported
+say so. Hot areas follow the original: inclusive edges, last match wins. A
+readout shows speed, set speed and the time scale. The original console has no
+speed or engines button in this build.

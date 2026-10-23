@@ -195,6 +195,8 @@ pub struct ViewState {
     pub mode: ViewMode,
     pub external: ExternalCamera,
     pub turret: TurretCamera,
+    /// What the console shows besides the views (time acceleration, speeds).
+    pub console: crate::console::ConsoleState,
 }
 
 impl Default for ViewState {
@@ -203,6 +205,7 @@ impl Default for ViewState {
             mode: ViewMode::Front,
             external: ExternalCamera::default(),
             turret: TurretCamera::default(),
+            console: crate::console::ConsoleState::default(),
         }
     }
 }

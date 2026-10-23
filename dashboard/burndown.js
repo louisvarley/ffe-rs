@@ -108,7 +108,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-3", title: "Physics: position and orientation update (cphys)", status: "done", version: "v0.49f" },
         { id: "flight-4", title: "Flight integration decoupled from the frame; fixed 50 Hz step", status: "in-progress", version: "v0.49h" },
         { id: "flight-5", title: "Original input processing, key accumulation and remapping", status: "in-progress", version: "v0.49g" },
-        { id: "flight-6", title: "Time acceleration and its RNG consumption", status: "todo" },
+        { id: "flight-6", title: "Time acceleration and its RNG consumption", status: "in-progress", version: "v0.49i" },
         { id: "flight-7", title: "Collision detection and response (ccoll)", status: "todo" },
         { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "todo" },
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "todo" },
@@ -161,6 +161,7 @@ window.FFE_BURNDOWN = {
       title: "Interface and presentation (phase 5)",
       status: "planned",
       tasks: [
+        { id: "ui-0", title: "Console buttons: time acceleration meter and screen buttons", status: "done", version: "v0.49i" },
         { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "todo" },
         { id: "ui-2", title: "Crosshair, targeting and the HUD overlay", status: "todo" },
         { id: "ui-3", title: "Missile, combat and external camera views", status: "todo" },
@@ -312,6 +313,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 85,
       note: "v0.49h: the original flight model is playable (key O): verified physics driven by real time and the original keys; frames of reference, collisions and docking rules remain."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 85,
+      note: "v0.49i: the console's time acceleration meter and screen buttons work (scope +1 item, done); time acceleration scales the original flight model."
     }
   ]
 };

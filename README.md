@@ -78,6 +78,8 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | Original flight model on / off (set speed, original steering and physics) | O |
 | Original flight: raise / lower the set speed | Enter / Shift |
 | Original flight: pitch, yaw, roll | Z A, `,` `.`, `[` `]` |
+| Time acceleration 1x / 10x / 100x / 1000x / 10000x (original model) | 6 7 8 9 0, or click the meter at the lower left |
+| Pause mark on the meter | click it (or P) |
 | Station model lab (pauses gameplay) / return | F4 |
 | Model viewer, every imported model (pauses gameplay) / return | M |
 | Viewer: previous / next model; turn; zoom; test input | Page Up / Page Down; arrows; + / -; 0 / 5 / 9 |

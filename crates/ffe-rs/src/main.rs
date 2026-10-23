@@ -1,4 +1,5 @@
 use ffe_rs::camera::{key_amount, ExternalKeys, ViewMode, ViewState};
+use ffe_rs::console::{acceleration_for_digit, Click, ConsoleState, ACCELERATION_NAMES};
 use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
@@ -167,6 +168,8 @@ fn run() -> Result<(), String> {
     // held-key ramp.
     let mut held_since: HashMap<Key, Instant> = HashMap::new();
     let mut mouse_was_down = false;
+    // The console's time acceleration step (0 = 1x .. 4 = 10000x).
+    let mut acceleration = 0usize;
     let mut model_viewer: Option<ModelViewer> = None;
     // The flight view's station is the original model 74 when the cache has it;
     // otherwise the placeholder wireframe stays.
@@ -205,6 +208,69 @@ fn run() -> Result<(), String> {
                 && model_viewer.is_none(),
         );
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
+        // A console click on the mouse-down edge, in flight (client pixels against
+        // the client size: get_mouse_pos divides by the creation scale only, which
+        // breaks after a resize).
+        let mouse_down = window.get_mouse_down(MouseButton::Left);
+        let console_click = if active
+            && mouse_down
+            && !mouse_was_down
+            && state.mode == ffe_rs::flight::Mode::Flight
+            && !help
+            && !scenarios
+            && model_lab.is_none()
+            && model_viewer.is_none()
+        {
+            window
+                .get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+                .and_then(|(x, y)| Screen::console_click(x, y))
+        } else {
+            None
+        };
+        mouse_was_down = mouse_down;
+        // The acceleration meter and the screen buttons: the 6 7 8 9 0 keys give the
+        // meter's steps as the original's FUNC_000208 maps them.
+        let digit_step = [
+            (Key::Key6, '6'),
+            (Key::Key7, '7'),
+            (Key::Key8, '8'),
+            (Key::Key9, '9'),
+            (Key::Key0, '0'),
+        ]
+        .into_iter()
+        .find(|(key, _)| pressed(*key))
+        .and_then(|(_, digit)| acceleration_for_digit(digit))
+        .filter(|_| active && !help && !scenarios && state.mode == ffe_rs::flight::Mode::Flight);
+        let chosen_step = match console_click {
+            Some(Click::Acceleration(step)) => Some(step),
+            _ => digit_step,
+        };
+        if let Some(step) = chosen_step {
+            acceleration = step;
+            if let Some(model) = original.as_mut() {
+                model.set_time_acceleration(step);
+                message = format!("Time acceleration {}.", ACCELERATION_NAMES[step]);
+            } else {
+                message = format!(
+                    "Time acceleration {} (applies to the original flight model: O).",
+                    ACCELERATION_NAMES[step]
+                );
+            }
+        }
+        match console_click {
+            Some(Click::Pause) => {
+                paused = !paused;
+                held_controls.disarm(&keys_down);
+                message = if paused { "Paused." } else { "Resumed." }.to_owned();
+            }
+            Some(click) => {
+                if let Some(text) = click.unported() {
+                    message = text.to_owned();
+                }
+            }
+            None => {}
+        }
         if active {
             // F1 is the original's view key; help moves to H.
             if pressed(Key::H) {
@@ -357,25 +423,27 @@ fn run() -> Result<(), String> {
                         let stats = scene
                             .as_ref()
                             .and_then(|scene| scene.ship_stats(state.ship));
-                        original = Some(OriginalFlight::from_flight(&state, stats.as_ref()));
+                        original = Some(
+                            OriginalFlight::from_flight(&state, stats.as_ref())
+                                .with_time_acceleration(acceleration),
+                        );
+                        if let Some(model) = original.as_mut() {
+                            model.set_time_acceleration(acceleration);
+                        }
                         message =
                             "Original flight: Enter/Shift set speed; Z/A pitch, ,/. yaw, [ ] roll."
                                 .to_owned();
                     }
                 }
                 if state.mode == ffe_rs::flight::Mode::Flight {
-                    let mouse_down = window.get_mouse_down(MouseButton::Left);
-                    // Client pixels against the client size: get_mouse_pos divides
-                    // by the creation scale only, which breaks after a resize.
-                    let clicked = if mouse_down && !mouse_was_down {
-                        window
-                            .get_unscaled_mouse_pos(MouseMode::Pass)
-                            .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
-                            .and_then(|(x, y)| Screen::view_button(x, y))
-                    } else {
-                        None
-                    };
-                    mouse_was_down = mouse_down;
+                    let clicked = console_click.and_then(|click| match click {
+                        Click::CycleView => Some(ViewButton::Cycle),
+                        Click::Front => Some(ViewButton::Select(ViewMode::Front)),
+                        Click::Rear => Some(ViewButton::Select(ViewMode::Rear)),
+                        Click::External => Some(ViewButton::Select(ViewMode::External)),
+                        Click::Turret => Some(ViewButton::Turret),
+                        _ => None,
+                    });
                     let turret = ViewMode::turret(gun_mounts, views.turret.pitch);
                     let chosen = if pressed(Key::F1) || clicked == Some(ViewButton::Cycle) {
                         Some(views.mode.next(gun_mounts, views.turret.pitch))
@@ -459,8 +527,10 @@ fn run() -> Result<(), String> {
                             }
                             if original.is_some() {
                                 let stats = scene.as_ref().and_then(|scene| scene.ship_stats(ship));
-                                original =
-                                    Some(OriginalFlight::from_flight(&state, stats.as_ref()));
+                                original = Some(
+                                    OriginalFlight::from_flight(&state, stats.as_ref())
+                                        .with_time_acceleration(acceleration),
+                                );
                             }
                             format!(
                                 "Ship: {} (model {ship}).",
@@ -610,6 +680,7 @@ fn run() -> Result<(), String> {
                                     .as_ref()
                                     .and_then(|scene| scene.ship_stats(state.ship));
                                 OriginalFlight::from_flight(&state, stats.as_ref())
+                                    .with_time_acceleration(acceleration)
                             });
                         }
                     }
@@ -652,6 +723,14 @@ fn run() -> Result<(), String> {
             original = None;
             state.axes = None;
         }
+        views.console = ConsoleState {
+            acceleration,
+            paused,
+            speed: (state.speed() * 9.7).round() as i32,
+            set_speed: original
+                .as_ref()
+                .map(|model| model.set_speed_metres().round() as i32),
+        };
         screen.draw(&state, views, scene.as_ref(), help, modern, &message);
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);

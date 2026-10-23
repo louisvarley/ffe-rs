@@ -43,6 +43,8 @@ pub struct OriginalFlight {
     /// Seconds each steering key has been held, in `SteerKeys` order.
     held: [f64; 6],
     forward_limit: i16,
+    /// The time acceleration (`DATA_009012`, per 20 ms): 0x3e2 is real time.
+    acceleration: u32,
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -91,7 +93,20 @@ impl OriginalFlight {
             player,
             held: [0.0; 6],
             forward_limit: limits.axes[2][0],
+            acceleration: crate::console::TIME_ACCELERATION[0],
         }
+    }
+
+    /// The same model at a time acceleration step.
+    pub fn with_time_acceleration(mut self, step: usize) -> Self {
+        self.set_time_acceleration(step);
+        self
+    }
+
+    /// Choose the time acceleration step (0 = 1x .. 4 = 10000x): the world
+    /// advances by the real time times it, while key amounts stay in real time.
+    pub fn set_time_acceleration(&mut self, step: usize) {
+        self.acceleration = crate::console::TIME_ACCELERATION[step.min(4)];
     }
 
     pub fn player(&self) -> &Player {
@@ -117,7 +132,10 @@ impl OriginalFlight {
     /// One frame of `elapsed` seconds with `keys` held: F1037/F1038 then F1041,
     /// F601/F602 and F1512 over the elapsed time in the original's units.
     pub fn step(&mut self, elapsed: f64, keys: &Keys) -> Result<(), String> {
+        // The input time is real time; the world time is that scaled by the
+        // acceleration (`ms * acceleration / 20`, 994 per 20 ms at 1x).
         let tics = (elapsed.clamp(0.0, 0.1) * TICS_PER_SECOND) as u32;
+        let world_tics = (elapsed.clamp(0.0, 0.1) * 50.0 * f64::from(self.acceleration)) as u32;
         let down = [
             keys.pitch_down,
             keys.pitch_up,
@@ -150,9 +168,10 @@ impl OriginalFlight {
             },
         };
         self.player.input_time = tics;
-        self.player.frame_tics = tics;
+        self.player.frame_tics = world_tics;
         self.player.update_set_speed(&controls);
-        self.player.step(&ThrusterKeys::default(), i64::from(tics))
+        self.player
+            .step(&ThrusterKeys::default(), i64::from(world_tics))
     }
 
     /// Copy the state into `flight`: position and velocity in flight units, the
