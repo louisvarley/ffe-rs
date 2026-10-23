@@ -802,11 +802,18 @@ pub fn decode_model_collision(
 pub const NAME_STRINGS: usize = 510;
 /// Bytes of the name range tables (`DATA_006274..6279`) that lead the name asset.
 pub const NAME_RANGE_BYTES: usize = 120;
+/// Bytes of the hand-coded systems' text (`DATA_007139` to the end of the last name).
+pub const HANDCODED_TEXT_BYTES: usize = 7706;
 
-/// The name generator's data (v18): the range tables `DATA_006274..6279` (120 bytes,
+/// The name generator's data (v19): the range tables `DATA_006274..6279` (120 bytes,
 /// which follow the pointer table and 24 zero bytes) and then the 510 strings the
-/// pointer table `DATA_006272` names, each NUL-terminated, in table order.
-pub fn decode_name_text(bytes: &[u8], table_rva: u32) -> Result<EmbeddedTable, String> {
+/// pointer table `DATA_006272` names, each NUL-terminated, in table order, followed by the hand-coded systems' text (`HANDCODED_TEXT_BYTES`
+/// bytes from `text_rva`).
+pub fn decode_name_text(
+    bytes: &[u8],
+    table_rva: u32,
+    text_rva: u32,
+) -> Result<EmbeddedTable, String> {
     let section = DataSection::parse(bytes)?;
     let source_offset = section.offset(table_rva, NAME_STRINGS * 4 + 24 + NAME_RANGE_BYTES)?;
     let mut out = range(
@@ -827,6 +834,16 @@ pub fn decode_name_text(bytes: &[u8], table_rva: u32) -> Result<EmbeddedTable, S
             .ok_or("Name string is not terminated")?;
         out.extend_from_slice(&bytes[at..=at + length]);
     }
+    // The hand-coded systems' text, which F873 and F874 index from `DATA_007139`.
+    let text = range(
+        bytes,
+        section.offset(text_rva, HANDCODED_TEXT_BYTES)?,
+        HANDCODED_TEXT_BYTES,
+    )?;
+    if &text[0x18bd..0x18c1] != b"Sol\0" || text[HANDCODED_TEXT_BYTES - 1] != 0 {
+        return Err("Hand-coded system text is not where expected".to_owned());
+    }
+    out.extend_from_slice(text);
     Ok(EmbeddedTable {
         source_offset,
         bytes: out,

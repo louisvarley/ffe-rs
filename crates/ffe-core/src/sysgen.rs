@@ -39,7 +39,7 @@ pub struct Params {
 
 /// F872/F875: the hand-coded Sol-neighbourhood objects (`DATA_008792`, 146
 /// objects), built the way the original builds them at start-up.
-pub fn handcoded(tables: &Tables) -> Vec<u8> {
+pub fn handcoded(tables: &Tables, names: Option<&Names>) -> Vec<u8> {
     let mut list = vec![0u8; 146 * OBJECT_BYTES + OBJECT_BYTES];
     let (mut first, mut second) = (tables.dword(tables::SEED), tables.dword(tables::SEED + 4));
     let random = |first: &mut u32, second: &mut u32| {
@@ -51,7 +51,7 @@ pub fn handcoded(tables: &Tables) -> Vec<u8> {
     };
     for step in STEPS {
         match *step {
-            Step::Body(at, a, _name) => {
+            Step::Body(at, a, text) => {
                 let at = at as usize;
                 let [mass, seed, p4, p5, parent, orbit, p8, p9, p10, _p11, kind, model] = a;
                 let object = &mut list[at..at + OBJECT_BYTES];
@@ -62,6 +62,7 @@ pub fn handcoded(tables: &Tables) -> Vec<u8> {
                     random(&mut first, &mut second)
                 };
                 put32(object, 4, seed);
+                put_name(object, names, text);
                 put16(object, 8, parent as u16);
                 put16(object, 0xa, kind as u16);
                 put16(object, 0xc, model as u16);
@@ -79,7 +80,7 @@ pub fn handcoded(tables: &Tables) -> Vec<u8> {
                 put16(object, 0x40, 0);
                 put16(object, 0x42, 0);
             }
-            Step::Port(at, [seed, latitude, longitude, parent, model], _name) => {
+            Step::Port(at, [seed, latitude, longitude, parent, model], text) => {
                 let at = at as usize;
                 let object = &mut list[at..at + OBJECT_BYTES];
                 put32(object, 0, 0xfff6_0000);
@@ -89,6 +90,7 @@ pub fn handcoded(tables: &Tables) -> Vec<u8> {
                     random(&mut first, &mut second)
                 };
                 put32(object, 4, seed);
+                put_name(object, names, text);
                 put16(object, 8, parent as u16);
                 put16(object, 0xa, 0x23);
                 put16(object, 0xc, model as u16);
@@ -111,6 +113,17 @@ pub fn handcoded(tables: &Tables) -> Vec<u8> {
         }
     }
     list
+}
+
+/// F873/F874's `strcpy` of a hand-coded object's name (`DATA_007139 + offset`).
+fn put_name(object: &mut [u8], names: Option<&Names>, offset: u32) {
+    let Some(names) = names else { return };
+    let text = names.handcoded(offset as usize);
+    for (k, byte) in text.iter().chain(&[0]).enumerate() {
+        if let Some(slot) = object.get_mut(0x26 + k) {
+            *slot = *byte;
+        }
+    }
 }
 
 fn put16(bytes: &mut [u8], at: usize, value: u16) {
@@ -152,12 +165,12 @@ pub struct Generator<'a> {
     /// `DATA_007128`: the allegiance F871 reports.
     pub allegiance: u32,
     /// The name data; without it objects are marked as named but keep their bytes.
-    pub names: Option<&'a Names<'a>>,
+    names: Option<&'a Names<'a>>,
 }
 
 impl<'a> Generator<'a> {
     pub fn new(tables: Tables<'a>) -> Self {
-        let templates = handcoded(&tables);
+        let templates = handcoded(&tables, None);
         Generator {
             tables,
             templates,
@@ -180,6 +193,12 @@ impl<'a> Generator<'a> {
             allegiance: 0,
             names: None,
         }
+    }
+
+    /// Sets the name data (also naming the hand-coded objects the templates hold).
+    pub fn set_names(&mut self, names: &'a Names<'a>) {
+        self.names = Some(names);
+        self.templates = handcoded(&self.tables, Some(names));
     }
 
     // ---- object field access (offsets as in the 68-byte record) ----
@@ -996,6 +1015,11 @@ impl<'a> Generator<'a> {
                 } else {
                     self.set_dword(object, 0x14, 0);
                 }
+                let length = source[0x26..]
+                    .iter()
+                    .position(|b| *b == 0)
+                    .unwrap_or(source.len() - 0x26);
+                self.put_text(object, &source[0x26..0x26 + length]);
             } else {
                 self.list[object * OBJECT_BYTES..(object + 1) * OBJECT_BYTES]
                     .copy_from_slice(&source);

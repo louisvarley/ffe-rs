@@ -117,7 +117,7 @@ pub enum AssetKind {
     ModelRecords {
         count: u32,
     },
-    /// The name generator's range tables and 510 strings (v18); see
+    /// The name generator's range tables, 510 strings and the hand-coded systems' text (v19); see
     /// `ffe_convert::embedded::decode_name_text`.
     NameText {
         source_offset: u64,
@@ -237,7 +237,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=18) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=19) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -298,8 +298,8 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         {
             return Err("The model records and gameplay tables require cache v16.".to_owned());
         }
-        if manifest.format_version < 18 && matches!(record.asset, AssetKind::NameText { .. }) {
-            return Err("The name text requires cache v18.".to_owned());
+        if manifest.format_version < 19 && matches!(record.asset, AssetKind::NameText { .. }) {
+            return Err("The name text requires cache v19.".to_owned());
         }
         if manifest.format_version < 17
             && matches!(
@@ -547,7 +547,18 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
             }
         }
         AssetKind::NameText { .. } => {
-            if bytes.len() < 120 || bytes[120..].iter().filter(|b| **b == 0).count() != 510 {
+            // 120 bytes of ranges, 510 NUL-terminated strings, then the 7,706-byte
+            // hand-coded text.
+            let strings_end = bytes.get(120..).and_then(|rest| {
+                let mut at = 0;
+                for _ in 0..510 {
+                    at += rest[at..].iter().position(|b| *b == 0)? + 1;
+                }
+                Some(120 + at)
+            });
+            if strings_end
+                .is_none_or(|end| bytes.len() - end != 7706 || bytes[bytes.len() - 1] != 0)
+            {
                 return Err("invalid name text".to_owned());
             }
         }

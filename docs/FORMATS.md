@@ -870,4 +870,7 @@ parts are future scope, not requirements for the first image exporter.
   name range tables `DATA_006274..6279` (RVA `0xdf96c` + 24) and then the 510
   NUL-terminated strings of the pointer table `DATA_006272` (RVA `0xdf174`) in table
   order).
+- V19 (still 1788 assets) appends to `base:text/names` the 7,706 bytes of the hand-coded
+  systems' text from `DATA_007139` (RVA `0xec3d0`) to the end of `La Soeur du Dan Ham`:
+  the names F873/F874 copy by offset (`Sol` is at `0x18bd`).
 

@@ -68,10 +68,11 @@ pub(crate) fn gameplay_layout(profile: &str) -> Option<u32> {
     }
 }
 
-/// Name string table (`DATA_006272`) RVA (v18), floppy 1.02 only.
-pub(crate) fn name_text_layout(profile: &str) -> Option<u32> {
+/// Name string table (`DATA_006272`) and hand-coded text (`DATA_007139`) RVAs
+/// (v19), floppy 1.02 only.
+pub(crate) fn name_text_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
-        "ffe-floppy-1.02-en" => Some(0xdf174),
+        "ffe-floppy-1.02-en" => Some((0xdf174, 0xec3d0)),
         _ => None,
     }
 }
@@ -360,8 +361,8 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: table.bytes,
                 });
             }
-            if let Some(names_rva) = name_text_layout(profile.id) {
-                let table = decode_name_text(&bytes, names_rva)?;
+            if let Some((names_rva, text_rva)) = name_text_layout(profile.id) {
+                let table = decode_name_text(&bytes, names_rva, text_rva)?;
                 assets.push(Asset {
                     id: "base:text/names".to_owned(),
                     path: "text/names.bin".to_owned(),
@@ -505,7 +506,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 18,
+        format: "ffe-content-cache".to_owned(), format_version: 19,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

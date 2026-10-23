@@ -1,7 +1,8 @@
 # Name generation (F791-F800, F921)
 
-`crates/ffe-core/src/names.rs`, from the cache's `base:text/names` (v18: the range
-tables `DATA_006274..6279` and the 510 strings of `DATA_006272`).
+`crates/ffe-core/src/names.rs`, from the cache's `base:text/names` (v19: the range
+tables `DATA_006274..6279`, the 510 strings of `DATA_006272`, then the hand-coded
+systems' text from `DATA_007139`, which `Names::handcoded` indexes).
 
 - **F921(range)**: `a += b; b = rol(b, 5); a += b; a = rol(a, 16)`, result
   `(a & 0xffff) * range >> 16`.

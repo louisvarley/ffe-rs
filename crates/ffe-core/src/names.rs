@@ -39,6 +39,7 @@ impl Seeds {
 pub struct Names<'a> {
     ranges: [u32; 30],
     strings: Vec<&'a [u8]>,
+    handcoded: &'a [u8],
 }
 
 impl<'a> Names<'a> {
@@ -49,15 +50,28 @@ impl<'a> Names<'a> {
         let ranges = std::array::from_fn(|k| {
             u32::from_le_bytes(bytes[4 * k..4 * k + 4].try_into().unwrap())
         });
-        let strings: Vec<&[u8]> = bytes[120..]
-            .strip_suffix(&[0])
-            .ok_or("Name text does not end in a terminator.")?
-            .split(|b| *b == 0)
-            .collect();
-        if strings.len() != 510 {
-            return Err("Name text must hold 510 strings.".to_owned());
+        let mut strings: Vec<&[u8]> = Vec::with_capacity(510);
+        let mut at = 120;
+        for _ in 0..510 {
+            let length = bytes
+                .get(at..)
+                .and_then(|rest| rest.iter().position(|b| *b == 0))
+                .ok_or("Name text must hold 510 strings.")?;
+            strings.push(&bytes[at..at + length]);
+            at += length + 1;
         }
-        Ok(Self { ranges, strings })
+        Ok(Self {
+            ranges,
+            strings,
+            handcoded: &bytes[at..],
+        })
+    }
+
+    /// The hand-coded system text (`DATA_007139` on): the NUL-terminated string at
+    /// `offset`, as F873 and F874 copy it.
+    pub fn handcoded(&self, offset: usize) -> &[u8] {
+        let rest = self.handcoded.get(offset..).unwrap_or(&[]);
+        &rest[..rest.iter().position(|b| *b == 0).unwrap_or(rest.len())]
     }
 
     /// F800 with F1348: string `index & 0x1ff`, its `FF 30 16` code replaced by the

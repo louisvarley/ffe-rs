@@ -165,12 +165,6 @@ struct SystemCase {
     objects: Vec<Vec<u8>>,
 }
 
-fn without_names(object: &[u8]) -> Vec<u8> {
-    let mut copy = object.to_vec();
-    copy[0x26..0x3a].fill(0);
-    copy
-}
-
 /// The NUL-terminated name of object `j` in a system list.
 fn name_of(list: &[u8], j: usize) -> Vec<u8> {
     let field = &list[j * 68 + 0x26..j * 68 + 0x3f];
@@ -217,12 +211,12 @@ fn executed_reference_sysgen() {
     let mut lines = input.lines();
     let first: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
     let expected: Vec<Vec<u8>> = serde_json::from_value(first["handcoded"].clone()).unwrap();
-    let built = handcoded(&tables);
+    let built = handcoded(&tables, Some(&names));
     assert_eq!(expected.len(), 146);
     for (i, want) in expected.iter().enumerate() {
         assert_eq!(
-            without_names(&built[i * 68..i * 68 + 68]),
-            *want,
+            terminated(&built[i * 68..i * 68 + 68]),
+            terminated(want),
             "hand-coded object {i}"
         );
     }
@@ -236,7 +230,7 @@ fn executed_reference_sysgen() {
             continue;
         }
         let mut generator = Generator::new(Tables::new(&bytes).unwrap());
-        generator.names = Some(&names);
+        generator.set_names(&names);
         let count = generator
             .generate(&Params {
                 seed: case.seed,
@@ -249,13 +243,8 @@ fn executed_reference_sysgen() {
             .unwrap();
         assert_eq!(count, case.count, "system case {}: object count", case.case);
         for (i, want) in case.objects.iter().enumerate() {
-            let got = if case.seed == 0 {
-                without_names(&generator.list[i * 68..i * 68 + 68])
-            } else {
-                generator.list[i * 68..i * 68 + 68].to_vec()
-            };
-            let unspecified =
-                case.seed != 0 && unspecified_name(&generator.list, &generator.uncertain, i);
+            let got = generator.list[i * 68..i * 68 + 68].to_vec();
+            let unspecified = unspecified_name(&generator.list, &generator.uncertain, i);
             let (mut got, mut want) = (terminated(&got), terminated(want));
             if unspecified {
                 got[0x26..0x3f].fill(0);
@@ -365,7 +354,7 @@ fn executed_reference_worldgen() {
             continue;
         }
         let mut generator = Generator::new(Tables::new(blob).unwrap());
-        generator.names = Some(&names);
+        generator.set_names(&names);
         generator
             .generate(&Params {
                 seed: case.seed,
@@ -393,9 +382,7 @@ fn executed_reference_worldgen() {
         for (i, want) in case.system.iter().enumerate() {
             let mut got = system[i * 68..i * 68 + 68].to_vec();
             let mut want = want.clone();
-            if case.seed == 0 {
-                got[0x26..0x3a].fill(0);
-            } else if unspecified_name(&system, &generator.uncertain, i) {
+            if unspecified_name(&system, &generator.uncertain, i) {
                 loose.push(u32::from_le_bytes(
                     system[i * 68 + 0x18..i * 68 + 0x1c].try_into().unwrap(),
                 ) as usize);
@@ -423,7 +410,7 @@ fn executed_reference_worldgen() {
             let at = 0x74 + 0x152 * index;
             let mut got = list.bytes[at..at + 0x152].to_vec();
             let mut want = want.clone();
-            if case.seed == 0 || loose.contains(&index) {
+            if loose.contains(&index) {
                 got[0x124..0x138].fill(0);
                 want[0x124..0x138].fill(0);
             } else {

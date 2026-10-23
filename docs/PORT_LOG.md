@@ -2341,4 +2341,9 @@ planet and moon strings, F877's `A,B` centre, F893 through `names::Names`), and
 `--sysgen` (4,156 systems) and `--worldgen` (1,024 systems, 17,762 physics objects)
 now run with names unmasked for generated systems; only the F877 uninitialised-counter
 names and JJFFE's accented spellings are left out of the comparison
-(`docs/notes/sysgen.md`). Hand-coded system names (literals in F875) are still masked.
+(`docs/notes/sysgen.md`).
+
+Cache v19 appends the hand-coded systems' text (`DATA_007139`, 7,706 bytes) to
+`base:text/names`; F873/F874 and F878's hand-coded path copy their names from it, so
+the hand-coded systems' names are compared too (nothing in the system oracles is
+masked any more).

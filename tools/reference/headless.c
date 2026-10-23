@@ -2905,12 +2905,12 @@ static int sysgen_vectors(void)
     static unsigned char list[0x50*68+0x100];
     unsigned char params[0x40];
     unsigned long n,i,count;
-    fprintf(stderr,"JJFFE sysgen-v1: original F878 for synthetic seeds, total mass, star counts, system codes and populations, after F875 builds the hand-coded objects; the hand-coded array first, then the generated objects (names zeroed), station counters and the random state.\n");
+    fprintf(stderr,"JJFFE sysgen-v1: original F878 for synthetic seeds, total mass, star counts, system codes and populations, after F875 builds the hand-coded objects; the hand-coded array first, then the generated objects , station counters and the random state.\n");
     texture_rng=0x1b873593UL;
     ref_sg_seed_a=0x1234;ref_sg_seed_b=0x5678;
     ref_handcoded_init();
     printf("{\"handcoded\":[");
-    for(i=0;i<146;++i) {printf("%s",i?",":"");sysgen_object(ref_handcoded_base+68*i,1);}
+    for(i=0;i<146;++i) {printf("%s",i?",":"");sysgen_object(ref_handcoded_base+68*i,0);}
     printf("],\"seeds\":[%lu,%lu]}\n",ref_sg_seed_a,ref_sg_seed_b);
     for(n=0;n<4160;++n) {
         unsigned long seed,mass,stars,code,population,shift;
@@ -2956,7 +2956,7 @@ static int sysgen_vectors(void)
         }
         for(count=0;count<0x50 && memcmp(list+68*count,"\0\0\0\0",4)!=0;++count) ;
         printf("{\"case\":%lu,\"seed\":%lu,\"mass\":%lu,\"stars\":%lu,\"code\":%lu,\"population\":%lu,\"count\":%lu,\"ports\":%u,\"stations\":%u,\"state\":[%lu,%lu],\"allegiance\":%lu,\"objects\":[",n,seed,mass,stars,code,population,count,ref_sg_ports,ref_sg_stations,ref_sg_a&0xffffffffUL,ref_sg_b&0xffffffffUL,ref_sg_government&0xffffffffUL);
-        for(i=0;i<=count && i<0x50;++i) {printf("%s",i?",":"");sysgen_object(list+68*i,seed==0);}
+        for(i=0;i<=count && i<0x50;++i) {printf("%s",i?",":"");sysgen_object(list+68*i,0);}
         printf("]}\n");
     }
     if (fflush(stdout)) fail("cannot flush sysgen vectors");
@@ -2967,7 +2967,7 @@ static int sysgen_vectors(void)
    F1533, F879 and the orbit helpers) on the objects F878 generates for a
    synthetic system, at a synthetic clock, into a zeroed physics list; it prints
    the generated system objects (names zeroed, +0x18 as a physics index) and every
-   flagged physics object (names zeroed). */
+   flagged physics object . */
 extern void ref_worldgen(unsigned char *list,unsigned char *system,unsigned long low,unsigned long high);
 extern long ref_worldgen_counter;
 extern unsigned char ref_player_struct[0x4000];
@@ -2977,7 +2977,7 @@ static int worldgen_vectors(void)
     static unsigned char physics[0x74+0x152*0x73+0x100];
     unsigned char params[0x40];
     unsigned long n,i,count,low,high;
-    fprintf(stderr,"JJFFE worldgen-v1: original F880 (F927, F1533, F879, F1506-F1510, F1674, F1675) for the objects F878 generates for synthetic systems, at synthetic clocks, into a zeroed physics list; the system objects (names zeroed, +0x18 as an index) and every flagged physics object (names zeroed).\n");
+    fprintf(stderr,"JJFFE worldgen-v1: original F880 (F927, F1533, F879, F1506-F1510, F1674, F1675) for the objects F878 generates for synthetic systems, at synthetic clocks, into a zeroed physics list; the system objects (names zeroed, +0x18 as an index) and every flagged physics object .\n");
     texture_rng=0x2c1b3c6dUL;
     ref_sg_seed_a=0x1234;ref_sg_seed_b=0x5678;
     ref_handcoded_init();
@@ -3023,7 +3023,6 @@ static int worldgen_vectors(void)
             unsigned char copy[68];
             unsigned long pointer;
             memcpy(copy,system+68*i,68);
-            if(seed==0) memset(copy+0x26,0,20);
             memcpy(&pointer,copy+0x18,4);
             if(pointer) pointer=(pointer-(unsigned long)physics-0x74)/0x152;
             memcpy(copy+0x18,&pointer,4);
@@ -3040,7 +3039,6 @@ static int worldgen_vectors(void)
                 unsigned char copy[0x152];
                 if(!physics[i]) continue;
                 memcpy(copy,physics+0x74+0x152*i,0x152);
-                if(seed==0) memset(copy+0x124,0,20);
                 printf("%s\"%lu\":[",first?"":",",i);first=0;
                 for(k=0;k<0x152;++k) printf("%s%u",k?",":"",copy[k]);
                 printf("]");
