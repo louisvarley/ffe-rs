@@ -1983,6 +1983,87 @@ static int gravity_vectors(void)
     return 0;
 }
 
+/* Frames of reference. frames drives the original F590 (distance between two
+   bodies through the cached absolute chain F1677/F1678), F604 and F605 (move
+   an object to its parent's parent frame, or into a given body's frame) and
+   F606 (choose the frame) on a synthetic object list of seven bodies in a tree
+   (parent below child), with random positions, velocities, radii, live flags
+   and cache stamps. Every body's parent byte, position, velocity, stamp and
+   cache after, and F590's vector and shift. */
+extern void ref_frame_distance(unsigned char *a,unsigned char *b,long *vector,long *shift);
+extern void ref_frame_enter_parent(unsigned char *object,unsigned char *parent);
+extern void ref_frame_enter(unsigned char *object,unsigned char *list,long index);
+extern void ref_frame_select(unsigned char *object,unsigned char *list);
+extern unsigned char *ref_list_pointer;
+extern unsigned char ref_frame_stamp;
+static long long get64(const unsigned char *object,unsigned long offset);
+static int frames_vectors(void)
+{
+    static unsigned char list[0x74+0x152*0x73+0x100];
+    unsigned long n,i,k,a,b,pick;
+    long vector[3]={0,0,0},shift=0;
+    fprintf(stderr,"JJFFE frames-v1: original F590, F604, F605 and F606 on a synthetic object list of seven bodies in a tree (positions, velocities, radii +0xda, live flags, frame stamps and caches random; stations only locked), the cached absolute chain F1677/F1678 included; every body's parent byte, position, velocity, stamp and cache after, and F590's vector and shift.\n");
+    texture_rng=0x3c6ef372UL;
+    for(n=0;n<4096;++n) {
+        unsigned char *o[8];
+        long long position;
+        unsigned int scale;
+        memset(list,0,sizeof(list));
+        ref_list_pointer=list;
+        ref_frame_stamp=(unsigned char)texture_random(0,3);
+        for(k=0;k<8;++k) o[k]=list+0x74+0x152*k;
+        for(k=1;k<8;++k) {
+            long radius;
+            o[k][0x56]=(unsigned char)(k==1?0:texture_random(0,(long)k-1));
+            o[k][0x86]=(unsigned char)k;
+            o[k][0x87]=(unsigned char)(texture_random(0,5)==0?1:texture_random(2,9));
+            if(o[k][0x87]==1) o[k][0x14c]=0x20;
+            radius=texture_random(0,40);
+            memcpy(o[k]+0xda,&radius,2);
+            o[k][0x25]=(unsigned char)texture_random(0,3);
+            list[k]=(unsigned char)(texture_random(0,3)?0x10:0);
+            for(i=0;i<3;++i) {
+                scale=(unsigned int)texture_random(0,56);
+                position=(long long)((((unsigned long long)(unsigned long)texture_random(0,0x7fffffff)<<32)|(unsigned long long)(unsigned long)texture_random(0,0x7fffffff))>>scale);
+                if(texture_random(0,1)) position=-position;
+                memcpy(o[k] + 0x3e + 8*i,&position,8);
+                position=(long long)((((unsigned long long)(unsigned long)texture_random(0,0x7fffffff)<<32)|(unsigned long long)(unsigned long)texture_random(0,0x7fffffff))>>scale);
+                memcpy(o[k]+0x26+8*i,&position,8);
+                put32(o[k],0x8c+4*i,(long)texture_random(-100000,100000));
+            }
+        }
+        a=(unsigned long)texture_random(1,7);
+        do b=(unsigned long)texture_random(1,7); while(b==a);
+        pick=n%4;
+        {
+            unsigned char before[8][0x152];
+            for(k=0;k<8;++k) memcpy(before[k],o[k],0x152);
+            switch(pick) {
+            case 0: ref_frame_distance(o[a],o[b],vector,&shift); break;
+            case 1: ref_frame_enter_parent(o[a],o[b]); break;
+            case 2: ref_frame_enter(o[a],list,(long)b); break;
+            default: ref_frame_select(o[a],list); break;
+            }
+            printf("{\"case\":%lu,\"function\":%u,\"stamp\":%u,\"a\":%lu,\"b\":%lu,\"live\":[",n,590u+(unsigned)(pick==0?0:pick+13),(unsigned)ref_frame_stamp,a,b);
+            for(k=1;k<8;++k) printf("%s%u",k>1?",":"",list[k]&0x10?1u:0u);
+            printf("],\"bodies\":[");
+            for(k=1;k<8;++k) {
+                printf("%s{\"parent\":%u,\"kind\":%u,\"radius\":%d,\"stamp\":%u,\"position\":[%lld,%lld,%lld],\"velocity\":[%ld,%ld,%ld],\"cache\":[%lld,%lld,%lld],\"after\":{\"parent\":%u,\"stamp\":%u,\"position\":[%lld,%lld,%lld],\"velocity\":[%ld,%ld,%ld],\"cache\":[%lld,%lld,%lld]}}",
+                    k>1?",":"",before[k][0x56],before[k][0x87],(int)*(short *)(before[k]+0xda),before[k][0x25],
+                    get64(before[k],0x3e),get64(before[k],0x46),get64(before[k],0x4e),
+                    get32(before[k],0x8c),get32(before[k],0x90),get32(before[k],0x94),
+                    get64(before[k],0x26),get64(before[k],0x2e),get64(before[k],0x36),
+                    o[k][0x56],o[k][0x25],get64(o[k],0x3e),get64(o[k],0x46),get64(o[k],0x4e),
+                    get32(o[k],0x8c),get32(o[k],0x90),get32(o[k],0x94),
+                    get64(o[k],0x26),get64(o[k],0x2e),get64(o[k],0x36));
+            }
+            printf("],\"vector\":[%ld,%ld,%ld],\"shift\":%ld}\n",pick==0?vector[0]:0,pick==0?vector[1]:0,pick==0?vector[2]:0,pick==0?shift:0);
+        }
+    }
+    if (fflush(stdout)) fail("cannot flush frames vectors");
+    return 0;
+}
+
 /* Orientation. orient drives the original F585 (angular rates spent in F584's
    steps through F611's small rotations, with F1520 renormalising when the drift
    counter at +0x24 runs out) on a zeroed object with a synthetic orientation
@@ -3200,6 +3281,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--thrust-limits")) return thrust_limit_vectors();
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
     if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
     if (argc == 2 && !strcmp(argv[1], "--orient")) return orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--player-orient")) return player_orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--advance")) return advance_vectors();

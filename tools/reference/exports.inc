@@ -96,6 +96,12 @@ GLOBAL _ref_pl_keys
 GLOBAL _ref_player_orient
 GLOBAL _ref_advance
 GLOBAL _ref_gravity
+GLOBAL _ref_frame_distance
+GLOBAL _ref_frame_enter_parent
+GLOBAL _ref_frame_enter
+GLOBAL _ref_frame_select
+GLOBAL _ref_list_pointer
+GLOBAL _ref_frame_stamp
 GLOBAL _ref_gravity_x
 GLOBAL _ref_gravity_y
 GLOBAL _ref_gravity_z
@@ -212,6 +218,12 @@ _ref_pl_keys equ DATA_007691
 _ref_player_orient equ FUNC_001041
 _ref_advance equ FUNC_001512
 _ref_gravity equ FUNC_000603
+_ref_frame_distance equ FUNC_000590
+_ref_frame_enter_parent equ FUNC_000604
+_ref_frame_enter equ FUNC_000605
+_ref_frame_select equ FUNC_000606
+_ref_list_pointer equ DATA_007758
+_ref_frame_stamp equ DATA_008811
 _ref_gravity_x equ DATA_008708
 _ref_gravity_y equ DATA_008709
 _ref_gravity_z equ DATA_008710

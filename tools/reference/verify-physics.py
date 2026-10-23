@@ -10,7 +10,7 @@ thrust request, with F607, F1043 and F599) in free space; the orientation, rates
 thrust words and caps are compared. --advance: F1512/F1511 (velocity over a
 64-bit time added to the 64-bit position); the position after is compared. Needs
 no cache. --flight-step: one whole free-flight tick (F1041, F601/F602 and F1512 in
-the order F1021 runs them). --steer: F1037/F1038/F1121 (set speed and heading input). --gravity: F603 (the parent body's pull, with the ffp helpers F1482/F1483/F1496 and F1658).
+the order F1021 runs them). --steer: F1037/F1038/F1121 (set speed and heading input). --gravity: F603 (the parent body's pull, with the ffp helpers F1482/F1483/F1496 and F1658). --frames: F590, F604, F605 and F606 (frames of reference, with the cached chain F1677/F1678 and F595).
 """
 import argparse
 import hashlib
@@ -44,6 +44,9 @@ SCENARIOS = [
     ("steer", "--steer", b"JJFFE steer-v1", "FFE_STEER_VECTORS", "executed_reference_steer",
      ["active", "keys_on", "time", "boost", "flags", "view", "speed", "previous", "mouse", "flip",
       "roll", "turret", "gun_mounts", "rate", "return", "shift", "hold", "after"]),
+    ("frames", "--frames", b"JJFFE frames-v1", "FFE_FRAMES_VECTORS",
+     "executed_reference_frames",
+     ["stamp", "a", "b", "live", "bodies", "vector", "shift"]),
     ("gravity", "--gravity", b"JJFFE gravity-v1", "FFE_GRAVITY_VECTORS",
      "executed_reference_gravity",
      ["parent", "mass", "time", "position", "velocity", "fraction", "after"]),
@@ -67,6 +70,11 @@ def alter(row, field):
         key = next(iter(value))
         inner = value[key]
         value[key] = [v + 1 for v in inner] if isinstance(inner, list) else inner + 1
+    elif field == "bodies":
+        row[field] = [dict(b, position=[v + (1 << 40) for v in b["position"]],
+                           velocity=[v + 1 for v in b["velocity"]]) for b in value]
+    elif field == "live":
+        row[field] = [1 - v for v in value]
     elif field in ("keys", "flip"):
         row[field] = [1 - v for v in value]
     elif field in ("keys_on", "roll", "return", "shift"):
@@ -149,7 +157,7 @@ def main():
                 "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
             }
     print(json.dumps({
-        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1 + jjffe-flight-step-v1 + jjffe-steer-v1 + jjffe-gravity-v1",
+        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1 + jjffe-flight-step-v1 + jjffe-steer-v1 + jjffe-gravity-v1 + jjffe-frames-v1",
         "repeat_matches": True,
         "empty_traces_rejected": True,
         **summary,

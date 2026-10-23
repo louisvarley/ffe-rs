@@ -167,3 +167,10 @@ screen, but outcomes that depend on how many numbers drawing consumed (combat
 rolls, agent behaviour) will not match the original roll for roll. Recorded in
 `docs/DEVIATIONS.md`.
 
+
+## Rotating frames and station velocity are not ported (frames)
+
+`ffe_core::frames` covers non-rotating frames only. A body with `+0x57` set (a
+station's rotating frame: F1677 multiplies by the parent's matrix, F1517,
+F1669) and a station's velocity (F595 through F1533/F866) return `None`.
+Needed for docking and for flying near a spinning station.

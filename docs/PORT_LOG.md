@@ -4,6 +4,21 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Frames of reference ported and verified (v0.49k)
+
+Notes: `docs/notes/frames.md`.
+
+- `ffe_core::frames::Bodies` ports F590, F595 (non-station), F604, F605, F606
+  and F1677/F1678 over an object list with the original's frame-stamp cache.
+  4096 oracle cases (a seven-body tree, each routine 1,024 times) match,
+  including every cache and stamp byte.
+- Rotating frames (`+0x57`, stations) and a station's own velocity are not
+  ported: those paths return `None`. They belong with station docking.
+- Still missing for planet flight: auto-roll F609, collisions F569/F1033, wiring
+  gravity and frame selection into `Player`, and the surface drawing.
+
+---
+
 ## 2026-10-23 — Gravity F603 ported and verified (v0.49j)
 
 Next step toward flying near a planet. Notes: `docs/notes/physics.md`.

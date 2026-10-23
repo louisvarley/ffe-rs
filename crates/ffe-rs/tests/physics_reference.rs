@@ -1,3 +1,4 @@
+use ffe_core::frames::{Bodies, Body};
 use ffe_core::physics::{Motion, Scanner};
 use ffe_core::player::{Controls, Player, SteerKeys, ThrusterKeys};
 use ffe_core::thrust::Limits;
@@ -8,6 +9,145 @@ use serde::Deserialize;
 struct After {
     velocity: [i32; 3],
     fraction: [u16; 3],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrameAfter {
+    parent: u8,
+    stamp: u8,
+    position: [i64; 3],
+    velocity: [i32; 3],
+    cache: [i64; 3],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrameBody {
+    parent: u8,
+    kind: u8,
+    radius: i16,
+    stamp: u8,
+    position: [i64; 3],
+    velocity: [i32; 3],
+    cache: [i64; 3],
+    after: FrameAfter,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Frames {
+    case: usize,
+    function: u32,
+    stamp: u8,
+    a: usize,
+    b: usize,
+    live: [u8; 7],
+    bodies: Vec<FrameBody>,
+    vector: [i32; 3],
+    shift: i32,
+}
+
+/// Original F590, F604, F605 and F606 (`--frames`): 4096 synthetic object lists
+/// of seven bodies in a tree. Every body's parent, position, velocity, frame
+/// stamp and cached absolute position after, and F590's vector and shift,
+/// must match.
+#[test]
+#[ignore = "Local-only original physics; use tools/reference/verify-physics.py"]
+fn executed_reference_frames() {
+    let input = std::fs::read_to_string(std::env::var_os("FFE_FRAMES_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 16 << 20);
+    let mut counts = [0usize; 4];
+    let mut cases = 0;
+    for line in input.lines() {
+        let case: Frames = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        let mut bodies = Bodies {
+            stamp: case.stamp,
+            ..Bodies::default()
+        };
+        for (i, row) in case.bodies.iter().enumerate() {
+            bodies.live[i + 1] = case.live[i] != 0;
+            bodies.body[i + 1] = Body {
+                position: row.position,
+                velocity: row.velocity,
+                parent: row.parent,
+                index: (i + 1) as u8,
+                kind: row.kind,
+                locked: row.kind == 1,
+                radius: row.radius,
+                stamp: row.stamp,
+                cache: row.cache,
+                ..Body::default()
+            };
+        }
+        let mut result = ([0; 3], 0);
+        match case.function {
+            590 => {
+                result = bodies.relative(case.a, case.b).unwrap();
+                counts[0] += 1;
+            }
+            604 => {
+                bodies.enter_grandparent(case.a, case.b).unwrap();
+                counts[1] += 1;
+            }
+            605 => {
+                bodies.enter(case.a, case.b).unwrap();
+                counts[2] += 1;
+            }
+            606 => {
+                bodies.select_frame(case.a).unwrap();
+                counts[3] += 1;
+            }
+            other => panic!("unknown function {other}"),
+        }
+        assert_eq!(
+            result,
+            (case.vector, case.shift),
+            "frames case {}",
+            case.case
+        );
+        for (i, row) in case.bodies.iter().enumerate() {
+            let body = bodies.body[i + 1];
+            let got = FrameAfterRef {
+                parent: body.parent,
+                stamp: body.stamp,
+                position: body.position,
+                velocity: body.velocity,
+                cache: body.cache,
+            };
+            let want = FrameAfterRef {
+                parent: row.after.parent,
+                stamp: row.after.stamp,
+                position: row.after.position,
+                velocity: row.after.velocity,
+                cache: row.after.cache,
+            };
+            assert_eq!(
+                got,
+                want,
+                "frames case {} function {} body {}",
+                case.case,
+                case.function,
+                i + 1
+            );
+        }
+        cases += 1;
+    }
+    assert_eq!(cases, 4096);
+    eprintln!(
+        "compared {cases} frames cases (F590 {}, F604 {}, F605 {}, F606 {})",
+        counts[0], counts[1], counts[2], counts[3]
+    );
+}
+
+#[derive(Debug, PartialEq)]
+struct FrameAfterRef {
+    parent: u8,
+    stamp: u8,
+    position: [i64; 3],
+    velocity: [i32; 3],
+    cache: [i64; 3],
 }
 
 #[derive(Deserialize)]
