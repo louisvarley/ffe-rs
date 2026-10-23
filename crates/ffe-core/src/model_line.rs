@@ -40,11 +40,7 @@ pub fn draw_line(a: [i16; 2], b: [i16; 2], mut plot: impl FnMut(i32, i32)) {
     };
     let dy = end_y - top_y;
     let dx = end_x - top_x;
-    let slope = if dx >= 0 {
-        dx.wrapping_shl(16) / dy
-    } else {
-        -((-dx).wrapping_shl(16) / dy)
-    };
+    let slope = crate::model_fill::gradient(dx, dy);
     let mut x = top_x.wrapping_shl(16);
     if (-0x10000..=0x10000).contains(&slope) {
         for y in top_y..end_y {

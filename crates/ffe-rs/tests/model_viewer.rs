@@ -35,7 +35,7 @@ fn viewer_executes_models_wraps_selection_and_fits_them_on_screen() {
     viewer.step(1);
     let frame = viewer.render().unwrap();
     assert_eq!(frame.skipped, 0);
-    let [Shape::Fill(points, rgb)] = frame.shapes.as_slice() else {
+    let [Shape::Flat(points, rgb)] = frame.shapes.as_slice() else {
         panic!("expected one filled triangle, got {:?}", frame.shapes);
     };
     assert_eq!(points.len(), 3);

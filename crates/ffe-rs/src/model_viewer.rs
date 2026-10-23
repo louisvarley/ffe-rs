@@ -32,6 +32,9 @@ use std::cell::Cell;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shape {
     Fill(Vec<(i32, i32)>, [u8; 3]),
+    /// An on-view flat triangle or quad (F1804/F1809 entry, points in face
+    /// order), drawn by F1604 or F1607.
+    Flat(Vec<(i32, i32)>, [u8; 3]),
     Line((i32, i32), (i32, i32), [u8; 3]),
     /// An F1811 curve entry's four points in entry order, drawn by F1546.
     Curve([[i16; 2]; 4], [u8; 3]),
@@ -616,7 +619,7 @@ impl ModelViewer {
             .shapes
             .iter()
             .flat_map(|shape| match shape {
-                Shape::Fill(points, _) => points.clone(),
+                Shape::Fill(points, _) | Shape::Flat(points, _) => points.clone(),
                 Shape::Line(a, b, _) => vec![*a, *b],
                 Shape::Curve(points, _) => points
                     .iter()
@@ -899,8 +902,13 @@ impl ModelViewer {
                             continue;
                         }
                     }
+                    let on_view = points
+                        .iter()
+                        .all(|(x, y)| (0..320).contains(x) && (0..158).contains(y));
                     frame.shapes.push(if points.len() == 2 {
                         Shape::Line(points[0], points[1], rgb)
+                    } else if on_view && matches!(points.len(), 3 | 4) {
+                        Shape::Flat(points, rgb)
                     } else {
                         Shape::Fill(points, rgb)
                     });

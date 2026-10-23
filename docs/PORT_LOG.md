@@ -2039,3 +2039,14 @@ new `--curve-raster` mode runs the original on 4096 synthetic curves into a
 320x800 buffer (so writes F1561 leaves outside the view are captured);
 `verify-lines.py` compares both traces (4096 + 4096, 0 mismatched). The
 viewer's stand-in cubic is gone.
+
+## The original flat-face rasterisers (v0.48h)
+
+F1604 DrawTriangle and F1607/F1608 DrawQuad (with F1602, F1603 and F1601) are
+ported in `ffe-core::model_fill` and verified by the new `--fill-raster` mode
+and `verify-fills.py` (4096 faces, 0 mismatched). Every on-view untextured
+triangle and quad now draws with them, so most of a model's surface is the
+original's pixels; faces reaching off the view and polygons still use the
+diagnostic fill. F1616's slope now shares F1603's gradient (re-verified). The
+flight-view test no longer expects a pixel from a degenerate triangle, which
+the original fills with nothing. Notes: `docs/notes/fills.md`.

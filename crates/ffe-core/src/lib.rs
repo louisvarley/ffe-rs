@@ -5,6 +5,7 @@ pub mod model_animation;
 pub mod model_commands;
 pub mod model_depth;
 pub mod model_execute;
+pub mod model_fill;
 pub mod model_instance;
 pub mod model_lighting;
 pub mod model_line;

@@ -5,6 +5,7 @@ use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::JITTER_SEED;
+use ffe_core::model_fill::{fill_quad, fill_triangle};
 use ffe_core::model_line::{draw_curve, draw_line};
 use std::io::Cursor;
 
@@ -585,6 +586,18 @@ impl Screen {
         for shape in shapes {
             match shape {
                 Shape::Fill(points, rgb) => self.fill_value(points, value(*rgb)),
+                Shape::Flat(points, rgb) => {
+                    // F1604/F1607 on an on-view entry: every pixel lands in the view.
+                    let frame = &mut self.frame;
+                    let p: Vec<[i16; 2]> =
+                        points.iter().map(|&(x, y)| [x as i16, y as i16]).collect();
+                    let plot = |x: i32, y: i32| frame[y as usize * 320 + x as usize] = value(*rgb);
+                    if let [a, b, c] = p[..] {
+                        fill_triangle([a, b, c], plot);
+                    } else if let [a, b, c, d] = p[..] {
+                        fill_quad([a, b, c, d], plot);
+                    }
+                }
                 Shape::Line(a, b, rgb) => {
                     let on_view = |(x, y): (i32, i32)| {
                         (0..320).contains(&x) && (0..VIEW_HEIGHT as i32).contains(&y)

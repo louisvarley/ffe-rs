@@ -248,7 +248,14 @@ tests and an oracle, as the earlier milestones did.
    distance where its patch is visible, with the original's parameters, and
    capture the probe at that distance as its oracle.
 
-4. **Pixel oracle.** Add a framebuffer mode to the reference adapter that
+4. **Pixel oracle.**
+   - **Done (v0.48h):** the flat-face rasterisers F1604 (triangles) and
+     F1607/F1608 (quads, F1602/F1603/F1601) are ported (`ffe-core::model_fill`,
+     `docs/notes/fills.md`) and verified by `verify-fills.py` (4096 faces, 0
+     mismatched); on-view flat faces draw with them.
+   - **Left:** the polygon path (F1713/F1714 entries, F1560/F1559/F1613
+     spans), then the whole-frame framebuffer mode below.
+ Add a framebuffer mode to the reference adapter that
    draws one queued scene with the original's F1795/F1796/F1797 spans, F1647
    textures, F1616 lines and F1811 curves. Then replace the viewer's diagnostic
    scanline fill and compare whole frames byte for byte.
