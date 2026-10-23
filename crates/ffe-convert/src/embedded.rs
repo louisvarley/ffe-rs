@@ -798,6 +798,41 @@ pub fn decode_model_collision(
     Ok(Some((back, bytes[start - back..i].to_vec())))
 }
 
+/// Entries in the name string table (`DATA_006272`).
+pub const NAME_STRINGS: usize = 510;
+/// Bytes of the name range tables (`DATA_006274..6279`) that lead the name asset.
+pub const NAME_RANGE_BYTES: usize = 120;
+
+/// The name generator's data (v18): the range tables `DATA_006274..6279` (120 bytes,
+/// which follow the pointer table and 24 zero bytes) and then the 510 strings the
+/// pointer table `DATA_006272` names, each NUL-terminated, in table order.
+pub fn decode_name_text(bytes: &[u8], table_rva: u32) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(table_rva, NAME_STRINGS * 4 + 24 + NAME_RANGE_BYTES)?;
+    let mut out = range(
+        bytes,
+        source_offset + NAME_STRINGS * 4 + 24,
+        NAME_RANGE_BYTES,
+    )?
+    .to_vec();
+    for k in 0..NAME_STRINGS {
+        let pointer = dword(bytes, source_offset + 4 * k)?
+            .checked_sub(section.image_base)
+            .ok_or("Name string pointer precedes the image base")?;
+        let at = section.offset(pointer, 1)?;
+        let length = bytes[at..]
+            .iter()
+            .take(80)
+            .position(|b| *b == 0)
+            .ok_or("Name string is not terminated")?;
+        out.extend_from_slice(&bytes[at..=at + length]);
+    }
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: out,
+    })
+}
+
 /// The original 12-bit colour to fixed low-palette map (`DATA_007770`, 4096 bytes).
 pub fn decode_colour_map(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
     use ffe_core::model_texture::{validate_colour_map, COLOUR_MAP_ENTRIES};

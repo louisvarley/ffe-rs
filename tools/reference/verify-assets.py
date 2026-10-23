@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 17 or len(manifest["files"]) != 1787:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 18 or len(manifest["files"]) != 1788:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,7 +143,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1788:
+            if archive.testzip() is not None or len(archive.infolist()) != 1789:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])

@@ -117,6 +117,11 @@ pub enum AssetKind {
     ModelRecords {
         count: u32,
     },
+    /// The name generator's range tables and 510 strings (v18); see
+    /// `ffe_convert::embedded::decode_name_text`.
+    NameText {
+        source_offset: u64,
+    },
     /// The planet engine's tables `DATA_007836..7899` with the code pointers
     /// replaced by ranks (v17); see `ffe_convert::embedded::decode_terrain_tables`.
     TerrainTables {
@@ -232,7 +237,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=17) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=18) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -292,6 +297,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("The model records and gameplay tables require cache v16.".to_owned());
+        }
+        if manifest.format_version < 18 && matches!(record.asset, AssetKind::NameText { .. }) {
+            return Err("The name text requires cache v18.".to_owned());
         }
         if manifest.format_version < 17
             && matches!(
@@ -536,6 +544,11 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         AssetKind::GameplayTables { .. } => {
             if bytes.len() != 647 {
                 return Err("invalid gameplay table block".to_owned());
+            }
+        }
+        AssetKind::NameText { .. } => {
+            if bytes.len() < 120 || bytes[120..].iter().filter(|b| **b == 0).count() != 510 {
+                return Err("invalid name text".to_owned());
             }
         }
         AssetKind::TerrainTables { .. } => {

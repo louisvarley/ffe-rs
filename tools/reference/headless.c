@@ -3394,6 +3394,30 @@ static int planet_vectors(void)
     return 0;
 }
 
+/* Name generation. names drives the original F791 (F792-F800, F921, F1348) for
+   the name types that need no game state, with random seeds. */
+extern unsigned char *ref_name(long kind,unsigned char *vars,unsigned long seed,unsigned char *out);
+static int name_vectors(void)
+{
+    static const int kinds[]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,0x10,0x11,0x12,0x13,0x14,0,0xf};
+    unsigned long n,k;
+    fprintf(stderr,"JJFFE names-v1: original F791 (F792-F800, F921 and the string expander) for name types 1 to 0x14 with random seeds: the text written and its length.\n");
+    texture_rng=0x1d872b41UL;
+    for(n=0;n<8192;++n) {
+        unsigned char vars[0x20],out[0x200];
+        long kind=kinds[n%(sizeof(kinds)/sizeof(kinds[0]))];
+        unsigned long seed=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+        unsigned char *end;
+        memset(vars,0,sizeof(vars));memset(out,0xaa,sizeof(out));
+        end=ref_name(kind,vars,seed,out);
+        printf("{\"case\":%lu,\"kind\":%ld,\"seed\":%lu,\"length\":%ld,\"text\":[",n,kind,seed,(long)(end-out));
+        for(k=0;k<(unsigned long)(end-out);++k) printf("%s%u",k?",":"",out[k]);
+        printf("]}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush name vectors");
+    return 0;
+}
+
 /* Steering input. steer drives the original F1037 (set speed from Return and
    Shift through F1121, then F1038: mouse and key deltas into the rates, or the
    turret angles in a turret view) on the player struct (DATA_008804) and a
@@ -4304,6 +4328,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--terrain-mid")) return terrain_mid_vectors();
     if (argc == 2 && !strcmp(argv[1], "--terrain")) return terrain_vectors();
     if (argc == 2 && !strcmp(argv[1], "--planet")) return planet_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--names")) return name_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sysgen")) return sysgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--worldgen")) return worldgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--galaxy")) return galaxy_vectors();

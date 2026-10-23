@@ -866,4 +866,8 @@ parts are future scope, not requirements for the first image exporter.
   words (F576 reads them in pairs backwards from the stream's start until a zero
   distance word; 51 models have a chain) and the collision stream (descriptor
   `+0x34`) cut by walking the stream grammar of F582 (465 of 466 slots have one).
+- V18 has 1788 assets (adds `base:text/names`, `text/names.bin`: the 120 bytes of the
+  name range tables `DATA_006274..6279` (RVA `0xdf96c` + 24) and then the 510
+  NUL-terminated strings of the pointer table `DATA_006272` (RVA `0xdf174`) in table
+  order).
 

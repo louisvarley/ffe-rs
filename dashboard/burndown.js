@@ -122,7 +122,7 @@ window.FFE_BURNDOWN = {
       title: "The galaxy and its systems",
       status: "planned",
       tasks: [
-        { id: "world-1", title: "Name generation (cname)", status: "todo" },
+        { id: "world-1", title: "Name generation (cname): types 1-0x14", status: "done", version: "v0.51g" },
         { id: "world-2", title: "System generation: stars, planets and station placement (csysgen)", status: "in-progress", version: "v0.50a" },
         { id: "world-3", title: "System object types and orbits (csystem)", status: "todo" },
         { id: "world-4", title: "Galaxy generation and the RNG stream question (KNOWN_ISSUES F1476)", status: "todo" },

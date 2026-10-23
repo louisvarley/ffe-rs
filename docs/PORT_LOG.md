@@ -2324,3 +2324,11 @@ Notes: `docs/notes/terrain.md`, `surface.md`, `objects.md`.
   kinds have no height map); planet types 3, 5 and 6 have no routine pair for faces
   with features; animation words overlap `+0x138` (write them first); the midpoint
   table's second label (`DATA_007845`) is four slots on.
+
+---
+
+## 2026-10-23 — Name generation, cache v18 (v0.51g)
+
+Notes: `docs/notes/names.md`. Cache v18 adds `base:text/names`. `ffe_core::names`
+ports F791 (types 1 to 0x14), F793/F794, F795-F799 and F921; `--names` matches 8,130
+names. Wiring names into system generation (F893) is next.
