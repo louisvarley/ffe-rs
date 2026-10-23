@@ -23,6 +23,9 @@ Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.
   `4431b861…`); events 60/61 are documentation only and excluded from it, and
   model 118's tamper now alters a surface event rather than dropping a
   documentation one.
+- **`--station-model N Z`** sets the instance depth. At z `0x20000000`, model
+  118 finally queues words (1,236), which is the capture the F1876 port will be
+  built against. At the default 2000 every surface is clipped.
 
 ## 2026-10-23 — Surface helper ports (v0.48d)
 

@@ -108,13 +108,14 @@ the legacy allocation failure path is not something the renderer needs.
   instance's `+0x130`, and calls the table entry `DATA_007843 + 48*mode`.
   F1874 always passes mode 0.
 - **F1876's queued words.** The probe now records, as events 60 (start, count)
-  and 61 (three words per event), the order-queue words F1876 appends. In the
-  synthetic `--station-model` context every surface here queues **nothing**:
-  their axis vectors are ~1e8 record units while the instance sits at z 2000,
-  so the patch is clipped. These are planet-scale surfaces (models 113-148,
-  445/447/449), and exercising F1876 needs a distance-appropriate instance.
-  Events 60/61 are documentation only (they contain build addresses) and are
-  excluded from the numeric oracle.
+  and 61 (three words per event), the order-queue words F1876 appends.
+  `--station-model N Z` sets the instance depth. At the default z 2000 every
+  surface queues **nothing** (their axis vectors are ~1e8 record units, so the
+  patch is clipped); these are planet-scale surfaces (models 113-148,
+  445/447/449). At z `0x20000000` model 118 queues **1,236 words** (40 event-61
+  records) — the captured target for the F1876 port. Events 60/61 are
+  documentation only (they contain build addresses) and are excluded from the
+  numeric oracle.
 
 ## F1876 (not ported)
 
