@@ -42,3 +42,43 @@ is displaced along the edge vector.
 `--terrain-mid` runs each routine 323 times on random nodes, levels and layer
 tables, including an already-made midpoint: 6,144 cases, 5,115 new nodes, all four
 nodes, the links and the arena counts match.
+
+## The distance query (F1876, mode 1)
+
+`Terrain::distance(seed, max, stream, translation, matrix, kind, detail)`.
+
+1. F1823 files the stream's records (16 bytes: key, feature type, six words) into a
+   tree: the key's highest bit marks its length, the five bits after it are the
+   face and each further pair a sub-triangle. A node has two slots (a record, or a
+   non-positive count). A record filed above another is undefined in the original
+   (it indexes a table with a pool address); the port reports `Fault::Overlap`.
+2. The matrix rows' longest length (F1825/F1467) sets `level_base`:
+   `msb(2 * F1521(length, 0x54000000)) + detail - 1`, `detail` being `DATA_008812`.
+3. The twelve corners are the unit directions turned by the matrix, plus the
+   translation, with a hash-seeded height (or a latitude-based one for the polar
+   type, whose first function is F1842).
+4. For each face F1834 gives the corners their level and their features' heights
+   (`height >> 7`, times the multiplier map, plus the height map's signed byte
+   shifted by 21), choosing the midpoint routines by the type's third dword, plus
+   8 if the face has a tree and plus 2 if the point is not far (`z <= 2 * length`).
+   The routine for the first four levels is read four slots on (`DATA_007845`).
+5. The first face whose three corners' cross products (F1875, in x and y relative to
+   the point) are all non-negative is subdivided: each level makes the three edge
+   midpoints and continues in the sub-triangle holding the point (corner A, B, C or
+   the centre), until level 9 or until no corner has the level. The feature
+   records at the tree node of each level fill the layer tables for the levels
+   they cover (cleared only after a successful search).
+6. The final triangle's plane gives the height at the point: positions shifted
+   below 14 bits, two ratios by `idiv` (the divisor shifted down and made 1 if it
+   becomes zero), the interpolation shifted back.
+
+The result is the interpolated distance, or the limit if it is larger or no face
+held the point. Types 3, 5 and 6 (third dword 0x18) have no routine pair for faces
+with features (the original jumps through garbage), and features of kinds other than
+12 (the only one with a height map) crash it; neither occurs in the game's models.
+
+`--terrain` runs 2,048 synthetic planets (random orientation and size, a point far
+away, near and a few units from the surface, off-axis, fourteen types, details 0 to 4,
+streams of random non-overlapping records and of a record on every face or sub
+triangle): the distance, bytes consumed, the unlimited distance, the arena counts
+and the layer tables match.

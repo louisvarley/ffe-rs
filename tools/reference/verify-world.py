@@ -1,7 +1,8 @@
 """Compare the galaxy and system-generation routines with the executed original.
 
 --terrain-mid: the nineteen terrain midpoint routines F1849-F1867 (with F1829, F1846 and the
-distance-mode vertex functions) on synthetic nodes. --worldgen: F880 (with F927, F1533, F879 and the orbit helpers) on generated systems at
+distance-mode vertex functions) on synthetic nodes. --terrain: the terrain query F1876 in distance mode (F1823, F1833, F1834, F1875 and the arenas) on
+synthetic planets. --worldgen: F880 (with F927, F1533, F879 and the orbit helpers) on generated systems at
 synthetic clocks; physics object bytes with names zeroed and starport placement masked
 (it needs the terrain query). --sysgen: F875 and F878 (system generation: the hand-coded objects and 4,160 generated
 or hand-coded systems; object bytes with the names zeroed). --galaxy (jjffe-commands): F868 (system index or class by distance from the
@@ -32,6 +33,10 @@ SCENARIOS = [
     ("terrain-mid", "--terrain-mid", b"JJFFE terrain-mid-v1", "FFE_TERRAIN_MID_VECTORS",
      "terrain_reference", "executed_reference_terrain_midpoints",
      ["which", "level", "base", "layers", "before", "after", "edge", "nodes", "edges"]),
+    ("terrain", "--terrain", b"JJFFE terrain-v1", "FFE_TERRAIN_VECTORS", "terrain_reference",
+     "executed_reference_terrain_distance",
+     ["seed", "max", "detail", "kind", "translation", "matrix", "stream", "value", "consumed",
+      "raw", "nodes", "edges"]),
     ("galaxy", "--galaxy", b"JJFFE galaxy-v1", "FFE_GALAXY_VECTORS", "world_reference",
      "executed_reference_galaxy", ["code", "index", "details", "market", "control"]),
 ]

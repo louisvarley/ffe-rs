@@ -113,6 +113,9 @@ GLOBAL _ref_tr_map0
 GLOBAL _ref_tr_map1
 GLOBAL _ref_tr_pool
 GLOBAL _ref_tr_edge_pool
+GLOBAL _ref_terrain
+GLOBAL _ref_detail
+GLOBAL _ref_tr_raw
 GLOBAL _ref_tr_f1831
 GLOBAL _ref_tr_f1832
 GLOBAL _ref_tr_f1848
@@ -291,6 +294,9 @@ _ref_tr_map0 equ DATA_007637
 _ref_tr_map1 equ DATA_007638
 _ref_tr_pool equ DATA_009274
 _ref_tr_edge_pool equ DATA_009277
+_ref_terrain equ FUNC_001876
+_ref_detail equ DATA_008812
+_ref_tr_raw equ DATA_009283
 _ref_tr_f1831 equ FUNC_001831
 _ref_tr_f1832 equ FUNC_001832
 _ref_tr_f1848 equ FUNC_001848

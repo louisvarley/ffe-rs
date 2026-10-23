@@ -3146,6 +3146,133 @@ static int terrain_mid_vectors(void)
     return 0;
 }
 
+/* The terrain query. terrain drives the original F1876 in distance mode on a
+   synthetic planet: the object's seed, a feature stream (records at random places
+   of the face tree), a rotated and scaled orientation, a translation near and far
+   along z and a detail setting. It prints the inputs and the distance, the
+   stream bytes consumed, the raw distance, the arena counts and the layer tables
+   afterwards. Divisions by zero in the original are caught and skipped. */
+extern long ref_terrain(long *result,long max,unsigned char *object,long p4,unsigned char *stream,long *translation,long *matrix,long kind,long u1,long u2,long u3,long mode);
+extern long ref_detail,ref_tr_raw;
+static sigjmp_buf terrain_jump;
+static void terrain_fault(int signal_number) {(void)signal_number;siglongjmp(terrain_jump,1);}
+static double terrain_unit(void) {return (double)texture_random(0,1000000)/1000000.0;}
+static void terrain_rotation(double r[9])
+{
+    double a[3],b[3],c[3],n;
+    int k;
+    do {
+        for(k=0;k<3;++k) {a[k]=terrain_unit()-0.5;b[k]=terrain_unit()-0.5;}
+        n=sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);
+    } while(n<0.1);
+    for(k=0;k<3;++k) a[k]/=n;
+    n=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+    for(k=0;k<3;++k) b[k]-=n*a[k];
+    n=sqrt(b[0]*b[0]+b[1]*b[1]+b[2]*b[2]);
+    if(n<0.05) {b[0]=-a[1];b[1]=a[0];b[2]=0;n=sqrt(b[0]*b[0]+b[1]*b[1]);if(n<0.01) {b[0]=0;b[1]=-a[2];b[2]=a[1];n=sqrt(b[1]*b[1]+b[2]*b[2]);}}
+    for(k=0;k<3;++k) b[k]/=n;
+    c[0]=a[1]*b[2]-a[2]*b[1];c[1]=a[2]*b[0]-a[0]*b[2];c[2]=a[0]*b[1]-a[1]*b[0];
+    for(k=0;k<3;++k) {r[k]=a[k];r[3+k]=b[k];r[6+k]=c[k];}
+}
+static int terrain_vectors(void)
+{
+    static unsigned char object[0x200];
+    unsigned char stream[16*100+16];
+    unsigned long n,found_cases=0;
+    fprintf(stderr,"JJFFE terrain-v1: original F1876 in distance mode (F1823, F1833, F1834, F1875, F1816-F1821, F1849-F1867) for synthetic planets: seed, feature stream, orientation, translation, planet type and detail.\n");
+    texture_rng=0x2e8b5a31UL;
+    signal(SIGFPE,terrain_fault);
+    for(n=0;n<2048;++n) {
+        unsigned long seed=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+        long matrix[9],translation[3],kind=texture_random(0,13),detail=texture_random(0,4),max,result=0x55555555;
+        long records=texture_random(0,3)==0?0:texture_random(1,10),k,used=0;
+        unsigned long keys[16];
+        double rotation[9],radius=(double)(1UL<<texture_random(19,28))*(0.5+terrain_unit());
+        long distance;
+        long consumed,fault;
+        /* Types 3, 5 and 6 select a routine pair past the table when a face has features. */
+        if(kind==3||kind==5||kind==6) records=0;
+        memset(object,0,sizeof(object));memset(stream,0,sizeof(stream));
+        memcpy(object+0xa0,&seed,4);
+        for(k=0;k<records && used<10;++k) {
+            long depth=texture_random(0,5),face=texture_random(0,19),m,i,clash=0;
+            /* A record at the root is an ancestor of every other: only the last may be. */
+            if(depth==0 && k!=records-1) depth=1;
+            unsigned long key,bits;
+            if(depth==0) key=(unsigned long)texture_random(1,15);
+            else {
+                m=2*depth+3;
+                bits=((unsigned long)face<<(2*(depth-1)));
+                for(i=0;i<depth-1;++i) bits|=((unsigned long)texture_random(0,3))<<(2*i);
+                key=(1UL<<m)|bits;
+            }
+            for(i=0;i<used;++i) {
+                /* One key's path must not lie on another's (the original would read garbage). */
+                unsigned long x=key,y=keys[i];
+                while(x>y && x>1) x>>=2;
+                if(x==y) clash=1;
+                x=key;
+                while(y>x && y>1) y>>=2;
+                if(x==y) clash=1;
+            }
+            if(clash) continue;
+            keys[used]=key;
+            {
+                short w[8];
+                long j;
+                w[0]=(short)key;w[1]=12;
+                for(j=2;j<8;++j) w[j]=texture_random(0,3)==0?(short)texture_random(-200,300):(short)texture_random(0,0x7f);
+                memcpy(stream+16*used,w,16);
+            }
+            ++used;
+        }
+        if(!(kind==3||kind==5||kind==6) && texture_random(0,2)==0) {
+            /* Every face carries features: a record at the face or at its four sub-triangles. */
+            long face,child,w;
+            short rec[8];
+            memset(stream,0,sizeof(stream));
+            used=0;
+            for(face=0;face<20;++face) {
+                int whole=texture_random(0,9)<7;
+                for(child=0;child<(whole?1:4);++child) {
+                    rec[0]=whole?(short)(32+face):(short)(128+4*face+child);
+                    rec[1]=12;
+                    for(w=2;w<8;++w) rec[w]=texture_random(0,3)==0?(short)texture_random(-200,300):(short)texture_random(0,0x7f);
+                    memcpy(stream+16*used,rec,16);
+                    ++used;
+                }
+            }
+        }
+        consumed=16*used+2;
+        terrain_rotation(rotation);
+        for(k=0;k<9;++k) matrix[k]=(long)(rotation[k]*radius);
+        translation[0]=texture_random(0,2)==0?(long)((terrain_unit()-0.5)*radius*(texture_random(0,2)==0?5.0:1.0)):0;
+        translation[1]=texture_random(0,2)==0?(long)((terrain_unit()-0.5)*radius*(texture_random(0,2)==0?5.0:1.0)):0;
+        translation[2]=texture_random(0,2)==0?(long)(radius*(1.0+(terrain_unit()-0.5)*ldexp(1.0,-(int)texture_random(4,18)))):texture_random(0,1)?(long)(radius*(0.93+0.12*terrain_unit())):(long)((texture_random(0,5)==0?-1.0:1.0)*radius*(0.4+3.0*terrain_unit()));
+        max=texture_random(0,4)==0?0x7fffffffL:(long)(radius*(0.5+3.0*terrain_unit()));
+        ref_detail=detail;ref_tr_raw=0x12345678;
+        memset(ref_tr_pool,0,sizeof(ref_tr_pool));memset(ref_tr_edge_pool,0,sizeof(ref_tr_edge_pool));
+        memset(ref_tr_layers,0,sizeof(unsigned long)*128);
+        ref_tr_nodes_used=0;ref_tr_edges_used=0;
+        fault=sigsetjmp(terrain_jump,1);
+        if(!fault) {
+            distance=(long)((unsigned char *)ref_terrain(&result,max,object,0,stream,translation,matrix,kind,0,0,0,1)-stream);
+        } else distance=0;
+        printf("{\"case\":%lu,\"seed\":%lu,\"max\":%ld,\"detail\":%ld,\"kind\":%ld,\"translation\":[%ld,%ld,%ld],\"matrix\":[",n,seed,max,detail,kind,translation[0],translation[1],translation[2]);
+        for(k=0;k<9;++k) printf("%s%ld",k?",":"",matrix[k]);
+        printf("],\"stream\":[");
+        for(k=0;k<consumed;++k) printf("%s%u",k?",":"",stream[k]);
+        if(fault) {printf("],\"fault\":true}\n");continue;}
+        printf("],\"fault\":false,\"value\":%ld,\"consumed\":%ld,\"raw\":%ld,\"nodes\":%lu,\"edges\":%lu,\"layers\":[",result,distance,(long)ref_tr_raw,ref_tr_nodes_used,ref_tr_edges_used);
+        for(k=0;k<128;++k) printf("%s%d",k?",":"",ref_tr_layers[k]==0?0:ref_tr_layers[k]==(unsigned long)ref_tr_map0?1:ref_tr_layers[k]==(unsigned long)ref_tr_map1?2:9);
+        printf("]}\n");
+        found_cases+=(ref_tr_raw!=0x7fffffffL);
+    }
+    fprintf(stderr,"terrain: %lu of 2048 cases found a face\n",found_cases);
+    if (fflush(stdout)) fail("cannot flush terrain vectors");
+    return 0;
+}
+
 /* Steering input. steer drives the original F1037 (set speed from Return and
    Shift through F1121, then F1038: mouse and key deltas into the rates, or the
    turret angles in a turret view) on the player struct (DATA_008804) and a
@@ -4054,6 +4181,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
     if (argc == 2 && !strcmp(argv[1], "--terrain-mid")) return terrain_mid_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--terrain")) return terrain_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sysgen")) return sysgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--worldgen")) return worldgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--galaxy")) return galaxy_vectors();

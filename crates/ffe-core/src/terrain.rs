@@ -7,6 +7,7 @@
 //! the executed original (`docs/notes/terrain.md`).
 
 use crate::model::multiply;
+use crate::model_math::table_root;
 
 /// Bytes of a node (`0x48`).
 pub const NODE_BYTES: usize = 0x48;
@@ -33,6 +34,8 @@ pub mod tables {
     pub const TYPES: usize = 503;
     /// `DATA_007854`: the midpoint corner adjustments, 32 bytes per routine.
     pub const ADJUST: usize = 5995;
+    /// `DATA_007844`: the midpoint routine ranks (dwords, 32 slots).
+    pub const MIDPOINTS: usize = 1175;
     /// `DATA_007892`: the icosahedron's twelve corner directions (12 bytes each).
     pub const CORNERS: usize = 6603;
     /// `DATA_007893`: the twenty faces (24 bytes each: corner and edge indexes).
@@ -567,5 +570,490 @@ impl<'a> Terrain<'a> {
             let bump = i32::from(self.map_byte(entry[0], index) as i8) << 21;
             self.nodes[node].set_dword(0x3c, height.wrapping_add(bump));
         }
+    }
+}
+
+/// A feature record of the stream: the feature type and the map coordinates of
+/// the face's three corners (u, v words each).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Record {
+    kind: i32,
+    corners: [[i16; 2]; 3],
+}
+
+/// A node of F1823's tree of the stream's records: the path from the face down
+/// to a record's place, two slots at each node (a record, or the count of levels
+/// an enclosing record still covers) and four children (twenty at the root).
+#[derive(Debug, Clone)]
+struct TreeNode {
+    slots: [Slot; 2],
+    children: [usize; 20],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    /// Zero, or the levels an enclosing record still covers, as a non-positive count.
+    Count(i32),
+    Record(usize),
+}
+
+/// The stream's records as F1823 files them: the root and every node below it.
+#[derive(Debug, Clone)]
+struct Tree {
+    nodes: Vec<TreeNode>,
+    records: Vec<Record>,
+}
+
+/// Why a query could not be answered as the original would.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fault {
+    /// A record was filed under another record's place, which the original
+    /// reads as garbage.
+    Overlap,
+    /// The stream's records need more than the original's 4,096-byte pool.
+    Pool,
+    /// The original divides by zero (or overflows the quotient).
+    Division,
+}
+
+/// Why the search stopped early.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    Abort(Abort),
+    Fault(Fault),
+}
+
+impl From<Abort> for Stop {
+    fn from(abort: Abort) -> Self {
+        Stop::Abort(abort)
+    }
+}
+
+/// The result of a distance query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Distance {
+    /// The distance along the query direction to the surface, or the limit.
+    pub value: i32,
+    /// The distance before it is limited (`DATA_009283`; `0x7fffffff` when no face
+    /// held the point).
+    pub raw: i32,
+    /// Bytes of the stream the records took (including the terminating word).
+    pub consumed: usize,
+    /// The arena that overflowed and aborted the search, if any.
+    pub aborted: Option<u8>,
+    /// Whether a face was found that holds the query point.
+    pub found: bool,
+}
+
+fn find_msb(value: u32) -> i32 {
+    31 - value.max(1).leading_zeros() as i32
+}
+
+/// F1825: the highest bit of the largest component magnitude (OR'd).
+fn extent(vector: [i32; 3]) -> i32 {
+    find_msb(vector.iter().fold(0u32, |a, v| a | v.wrapping_abs() as u32))
+}
+
+/// The length of a matrix row (the part of F1876 before the corners).
+fn row_length(row: [i32; 3]) -> i32 {
+    let shift = extent(row) - 14;
+    let square = |c: i32| c.wrapping_mul(c);
+    if shift > 0 {
+        let sum = row
+            .iter()
+            .fold(0i32, |a, c| a.wrapping_add(square(*c >> shift)));
+        (table_root(sum as u32) << shift) as i32
+    } else {
+        let sum = row.iter().fold(0i32, |a, c| a.wrapping_add(square(*c)));
+        table_root(sum as u32) as i32
+    }
+}
+
+/// F1875: -1 if the cross product `p x q` of the two points' x and y is negative.
+fn side(p: [i32; 3], q: [i32; 3]) -> i32 {
+    let product = |a: i32, b: i32| i64::from(a) * i64::from(b);
+    -i32::from(product(p[0], q[1]) - product(p[1], q[0]) < 0)
+}
+
+impl Tree {
+    /// F1823: file the stream's records (16 bytes each: a key, the feature type,
+    /// six words) until the zero key; returns the tree and the bytes consumed.
+    fn build(stream: &[u8]) -> Result<(Self, usize), Fault> {
+        let mut tree = Self {
+            nodes: vec![TreeNode {
+                slots: [Slot::Count(0); 2],
+                children: [NIL; 20],
+            }],
+            records: Vec::new(),
+        };
+        let word = |at: usize| i16::from_le_bytes([stream[at], stream[at + 1]]);
+        let mut at = 0;
+        // The original's pool: the root takes 0x58 bytes, a node 0x18, a record 0x10.
+        let mut pool = 0x58;
+        loop {
+            let key = i32::from(word(at));
+            if key == 0 {
+                return Ok((tree, at + 2));
+            }
+            let kind = i32::from(word(at + 2));
+            let top = find_msb(key as u32);
+            let mut path = (key.wrapping_shl((16 - top) as u32 & 31) & 0xffff) as u32;
+            let mut node = 0;
+            let mut depth = (top - 3) / 2;
+            while depth > 0 {
+                let index = (path >> 11) as usize;
+                let existing = tree.nodes[node].children[index];
+                if existing == NIL {
+                    pool += 0x18;
+                    let mut slots = [Slot::Count(0); 2];
+                    for (slot, parent) in slots.iter_mut().zip(tree.nodes[node].slots) {
+                        *slot = match parent {
+                            Slot::Record(_) => return Err(Fault::Overlap),
+                            Slot::Count(n) if n < 0 => Slot::Count(n + 1),
+                            Slot::Count(_) => Slot::Count(0),
+                        };
+                    }
+                    tree.nodes.push(TreeNode {
+                        slots,
+                        children: [NIL; 20],
+                    });
+                    let made = tree.nodes.len() - 1;
+                    tree.nodes[node].children[index] = made;
+                    node = made;
+                } else {
+                    node = existing;
+                }
+                path = (path << 2) & 0x1fff;
+                depth -= 1;
+            }
+            if let Some(free) = tree.nodes[node]
+                .slots
+                .iter()
+                .position(|s| *s == Slot::Count(0))
+            {
+                pool += 0x10;
+                let corners = std::array::from_fn(|k| [word(at + 4 + 4 * k), word(at + 6 + 4 * k)]);
+                tree.records.push(Record { kind, corners });
+                tree.nodes[node].slots[free] = Slot::Record(tree.records.len() - 1);
+            }
+            if pool > 4096 {
+                return Err(Fault::Pool);
+            }
+            at += 16;
+        }
+    }
+}
+
+impl Terrain<'_> {
+    /// The planet type's third dword (what F1833 returns), the table entry for
+    /// `kind`.
+    fn type_dword(&self, kind: usize, field: usize) -> i32 {
+        self.table_dword(tables::TYPES + 48 * kind + field)
+    }
+
+    /// F1834 for the distance mode: the detail level and quadrant words of a
+    /// face's corners, and the feature records' effect on their heights.
+    fn prepare_face(&mut self, corners: [usize; 3], tree: Option<usize>, tree_data: &Tree) {
+        for node in corners {
+            self.set_level(node);
+            let (u, v) = (
+                i32::from(self.nodes[node].word(0)),
+                i32::from(self.nodes[node].word(2)),
+            );
+            self.nodes[node].set_word(0x24, quadrant_u(u));
+            self.nodes[node].set_word(0x26, quadrant_v(v));
+        }
+        if let Some(tree) = tree {
+            for slot in tree_data.nodes[tree].slots {
+                let Slot::Record(record) = slot else { continue };
+                let record = tree_data.records[record];
+                let feature = tables::FEATURES + 12 * record.kind as usize;
+                let heights = self.table_dword(feature) as u8;
+                let multiplier = self.table_dword(feature + 4) as u8;
+                for (node, [u, v]) in corners.into_iter().zip(record.corners) {
+                    if u as u16 >= 0x80 || v as u16 >= 0x80 {
+                        continue;
+                    }
+                    let index = usize::from(u as u16) + (usize::from(v as u16) << 7);
+                    let n = &mut self.nodes[node];
+                    let mut height = n.height() >> 7;
+                    if multiplier != 0 {
+                        height =
+                            i32::from(self.maps[(usize::from(multiplier) - 1) * 0x4000 + index])
+                                .wrapping_mul(height);
+                    }
+                    let bump =
+                        i32::from(self.maps[(usize::from(heights) - 1) * 0x4000 + index] as i8)
+                            << 21;
+                    n.set_dword(0x3c, height.wrapping_add(bump));
+                }
+            }
+        }
+        for node in corners {
+            let height = self.nodes[node].height();
+            self.nodes[node].set_dword(0x40, height.max(0));
+        }
+    }
+
+    /// F1876 in distance mode: how far along its z axis the point `translation`
+    /// (with the planet's orientation `matrix`, rows of three) is from the planet's
+    /// surface, searching down to the limit `max`. `stream` is the model's
+    /// collision stream after the terrain record's six-byte header, `kind` that
+    /// header's planet type, `seed` the object's `+0xa0` and `detail` the game's
+    /// detail setting (`DATA_008812`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn distance(
+        &mut self,
+        seed: u32,
+        max: i32,
+        stream: &[u8],
+        translation: [i32; 3],
+        matrix: [i32; 9],
+        kind: usize,
+        detail: i32,
+    ) -> Result<Distance, Fault> {
+        let (tree, consumed) = Tree::build(stream)?;
+        let rows = [
+            [matrix[0], matrix[1], matrix[2]],
+            [matrix[3], matrix[4], matrix[5]],
+            [matrix[6], matrix[7], matrix[8]],
+        ];
+        let longest = rows.iter().map(|r| row_length(*r)).fold(i32::MIN, i32::max);
+        let bound = multiply(longest, 0x5400_0000).wrapping_mul(2);
+        self.level_base = find_msb(bound as u32) + detail - 1;
+        // F1816, then the twelve corners.
+        self.reset();
+        let mut seed = seed;
+        let polar = self.type_dword(kind, 0) == 2;
+        for corner in 0..LOCAL_NODES {
+            let at = tables::CORNERS + 12 * corner;
+            let direction = [
+                self.table_dword(at),
+                self.table_dword(at + 4),
+                self.table_dword(at + 8),
+            ];
+            let mut node = Node::default();
+            for axis in 0..3 {
+                let position = (0..3).fold(0i32, |sum, row| {
+                    sum.wrapping_add(multiply(direction[row], matrix[3 * row + axis]))
+                });
+                node.set_dword(0x28 + 4 * axis, position);
+                node.set_dword(4 + 4 * axis, position.wrapping_add(translation[axis]));
+            }
+            seed = hash(seed);
+            node.set_dword(
+                0x3c,
+                if polar {
+                    (direction[1] >> 5).wrapping_add(0x400_0000)
+                } else {
+                    seed as i32 >> 4
+                },
+            );
+            self.nodes[corner] = node;
+        }
+        let far = translation[2] > longest.wrapping_mul(2);
+        let (value, raw, found, aborted) = match self.search(&tree, translation, kind, far) {
+            Ok(Some(value)) => {
+                // The layer tables are cleared only by a search that finds a face.
+                self.layers = [[[0; 2]; 32]; 2];
+                let limited = if value == i32::MAX || value > max {
+                    max
+                } else {
+                    value
+                };
+                (limited, value, true, None)
+            }
+            Ok(None) => (max, i32::MAX, false, None),
+            Err(Stop::Abort(Abort(code))) => (max, i32::MAX, false, Some(code)),
+            Err(Stop::Fault(fault)) => return Err(fault),
+        };
+        Ok(Distance {
+            value,
+            raw,
+            consumed,
+            aborted,
+            found,
+        })
+    }
+
+    fn search(
+        &mut self,
+        tree: &Tree,
+        translation: [i32; 3],
+        kind: usize,
+        far: bool,
+    ) -> Result<Option<i32>, Stop> {
+        let mut edges = [NIL; 30];
+        for (k, edge) in edges.iter_mut().enumerate() {
+            let record = self.alloc_edge()?;
+            self.edges[record].head = self.table_dword(tables::EDGES + 8 * k) as usize;
+            *edge = record;
+        }
+        let span = self.type_dword(kind, 8) as usize;
+        let pos = |t: &Self, n: usize| [t.nodes[n].x(), t.nodes[n].y(), t.nodes[n].z()];
+        let relative = |p: [i32; 3]| std::array::from_fn(|k| p[k].wrapping_sub(translation[k]));
+        for face in 0..20 {
+            let entry = tables::FACES + 24 * face;
+            let word = |t: &Self, k: usize| t.table_dword(entry + 4 * k) as usize;
+            let corners = [word(self, 0), word(self, 1), word(self, 2)];
+            let sides = [
+                edges[word(self, 3)],
+                edges[word(self, 4)],
+                edges[word(self, 5)],
+            ];
+            let face_tree = Some(tree.nodes[0].children[face]).filter(|t| *t != NIL);
+            // F1834: the midpoint routines for this face, and its corners.
+            let slot = span + 8 * usize::from(face_tree.is_some()) + 2 * usize::from(!far);
+            let routine =
+                |t: &Self, k: usize| t.table_dword(tables::MIDPOINTS + 4 * (slot + k)) as usize - 1;
+            // `DATA_009278` (the first four levels) reads from `DATA_007845`, four slots on.
+            let (coarse, fine) = (routine(self, 4), routine(self, 0));
+            self.prepare_face(corners, face_tree, tree);
+            let [mut a, mut b, mut c] = corners;
+            let inside = {
+                let (p1, p2, p3) = (
+                    relative(pos(self, a)),
+                    relative(pos(self, b)),
+                    relative(pos(self, c)),
+                );
+                side(p1, p2) >= 0 && side(p2, p3) >= 0 && side(p3, p1) >= 0
+            };
+            if !inside {
+                continue;
+            }
+            let [mut e3, mut e4, mut e5] = sides;
+            let mut cursor = face_tree;
+            let mut level = 0;
+            while level <= 9 && [a, b, c].iter().any(|n| self.nodes[*n].level() >= level) {
+                if let Some(t) = cursor {
+                    for layer in 0..2 {
+                        let Slot::Record(r) = tree.nodes[t].slots[layer] else {
+                            continue;
+                        };
+                        let record = tree.records[r];
+                        let feature = tables::FEATURES + 12 * record.kind as usize;
+                        let maps = [
+                            self.table_dword(feature) as u8,
+                            self.table_dword(feature + 4) as u8,
+                        ];
+                        let levels = self.table_dword(feature + 8);
+                        for l in level..level + levels {
+                            if let Some(entry) = self.layers.get_mut(layer + l as usize / 32) {
+                                entry[l as usize % 32] = maps;
+                            }
+                        }
+                        for (node, [u, v]) in [a, b, c].into_iter().zip(record.corners) {
+                            self.nodes[node].set_word(0x34 + 4 * layer, u);
+                            self.nodes[node].set_word(0x36 + 4 * layer, v);
+                        }
+                    }
+                }
+                let which = if level < 5 { coarse } else { fine };
+                self.midpoint(which, e4, b, c, a, level)?;
+                self.midpoint(which, e5, c, a, b, level)?;
+                self.midpoint(which, e3, a, b, c, level)?;
+                let (m3, m4, m5) = (self.edges[e3].mid, self.edges[e4].mid, self.edges[e5].mid);
+                let (q3, q4, q5) = (
+                    relative(pos(self, m3)),
+                    relative(pos(self, m4)),
+                    relative(pos(self, m5)),
+                );
+                let half = |t: &Self, e: usize, end: usize| {
+                    if t.edges[e].head == end {
+                        t.edges[e].first
+                    } else {
+                        t.edges[e].second
+                    }
+                };
+                let branch;
+                let (s, n, t);
+                if side(q3, q5) >= 0 {
+                    branch = 0;
+                    s = half(self, e3, a);
+                    n = self.alloc_edge()?;
+                    self.edges[n].head = m3;
+                    t = half(self, e5, a);
+                    (b, c) = (m3, m5);
+                } else if side(q4, q3) >= 0 {
+                    branch = 1;
+                    s = half(self, e4, b);
+                    n = self.alloc_edge()?;
+                    self.edges[n].head = m4;
+                    t = half(self, e3, b);
+                    (a, b, c) = (b, m4, m3);
+                } else if side(q5, q4) >= 0 {
+                    branch = 2;
+                    s = half(self, e5, c);
+                    n = self.alloc_edge()?;
+                    self.edges[n].head = m5;
+                    t = half(self, e4, c);
+                    (a, b, c) = (c, m5, m4);
+                } else {
+                    branch = 3;
+                    s = self.alloc_edge()?;
+                    self.edges[s].head = m5;
+                    n = self.alloc_edge()?;
+                    self.edges[n].head = m3;
+                    t = self.alloc_edge()?;
+                    self.edges[t].head = m4;
+                    (a, b, c) = (m4, m5, m3);
+                }
+                (e3, e4, e5) = (s, n, t);
+                cursor = cursor
+                    .map(|node| tree.nodes[node].children[branch])
+                    .filter(|child| *child != NIL);
+                level += 1;
+            }
+            return self.interpolate([a, b, c]).map(Some).map_err(Stop::Fault);
+        }
+        Ok(None)
+    }
+}
+
+impl Terrain<'_> {
+    /// The end of F1876: the height of the final triangle's plane at the query
+    /// point, measured along z.
+    fn interpolate(&mut self, corners: [usize; 3]) -> Result<i32, Fault> {
+        let mut points = corners.map(|n| [self.nodes[n].x(), self.nodes[n].y(), self.nodes[n].z()]);
+        let all = points
+            .iter()
+            .flatten()
+            .fold(0u32, |a, v| a | v.wrapping_abs() as u32);
+        let shift = (find_msb(all) - 13).max(0);
+        for point in &mut points {
+            for v in point.iter_mut() {
+                *v >>= shift;
+            }
+        }
+        let [[x1, y1, z1], [x2, y2, z2], [x3, y3, z3]] = points;
+        let m = i32::wrapping_mul;
+        let a = i32::wrapping_add;
+        let d = i32::wrapping_sub;
+        let t70 = a(a(m(d(x1, x3), y2), m(d(x2, x1), y3)), m(d(x3, x2), y1));
+        let t74 = a(a(m(d(x1, x2), y3), m(d(x3, x1), y2)), m(d(x2, x3), y1));
+        let t78 = d(m(x1, y2), m(x2, y1));
+        let t7c = d(m(x1, y3), m(x3, y1));
+        let ratio = |numerator: i32, mut divisor: i32| -> Result<i32, Fault> {
+            let bits = (0x1e - find_msb(numerator.wrapping_abs() as u32)).clamp(0, 15);
+            if bits < 15 {
+                divisor >>= 15 - bits;
+                if divisor == 0 {
+                    divisor = 1;
+                }
+            }
+            numerator
+                .wrapping_shl(bits as u32)
+                .checked_div(divisor)
+                .ok_or(Fault::Division)
+        };
+        let q1 = ratio(t7c, t74)?;
+        let q2 = ratio(t78, t70)?;
+        let plane = a(m(d(z2, z1), q1), m(d(z3, z1), q2));
+        let base = self.nodes[corners[0]].z();
+        Ok(if shift < 15 {
+            a(plane >> (15 - shift), base)
+        } else {
+            a(plane.wrapping_shl((shift - 15) as u32), base)
+        })
     }
 }

@@ -1,4 +1,4 @@
-use ffe_core::terrain::{Node, Terrain, NIL};
+use ffe_core::terrain::{Fault, Node, Terrain, NIL};
 use serde::Deserialize;
 
 fn cache_terrain() -> (Vec<u8>, Vec<u8>) {
@@ -129,4 +129,71 @@ fn executed_reference_terrain_midpoints() {
     }
     assert!(cases >= 6000 && created > 4000);
     eprintln!("compared {cases} midpoint cases ({created} new nodes, {coarse} with a coarse end)");
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Query {
+    case: u32,
+    seed: u32,
+    max: i32,
+    detail: i32,
+    kind: usize,
+    translation: [i32; 3],
+    matrix: [i32; 9],
+    stream: Vec<u8>,
+    fault: bool,
+    value: Option<i32>,
+    consumed: Option<usize>,
+    raw: Option<i32>,
+    nodes: Option<u32>,
+    edges: Option<u32>,
+    layers: Option<Vec<u8>>,
+}
+
+/// The original F1876 in distance mode (`--terrain`) on synthetic planets: the
+/// distance, the stream bytes consumed, the unlimited distance, the arena counts
+/// and the layer tables afterwards.
+#[test]
+#[ignore = "Local-only original world data; use tools/reference/verify-world.py"]
+fn executed_reference_terrain_distance() {
+    let (table, maps) = cache_terrain();
+    let input = std::fs::read_to_string(std::env::var_os("FFE_TERRAIN_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 64 << 20);
+    let (mut cases, mut found, mut aborted, mut faults) = (0, 0, 0, 0);
+    for line in input.lines() {
+        let case: Query = serde_json::from_str(line).unwrap();
+        let mut terrain = Terrain::new(&table, &maps);
+        let result = terrain.distance(
+            case.seed,
+            case.max,
+            &case.stream,
+            case.translation,
+            case.matrix,
+            case.kind,
+            case.detail,
+        );
+        let context = format!("case {}", case.case);
+        if case.fault {
+            assert_eq!(result, Err(Fault::Division), "{context}");
+            faults += 1;
+            continue;
+        }
+        let got = result.unwrap_or_else(|fault| panic!("{fault:?}, {context}"));
+        assert_eq!(got.value, case.value.unwrap(), "value, {context}");
+        assert_eq!(got.consumed, case.consumed.unwrap(), "consumed, {context}");
+        assert_eq!(got.raw, case.raw.unwrap(), "raw distance, {context}");
+        assert_eq!(
+            (terrain.nodes_out(), terrain.edges_out()),
+            (case.nodes.unwrap(), case.edges.unwrap()),
+            "arena counts, {context}"
+        );
+        let layers: Vec<u8> = terrain.layers.iter().flatten().flatten().copied().collect();
+        assert_eq!(layers, case.layers.unwrap(), "layers, {context}");
+        found += usize::from(got.found);
+        aborted += usize::from(got.aborted.is_some());
+        cases += 1;
+    }
+    assert!(cases > 1500 && found > 300);
+    eprintln!("compared {cases} terrain queries ({found} found a face, {aborted} aborted, {faults} divisions by zero)");
 }
