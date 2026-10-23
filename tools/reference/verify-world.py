@@ -1,7 +1,8 @@
 """Compare the galaxy and system-generation routines with the executed original.
 
 --terrain-mid: the nineteen terrain midpoint routines F1849-F1867 (with F1829, F1846 and the
-distance-mode vertex functions) on synthetic nodes. --terrain: the terrain query F1876 in distance mode (F1823, F1833, F1834, F1875 and the arenas) on
+distance-mode vertex functions) on synthetic nodes. --planet: F576 (F579-F583) for a ship sphere against the collision streams of the game's models,
+terrain records included. --terrain: the terrain query F1876 in distance mode (F1823, F1833, F1834, F1875 and the arenas) on
 synthetic planets. --worldgen: F880 (with F927, F1533, F879 and the orbit helpers) on generated systems at
 synthetic clocks; physics object bytes with names zeroed and starport placement masked
 (it needs the terrain query). --sysgen: F875 and F878 (system generation: the hand-coded objects and 4,160 generated
@@ -37,6 +38,10 @@ SCENARIOS = [
      "executed_reference_terrain_distance",
      ["seed", "max", "detail", "kind", "translation", "matrix", "stream", "value", "consumed",
       "raw", "nodes", "edges"]),
+    ("planet", "--planet", b"JJFFE planet-v1", "FFE_PLANET_VECTORS", "surface_reference",
+     "executed_reference_surface_hits",
+     ["planet", "ship", "detail", "seed", "words", "planet_matrix", "relpos",
+      "result", "flags", "more", "chunk", "distance", "altitude"]),
     ("galaxy", "--galaxy", b"JJFFE galaxy-v1", "FFE_GALAXY_VECTORS", "world_reference",
      "executed_reference_galaxy", ["code", "index", "details", "market", "control"]),
 ]

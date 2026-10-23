@@ -145,7 +145,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             // The descriptor fields object set-up reads, for every slot with a
             // descriptor, imported or not (v16).
             let slots = ffe_convert::model_extents::MODEL_COUNT;
-            let mut collision_index = vec![0u8; slots * 8];
+            let mut collision_index = vec![0u8; slots * 12];
             let mut collision_data = Vec::new();
             for index in 0..slots as u32 {
                 if let Ok(record) = decode_model_record(&bytes, model_table_rva, index) {
@@ -153,12 +153,16 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                         .copy_from_slice(&record);
                 }
                 // The collision stream, where the descriptor has one (v17).
-                if let Ok(Some(stream)) = decode_model_collision(&bytes, model_table_rva, index) {
-                    let entry = index as usize * 8;
+                if let Ok(Some((back, stream))) =
+                    decode_model_collision(&bytes, model_table_rva, index)
+                {
+                    let entry = index as usize * 12;
                     collision_index[entry..entry + 4]
                         .copy_from_slice(&(collision_data.len() as u32).to_le_bytes());
                     collision_index[entry + 4..entry + 8]
-                        .copy_from_slice(&(stream.len() as u32).to_le_bytes());
+                        .copy_from_slice(&((stream.len() - back) as u32).to_le_bytes());
+                    collision_index[entry + 8..entry + 12]
+                        .copy_from_slice(&(back as u32).to_le_bytes());
                     collision_data.extend_from_slice(&stream);
                 }
             }

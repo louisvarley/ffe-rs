@@ -24,6 +24,7 @@ pub mod model_thruster;
 pub mod objects;
 pub mod physics;
 pub mod player;
+pub mod surface;
 pub mod sysgen;
 pub mod terrain;
 pub mod thrust;

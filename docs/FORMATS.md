@@ -860,8 +860,10 @@ parts are future scope, not requirements for the first image exporter.
   pattern on import;
   `base:terrain/maps`, `terrain/maps.bin`, the two 128 by 128 signed height maps
   `DATA_007637` and `DATA_007638` (RVA `0xf7d6c`, 32,768 bytes); and
-  `base:model/collision`, `models/collision.bin`, one pair of little-endian u32
-  (offset, length; length 0 for none) per model table slot followed by the
-  collision streams (descriptor `+0x34`) cut by walking the stream grammar of F582
-  (465 of 466 slots have one).
+  `base:model/collision`, `models/collision.bin`, one triple of little-endian u32
+  (offset, stream length, bytes of backward region words before the stream; length 0
+  for none) per model table slot followed by the data: for each model the backward
+  words (F576 reads them in pairs backwards from the stream's start until a zero
+  distance word; 51 models have a chain) and the collision stream (descriptor
+  `+0x34`) cut by walking the stream grammar of F582 (465 of 466 slots have one).
 

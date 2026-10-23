@@ -127,9 +127,10 @@ pub enum AssetKind {
     TerrainMaps {
         source_offset: u64,
     },
-    /// Per model table slot, the collision stream: `count` pairs of little-endian
-    /// u32 (offset into the data that follows the pairs, length; zero length for
-    /// none) and then the streams (v17).
+    /// Per model table slot, the collision stream: `count` triples of little-endian
+    /// u32 (offset into the data that follows the triples, length of the stream, and
+    /// the bytes of backward region words that come before it in the data; a zero
+    /// length for none) and then the data (v17).
     ModelCollision {
         count: u32,
     },
@@ -548,15 +549,20 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
             }
         }
         AssetKind::ModelCollision { count } => {
-            let header = *count as usize * 8;
+            let header = *count as usize * 12;
             if *count != MODEL_TABLE_SLOTS || bytes.len() < header {
                 return Err("invalid model collision table".to_owned());
             }
             let data = bytes.len() - header;
-            for entry in bytes[..header].chunks_exact(8) {
+            for entry in bytes[..header].chunks_exact(12) {
                 let offset = u32::from_le_bytes(entry[0..4].try_into().unwrap()) as usize;
                 let length = u32::from_le_bytes(entry[4..8].try_into().unwrap()) as usize;
-                if offset.checked_add(length).is_none_or(|end| end > data) {
+                let back = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
+                if offset
+                    .checked_add(length)
+                    .and_then(|end| end.checked_add(back))
+                    .is_none_or(|end| end > data)
+                {
                     return Err("invalid model collision stream bounds".to_owned());
                 }
             }

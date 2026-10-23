@@ -72,7 +72,7 @@ impl Models<'_> {
 
 /// F1341: a 64-bit arithmetic shift (left for a positive count) with the
 /// original's behaviour above 31.
-fn shift64(value: i64, count: i32) -> i64 {
+pub(crate) fn shift64(value: i64, count: i32) -> i64 {
     let (low, high) = (value as u32, (value >> 32) as i32);
     let (low, high) = if count < 0 {
         let by = (-count) as u32;

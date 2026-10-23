@@ -99,6 +99,12 @@ GLOBAL _ref_gravity
 GLOBAL _ref_sysgen
 GLOBAL _ref_worldgen
 GLOBAL _ref_worldgen_counter
+GLOBAL _ref_hit
+GLOBAL _ref_c_more
+GLOBAL _ref_c_object
+GLOBAL _ref_c_chunk
+GLOBAL _ref_c_altitude
+GLOBAL _ref_c_planet
 GLOBAL _ref_tr_reset
 GLOBAL _ref_tr_init
 GLOBAL _ref_tr_node
@@ -310,6 +316,12 @@ _ref_galaxy_rank_a equ DATA_008912
 _ref_galaxy_rank_b equ DATA_008913
 _ref_collide equ FUNC_000569
 _ref_coll_flags equ DATA_008696
+_ref_hit equ FUNC_000576
+_ref_c_more equ DATA_008697
+_ref_c_object equ DATA_008698
+_ref_c_chunk equ DATA_008701
+_ref_c_altitude equ DATA_008705
+_ref_c_planet equ DATA_008707
 _ref_coll_distance equ DATA_008703
 _ref_coll_distance_high equ DATA_008704
 _ref_frame_distance equ FUNC_000590

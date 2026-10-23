@@ -3273,6 +3273,96 @@ static int terrain_vectors(void)
     return 0;
 }
 
+/* Shape collisions. planet drives the original F576 (with F579, F580, F581,
+   F582, F583 and, for a planet's terrain record, F1876) for a ship sphere against
+   a model's collision stream: any of the game's models stands in as the complex
+   shape, with a rotation and radii from its extent, the ship at distances from
+   0.2 to 3 radii. It prints the inputs and the return value and registers. */
+extern long ref_hit(unsigned char *ship,unsigned char *planet,long long *relpos);
+extern unsigned char ref_coll_flags,ref_c_more,ref_c_object,ref_c_chunk,ref_c_planet;
+extern unsigned long ref_c_altitude[2];
+extern unsigned long ref_coll_distance,ref_coll_distance_high;
+static sigjmp_buf planet_jump;
+static void planet_fault(int signal_number) {(void)signal_number;siglongjmp(planet_jump,1);}
+static void planet_matrix(unsigned char *object)
+{
+    double r[9];
+    long k;
+    terrain_rotation(r);
+    for(k=0;k<9;++k) put32(object,4*k,(long)(r[k]*2147483647.0));
+}
+static double planet_extent(const unsigned long *model)
+{
+    const signed char *vertices=(const signed char *)model[1];
+    unsigned long count=model[2]/2,k;
+    double best=1.0;
+    for(k=0;k<count;++k) {
+        double x=vertices[6*k+2],y=vertices[6*k+3],z=vertices[6*k+4],r=sqrt(x*x+y*y+z*z);
+        if(r>best) best=r;
+    }
+    return best;
+}
+static int planet_vectors(void)
+{
+    static unsigned char ship[0x200],planet[0x200];
+    int shapes[466],chained[466],count=0,chains=0;
+    unsigned long n,i,k;
+    fprintf(stderr,"JJFFE planet-v1: original F576 (F579, F580, F581, F582, F583, F1876) for a ship sphere against the collision stream of any model standing in as the complex shape, with random rotations, radii from the model's extent, positions 0.2 to 3 radii away, animation words and a detail setting: the return value, the registers and the stream entry that decided.\n");
+    for(i=0;i<466;++i) {unsigned long *m=ref_model((int)i); if(m && m[0x34/4]) {shapes[count++]=(int)i;if(*(unsigned short *)(m[0x34/4]-2)) chained[chains++]=(int)i;}}
+    texture_rng=0x4c8f3d11UL;
+    signal(SIGSEGV,planet_fault);signal(SIGFPE,planet_fault);
+    for(n=0;n<4096;++n) {
+        int pm=texture_random(0,1)?(int)texture_random(113,148):shapes[texture_random(0,count-1)],sm=texture_random(0,2)==0?chained[texture_random(0,chains-1)]:shapes[texture_random(0,count-1)];
+        unsigned long *pmodel=ref_model(pm),*smodel=ref_model(sm);
+        double radius,length,direction[3],reach;
+        long long relpos[3],outer,inner,ship_inner,ship_outer;
+        long detail=texture_random(0,4);
+        unsigned long seed=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+        int fault,result=0,complex_ship=texture_random(0,3)!=0;
+        memset(ship,0,sizeof(ship));memset(planet,0,sizeof(planet));
+        radius=planet_extent(pmodel)*ldexp(1.0,(int)(pmodel[0x14/4]+pmodel[0x18/4]));
+        /* the basis vectors of a terrain record span the radius; a plain model's extent is its own */
+        outer=(long long)(radius*(1.0+0.5*terrain_unit()));
+        inner=(long long)(radius*(0.8+0.2*terrain_unit()));
+        if(texture_random(0,3)==0) inner=outer;
+        ship_inner=(long long)(radius*0.05*terrain_unit());
+        ship_outer=ship_inner+(texture_random(0,1)?0:(long long)(ship_inner*0.1));
+        for(k=0;k<0x5b;++k) {unsigned short w=(unsigned short)texture_random(0,0xffff);memcpy(planet+0x9c+2*k,&w,2);}
+        put32(planet,0x82,(long)pm);planet[0x86]=5;
+        memcpy(planet+0x138,&outer,8);memcpy(planet+0x140,&inner,8);
+        planet[0x14c]=0x80;
+        memcpy(planet+0xa0,&seed,4);
+        planet_matrix(planet);
+        put32(ship,0x82,(long)sm);ship[0x86]=7;
+        memcpy(ship+0x138,&ship_outer,8);memcpy(ship+0x140,&ship_inner,8);
+        ship[0x14c]=complex_ship?0x80:0;
+        ship[0x56]=(unsigned char)(texture_random(0,1)?5:4);ship[0x57]=(unsigned char)texture_random(0,1);
+        planet_matrix(ship);
+        for(k=0;k<3;++k) direction[k]=terrain_unit()-0.5;
+        length=sqrt(direction[0]*direction[0]+direction[1]*direction[1]+direction[2]*direction[2])+1e-9;
+        reach=radius*(texture_random(0,1)?(0.2+2.8*terrain_unit()):(0.85+0.4*terrain_unit()));
+        for(k=0;k<3;++k) relpos[k]=(long long)(direction[k]/length*reach);
+        ref_detail=detail;
+        ref_coll_flags=0;ref_c_more=0;ref_c_object=0;ref_c_chunk=0;ref_c_planet=0;
+        ref_coll_distance=0xffffffffUL;ref_coll_distance_high=0;ref_c_altitude[0]=0;ref_c_altitude[1]=0;
+        memset(ref_tr_pool,0,sizeof(ref_tr_pool));memset(ref_tr_edge_pool,0,sizeof(ref_tr_edge_pool));
+        memset(ref_tr_layers,0,sizeof(unsigned long)*128);
+        fault=sigsetjmp(planet_jump,1);
+        if(!fault) result=(int)(signed char)ref_hit(ship,planet,relpos);
+        printf("{\"case\":%lu,\"planet\":%d,\"ship\":%d,\"detail\":%ld,\"seed\":%lu,\"outer\":%lld,\"inner\":%lld,\"ship_outer\":%lld,\"ship_inner\":%lld,\"complex\":%d,\"parent\":%u,\"rotating\":%u,\"words\":[",n,pm,sm,detail,seed,outer,inner,ship_outer,ship_inner,complex_ship,(unsigned)ship[0x56],(unsigned)ship[0x57]);
+        for(k=0;k<0x5b;++k) printf("%s%u",k?",":"",(unsigned)*(unsigned short *)(planet+0x9c+2*k));
+        printf("],\"planet_matrix\":[");
+        for(k=0;k<9;++k) printf("%s%ld",k?",":"",get32(planet,4*k));
+        printf("],\"ship_matrix\":[");
+        for(k=0;k<9;++k) printf("%s%ld",k?",":"",get32(ship,4*k));
+        printf("],\"relpos\":[%lld,%lld,%lld],",relpos[0],relpos[1],relpos[2]);
+        if(fault) {printf("\"fault\":true}\n");continue;}
+        printf("\"fault\":false,\"result\":%d,\"flags\":%u,\"more\":%u,\"object\":%u,\"chunk\":%u,\"planet_flag\":%u,\"distance\":%lld,\"altitude\":%lld}\n",result,(unsigned)ref_coll_flags,(unsigned)ref_c_more,(unsigned)ref_c_object,(unsigned)ref_c_chunk,(unsigned)ref_c_planet,(long long)(((unsigned long long)ref_coll_distance_high<<32)|ref_coll_distance),(long long)(((unsigned long long)ref_c_altitude[1]<<32)|ref_c_altitude[0]));
+    }
+    if (fflush(stdout)) fail("cannot flush planet vectors");
+    return 0;
+}
+
 /* Steering input. steer drives the original F1037 (set speed from Return and
    Shift through F1121, then F1038: mouse and key deltas into the rates, or the
    turret angles in a turret view) on the player struct (DATA_008804) and a
@@ -4182,6 +4272,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
     if (argc == 2 && !strcmp(argv[1], "--terrain-mid")) return terrain_mid_vectors();
     if (argc == 2 && !strcmp(argv[1], "--terrain")) return terrain_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--planet")) return planet_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sysgen")) return sysgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--worldgen")) return worldgen_vectors();
     if (argc == 2 && !strcmp(argv[1], "--galaxy")) return galaxy_vectors();

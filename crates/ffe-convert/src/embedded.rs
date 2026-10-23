@@ -720,17 +720,21 @@ pub fn decode_terrain_maps(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, Stri
     })
 }
 
-/// A model's collision stream (descriptor `+0x34`), or `None` for a null pointer.
-/// The stream has no length field, so it is walked as F582 reads it: entries of a
-/// type byte and a flag byte (two more bytes when the type has `0x20`), then by
-/// `type & 0xc0` a surface list, a terrain record (the `0xff` marker, six bytes,
-/// 16-byte records to a zero word and its two bytes), a hierarchical reference
-/// (four bytes) or a list, to a zero type byte.
+/// A model's collision stream (descriptor `+0x34`), or `None` for a null pointer,
+/// with the number of bytes of backward region words before it. F576 reads those
+/// words backwards from the stream start in pairs (a distance word, which is zero
+/// at the end of the chain, then a direction and radius word), so the bytes from the
+/// zero word up to the stream start come first in the returned bytes. The stream has
+/// no length field, so it is walked as F582 reads it: entries of a type byte and a
+/// flag byte (two more bytes when the type has `0x20`), then by `type & 0xc0` a
+/// surface list, a terrain record (the `0xff` marker, six bytes, 16-byte records
+/// to a zero word and its two bytes), a hierarchical reference (four bytes) or a
+/// list, to a zero type byte.
 pub fn decode_model_collision(
     bytes: &[u8],
     table_rva: u32,
     index: u32,
-) -> Result<Option<Vec<u8>>, String> {
+) -> Result<Option<(usize, Vec<u8>)>, String> {
     let (section, descriptor_offset) = model_descriptor(bytes, table_rva, index)?;
     let pointer = dword(bytes, descriptor_offset + 0x34)?;
     if pointer == 0 {
@@ -782,7 +786,16 @@ pub fn decode_model_collision(
             return Err("Collision stream is implausibly long".to_owned());
         }
     }
-    Ok(Some(bytes[start..i].to_vec()))
+    // The backward chain: pairs of words before the stream until a zero distance.
+    let word = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+    let mut back = 2;
+    while word(start - back) != 0 {
+        back += 4;
+        if back > 0x100 || start < back {
+            return Err("Collision region chain is implausibly long".to_owned());
+        }
+    }
+    Ok(Some((back, bytes[start - back..i].to_vec())))
 }
 
 /// The original 12-bit colour to fixed low-palette map (`DATA_007770`, 4096 bytes).
