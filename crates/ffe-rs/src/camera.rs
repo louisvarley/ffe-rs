@@ -220,6 +220,9 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 
 /// The ship's own axes (right, up, forward) from the flight yaw and pitch.
 pub fn ship_axes(state: &Flight) -> [[f64; 3]; 3] {
+    if let Some(axes) = state.axes {
+        return axes;
+    }
     let (sy, cy) = state.yaw.sin_cos();
     let (sp, cp) = state.pitch.sin_cos();
     [

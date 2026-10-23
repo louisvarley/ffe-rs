@@ -32,6 +32,11 @@ pub struct Flight {
     /// from before it load with 0.
     #[serde(default)]
     pub thrust: f64,
+    /// The ship's full orientation (right, up, forward) when the original flight
+    /// model is running (it rolls, which `yaw` and `pitch` cannot say). Not saved:
+    /// a loaded game falls back to `yaw` and `pitch`.
+    #[serde(skip)]
+    pub axes: Option<[[f64; 3]; 3]>,
 }
 
 fn default_ship() -> u32 {
@@ -61,6 +66,7 @@ impl Default for Flight {
             docking_requested: false,
             ship: default_ship(),
             thrust: 0.0,
+            axes: None,
         }
     }
 }
@@ -94,8 +100,10 @@ impl Flight {
                 .position
                 .iter()
                 .any(|number| number.abs() > 1_000_000.0)
-            || self.velocity.iter().any(|number| number.abs() > 250.0)
-            || self.speed() > 250.0000001
+            // The prototype step caps itself at 250; the original flight model
+            // (key O) reaches a few thousand flight units per second.
+            || self.velocity.iter().any(|number| number.abs() > 5000.0)
+            || self.speed() > 5000.0000001
             || !(0.0..std::f64::consts::TAU).contains(&self.yaw)
             || self.pitch.abs() > 1.4
             || self.cargo > CARGO_CAPACITY
@@ -117,6 +125,9 @@ impl Flight {
     }
 
     pub fn forward(&self) -> [f64; 3] {
+        if let Some(axes) = self.axes {
+            return axes[2];
+        }
         [
             self.yaw.sin() * self.pitch.cos(),
             self.pitch.sin(),
@@ -230,6 +241,13 @@ impl Flight {
             self.position[axis] += self.velocity[axis] * STEP;
         }
         self.ticks = self.ticks.wrapping_add(1);
+        Ok(self.finish_step())
+    }
+
+    /// What follows a step of either flight model: the prototype boundary,
+    /// docking and the station safety reset. Returns the message when one fired.
+    pub fn finish_step(&mut self) -> Option<&'static str> {
+        let forward = self.forward();
         if self
             .position
             .iter()
@@ -239,7 +257,7 @@ impl Flight {
             self.position = [0.0, 0.0, -60.0];
             self.velocity = [0.0; 3];
             self.docking_requested = false;
-            return Ok(Some("Prototype boundary reached: returned to station."));
+            return Some("Prototype boundary reached: returned to station.");
         }
         let distance = self.distance();
         let facing = if distance > 0.0 {
@@ -257,18 +275,16 @@ impl Flight {
             self.position = [0.0, 0.0, -60.0];
             self.velocity = [0.0; 3];
             self.docking_requested = false;
-            return Ok(Some("Docked. B buys food, N sells; F5 saves."));
+            return Some("Docked. B buys food, N sells; F5 saves.");
         }
         if distance < 45.0 {
             self.position = [0.0, 0.0, -180.0];
             self.velocity = [0.0; 3];
             self.yaw = 0.0;
             self.pitch = 0.0;
-            return Ok(Some(
-                "Unsafe approach: station safety reset. Slow down and request docking.",
-            ));
+            return Some("Unsafe approach: station safety reset. Slow down and request docking.");
         }
-        Ok(None)
+        None
     }
 }
 

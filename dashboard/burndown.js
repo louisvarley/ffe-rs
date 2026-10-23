@@ -106,7 +106,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-1", title: "Object system and agent records (cstruct, gmstruct)", status: "todo" },
         { id: "flight-2", title: "Original thrust vector and ship limits (F598/F600)", status: "done", version: "v0.49d" },
         { id: "flight-3", title: "Physics: position and orientation update (cphys)", status: "done", version: "v0.49f" },
-        { id: "flight-4", title: "Flight integration decoupled from the frame; fixed 50 Hz step", status: "todo" },
+        { id: "flight-4", title: "Flight integration decoupled from the frame; fixed 50 Hz step", status: "in-progress", version: "v0.49h" },
         { id: "flight-5", title: "Original input processing, key accumulation and remapping", status: "in-progress", version: "v0.49g" },
         { id: "flight-6", title: "Time acceleration and its RNG consumption", status: "todo" },
         { id: "flight-7", title: "Collision detection and response (ccoll)", status: "todo" },
@@ -307,6 +307,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 85,
       note: "v0.49g: set-speed and heading input (F1037/F1038/F1121) ported and verified (4096 cases); input item in progress (key accumulation and remapping remain)."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 85,
+      note: "v0.49h: the original flight model is playable (key O): verified physics driven by real time and the original keys; frames of reference, collisions and docking rules remain."
     }
   ]
 };

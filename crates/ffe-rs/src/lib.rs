@@ -1,10 +1,12 @@
-//! Experimental mechanics only. Not a port or validation of JJFFE flight physics.
+//! Experimental mechanics, plus the original flight model (`original_flight`), which
+//! runs the verified free-flight physics from `ffe-core`.
 pub mod camera;
 pub mod flight;
 pub mod indexed;
 pub mod input;
 pub mod model_lab;
 pub mod model_viewer;
+pub mod original_flight;
 pub mod saves;
 pub mod screen;
 pub mod ships;

@@ -3,6 +3,7 @@ use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
+use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
 use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
@@ -160,6 +161,8 @@ fn run() -> Result<(), String> {
     let mut scenarios = false;
     let mut model_lab = None;
     let mut views = ViewState::default();
+    // The original flight model (key O); None runs the synthetic prototype flight.
+    let mut original: Option<OriginalFlight> = None;
     // When each external-view or turret key went down, for the original's
     // held-key ramp.
     let mut held_since: HashMap<Key, Instant> = HashMap::new();
@@ -346,6 +349,20 @@ fn run() -> Result<(), String> {
                     .as_ref()
                     .and_then(|scene| scene.ship_stats(state.ship))
                     .map_or(0, |stats| stats.gun_mounts);
+                if pressed(Key::O) && state.mode == ffe_rs::flight::Mode::Flight {
+                    if original.take().is_some() {
+                        state.axes = None;
+                        message = "Prototype flight model.".to_owned();
+                    } else {
+                        let stats = scene
+                            .as_ref()
+                            .and_then(|scene| scene.ship_stats(state.ship));
+                        original = Some(OriginalFlight::from_flight(&state, stats.as_ref()));
+                        message =
+                            "Original flight: Enter/Shift set speed; Z/A pitch, ,/. yaw, [ ] roll."
+                                .to_owned();
+                    }
+                }
                 if state.mode == ffe_rs::flight::Mode::Flight {
                     let mouse_down = window.get_mouse_down(MouseButton::Left);
                     // Client pixels against the client size: get_mouse_pos divides
@@ -395,7 +412,7 @@ fn run() -> Result<(), String> {
                     })
                 };
                 let elapsed_ms = (elapsed * 1000.0) as u32;
-                if views.mode.is_turret() {
+                if views.mode.is_turret() && original.is_none() {
                     // FUNC_001038: A/Z and comma/period aim the turret (the arrows
                     // too, in either control scheme); the ship holds its course.
                     let amount = |held| key_amount(elapsed_ms, held) as i16;
@@ -439,6 +456,11 @@ fn run() -> Result<(), String> {
                                 .map_or(0, |stats| stats.gun_mounts);
                             if views.mode.is_turret() && mounts <= 2 {
                                 views.mode = ViewMode::Front;
+                            }
+                            if original.is_some() {
+                                let stats = scene.as_ref().and_then(|scene| scene.ship_stats(ship));
+                                original =
+                                    Some(OriginalFlight::from_flight(&state, stats.as_ref()));
                             }
                             format!(
                                 "Ship: {} (model {ship}).",
@@ -543,12 +565,70 @@ fn run() -> Result<(), String> {
                     brake: held_controls.contains(&Key::X),
                 }
             };
-            accumulator += elapsed;
-            while accumulator >= STEP {
-                if let Some(text) = state.step(input)? {
-                    message = text.to_owned();
+            if let Some(model) = original.as_mut() {
+                let down = |keys: &[Key]| keys.iter().any(|key| held_controls.contains(key));
+                let keys = OriginalKeys {
+                    faster: down(&[Key::Enter]),
+                    slower: down(&[Key::LeftShift, Key::RightShift]),
+                    pitch_down: down(&[Key::Z]),
+                    pitch_up: down(&[Key::A]),
+                    left: down(&[Key::Comma]),
+                    right: down(&[Key::Period]),
+                    roll_left: down(&[Key::LeftBracket]),
+                    roll_right: down(&[Key::RightBracket]),
+                };
+                let view = match views.mode {
+                    ViewMode::TopTurret => 2,
+                    ViewMode::BottomTurret => 3,
+                    _ => 4,
+                };
+                model.set_view(view, [views.turret.yaw, views.turret.pitch]);
+                match model.step(elapsed, &keys) {
+                    Ok(()) => {
+                        model.apply(&mut state);
+                        let (view, turret) = model.view();
+                        if views.mode.is_turret() {
+                            views.mode = if view == 3 {
+                                ViewMode::BottomTurret
+                            } else {
+                                ViewMode::TopTurret
+                            };
+                            views.turret.yaw = turret[0];
+                            views.turret.pitch = turret[1];
+                        }
+                        if keys.faster || keys.slower {
+                            message = format!(
+                                "Set speed {:.0} m/s, speed {:.0} m/s.",
+                                model.set_speed_metres(),
+                                state.speed() * 9.7
+                            );
+                        }
+                        if let Some(text) = state.finish_step() {
+                            message = text.to_owned();
+                            original = (state.mode == ffe_rs::flight::Mode::Flight).then(|| {
+                                let stats = scene
+                                    .as_ref()
+                                    .and_then(|scene| scene.ship_stats(state.ship));
+                                OriginalFlight::from_flight(&state, stats.as_ref())
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("ORIGINAL FLIGHT ERROR: {error}");
+                        message = format!("ORIGINAL FLIGHT ERROR: {error}");
+                        original = None;
+                        state.axes = None;
+                    }
                 }
-                accumulator -= STEP;
+                accumulator = 0.0;
+            } else {
+                accumulator += elapsed;
+                while accumulator >= STEP {
+                    if let Some(text) = state.step(input)? {
+                        message = text.to_owned();
+                    }
+                    accumulator -= STEP;
+                }
             }
         } else {
             accumulator = 0.0;
@@ -564,6 +644,13 @@ fn run() -> Result<(), String> {
         // The original returns to the front view when docking (FUNC_001048).
         if state.mode == ffe_rs::flight::Mode::Docked {
             views.mode = ViewMode::Front;
+        }
+        // A new state (docking, a scenario, a load) ends the original flight model.
+        if original.is_some()
+            && (state.mode != ffe_rs::flight::Mode::Flight || state.axes.is_none())
+        {
+            original = None;
+            state.axes = None;
         }
         screen.draw(&state, views, scene.as_ref(), help, modern, &message);
         if let Some(viewer) = &model_viewer {

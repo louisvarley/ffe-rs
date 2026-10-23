@@ -108,3 +108,30 @@ notes: steering is key driven through `FUNC_CalcKeyInput` as well as the mouse.
 `--steer` runs the original F1037 on the player struct with synthetic keys,
 accumulators, mouse words and every view: 4096 compared, 0 mismatched (the first
 run exposed the roll low-byte quirk).
+
+## In the playable (key O)
+
+`ffe_rs::original_flight::OriginalFlight` runs the verified tick in the
+playable, opt-in so saves, docking and the safety reset keep working:
+
+- **Units.** Positions are the original's about-millimetre units, 9,700 per
+  flight unit (the scale the station model is drawn at); time is 49,700 tics per
+  second (the original's `ms * 0x3e2 / 20`); velocity units are 49,700 / 512 =
+  97.07 mm/s each (F1511). The set speed in metres per second is shown while
+  Enter or Shift is held.
+- **Controls.** The original's keys: Enter / Shift raise / lower the set speed
+  (F1037), Z / A pitch, `,` / `.` yaw, `[` / `]` roll (F1038). The mouse is not
+  wired (it drives the console). Arrow keys keep their external-camera job.
+- **State.** `from_flight` starts from the current position, velocity and
+  orientation with the set speed at the current speed along the nose (F1018),
+  the ship's limits and gun mounts from its statistics block (the Eagle's when
+  the cache has none). `apply` writes position, velocity, the full orientation
+  (`Flight::axes`, not saved), `yaw`/`pitch` for saves and the forward thrust
+  for the engine glows back. `Flight::finish_step` then runs the docking and
+  safety checks, and a station reset restarts the model from the new state.
+- **Turrets.** In a turret view the same keys turn the turret (F1038), and the
+  view and angles are copied back to the camera.
+- **Not yet.** Frames of reference, gravity and planets (so the original's
+  station rotation frame is absent: the station is drawn at its own spin but
+  the ship does not co-rotate), the engines-off mode and its keys, collisions
+  and the original's docking rules.

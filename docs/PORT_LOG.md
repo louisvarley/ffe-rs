@@ -2135,3 +2135,14 @@ turret in a turret view) and F1121 (the set-speed step) are ported in
 mismatched). The comparison found an original quirk, now kept: with mouse roll
 on, the roll's low byte is replaced by the view mode. Notes:
 `docs/notes/player.md`.
+
+## Original flight in the playable (v0.49h)
+
+Key O switches the playable to the original flight model
+(`ffe_rs::original_flight`): the verified tick (set speed, original steering
+keys, thrust limits from the ship's statistics, velocity and position, full
+orientation including roll) with the result copied back into `Flight` for the
+views, engine glows, docking checks and the safety reset. Saves, docking and the
+prototype model are unchanged; the save validator's speed bound rose from 250 to
+5,000 flight units per second for the original ship's real acceleration. Notes:
+`docs/notes/player.md`.

@@ -558,6 +558,7 @@ impl Screen {
                 "F5 save snapshot; Shift+F5 load newest snapshot.",
                 "F2 scenarios: 1 Docked / 2 Approach / 3 Free Flight",
                 "Dock: range <80, speed <20, aim at station.",
+                "O original flight: Enter/Shift speed, Z/A , . [ ] steer",
                 "No audio/combat/hyperspace/old saves/HD packs yet.",
                 "H closes help. F2 opens playtest scenarios.",
             ]
