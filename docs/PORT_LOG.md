@@ -4,6 +4,26 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Surface plumbing: entries, dispatch and queued words (v0.48e)
+
+Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.
+
+- **F1823** builds a small hash map from the 16-byte entries (key word +0,
+  FindMSB normalisation, `>> 11` bucket, two 16-byte records per bucket). It is
+  plumbing; the port should build the map from `Surface::entries` instead of the
+  legacy arena.
+- **F1833** is a mode dispatch: mode 0 (always used by F1874) selects the flat
+  emitters F1715/F1716/F1847, mode 1 the textured F1831/F1832/F1848, then calls
+  the table entry `DATA_007843 + 48*mode`.
+- **Queued words.** The probe records F1876's order-queue additions (events
+  60/61). In the synthetic station context they are always empty: these surfaces
+  are planet-scale (axis vectors ~1e8 units) and the instance sits at z 2000, so
+  the patch is clipped. Exercising F1876 needs a distance-appropriate instance.
+- The whole-table oracle is unchanged (448 models, 0 mismatched, trace
+  `4431b861…`); events 60/61 are documentation only and excluded from it, and
+  model 118's tamper now alters a surface event rather than dropping a
+  documentation one.
+
 ## 2026-10-23 — Surface helper ports (v0.48d)
 
 Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.

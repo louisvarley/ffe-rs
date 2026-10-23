@@ -94,6 +94,28 @@ F1816/F1817/F1820 are **arena allocators** (a 1499-block 0x48 arena and a
 They should be replaced by Rust collections in the port rather than reproduced;
 the legacy allocation failure path is not something the renderer needs.
 
+## Entries and mode dispatch (read, not ported)
+
+- **F1823** files the 16-byte entries into a small hash map: each entry's word +0
+  is a key, FindMSB normalises it, and its successive `>> 11` / `<< 2 & 0x1fff`
+  slices select a bucket. A bucket holds up to two 16-byte records (the entry's
+  word +2 and its six payload words). It is lookup plumbing, not geometry; the
+  port should build an equivalent map from `Surface::entries` rather than the
+  legacy arena.
+- **F1833** is a mode dispatch: argument 3 selects either the flat emitters
+  (F1715/F1716, plus F1847) or the textured ones (F1831/F1832, plus F1848),
+  stores them in `DATA_009280..9282`, scales a constant `0x1dcd6500` by the
+  instance's `+0x130`, and calls the table entry `DATA_007843 + 48*mode`.
+  F1874 always passes mode 0.
+- **F1876's queued words.** The probe now records, as events 60 (start, count)
+  and 61 (three words per event), the order-queue words F1876 appends. In the
+  synthetic `--station-model` context every surface here queues **nothing**:
+  their axis vectors are ~1e8 record units while the instance sits at z 2000,
+  so the patch is clipped. These are planet-scale surfaces (models 113-148,
+  445/447/449), and exercising F1876 needs a distance-appropriate instance.
+  Events 60/61 are documentation only (they contain build addresses) and are
+  excluded from the numeric oracle.
+
 ## F1876 (not ported)
 
 F1876 is about **1,580 lines** of assembly with its own helper set. From the

@@ -76,6 +76,10 @@ def main():
                 row[field] = ("0" if row[field][0] != "0" else "1") + row[field][1:]
             elif field == "faces":
                 row[field] += 1
+            elif model == 118:
+                # Its last events are F1876's documentation-only queue words
+                # (60/61), which the comparison excludes; alter a surface event.
+                row[field][0][3] ^= 1
             else:
                 row[field] = row[field][:-1]
             trace.write_bytes(b"".join(json.dumps(r).encode() + b"\n" for r in altered))

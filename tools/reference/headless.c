@@ -357,8 +357,20 @@ long trace_surface(long output, long compare, long object, long instance, long e
     nested_event(52,(unsigned long)v[0],(unsigned long)v[1],(unsigned long)v[2]);
     nested_event(53,(unsigned long)v[3],(unsigned long)v[4],(unsigned long)v[5]);
     nested_event(54,(unsigned long)v[6],(unsigned long)v[7],(unsigned long)v[8]);
-    return ref_surface(output,compare,object,instance,entries,origin,vectors,
-                       word6,word10,word8,word0,flag);
+    {
+        /* Also record what F1876 queues: the words the order cursor gains during
+           the call, in order. Function pointers in them are build addresses, so
+           this is porting documentation, not a numeric oracle. */
+        unsigned long *before=ref_order_cursor, i, words, parts;
+        long result=ref_surface(output,compare,object,instance,entries,origin,vectors,
+                                word6,word10,word8,word0,flag);
+        words=(unsigned long)(ref_order_cursor-before);
+        nested_event(60,(unsigned long)(before-ref_order_base),words,0);
+        parts=words/3+(words%3!=0);
+        for(i=0;i<parts && i<100;++i)
+            nested_event(61,before[3*i],3*i+1<words?before[3*i+1]:0,3*i+2<words?before[3*i+2]:0);
+        return result;
+    }
 }
 long *trace_text_vertex(void *instance, long index) { nested_event(1,(unsigned char)index,0,0); return nested_station ? ref_view_vertex(instance,(signed char)index) : nested_vertex; }
 long *trace_text_font(long selector) { nested_event(2,(unsigned long)selector,0,0); return nested_descriptor; }

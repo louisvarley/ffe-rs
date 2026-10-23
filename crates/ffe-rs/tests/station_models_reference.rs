@@ -289,11 +289,13 @@ fn executed_reference_station_models() {
         // miss. The probe replaces the face handlers (which project in Rust), and
         // splines, labels, thrusters and polygon segments project too, so the cache
         // state at each lookup is not predicted here; compare every other event.
+        // 60/61 are F1876's queued words for porting documentation: their entry
+        // pointers are build addresses, so they cannot be compared numerically.
         let lookups = |events: &[[u32; 4]]| -> Vec<[u32; 4]> {
             events
                 .iter()
                 .copied()
-                .filter(|event| !matches!(event[0], 1 | 7))
+                .filter(|event| !matches!(event[0], 1 | 7 | 60 | 61))
                 .collect()
         };
         let (ours, mut theirs) = (lookups(&nested), lookups(&original.nested));
