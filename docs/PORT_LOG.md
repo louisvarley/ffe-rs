@@ -2118,3 +2118,11 @@ verified by the new `--advance` mode in `verify-physics.py` (4096 cases, 0
 mismatched). With F601, F585 and F1041 this completes the physics core of one
 free-flight step; the input layer (F1037/F1038), frames of reference and the
 unit calibration for the playable still remain.
+
+## A whole free-flight tick (v0.49f)
+
+`Player::step` composes F1041, F601/F602 and F1512 in the order F1021 runs
+them, and `--flight-step` compares it with the original chain over 4096
+synthetic players (orientation, thrust, velocity and 64-bit position all
+match). The physics core of free flight is now verified end to end; the unit
+calibration for the playable, the input layer and frames of reference are next.

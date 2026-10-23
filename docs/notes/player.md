@@ -56,3 +56,18 @@ an empty trace are rejected.
 F603 (gravity), F606/F604/F605 (frames of reference), F609 (auto-roll), F1037/
 F1038 (the set-speed and heading input), F1046 (position, smoke, engine noise)
 and F1033 (collision and altitude) are the rest of the free-flight chain.
+
+## One whole tick: `Player::step`
+
+F1021 (free flight) runs F1037, F1041, then F602 (engines off) or F601 for the
+velocity over the low dword of the time (`DATA_008868`) and, through F1046 and
+F1045, F1512 for the position over the 64-bit time (`DATA_008869:DATA_008868`).
+`Player::step(keys, time)` is F1041 + that velocity update + `Motion::advance`.
+The `--flight-step` mode runs the original chain on the player cases plus a
+64-bit time (small to above 2^40) and a starting position: 4096 compared, 0
+mismatched, over the orientation, drift counter, rates, thrust words, caps,
+frame countdown, scanner word, velocity and 64-bit position.
+
+Still outside it: the set-speed and heading input (F1037/F1038), F1046's smoke
+and engine noise, the collision and altitude test (F1033), and frames of
+reference, gravity and the planet auto-roll.

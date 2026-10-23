@@ -2134,6 +2134,102 @@ static int advance_vectors(void)
     return 0;
 }
 
+static int flight_step_vectors(void)
+{
+    static unsigned char object[0x400];
+    static unsigned char list[0x20000];
+    unsigned char before[0x400];
+    unsigned long n,i,model,time_low,time_high;
+    long long time64;
+    unsigned long long start;
+    static const int key_offsets[10]={0x1c,0x36,0x48,0x4c,0x4b,0x4d,0x4f,0x51,0x49,0x47};
+    int pressed[10];
+    fprintf(stderr,"JJFFE flight-step-v1: one free-flight tick of the original in free space: F1041, then F602 (engines off) or F601 for the velocity over the low time dword, then F1512 for the position over the 64-bit time (DATA_008869:DATA_008868); the object before and after.\n");
+    texture_rng=0x7a2e1c3bUL;
+    for(n=0;n<4096;++n) {
+        memset(object,0,sizeof(object));memset(list,0,sizeof(list));
+        ref_pl_object_list=list;
+        if(n&1) {
+            for(i=0;i<3;++i) put32(object,12*i+4*i,0x7fffffffL-texture_random(0,100000));
+            for(i=0;i<9;++i) if(i%4) put32(object,4*i,(long)texture_random(-3000000,3000000));
+        } else for(i=0;i<9;++i) put32(object,4*i,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)));
+        object[0x24]=(unsigned char)(signed char)texture_random(-2,0x40);
+        for(i=0;i<3;++i) {
+            short rate,lim;
+            switch(texture_random(0,3)) {
+            case 0: rate=0; break;
+            case 1: rate=(short)texture_random(-14,14); break;
+            default: rate=(short)texture_random(-4000,4000); break;
+            }
+            memcpy(object+0xb0+2*i,&rate,2);
+            lim=(short)texture_random(0,(n&16)?32767:6000); memcpy(object + 0xbc + 4*i,&lim,2);
+            lim=(short)-texture_random(0,(n&32)?32767:6000); memcpy(object + 0xbe + 4*i,&lim,2);
+            put32(object,0x8c+4*i,(long)texture_random(-3000000,3000000));
+            ref_pl_combat_velocity[i]=(long)texture_random(-3000000,3000000);
+        }
+        model=(unsigned long)texture_random(0,0x80);
+        memcpy(object+0x82,&model,4);
+        object[0x86]=(unsigned char)texture_random(0,3);
+        object[0x14d]=(unsigned char)(signed char)texture_random(-1,0xd);
+        ref_player_craft=(unsigned long)texture_random(0,3);
+        ref_scanner=(unsigned short)texture_random(0,0xffff);
+        ref_pl_frame_tics=(unsigned long)texture_random(0,(n&64)?0x80000:0x4000);
+        ref_pl_altitude=0x2625a01UL+(unsigned long)texture_random(0,0x7fffffff-0x2625a01);
+        ref_pl_mode=(unsigned char)(texture_random(0,5)==0?0x24:0);
+        ref_pl_flags=(unsigned char)texture_random(0,1);
+        ref_pl_combat=(unsigned char)(texture_random(0,1)?2:0);
+        switch(texture_random(0,3)) {
+        case 0: ref_pl_set_speed=0; break;
+        case 1: ref_pl_set_speed=(unsigned long)texture_random(-5000,5000); break;
+        case 2: ref_pl_set_speed=(unsigned long)texture_random(-3000000,3000000); break;
+        default: ref_pl_set_speed=(unsigned long)texture_random(-100000000,100000000); break;
+        }
+        memset(ref_pl_keys,0x80,sizeof(ref_pl_keys));
+        for(i=0;i<10;++i) {pressed[i]=texture_random(0,3)==0;if(pressed[i]) ref_pl_keys[key_offsets[i]]=0;}
+        switch(texture_random(0,3)) {
+        case 0: time64=(long long)texture_random(0,2000); break;
+        case 1: time64=(long long)texture_random(0,100000); break;
+        case 2: time64=(long long)texture_random(0,0x7fffffff); break;
+        default: time64=((long long)texture_random(0,0xff)<<32)|(long long)texture_random(0,0x7fffffff); break;
+        }
+        time_low=(unsigned long)(time64&0xffffffffLL);time_high=(unsigned long)(time64>>32);
+        for(i=0;i<3;++i) {
+            start=((unsigned long long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff))<<16)^(unsigned long long)texture_random(0,0xffff);
+            memcpy(object + 0x3e + 8*i,&start,8);
+        }
+        memcpy(before,object,sizeof(before));
+        {
+            unsigned long player=ref_player_craft; unsigned short scanner=ref_scanner;
+            ref_player_orient(object);
+            if(ref_pl_flags&1) ref_accelerate_uncapped(object,time_low); else ref_accelerate(object,time_low);
+            ref_advance(object,time_high,time_low);
+            printf("{\"case\":%lu,\"time\":%lld,\"position\":[%lld,%lld,%lld],\"matrix\":[",n,time64,get64(before,0x3e),get64(before,0x46),get64(before,0x4e));
+            for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(before,4*i));
+            printf("],\"drift\":%d,\"rate\":[",(int)(signed char)before[0x24]);
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(before+0xb0+2*i));
+            printf("],\"limits\":[");
+            for(i=0;i<3;++i) printf("%s%d,%d",i?",":"",*(short *)(before + 0xbc + 4*i),*(short *)(before + 0xbe + 4*i));
+            printf("],\"velocity\":[");
+            for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(before,0x8c+4*i));
+            printf("],\"model\":%lu,\"craft\":%u,\"player\":%lu,\"scanner\":%u,\"counter\":%d,\"tics\":%lu,\"altitude\":%ld,\"mode\":%u,\"flags\":%u,\"combat\":%u,\"combat_velocity\":[%ld,%ld,%ld],\"set_speed\":%ld,\"keys\":[",
+                   model,before[0x86],player,scanner,(int)(signed char)before[0x14d],ref_pl_frame_tics,(long)ref_pl_altitude,ref_pl_mode,ref_pl_flags,ref_pl_combat,
+                   ref_pl_combat_velocity[0],ref_pl_combat_velocity[1],ref_pl_combat_velocity[2],(long)ref_pl_set_speed);
+            for(i=0;i<10;++i) printf("%s%d",i?",":"",pressed[i]);
+            printf("],\"after\":{\"matrix\":[");
+            for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(object,4*i));
+            printf("],\"drift\":%d,\"rate\":[",(int)(signed char)object[0x24]);
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(object+0xb0+2*i));
+            printf("],\"thrust\":[");
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(object+0xb6+2*i));
+            printf("],\"cap\":[");
+            for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(object,0xf2+4*i));
+            printf("],\"counter\":%d,\"scanner\":%u,\"velocity\":[%ld,%ld,%ld],\"position\":[%lld,%lld,%lld]}}\n",(int)(signed char)object[0x14d],ref_scanner,get32(object,0x8c),get32(object,0x90),get32(object,0x94),get64(object,0x3e),get64(object,0x46),get64(object,0x4e));
+        }
+    }
+    if (fflush(stdout)) fail("cannot flush flight-step vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
 static unsigned long texture_faces[1024][48];
 static void texture_face_begin(void)
@@ -2959,6 +3055,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--orient")) return orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--player-orient")) return player_orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--advance")) return advance_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--flight-step")) return flight_step_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

@@ -9,7 +9,8 @@ are compared. --player-orient: F1041 (the player's free-flight orientation and
 thrust request, with F607, F1043 and F599) in free space; the orientation, rates,
 thrust words and caps are compared. --advance: F1512/F1511 (velocity over a
 64-bit time added to the 64-bit position); the position after is compared. Needs
-no cache.
+no cache. --flight-step: one whole free-flight tick (F1041, F601/F602 and F1512 in
+the order F1021 runs them) on the player cases with a 64-bit time and position.
 """
 import argparse
 import hashlib
@@ -35,13 +36,18 @@ SCENARIOS = [
       "after"]),  # (altitude is only a guard, so it is not tampered)
     ("advance", "--advance", b"JJFFE advance-v1", "FFE_ADVANCE_VECTORS",
      "executed_reference_advance", ["time", "position", "velocity", "after"]),
+    ("step", "--flight-step", b"JJFFE flight-step-v1", "FFE_STEP_VECTORS",
+     "executed_reference_flight_step",
+     ["time", "position", "matrix", "drift", "rate", "limits", "velocity", "model", "craft",
+      "player", "scanner", "counter", "tics", "mode", "flags", "combat", "combat_velocity",
+      "set_speed", "keys", "after"]),
 ]
 
 
 def run(reference, flag, tag, directory):
     result = subprocess.run([str(reference), flag], cwd=directory,
                             capture_output=True, timeout=60)
-    if result.returncode or tag not in result.stderr or len(result.stdout) > 1 << 25:
+    if result.returncode or tag not in result.stderr or len(result.stdout) > 1 << 26:
         raise RuntimeError(f"{flag} failed or wrong/unbounded output")
     return result.stdout
 
@@ -63,7 +69,7 @@ def alter(row, field):
         row[field] = value ^ 2
     elif isinstance(value, list):
         # Only a matrix coordinate's high 16 bits matter.
-        step = 0x10000 if field == "matrix" else 1
+        step = {"matrix": 0x10000, "combat_velocity": 300000}.get(field, 1)
         row[field] = [v + step for v in value]
     elif field == "time":
         row[field] = value + (1 << 20)
@@ -121,7 +127,7 @@ def main():
                 "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
             }
     print(json.dumps({
-        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1",
+        "scenario": "jjffe-accelerate-v1 + jjffe-orient-v1 + jjffe-player-orient-v1 + jjffe-advance-v1 + jjffe-flight-step-v1",
         "repeat_matches": True,
         "empty_traces_rejected": True,
         **summary,

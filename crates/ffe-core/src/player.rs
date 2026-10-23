@@ -1,5 +1,7 @@
 //! The player's free-flight update, ported from `ffe.asm` and `cplayer.txt`:
-//! F1041 (orientation, thrust request) with F1043 (engines-off thrust). This
+//! F1041 (orientation, thrust request) with F1043 (engines-off thrust), and the
+//! full free-flight tick F1021 makes of it: velocity (F601/F602) and position
+//! (F1512). This
 //! covers flight in free space: with no parent frame of reference (F606) and
 //! far from any planet (F603's gravity, F609's auto-roll) those steps do
 //! nothing, and anything that would need them is reported as an error rather
@@ -146,6 +148,21 @@ impl Player {
             self.motion.set_speed_request(self.set_speed)
         };
         self.motion.thrust = clamp(&self.limits, request).words.map(|w| w as i16);
+        Ok(())
+    }
+
+    /// One free-flight tick over the 64-bit `time` (`DATA_008869:DATA_008868`):
+    /// F1041, then the velocity (F602 with the engines off, F601 otherwise, over
+    /// the low dword) and the position (F1512). The same limits as
+    /// [`Player::orient_and_thrust`] apply.
+    pub fn step(&mut self, keys: &ThrusterKeys, time: i64) -> Result<(), String> {
+        self.orient_and_thrust(keys)?;
+        if self.flags & 1 != 0 {
+            self.motion.accelerate_uncapped(time as u32);
+        } else {
+            self.motion.accelerate(time as u32);
+        }
+        self.motion.advance(time);
         Ok(())
     }
 }
