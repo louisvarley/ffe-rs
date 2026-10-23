@@ -192,9 +192,9 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 ## Next milestone: v0.48 "Every model fully drawn"
 
-**Progress.** Tracked in `dashboard/`: 12 v0.48 items (8 left on 2026-10-23)
-inside the whole-port backlog (38 items, 34 left). Keep it current with every
-progress commit.
+**Progress.** Tracked in `dashboard/`: the burndown now covers the whole
+project from the first commit to a finished like-for-like port (130 items, 42
+done on 2026-10-23). Keep it current with every progress commit.
 
 **Goal.** The F6 viewer and the flight view draw every primitive the executor
 queues, with the original's own rasterisers, verified at the pixel level. Today
