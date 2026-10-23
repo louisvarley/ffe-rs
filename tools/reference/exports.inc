@@ -95,6 +95,10 @@ GLOBAL _ref_pl_combat_velocity
 GLOBAL _ref_pl_keys
 GLOBAL _ref_player_orient
 GLOBAL _ref_advance
+GLOBAL _ref_gravity
+GLOBAL _ref_gravity_x
+GLOBAL _ref_gravity_y
+GLOBAL _ref_gravity_z
 GLOBAL _ref_st_active
 GLOBAL _ref_st_accum
 GLOBAL _ref_st_keys_on
@@ -207,6 +211,10 @@ _ref_pl_combat_velocity equ DATA_008839
 _ref_pl_keys equ DATA_007691
 _ref_player_orient equ FUNC_001041
 _ref_advance equ FUNC_001512
+_ref_gravity equ FUNC_000603
+_ref_gravity_x equ DATA_008708
+_ref_gravity_y equ DATA_008709
+_ref_gravity_z equ DATA_008710
 _ref_st_active equ DATA_008630
 _ref_st_accum equ DATA_KeyAccumTable
 _ref_st_keys_on equ DATA_007706

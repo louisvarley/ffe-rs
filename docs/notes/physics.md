@@ -95,3 +95,38 @@ velocity (`+0x8c`) to F1511:
 
 `--advance` runs the original on 4096 synthetic positions and velocities over
 small, large, huge and negative times: 4096 compared, 0 mismatched.
+
+## Gravity: F603
+
+F603(obj, list, time) pulls an object toward its parent body (the parent byte
+`+0x56` indexes the object list through F1532: `index * 0x152 + list + 0x74`).
+It returns at once when the parent byte is zero or the parent's word `+0xa4` is
+zero; that dword is an ffp number (mantissa word, exponent word).
+
+1. The relative position (the three 64-bit coordinates) is cut to 13 bits by
+   F1658: shift right arithmetically by `msb - 13` if that is positive, and
+   remember the shift as the exponent (zero otherwise). The low dwords are left
+   in `DATA_008708..DATA_008710` and used as the vector.
+2. `length = F1466(vector)`; mantissa = its low word, exponent = the shift;
+   F1496 normalises (shift left until bit 14, decrementing the exponent). A zero
+   mantissa returns (the globals are already written).
+3. The cube: `s4 = F1482(s, s)` (exponents add, mantissas `(a*b) >> 15`), then
+   mantissa `(s.m * s4.m) >> 15` with **`s4`'s exponent** (the original keeps
+   the square's exponent here; ported as is), normalised.
+4. `pull = F1483(mass, cube)`: zero divisor gives mantissa 0x7fff, exponent
+   0x7f; otherwise the exponent subtracts and the 16-bit quotient
+   `(a << 14) / b` is doubled unless its magnitude reached 0x4000 (then the
+   exponent grows by one).
+5. The time is halved until it fits +-0x7fff, adding one to the exponent per
+   halving. `scale = -((pull.m * time) >> 15)`; each vector coordinate times
+   `scale` (32-bit wrapping).
+6. Exponent > 0: subtract 16, shift the vector right by the magnitude if that
+   is negative, and add it to the velocity. Exponent <= -0x20: nothing.
+   Otherwise shift right by the negated exponent and add through the fraction
+   words (`fraction += v`, `velocity += fraction_sum >> 16`), as F601 does.
+
+`--gravity` runs the original on 4096 synthetic objects (no parent, no mass,
+positions from zero to 2^62, times of both signs and zero): 4096 compared, 1818
+of them changed the velocity, 0 mismatched; every tampered field and an empty
+trace are rejected.
+

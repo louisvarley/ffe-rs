@@ -137,6 +137,43 @@ fn signed_multiply(a: u32, b: i32) -> i32 {
     }
 }
 
+/// F1496: normalise an ffp number (mantissa, exponent): shift the mantissa left,
+/// decrementing the exponent, until bit 14 is set. A zero mantissa is returned
+/// unchanged.
+fn normalise_ffp(mantissa: u16, exponent: u16) -> (u16, u16) {
+    let (mut mantissa, mut exponent) = (mantissa, exponent);
+    if mantissa == 0 {
+        return (mantissa, exponent);
+    }
+    while mantissa & 0x4000 == 0 {
+        mantissa <<= 1;
+        exponent = exponent.wrapping_sub(1);
+    }
+    (mantissa, exponent)
+}
+
+/// F1482: ffp multiply: exponents add, mantissas multiply `>> 15`.
+fn multiply_ffp(a: (u16, u16), b: (u16, u16)) -> (u16, u16) {
+    let product = (i32::from(a.0 as i16) * i32::from(b.0 as i16)) >> 15;
+    (product as u16, a.1.wrapping_add(b.1))
+}
+
+/// F1483: ffp divide. A zero divisor gives the largest number (mantissa
+/// 0x7fff, exponent 0x7f); otherwise the exponents subtract and the mantissa
+/// quotient `(a << 14) / b` is doubled unless it reached 0x4000.
+fn divide_ffp(a: (u16, u16), b: (u16, u16)) -> (u16, u16) {
+    if b.0 == 0 {
+        return (0x7fff, 0x7f);
+    }
+    let exponent = a.1.wrapping_sub(b.1);
+    let quotient = ((i32::from(a.0 as i16) << 14) / i32::from(b.0 as i16)) as i16;
+    if i32::from(quotient).abs() >= 0x4000 {
+        (quotient as u16, exponent.wrapping_add(1))
+    } else {
+        ((quotient as u16) << 1, exponent)
+    }
+}
+
 /// A 64-bit value as the original's pair of dwords (`high`, `low`).
 fn split64(value: i64) -> (u32, u32) {
     ((value >> 32) as u32, value as u32)
@@ -296,6 +333,85 @@ impl Motion {
                 };
             }
         }
+    }
+
+    /// F603: the pull of the parent body on an object in its frame of
+    /// reference. `mass` is the parent's dword at `+0xa4` (an ffp number: a
+    /// 16-bit mantissa and exponent; a zero mantissa means no gravity) and
+    /// `time` the signed time step. The position relative to the parent is cut
+    /// to 13 bits (F1658, remembering the shift), its length found (F1466)
+    /// and cubed in ffp (F1482), the mass divided by that (F1483), and the
+    /// result times the time and the negated relative position is added to the
+    /// velocity: directly when large, through the fraction accumulators when
+    /// small. Returns the truncated relative position the original leaves in
+    /// `DATA_008708..DATA_008710`, or `None` when it returns early.
+    pub fn gravity(&mut self, mass: u32, time: i32) -> Option<[i32; 3]> {
+        if self.parent == 0 || mass as u16 == 0 {
+            return None;
+        }
+        let msb = crate::model_animation::vector_msb(self.position);
+        let cut = msb as i32 - 0xd;
+        let (relative, exponent) = if cut > 0 {
+            (
+                crate::model_animation::shift_vector(self.position, cut as u32),
+                cut,
+            )
+        } else {
+            (self.position, 0)
+        };
+        let relative = relative.map(|v| v as i32);
+        let published = relative;
+        let length = crate::model_math::length(relative);
+        let near = normalise_ffp(length as u16, exponent as u16);
+        if near.0 == 0 {
+            return Some(published);
+        }
+        let square = multiply_ffp(near, near);
+        let cube = (
+            ((i32::from(near.0) * i32::from(square.0)) >> 15) as u16,
+            square.1,
+        );
+        let cube = normalise_ffp(cube.0, cube.1);
+        let pull = divide_ffp(((mass & 0xffff) as u16, (mass >> 16) as u16), cube);
+        let (pull_mantissa, mut pull_exponent) = (pull.0, pull.1 as i16);
+        let mut time = time;
+        if time < 0 {
+            while time < -0x7fff {
+                pull_exponent = pull_exponent.wrapping_add(1);
+                time >>= 1;
+            }
+        } else {
+            while time > 0x7fff {
+                pull_exponent = pull_exponent.wrapping_add(1);
+                time >>= 1;
+            }
+        }
+        let scale = (i32::from(pull_mantissa as i16).wrapping_mul(time) >> 15).wrapping_neg();
+        let mut vector = relative.map(|v| v.wrapping_mul(scale));
+        if pull_exponent > 0 {
+            let remaining = pull_exponent.wrapping_sub(0x10);
+            if remaining < 0 {
+                let count = -i32::from(remaining);
+                vector = vector.map(|v| v >> (count & 31));
+            }
+            for (velocity, delta) in self.velocity.iter_mut().zip(vector) {
+                *velocity = velocity.wrapping_add(delta);
+            }
+            return Some(published);
+        }
+        if pull_exponent <= -0x20 {
+            return Some(published);
+        }
+        if pull_exponent != 0 {
+            let count = -i32::from(pull_exponent);
+            vector = vector.map(|v| v >> (count & 31));
+        }
+        for axis in 0..3 {
+            let total = i32::from(self.fraction[axis]).wrapping_add(vector[axis]);
+            self.fraction[axis] = total as u16;
+            self.velocity[axis] = self.velocity[axis].wrapping_add(total >> 16);
+        }
+        Some(published)
     }
 
     /// F601: add the thrust over `tics` to the velocity. `tics >> 3` is cut to

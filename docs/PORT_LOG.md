@@ -4,6 +4,21 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Gravity F603 ported and verified (v0.49j)
+
+Next step toward flying near a planet. Notes: `docs/notes/physics.md`.
+
+- `Motion::gravity` ports F603 with the ffp helpers F1496/F1482/F1483 and the
+  F1658 truncation (F1657/F1660 and F1466 already existed). 4096 oracle cases,
+  1818 of which move the velocity, match exactly, including the truncated
+  vector left in `DATA_008708..DATA_008710`.
+- The cube step keeps the square's exponent for the cubed number, as the
+  original does; the divide by the cube is then what makes the units work out.
+- Still missing for planet flight: the frame-of-reference transfers (F604/F605/
+  F606, F590), auto-roll F609, collisions F569/F1033 and the surface drawing.
+
+---
+
 ## 2026-10-23 — Surface plumbing: entries, dispatch and queued words (v0.48e)
 
 Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.

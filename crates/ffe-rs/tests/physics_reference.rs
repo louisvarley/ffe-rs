@@ -12,6 +12,74 @@ struct After {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct GravityAfter {
+    velocity: [i32; 3],
+    fraction: [u16; 3],
+    truncated: [i32; 3],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Gravity {
+    case: usize,
+    parent: u8,
+    mass: [i16; 2],
+    time: i32,
+    position: [i64; 3],
+    velocity: [i32; 3],
+    fraction: [u16; 3],
+    after: GravityAfter,
+}
+
+/// Original F603 (`--gravity`): 4096 synthetic objects with a parent (or none),
+/// an ffp mass (or none), positions of every magnitude and time steps of both
+/// signs. The velocity, fraction words and the truncated position left in
+/// `DATA_008708..DATA_008710` (untouched on an early return) must match.
+#[test]
+#[ignore = "Local-only original physics; use tools/reference/verify-physics.py"]
+fn executed_reference_gravity() {
+    const UNTOUCHED: i32 = 0x5a5a_5a5a;
+    let input = std::fs::read_to_string(std::env::var_os("FFE_GRAVITY_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 8 << 20);
+    let (mut cases, mut pulled) = (0, 0);
+    for line in input.lines() {
+        let case: Gravity = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        let mut motion = Motion {
+            parent: case.parent,
+            position: case.position,
+            velocity: case.velocity,
+            fraction: case.fraction,
+            ..Motion::default()
+        };
+        let mass = u32::from(case.mass[0] as u16) | u32::from(case.mass[1] as u16) << 16;
+        let truncated = motion.gravity(mass, case.time);
+        assert_eq!(
+            (
+                motion.velocity,
+                motion.fraction,
+                truncated.unwrap_or([UNTOUCHED; 3])
+            ),
+            (
+                case.after.velocity,
+                case.after.fraction,
+                case.after.truncated
+            ),
+            "gravity case {} mass {:?} time {}",
+            case.case,
+            case.mass,
+            case.time
+        );
+        pulled += usize::from(motion.velocity != case.velocity || motion.fraction != case.fraction);
+        cases += 1;
+    }
+    assert_eq!(cases, 4096);
+    assert!(pulled > 1000, "too few cases moved the velocity: {pulled}");
+    eprintln!("compared {cases} gravity cases ({pulled} changed the velocity)");
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Accelerate {
     case: usize,
     function: u32,

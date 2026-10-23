@@ -318,6 +318,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 85,
       note: "v0.49i: the console's time acceleration meter and screen buttons work (scope +1 item, done); time acceleration scales the original flight model."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 85,
+      note: "v0.49j: gravity F603 and the ffp helpers ported and verified (4096 cases); frames of reference, auto-roll and collisions remain."
     }
   ]
 };

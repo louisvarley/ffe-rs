@@ -1919,6 +1919,70 @@ static int accelerate_vectors(void)
     return 0;
 }
 
+/* Gravity. gravity drives the original F603 (the parent body's pull on an
+   object in its frame of reference: relative position cut to 13 bits, ffp
+   length cubed, the mass divided by it, times the time step) on a zeroed object
+   whose parent byte (+0x56) indexes a synthetic object list holding the
+   parent's mass dword (+0xa4), over random positions, masses and time steps. */
+extern void ref_gravity(unsigned char *object,unsigned char *list,long time);
+extern unsigned long ref_gravity_x, ref_gravity_y, ref_gravity_z;
+static long long get64(const unsigned char *object,unsigned long offset);
+static int gravity_vectors(void)
+{
+    static unsigned char object[0x200], list[0x800];
+    unsigned long n,i;
+    long time;
+    fprintf(stderr,"JJFFE gravity-v1: original F603 on a zeroed object with a parent byte (+0x56) into a synthetic object list holding the parent's ffp mass dword (+0xa4), a 64-bit relative position (+0x3e), velocity (+0x8c) and fraction words (+0xec) over positions of every magnitude and time steps of both signs; the velocity dwords, fraction words and the truncated position left in DATA_008708..DATA_008710 after.\n");
+    texture_rng=0x2545f491UL;
+    for(n=0;n<4096;++n) {
+        unsigned long long coordinate;
+        unsigned int shift,parent;
+        long long position[3];
+        short mantissa,exponent;
+        memset(object,0,sizeof(object));
+        memset(list,0,sizeof(list));
+        parent=(n%16==0)?0:(unsigned int)texture_random(1,3);
+        object[0x56]=(unsigned char)parent;
+        for(i=0;i<3;++i) {
+            shift=(unsigned int)texture_random(0,58);
+            coordinate=(((unsigned long long)(unsigned long)texture_random(0,0x7fffffff)<<32)|(unsigned long long)(unsigned long)texture_random(0,0x7fffffff))>>shift;
+            position[i]=(long long)coordinate;
+            if(texture_random(0,1)) position[i]=-position[i];
+            if(n%23==0) position[i]=0;
+            memcpy(object + 0x3e + 8*i,&position[i],8);
+            put32(object,0x8c+4*i,(long)texture_random(-1000000,1000000));
+            {unsigned short w=(unsigned short)texture_random(0,0xffff);memcpy(object+0xec+2*i,&w,2);}
+        }
+        mantissa=(n%29==0)?0:(short)texture_random(0x4000,0x7fff);
+        exponent=(short)texture_random(-8,70);
+        memcpy(list+parent*0x152+0x74+0xa4,&mantissa,2);
+        memcpy(list+parent*0x152+0x74+0xa6,&exponent,2);
+        switch(texture_random(0,3)) {
+        case 0: time=texture_random(-2000,2000); break;
+        case 1: time=texture_random(-100000,100000); break;
+        case 2: time=texture_random(-0x7fffffff,0x7fffffff); break;
+        default: time=0; break;
+        }
+        {
+            unsigned char before[0x200];
+            memcpy(before,object,sizeof(before));
+            ref_gravity_x=ref_gravity_y=ref_gravity_z=0x5a5a5a5aUL;
+            ref_gravity(object,list,time);
+            printf("{\"case\":%lu,\"parent\":%u,\"mass\":[%d,%d],\"time\":%ld,\"position\":[%lld,%lld,%lld],\"velocity\":[",n,parent,(int)mantissa,(int)exponent,time,get64(before,0x3e),get64(before,0x46),get64(before,0x4e));
+            for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(before,0x8c+4*i));
+            printf("],\"fraction\":[");
+            for(i=0;i<3;++i) printf("%s%u",i?",":"",*(unsigned short *)(before+0xec+2*i));
+            printf("],\"after\":{\"velocity\":[");
+            for(i=0;i<3;++i) printf("%s%ld",i?",":"",get32(object,0x8c+4*i));
+            printf("],\"fraction\":[");
+            for(i=0;i<3;++i) printf("%s%u",i?",":"",*(unsigned short *)(object+0xec+2*i));
+            printf("],\"truncated\":[%ld,%ld,%ld]}}\n",(long)(int)ref_gravity_x,(long)(int)ref_gravity_y,(long)(int)ref_gravity_z);
+        }
+    }
+    if (fflush(stdout)) fail("cannot flush gravity vectors");
+    return 0;
+}
+
 /* Orientation. orient drives the original F585 (angular rates spent in F584's
    steps through F611's small rotations, with F1520 renormalising when the drift
    counter at +0x24 runs out) on a zeroed object with a synthetic orientation
@@ -3135,6 +3199,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--span-raster")) return span_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--thrust-limits")) return thrust_limit_vectors();
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
     if (argc == 2 && !strcmp(argv[1], "--orient")) return orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--player-orient")) return player_orient_vectors();
     if (argc == 2 && !strcmp(argv[1], "--advance")) return advance_vectors();
