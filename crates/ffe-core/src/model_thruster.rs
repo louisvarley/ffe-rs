@@ -170,6 +170,14 @@ fn clip_axis(point: &mut [i16; 2], other: [i16; 2], axis: usize, limit: i32) -> 
     Ok(())
 }
 
+/// F1561: F1562 then F1563 (x onto 0..=0x13f, then y onto 0..=0x9d), each
+/// moving `point` along the line to `other`. Not a rejection test: the point
+/// can still be off screen afterwards.
+pub fn clip_toward(point: &mut [i16; 2], other: [i16; 2]) -> Result<(), String> {
+    clip_axis(point, other, 0, 0x13f)?;
+    clip_axis(point, other, 1, 0x9d)
+}
+
 /// F1705: bring `point` (the screen of `this`) onto the screen along the line to
 /// `other`. Behind the near plane (z < 0x40) it first takes F1564's crossing
 /// (both behind: rejected). Then F1561 clips x, then y; rejected (`true`) unless

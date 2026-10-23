@@ -1659,6 +1659,47 @@ static int line_raster_vectors(void)
     return 0;
 }
 
+/* Curves. curve-raster drives the original F1546 (F1549 steps, F1561 clipping,
+   F1616 lines) as F1811 calls it, on synthetic control points on and off the
+   view. F1561 can leave an end off the view, and F1616 then writes outside it,
+   so the framebuffer pointer sits 300 rows into a 320x800 buffer, all hashed. */
+extern void ref_draw_curve(const short *p1,const short *p2,const short *p3,const short *p4,unsigned long colour);
+static int curve_raster_vectors(void)
+{
+    static unsigned char buffer[320*800];
+    short points[4][2];
+    unsigned long n,i,count,colour;
+    long minx,miny,maxx,maxy,form,cx,cy,r;
+    fprintf(stderr,"JJFFE curve-raster-v1: original F1546 (F1549, F1561, F1616/F1601) on synthetic control points; framebuffer 300 rows into a 0xff-filled 320x800 buffer, hashed; bounds are view coordinates. Not queueing or colours.\n");
+    ref_framebuffer=buffer+320*300;
+    texture_rng=0x1b873593UL;
+    for(n=0;n<4096;++n) {
+        form=n&3;
+        colour=n%254;
+        if(form==0) for(i=0;i<4;++i) {points[i][0]=(short)texture_random(0,319);points[i][1]=(short)texture_random(0,157);}
+        else if(form==1) {
+            cx=texture_random(0,319);cy=texture_random(0,157);r=texture_random(0,12);
+            for(i=0;i<4;++i) {points[i][0]=(short)(cx+texture_random(-r,r));points[i][1]=(short)(cy+texture_random(-r,r));}
+        } else if(form==2) for(i=0;i<4;++i) {points[i][0]=(short)texture_random(-160,480);points[i][1]=(short)texture_random(-80,240);}
+        else for(i=0;i<4;++i) {points[i][0]=(short)texture_random(-40,360);points[i][1]=(short)texture_random(-30,190);}
+        memset(buffer,0xff,sizeof(buffer));
+        ref_draw_curve(points[0],points[1],points[2],points[3],colour);
+        count=0;minx=miny=100000;maxx=maxy=-100000;
+        for(i=0;i<sizeof(buffer);++i) if(buffer[i]!=0xff) {
+            long x=(long)(i%320),y=(long)(i/320)-300;
+            ++count;
+            if(x<minx) minx=x; if(x>maxx) maxx=x; if(y<miny) miny=y; if(y>maxy) maxy=y;
+        }
+        printf("{\"case\":%lu,\"colour\":%lu,\"points\":[",n,colour);
+        for(i=0;i<4;++i) printf("%s[%d,%d]",i?",":"",points[i][0],points[i][1]);
+        printf("],\"written\":%lu,\"bounds\":[%ld,%ld,%ld,%ld],\"pixels_fnv1a64\":\"%016llx\"}\n",
+               count,count?minx:0,count?miny:0,count?maxx:0,count?maxy:0,
+               (unsigned long long)fingerprint(buffer,sizeof(buffer)));
+    }
+    if (fflush(stdout)) fail("cannot flush curve raster vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
 static unsigned long texture_faces[1024][20];
 static void texture_face_begin(void)
@@ -2463,6 +2504,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--polygon-helpers")) return polygon_helper_vectors();
     if (argc == 2 && !strcmp(argv[1], "--texture-raster")) return texture_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--line-raster")) return line_raster_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--curve-raster")) return curve_raster_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

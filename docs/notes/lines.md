@@ -1,7 +1,7 @@
-# Lines (F1616 DrawLine, F1601 DrawHLine)
+# Lines and curves (F1616 DrawLine, F1601 DrawHLine, F1546)
 
 Ported in `crates/ffe-core/src/model_line.rs`; verified by
-`tools/reference/verify-lines.py` (v0.48f).
+`tools/reference/verify-lines.py` (lines v0.48f, curves v0.48g).
 
 ## Who calls it
 
@@ -46,11 +46,32 @@ hashes it. `line_reference.rs` draws each with `draw_line` and compares the
 count, bounds and FNV-1a hash: 4096 compared, 0 mismatched. Tampered points,
 colour, count, bounds and hash, and an empty trace, are rejected.
 
+## Curves (F1811 -> F1546)
+
+F1811, the draw routine of opcode 22's curve entries, passes the entry's four
+points (+4/+8, +0xc/+0x10, +0x14/+0x18, +0x1c/+0x20, entry order) and colour
+(+0x24, F1327) to F1546. F1546 sets up F1549's forward differences (the same
+set-up F1547 uses for polygon edges, `model_polygon::curve_edges`): `2^n` steps,
+n = 2..5 from the Manhattan distance between the first point and the four
+points' mean, count `2^n - 1` counted down to -1. Each step is the segment from
+the current point to the next; unlike F1547 there is no closing edge to the end
+point. Per segment (`x <u 0x140`, `y <u 0x9e` is on the view): both ends off,
+skipped; one end off, F1561 (F1562 x onto 0..0x13f, then F1563 y onto
+0..0x9d, each along the line to the other end) moves it, then F1616; both on,
+F1616. F1561 does not reject, so an end can stay off the view and F1616 then
+writes outside it.
+
+`--curve-raster` runs the original F1546 on 4096 synthetic curves (on the view,
+small, and spilling off it), with the framebuffer pointer 300 rows into a
+0xff-filled 320x800 buffer so writes outside the view are captured; 4096
+compared, 0 mismatched, the same tampers rejected.
+
 ## In ffe-rs
 
-Opcode 2 lines now take F1704's clipped, stored points (`model_thruster::line`,
+Opcode 2 lines take F1704's clipped, stored points (`model_thruster::line`,
 already verified with the thrusters) in place of raw projections, so every
 F1803 entry the viewer draws has both ends on the view; a line F1704 rejects
 draws nothing (it is still queued for ordering, as before). `Screen::draw_shapes`
-draws each with `draw_line`. Only stand-in shapes (the cubic curve segments and
-two-point faces) still use the bounded Bresenham.
+draws each with `draw_line`, and each curve entry (`Shape::Curve`) with
+`draw_curve`, dropping the pixels the original would write outside the view
+(over the console). Only two-point faces still use the bounded Bresenham.

@@ -2029,3 +2029,13 @@ trace rejected). Opcode 2 lines now take F1704's clipped, stored points (the
 verified `model_thruster::line`) instead of raw projections, so every line
 entry, narrow thrusters included, is drawn with it. Notes:
 `docs/notes/lines.md`.
+
+## The original curve rasteriser (v0.48g)
+
+F1811's curves now draw with the original F1546 (`ffe-core::model_line::
+draw_curve`): F1549's forward-difference steps (shared with the verified polygon
+edges), F1561's one-end clip and F1616 per segment, with no closing edge. The
+new `--curve-raster` mode runs the original on 4096 synthetic curves into a
+320x800 buffer (so writes F1561 leaves outside the view are captured);
+`verify-lines.py` compares both traces (4096 + 4096, 0 mismatched). The
+viewer's stand-in cubic is gone.

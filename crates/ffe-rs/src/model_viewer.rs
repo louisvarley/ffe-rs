@@ -33,6 +33,8 @@ use std::cell::Cell;
 pub enum Shape {
     Fill(Vec<(i32, i32)>, [u8; 3]),
     Line((i32, i32), (i32, i32), [u8; 3]),
+    /// An F1811 curve entry's four points in entry order, drawn by F1546.
+    Curve([[i16; 2]; 4], [u8; 3]),
     Point((i32, i32), [u8; 3]),
     Textured(Textured),
     /// A thruster glow (F1738's F1805 entry): drawn like [`Shape::Textured`] (F1647
@@ -616,6 +618,10 @@ impl ModelViewer {
             .flat_map(|shape| match shape {
                 Shape::Fill(points, _) => points.clone(),
                 Shape::Line(a, b, _) => vec![*a, *b],
+                Shape::Curve(points, _) => points
+                    .iter()
+                    .map(|[x, y]| (i32::from(*x), i32::from(*y)))
+                    .collect(),
                 Shape::Point(p, _) => vec![*p],
                 Shape::Textured(textured) => textured.points.clone(),
                 Shape::Glow(_) => Vec::new(),
@@ -918,25 +924,11 @@ impl ModelViewer {
                     }
                 }
                 Primitive::Spline(spline) => {
-                    // F1811's curve drawing is not ported: a cubic through the entry's
-                    // four points in entry order stands in for it.
+                    // F1811: the entry's four points, drawn by F1546.
                     if let Some(points) = spline.points {
-                        let p = points.map(|[x, y]| (f64::from(x), f64::from(y)));
-                        let at = |t: f64| {
-                            let u = 1.0 - t;
-                            let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
-                            let x: f64 = (0..4).map(|i| w[i] * p[i].0).sum();
-                            let y: f64 = (0..4).map(|i| w[i] * p[i].1).sum();
-                            (x.round() as i32, y.round() as i32)
-                        };
-                        let colour = self.rgb(spline.colour);
-                        for step in 0..16 {
-                            frame.shapes.push(Shape::Line(
-                                at(f64::from(step) / 16.0),
-                                at(f64::from(step + 1) / 16.0),
-                                colour,
-                            ));
-                        }
+                        frame
+                            .shapes
+                            .push(Shape::Curve(points, self.rgb(spline.colour)));
                     }
                 }
                 Primitive::Polygon(polygon) => {

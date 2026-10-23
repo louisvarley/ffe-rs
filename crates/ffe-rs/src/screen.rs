@@ -5,7 +5,7 @@ use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::JITTER_SEED;
-use ffe_core::model_line::draw_line;
+use ffe_core::model_line::{draw_curve, draw_line};
 use std::io::Cursor;
 
 pub const WIDTH: usize = 640;
@@ -597,9 +597,19 @@ impl Screen {
                             frame[y as usize * 320 + x as usize] = value(*rgb);
                         });
                     } else {
-                        // Stand-in shapes (curves, two-point faces): bounded Bresenham.
+                        // Stand-in shapes (two-point faces): bounded Bresenham.
                         self.line_value(*a, *b, value(*rgb));
                     }
+                }
+                Shape::Curve(points, rgb) => {
+                    // F1546 can leave a clipped end off the view; the original then
+                    // draws outside it (over the console), which is dropped here.
+                    let frame = &mut self.frame;
+                    let _ = draw_curve(*points, |x, y| {
+                        if (0..320).contains(&x) && (0..VIEW_HEIGHT as i32).contains(&y) {
+                            frame[y as usize * 320 + x as usize] = value(*rgb);
+                        }
+                    });
                 }
                 Shape::Point((x, y), rgb) => {
                     if (0..VIEW_HEIGHT as i32).contains(y) && (0..320).contains(x) {

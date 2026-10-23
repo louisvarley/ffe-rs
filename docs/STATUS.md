@@ -240,7 +240,9 @@ tests and an oracle, as the earlier milestones did.
      `docs/notes/lines.md`) and verified by `verify-lines.py` (4096 cases, 0
      mismatched). Opcode 2 lines now take F1704's clipped points
      (`model_thruster::line`), so every line entry draws with it.
-   - **Left:** F1811 for opcode 22 curves.
+   - **Done (v0.48g):** F1811's F1546 ported (`draw_curve`: F1549 steps,
+     F1561 clip, F1616) and verified by `verify-lines.py` (4096 curves, 0
+     mismatched); curve entries draw with it instead of the stand-in cubic.
 5. **A planet in the flight scenario.** Once F1876 draws, put a planet-scale
    surface model (slots 113-148, 445, 447, 449) in the flight scene at a
    distance where its patch is visible, with the original's parameters, and

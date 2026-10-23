@@ -28,7 +28,7 @@ window.FFE_BURNDOWN = {
         { id: "surface-emit", title: "F1834 / F1835 quad emission (with F1868-F1873)", status: "todo" },
         { id: "surface-oracle", title: "Surface quad oracle at a planet-scale distance", status: "todo" },
         { id: "lines", title: "F1616 line rasteriser (replaces the stand-in)", status: "done", version: "v0.48f" },
-        { id: "curves", title: "F1811 curve rasteriser (replaces the stand-in cubic)", status: "todo" },
+        { id: "curves", title: "F1811 curve rasteriser (replaces the stand-in cubic)", status: "done", version: "v0.48g" },
         { id: "pixels", title: "Pixel-level whole-frame oracle (F1795-F1797 spans)", status: "todo" },
         { id: "planet", title: "A planet in the flight scenario", status: "todo" }
       ]
@@ -110,6 +110,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 33,
       note: "v0.48f: F1616 line rasteriser ported and verified (4096 cases, 0 mismatched)."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 32,
+      note: "v0.48g: F1811/F1546 curve rasteriser ported and verified (4096 curves, 0 mismatched)."
     }
   ]
 };
