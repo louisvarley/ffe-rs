@@ -4,8 +4,8 @@ use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
     decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font, decode_model_commands,
     decode_model_descriptor, decode_model_names, decode_model_normals, decode_model_vertices,
-    decode_ship_stats, decode_sine_table, decode_star_shades, decode_texture_descriptors,
-    BitmapLayout,
+    decode_ship_stats, decode_sine_table, decode_star_shades, decode_system_tables,
+    decode_texture_descriptors, BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -45,6 +45,15 @@ pub(crate) fn names_layout(profile: &str) -> Option<u32> {
 pub(crate) fn lighting_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0xeec60, 0x101858)),
+        _ => None,
+    }
+}
+
+/// System tables (`DATA_007106`) RVA (v15), matched byte for byte against JJFFE
+/// 2.8a7 in floppy 1.02 only (the relocated handler pointers aside).
+pub(crate) fn system_layout(profile: &str) -> Option<u32> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some(0xe71d8),
         _ => None,
     }
 }
@@ -270,6 +279,17 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some(tables_rva) = system_layout(profile.id) {
+                let table = decode_system_tables(&bytes, tables_rva)?;
+                assets.push(Asset {
+                    id: "base:world/system-tables".to_owned(),
+                    path: "world/system-tables.bin".to_owned(),
+                    kind: AssetKind::SystemTables {
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             let font = decode_font(&bytes, font_rva)?;
             assets.push(Asset {
                 id: "base:font/main".to_owned(),
@@ -344,7 +364,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         }
     }
     // Non-model assets: +2 v8 texture tables, +2 v9 lighting tables, one name
-    // table and three v14 glyph sets, plus vertices, commands and normals per
+    // table, the v15 system tables and three v14 glyph sets, plus vertices, commands and normals per
     // imported model.
     let tables = if texture_layout(profile.id).is_some() {
         2
@@ -355,6 +375,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     } else {
         0
     } + usize::from(names_layout(profile.id).is_some())
+        + usize::from(system_layout(profile.id).is_some())
         + 3;
     // Plus the v10 model descriptor table and the v12 ship statistics table.
     if models < 2 || assets.len() != 381 + tables + 3 * models {
@@ -364,7 +385,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 14,
+        format: "ffe-content-cache".to_owned(), format_version: 15,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

@@ -2799,6 +2799,65 @@ static int world_tick_vectors(void)
     return 0;
 }
 
+/* Galaxy table lookups. galaxy drives the original F868 (system index of a
+   code: the table, four special codes, or a class by distance from the
+   centre), and for table systems F869 (details), F870 (market parameters and
+   the stock string left in DATA_008790) and F871 (control and ranks, with the
+   player's two rank globals set per case), over every table code, the special
+   codes and random codes near and far. */
+extern int ref_galaxy_index(unsigned long code);
+extern void ref_galaxy_details(unsigned long code,unsigned long *a,unsigned long *b,unsigned long *c,unsigned long *d,unsigned long *e,unsigned long *f,unsigned long *g,unsigned long *h);
+extern void ref_galaxy_market(unsigned long code,unsigned char **stock,unsigned long *population,unsigned long *danger,unsigned long *allegiance);
+extern void ref_galaxy_control(unsigned long code,unsigned long *federal,unsigned long *imperial,unsigned long *maximum,unsigned long *allegiance,unsigned long *minor,unsigned long *major);
+extern unsigned char ref_galaxy_stock[40];
+extern unsigned long ref_galaxy_rank_a,ref_galaxy_rank_b;
+static int galaxy_vectors(void)
+{
+    static unsigned long codes[8192];
+    unsigned long n,count=0,i,x,y;
+    extern unsigned char ref_galaxy_table[];
+    extern unsigned long ref_galaxy_special[4];
+    fprintf(stderr,"JJFFE galaxy-v1: original F868 (system index or class), and for table systems F869, F870 (stock string in DATA_008790) and F871 (player ranks DATA_008912/DATA_008913 set per case) over every table code, the four special codes and random codes near and far from the galactic centre.\n");
+    {
+        unsigned char *table=ref_galaxy_table;
+        for(i=0;i<330;++i) {unsigned long c;memcpy(&c,table+54*i,4);if(c==0)break;codes[count++]=c;}
+    }
+    texture_rng=0x4e67c6a7UL;
+    for(i=0;i<4;++i) {unsigned long c=ref_galaxy_special[i];codes[count++]=c;codes[count++]=c|((unsigned long)texture_random(1,63)<<26);}
+    for(n=0;n<2000;++n) codes[count++]=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+    for(n=0;n<2000;++n) {
+        x=0x1718+(unsigned long)texture_random(-150,150);y=0x1524+(unsigned long)texture_random(-150,150);
+        codes[count++]=(x&0x1fff)|((y&0x1fff)<<13)|((unsigned long)texture_random(0,63)<<26);
+    }
+    for(n=0;n<1500;++n) {
+        x=0x1718+(unsigned long)texture_random(-12,12);y=0x1524+(unsigned long)texture_random(-12,12);
+        codes[count++]=(x&0x1fff)|((y&0x1fff)<<13)|((unsigned long)texture_random(0,63)<<26);
+    }
+    for(n=0;n<count;++n) {
+        unsigned long code=codes[n],a[9],stock_ptr_value;
+        unsigned char *stock;
+        unsigned long population,danger,allegiance,federal,imperial,maximum,control_allegiance,minor,major;
+        int index=ref_galaxy_index(code);
+        printf("{\"code\":%lu,\"index\":%d",code,index);
+        if(index>=0) {
+            ref_galaxy_rank_a=(unsigned long)texture_random(0,100);ref_galaxy_rank_b=(unsigned long)texture_random(0,100);
+            ref_galaxy_details(code,&a[0],&a[1],&a[2],&a[3],&a[4],&a[5],&a[6],&a[7]);
+            printf(",\"details\":[%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu]",a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7]);
+            memset(ref_galaxy_stock,0x55,40);
+            ref_galaxy_market(code,&stock,&population,&danger,&allegiance);
+            stock_ptr_value=(unsigned long)stock;(void)stock_ptr_value;
+            printf(",\"market\":{\"population\":%lu,\"danger\":%lu,\"allegiance\":%lu,\"stock\":[",population,danger,allegiance);
+            for(i=0;i<37;++i) printf("%s%u",i?",":"",ref_galaxy_stock[i]);
+            printf("]}");
+            ref_galaxy_control(code,&federal,&imperial,&maximum,&control_allegiance,&minor,&major);
+            printf(",\"control\":{\"ranks\":[%lu,%lu],\"federal\":%lu,\"imperial\":%lu,\"maximum\":%lu,\"allegiance\":%lu,\"minor\":%lu,\"major\":%lu}",ref_galaxy_rank_a,ref_galaxy_rank_b,federal,imperial,maximum,control_allegiance,minor,major);
+        }
+        printf("}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush galaxy vectors");
+    return 0;
+}
+
 /* Steering input. steer drives the original F1037 (set speed from Return and
    Shift through F1121, then F1038: mouse and key deltas into the rates, or the
    turret angles in a turret view) on the player struct (DATA_008804) and a
@@ -3706,6 +3765,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
     if (argc == 2 && !strcmp(argv[1], "--gravity")) return gravity_vectors();
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--galaxy")) return galaxy_vectors();
     if (argc == 2 && !strcmp(argv[1], "--collide")) return collide_vectors();
     if (argc == 2 && !strcmp(argv[1], "--world-step")) return world_step_vectors();
     if (argc == 2 && !strcmp(argv[1], "--world-tick")) return world_tick_vectors();

@@ -96,6 +96,15 @@ GLOBAL _ref_pl_keys
 GLOBAL _ref_player_orient
 GLOBAL _ref_advance
 GLOBAL _ref_gravity
+GLOBAL _ref_galaxy_index
+GLOBAL _ref_galaxy_details
+GLOBAL _ref_galaxy_market
+GLOBAL _ref_galaxy_control
+GLOBAL _ref_galaxy_stock
+GLOBAL _ref_galaxy_table
+GLOBAL _ref_galaxy_special
+GLOBAL _ref_galaxy_rank_a
+GLOBAL _ref_galaxy_rank_b
 GLOBAL _ref_collide
 GLOBAL _ref_coll_flags
 GLOBAL _ref_coll_distance
@@ -222,6 +231,15 @@ _ref_pl_keys equ DATA_007691
 _ref_player_orient equ FUNC_001041
 _ref_advance equ FUNC_001512
 _ref_gravity equ FUNC_000603
+_ref_galaxy_index equ FUNC_000868
+_ref_galaxy_details equ FUNC_000869
+_ref_galaxy_market equ FUNC_000870
+_ref_galaxy_control equ FUNC_000871
+_ref_galaxy_stock equ DATA_008790
+_ref_galaxy_table equ DATA_007110
+_ref_galaxy_special equ DATA_007116
+_ref_galaxy_rank_a equ DATA_008912
+_ref_galaxy_rank_b equ DATA_008913
 _ref_collide equ FUNC_000569
 _ref_coll_flags equ DATA_008696
 _ref_coll_distance equ DATA_008703

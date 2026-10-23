@@ -123,7 +123,7 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "world-1", title: "Name generation (cname)", status: "todo" },
-        { id: "world-2", title: "System generation: stars, planets and station placement (csysgen)", status: "todo" },
+        { id: "world-2", title: "System generation: stars, planets and station placement (csysgen)", status: "in-progress", version: "v0.50a" },
         { id: "world-3", title: "System object types and orbits (csystem)", status: "todo" },
         { id: "world-4", title: "Galaxy generation and the RNG stream question (KNOWN_ISSUES F1476)", status: "todo" },
         { id: "world-5", title: "Planet surfaces and landing approach", status: "todo" },
@@ -343,6 +343,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 85,
       note: "v0.49n: the player's whole tick with the collision scan verified (3,476 contact-free ticks); collision (ccoll) and rotating-frame items now in progress."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 85,
+      note: "v0.50a: cache v15 with the galaxy and system tables; F868-F871 (system index, details, market, control) verified (5,835 lookups); system generation in progress."
     }
   ]
 };

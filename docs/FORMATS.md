@@ -178,7 +178,11 @@ contract, not the full schema/examples in sections 2.1 onward.
   uppercase; font 1 defines 52 of the 95 possible entries), so the starts are
   not sorted. Every distinct start must begin a program that decodes over the
   font model's vertices. Semantics: `docs/notes/text.md`.
-- V13 has 1778 assets; v14 has 1781.
+- V13 has 1778 assets; v14 has 1781; v15 has 1782 (adds `base:world/system-tables`,
+  `world/system-tables.bin`, 20,984 raw bytes of the executable's `DATA_007106..7138`:
+  the 329-record galaxy table of 54-byte records at offset 432, the four special
+  system codes at 18,252 and the system generator's tables from 18,492; see
+  `ffe_core::galaxy`. The relocated handler pointers at 19,048 are not used).
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
   v10). Tools read every version. The playable requires v2 font content;

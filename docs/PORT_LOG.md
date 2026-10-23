@@ -4,6 +4,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Galaxy table and system parameters, cache v15 (v0.50a)
+
+Notes: `docs/notes/galaxy.md`. Start of the world milestone (system generation).
+
+- Cache v15 adds `base:world/system-tables`: the galaxy table and the system
+  generator's tables, imported raw from the executable (RVA `0xe71d8`, floppy
+  1.02 only). `ffe_core::galaxy::Tables` ports F868-F871; `--galaxy` matches on
+  5,835 lookups.
+- JJFFE's galaxy table is longer than the original's (extra systems after the
+  329th); the oracle skips codes only the reference knows.
+- System generation (F872-F899) is next; names (F791) need the message-string
+  engine, which is not imported yet, so generated objects will be compared
+  without their names for now.
+
+---
+
 ## 2026-10-23 — The player's whole tick with the collision scan (v0.49n)
 
 Notes: `docs/notes/collision.md`.

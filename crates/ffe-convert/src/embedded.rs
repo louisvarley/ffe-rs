@@ -562,6 +562,19 @@ pub fn decode_star_shades(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, Strin
     })
 }
 
+/// The galaxy table and system-generation tables (`DATA_007106..7138`, 20,984 bytes).
+pub fn decode_system_tables(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    use ffe_core::galaxy::{Tables, TABLES_BYTES};
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, TABLES_BYTES)?;
+    let table = range(bytes, source_offset, TABLES_BYTES)?;
+    Tables::new(table)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table.to_vec(),
+    })
+}
+
 /// The original 12-bit colour to fixed low-palette map (`DATA_007770`, 4096 bytes).
 pub fn decode_colour_map(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
     use ffe_core::model_texture::{validate_colour_map, COLOUR_MAP_ENTRIES};

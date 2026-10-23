@@ -2,6 +2,7 @@
 
 pub mod collision;
 pub mod frames;
+pub mod galaxy;
 pub mod model;
 pub mod model_animation;
 pub mod model_commands;

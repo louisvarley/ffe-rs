@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 14 or len(manifest["files"]) != 1781:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 15 or len(manifest["files"]) != 1782:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,13 +143,35 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1782:
+            if archive.testzip() is not None or len(archive.infolist()) != 1783:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
                 if len(payload) != record["size"] or hashlib.sha256(payload).hexdigest() != record["sha256"]:
                     raise RuntimeError("cache payload digest mismatch")
                 asset = record["asset"]
+                if asset["kind"] == "system_tables":
+                    # DATA_007106..7138: the galaxy table (JJFFE appends systems after the
+                    # original's 329), the specials and the generator's tables.
+                    blocks_d = declarations(reference / "ffedat.asm")
+                    def tail(label):
+                        return db_bytes(blocks_d[label])
+                    galaxy = b"".join(
+                        tail(label) for label in ["DATA_007110", "DATA_007111", "DATA_007112",
+                                                  "DATA_007113", "DATA_007114", "DATA_007115"])
+                    if len(payload) != 20984 or payload[432:432 + 329 * 54] != galaxy[:329 * 54]:
+                        raise RuntimeError("galaxy table differs from JJFFE DATA_007110")
+                    for label, offset in [("DATA_007116", 18252), ("DATA_007119", 18492),
+                                          ("DATA_007120", 18584), ("DATA_007121", 18676),
+                                          ("DATA_007122", 18772), ("DATA_007123", 18864),
+                                          ("DATA_007124", 18956), ("DATA_007129", 19152),
+                                          ("DATA_007131", 20180), ("DATA_007132", 20304),
+                                          ("DATA_007133", 20496), ("DATA_007134", 20592),
+                                          ("DATA_007136", 20936), ("DATA_007137", 20952),
+                                          ("DATA_007138", 20968)]:
+                        expected = tail(label)
+                        if payload[offset:offset + len(expected)] != expected:
+                            raise RuntimeError(f"system table differs from JJFFE {label}")
                 if asset["kind"] == "model_names":
                     # DATA_004682, the "Ship string table": each pointer's string, NUL-terminated.
                     data_blocks = declarations(reference / "ffedat.asm")
