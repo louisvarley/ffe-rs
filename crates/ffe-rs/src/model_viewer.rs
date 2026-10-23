@@ -18,6 +18,7 @@ use ffe_core::model_execute::{
     execute_live, execute_scene, resolve_colour, ChildEnvironment, ChildModel, ChildModels,
     Execution, InstanceContext, Primitive,
 };
+use ffe_core::model_fill::near_outline;
 use ffe_core::model_instance::{Vertices, NEAR_SENTINEL};
 use ffe_core::model_lighting::{default_lighting, pack, Lighting};
 use ffe_core::model_math::SineTable;
@@ -35,6 +36,9 @@ pub enum Shape {
     /// An on-view flat triangle or quad (F1804/F1809 entry, points in face
     /// order), drawn by F1604 or F1607.
     Flat(Vec<(i32, i32)>, [u8; 3]),
+    /// A polygon entry's F1560 edges in order (`model_polygon::edges`), filled
+    /// by F1468/F1560/F1613.
+    Polygon(Vec<[[i16; 2]; 2]>, [u8; 3]),
     Line((i32, i32), (i32, i32), [u8; 3]),
     /// An F1811 curve entry's four points in entry order, drawn by F1546.
     Curve([[i16; 2]; 4], [u8; 3]),
@@ -620,6 +624,11 @@ impl ModelViewer {
             .iter()
             .flat_map(|shape| match shape {
                 Shape::Fill(points, _) | Shape::Flat(points, _) => points.clone(),
+                Shape::Polygon(edges, _) => edges
+                    .iter()
+                    .flatten()
+                    .map(|[x, y]| (i32::from(*x), i32::from(*y)))
+                    .collect(),
                 Shape::Line(a, b, _) => vec![*a, *b],
                 Shape::Curve(points, _) => points
                     .iter()
@@ -881,9 +890,51 @@ impl ModelViewer {
                         (true, None) => std::array::from_fn(|i| 5 + shade[i]),
                         (false, _) => resolve_colour(face.material, colour, shade),
                     });
+                    let count = face.vertices.len();
+                    if emission.screen.is_empty() || emission.screen.len() != count {
+                        continue;
+                    }
+                    let behind = emission.screen.contains(&NEAR_SENTINEL);
+                    let on_view = !behind
+                        && emission.screen.iter().all(|[x, y]| {
+                            (0..320).contains(&i32::from(*x)) && (0..158).contains(&i32::from(*y))
+                        });
+                    let textured_entry = descriptors.is_some()
+                        && count >= 3
+                        && !behind
+                        && textured_path(
+                            true,
+                            face.material,
+                            &emission
+                                .screen
+                                .iter()
+                                .map(|p| p.map(i32::from))
+                                .collect::<Vec<_>>(),
+                        );
+                    // F1714: a flat face reaching off the view (or behind the near
+                    // plane) is queued as a polygon outline and span-filled.
+                    if !textured_entry
+                        && !on_view
+                        && matches!(count, 3 | 4)
+                        && emission.views.len() == count
+                    {
+                        let vertices: Vec<([i16; 2], [i32; 3])> = emission
+                            .screen
+                            .iter()
+                            .copied()
+                            .zip(emission.views.iter().copied())
+                            .collect();
+                        let outline = near_outline(&vertices);
+                        let edges: Vec<[[i16; 2]; 2]> =
+                            outline.windows(2).map(|pair| [pair[0], pair[1]]).collect();
+                        if !edges.is_empty() {
+                            frame.shapes.push(Shape::Polygon(edges, rgb));
+                        }
+                        continue;
+                    }
                     let points: Vec<(i32, i32)> =
                         emission.screen.iter().filter_map(|p| point(*p)).collect();
-                    if points.is_empty() || points.len() != face.vertices.len() {
+                    if points.len() != count {
                         continue;
                     }
                     let screens: Vec<[i32; 2]> = points.iter().map(|&(x, y)| [x, y]).collect();
@@ -902,9 +953,6 @@ impl ModelViewer {
                             continue;
                         }
                     }
-                    let on_view = points
-                        .iter()
-                        .all(|(x, y)| (0..320).contains(x) && (0..158).contains(y));
                     frame.shapes.push(if points.len() == 2 {
                         Shape::Line(points[0], points[1], rgb)
                     } else if on_view && matches!(points.len(), 3 | 4) {
@@ -940,21 +988,17 @@ impl ModelViewer {
                     }
                 }
                 Primitive::Polygon(polygon) => {
-                    // The outline is the original's queued entries and F1547 edge
-                    // subdivision; the fill is the diagnostic even-odd scanline fill.
-                    // Textured fills (F1691 texture colour not ported) show grey.
-                    let path = ffe_core::model_polygon::fill_path(&polygon.outline.entries)?;
-                    if path.len() >= 3 {
+                    // The original's queued entries and F1547 edge subdivision, filled
+                    // by its span rasteriser. Textured fills (F1691 texture colour not
+                    // ported) show grey. An abandoned outline has no entries.
+                    let edges = ffe_core::model_polygon::edges(&polygon.outline.entries)?;
+                    if !edges.is_empty() {
                         let colour = if material(polygon.polygon.material).texture != 0 {
                             [5; 3]
                         } else {
                             polygon.colour
                         };
-                        let points = path
-                            .iter()
-                            .map(|[x, y]| (i32::from(*x), i32::from(*y)))
-                            .collect();
-                        frame.shapes.push(Shape::Fill(points, self.rgb(colour)));
+                        frame.shapes.push(Shape::Polygon(edges, self.rgb(colour)));
                     }
                 }
                 Primitive::Thruster(entry) => match &entry.shape {

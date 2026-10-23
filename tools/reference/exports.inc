@@ -73,6 +73,9 @@ GLOBAL _ref_draw_line
 GLOBAL _ref_draw_curve
 GLOBAL _ref_fill_triangle
 GLOBAL _ref_fill_quad
+GLOBAL _ref_span_reset
+GLOBAL _ref_span_edge
+GLOBAL _ref_span_draw
 GLOBAL _ref_tex_quad
 GLOBAL _ref_tex_slots
 GLOBAL _ref_tex_draw_triangle
@@ -155,6 +158,9 @@ _ref_draw_line equ FUNC_001616_DrawLine
 _ref_draw_curve equ FUNC_001546
 _ref_fill_triangle equ FUNC_001604_DrawTriangle
 _ref_fill_quad equ FUNC_001607_DrawQuad
+_ref_span_reset equ FUNC_001468
+_ref_span_edge equ FUNC_001560
+_ref_span_draw equ FUNC_001613_DrawSpans
 _ref_tex_quad equ FUNC_001647_DrawTexQuad
 _ref_tex_slots equ DATA_009252
 _ref_tex_draw_triangle equ FUNC_001807

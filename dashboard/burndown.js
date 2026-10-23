@@ -29,7 +29,7 @@ window.FFE_BURNDOWN = {
         { id: "surface-oracle", title: "Surface quad oracle at a planet-scale distance", status: "todo" },
         { id: "lines", title: "F1616 line rasteriser (replaces the stand-in)", status: "done", version: "v0.48f" },
         { id: "curves", title: "F1811 curve rasteriser (replaces the stand-in cubic)", status: "done", version: "v0.48g" },
-        { id: "pixels", title: "Pixel-level whole-frame oracle (F1795-F1797 spans)", status: "in-progress", version: "v0.48h" },
+        { id: "pixels", title: "Pixel-level whole-frame oracle (F1795-F1797 spans)", status: "in-progress", version: "v0.48i" },
         { id: "planet", title: "A planet in the flight scenario", status: "todo" }
       ]
     },
@@ -120,6 +120,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 32,
       note: "v0.48h: flat triangle/quad rasterisers (F1604, F1607/F1608) ported and verified (4096 faces); the pixel item is in progress."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 32,
+      note: "v0.48i: polygon spans (F1560/F1613) and F1714 off-view outlines ported and verified; every primitive now draws with original rasterisers. Whole-frame oracle still to do."
     }
   ]
 };

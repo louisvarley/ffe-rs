@@ -2,6 +2,7 @@ use ffe_content::AssetKind;
 use ffe_core::model::VertexContext;
 use ffe_core::model_commands::{material, VisibilityContext};
 use ffe_core::model_execute::{execute_live, InstanceContext};
+use ffe_core::model_fill::near_outline;
 use ffe_core::model_instance::Vertices;
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::Normal;
@@ -130,6 +131,29 @@ fn pack_point([x, y]: [i32; 2]) -> i64 {
     i64::from(x as u16 as u32 | (y as u16 as u32) << 16)
 }
 
+/// F1709/F1712 with some point on the view, or F1713's outcodes (F1715 x,
+/// F1716 y, OR-ed over the points with a triangle's last point twice) not all
+/// left, right or behind (`DATA_007818`): the face reaches F1714.
+fn f1714_queued(screens: &[[i32; 2]]) -> bool {
+    let on_view = |[x, y]: [i32; 2]| (x as u32) < 320 && (y as u32) < 158;
+    if screens.iter().any(|s| on_view(*s)) {
+        return true;
+    }
+    let code = |value: i32, limit: i32| match value {
+        -32766 => 8,
+        v if (0..limit).contains(&v) => 2,
+        v if v < 0 => 1,
+        _ => 4,
+    };
+    let rejected = |axis: usize, limit: i32| {
+        matches!(
+            screens.iter().fold(0, |acc, s| acc | code(s[axis], limit)),
+            1 | 4 | 8
+        )
+    };
+    !rejected(0, 320) && !rejected(1, 158)
+}
+
 /// Original F1708/F1712 per face (`--texture-queue`, every slot, four views): the
 /// textured entry (screen points in queue order, descriptor dword, F1326 colours of
 /// record + shade clamped to 15), the on-screen flat entry and the F1691 flat colour
@@ -163,11 +187,19 @@ fn executed_reference_texture_queue() {
         1518500249,
     ];
     let (mut compared, mut textured, mut flat, mut skipped) = (0usize, 0usize, 0usize, 0usize);
+    let mut polygon = 0usize;
     let mut mismatches = Vec::new();
     for line in input.lines() {
         let original: Queue = serde_json::from_str(line).unwrap();
         let index = original.model;
         if original.null != 0 {
+            continue;
+        }
+        // Model 361's vertex data differs between the JJFFE build the reference
+        // links and this release (as in verify-assets.py), so its F1714 outline
+        // points cannot agree.
+        if index == 361 {
+            skipped += 1;
             continue;
         }
         let (Some(commands), Some(records)) = (
@@ -245,11 +277,13 @@ fn executed_reference_texture_queue() {
                 continue;
             }
             let mut screens = Vec::new();
+            let mut views = Vec::new();
             for vertex in &face.vertices {
                 let v = live
                     .resolve(*vertex as i8, &emission.context, position, 2, true)
                     .unwrap();
                 screens.push([i32::from(v.screen[0]), i32::from(v.screen[1])]);
+                views.push(v.view);
             }
             let colour = emission.context.colour;
             if textured_path(true, face.material, &screens) {
@@ -279,6 +313,21 @@ fn executed_reference_texture_queue() {
                     if material(face.material).texture != 0 {
                         flat += 1;
                     }
+                } else if f1714_queued(&screens) {
+                    // F1714's outline: its points, then the F1799 colour.
+                    let vertices: Vec<([i16; 2], [i32; 3])> = views
+                        .iter()
+                        .zip(&screens)
+                        .map(|(view, [x, y])| ([*x as i16, *y as i16], *view))
+                        .collect();
+                    row.extend([3, packed]);
+                    row.extend(
+                        near_outline(&vertices)
+                            .iter()
+                            .map(|p| pack_point(p.map(i32::from))),
+                    );
+                    row.push(i64::from(pack_colour(rgb)));
+                    polygon += 1;
                 } else {
                     row.extend([0, packed]);
                 }
@@ -303,7 +352,7 @@ fn executed_reference_texture_queue() {
         compared += 1;
     }
     eprintln!(
-        "compared {compared} model views ({textured} textured entries, {flat} on-screen flat textured-material faces), skipped {skipped}, mismatched {}",
+        "compared {compared} model views ({textured} textured entries, {flat} on-screen flat textured-material faces, {polygon} F1714 outlines), skipped {skipped}, mismatched {}",
         mismatches.len()
     );
     for mismatch in mismatches.iter().take(20) {

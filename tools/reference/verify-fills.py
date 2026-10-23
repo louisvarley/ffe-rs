@@ -1,8 +1,9 @@
-"""Compare flat-face rasterisation with the executed original.
+"""Compare flat-face and polygon-span rasterisation with the executed original.
 
 --fill-raster (jjffe-commands): F1604 (triangles) and F1607/F1608 (quads, with
-F1602/F1603/F1601) pixels for 4096 synthetic faces, a 320x800 buffer hashed per
-case. Needs no cache.
+F1602/F1603/F1601) pixels for 4096 synthetic faces. --span-raster: F1468, F1560
+per edge and F1613 for 4096 synthetic closed polygons. Each case hashes a
+320x800 buffer. Needs no cache.
 """
 import argparse
 import hashlib
@@ -16,6 +17,8 @@ import tempfile
 SCENARIOS = [
     ("fill", "--fill-raster", b"JJFFE fill-raster-v1", "FFE_FILL_RASTER_VECTORS",
      "executed_reference_fill_raster"),
+    ("span", "--span-raster", b"JJFFE span-raster-v1", "FFE_SPAN_RASTER_VECTORS",
+     "executed_reference_span_raster"),
 ]
 TAMPERS = ["points", "colour", "written", "bounds", "pixels_fnv1a64"]
 
@@ -79,7 +82,7 @@ def main():
                 "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
             }
     print(json.dumps({
-        "scenario": "jjffe-fill-raster-v1",
+        "scenario": "jjffe-fill-raster-v1 + jjffe-span-raster-v1",
         "repeat_matches": True,
         "empty_traces_rejected": True,
         **summary,

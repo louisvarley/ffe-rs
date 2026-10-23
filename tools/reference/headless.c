@@ -1757,8 +1757,56 @@ static int fill_raster_vectors(void)
     return 0;
 }
 
+/* Polygon spans. span-raster drives the original F1468 (a fresh span table),
+   F1560 for every edge of a synthetic closed polygon (on and off the view,
+   self-crossing, up to 12 points) and F1613 (with F1600/F1601), as F1794,
+   F1795/F1796 and F1799 do. The framebuffer pointer sits 300 rows into a
+   0xff-filled 320x800 buffer. */
+extern void *ref_span_reset(void);
+extern void ref_span_edge(void *spans,const short *p1,const short *p2,unsigned long flag);
+extern void ref_span_draw(void *spans,unsigned long colour);
+static int span_raster_vectors(void)
+{
+    static unsigned char buffer[320*800];
+    short points[12][2];
+    unsigned long n,i,count,colour,sides;
+    long minx,miny,maxx,maxy,form,cx,cy,r;
+    void *spans;
+    fprintf(stderr,"JJFFE span-raster-v1: original F1468, F1560 (F1563, F1559, F1558) per edge of synthetic closed polygons and F1613 (F1600/F1601); framebuffer 300 rows into a 0xff-filled 320x800 buffer, hashed; bounds are view coordinates. Not queueing, curves or colours.\n");
+    ref_framebuffer=buffer+320*300;
+    texture_rng=0xc2b2ae35UL;
+    for(n=0;n<4096;++n) {
+        form=n&3;
+        colour=n%254;
+        sides=(unsigned long)texture_random(3,(n&8)?12:6);
+        if(form==0) for(i=0;i<sides;++i) {points[i][0]=(short)texture_random(0,319);points[i][1]=(short)texture_random(0,157);}
+        else if(form==1) {
+            cx=texture_random(0,319);cy=texture_random(0,157);r=texture_random(1,40);
+            for(i=0;i<sides;++i) {points[i][0]=(short)(cx+texture_random(-r,r));points[i][1]=(short)(cy+texture_random(-r,r));}
+        } else if(form==2) for(i=0;i<sides;++i) {points[i][0]=(short)texture_random(-400,720);points[i][1]=(short)texture_random(-300,460);}
+        else for(i=0;i<sides;++i) {points[i][0]=(short)texture_random(-60,380);points[i][1]=(short)texture_random(-40,200);}
+        memset(buffer,0xff,sizeof(buffer));
+        spans=ref_span_reset();
+        for(i=0;i<sides;++i) ref_span_edge(spans,points[i],points[(i+1)%sides],0);
+        ref_span_draw(spans,colour);
+        count=0;minx=miny=100000;maxx=maxy=-100000;
+        for(i=0;i<sizeof(buffer);++i) if(buffer[i]!=0xff) {
+            long x=(long)(i%320),y=(long)(i/320)-300;
+            ++count;
+            if(x<minx) minx=x; if(x>maxx) maxx=x; if(y<miny) miny=y; if(y>maxy) maxy=y;
+        }
+        printf("{\"case\":%lu,\"colour\":%lu,\"points\":[",n,colour);
+        for(i=0;i<sides;++i) printf("%s[%d,%d]",i?",":"",points[i][0],points[i][1]);
+        printf("],\"written\":%lu,\"bounds\":[%ld,%ld,%ld,%ld],\"pixels_fnv1a64\":\"%016llx\"}\n",
+               count,count?minx:0,count?miny:0,count?maxx:0,count?maxy:0,
+               (unsigned long long)fingerprint(buffer,sizeof(buffer)));
+    }
+    if (fflush(stdout)) fail("cannot flush span raster vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
-static unsigned long texture_faces[1024][20];
+static unsigned long texture_faces[1024][48];
 static void texture_face_begin(void)
 {
     face_entry=0;face_colour_called=0;
@@ -1775,9 +1823,22 @@ static void texture_face_end(int kind, long material, unsigned long normal)
     else if(face_entry && face_entry[0]==(unsigned long)ref_tex_draw_quad) {row[3]=1;words=12;}
     else if(face_entry && face_entry[0]==(unsigned long)ref_flat_draw_triangle) {row[3]=2;words=4;}
     else if(face_entry && face_entry[0]==(unsigned long)ref_flat_draw_quad) {row[3]=2;words=5;}
+    else if(face_entry && face_entry[0]==(unsigned long)ref_poly_start) {
+        /* F1714: F1795's two points, each F1796's point, then F1799's colour. */
+        unsigned long k=4;
+        row[3]=3;
+        if(face_entry[1]!=(unsigned long)ref_poly_edge) fail("F1714 entry without F1795");
+        row[6]=face_entry[2];row[7]=face_entry[3];words=2;
+        while(face_entry[k]==(unsigned long)ref_poly_to) {
+            if(words>=40) fail("F1714 entry too long");
+            row[6+words++]=face_entry[k+1];k+=2;
+        }
+        if(face_entry[k]!=(unsigned long)ref_poly_fill) fail("F1714 entry without F1799");
+        row[6+words++]=face_entry[k+1];
+    }
     row[4]=face_colour_called ? ((unsigned long)face_colour[0]|((unsigned long)face_colour[1]<<8)|((unsigned long)face_colour[2]<<16)) : 0xffffffffUL;
     row[5]=words;
-    for(i=0;i<words;++i) row[6+i]=face_entry[1+i];
+    if(row[3]!=3) for(i=0;i<words;++i) row[6+i]=face_entry[1+i];
 }
 
 /* Thruster glows (opcode 9). thruster-cases calls the original F1738 handler directly
@@ -1901,7 +1962,7 @@ static int texture_queue_vector(int index)
     static const long positions[][3]={{0,0,2000},{0,0,600},{300,-200,3000},{0,0,12000}};
     unsigned long v,i,j;
     unsigned long *model;
-    fprintf(stderr,"JJFFE texture-queue-v1: one model slot through original F1772 with real F1708/F1712 (as station-model-v1, four views, instance colour 1,2,3, synthetic normal colours r=3i%%9 g=5i%%10 b=7i%%11, culled when i%%7==3); per face the queue entry of the textured (F1807/F1805) or on-screen flat (F1804/F1809) path and the F1691 flat colour. Points/lines/text/children not queued; no flush or pixels.\n");
+    fprintf(stderr,"JJFFE texture-queue-v1: one model slot through original F1772 with real F1708/F1712 (as station-model-v1, four views, instance colour 1,2,3, synthetic normal colours r=3i%%9 g=5i%%10 b=7i%%11, culled when i%%7==3); per face the queue entry of the textured (F1807/F1805), on-screen flat (F1804/F1809) or F1714 outline (path 3: its points, then the F1799 colour) path and the F1691 flat colour. Points/lines/text/children not queued; no flush or pixels.\n");
     if(index<0 || index>465) fail("model index outside the table");
     model=ref_model(index);
     if(!model) { printf("{\"model\":%d,\"null\":1}\n",index); return 0; }
@@ -2563,6 +2624,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--line-raster")) return line_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--curve-raster")) return curve_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--fill-raster")) return fill_raster_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--span-raster")) return span_raster_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

@@ -1,7 +1,8 @@
-# Flat faces (F1604 DrawTriangle, F1607/F1608 DrawQuad)
+# Flat faces and polygon spans (F1604, F1607/F1608, F1714, F1560/F1613)
 
 Ported in `crates/ffe-core/src/model_fill.rs`; verified by
-`tools/reference/verify-fills.py` (v0.48h).
+`tools/reference/verify-fills.py` (v0.48h, spans v0.48i) and the texture-queue
+oracle (F1714 outlines, v0.48i).
 
 ## Who calls them
 
@@ -49,9 +50,51 @@ the view) with the framebuffer pointer 300 rows into a 0xff-filled 320x800
 buffer. `fill_reference.rs` compares count, bounds and hash: 4096 compared, 0
 mismatched; tampered fields and an empty trace are rejected.
 
+## Polygon spans (F1794 -> F1795/F1796/F1797 -> F1799)
+
+- **F1468** (F1794): a fresh table `DATA_009202`: 158 rows of 44 bytes (a count
+  and ten x values), `+0x1b28` clip flag 0, `+0x1b2c` top 0x9e, `+0x1b30`
+  bottom -1.
+- **F1560** (per edge; F1795 its two points, F1796 the previous point and its
+  own, F1797 F1548's curve edges): top end first (swap when the second is
+  higher); dropped when `top.y >= 0x9e` or `bottom.y <= 0`; `bottom.y > 0x9e`
+  clipped toward the top by F1563 (limit 0x9e), `top.y < 0` toward the bottom;
+  either x off the view (`x >=u 0x140`) sets the clip flag; bottom/top widened;
+  **F1559** steps `x = top.x << 16` by `(dx << 16) / dy` (dx > 0) or
+  `-(-(dx << 16) / dy)` over `dy` rows from the top row, each row's
+  **F1558** appending `x >> 16` when it holds fewer than ten.
+- **F1613** (F1799, colour through F1327): nothing when `bottom < top`; rows
+  from `bottom - 1` up to `top`; each row bubble-sorted (signed) and drawn in
+  pairs from the last pair, `F(x[i], y, x[i+1] - x[i])` with F1600 (x clipped
+  to 0..0x140, nothing when empty) if the flag is set, else F1601. An odd first
+  value is left out.
+
+`--span-raster` runs the original F1468, F1560 per edge and F1613 on 4096
+synthetic closed polygons (3-12 points, on and off the view, self-crossing);
+4096 compared, 0 mismatched.
+
+## Faces reaching off the view (F1713/F1714)
+
+F1709 sends a triangle (as a, b, c, c) and F1712 a quad to F1713 when no point
+is on the view (rejected when the F1715/F1716 outcodes OR to all-left,
+all-right or all-behind, `DATA_007818`), or straight to F1714 when some point
+is. **F1714** turns (a, b, c, d) until a is in front (z >= 0x40), then queues an
+F1794 outline: a's screen point, then for b, c, d in turn the screen point of
+each vertex in front and F1564's near-plane point (from the vertex behind
+toward its neighbour in front) at each crossing, back to a, and an F1799 fill
+in the F1326 colour. `model_fill::near_outline` ports it; the executor now
+records each queued face's views (`Emission::views`) for it.
+
+The texture-queue oracle records these entries (path 3: the points, then the
+colour) and compares them per face across every model and four views: 5,666
+outlines, 0 mismatched (model 361, whose data differs between JJFFE and this
+release, is left out).
+
 ## In ffe-rs
 
-Untextured triangles and quads whose points are all on the view become
-`Shape::Flat` and draw with `fill_triangle` / `fill_quad`. Faces reaching off
-the view (the original's F1713/F1714 polygon path) and polygons still use the
-diagnostic even-odd fill (F1560/F1559/F1613 are not ported).
+Untextured triangles and quads with every point on the view draw with
+`fill_triangle` / `fill_quad` (`Shape::Flat`); any other queued flat face,
+including those crossing the near plane (previously skipped), draws its F1714
+outline with `fill_polygon` (`Shape::Polygon`), as do polygon entries
+(`model_polygon::edges`). The diagnostic even-odd fill is left only for faces
+with other point counts.

@@ -140,7 +140,12 @@ fn on_screen([x, y]: [i16; 2]) -> bool {
 
 /// F1562 (axis 0, limit 0x13f) / F1563 (axis 1, limit 0x9d): move `point` along
 /// the line to `other` onto the screen edge it lies beyond on that axis.
-fn clip_axis(point: &mut [i16; 2], other: [i16; 2], axis: usize, limit: i32) -> Result<(), String> {
+pub(crate) fn clip_axis(
+    point: &mut [i16; 2],
+    other: [i16; 2],
+    axis: usize,
+    limit: i32,
+) -> Result<(), String> {
     let across = 1 - axis;
     let value = i32::from(point[axis]);
     if value as u32 <= limit as u32 {

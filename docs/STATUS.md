@@ -253,8 +253,13 @@ tests and an oracle, as the earlier milestones did.
      F1607/F1608 (quads, F1602/F1603/F1601) are ported (`ffe-core::model_fill`,
      `docs/notes/fills.md`) and verified by `verify-fills.py` (4096 faces, 0
      mismatched); on-view flat faces draw with them.
-   - **Left:** the polygon path (F1713/F1714 entries, F1560/F1559/F1613
-     spans), then the whole-frame framebuffer mode below.
+   - **Done (v0.48i):** the polygon span path (F1468, F1560/F1559/F1558,
+     F1613/F1600) verified by `verify-fills.py` (4096 polygons, 0
+     mismatched), and F1714's outlines for faces reaching off the view
+     verified by the texture-queue oracle (5,666 outlines, 0 mismatched).
+     Polygons and every queued flat face now draw with the original
+     rasterisers; faces crossing the near plane are no longer skipped.
+   - **Left:** the whole-frame framebuffer mode below.
  Add a framebuffer mode to the reference adapter that
    draws one queued scene with the original's F1795/F1796/F1797 spans, F1647
    textures, F1616 lines and F1811 curves. Then replace the viewer's diagnostic
@@ -298,8 +303,9 @@ values.
 
 ## Known stale spots
 
-- `verify-all.py` on 2026-10-23 (after v0.48e, with v0.48f's lines): 27 of
-  30 pass. Already failing on main before v0.48f: `verify-assets.py` still
+- `verify-all.py` on 2026-10-23 (after v0.48i): 28 of 31 pass (the new
+  `verify-lines.py` and `verify-fills.py` included). Already failing on main
+  before v0.48f: `verify-assets.py` still
   expects cache v13 with 1,778 files (v14 has 1,781, and its name check
   expects JJFFE's 209 entries where the cache now holds 219), and both
   `verify-child-models.py` runs report nested/face/child event differences

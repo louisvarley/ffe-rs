@@ -5,7 +5,7 @@ use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::JITTER_SEED;
-use ffe_core::model_fill::{fill_quad, fill_triangle};
+use ffe_core::model_fill::{fill_polygon, fill_quad, fill_triangle};
 use ffe_core::model_line::{draw_curve, draw_line};
 use std::io::Cursor;
 
@@ -586,6 +586,16 @@ impl Screen {
         for shape in shapes {
             match shape {
                 Shape::Fill(points, rgb) => self.fill_value(points, value(*rgb)),
+                Shape::Polygon(edges, rgb) => {
+                    // F1560 keeps rows in 0..158 and F1600 clips x when an edge
+                    // reaches off the view, so every pixel lands in the view.
+                    let frame = &mut self.frame;
+                    let _ = fill_polygon(edges, |x, y| {
+                        if (0..320).contains(&x) && (0..VIEW_HEIGHT as i32).contains(&y) {
+                            frame[y as usize * 320 + x as usize] = value(*rgb);
+                        }
+                    });
+                }
                 Shape::Flat(points, rgb) => {
                     // F1604/F1607 on an on-view entry: every pixel lands in the view.
                     let frame = &mut self.frame;

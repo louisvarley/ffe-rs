@@ -2050,3 +2050,16 @@ original's pixels; faces reaching off the view and polygons still use the
 diagnostic fill. F1616's slope now shares F1603's gradient (re-verified). The
 flight-view test no longer expects a pixel from a degenerate triangle, which
 the original fills with nothing. Notes: `docs/notes/fills.md`.
+
+## Polygon spans and off-view faces (v0.48i)
+
+The polygon span path is ported in `ffe-core::model_fill` (`Spans`,
+`fill_polygon`: F1468, F1560 with F1563/F1559/F1558, F1613 with F1600/F1601)
+and verified by the new `--span-raster` mode (4096 synthetic polygons, 0
+mismatched). F1714, which queues a flat face reaching off the view (or across
+the near plane) as an outline, is ported as `near_outline`; the texture-queue
+probe now records those entries and the oracle compares 5,666 of them, 0
+mismatched (model 361 left out: its data differs between JJFFE and this
+release). The executor keeps each queued face's views for it. Polygons and all
+queued flat faces now use the original rasterisers, and faces crossing the
+near plane, previously skipped, are drawn.

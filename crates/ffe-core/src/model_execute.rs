@@ -25,6 +25,9 @@ pub struct Emission {
     /// Screen points F1708/F1712 projected, in `face.vertices` order; empty unless
     /// the face was queued. Child faces carry their own (child-cache) points.
     pub screen: Vec<[i16; 2]>,
+    /// The view positions of the same vertices (what F1714 reads for a face
+    /// reaching off the view); empty unless the face was queued.
+    pub views: Vec<[i32; 3]>,
     /// The face normal's colour in the evaluating instance's normal table (zero
     /// when culled): what F1693 adds to a lit material.
     pub shade: [u8; 3],
@@ -506,8 +509,8 @@ fn view_point(
         .view)
 }
 
-/// A queued face's depth key and its projected screen points.
-type QueuedFace = (u32, Vec<[i16; 2]>);
+/// A queued face's depth key, its projected screen points and their views.
+type QueuedFace = (u32, Vec<[i16; 2]>, Vec<[i32; 3]>);
 
 /// F1708/F1712 face queueing. A culled normal queues nothing. Otherwise every vertex is
 /// projected (F1471) in the original order: b, c, (d,) then a. A textured face whose
@@ -564,12 +567,13 @@ fn face_queue_key(
         .sum();
     let key = model_depth::key(points[0].view, instance.key_scale);
     let projected = points.iter().map(|p| p.screen).collect();
+    let views = points.iter().map(|p| p.view).collect();
     if instance.textures && decoded.texture != 0 && guarded && perimeter >= 6 {
-        return Ok(Some((key, projected)));
+        return Ok(Some((key, projected, views)));
     }
     let on_screen = |[x, y]: [i32; 2]| (x as u32) < 320 && (y as u32) < 158;
     if screens.iter().any(|s| on_screen(*s)) {
-        return Ok(Some((key, projected)));
+        return Ok(Some((key, projected, views)));
     }
     // F1715/F1716 outcodes over a, b, c and (for triangles, c again) d.
     let code = |value: i32, limit: i32| match value {
@@ -583,7 +587,7 @@ fn face_queue_key(
         // DATA_007818 rejects all-left (1), all-right (4) and all-behind (8).
         matches!(combined, 1 | 4 | 8)
     };
-    Ok((!rejected(0, 320) && !rejected(1, 158)).then_some((key, projected)))
+    Ok((!rejected(0, 320) && !rejected(1, 158)).then_some((key, projected, views)))
 }
 
 fn resolve_depth_key(
@@ -910,16 +914,18 @@ fn run(
                         face: face.clone(),
                         context: working.clone(),
                         screen: Vec::new(),
+                        views: Vec::new(),
                         shade,
                     };
                     result.emissions.push(emission.clone());
                     if let (Some(queue), Some(live)) =
                         (shared.order.as_mut(), vertices.as_deref_mut())
                     {
-                        if let Some((key, screen)) =
+                        if let Some((key, screen, views)) =
                             face_queue_key(face, live, working, &instance, visibility)?
                         {
                             emission.screen = screen;
+                            emission.views = views;
                             queue.push(key, Primitive::Face(emission))?;
                             shared.queue.push(QueueEvent::Face(key));
                         }
