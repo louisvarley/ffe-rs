@@ -84,6 +84,16 @@ GLOBAL _ref_accelerate_uncapped
 GLOBAL _ref_orient
 GLOBAL _ref_player_craft
 GLOBAL _ref_scanner
+GLOBAL _ref_pl_frame_tics
+GLOBAL _ref_pl_object_list
+GLOBAL _ref_pl_altitude
+GLOBAL _ref_pl_mode
+GLOBAL _ref_pl_flags
+GLOBAL _ref_pl_set_speed
+GLOBAL _ref_pl_combat
+GLOBAL _ref_pl_combat_velocity
+GLOBAL _ref_pl_keys
+GLOBAL _ref_player_orient
 GLOBAL _ref_tex_quad
 GLOBAL _ref_tex_slots
 GLOBAL _ref_tex_draw_triangle
@@ -177,6 +187,16 @@ _ref_accelerate_uncapped equ FUNC_000602
 _ref_orient equ FUNC_000585
 _ref_player_craft equ DATA_008857
 _ref_scanner equ DATA_008933
+_ref_pl_frame_tics equ DATA_009155
+_ref_pl_object_list equ DATA_009133
+_ref_pl_altitude equ DATA_008867
+_ref_pl_mode equ DATA_008870
+_ref_pl_flags equ DATA_008871
+_ref_pl_set_speed equ DATA_008918
+_ref_pl_combat equ DATA_009046
+_ref_pl_combat_velocity equ DATA_008839
+_ref_pl_keys equ DATA_007691
+_ref_player_orient equ FUNC_001041
 _ref_tex_quad equ FUNC_001647_DrawTexQuad
 _ref_tex_slots equ DATA_009252
 _ref_tex_draw_triangle equ FUNC_001807

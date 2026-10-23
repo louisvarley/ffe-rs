@@ -31,6 +31,9 @@ pub struct Motion {
     pub craft: u8,
     /// The autopilot's turn rates (`+0x110`, `+0x112`, `+0x114`).
     pub autopilot: [i16; 3],
+    /// The parent object's index (`+0x56`): zero when the object is in free
+    /// space and no frame of reference applies.
+    pub parent: u8,
 }
 
 /// The scanner state F585 touches: the player's craft number (`DATA_008857`)
@@ -111,7 +114,48 @@ fn capped(cap: i32, value: i32) -> i32 {
     value
 }
 
+/// F1515: `a * b >> 16` with `a` taken as two 16-bit halves (so `a` is
+/// unsigned): the low half's product shifted down plus the high half's product.
+fn split_multiply(a: u32, b: i32) -> i32 {
+    let low = ((a & 0xffff) as i32).wrapping_mul(b) as u32 >> 16;
+    let high = ((a >> 16) as i32).wrapping_mul(b);
+    (low as i32).wrapping_add(high)
+}
+
+/// F1516: twice F1515, with the sign of `b` applied to the result.
+fn signed_multiply(a: u32, b: i32) -> i32 {
+    if b < 0 {
+        split_multiply(a, b.wrapping_neg())
+            .wrapping_add(split_multiply(a, b.wrapping_neg()))
+            .wrapping_neg()
+    } else {
+        split_multiply(a, b).wrapping_mul(2)
+    }
+}
+
 impl Motion {
+    /// F607: the thrust request that brings the object to `speed` along its
+    /// forward axis. `speed + speed / 100` (truncating) times the forward row's
+    /// high words (F1516) less the current velocity gives the velocity change,
+    /// which is stored as the F601 caps (`+0xf2`, `+0xf6`, `+0xfa`) and carried
+    /// through the orientation (F1670) and shifted left two.
+    pub fn set_speed_request(&mut self, speed: i32) -> [i32; 3] {
+        let target = speed.wrapping_add(speed.wrapping_div(100));
+        let forward = self.orientation[2];
+        let along = |component: i32| {
+            if target < 0 {
+                signed_multiply(target.wrapping_neg() as u32, component >> 16).wrapping_neg()
+            } else {
+                signed_multiply(target as u32, component >> 16)
+            }
+        };
+        let change: [i32; 3] =
+            std::array::from_fn(|axis| along(forward[axis]).wrapping_sub(self.velocity[axis]));
+        self.cap = change;
+        let matrix: [i32; 9] = std::array::from_fn(|i| self.orientation[i / 3][i % 3]);
+        crate::model_math::transform_rows(change, &matrix).map(|v| v.wrapping_shl(2))
+    }
+
     /// F1520: re-orthogonalise the orientation: right and forward normalised,
     /// up = forward x right normalised, right = up x forward.
     pub fn renormalise(&mut self) {

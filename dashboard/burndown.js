@@ -287,6 +287,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 87,
       note: "v0.49c: orientation update F585/F584/F611/F1520 ported and verified (4096 cases); physics still in progress (positions, frames, gravity)."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 87,
+      note: "v0.49d: the player's free-flight orientation and thrust request (F1041, F607, F1043) ported and verified (4096 cases)."
     }
   ]
 };

@@ -1,4 +1,6 @@
 use ffe_core::physics::{Motion, Scanner};
+use ffe_core::player::{Player, ThrusterKeys};
+use ffe_core::thrust::Limits;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -141,5 +143,128 @@ fn executed_reference_orient() {
         cases += 1;
     }
     eprintln!("compared {cases} orient cases ({renormalised} renormalised), 0 mismatched");
+    assert_eq!(cases, 4096);
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlayerAfter {
+    matrix: [i32; 9],
+    drift: i8,
+    rate: [i16; 3],
+    thrust: [i16; 3],
+    cap: [i32; 3],
+    counter: i8,
+    scanner: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlayerCase {
+    case: usize,
+    matrix: [i32; 9],
+    drift: i8,
+    rate: [i16; 3],
+    limits: [i16; 6],
+    velocity: [i32; 3],
+    model: u32,
+    craft: u8,
+    player: u32,
+    scanner: u16,
+    counter: i8,
+    tics: u32,
+    altitude: i32,
+    mode: u8,
+    flags: u8,
+    combat: u8,
+    combat_velocity: [i32; 3],
+    set_speed: i32,
+    keys: [u8; 10],
+    after: PlayerAfter,
+}
+
+/// Original F1041 in free space (`--player-orient`): 4096 synthetic players with
+/// near-identity and random orientations, limits, velocities, set speeds, the
+/// take-off mode, engines on and off, combat mode and random pressed thruster
+/// keys. The orientation, drift counter, rates, thrust words, caps (set by the
+/// set-speed request), countdown and scanner word after must match.
+#[test]
+#[ignore = "Local-only original player update; use tools/reference/verify-physics.py"]
+fn executed_reference_player_orient() {
+    let input = std::fs::read_to_string(std::env::var_os("FFE_PLAYER_VECTORS").unwrap()).unwrap();
+    assert!(input.len() < 32 << 20);
+    let mut cases = 0;
+    for line in input.lines() {
+        let case: PlayerCase = serde_json::from_str(line).unwrap();
+        assert_eq!(case.case, cases);
+        let m = case.matrix;
+        let l = case.limits;
+        let mut player = Player {
+            motion: Motion {
+                orientation: [[m[0], m[1], m[2]], [m[3], m[4], m[5]], [m[6], m[7], m[8]]],
+                drift: case.drift,
+                rate: case.rate,
+                velocity: case.velocity,
+                model: case.model,
+                craft: case.craft,
+                ..Motion::default()
+            },
+            limits: Limits {
+                axes: [[l[0], l[1]], [l[2], l[3]], [l[4], l[5]]],
+            },
+            set_speed: case.set_speed,
+            mode: case.mode,
+            flags: case.flags,
+            altitude: case.altitude,
+            frame_tics: case.tics,
+            reference_counter: case.counter,
+            combat: case.combat & 2 != 0,
+            combat_velocity: case.combat_velocity,
+            scanner: Scanner {
+                player: case.player,
+                rotation: case.scanner,
+            },
+        };
+        let k = case.keys.map(|k| k != 0);
+        let keys = ThrusterKeys {
+            forward: k[0],
+            reverse: k[1],
+            numpad_forward: k[2],
+            numpad_reverse: k[3],
+            up_a: k[4],
+            up_b: k[5],
+            down_a: k[6],
+            down_b: k[7],
+            right: k[8],
+            left: k[9],
+        };
+        player.orient_and_thrust(&keys).unwrap();
+        let a = case.after.matrix;
+        let expected = [[a[0], a[1], a[2]], [a[3], a[4], a[5]], [a[6], a[7], a[8]]];
+        assert_eq!(
+            (
+                player.motion.orientation,
+                player.motion.drift,
+                player.motion.rate,
+                player.motion.thrust,
+                player.motion.cap,
+                player.reference_counter,
+                player.scanner.rotation
+            ),
+            (
+                expected,
+                case.after.drift,
+                case.after.rate,
+                case.after.thrust,
+                case.after.cap,
+                case.after.counter,
+                case.after.scanner
+            ),
+            "player case {}",
+            case.case
+        );
+        cases += 1;
+    }
+    eprintln!("compared {cases} player cases, 0 mismatched");
     assert_eq!(cases, 4096);
 }

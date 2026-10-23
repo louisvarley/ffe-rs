@@ -2100,3 +2100,12 @@ F584 (step sizes), F611 (the rotation and its drift counter) and F1520 with
 F1519 and F1552 (re-orthogonalising the matrix) are ported in `ffe-core::physics`
 and verified by the new `--orient` mode and `verify-physics.py` (4096 cases,
 447 through F1520, 0 mismatched). Notes: `docs/notes/physics.md`.
+
+## The player's free-flight update (v0.49d)
+
+F1041 (the player's orientation and thrust request in free space) is ported in
+`ffe-core::player` with F607 (the set-speed request, F1515/F1516) and F1043 (the
+engines-off thrust), and verified by the new `--player-orient` mode and
+`verify-physics.py` (4096 cases, 0 mismatched). Frames of reference, gravity and
+the planet auto-roll are not ported yet and the port refuses those cases.
+Notes: `docs/notes/player.md`.
