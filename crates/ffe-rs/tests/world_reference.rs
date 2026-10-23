@@ -6,6 +6,19 @@ use ffe_core::objects::{Models, PhysList, Placement, SurfaceTools};
 use ffe_core::sysgen::{handcoded, Generator, Params};
 use serde::Deserialize;
 
+fn system_name() -> [u8; 20] {
+    let mut name = [0u8; 20];
+    name[..8].copy_from_slice(b"Testname");
+    name
+}
+
+fn cache_names() -> Vec<u8> {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    cache.asset("base:text/names").unwrap().to_vec()
+}
+
 fn cache_tables() -> Vec<u8> {
     let cache =
         ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
@@ -158,6 +171,36 @@ fn without_names(object: &[u8]) -> Vec<u8> {
     copy
 }
 
+/// The NUL-terminated name of object `j` in a system list.
+fn name_of(list: &[u8], j: usize) -> Vec<u8> {
+    let field = &list[j * 68 + 0x26..j * 68 + 0x3f];
+    field[..field.iter().position(|b| *b == 0).unwrap_or(field.len())].to_vec()
+}
+
+/// Whether object `i`'s name cannot be reproduced: it is built from the
+/// uninitialised counters of the original's F877 (or from such a name), or holds
+/// the accented letters JJFFE's data spells differently (see `names_reference`).
+fn unspecified_name(list: &[u8], uncertain: &[usize], i: usize) -> bool {
+    let own = name_of(list, i);
+    uncertain
+        .iter()
+        .any(|&j| j <= i && own.starts_with(&name_of(list, j)))
+        || (0..=i).any(|j| {
+            let other = name_of(list, j);
+            other.iter().any(|b| *b >= 0x80) && own.starts_with(&other)
+        })
+}
+
+/// The object with the bytes after its name's NUL cleared (the original leaves
+/// whatever its string pieces wrote there).
+fn terminated(object: &[u8]) -> Vec<u8> {
+    let mut copy = object.to_vec();
+    if let Some(end) = copy[0x26..0x3f].iter().position(|b| *b == 0) {
+        copy[0x26 + end..0x3f].fill(0);
+    }
+    copy
+}
+
 /// Original F875 and F878 (`--sysgen`): the hand-coded objects, then 4096 synthetic
 /// systems (seeds, star masses, star counts, codes, populations). Every object's
 /// 68 bytes (names zeroed), the counters and the random state must match; the
@@ -166,6 +209,8 @@ fn without_names(object: &[u8]) -> Vec<u8> {
 #[ignore = "Local-only original world generation; use tools/reference/verify-world.py"]
 fn executed_reference_sysgen() {
     let bytes = cache_tables();
+    let name_bytes = cache_names();
+    let names = ffe_core::names::Names::new(&name_bytes).unwrap();
     let tables = Tables::new(&bytes).unwrap();
     let input = std::fs::read_to_string(std::env::var_os("FFE_SYSGEN_VECTORS").unwrap()).unwrap();
     assert!(input.len() < 160 << 20);
@@ -191,6 +236,7 @@ fn executed_reference_sysgen() {
             continue;
         }
         let mut generator = Generator::new(Tables::new(&bytes).unwrap());
+        generator.names = Some(&names);
         let count = generator
             .generate(&Params {
                 seed: case.seed,
@@ -198,12 +244,24 @@ fn executed_reference_sysgen() {
                 stars: case.stars,
                 code: case.code,
                 population: case.population,
+                name: system_name(),
             })
             .unwrap();
         assert_eq!(count, case.count, "system case {}: object count", case.case);
         for (i, want) in case.objects.iter().enumerate() {
-            let got = without_names(&generator.list[i * 68..i * 68 + 68]);
-            assert_eq!(&got, want, "system case {} object {i}", case.case);
+            let got = if case.seed == 0 {
+                without_names(&generator.list[i * 68..i * 68 + 68])
+            } else {
+                generator.list[i * 68..i * 68 + 68].to_vec()
+            };
+            let unspecified =
+                case.seed != 0 && unspecified_name(&generator.list, &generator.uncertain, i);
+            let (mut got, mut want) = (terminated(&got), terminated(want));
+            if unspecified {
+                got[0x26..0x3f].fill(0);
+                want[0x26..0x3f].fill(0);
+            }
+            assert_eq!(got, want, "system case {} object {i}", case.case);
         }
         // A hand-coded system leaves the random state as it was.
         let state = if case.seed == 0 {
@@ -273,6 +331,8 @@ fn executed_reference_worldgen() {
     let cache =
         ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
             .unwrap();
+    let name_bytes = cache.asset("base:text/names").unwrap().to_vec();
+    let names = ffe_core::names::Names::new(&name_bytes).unwrap();
     let blob = cache.asset("base:world/system-tables").unwrap();
     let tables = Tables::new(blob).unwrap();
     let models = Models {
@@ -305,6 +365,7 @@ fn executed_reference_worldgen() {
             continue;
         }
         let mut generator = Generator::new(Tables::new(blob).unwrap());
+        generator.names = Some(&names);
         generator
             .generate(&Params {
                 seed: case.seed,
@@ -312,6 +373,7 @@ fn executed_reference_worldgen() {
                 stars: case.stars,
                 code: case.code,
                 population: case.population,
+                name: system_name(),
             })
             .unwrap();
         let mut system = generator.list.clone();
@@ -327,10 +389,23 @@ fn executed_reference_worldgen() {
             "worldgen case {} count",
             case.case
         );
+        let mut loose = Vec::new();
         for (i, want) in case.system.iter().enumerate() {
             let mut got = system[i * 68..i * 68 + 68].to_vec();
-            got[0x26..0x3a].fill(0);
-            assert_eq!(&got, want, "worldgen case {} system object {i}", case.case);
+            let mut want = want.clone();
+            if case.seed == 0 {
+                got[0x26..0x3a].fill(0);
+            } else if unspecified_name(&system, &generator.uncertain, i) {
+                loose.push(u32::from_le_bytes(
+                    system[i * 68 + 0x18..i * 68 + 0x1c].try_into().unwrap(),
+                ) as usize);
+                got[0x26..0x3f].fill(0);
+                want[0x26..0x3f].fill(0);
+            } else {
+                got = terminated(&got);
+                want = terminated(&want);
+            }
+            assert_eq!(got, want, "worldgen case {} system object {i}", case.case);
         }
         assert_eq!(
             &list.bytes[..0x73],
@@ -347,7 +422,19 @@ fn executed_reference_worldgen() {
             let index: usize = index.parse().unwrap();
             let at = 0x74 + 0x152 * index;
             let mut got = list.bytes[at..at + 0x152].to_vec();
-            got[0x124..0x138].fill(0);
+            let mut want = want.clone();
+            if case.seed == 0 || loose.contains(&index) {
+                got[0x124..0x138].fill(0);
+                want[0x124..0x138].fill(0);
+            } else {
+                let end = got[0x124..0x138].iter().position(|b| *b == 0).unwrap_or(20);
+                got[0x124 + end..0x138].fill(0);
+                let end = want[0x124..0x138]
+                    .iter()
+                    .position(|b| *b == 0)
+                    .unwrap_or(20);
+                want[0x124 + end..0x138].fill(0);
+            }
             let differing: Vec<usize> = (0..got.len()).filter(|i| got[*i] != want[*i]).collect();
             assert!(
                 differing.is_empty(),

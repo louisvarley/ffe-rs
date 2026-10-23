@@ -2332,3 +2332,13 @@ Notes: `docs/notes/terrain.md`, `surface.md`, `objects.md`.
 Notes: `docs/notes/names.md`. Cache v18 adds `base:text/names`. `ffe_core::names`
 ports F791 (types 1 to 0x14), F793/F794, F795-F799 and F921; `--names` matches 8,130
 names. Wiring names into system generation (F893) is next.
+
+## v0.51h: names in system generation
+
+`ffe_core::sysgen` builds every object's name as the original does (F881's star,
+planet and moon strings, F877's `A,B` centre, F893 through `names::Names`), and
+`Placement::create` copies it to the physics object's `+0x124` (F880's `strcpy`).
+`--sysgen` (4,156 systems) and `--worldgen` (1,024 systems, 17,762 physics objects)
+now run with names unmasked for generated systems; only the F877 uninitialised-counter
+names and JJFFE's accented spellings are left out of the comparison
+(`docs/notes/sysgen.md`). Hand-coded system names (literals in F875) are still masked.

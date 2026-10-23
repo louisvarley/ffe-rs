@@ -732,6 +732,13 @@ impl Placement<'_> {
                 let tilt = i32::from(list.word(object, 0xcc) as i16);
                 list.set_matrix(object, matrix_yzt(self.sine, tilt, spin as i32));
             }
+            // The name (`strcpy`, so up to and including the NUL).
+            let source = &system[at + 0x26..];
+            let length = source.iter().position(|b| *b == 0).unwrap_or(source.len());
+            let to = list.at(object, 0x124);
+            for (k, byte) in source[..length].iter().chain(&[0]).enumerate() {
+                list.bytes[to + k] = *byte;
+            }
             index += 1;
         }
     }

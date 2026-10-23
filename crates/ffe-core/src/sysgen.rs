@@ -1,15 +1,17 @@
 //! System generation, ported routine by routine from `csysgen.txt` and
 //! `ffe.asm` (F872-F897): the list of 68-byte system objects (stars, planets,
 //! moons, stations and starports) that F878 builds from a system's seeds.
-//! Names (F893's string expansion) are not generated: the objects' name field
-//! stays as the caller left it, but F893's flag (`+0x3f` bit 7) is kept because
-//! later decisions read it. The tables are the executable's, imported into the
+//! Names are built as the original does: stars and pairs from the system name,
+//! planets and moons from their parent's, and the rest by F893 through
+//! `names::Names` (without name data the objects are only marked as named, which
+//! later decisions read). The tables are the executable's, imported into the
 //! content cache (`ffe_core::galaxy::tables`). Verified against the executed
 //! original (`docs/notes/sysgen.md`).
 
 use crate::ffp::{self, Ffp};
 use crate::galaxy::{tables, Tables};
 use crate::handcoded::{Step, STEPS};
+use crate::names::Names;
 
 /// Bytes per system object.
 pub const OBJECT_BYTES: usize = 68;
@@ -31,6 +33,8 @@ pub struct Params {
     pub code: u32,
     /// `+0x10`: the population-like parameter (`DATA_008854`).
     pub population: i32,
+    /// `+0x14`: the system's name, NUL-terminated.
+    pub name: [u8; 20],
 }
 
 /// F872/F875: the hand-coded Sol-neighbourhood objects (`DATA_008792`, 146
@@ -131,6 +135,12 @@ pub struct Generator<'a> {
     objects: u8,
     letter: u8,
     depth: u8,
+    /// The first-, second- and third-level counters of F881's planet names.
+    counters: [u8; 3],
+    in_pair: bool,
+    /// Objects whose names depend on uninitialised memory in the original: F877's
+    /// counters for a pair's first star when the mass is below a star's.
+    pub uncertain: Vec<usize>,
     stars_left: u8,
     total_mass: u32,
     code: u32,
@@ -141,6 +151,8 @@ pub struct Generator<'a> {
     pub stations: u8,
     /// `DATA_007128`: the allegiance F871 reports.
     pub allegiance: u32,
+    /// The name data; without it objects are marked as named but keep their bytes.
+    pub names: Option<&'a Names<'a>>,
 }
 
 impl<'a> Generator<'a> {
@@ -156,6 +168,9 @@ impl<'a> Generator<'a> {
             objects: 0,
             letter: 0,
             depth: 0,
+            counters: [0; 3],
+            in_pair: false,
+            uncertain: Vec::new(),
             stars_left: 0,
             total_mass: 0,
             code: 0,
@@ -163,6 +178,7 @@ impl<'a> Generator<'a> {
             starports: 0,
             stations: 0,
             allegiance: 0,
+            names: None,
         }
     }
 
@@ -220,10 +236,42 @@ impl<'a> Generator<'a> {
         }
     }
 
-    /// F893's numeric effect: the object is marked as named.
-    fn name(&mut self, object: usize) {
+    /// F893: the object is marked as named and, with the name data, named: types 8
+    /// and 9 become planet names (0x10) and 6 and 7 starport names (0x11) when the
+    /// allegiance is 3.
+    fn name(&mut self, object: usize, kind: u32) {
         let flags = self.byte(object, 0x3f) | 0x80;
         self.set_byte(object, 0x3f, flags);
+        let Some(names) = self.names else { return };
+        let kind = match (self.allegiance, kind) {
+            (3, 8 | 9) => 0x10,
+            (3, 6 | 7) => 0x11,
+            _ => kind,
+        };
+        let seed = self.dword(object, 4);
+        if let Some(mut text) = names.generate(kind, seed) {
+            text.push(0);
+            let at = object * OBJECT_BYTES + 0x26;
+            let end = (at + text.len()).min(self.list.len());
+            self.list[at..end].copy_from_slice(&text[..end - at]);
+        }
+    }
+
+    /// The NUL-terminated text of an object's name field.
+    fn text(&self, object: usize) -> Vec<u8> {
+        let at = object * OBJECT_BYTES + 0x26;
+        let bytes = &self.list[at..];
+        bytes[..bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len())].to_vec()
+    }
+
+    /// Writes a NUL-terminated name into an object's name field.
+    fn put_text(&mut self, object: usize, text: &[u8]) {
+        let at = object * OBJECT_BYTES + 0x26;
+        for (k, byte) in text.iter().chain(&[0]).enumerate() {
+            if let Some(slot) = self.list.get_mut(at + k) {
+                *slot = *byte;
+            }
+        }
     }
 
     /// F882: the orbit, velocity, seed, mass, angles and temperature of a body.
@@ -299,7 +347,7 @@ impl<'a> Generator<'a> {
     }
 
     /// F881: a star, planet or moon of the given mass; returns its shape word.
-    fn body(&mut self, mass: u32, parent: u32, p5: u32, p6: u16) -> u16 {
+    fn body(&mut self, mass: u32, parent: u32, p5: u32, p6: u16, name: &[u8]) -> u16 {
         let object = self.count as usize;
         if self.count >= 0x3c {
             return 0xffff;
@@ -316,10 +364,42 @@ impl<'a> Generator<'a> {
         let shape = self.table(tables::SHAPE, index) as u16;
         let handler = HANDLERS.get(index).copied().unwrap_or(0);
         if mass >= STAR_MASS {
+            let mut text = name.to_vec();
+            text.push(b' ');
             self.letter = self.letter.wrapping_add(1);
+            if parent != 0 {
+                text.push(self.letter.wrapping_add(0x40));
+            }
+            self.put_text(object, &text);
         } else if parent != 0 && self.byte(parent as usize - 1, 0x3f) & 0x80 != 0 {
             self.set_dword(object, 4, self.state[1]);
-            self.name(object);
+            self.name(object, 0xa);
+        } else {
+            if self.in_pair {
+                self.uncertain.push(object);
+            }
+            let mut text = self.text(parent.wrapping_sub(1) as usize);
+            match self.depth {
+                0 => {
+                    self.counters[0] = self.counters[0].wrapping_add(1);
+                    let n = self.counters[0];
+                    if n > 9 {
+                        text.push(b'1');
+                        text.push(n.wrapping_add(0x26));
+                    } else {
+                        text.push(n + 0x30);
+                    }
+                }
+                1 => {
+                    self.counters[1] = self.counters[1].wrapping_add(1);
+                    text.push(self.counters[1].wrapping_add(0x60));
+                }
+                _ => {
+                    self.counters[2] = self.counters[2].wrapping_add(1);
+                    text.push(self.counters[2].wrapping_add(0x30));
+                }
+            }
+            self.put_text(object, &text);
         }
         self.orbit(object, parent, p5, p6, mass);
         self.handle(handler, mass);
@@ -405,7 +485,7 @@ impl<'a> Generator<'a> {
         if population < 4 {
             return;
         }
-        self.name(object);
+        self.name(object, 0x9);
         if population < 0x10 {
             return;
         }
@@ -455,7 +535,7 @@ impl<'a> Generator<'a> {
             self.set_word(object, 0x24, 0x127);
         }
         self.set_type(0xb, 0x7e);
-        self.name(object);
+        self.name(object, 0x8);
         self.starports(0, population >> 5);
         if population < 0x1e {
             return;
@@ -482,7 +562,7 @@ impl<'a> Generator<'a> {
                 self.set_word(object, 0x24, 0x127);
             }
             self.set_type(9, 0x7e);
-            self.name(object);
+            self.name(object, 0x8);
             self.starports(0, population >> 6);
             if population < 0x1e {
                 return;
@@ -510,7 +590,7 @@ impl<'a> Generator<'a> {
         if (self.word(object, 2) as i16) > 0x47 {
             self.set_word(object, 2, 0x47);
         }
-        self.name(object);
+        self.name(object, 0xa);
         if population < 0x1e {
             return;
         }
@@ -533,7 +613,7 @@ impl<'a> Generator<'a> {
         if population < 0xc8 && (temperature < 0xc8 || population <= 8) {
             return;
         }
-        self.name(object);
+        self.name(object, 0xa);
         if population < 0x2d {
             return;
         }
@@ -551,7 +631,7 @@ impl<'a> Generator<'a> {
         if self.temperature() < 0xdc || population <= 0x32 {
             return;
         }
-        self.name(object);
+        self.name(object, 0xa);
         if population < 0x50 {
             return;
         }
@@ -566,7 +646,7 @@ impl<'a> Generator<'a> {
         if self.temperature() < 0xdc || self.population <= 0x32 {
             return;
         }
-        self.name(object);
+        self.name(object, 0xa);
     }
 
     /// F888: a red giant may become a white dwarf.
@@ -633,7 +713,7 @@ impl<'a> Generator<'a> {
                 0x12,
                 self.tables.dword(tables::STARPORT_LATITUDE + 8 * slot) as u16,
             );
-            self.name(object);
+            self.name(object, 0x6);
             let model_index = ((saved_population >> 5) & 7) as u32
                 + kind
                 + ((self.dword(object, 4) & 0x3_0000) >> 16);
@@ -687,7 +767,7 @@ impl<'a> Generator<'a> {
             Ffp::new(scaled as i16, speed.exponent).to_dword(),
         );
         if kind < 3 {
-            self.name(object);
+            self.name(object, 0x7);
         }
     }
 
@@ -698,11 +778,21 @@ impl<'a> Generator<'a> {
     }
 
     /// F877: a pair of stars.
-    fn pair(&mut self, parent: u32, mass: u32, p5: u32, p6: u16, p7: u16) -> u16 {
+    fn pair(&mut self, parent: u32, mass: u32, p5: u32, p6: u16, p7: u16, name: &[u8]) -> u16 {
+        // F881's counters are locals of F877's own frame.
+        let counters = std::mem::take(&mut self.counters);
+        self.in_pair = true;
+        let shape = self.pair_in(parent, mass, p5, p6, p7, name);
+        self.in_pair = false;
+        self.counters = counters;
+        shape
+    }
+
+    fn pair_in(&mut self, parent: u32, mass: u32, p5: u32, p6: u16, p7: u16, name: &[u8]) -> u16 {
         if mass >= 0xffff_ffef || (0x0a21_fe80..0x0a6e_49c0).contains(&mass) {
-            self.body(mass, parent, p5, p6);
+            self.body(mass, parent, p5, p6, name);
             let first = self.count;
-            self.body(mass >> 2, first, p5, p7);
+            self.body(mass >> 2, first, p5, p7, name);
             return p7 << 3;
         }
         self.random();
@@ -712,11 +802,17 @@ impl<'a> Generator<'a> {
         self.orbit(centre, parent, p5, p6, extra.wrapping_add(mass));
         self.set_word(centre, 0xa, 0);
         self.set_word(centre, 0xc, 0x17);
+        let mut text = name.to_vec();
+        text.push(if text.len() > 0xb { b'.' } else { b' ' });
+        text.push(self.letter.wrapping_add(0x41));
+        text.push(b',');
+        text.push(self.letter.wrapping_add(0x42));
+        self.put_text(centre, &text);
         self.count += 1;
-        self.body(mass, centre as u32 + 1, p5, p7);
+        self.body(mass, centre as u32 + 1, p5, p7, name);
         let count = self.count as usize;
         self.set_word(count - 1, 0x12, 0);
-        self.body(extra, centre as u32 + 1, p5, p7);
+        self.body(extra, centre as u32 + 1, p5, p7, name);
         let count = self.count as usize;
         self.set_word(count - 1, 0x12, 0x7fff);
         // JJFFE's fix: the pair's light is the sum of its stars'.
@@ -728,7 +824,17 @@ impl<'a> Generator<'a> {
     }
 
     /// F897: the planets (and, past a star's reach, further stars) around a body.
-    fn planets(&mut self, parent: u32, random: u32, p5: u32, p6: u32, p7: u32) {
+    #[allow(clippy::too_many_arguments)]
+    fn planets(
+        &mut self,
+        parent: u32,
+        random: u32,
+        p5: u32,
+        p6: u32,
+        p7: u32,
+        name: &[u8],
+        mut counters: [u8; 3],
+    ) {
         let reach = if p6 > 0x7fff_ffff {
             u32::MAX
         } else {
@@ -775,6 +881,7 @@ impl<'a> Generator<'a> {
                         reach,
                         (edi >> 1).wrapping_add(u32::from(si)) as u16,
                         draw16,
+                        name,
                     );
                     self.stars_left = self.stars_left.wrapping_sub(2);
                     shape = 0x3000u16;
@@ -794,12 +901,15 @@ impl<'a> Generator<'a> {
                             mass = (self.random() & 0xffff) * 259;
                         }
                     }
+                    self.counters = counters;
                     shape = self.body(
                         mass,
                         parent,
                         reach,
                         (edi >> 1).wrapping_add(u32::from(si)) as u16,
+                        name,
                     );
+                    counters = self.counters;
                 }
                 if mass <= 0x3a98 {
                     mass <<= 3;
@@ -813,7 +923,16 @@ impl<'a> Generator<'a> {
                     self.depth.wrapping_add(1)
                 };
                 let rnd = self.random();
-                self.planets(before + 1, rnd, u32::from(shape), child_reach, mass >> 7);
+                let child_name = self.text(before as usize);
+                self.planets(
+                    before + 1,
+                    rnd,
+                    u32::from(shape),
+                    child_reach,
+                    mass >> 7,
+                    &child_name,
+                    counters,
+                );
                 self.state = saved.0;
                 self.depth = saved.1;
             }
@@ -897,6 +1016,8 @@ impl<'a> Generator<'a> {
         self.objects = 0;
         self.letter = 0;
         self.depth = 0;
+        self.counters = [0; 3];
+        self.uncertain.clear();
         self.starports = 0;
         self.stations = 0;
         self.total_mass = params.mass;
@@ -904,6 +1025,8 @@ impl<'a> Generator<'a> {
         self.population = params.population;
         self.allegiance = self.tables.control(params.code, [0, 0]).allegiance;
         let mass = params.mass;
+        let length = params.name.iter().position(|b| *b == 0).unwrap_or(20);
+        let name = params.name[..length].to_vec();
         if params.seed == 0 {
             self.copy_handcoded();
             return Ok(self.count);
@@ -912,12 +1035,12 @@ impl<'a> Generator<'a> {
         self.stars_left = params.stars as u8;
         match params.stars {
             0 => {
-                let shape = self.body(mass, 0, 0, 0);
+                let shape = self.body(mass, 0, 0, 0, &name);
                 if shape == 0 {
                     return Ok(self.count);
                 }
                 let rnd = self.random();
-                self.planets(1, rnd, u32::from(shape), mass, mass >> 8);
+                self.planets(1, rnd, u32::from(shape), mass, mass >> 8, &name, [0; 3]);
             }
             1 => {
                 self.stars_left = self.stars_left.wrapping_sub(1);
@@ -928,14 +1051,14 @@ impl<'a> Generator<'a> {
                 } else {
                     mass << 3
                 };
-                let shape = self.pair(0, mass, second, 0, scale as u16);
+                let shape = self.pair(0, mass, second, 0, scale as u16, &name);
                 let rnd = self.random();
-                self.planets(1, rnd, u32::from(shape), second, mass >> 6);
+                self.planets(1, rnd, u32::from(shape), second, mass >> 6, &name, [0; 3]);
             }
             _ => {
                 self.random();
                 let word = ((self.state[1] & 0xffff) >> 8) as u16;
-                self.pair(0, mass, u32::MAX, 0, word);
+                self.pair(0, mass, u32::MAX, 0, word, &name);
                 let shape = word << 4;
                 self.stars_left = self.stars_left.wrapping_sub(1);
                 let mut next = mass.wrapping_add(0x081b_3200);
@@ -944,7 +1067,7 @@ impl<'a> Generator<'a> {
                 }
                 self.random();
                 let rnd = ((self.state[0] as u16 | 0x8000) as i16 >> 2) as i32 as u32;
-                self.planets(1, rnd, u32::from(shape), u32::MAX, next);
+                self.planets(1, rnd, u32::from(shape), u32::MAX, next, &name, [0; 3]);
             }
         }
         let end = self.count as usize;

@@ -36,9 +36,19 @@ orientation.
 
 ## What is not generated
 
-Names. F893 expands them through the message-string engine, which is not imported
-yet; the port leaves the 20-byte name as it was. Everything else, including every
-decision names do not make, is byte-exact.
+Names. Stars are the system name, a space and a letter (`A`, `B`...); the centre of an
+opposing-orbit pair is `Name A,B` (a `.` instead of the space when the name is longer
+than 11); a planet is its parent's name and a counter (digits at the first level, `a`...
+at the second, digits again below), the counters being F897's own parameters copied down
+by value to the next level; anything whose parent is already a generated name (moons of
+named planets, starports, stations) goes through F893 and the name generator
+(`docs/notes/names.md`). Compared up to the NUL (the original leaves stale bytes after
+it). Not reproducible: F877 keeps its counters in uninitialised locals, so the first star
+of a pair whose mass is below a star's (possible when the total mass is under twice a
+star's) gets a counter from stack garbage; the port starts them at zero, records those
+objects (`Generator::uncertain`) and the tests leave them and the names built from theirs
+out of the comparison, as they do the accented letters JJFFE's data spells differently.
+Everything else is byte-exact.
 
 ## Oracle
 

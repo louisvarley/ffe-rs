@@ -4,6 +4,8 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <sys/time.h>
+#include <sys/personality.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include "ffeapi.h"
@@ -2871,7 +2873,7 @@ static int galaxy_vectors(void)
    for synthetic parameters (seeds, total mass, star count, system code and the
    population-like DATA_008854), after building the hand-coded objects with
    F875 (the templates F891 and F892 copy), and prints the generated objects
-   (names zeroed: the Rust port does not generate them), the counters and the
+   (names zeroed only for hand-coded systems, whose names come from the executable's strings), the counters and the
    generator's random state. A separate record gives the hand-coded array. */
 extern void ref_sysgen(unsigned char *list,unsigned char *params);
 extern void ref_handcoded_init(void);
@@ -2879,12 +2881,19 @@ extern unsigned long ref_sg_index_table[];
 extern unsigned char ref_handcoded_base[];
 extern unsigned long ref_sg_a,ref_sg_b,ref_sg_seed_a,ref_sg_seed_b,ref_sg_government,ref_sg_population;
 extern unsigned char ref_sg_ports,ref_sg_stations;
-static void sysgen_object(const unsigned char *o)
+/* F877 keeps counters in uninitialised locals: clear the stack below so the names built from them are reproducible between runs. */
+static __attribute__((noinline)) void scrub_stack(void)
+{
+    volatile unsigned char scrap[32768];
+    unsigned long i;
+    for(i=0;i<sizeof(scrap);++i) scrap[i]=0;
+}
+static void sysgen_object(const unsigned char *o,int mask)
 {
     unsigned char copy[68];
     unsigned long i;
     memcpy(copy,o,68);
-    memset(copy+0x26,0,20);
+    if(mask) memset(copy+0x26,0,20);
     printf("[");
     for(i=0;i<68;++i) printf("%s%u",i?",":"",copy[i]);
     printf("]");
@@ -2901,7 +2910,7 @@ static int sysgen_vectors(void)
     ref_sg_seed_a=0x1234;ref_sg_seed_b=0x5678;
     ref_handcoded_init();
     printf("{\"handcoded\":[");
-    for(i=0;i<146;++i) {printf("%s",i?",":"");sysgen_object(ref_handcoded_base+68*i);}
+    for(i=0;i<146;++i) {printf("%s",i?",":"");sysgen_object(ref_handcoded_base+68*i,1);}
     printf("],\"seeds\":[%lu,%lu]}\n",ref_sg_seed_a,ref_sg_seed_b);
     for(n=0;n<4160;++n) {
         unsigned long seed,mass,stars,code,population,shift;
@@ -2935,6 +2944,7 @@ static int sysgen_vectors(void)
             if(!hung) {
                 timer.it_value.tv_usec=300000;
                 setitimer(ITIMER_REAL,&timer,0);
+                scrub_stack();
                 ref_sysgen(list,params);
             }
             memset(&timer,0,sizeof(timer));
@@ -2946,7 +2956,7 @@ static int sysgen_vectors(void)
         }
         for(count=0;count<0x50 && memcmp(list+68*count,"\0\0\0\0",4)!=0;++count) ;
         printf("{\"case\":%lu,\"seed\":%lu,\"mass\":%lu,\"stars\":%lu,\"code\":%lu,\"population\":%lu,\"count\":%lu,\"ports\":%u,\"stations\":%u,\"state\":[%lu,%lu],\"allegiance\":%lu,\"objects\":[",n,seed,mass,stars,code,population,count,ref_sg_ports,ref_sg_stations,ref_sg_a&0xffffffffUL,ref_sg_b&0xffffffffUL,ref_sg_government&0xffffffffUL);
-        for(i=0;i<=count && i<0x50;++i) {printf("%s",i?",":"");sysgen_object(list+68*i);}
+        for(i=0;i<=count && i<0x50;++i) {printf("%s",i?",":"");sysgen_object(list+68*i,seed==0);}
         printf("]}\n");
     }
     if (fflush(stdout)) fail("cannot flush sysgen vectors");
@@ -3000,6 +3010,7 @@ static int worldgen_vectors(void)
         if(!hung) {
             timer.it_value.tv_usec=500000;
             setitimer(ITIMER_REAL,&timer,0);
+            scrub_stack();
             ref_sysgen(system,params);
             ref_worldgen(physics,system,low,high);
         }
@@ -3012,7 +3023,7 @@ static int worldgen_vectors(void)
             unsigned char copy[68];
             unsigned long pointer;
             memcpy(copy,system+68*i,68);
-            memset(copy+0x26,0,20);
+            if(seed==0) memset(copy+0x26,0,20);
             memcpy(&pointer,copy+0x18,4);
             if(pointer) pointer=(pointer-(unsigned long)physics-0x74)/0x152;
             memcpy(copy+0x18,&pointer,4);
@@ -3029,7 +3040,7 @@ static int worldgen_vectors(void)
                 unsigned char copy[0x152];
                 if(!physics[i]) continue;
                 memcpy(copy,physics+0x74+0x152*i,0x152);
-                memset(copy+0x124,0,20);
+                if(seed==0) memset(copy+0x124,0,20);
                 printf("%s\"%lu\":[",first?"":",",i);first=0;
                 for(k=0;k<0x152;++k) printf("%s%u",k?",":"",copy[k]);
                 printf("]");
@@ -4298,6 +4309,14 @@ static int object_instance_vectors(void)
 int main(int argc, char **argv)
 {
     const char *count;
+    if (argc == 2 && (!strcmp(argv[1], "--sysgen") || !strcmp(argv[1], "--worldgen"))) {
+        /* Uninitialised stack in F877 holds addresses: fix them so traces repeat. */
+        int mode = personality(0xffffffff);
+        if (mode != -1 && !(mode & ADDR_NO_RANDOMIZE)) {
+            personality(mode | ADDR_NO_RANDOMIZE);
+            execv("/proc/self/exe", argv);
+        }
+    }
     if (argc == 2 && !strcmp(argv[1], "--normals")) return normal_vectors();
     if (argc == 2 && !strcmp(argv[1], "--transforms")) return transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--rotation-operands")) return rotation_operand_vectors();
