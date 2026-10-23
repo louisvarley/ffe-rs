@@ -168,15 +168,17 @@ rolls, agent behaviour) will not match the original roll for roll. Recorded in
 `docs/DEVIATIONS.md`.
 
 
-## Station velocity and collision contact are not ported (frames, collision)
+## Station velocity and the crash and bounce contact are not ported (frames, collision)
 
 `ffe_core::frames` handles rotating frames (F1677, F572, F573) but not a
 station's own velocity (F595 through F1533/F866), which returns `None`.
-`ffe_core::collision` covers the contact-free path of F570/F575/F577: a complex
-shape (`+0x14c` negative; F576, F579-F582) and an actual contact (F577 reporting
-collision, leading to the landing, crash and bounce code of the F575 tail and
-F578) return `None`. Note that F577's far branch (distance beyond 2^30 units)
+`ffe_core::collision` covers the contact-free path of F570/F575/F577, complex
+shapes (`+0x14c` negative; F576, F579-F583), terrain (F581/F1876) and the
+reorienting landing of F575 (crash mask clear, as for F574 and the starports
+F879 places). Still returning `None`: F578 (the collision damage and bounce, with
+F953), and the crash and bounce branch of F575 for a non-zero crash mask
+(`DATA_008700`). Note that F577's far branch (distance beyond 2^30 units)
 tests the sum of the bodies' outer radii (`+0x138`), not the collision radii
 (`+0x140`) that its near branch uses (a JJFFE "FIX" applied to one branch only),
 so a planet's atmosphere counts as contact at long range; the port keeps this.
-Needed for landing and for flying through an atmosphere.
+Needed for flying into the ground or another ship.
