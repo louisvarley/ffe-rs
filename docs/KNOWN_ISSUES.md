@@ -152,13 +152,18 @@ Use a short ID, affected subsystem, exact source reference, baseline/build,
 reproduction steps, expected vs observed, and planned correction. Add a failing
 test first and record any intentional behavior change; default fixes are allowed.
 
-## F1476 state shared between vertex jitter and other code (open)
+## F1476 state shared between vertex jitter and other code (decided 2026-10-23)
 
 The original's vertex opcodes 7/8 draw from F1476 (`DATA_008818`/`DATA_008820`),
-whose state other game code also reads. Rendering therefore can affect
-non-rendering behaviour in the original. The port keeps this state in the
-vertex cache, owned by the caller, so presentation cannot disturb simulation.
-Before porting flight/AI, identify every reader of that state and decide
-(with the owner) whether gameplay needs a faithful shared stream or the
-isolation is an approved deviation.
+whose state other game code also reads (about 35 routines, among them the
+physics, agent and system-generation code). Rendering therefore affects
+non-rendering behaviour in the original.
+
+**Owner decision (2026-10-23): isolate drawing.** The port keeps the jitter
+state in the vertex cache, owned by the caller, so presentation never disturbs
+the simulation. The simulation keeps its own stream with the original's
+generator. Consequence: replays and saves behave the same whatever is on
+screen, but outcomes that depend on how many numbers drawing consumed (combat
+rolls, agent behaviour) will not match the original roll for roll. Recorded in
+`docs/DEVIATIONS.md`.
 

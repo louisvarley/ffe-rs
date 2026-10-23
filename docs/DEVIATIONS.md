@@ -27,6 +27,7 @@ experimental prototype below is not a substitute for faithful simulation.
 | SIM-007 | Deterministic 20 ms/50 Hz harness timestep for traces; the real game still uses measured elapsed time. | proposed | Proves equivalence; does not change the game. |
 | SIM-008 | Gameplay mods can add/override/patch content. | deferred | V1 image packs cannot alter gameplay data or RNG. |
 | SIM-009 | Use supplied JJFFE 2.8a7 as gameplay reference. | approved | Keep unmodified reference traces and expected corrected behavior separately. |
+| SIM-010 | Model drawing (vertex jitter, opcodes 7/8) uses its own random stream; the simulation keeps the original generator separately. | approved | Owner decision 2026-10-23. Original F1476 is shared with about 35 simulation routines, so drawing changes outcomes there; isolating keeps replays, saves and graphics packs independent of what is on screen. Combat and AI rolls will not match the original roll for roll. |
 
 ### Temporary experimental example (not an approved change to Classic)
 
