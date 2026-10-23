@@ -282,6 +282,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 87,
       note: "v0.49b: F601/F602 velocity from thrust ported and verified (4096 cases); physics item in progress."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 87,
+      note: "v0.49c: orientation update F585/F584/F611/F1520 ported and verified (4096 cases); physics still in progress (positions, frames, gravity)."
     }
   ]
 };

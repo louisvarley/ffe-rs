@@ -81,6 +81,9 @@ GLOBAL _ref_thrust_clamp
 GLOBAL _ref_thrust_scale
 GLOBAL _ref_accelerate
 GLOBAL _ref_accelerate_uncapped
+GLOBAL _ref_orient
+GLOBAL _ref_player_craft
+GLOBAL _ref_scanner
 GLOBAL _ref_tex_quad
 GLOBAL _ref_tex_slots
 GLOBAL _ref_tex_draw_triangle
@@ -171,6 +174,9 @@ _ref_thrust_clamp equ FUNC_000599
 _ref_thrust_scale equ FUNC_000600
 _ref_accelerate equ FUNC_000601
 _ref_accelerate_uncapped equ FUNC_000602
+_ref_orient equ FUNC_000585
+_ref_player_craft equ DATA_008857
+_ref_scanner equ DATA_008933
 _ref_tex_quad equ FUNC_001647_DrawTexQuad
 _ref_tex_slots equ DATA_009252
 _ref_tex_draw_triangle equ FUNC_001807

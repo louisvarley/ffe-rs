@@ -1,7 +1,8 @@
-# Physics (cphys): F601, F602
+# Physics (cphys): F601, F602, F585 and its helpers
 
 Ported in `crates/ffe-core/src/physics.rs`; verified by
-`tools/reference/verify-physics.py` (v0.49b). More of `cphys.txt` follows.
+`tools/reference/verify-physics.py` (F601/F602 v0.49b, orientation v0.49c). More
+of `cphys.txt` follows (positions, frames of reference, gravity).
 
 ## Object fields used so far (`PhysObj`)
 
@@ -35,3 +36,41 @@ caller) to the velocity:
 orientations, thrust words including zero, accumulators, velocities, positive,
 negative and zero caps) over time steps in all three regimes: 4096 compared, 0
 mismatched, every tampered field and an empty trace rejected.
+
+## Orientation: F585, F584, F611, F1520
+
+More fields: `+0x24` the drift counter (signed byte), `+0xb0/+0xb2/+0xb4` the
+angular rates (pitch, roll, yaw; words), `+0x82` the dword read as the model
+number, `+0x86` the craft byte, `+0x110/+0x112/+0x114` the autopilot's turn
+rates. Globals: `DATA_008857` the player's craft number, `DATA_008933` the
+scanner rotation word.
+
+- **F585** (object, time, autopilot flag, autopilot time): the time is
+  arithmetically halved for model dwords from 0x35 (again from 0x3b). With the
+  autopilot flag each rate gains `(autopilot rate * min(ai time, 0x7fff)) >> 16`
+  (16-bit add). The time is then capped at 0x7fff. Pitch, roll and yaw in turn:
+  `wanted = min(|rate|, time)`; below 0xf nothing happens; otherwise F584 names
+  the step and the rate moves toward zero by it (`rate -= size` for a positive
+  rate, `+=` for a negative one) and F611 turns the row pair (pitch: forward
+  toward up, roll: up toward right, yaw: right toward forward; a negative rate
+  turns the other way). Yaw also adds or subtracts the step from the scanner word
+  when the object's craft byte equals the player's.
+- **F584**: the largest of 0x9fb, 0x511, 0x28b, 0x146, 0xa3, 0x52, 0x29 not above
+  the value, with codes 2..8; below 0x29 the size is 0x14 and the code 9. The
+  code is the shift `n` of the rotation (a step of 2^-n).
+- **F611** (object, row a, row b, direction, n): for `n <= 5` both rows first
+  lose `v >> (2n + 1)` per coordinate; then `b' = b + (a >> n)` (or `b - (a >> n)`
+  for the other direction) and `a' = a - (b >> n)` (or `+`), the old shrunk `b`
+  used for `a'`. The drift counter falls by the byte `[0x12, 3, 3, 3, 5, 2, 1, 1,
+  1, 1][n - 2]`; when it goes negative F1520 runs and the counter becomes 0x3c.
+- **F1520** re-orthogonalises: right and forward normalised (F1519), up =
+  forward x right normalised, right = up x forward (F1552, F1521 products).
+  **F1519** scales a vector by the reciprocal of its length (F1466, then
+  `F1523(0x3f800000, length << k >> 1) >> 1` less one, `F1521`, shifted back up
+  by `k + 1`).
+
+`--orient` runs the original F585 on 4096 synthetic objects (near-identity and
+random orientations, drift counters around zero, rates from zero to full range,
+every model band, autopilot on and off, time steps from negative to huge): 4096
+compared, 447 of them through F1520, 0 mismatched; every tampered field and an
+empty trace are rejected.

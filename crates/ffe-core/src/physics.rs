@@ -1,5 +1,6 @@
 //! The original's object motion, ported routine by routine from `cphys.txt`
-//! and `ffe.asm`: F601 and F602 (velocity from thrust over a time step) so far.
+//! and `ffe.asm`: F601 and F602 (velocity from thrust over a time step) and the
+//! orientation update F585 with F584, F611 and F1520 (F1519, F1552) so far.
 //! Verified against the executed original (`docs/notes/physics.md`).
 
 /// The fields of a physics object (`PhysObj`) the motion routines read and
@@ -18,6 +19,74 @@ pub struct Motion {
     /// dword): a non-negative cap limits the change to `0..=cap`, a negative
     /// one to `cap..=0`.
     pub cap: [i32; 3],
+    /// The drift counter (`+0x24`, a signed byte): F611 lowers it as it rotates
+    /// and F1520 re-orthogonalises the matrix when it goes negative.
+    pub drift: i8,
+    /// The angular rates (`+0xb0` pitch, `+0xb2` roll, `+0xb4` yaw).
+    pub rate: [i16; 3],
+    /// The dword read at `+0x82`: the model number, whose higher bytes F585
+    /// reads along with it.
+    pub model: u32,
+    /// The craft number byte (`+0x86`), compared with the player's.
+    pub craft: u8,
+    /// The autopilot's turn rates (`+0x110`, `+0x112`, `+0x114`).
+    pub autopilot: [i16; 3],
+}
+
+/// The scanner state F585 touches: the player's craft number (`DATA_008857`)
+/// and the scanner rotation word (`DATA_008933`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Scanner {
+    pub player: u32,
+    pub rotation: u16,
+}
+
+/// F611's drift decrements, indexed by the step number minus two (the ten bytes
+/// at `DATA_006159`).
+const DRIFT: [u8; 10] = [0x12, 3, 3, 3, 5, 2, 1, 1, 1, 1];
+
+/// F584: the largest step size (and its code) not above `value`; below the
+/// smallest, 0x14 with code 9. Returns `(code, size)`.
+fn step_size(value: i32) -> (u32, i32) {
+    const STEPS: [(i32, u32); 7] = [
+        (0x9fb, 2),
+        (0x511, 3),
+        (0x28b, 4),
+        (0x146, 5),
+        (0xa3, 6),
+        (0x52, 7),
+        (0x29, 8),
+    ];
+    for (size, code) in STEPS {
+        if value >= size {
+            return (code, size);
+        }
+    }
+    (9, 0x14)
+}
+
+fn find_msb(value: u32) -> u32 {
+    31u32.saturating_sub(value.leading_zeros())
+}
+
+/// F1519: a vector scaled to unit length (Q31): the reciprocal of its length
+/// through F1523, applied with F1521 and shifted back up.
+fn normalise(vector: [i32; 3]) -> [i32; 3] {
+    let mut scaled = crate::model_math::length(vector).wrapping_add(1);
+    let shift = 31 - find_msb(scaled);
+    scaled = scaled.wrapping_shl(shift) >> 1;
+    let reciprocal = (crate::model_math::fraction(0x3f80_0000, scaled) >> 1).wrapping_sub(1) as i32;
+    vector.map(|c| crate::model::multiply(c, reciprocal).wrapping_shl(shift + 1))
+}
+
+/// F1552: the cross product `a x b` with F1521 products.
+fn cross(a: [i32; 3], b: [i32; 3]) -> [i32; 3] {
+    use crate::model::multiply as m;
+    [
+        m(a[1], b[2]).wrapping_sub(m(a[2], b[1])),
+        m(a[2], b[0]).wrapping_sub(m(a[0], b[2])),
+        m(a[0], b[1]).wrapping_sub(m(a[1], b[0])),
+    ]
 }
 
 /// One axis of F601's cap: the change `value` limited by `cap`.
@@ -43,6 +112,101 @@ fn capped(cap: i32, value: i32) -> i32 {
 }
 
 impl Motion {
+    /// F1520: re-orthogonalise the orientation: right and forward normalised,
+    /// up = forward x right normalised, right = up x forward.
+    pub fn renormalise(&mut self) {
+        let [right, up, forward] = &mut self.orientation;
+        *right = normalise(*right);
+        *forward = normalise(*forward);
+        *up = cross(*forward, *right);
+        *up = normalise(*up);
+        *right = cross(*up, *forward);
+    }
+
+    /// F611: rotate row `a` toward row `b` (or away, for `plus` false) by a step
+    /// of 2^-n: for n up to 5 both rows are first shrunk by `2^-(2n+1)`, then
+    /// `b' = b +- (a >> n)` and `a' = a -+ (b >> n)` with the shrunk `b`.
+    /// The drift counter then falls by the step's byte, and when it goes
+    /// negative F1520 runs and the counter restarts at 0x3c.
+    fn turn(&mut self, a: usize, b: usize, plus: bool, n: u32) {
+        let (mut row_a, mut row_b) = (self.orientation[a], self.orientation[b]);
+        if n <= 5 {
+            let shift = 2 * n + 1;
+            row_a = row_a.map(|v| v.wrapping_sub(v >> shift));
+            row_b = row_b.map(|v| v.wrapping_sub(v >> shift));
+        }
+        let new_b: [i32; 3] = std::array::from_fn(|i| {
+            let moved = row_a[i] >> n;
+            if plus {
+                moved.wrapping_add(row_b[i])
+            } else {
+                row_b[i].wrapping_sub(moved)
+            }
+        });
+        let moved_b = row_b.map(|v| v >> n);
+        let new_a: [i32; 3] = std::array::from_fn(|i| {
+            if plus {
+                row_a[i].wrapping_sub(moved_b[i])
+            } else {
+                row_a[i].wrapping_add(moved_b[i])
+            }
+        });
+        self.orientation[a] = new_a;
+        self.orientation[b] = new_b;
+        self.drift = self.drift.wrapping_sub(DRIFT[n as usize - 2] as i8);
+        if self.drift < 0 {
+            self.renormalise();
+            self.drift = 0x3c;
+        }
+    }
+
+    /// F585: apply the angular rates over `time`. The time is halved for the
+    /// larger craft models (0x35 and up, again from 0x3b); with `autopilot` set
+    /// the rates first gain the autopilot's turn rates scaled by `ai_time`
+    /// (capped at 0x7fff, `* rate >> 16`). Each rate (pitch, roll, yaw) of at
+    /// least 0xf, limited by the time (itself capped at 0x7fff), is spent in the
+    /// largest step F584 offers and turns the matching row pair; the yaw also
+    /// turns the scanner when this is the player's craft.
+    pub fn orient(&mut self, time: i32, autopilot: bool, ai_time: i32, scanner: &mut Scanner) {
+        let mut limit = time;
+        if self.model >= 0x35 {
+            limit >>= 1;
+            if self.model >= 0x3b {
+                limit >>= 1;
+            }
+        }
+        if autopilot {
+            let ai_time = ai_time.min(0x7fff);
+            for (rate, turn) in self.rate.iter_mut().zip(self.autopilot) {
+                *rate = rate.wrapping_add(((i32::from(turn) * ai_time) >> 16) as i16);
+            }
+        }
+        let limit = limit.min(0x7fff);
+        // (rate index, rows turned (a, b), scanner turns with it)
+        for (axis, (a, b)) in [(0usize, (2usize, 1usize)), (1, (1, 0)), (2, (0, 2))] {
+            let rate = i32::from(self.rate[axis]);
+            let positive = rate >= 0;
+            let wanted = rate.abs().min(limit);
+            if wanted < 0xf {
+                continue;
+            }
+            let (code, size) = step_size(wanted);
+            self.rate[axis] = if positive {
+                self.rate[axis].wrapping_sub(size as i16)
+            } else {
+                self.rate[axis].wrapping_add(size as i16)
+            };
+            self.turn(a, b, positive, code);
+            if axis == 2 && u32::from(self.craft) == scanner.player {
+                scanner.rotation = if positive {
+                    scanner.rotation.wrapping_sub(size as u16)
+                } else {
+                    scanner.rotation.wrapping_add(size as u16)
+                };
+            }
+        }
+    }
+
     /// F601: add the thrust over `tics` to the velocity. `tics >> 3` is cut to
     /// at most 0x7fff by halving (remembering the shifts); the thrust words
     /// are carried through the orientation rows (each coordinate's high 16

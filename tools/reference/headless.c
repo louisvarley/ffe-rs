@@ -1919,6 +1919,80 @@ static int accelerate_vectors(void)
     return 0;
 }
 
+/* Orientation. orient drives the original F585 (angular rates spent in F584's
+   steps through F611's small rotations, with F1520 renormalising when the drift
+   counter at +0x24 runs out) on a zeroed object with a synthetic orientation
+   (near identity or random), drift counter, rates, model dword, craft byte and
+   autopilot rates, and prints the object before and after plus the scanner
+   rotation word (DATA_008933) and the player's craft number (DATA_008857). */
+extern void ref_orient(unsigned char *object,long time,long aiflag,long aitime);
+extern unsigned long ref_player_craft;
+extern unsigned short ref_scanner;
+static int orient_vectors(void)
+{
+    static unsigned char object[0x200];
+    unsigned char before[0x200];
+    unsigned long n,i;
+    long time,aiflag,aitime;
+    unsigned long model;
+    fprintf(stderr,"JJFFE orient-v1: original F585 (F584, F611, F1520/F1519/F1552) on a zeroed object with a synthetic orientation (+0x0), drift counter (+0x24), rates (+0xb0), model dword (+0x82), craft byte (+0x86) and autopilot rates (+0x110); the object before and after, with the scanner word (DATA_008933) and player craft (DATA_008857).\n");
+    texture_rng=0x9e3779b1UL;
+    for(n=0;n<4096;++n) {
+        memset(object,0,sizeof(object));
+        if(n&1) {
+            for(i=0;i<3;++i) put32(object,12*i+4*i,0x7fffffffL-texture_random(0,100000));
+            for(i=0;i<9;++i) if(i%4) put32(object,4*i,(long)texture_random(-3000000,3000000));
+        } else for(i=0;i<9;++i) put32(object,4*i,(long)(((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff)));
+        object[0x24]=(unsigned char)(signed char)texture_random(-2,0x40);
+        for(i=0;i<3;++i) {
+            short rate;
+            switch(texture_random(0,4)) {
+            case 0: rate=0; break;
+            case 1: rate=(short)texture_random(-14,14); break;
+            case 2: rate=(short)texture_random(-3000,3000); break;
+            default: rate=(short)texture_random(-32768,32767); break;
+            }
+            memcpy(object+0xb0+2*i,&rate,2);
+            rate=(short)texture_random(-30000,30000);
+            memcpy(object+0x110+2*i,&rate,2);
+        }
+        model=(unsigned long)texture_random(0,0x80);
+        if(texture_random(0,7)==0) model|=(unsigned long)texture_random(0,0xffff)<<16;
+        memcpy(object+0x82,&model,4);
+        object[0x86]=(unsigned char)texture_random(0,3);
+        ref_player_craft=(unsigned long)texture_random(0,3);
+        ref_scanner=(unsigned short)texture_random(0,0xffff);
+        switch(texture_random(0,4)) {
+        case 0: time=texture_random(0,200); break;
+        case 1: time=texture_random(0,4000); break;
+        case 2: time=texture_random(0,40000); break;
+        case 3: time=texture_random(-5000,0); break;
+        default: time=texture_random(0,0x7fffffffL>>8); break;
+        }
+        aiflag=(long)texture_random(0,1);
+        aitime=texture_random(-100,70000);
+        memcpy(before,object,sizeof(before));
+        {
+            unsigned long player=ref_player_craft; unsigned short scanner=ref_scanner;
+            ref_orient(object,time,aiflag,aitime);
+            printf("{\"case\":%lu,\"matrix\":[",n);
+            for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(before,4*i));
+            printf("],\"drift\":%d,\"rate\":[",(int)(signed char)before[0x24]);
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(before+0xb0+2*i));
+            printf("],\"autopilot\":[");
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(before+0x110+2*i));
+            printf("],\"model\":%lu,\"craft\":%u,\"player\":%lu,\"scanner\":%u,\"time\":%ld,\"ai\":%ld,\"ai_time\":%ld,\"after\":{\"matrix\":[",
+                   model,before[0x86],player,scanner,time,aiflag,aitime);
+            for(i=0;i<9;++i) printf("%s%ld",i?",":"",get32(object,4*i));
+            printf("],\"drift\":%d,\"rate\":[",(int)(signed char)object[0x24]);
+            for(i=0;i<3;++i) printf("%s%d",i?",":"",*(short *)(object+0xb0+2*i));
+            printf("],\"scanner\":%u}}\n",ref_scanner);
+        }
+    }
+    if (fflush(stdout)) fail("cannot flush orient vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
 static unsigned long texture_faces[1024][48];
 static void texture_face_begin(void)
@@ -2741,6 +2815,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--span-raster")) return span_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--thrust-limits")) return thrust_limit_vectors();
     if (argc == 2 && !strcmp(argv[1], "--accelerate")) return accelerate_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--orient")) return orient_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

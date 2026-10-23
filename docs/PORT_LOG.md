@@ -2092,3 +2092,11 @@ thrust words, the three time-step regimes, F601's caps) are ported in
 `verify-physics.py` (4096 cases, 0 mismatched). F602 differs from F601 in its
 halving start (0xf, not 0x10) and its arithmetic shift of the time. Notes:
 `docs/notes/physics.md`.
+
+## Orientation update (v0.49c)
+
+F585 (angular rates spent as small rotations of the orientation rows), with
+F584 (step sizes), F611 (the rotation and its drift counter) and F1520 with
+F1519 and F1552 (re-orthogonalising the matrix) are ported in `ffe-core::physics`
+and verified by the new `--orient` mode and `verify-physics.py` (4096 cases,
+447 through F1520, 0 mismatched). Notes: `docs/notes/physics.md`.
