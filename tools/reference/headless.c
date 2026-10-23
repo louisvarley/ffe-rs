@@ -1604,6 +1604,61 @@ static int texture_raster_vectors(void)
     return 0;
 }
 
+/* Lines. line-raster drives the original F1616 DrawLine (with F1601 DrawHLine)
+   on synthetic on-screen end points, as F1704 queues them (x 0..319, y 0..157),
+   and hashes the whole 320x200 buffer per case. */
+extern void ref_draw_line(const short *p1,const short *p2,unsigned long colour);
+static int line_raster_vectors(void)
+{
+    static const short xs[]={0,1,2,159,160,318,319},ys[]={0,1,2,78,79,156,157};
+    static unsigned char buffer[320*200];
+    short points[2][2];
+    unsigned long n,i,count,colour;
+    long minx,miny,maxx,maxy,form,length;
+    fprintf(stderr,"JJFFE line-raster-v1: original F1616/F1601 on synthetic on-screen end points (x 0..319, y 0..157); 320x200 buffer filled with 0xff and hashed. Not clipping, queueing or colours.\n");
+    ref_framebuffer=buffer;
+    texture_rng=0x6c078965UL;
+    for(n=0;n<4096;++n) {
+        form=n&7;
+        colour=n%254;
+        points[0][0]=(short)texture_random(0,319);points[0][1]=(short)texture_random(0,157);
+        if(form==0||form==1) {points[1][0]=(short)texture_random(0,319);points[1][1]=(short)texture_random(0,157);}
+        else if(form==2) {points[1][0]=(short)texture_random(0,319);points[1][1]=points[0][1];}
+        else if(form==3) {points[1][0]=points[0][0];points[1][1]=(short)texture_random(0,157);}
+        else if(form==4||form==5) {
+            length=texture_random(0,6);
+            points[1][0]=(short)(points[0][0]+texture_random(-length,length));
+            points[1][1]=(short)(points[0][1]+texture_random(-length,length));
+            if(points[1][0]<0) points[1][0]=0; if(points[1][0]>319) points[1][0]=319;
+            if(points[1][1]<0) points[1][1]=0; if(points[1][1]>157) points[1][1]=157;
+        } else if(form==6) {
+            /* Near the 45-degree and 1:1 slope boundaries. */
+            length=texture_random(1,150);
+            points[0][0]=(short)texture_random(0,160);points[0][1]=(short)texture_random(0,7);
+            points[1][0]=(short)(points[0][0]+(texture_random(0,1)?length:-length/2)+texture_random(-1,1));
+            points[1][1]=(short)(points[0][1]+length);
+            if(points[1][0]<0) points[1][0]=0; if(points[1][0]>319) points[1][0]=319;
+            if(points[1][1]>157) points[1][1]=157;
+        } else {
+            for(i=0;i<2;++i) {points[i][0]=xs[texture_random(0,6)];points[i][1]=ys[texture_random(0,6)];}
+        }
+        memset(buffer,0xff,sizeof(buffer));
+        ref_draw_line(points[0],points[1],colour);
+        count=0;minx=miny=100000;maxx=maxy=-1;
+        for(i=0;i<sizeof(buffer);++i) if(buffer[i]!=0xff) {
+            long x=(long)(i%320),y=(long)(i/320);
+            ++count;
+            if(x<minx) minx=x; if(x>maxx) maxx=x; if(y<miny) miny=y; if(y>maxy) maxy=y;
+        }
+        printf("{\"case\":%lu,\"colour\":%lu,\"points\":[[%d,%d],[%d,%d]],\"written\":%lu,\"bounds\":[%ld,%ld,%ld,%ld],\"pixels_fnv1a64\":\"%016llx\"}\n",
+               n,colour,points[0][0],points[0][1],points[1][0],points[1][1],
+               count,count?minx:0,count?miny:0,count?maxx:0,count?maxy:0,
+               (unsigned long long)fingerprint(buffer,sizeof(buffer)));
+    }
+    if (fflush(stdout)) fail("cannot flush line raster vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
 static unsigned long texture_faces[1024][20];
 static void texture_face_begin(void)
@@ -2407,6 +2462,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--station-queue")) return station_queue_vectors();
     if (argc == 2 && !strcmp(argv[1], "--polygon-helpers")) return polygon_helper_vectors();
     if (argc == 2 && !strcmp(argv[1], "--texture-raster")) return texture_raster_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--line-raster")) return line_raster_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

@@ -901,10 +901,10 @@ impl ModelViewer {
                 }
                 Primitive::Line(line) => {
                     let rgb = self.rgb(resolve_colour(line.material, line.context.colour, [0; 3]));
+                    // F1803: F1704's clipped, stored end points, drawn by F1616.
                     if let Some([a, b]) = line.screen {
-                        if let (Some(a), Some(b)) = (point(a), point(b)) {
-                            frame.shapes.push(Shape::Line(a, b, rgb));
-                        }
+                        let point = |[x, y]: [i16; 2]| (i32::from(x), i32::from(y));
+                        frame.shapes.push(Shape::Line(point(a), point(b), rgb));
                     }
                 }
                 Primitive::Point(emitted) => {

@@ -56,8 +56,10 @@ pub struct LineEmission {
     pub material: u16,
     pub vertices: [u8; 2],
     pub context: VertexContext,
-    /// F1479 projections of both views when queued; the second vertex is resolved
-    /// on a copy of the cache, so the original's cache state is unchanged.
+    /// The F1803 entry's two points when queued: F1704's clipped ends, x stored
+    /// as `x - 1` when positive (`None` when F1704 rejects the line). The second
+    /// vertex is resolved on a copy of the cache, so the original's cache state
+    /// is unchanged.
     pub screen: Option<[[i16; 2]; 2]>,
 }
 
@@ -883,10 +885,14 @@ fn run(
                                 false,
                             )
                             .ok();
+                        // F1703 queues through F1704: both ends clipped onto the
+                        // view (F1705) and stored with x - 1 when positive, or
+                        // nothing when F1704 rejects the line.
                         let mut emission = emission;
-                        emission.screen = crate::model_instance::project(vertex.view)
-                            .zip(other.and_then(|v| crate::model_instance::project(v.view)))
-                            .map(|(a, b)| [a, b]);
+                        emission.screen = other
+                            .and_then(|other| crate::model_thruster::line(&vertex, &other).ok())
+                            .flatten()
+                            .map(|points| points.map(|[x, y]| [x as i16, y as i16]));
                         queue.push(key, Primitive::Line(emission))?;
                         shared.queue.push(QueueEvent::Line(key));
                     }

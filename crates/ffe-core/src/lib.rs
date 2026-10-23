@@ -7,6 +7,7 @@ pub mod model_depth;
 pub mod model_execute;
 pub mod model_instance;
 pub mod model_lighting;
+pub mod model_line;
 pub mod model_math;
 pub mod model_normals;
 pub mod model_order;

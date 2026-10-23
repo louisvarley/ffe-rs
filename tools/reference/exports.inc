@@ -69,6 +69,7 @@ GLOBAL _ref_circle_point
 GLOBAL _ref_circle
 GLOBAL _ref_curve
 GLOBAL _ref_tex_triangle
+GLOBAL _ref_draw_line
 GLOBAL _ref_tex_quad
 GLOBAL _ref_tex_slots
 GLOBAL _ref_tex_draw_triangle
@@ -147,6 +148,7 @@ _ref_circle_point equ FUNC_001557
 _ref_circle equ FUNC_001554
 _ref_curve equ FUNC_001547
 _ref_tex_triangle equ FUNC_001644_DrawTexTriangle
+_ref_draw_line equ FUNC_001616_DrawLine
 _ref_tex_quad equ FUNC_001647_DrawTexQuad
 _ref_tex_slots equ DATA_009252
 _ref_tex_draw_triangle equ FUNC_001807

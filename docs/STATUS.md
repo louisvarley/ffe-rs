@@ -236,6 +236,11 @@ tests and an oracle, as the earlier milestones did.
      before the quads are drawn.
 3. **Lines and curves.** F1616 (DrawLine) for F1803 entries (opcode 2 lines,
    narrow thrusters) and F1811 for opcode 22 curves, replacing the stand-ins.
+   - **Done (v0.48f):** F1616/F1601 ported (`ffe-core::model_line`,
+     `docs/notes/lines.md`) and verified by `verify-lines.py` (4096 cases, 0
+     mismatched). Opcode 2 lines now take F1704's clipped points
+     (`model_thruster::line`), so every line entry draws with it.
+   - **Left:** F1811 for opcode 22 curves.
 5. **A planet in the flight scenario.** Once F1876 draws, put a planet-scale
    surface model (slots 113-148, 445, 447, 449) in the flight scene at a
    distance where its patch is visible, with the original's parameters, and
@@ -284,6 +289,12 @@ values.
 
 ## Known stale spots
 
+- `verify-all.py` on 2026-10-23 (after v0.48e, with v0.48f's lines): 27 of
+  30 pass. Already failing on main before v0.48f: `verify-assets.py` still
+  expects cache v13 with 1,778 files (v14 has 1,781, and its name check
+  expects JJFFE's 209 entries where the cache now holds 219), and both
+  `verify-child-models.py` runs report nested/face/child event differences
+  for models 346-351, 439, 443 and 445-449 (the surface models).
 - `README.md` and the executable title still say "0.9" because the product
   version label has not been bumped (cosmetic).
 - `README.md` still describes cache v11 and "26 oracles" in places; the figures

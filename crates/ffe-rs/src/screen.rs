@@ -5,6 +5,7 @@ use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::JITTER_SEED;
+use ffe_core::model_line::draw_line;
 use std::io::Cursor;
 
 pub const WIDTH: usize = 640;
@@ -584,7 +585,22 @@ impl Screen {
         for shape in shapes {
             match shape {
                 Shape::Fill(points, rgb) => self.fill_value(points, value(*rgb)),
-                Shape::Line(a, b, rgb) => self.line_value(*a, *b, value(*rgb)),
+                Shape::Line(a, b, rgb) => {
+                    let on_view = |(x, y): (i32, i32)| {
+                        (0..320).contains(&x) && (0..VIEW_HEIGHT as i32).contains(&y)
+                    };
+                    if on_view(*a) && on_view(*b) {
+                        // F1616 on end points F1704 has already put on the view.
+                        let frame = &mut self.frame;
+                        let point = |(x, y): (i32, i32)| [x as i16, y as i16];
+                        draw_line(point(*a), point(*b), |x, y| {
+                            frame[y as usize * 320 + x as usize] = value(*rgb);
+                        });
+                    } else {
+                        // Stand-in shapes (curves, two-point faces): bounded Bresenham.
+                        self.line_value(*a, *b, value(*rgb));
+                    }
+                }
                 Shape::Point((x, y), rgb) => {
                     if (0..VIEW_HEIGHT as i32).contains(y) && (0..320).contains(x) {
                         self.frame[*y as usize * 320 + *x as usize] = value(*rgb);

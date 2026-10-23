@@ -1296,10 +1296,17 @@ fn queued_faces_lines_and_points_carry_their_screen_points() {
                 assert_eq!(face.screen, expected);
                 assert_eq!(face.shade, [0; 3]);
             }
-            Primitive::Line(line) => assert_eq!(
-                line.screen,
-                Some([screen(&mut resolved, 0), screen(&mut resolved, 2)])
-            ),
+            // F1704's stored points: both ends on screen, x - 1 when positive.
+            Primitive::Line(line) => {
+                let stored = |[x, y]: [i16; 2]| [if x > 0 { x - 1 } else { 0 }, y];
+                assert_eq!(
+                    line.screen,
+                    Some([
+                        stored(screen(&mut resolved, 0)),
+                        stored(screen(&mut resolved, 2))
+                    ])
+                )
+            }
             Primitive::Point(point) => {
                 assert_eq!(point.screen, Some(screen(&mut resolved, 0)))
             }

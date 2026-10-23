@@ -2018,3 +2018,14 @@ rear views sit at the ship's eye offset (FUNC_001053), and the top/bottom turret
 views (F1 cycle, F8, console button 0x16, FUNC_001038 aiming) are ported for
 ships with more than two gun mounts. verify-assets counts were bumped to v12;
 its byte-for-byte check of the stats blocks against JJFFE is still to be added.
+
+## The original line rasteriser (v0.48f)
+
+F1616 DrawLine with F1601 DrawHLine is ported in `ffe-core::model_line` and
+verified against the executed original: the new `--line-raster` adapter mode
+draws 4096 synthetic on-screen lines and `verify-lines.py` compares every
+320x200 buffer (4096 compared, 0 mismatched; tampered fields and an empty
+trace rejected). Opcode 2 lines now take F1704's clipped, stored points (the
+verified `model_thruster::line`) instead of raw projections, so every line
+entry, narrow thrusters included, is drawn with it. Notes:
+`docs/notes/lines.md`.

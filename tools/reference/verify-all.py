@@ -44,6 +44,7 @@ ORACLES = [
     ("verify-base-transform.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-polygon.py", ["--reference", "{commands}"]),
     ("verify-textures.py", ["--reference", "{commands}", "--cache", "{cache}"]),
+    ("verify-lines.py", ["--reference", "{commands}"]),
     ("verify-station.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-station-queue.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-station-models.py", ["--reference", "{commands}", "--game", "{game}",
