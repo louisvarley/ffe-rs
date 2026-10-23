@@ -11,6 +11,7 @@ pub mod model_math;
 pub mod model_normals;
 pub mod model_order;
 pub mod model_polygon;
+pub mod model_surface;
 pub mod model_texture;
 pub mod model_thruster;
 

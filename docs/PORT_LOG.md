@@ -4,6 +4,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-23 — Surface helper ports (v0.48d)
+
+Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.
+
+- **F1875, F1824 and F1825 ported** (`ffe_core::model_surface`):
+  `cross_sign` (sign of the 64-bit 2D cross product, 0 or -1), `mix32` (the
+  shift/or/add mixer) and `max_abs_msb` (F1656 MSB of the largest absolute
+  coordinate; `i32::MIN` -> 31).
+- **Probe modes:** `--surface-sign` (12 vector pairs) and `--surface-helpers`
+  (8 words, 9 points), using the new `_ref_surface_sign`/`_ref_surface_mix`/
+  `_ref_surface_vector_msb` aliases. The unit tests pin the original's values.
+- **F1816/F1817/F1820 are arena allocators**, not geometry: a 1499-block 0x48
+  arena and a 2999-block 0x10 arena, with a longjmp after 0xbb8 allocations.
+  The port will use Rust collections instead; recorded rather than reproduced.
+- Next helpers: F1823 (entry decode), F1833, then F1834/F1835 (quad emission).
+
 ## 2026-10-23 — Curved surface resolution (v0.48c)
 
 Milestone v0.48 step 2, first part. Notes: `docs/notes/surfaces.md`.

@@ -78,6 +78,22 @@ argument 1 and compare it with argument 2 (the tail of F1876), so a model-driven
 surface never writes through the null pointer. F1741-style callers (not model
 commands) can.
 
+## Helpers ported so far
+
+Three of F1876's pure helpers are in `ffe_core::model_surface`, each with the
+probe's pinned values as unit tests:
+
+| Helper | Rust | Probe | What it does |
+|---|---|---|---|
+| F1875 | `cross_sign` | `--surface-sign` (12 pairs) | sign of `a.x*b.y - a.y*b.x` in exact 64-bit, returned as 0 or -1 |
+| F1824 | `mix32` | `--surface-helpers` (8 words) | the 32-bit shift/or/add mixer |
+| F1825 | `max_abs_msb` | `--surface-helpers` (9 points) | F1656's MSB of the largest absolute coordinate (INT_MIN -> 31) |
+
+F1816/F1817/F1820 are **arena allocators** (a 1499-block 0x48 arena and a
+2999-block 0x10 arena, with a longjmp after 0xbb8 allocations), not geometry.
+They should be replaced by Rust collections in the port rather than reproduced;
+the legacy allocation failure path is not something the renderer needs.
+
 ## F1876 (not ported)
 
 F1876 is about **1,580 lines** of assembly with its own helper set. From the
@@ -107,11 +123,11 @@ The final entry loop walks 0x14 (20) 24-byte records in a local table, calling
 
 ## Plan for the port
 
-1. **Read the helper set bottom-up** and port the pure ones first, each with a
-   synthetic test: `F1875` (cross-product sign, 64-bit), `F1816`/`F1820`/
-   `F1823`/`F1824`/`F1825` (entry decoding and patch evaluation), then `F1833`/
-   `F1834`/`F1835` (quad emission). Import the two constant tables as cache
-   assets when their use is understood (they are small and fixed).
+1. **Helper set bottom-up.** Done: F1875, F1824, F1825. Next: `F1823` (entry
+   decode, 181 lines, calls F1656), then `F1833` (45) and `F1834`/`F1835` (quad
+   emission, which call F1868-F1873). F1816/F1817/F1820 are replaced by Rust
+   collections (above). Import the two constant tables as cache assets when
+   their use is understood (they are small and fixed).
 2. **Port F1876's control flow** against those helpers, keeping 64-bit
    intermediates exactly (`Int64MulCreate`/`Int64Sub64` in F1875).
 3. **Probe first.** Done for F1874 (events 50-54, above). Still needed for F1876:

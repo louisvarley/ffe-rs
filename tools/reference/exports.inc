@@ -191,3 +191,9 @@ GLOBAL _ref_surface_cmd
 _ref_surface_cmd equ FUNC_001874
 GLOBAL _ref_surface
 _ref_surface equ FUNC_001876
+GLOBAL _ref_surface_sign
+_ref_surface_sign equ FUNC_001875
+GLOBAL _ref_surface_mix
+_ref_surface_mix equ FUNC_001824
+GLOBAL _ref_surface_vector_msb
+_ref_surface_vector_msb equ FUNC_001825

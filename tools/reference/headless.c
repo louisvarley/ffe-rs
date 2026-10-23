@@ -1294,6 +1294,57 @@ static int station_vectors(void)
 #endif
 }
 
+/* F1824's 32-bit mix and F1825's MSB of the largest |coordinate|. */
+extern long ref_surface_mix(long x);
+extern long ref_surface_vector_msb(long *point);
+static int surface_helper_vectors(void)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--surface-helpers requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static const unsigned long mixes[] = {0,1,2,0xffff,0x10000,0x7fffffff,0x80000000UL,0xdeadbeefUL};
+    static const long points[][3] = {
+        {0,0,0}, {1,0,0}, {-1,0,0}, {0x100,0,-0x100}, {0x10000,0,0},
+        {-0x10000,-1,1}, {0x7fffffff,0,0}, {-2147483647L-1,1,1}, {0xffff,0x10000,0x100},
+    };
+    unsigned long i;
+    fprintf(stderr,"JJFFE surface-helpers-v1: F1824 on 8 words and F1825 on 9 points (MSB of the largest absolute coordinate).\n");
+    for(i=0;i<sizeof(mixes)/sizeof(mixes[0]);++i)
+        printf("{\"mix\":%lu,\"result\":%lu}\n",mixes[i],ref_surface_mix((long)mixes[i]));
+    for(i=0;i<sizeof(points)/sizeof(points[0]);++i) {
+        long p[3]={points[i][0],points[i][1],points[i][2]};
+        printf("{\"point\":[%ld,%ld,%ld],\"msb\":%ld}\n",p[0],p[1],p[2],ref_surface_vector_msb(p));
+    }
+    return 0;
+#endif
+}
+
+/* F1875: the sign of a.x*b.y - a.y*b.x as the original returns it (0 or -1). */
+extern long ref_surface_sign(long *a, long *b);
+static int surface_sign_vectors(void)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--surface-sign requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static const long pairs[][4] = {
+        {1,0,0,1}, {0,1,1,0}, {3,4,-4,3}, {0,0,1,1}, {-1,0,0,-1},
+        {0x40000000L,1,1,0x40000000L}, {-0x40000000L,0x7fffffffL,0x7fffffffL,-0x40000000L},
+        {-2147483647L-1,1,1,-2147483647L-1}, {2147483647L,-2147483647L,-2147483647L,2147483647L},
+        {0x10000,0x10000,-0x10000,0x10000}, {-0x10000,0x10000,0x10000,0x10000},
+        {123456789,-987654321,987654321,123456789},
+    };
+    unsigned long i;
+    fprintf(stderr,"JJFFE surface-sign-v1: F1875 on 12 synthetic vector pairs (0 or -1, exact 64-bit difference).\n");
+    for(i=0;i<sizeof(pairs)/sizeof(pairs[0]);++i) {
+        long a[2]={pairs[i][0],pairs[i][1]},b[2]={pairs[i][2],pairs[i][3]};
+        printf("{\"a\":[%ld,%ld],\"b\":[%ld,%ld],\"sign\":%ld}\n",a[0],a[1],b[0],b[1],ref_surface_sign(a,b));
+    }
+    return 0;
+#endif
+}
+
 static int station_model_vector(int index)
 {
 #ifndef FFE_COMMAND_PROBE
@@ -2331,6 +2382,8 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--text-submodel")) return text_submodel_vectors();
     if (argc == 2 && !strcmp(argv[1], "--colour")) return colour_vectors();
     if (argc == 2 && !strcmp(argv[1], "--station")) return station_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--surface-sign")) return surface_sign_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--surface-helpers")) return surface_helper_vectors();
     if (argc == 3 && !strcmp(argv[1], "--station-model")) return station_model_vector(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--station-queue")) return station_queue_vectors();
     if (argc == 2 && !strcmp(argv[1], "--polygon-helpers")) return polygon_helper_vectors();
