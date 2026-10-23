@@ -2072,3 +2072,14 @@ models by `verify-station-models.py`) and 60/61 (F1876 queue words, not ported
 yet), which the original now emits and the child execution does not model.
 Both child runs report 0 mismatched (440 and 437 models) and the full set
 passes: 31 of 31 oracles.
+
+## Thrust limits (v0.49a)
+
+F598, F599 and F600 (the clamp, per-axis cap and proportional scale of a
+thrust request against an object's limit words) are ported in
+`ffe-core::thrust` and verified by the new `--thrust-limits` mode and
+`verify-thrust.py` (4096 cases, 0 mismatched). The ship statistics give each
+craft its limits (`ShipStats::limits`). The first flight-core step: the
+in-game thrust is not wired to them yet. Notes: `docs/notes/thrust.md`. Also
+recorded: the owner decision to isolate drawing from the simulation RNG
+(SIM-010).

@@ -1805,6 +1805,56 @@ static int span_raster_vectors(void)
     return 0;
 }
 
+/* Thrust limits. thrust-limits drives the original F598, F599 and F600 on a
+   zeroed object whose limit words (+0xbc/+0xbe, +0xc0/+0xc2, +0xc4/+0xc6) and
+   request dwords are synthetic (in range, beyond a limit, negative, zero), and
+   prints the returned dwords and the words stored at +0xb6/+0xb8/+0xba. */
+extern void ref_thrust_request(unsigned char *object,const long *request,long *out);
+extern void ref_thrust_clamp(unsigned char *object,const long *request,long *out);
+extern void ref_thrust_scale(unsigned char *object,const long *request,long *out);
+static int thrust_limit_vectors(void)
+{
+    static unsigned char object[0x200];
+    long request[3],out[3];
+    short limits[6];
+    unsigned long n,i,fn;
+    fprintf(stderr,"JJFFE thrust-limits-v1: original F598, F599 and F600 on a zeroed object with synthetic limit words and requests; the result dwords and the words stored at +0xb6/+0xb8/+0xba.\n");
+    texture_rng=0x27d4eb2fUL;
+    for(n=0;n<4096;++n) {
+        fn=n%3;
+        for(i=0;i<3;++i) {
+            limits[2*i]=(short)texture_random(0,(n&16)?32767:4000);
+            limits[2*i+1]=(short)-texture_random(0,(n&32)?32767:4000);
+            if(n%11==0) limits[2*i]=limits[2*i+1]=0;
+        }
+        for(i=0;i<3;++i) {
+            switch(texture_random(0,5)) {
+            case 0: request[i]=0; break;
+            case 1: request[i]=texture_random(-100,100); break;
+            case 2: request[i]=texture_random(-40000,40000); break;
+            case 3: request[i]=texture_random(-4000000,4000000); break;
+            case 4: request[i]=limits[2*i]+texture_random(-2,2); break;
+            default: request[i]=limits[2*i+1]+texture_random(-2,2); break;
+            }
+        }
+        memset(object,0,sizeof(object));
+        for(i=0;i<3;++i) {
+            *(short *)(object + 0xbc + 4*i)=limits[2*i];
+            *(short *)(object + 0xbe + 4*i)=limits[2*i+1];
+        }
+        out[0]=out[1]=out[2]=0x5a5a5a5aL;
+        if(fn==0) ref_thrust_request(object,request,out);
+        else if(fn==1) ref_thrust_clamp(object,request,out);
+        else ref_thrust_scale(object,request,out);
+        printf("{\"case\":%lu,\"function\":%lu,\"limits\":[%d,%d,%d,%d,%d,%d],\"request\":[%ld,%ld,%ld],\"out\":[%ld,%ld,%ld],\"words\":[%u,%u,%u]}\n",
+               n,598+fn,limits[0],limits[1],limits[2],limits[3],limits[4],limits[5],
+               request[0],request[1],request[2],out[0],out[1],out[2],
+               *(unsigned short *)(object+0xb6),*(unsigned short *)(object+0xb8),*(unsigned short *)(object+0xba));
+    }
+    if (fflush(stdout)) fail("cannot flush thrust limit vectors");
+    return 0;
+}
+
 static unsigned long texture_face_count;
 static unsigned long texture_faces[1024][48];
 static void texture_face_begin(void)
@@ -2625,6 +2675,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--curve-raster")) return curve_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--fill-raster")) return fill_raster_vectors();
     if (argc == 2 && !strcmp(argv[1], "--span-raster")) return span_raster_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--thrust-limits")) return thrust_limit_vectors();
     if (argc == 3 && !strcmp(argv[1], "--texture-queue")) return texture_queue_vector(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),2000);
     if (argc == 4 && !strcmp(argv[1], "--child-model")) return child_model_vector(atoi(argv[2]),strtol(argv[3],0,0));

@@ -51,6 +51,20 @@ impl ShipStats {
         })
     }
 
+    /// The limits object set-up gives the ship (the routine at 0x125c0): z from
+    /// the reverse limit up to the forward one, x and y symmetric at the
+    /// reverse limit's magnitude.
+    pub fn limits(&self) -> ffe_core::thrust::Limits {
+        let side = self.reverse_thrust.wrapping_neg();
+        ffe_core::thrust::Limits {
+            axes: [
+                [side, self.reverse_thrust],
+                [side, self.reverse_thrust],
+                [self.forward_thrust, self.reverse_thrust],
+            ],
+        }
+    }
+
     /// The object's z thrust word (+0xba, model global 15) for a throttle in
     /// -1..=1. F600 scales the requested thrust to fit the limits, so full
     /// throttle gives the forward limit and full reverse the (negative) reverse

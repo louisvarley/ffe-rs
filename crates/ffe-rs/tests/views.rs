@@ -79,6 +79,11 @@ fn ship_stats_decode_the_original_block() {
     assert_eq!((eagle.mass, eagle.missiles), (16, 2));
     assert_eq!(eagle.eye, [1870, 127]);
     assert_eq!((eagle.top_turret, eagle.bottom_turret), ([192, 42], [4, 7]));
+    // Object set-up (0x125c0): z [reverse, forward], x and y +-|reverse|.
+    assert_eq!(
+        eagle.limits().axes,
+        [[4905, -4905], [4905, -4905], [16350, -4905]]
+    );
     assert_eq!(ShipStats::from_block(&[0; 48]), None);
     // F600: full throttle gives the forward limit, full reverse the reverse one.
     assert_eq!(eagle.thrust_word(1.0), 16350);

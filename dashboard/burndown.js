@@ -104,7 +104,7 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "flight-1", title: "Object system and agent records (cstruct, gmstruct)", status: "todo" },
-        { id: "flight-2", title: "Original thrust vector and ship limits (F598/F600)", status: "todo" },
+        { id: "flight-2", title: "Original thrust vector and ship limits (F598/F600)", status: "in-progress", version: "v0.49a" },
         { id: "flight-3", title: "Physics: position and orientation update (cphys)", status: "todo" },
         { id: "flight-4", title: "Flight integration decoupled from the frame; fixed 50 Hz step", status: "todo" },
         { id: "flight-5", title: "Original input processing, key accumulation and remapping", status: "todo" },
@@ -272,6 +272,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 87,
       note: "v0.48j: the verify-assets and child-model oracles repaired; all 31 local oracles pass."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 87,
+      note: "v0.49a: thrust limits F598/F599/F600 ported and verified (4096 cases); the thrust item is in progress until the in-game thrust uses them. RNG isolation decision recorded (SIM-010)."
     }
   ]
 };
