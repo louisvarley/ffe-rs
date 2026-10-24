@@ -117,6 +117,37 @@ impl OriginalFlight {
         self.player.set_speed = 0;
     }
 
+    /// Turn the ship to face a point (keeping it level against the system's y axis).
+    pub fn face(&mut self, target: [i64; 3]) {
+        let at = self.player.motion.position;
+        let mut forward: [f64; 3] = std::array::from_fn(|k| (target[k] - at[k]) as f64);
+        let length = forward.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if length < 1.0 {
+            return;
+        }
+        forward = forward.map(|v| v / length);
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let unit = |v: [f64; 3]| {
+            let l = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-12);
+            v.map(|c| c / l)
+        };
+        let reference = if forward[1].abs() > 0.99 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let right = unit(cross(reference, forward));
+        let up = cross(forward, right);
+        let q = |v: f64| (v * 2_147_483_647.0) as i32;
+        self.player.motion.orientation = [right, up, forward].map(|row| row.map(q));
+    }
+
     /// Move the ship without touching its velocity or set speed (a change of frame).
     pub fn shift(&mut self, position: [i64; 3]) {
         self.player.motion.position = position;

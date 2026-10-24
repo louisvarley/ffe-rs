@@ -31,6 +31,10 @@ pub struct Disc {
 /// The controls button in the top bar: left edge and right edge (logical pixels).
 pub const CONTROLS_BUTTON: (i32, i32) = (118, 236);
 
+/// The map buttons along the bottom of the view: left edge, right edge and label.
+pub const MAP_BUTTONS: [(i32, i32, &str); 2] = [(2, 62, "SYSTEMS"), (66, 150, "THIS SYSTEM")];
+const MAP_BUTTONS_Y: (i32, i32) = (128, 138);
+
 pub struct Screen {
     pub pixels: Vec<u32>,
     frame: Vec<u32>,
@@ -160,6 +164,15 @@ impl Screen {
     /// Any console click under logical pixel (x, y): the views, the time
     /// acceleration meter and the buttons whose screens are not ported.
     pub fn console_click(x: i32, y: i32) -> Option<crate::console::Click> {
+        use crate::console::Click;
+        if (MAP_BUTTONS_Y.0..=MAP_BUTTONS_Y.1).contains(&y) {
+            if (MAP_BUTTONS[0].0..=MAP_BUTTONS[0].1).contains(&x) {
+                return Some(Click::Screen(3));
+            }
+            if (MAP_BUTTONS[1].0..=MAP_BUTTONS[1].1).contains(&x) {
+                return Some(Click::Navigation);
+            }
+        }
         crate::console::click(x, y)
     }
 
@@ -734,16 +747,18 @@ impl Screen {
             ),
             15,
         );
-        self.text(
-            3,
-            130,
-            &format!(
-                "DOCK {}  {}  H HELP",
-                if state.docking_requested { "ON" } else { "OFF" },
-                if modern { "MODERN" } else { "CLASSIC-LIKE" }
-            ),
-            12,
-        );
+        // The map buttons (the system list and this system's list), where the old dock
+        // status line was.
+        for (x0, x1, label) in MAP_BUTTONS {
+            self.rect(
+                x0 as usize,
+                MAP_BUTTONS_Y.0 as usize,
+                (x1 - x0) as usize,
+                10,
+                1,
+            );
+            self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, 18);
+        }
         let mut lines = Vec::new();
         let mut line = String::new();
         for ch in message.chars() {

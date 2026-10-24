@@ -538,6 +538,15 @@ impl Navigator {
             })
     }
 
+    /// The nearest planet or moon to a point (what the ship faces on launch).
+    pub fn nearest_world(&self, from: [i64; 3]) -> Option<[i64; 3]> {
+        self.bodies
+            .iter()
+            .filter(|b| matches!(b.kind, Kind::Planet | Kind::Moon))
+            .min_by(|a, b| distance(from, a.position).total_cmp(&distance(from, b.position)))
+            .map(|b| b.position)
+    }
+
     pub fn system_name(&self) -> &str {
         &self.entries[self.current].name
     }

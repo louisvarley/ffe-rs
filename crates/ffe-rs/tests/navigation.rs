@@ -271,3 +271,35 @@ fn planet_discs_are_drawn() {
     eprintln!("expected {expected:.0}, changed {changed}");
     assert!((changed as f64 - expected).abs() < expected * 0.1);
 }
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn launch_surroundings() {
+    use ffe_rs::navigation::Navigator;
+    let cache = cache();
+    let nav = Navigator::new(&cache).unwrap();
+    let (name, at) = nav.station().unwrap();
+    eprintln!("start at {name}");
+    let mut near: Vec<_> = nav
+        .bodies
+        .iter()
+        .map(|b| (distance(at, b.position), b.name.clone(), b.radius))
+        .collect();
+    near.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for (d, n, r) in near.iter().take(5) {
+        eprintln!("   {n}: {} (radius {})", describe(*d), describe(*r as f64));
+    }
+    // Launching faces the nearest world.
+    let world = nav.nearest_world(at).unwrap();
+    let mut flight = OriginalFlight::from_flight(
+        &Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        },
+        None,
+    );
+    flight.teleport(at);
+    flight.face(world);
+    let command = autopilot(&flight, world, 1.0, &mut Memory::default());
+    assert!(command.aligned > 0.999, "aligned {}", command.aligned);
+}
