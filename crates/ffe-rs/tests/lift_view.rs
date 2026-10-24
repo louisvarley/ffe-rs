@@ -43,7 +43,8 @@ fn the_lift_scenes_draw() {
         ship: 20,
         ..Flight::default()
     };
-    // Launching: the lift alone, inside.
+    // Launching: the lift over the world seen from the slot, facing out.
+    let slot = nav.port(station).unwrap();
     nav.begin_launch().unwrap();
     let mut last = 0;
     let mut frames = 0;
@@ -62,9 +63,32 @@ fn the_lift_scenes_draw() {
             let mut inside = state.clone();
             inside.mode = Mode::Flight;
             inside.system_flight = true;
+            inside.position = slot.point(slot.front * 0.9).map(|v| v as f64 / UNIT);
+            let forward = slot.axis;
+            let up = [0.0, 1.0, 0.0];
+            let right = [
+                up[1] * forward[2] - up[2] * forward[1],
+                up[2] * forward[0] - up[0] * forward[2],
+                up[0] * forward[1] - up[1] * forward[0],
+            ];
+            inside.axes = Some([right, up, forward]);
+            screen.stations = nav
+                .bodies
+                .iter()
+                .filter(|b| b.kind == Kind::Station)
+                .map(|b| SystemStation {
+                    model: b.model,
+                    centre: b.position.map(|v| v as f64 / UNIT),
+                    orientation: b.orientation,
+                    speed: b.spin,
+                    tics: 0x8000_0000,
+                })
+                .collect();
             screen.lift = Some(LiftView {
                 objects,
-                world: false,
+                seed: 0x2468_ace0,
+                starport: false,
+                world: true,
                 tics: 0x8000_0000 + frames * 994,
             });
             screen.draw(
@@ -140,6 +164,8 @@ fn the_lift_scenes_draw() {
             last = stage;
             screen.lift = Some(LiftView {
                 objects,
+                seed: 0x2468_ace0,
+                starport: false,
                 world: true,
                 tics: 0x8000_0000 + frames * 994,
             });

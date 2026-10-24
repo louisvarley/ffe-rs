@@ -65,6 +65,16 @@ held still during a docking. The models are the original's, run by the verified 
 original's cage, shaft and bay (`tests/lift_view.rs` saves them with `FFE_SHOT_DIR`). One thing to look at against
 the real game: the interior model with word 0 (the waiting stages) is nearly empty, so those frames are dark.
 
+## The posters, and the launch's world (2026-10-24)
+
+- F1070 gives each lift object the station's seed (`+0xa0`, global words 2 and 3) and global 4 = 1 (0 at an open-air
+  starport); the posters of the bay and the lift are the child model `0xeb`, which picks its board by the seed, so every
+  station has its own ("LITE", "JAGGED BANNER", "DREAM WARE", "RECYCLE OR DIE", "FIRST ENCOUNTERS ..."). They are text
+  records of the child, which the viewer now draws (`docs/notes/text.md`).
+- The launching lift scenes are drawn over the world like the docking ones: the ship waits in the slot facing out, so the
+  stars (and the station seen from its slot) show past the cage's open doors; before they were black wherever the lift
+  model has no wall (the waiting stage and the cage door). The original draws the world every frame.
+
 ## What the port keeps and leaves out
 
 Kept: the record and every routine above, the stage order and timeouts, the clearance countdown, the lift scenes.

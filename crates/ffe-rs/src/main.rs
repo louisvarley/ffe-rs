@@ -1201,9 +1201,14 @@ fn run() -> Result<(), String> {
         if let Some((objects, launching)) = nav.as_ref().and_then(|nav| nav.lift_scene()) {
             views.mode = ViewMode::Front;
             launching_scene = launching && state.mode == ffe_rs::flight::Mode::Docked;
+            let station = nav
+                .as_ref()
+                .and_then(|nav| nav.sequence.map(|s| s.station).map(|i| &nav.bodies[i]));
             screen.lift = Some(ffe_rs::screen::LiftView {
                 objects,
-                world: !launching,
+                seed: station.map_or(0, |body| body.seed),
+                starport: station.is_some_and(|body| body.kind == NavKind::Starport),
+                world: true,
                 tics: ffe_core::model_animation::START_TICS.wrapping_add(
                     (nav.as_ref().map_or(0.0, |nav| nav.clock) * 49_700.0) as u64 as u32,
                 ),
@@ -1252,6 +1257,23 @@ fn run() -> Result<(), String> {
             inside.mode = ffe_rs::flight::Mode::Flight;
             inside.system_flight = true;
             inside.axes = None;
+            // The ship waits in the docking slot facing out, so the world (the stars, the
+            // planet and the station seen from its slot) shows past the lift's open doors.
+            if let Some(port) = nav
+                .as_ref()
+                .and_then(|nav| nav.docked.and_then(|index| nav.port(index)))
+            {
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                inside.position = port.point(port.front * 0.9).map(|v| v as f64 / unit);
+                let forward = port.axis;
+                let up = [0.0, 1.0, 0.0];
+                let right = [
+                    up[1] * forward[2] - up[2] * forward[1],
+                    up[2] * forward[0] - up[0] * forward[2],
+                    up[0] * forward[1] - up[1] * forward[0],
+                ];
+                inside.axes = Some([right, up, forward]);
+            }
             screen.draw(&inside, views, scene.as_ref(), help, modern, &message);
         } else {
             screen.draw(&state, views, scene.as_ref(), help, modern, &message);

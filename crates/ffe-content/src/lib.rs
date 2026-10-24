@@ -174,6 +174,10 @@ pub enum AssetKind {
         vertex_count: u32,
         scale: u32,
         source_offset: u64,
+        /// The font model's descriptor `+0x3c` (v24): the vertex F1747 moves the pen to
+        /// for a control code (a new line). Caches before v24 lack it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        newline_vertex: Option<u32>,
     },
 }
 
@@ -257,7 +261,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=23) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=24) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -317,6 +321,17 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("The model records and gameplay tables require cache v16.".to_owned());
+        }
+        if manifest.format_version < 24
+            && matches!(
+                record.asset,
+                AssetKind::GlyphPrograms {
+                    newline_vertex: Some(_),
+                    ..
+                }
+            )
+        {
+            return Err("The font newline vertex requires cache v24.".to_owned());
         }
         if manifest.format_version < 23 && matches!(record.asset, AssetKind::StarPointTables { .. })
         {
@@ -510,8 +525,12 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
             count,
             first_char,
             vertex_count,
+            newline_vertex,
             ..
         } => {
+            if newline_vertex.is_some_and(|vertex| vertex >= *vertex_count) {
+                return Err("glyph newline vertex is out of range".to_owned());
+            }
             if *index > 2
                 || *first_char != u32::from(ffe_core::model_commands::GLYPH_FIRST_CHAR)
                 || *count == 0

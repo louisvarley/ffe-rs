@@ -67,7 +67,7 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         read(&bytes).unwrap().asset("base:model-commands/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 24] {
+    for version in [1, 2, 3, 25] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
 
@@ -104,7 +104,7 @@ fn normal_payloads_require_v5_and_validate_counts_and_anchor_bounds() {
         read(&bytes).unwrap().asset("base:model-normals/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 24] {
+    for version in [1, 2, 3, 4, 25] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for count in [0, 1, 3, 6, 258, u32::MAX] {
@@ -135,7 +135,7 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
         read(&bytes).unwrap().asset("base:model-vertices/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 24] {
+    for version in [1, 2, 25] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for (program, count, scale, index) in [
@@ -223,7 +223,7 @@ fn stored_cache_is_deterministic_sorted_and_loads_by_stable_id() {
 fn malformed_manifests_cannot_claim_complete_content_or_escape_paths() {
     let bytes = build(manifest(), assets()).unwrap();
     for (key, value) in [
-        ("format_version", serde_json::json!(24)),
+        ("format_version", serde_json::json!(25)),
         ("format", serde_json::json!("other")),
         ("complete_game_assets", serde_json::json!(true)),
         ("unresolved", serde_json::json!([])),
@@ -483,6 +483,7 @@ fn glyph_programs_require_v14_and_validate_their_programs() {
             vertex_count: 2,
             scale: 0,
             source_offset: 1,
+            newline_vertex: None,
         },
         bytes,
     };
@@ -491,6 +492,19 @@ fn glyph_programs_require_v14_and_validate_their_programs() {
     assert!(build(m.clone(), vec![asset(payload(), 1)]).is_err());
     m.format_version = 14;
     assert!(build(m.clone(), vec![asset(payload(), 1)]).is_ok());
+    // The font's newline vertex is a v24 field and must name a vertex of the font.
+    let with_newline = |vertex| {
+        let mut record = asset(payload(), 1);
+        if let AssetKind::GlyphPrograms { newline_vertex, .. } = &mut record.kind {
+            *newline_vertex = Some(vertex);
+        }
+        record
+    };
+    assert!(build(m.clone(), vec![with_newline(1)]).is_err());
+    m.format_version = 24;
+    assert!(build(m.clone(), vec![with_newline(1)]).is_ok());
+    assert!(build(m.clone(), vec![with_newline(2)]).is_err());
+    m.format_version = 14;
     // A count that does not match the offset block, a bad first start and a
     // program that does not decode are all rejected.
     assert!(build(m.clone(), vec![asset(payload(), 2)]).is_err());

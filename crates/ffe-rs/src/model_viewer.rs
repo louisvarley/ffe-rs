@@ -16,7 +16,7 @@ use ffe_core::model_animation::{
 use ffe_core::model_commands::{material, VisibilityContext};
 use ffe_core::model_execute::{
     execute_live, execute_scene, resolve_colour, ChildEnvironment, ChildModel, ChildModels,
-    Execution, InstanceContext, Primitive,
+    ChildOutcome, ChildRun, Execution, InstanceContext, Primitive,
 };
 use ffe_core::model_fill::near_outline;
 use ffe_core::model_instance::{Vertices, NEAR_SENTINEL};
@@ -203,6 +203,8 @@ const THRUST_STEPS: [Option<u16>; 3] = [None, Some(2048), Some(4095)];
 pub struct GlyphSet {
     vertex_count: u32,
     scale: u32,
+    /// The font vertex a control code (a new line) moves the pen to (cache v24).
+    newline: Option<u32>,
     starts: Vec<u32>,
     bytes: Vec<u8>,
 }
@@ -210,7 +212,13 @@ pub struct GlyphSet {
 impl GlyphSet {
     /// Decode a `base:model-glyphs/NNN` payload: `count` u32 starts, then the
     /// program block.
-    pub fn from_payload(payload: &[u8], count: u32, vertex_count: u32, scale: u32) -> Option<Self> {
+    pub fn from_payload(
+        payload: &[u8],
+        count: u32,
+        vertex_count: u32,
+        scale: u32,
+        newline: Option<u32>,
+    ) -> Option<Self> {
         let offsets = count as usize * 4;
         if payload.len() <= offsets || count == 0 {
             return None;
@@ -218,6 +226,7 @@ impl GlyphSet {
         Some(Self {
             vertex_count,
             scale,
+            newline,
             starts: payload[..offsets]
                 .chunks_exact(4)
                 .map(|entry| u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]))
@@ -379,12 +388,19 @@ impl ModelViewer {
                     count,
                     vertex_count,
                     scale,
+                    newline_vertex,
                     ..
                 } = record.asset
                 else {
                     return None;
                 };
-                GlyphSet::from_payload(cache.asset(&id)?, count, vertex_count, scale)
+                GlyphSet::from_payload(
+                    cache.asset(&id)?,
+                    count,
+                    vertex_count,
+                    scale,
+                    newline_vertex,
+                )
             })
             .collect();
         Ok(viewer)
@@ -891,8 +907,6 @@ impl ModelViewer {
             locals: inputs.locals,
             ..Default::default()
         };
-        // Light points (opcode 30 0x801e) count global word 4; keep it empty.
-        context.globals[4] = 0;
         if let Some(thrust) = self.thrust {
             context.globals[THRUST_GLOBAL] = thrust;
         }
@@ -964,6 +978,7 @@ impl ModelViewer {
         };
         self.draw_primitives(&result, &mut frame)?;
         self.draw_texts(&result, model.index, &mut vertices, instance, &mut frame)?;
+        self.draw_child_texts(&result.children, &mut frame)?;
         self.draw_surfaces(&result, light, &mut frame);
         Ok(frame)
     }
@@ -1331,6 +1346,33 @@ impl ModelViewer {
         Ok(())
     }
 
+    /// The texts of child models (the lift's posters are child models of the lift
+    /// and the bay): each executed child's texts are drawn in its own instance, with
+    /// a fresh vertex cache over its records and the externals its parent gave it.
+    fn draw_child_texts(&self, runs: &[ChildRun], frame: &mut Frame) -> Result<(), String> {
+        for run in runs {
+            let (ChildOutcome::Executed(execution), Some(setup)) = (&run.outcome, &run.setup)
+            else {
+                continue;
+            };
+            let table = ChildTable(self);
+            let child = table.model(run.model)?;
+            let mut vertices =
+                Vertices::child(child.vertices, child.vertex_count, setup.externals)?
+                    .with_normal_records(child.normals);
+            frame.texts += execution.texts.iter().filter(|text| !text.culled).count();
+            self.draw_texts(
+                execution,
+                u32::from(run.model),
+                &mut vertices,
+                setup.instance,
+                frame,
+            )?;
+            self.draw_child_texts(&execution.children, frame)?;
+        }
+        Ok(())
+    }
+
     /// Opcode 10 text (F1747): run each character's glyph program through the
     /// executor in a frame at the text's position, and move the pen to the font
     /// vertex the program's final return word names. The glyph geometry is drawn
@@ -1394,12 +1436,18 @@ impl ModelViewer {
                 .0
             };
             let mut pen = position.view;
+            let mut line = pen;
+            // F1747 runs the glyphs in a nested instance whose operand scale (+0x148) is the
+            // record's size nibble, not the font model's own scale, and whose generation
+            // (+0xf0) is a counter that starts at 2 and moves on at every pen move, so
+            // each vertex of the font is evaluated afresh for every glyph.
+            let size = u32::from(text.size);
             let mut glyph_vertices = Vertices::new(&font.vertices, font.vertex_count)?
                 .with_normal_records(&font.normals);
             let mut glyph_context = VertexContext {
                 matrix,
                 basis: matrix,
-                scale: font.scale,
+                scale: size,
                 globals: emission.context.globals,
                 locals: emission.context.locals,
                 colour: emission.context.colour,
@@ -1421,10 +1469,29 @@ impl ModelViewer {
                 detail: [0, 0],
                 normals: &normals,
             };
+            let mut generation = 2u32;
             for &code in &string {
                 if code < 0x20 {
-                    frame.skipped += 1;
-                    break;
+                    // A control code starts a new line: the pen returns to the line's start
+                    // and the font's newline vertex, seen from there, becomes the next
+                    // line's start.
+                    let Some(newline) = set.newline else {
+                        frame.skipped += 1;
+                        break;
+                    };
+                    pen = line;
+                    generation += 1;
+                    let next = glyph_vertices.resolve(
+                        newline as i8,
+                        &glyph_context,
+                        pen,
+                        generation,
+                        false,
+                    )?;
+                    line = next.view;
+                    pen = line;
+                    generation += 1;
+                    continue;
                 }
                 let Some(program) = set.program(code) else {
                     frame.skipped += 1;
@@ -1436,9 +1503,9 @@ impl ModelViewer {
                 };
                 let glyph_instance = InstanceContext {
                     position: pen,
-                    generation: instance.generation,
+                    generation,
                     key_scale: 0,
-                    operand_scale: font.scale as i32,
+                    operand_scale: size as i32,
                     textures: true,
                 };
                 let execution = execute_live(
@@ -1454,14 +1521,10 @@ impl ModelViewer {
                     format!("{error} (glyph {code:?} of text at {:#x})", text.offset)
                 })?;
                 self.draw_primitives(&execution, frame)?;
-                let next = glyph_vertices.resolve(
-                    anchor as i8,
-                    &glyph_context,
-                    pen,
-                    instance.generation,
-                    true,
-                )?;
+                let next =
+                    glyph_vertices.resolve(anchor as i8, &glyph_context, pen, generation, false)?;
                 pen = next.view;
+                generation += 1;
             }
         }
         Ok(())

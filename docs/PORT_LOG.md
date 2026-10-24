@@ -4,6 +4,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — Lift posters, launch world and text placement (cache v24)
+
+Owner report: black frames in the lift scenes when leaving a station, and the posters of the real game missing.
+
+- Posters: the lift and bay models call child model `0xeb`, whose boards are text records (and textured faces chosen by the
+  station's seed). The viewer ran child texts but never drew them, and drew all text at the font model's scale instead of
+  the record's size nibble (F1747's `+0x148`), which left glyphs a few units wide. Both fixed; newlines (control codes)
+  now work through the font descriptor's `+0x3c` vertex (cache v24 `newline_vertex`). Lift objects now get the station's
+  seed and global 4.
+- Black frames: the launching scenes drew only the lift, so a lift model's open door showed nothing. They now draw the
+  world from the slot (the docking sequence already did).
+- Not verified against the original's pixels (no oracle for text, and the lift cannot be driven in the headless harness
+  without a long flight); the posters' wording and layout are the original's data.
+
+---
+
 ## 2026-10-24 — The galaxy map's stars (F1769, cache v23)
 
 Notes: `docs/notes/galaxy-map.md`.

@@ -27,7 +27,7 @@ fn glyph_set() -> GlyphSet {
         .flat_map(u32::to_le_bytes)
         .collect();
     payload.extend_from_slice(&program);
-    GlyphSet::from_payload(&payload, count as u32, 4, 0).unwrap()
+    GlyphSet::from_payload(&payload, count as u32, 4, 0, None).unwrap()
 }
 
 /// Parent model (slot 9): vertex 0 at (0, 0, 40) and one text command.

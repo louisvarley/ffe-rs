@@ -58,6 +58,12 @@ pub struct LiftView {
     pub world: bool,
     /// The game tics the models' time word reads.
     pub tics: u32,
+    /// The station's random seed (object `+0xa0`, global words 2 and 3): it picks the
+    /// posters on the walls, so every station has its own.
+    pub seed: u32,
+    /// An open-air starport (`+0x14c` bit 5): global word 4 is 0 there, 1 in an orbital
+    /// station (F1070).
+    pub starport: bool,
 }
 
 /// One commodity line of the station's market screen.
@@ -1194,6 +1200,9 @@ impl Screen {
             let position = ffe_core::lift::view_position(&object, eye).map(f64::from);
             let mut inputs = AnimationInputs::original(lift.tics, object.word, &scene.shades());
             inputs.jitter = self.jitter.cursor;
+            inputs.globals[2] = lift.seed as u16;
+            inputs.globals[3] = (lift.seed >> 16) as u16;
+            inputs.globals[4] = u16::from(!lift.starport);
             if let Ok(frame) = scene.render_scene_with(
                 object.model,
                 scene.lift_rows(object.angle),

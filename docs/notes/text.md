@@ -98,6 +98,18 @@ to the resolved anchor vertex. `0x3016` and `0x3022` expand the drawn object's
 string (object +0x124); the F6 viewer defaults it to the model's own name, and
 `set_registration` supplies a real one.
 
+## Corrections (2026-10-24)
+
+- **The glyph scale is the record's size nibble.** F1747 stores `byte 3 & 15` at the nested instance's `+0x148`, the
+  operand scale the font vertices are shifted by; the earlier port used the font model's own scale (0, 8 and 0), which
+  made every font 0 and font 2 text a few units wide. Sizes run 1..15 (decals 6..8, station signs 10..12). The census:
+  every (font, size) pair of the 236 records.
+- **Control codes are new lines.** A byte below 0x20 returns the pen to the line's start and moves both to the font's
+  vertex `descriptor +0x3c` seen from there (cache v24 `newline_vertex`: 58, 38, 20). The nested instance's generation
+  is a counter (2, then +1 at every pen move), so each glyph resolves the font's vertices afresh.
+- **Child models' texts are drawn**: the lift's and the bay's posters are child models (`0xeb`) whose texts ran but were
+  never drawn (`ModelViewer::draw_child_texts`).
+
 ## Labels (ported)
 
 Opcode 18 decodes to a vertex and a string word. `execute_live` projects the

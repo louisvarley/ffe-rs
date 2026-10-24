@@ -302,6 +302,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                         vertex_count: glyphs.vertex_count,
                         scale: glyphs.scale,
                         source_offset: glyphs.source_offset as u64,
+                        newline_vertex: Some(glyphs.newline_vertex),
                     },
                     bytes: payload,
                 });
@@ -588,7 +589,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 23,
+        format: "ffe-content-cache".to_owned(), format_version: 24,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

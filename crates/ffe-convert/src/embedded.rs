@@ -132,6 +132,8 @@ pub struct EmbeddedGlyphPrograms {
     pub source_offset: usize,
     pub vertex_count: u32,
     pub scale: u32,
+    /// The descriptor's byte `+0x3c`: the font vertex a control code moves the pen to.
+    pub newline_vertex: u32,
     /// Start offset of each character's program in `bytes`, in code order from
     /// [`GLYPH_FIRST_CHAR`]; the last program runs to the end of `bytes`.
     pub starts: Vec<u32>,
@@ -245,10 +247,19 @@ pub fn glyph_programs(
                 .ok_or("Glyph program precedes the font block")
         })
         .collect::<Result<Vec<u32>, _>>()?;
+    let newline_vertex = u32::from(
+        *bytes
+            .get(section.offset(descriptor_rva + 0x3c, 1)?)
+            .ok_or("Font descriptor outside the executable")?,
+    );
+    if newline_vertex >= vertex_count {
+        return Err("The font's newline vertex is out of range.".to_owned());
+    }
     Ok(EmbeddedGlyphPrograms {
         source_offset: first as usize,
         vertex_count,
         scale,
+        newline_vertex,
         starts,
         bytes: bytes
             .get(first as usize..end as usize)

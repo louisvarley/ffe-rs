@@ -7,7 +7,7 @@ setlocal
 cd /d "%~dp0"
 
 rem Cache version this build expects. Update together with ffe-tools build-data.
-set CACHE=v23
+set CACHE=v24
 
 where cargo >nul 2>nul
 if errorlevel 1 (
