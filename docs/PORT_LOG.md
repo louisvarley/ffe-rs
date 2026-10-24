@@ -4,6 +4,23 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — Traffic control and the docking and launch stages (`ffe_core::traffic`)
+
+Notes: `docs/notes/docking.md`. Replaces the always-granted clearance and the instant dock of the entry below.
+
+- F649-F657 (the station record: clearance, bays, touch, release, reset), F867's clearance countdown and the player's
+  timed stages (F1025, F1067/F1068, F1069-F1088: align, lift door, into the lift, turn, close, wait, inner door, into the
+  bay; and the launch stages) are ported from the assembly. Docking takes about 26 s of game time, launching about 20 s;
+  D answers busy, full or granted with a bay; the autopilot asks at its approach point.
+- The original's lift scenes (a lift object built by F1070-F1080), the velocity matching the rotating station and the sounds
+  are not ported; the status line names each stage instead.
+- **Not run against the original.** `--traffic` in `headless.c` (8,192 records), `verify-traffic.py` and
+  `traffic_reference.rs` are written, but the harness now builds only on Linux and this checkout is Windows without WSL.
+  The C was syntax-checked and the Rust test's plumbing exercised on a self-generated trace. Run it on Linux before calling
+  the port verified.
+
+---
+
 ## 2026-10-24 — Stations in system flight and docking at them (ffe-rs rules)
 
 Notes: `docs/NAVIGATION.md` ("Docking"); deviation EXP-005.

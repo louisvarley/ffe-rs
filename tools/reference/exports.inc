@@ -421,3 +421,24 @@ GLOBAL _ref_surface_mix
 _ref_surface_mix equ FUNC_001824
 GLOBAL _ref_surface_vector_msb
 _ref_surface_vector_msb equ FUNC_001825
+
+; Traffic control oracle (--traffic): F650-F655, F657 (station bays, clearance), F867's
+; clearance countdown, and the player index F650 and F655 compare against.
+GLOBAL _ref_traffic_alloc
+GLOBAL _ref_traffic_release
+GLOBAL _ref_traffic_touch
+GLOBAL _ref_traffic_reset
+GLOBAL _ref_traffic_request
+GLOBAL _ref_traffic_dock
+GLOBAL _ref_traffic_docking
+GLOBAL _ref_traffic_elapse
+GLOBAL _ref_player_index
+_ref_traffic_alloc equ FUNC_000650
+_ref_traffic_release equ FUNC_000651
+_ref_traffic_touch equ FUNC_000652
+_ref_traffic_reset equ FUNC_000653
+_ref_traffic_request equ FUNC_000654
+_ref_traffic_dock equ FUNC_000655
+_ref_traffic_docking equ FUNC_000657
+_ref_traffic_elapse equ FUNC_000867
+_ref_player_index equ DATA_008857

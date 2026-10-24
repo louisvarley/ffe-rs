@@ -13,6 +13,7 @@ fn station() -> Body {
         seed: 0,
         orientation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         spin: 12,
+        bays: 3,
     }
 }
 

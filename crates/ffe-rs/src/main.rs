@@ -1,3 +1,4 @@
+use ffe_core::traffic::Reply;
 use ffe_rs::camera::{key_amount, ExternalKeys, ViewMode, ViewState};
 use ffe_rs::console::{acceleration_for_digit, Click, ConsoleState, ACCELERATION_NAMES};
 use ffe_rs::docking::Contact;
@@ -5,7 +6,9 @@ use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
-use ffe_rs::navigation::{describe, distance, Kind as NavKind, Navigator, View as NavView};
+use ffe_rs::navigation::{
+    describe, distance, refusal, Kind as NavKind, Navigator, Traffic, View as NavView,
+};
 use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
 use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
@@ -712,22 +715,43 @@ fn run() -> Result<(), String> {
                     };
                 }
                 let action = if pressed(Key::L) {
-                    Some(state.launch())
+                    match nav.as_mut() {
+                        Some(nav) if state.mode == ffe_rs::flight::Mode::Docked => {
+                            match nav.begin_launch() {
+                                Ok(()) => {
+                                    acceleration = 0;
+                                    message = "Launch permission granted: moving into the lift."
+                                        .to_owned();
+                                    None
+                                }
+                                Err(error) => Some(Err(error)),
+                            }
+                        }
+                        _ => Some(state.launch()),
+                    }
                 } else if pressed(Key::D)
                     && state.system_flight
                     && state.mode == ffe_rs::flight::Mode::Flight
                 {
                     let ship = ship_position(&original);
                     message = match nav.as_mut() {
-                        Some(nav) if nav.clearance.is_some() => {
-                            nav.clearance = None;
+                        Some(nav) if nav.sequence.is_some() => {
+                            "Docking or launching is under way.".to_owned()
+                        }
+                        Some(nav) if nav.cleared_anywhere() => {
+                            nav.cancel_clearance();
                             "Docking clearance cancelled.".to_owned()
                         }
                         Some(nav) => match nav.request_clearance(ship) {
-                            Some(station) => format!(
-                                "{}: docking clearance granted. Enter the slot on the docking face.",
-                                station.name
+                            Some((index, Reply::Granted(bay))) => format!(
+                                "{}: docking clearance {} (bay {}). Enter the slot on the docking face.",
+                                nav.bodies[index].name,
+                                if bay.fresh { "granted" } else { "already granted" },
+                                bay.index + 1
                             ),
+                            Some((index, other)) => {
+                                format!("{}: {}.", nav.bodies[index].name, refusal(other))
+                            }
                             None => "No station within 100 km to ask for clearance.".to_owned(),
                         },
                         None => "No stations: navigation is unavailable.".to_owned(),
@@ -843,7 +867,11 @@ fn run() -> Result<(), String> {
                     roll_right: both(&[Key::RightBracket], &[Key::E]),
                 };
                 let mut command_face = None;
-                if let Some(nav) = nav.as_mut() {
+                if nav.as_ref().is_some_and(|nav| nav.holding()) {
+                    keys = OriginalKeys::default();
+                    model.teleport(model.player().motion.position);
+                }
+                if let Some(nav) = nav.as_mut().filter(|nav| !nav.holding()) {
                     if let Some((command, body)) = nav.command(&cache, model) {
                         keys = command.keys;
                         command_face = command.face;
@@ -862,6 +890,9 @@ fn run() -> Result<(), String> {
                             let range = distance(model.player().motion.position, body.position);
                             message = format!("Autopilot: {} {}.", body.name, describe(range));
                         }
+                    }
+                    if let Some(notice) = nav.notice.take() {
+                        message = notice;
                     }
                     let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
                         / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
@@ -890,15 +921,12 @@ fn run() -> Result<(), String> {
                                 match contact {
                                     Contact::None => {}
                                     Contact::Docked => {
-                                        nav.dock(index);
-                                        state.mode = ffe_rs::flight::Mode::Docked;
-                                        state.position = [0.0, 0.0, -60.0];
-                                        state.velocity = [0.0; 3];
-                                        state.thrust = 0.0;
-                                        state.docking_requested = false;
-                                        message = format!(
-                                            "Docked at {name}. B buys food, N sells; F5 saves; L launches."
-                                        );
+                                        if nav.begin_docking(index) {
+                                            acceleration = 0;
+                                            model.set_time_acceleration(0);
+                                            message =
+                                                format!("{name}: docking, aligning with the lift.");
+                                        }
                                     }
                                     Contact::Collision { clear, reason } => {
                                         model.teleport(clear);
@@ -969,6 +997,47 @@ fn run() -> Result<(), String> {
         // The original returns to the front view when docking (FUNC_001048).
         if state.mode == ffe_rs::flight::Mode::Docked {
             views.mode = ViewMode::Front;
+        }
+        // Traffic control: doors, clearance timeouts and the docking and launch stages.
+        if active && !help && !paused && model_lab.is_none() && model_viewer.is_none() {
+            if let Some(nav) = nav.as_mut() {
+                let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
+                    / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
+                let tics = (elapsed * ffe_rs::original_flight::TICS_PER_SECOND * factor) as u32;
+                for event in nav.tick_traffic(tics, elapsed * factor) {
+                    match event {
+                        Traffic::Stage(text) => {
+                            message = format!(
+                                "{}: {text}.",
+                                if nav.sequence.is_some_and(|s| s.launching) {
+                                    "Launching"
+                                } else {
+                                    "Docking"
+                                }
+                            );
+                        }
+                        Traffic::Docked(index) => {
+                            state.mode = ffe_rs::flight::Mode::Docked;
+                            state.position = [0.0, 0.0, -60.0];
+                            state.velocity = [0.0; 3];
+                            state.thrust = 0.0;
+                            state.docking_requested = false;
+                            message = format!(
+                                "Docked at {}. B buys food, N sells; F5 saves; L launches.",
+                                nav.bodies[index].name
+                            );
+                        }
+                        Traffic::LaunchOut(_) => {
+                            if let Err(error) = state.launch() {
+                                message = error;
+                            }
+                        }
+                        Traffic::LaunchDone(index) => {
+                            message = format!("Clear of {}.", nav.bodies[index].name);
+                        }
+                    }
+                }
+            }
         }
         // A new state (docking, a scenario, a load) ends the original flight model.
         if original.is_some()

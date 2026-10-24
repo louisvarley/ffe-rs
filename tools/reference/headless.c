@@ -4385,6 +4385,92 @@ static int animation_vectors(void)
     return 0;
 }
 
+
+/* Traffic control oracle (--traffic): the original F654 (permission), F650 (a bay,
+   indoor station), F651 (release), F652 (touch), F653 (reset), F655 (the whole request
+   for a ship other than the player, so no message is printed), F657 (is docking) and
+   F867's clearance countdown, on a synthetic station record. Each case starts from a
+   random record (mode, current ship, timeout, bay count, bays) and applies one call;
+   the record and the return values are printed. The player index is set to 0x7f so no
+   ship in the cases is the player (F650/F655 raise events for the player). */
+extern unsigned long ref_traffic_alloc(void *station, long ship, void *position, long *flag, long *pad);
+extern void ref_traffic_release(long ship, void *station);
+extern unsigned long ref_traffic_touch(long ship, void *station);
+extern void ref_traffic_reset(void *station);
+extern unsigned long ref_traffic_request(long ship, void *station);
+extern unsigned long ref_traffic_dock(void *ship_object, void *station, void *position, long *pad);
+extern unsigned long ref_traffic_docking(long ship, void *station);
+extern void ref_traffic_elapse(void *parameters);
+extern unsigned long ref_player_index;
+static unsigned long traffic_state = 0x13579bdfUL;
+static unsigned long traffic_random(void)
+{
+    traffic_state ^= traffic_state << 13; traffic_state &= 0xffffffffUL;
+    traffic_state ^= traffic_state >> 17;
+    traffic_state ^= traffic_state << 5; traffic_state &= 0xffffffffUL;
+    return traffic_state;
+}
+static void traffic_print(const unsigned char *o)
+{
+    unsigned i;
+    printf("\"mode\":%u,\"current\":%u,\"timeout\":%u,\"bays\":%u,\"pads\":[", o[0xc9], o[0xca], *(unsigned short *)(o + 0xd8), *(unsigned short *)(o + 0xce));
+    for (i = 0; i < 8; ++i) printf("%s%u", i ? "," : "", o[0xd0 + i]);
+    printf("]");
+}
+static int traffic_vectors(void)
+{
+    static unsigned char station[0x160];
+    static unsigned char ship[0x160];
+    static const unsigned char modes[] = {0, 1, 2, 3, 0xfe, 0xff, 4, 0x80};
+    unsigned long i, k;
+    fprintf(stderr, "JJFFE traffic-v1: original F650 (indoor bay), F651, F652, F653, F654, F655 (non-player ship), F657 and F867's clearance countdown on synthetic station records; the player index is 0x7f. No messages, events or open-air pads.\n");
+    ref_player_index = 0x7f;
+    for (i = 0; i < 8192; ++i) {
+        unsigned long call = i % 8, ship_index, ca, elapsed;
+        long flag = 0x5a5a5a5aL, pad = 0x5a5a5a5aL, position[6];
+        unsigned long result = 0x5a5a5a5aUL;
+        memset(station, 0, sizeof station);
+        memset(ship, 0, sizeof ship);
+        station[0xc9] = modes[traffic_random() % 8];
+        ca = traffic_random() % 4 == 0 ? 0 : traffic_random() % 12 + 1;
+        station[0xca] = (unsigned char)ca;
+        *(unsigned short *)(station + 0xd8) = traffic_random() % 3 == 0 ? 0 : (unsigned short)(traffic_random() % 0x7100);
+        *(unsigned short *)(station + 0xce) = (unsigned short)(traffic_random() % 8);
+        for (k = 0; k < 8; ++k) station[0xd0 + k] = traffic_random() % 3 == 0 ? 0 : (unsigned char)(traffic_random() % 12 + 1);
+        station[0x14c] = traffic_random() % 2 ? 0x10 : 0x00; /* indoor (bit 0x40 clear), not a starport (bit 0x20 clear) */
+        *(unsigned long *)(station + 0x82) = 0x50;
+        ship_index = traffic_random() % 12 + 1;
+        ship[0x86] = (unsigned char)ship_index;
+        elapsed = traffic_random() % 4 == 0 ? 0x7000 + traffic_random() % 0x200 : traffic_random() % 0x300;
+        {
+            unsigned char before[0x160];
+            memcpy(before, station, sizeof station);
+            printf("{\"call\":%lu,\"ship\":%lu,\"elapsed\":%lu,\"in\":{", call, ship_index, elapsed);
+            traffic_print(before);
+            printf("}");
+        }
+        switch (call) {
+        case 0: result = ref_traffic_request((long)ship_index, station) & 0xff; break;
+        case 1: result = ref_traffic_alloc(station, (long)ship_index, position, &flag, &pad) & 0xffffffffUL; break;
+        case 2: ref_traffic_release((long)ship_index, station); break;
+        case 3: result = ref_traffic_touch((long)ship_index, station) & 0xff; break;
+        case 4: ref_traffic_reset(station); break;
+        case 5: result = ref_traffic_dock(ship, station, position, &pad) & 0xff; break;
+        case 6: result = ref_traffic_docking((long)ship_index, station) & 0xffffffffUL; break;
+        default: {
+            unsigned long parameters[2];
+            parameters[0] = (unsigned long)station; parameters[1] = elapsed;
+            ref_traffic_elapse(parameters);
+        }
+        }
+        printf(",\"result\":%lu,\"flag\":%ld,\"pad\":%ld,\"out\":{", result, flag, pad);
+        traffic_print(station);
+        printf("}}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush traffic vectors");
+    return 0;
+}
+
 #ifdef FFE_COMMAND_PROBE
 extern void ref_object_frame(void *list, void *camera);
 extern void ref_display_object(void *object, void *descriptor);
@@ -4642,6 +4728,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--thruster-cases")) return thruster_case_vectors();
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--animation")) return animation_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--traffic")) return traffic_vectors();
     if (argc == 2 && !strcmp(argv[1], "--object-instance")) return object_instance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

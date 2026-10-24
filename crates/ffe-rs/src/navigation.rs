@@ -12,6 +12,7 @@ use ffe_core::names::Names;
 use ffe_core::objects::{Models, PhysList, Placement};
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
+use ffe_core::traffic::{begin_exit, finish_touch, state, Reply, Stages, Starport};
 use std::collections::HashMap;
 
 /// The reverse thrust's deceleration (metres per second squared, world time).
@@ -61,6 +62,8 @@ pub struct Body {
     pub orientation: [[f64; 3]; 3],
     /// F866's signed rotation speed byte (`+0xc8`) for a station; 0 otherwise.
     pub spin: i8,
+    /// The object's bay count (`+0xce`): F880 gives a station 3 (7 for kind 0x22).
+    pub bays: u16,
 }
 
 /// A system that can be visited.
@@ -264,6 +267,7 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
             } else {
                 0
             },
+            bays: list.word(slot, 0xce),
         });
     }
     Ok(out)
@@ -489,8 +493,14 @@ pub struct Navigator {
     pub target: Option<usize>,
     /// The station the player is docked at (or last docked at).
     pub docked: Option<usize>,
-    /// The station that has granted docking clearance.
-    pub clearance: Option<usize>,
+    /// Each station's traffic record (F654 and friends), made when first needed.
+    traffic: HashMap<usize, Starport>,
+    /// The docking or launching stages the player is in, when it is.
+    pub sequence: Option<Sequence>,
+    /// A message from the autopilot's own clearance request.
+    pub notice: Option<String>,
+    /// Game seconds not yet handed to the clearance countdowns.
+    carry: f64,
     /// The autopilot has reached a station's approach point and is flying into
     /// the slot.
     pub final_leg: bool,
@@ -502,6 +512,41 @@ pub struct Navigator {
     ports: HashMap<u32, (Option<f64>, Option<f64>)>,
     memory: Memory,
     refreshed: f64,
+}
+
+/// The player's index in a station's bay table (the original's `DATA_008857`; 0 is an
+/// empty bay).
+pub const PLAYER: u8 = 1;
+
+/// The player's docking or launching stages at a station.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sequence {
+    pub station: usize,
+    pub stages: Stages,
+    pub launching: bool,
+}
+
+/// What a frame of traffic changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Traffic {
+    /// A new stage began (its description).
+    Stage(&'static str),
+    /// The docking stages are over: the ship is docked at the station.
+    Docked(usize),
+    /// The launch stages put the ship out of the station: it flies again.
+    LaunchOut(usize),
+    /// The door is open and the bay released: the launch is complete.
+    LaunchDone(usize),
+}
+
+/// Why traffic control said no (the original's 0x98b7..0x98b9 messages).
+pub fn refusal(reply: Reply) -> &'static str {
+    match reply {
+        Reply::Fined => "docking refused: outstanding fines",
+        Reply::Busy => "traffic control is busy with another ship",
+        Reply::Full => "all bays are full",
+        Reply::Granted(_) => "clearance granted",
+    }
 }
 
 /// Distance to a station's approach point on its docking axis, beyond the face.
@@ -539,7 +584,10 @@ impl Navigator {
             selected: 0,
             target: None,
             docked,
-            clearance: None,
+            traffic: HashMap::new(),
+            sequence: None,
+            notice: None,
+            carry: 0.0,
             final_leg: false,
             frame: None,
             ports: HashMap::new(),
@@ -587,12 +635,139 @@ impl Navigator {
             .map(|(i, _)| i)
     }
 
-    /// Ask the nearest station for docking clearance (granted while traffic is not
-    /// modelled). Returns the station, or `None` with none in range.
-    pub fn request_clearance(&mut self, ship: [i64; 3]) -> Option<&Body> {
+    /// The traffic record of a station, made on first use with its bay count.
+    pub fn starport(&mut self, index: usize) -> &mut Starport {
+        let bays = self.bodies.get(index).map_or(3, |b| b.bays);
+        self.traffic
+            .entry(index)
+            .or_insert_with(|| Starport::new(bays))
+    }
+
+    /// The station has given the player clearance (F657).
+    pub fn cleared(&self, index: usize) -> bool {
+        self.traffic
+            .get(&index)
+            .is_some_and(|port| port.is_docking(PLAYER))
+    }
+
+    /// Ask the nearest station for docking clearance, as the comms screen does
+    /// (F655): traffic control may be busy with another ship, or have no bay.
+    pub fn request_clearance(&mut self, ship: [i64; 3]) -> Option<(usize, Reply)> {
         let index = self.nearest_station(ship)?;
-        self.clearance = Some(index);
-        self.bodies.get(index)
+        let reply = self.starport(index).request_docking(PLAYER, true, 0);
+        Some((index, reply))
+    }
+
+    /// Some station holds the player's clearance.
+    pub fn cleared_anywhere(&self) -> bool {
+        (0..self.bodies.len()).any(|i| self.cleared(i))
+    }
+
+    /// Give clearance up again (F651).
+    pub fn cancel_clearance(&mut self) -> bool {
+        let Some(index) = (0..self.bodies.len()).find(|i| self.cleared(*i)) else {
+            return false;
+        };
+        self.starport(index).release(PLAYER);
+        true
+    }
+
+    /// The ship has touched the pad of station `index` with clearance (F652): the
+    /// timed docking stages begin.
+    pub fn begin_docking(&mut self, index: usize) -> bool {
+        if !self.starport(index).touch(PLAYER) {
+            return false;
+        }
+        self.target = None;
+        self.final_leg = false;
+        self.sequence = Some(Sequence {
+            station: index,
+            stages: Stages::touched(false),
+            launching: false,
+        });
+        true
+    }
+
+    /// Ask the station the player is docked at for permission to launch (F654) and
+    /// begin the launch stages. `Err` says why not.
+    pub fn begin_launch(&mut self) -> Result<(), String> {
+        let index = self.docked.or_else(|| first_station(&self.bodies));
+        let Some(index) = index else {
+            return Err("No station to launch from.".to_owned());
+        };
+        if self.sequence.is_some() {
+            return Err("Already launching.".to_owned());
+        }
+        if !self.starport(index).request(PLAYER) {
+            return Err("Launch refused: traffic control is busy.".to_owned());
+        }
+        self.docked = Some(index);
+        self.sequence = Some(Sequence {
+            station: index,
+            stages: Stages::launch_requested(),
+            launching: true,
+        });
+        Ok(())
+    }
+
+    /// The ship is held still: it is in the lift of a docking sequence.
+    pub fn holding(&self) -> bool {
+        self.sequence.is_some_and(|s| !s.launching)
+    }
+
+    /// One frame of traffic: every station's door and clearance countdown, and the
+    /// player's stages. `tics` are the game tics of the frame, `seconds` game seconds.
+    pub fn tick_traffic(&mut self, tics: u32, seconds: f64) -> Vec<Traffic> {
+        let mut events = Vec::new();
+        self.carry += seconds;
+        let whole = self.carry.floor();
+        self.carry -= whole;
+        for port in self.traffic.values_mut() {
+            port.move_door(tics);
+            if whole >= 1.0 {
+                port.elapse(whole as u32);
+            }
+        }
+        let Some(mut sequence) = self.sequence else {
+            return events;
+        };
+        let station = sequence.station;
+        let model = self.bodies.get(station).map_or(0, |b| b.model);
+        let thargoid = model == 0x45 || model == 0x4f;
+        let door = self.traffic.get(&station).map_or(0xffff, |p| p.door);
+        let left = sequence.stages.step(tics as i32, thargoid, door);
+        if let Some(left) = left {
+            let now = sequence.stages.state;
+            if left == state::ALIGN || left == state::STARPORT_ALIGN {
+                finish_touch(self.starport(station));
+            }
+            match now {
+                state::DOCKED => {
+                    self.sequence = None;
+                    self.dock(station);
+                    events.push(Traffic::Docked(station));
+                    return events;
+                }
+                state::LAUNCHING_STATION | state::LAUNCHING_STARPORT => {
+                    begin_exit(self.starport(station));
+                    events.push(Traffic::LaunchOut(station));
+                }
+                state::AFTER_TAKEOFF | state::TAKEOFF => {
+                    self.starport(station).release(PLAYER);
+                    self.sequence = None;
+                    events.push(Traffic::LaunchDone(station));
+                    return events;
+                }
+                _ => {
+                    let text = state::describe(now);
+                    if !text.is_empty() {
+                        events.push(Traffic::Stage(text));
+                    }
+                }
+            }
+        }
+        self.sequence = Some(sequence);
+        events
     }
 
     /// The first station whose slot or hull the ship at `ship`, moving at `speed`
@@ -603,15 +778,14 @@ impl Navigator {
             .filter(|i| distance(ship, self.bodies[*i].position) < CLEARANCE_RANGE)
             .find_map(|index| {
                 let port = self.port(index)?;
-                let contact = port.contact(ship, speed, self.clearance == Some(index));
+                let contact = port.contact(ship, speed, self.cleared(index));
                 (contact != Contact::None).then_some((index, contact))
             })
     }
 
-    /// The ship has docked at `index`: the clearance and the autopilot end.
+    /// The ship has docked at `index`: the autopilot ends.
     pub fn dock(&mut self, index: usize) {
         self.docked = Some(index);
-        self.clearance = None;
         self.target = None;
         self.final_leg = false;
     }
@@ -697,7 +871,8 @@ impl Navigator {
         self.refreshed = self.clock;
         self.target = None;
         self.docked = None;
-        self.clearance = None;
+        self.traffic.clear();
+        self.sequence = None;
         self.final_leg = false;
         self.frame = None;
         self.drift = [0; 3];
@@ -830,10 +1005,17 @@ impl Navigator {
         let mut command = autopilot(flight, aim(body.position), stop, &mut self.memory);
         if port.is_some() && command.arrived && !self.final_leg {
             // The approach point: ask for clearance and fly in.
-            self.final_leg = true;
-            self.clearance = Some(index);
             self.memory = Memory::default();
-            command.arrived = false;
+            match self.starport(index).request_docking(PLAYER, true, 0) {
+                Reply::Granted(_) => {
+                    self.final_leg = true;
+                    command.arrived = false;
+                }
+                other => {
+                    self.notice = Some(format!("{}: {}.", body.name, refusal(other)));
+                    command.arrived = true;
+                }
+            }
         }
         if let Some((_, seconds)) = command.skip {
             // The body moves while the ship travels: aim for where it will be.

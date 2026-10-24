@@ -80,11 +80,18 @@ passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`)
   vertices stop short of its hub (a child model), so it takes a quarter of the radius (1.96
   km). The corridor into the slot is 15% of the face distance either side of the axis, at
   least 60 m.
+- **Traffic control (the original's).** D is F655 on the nearest station's record
+  (`ffe_core::traffic`, `docs/notes/docking.md`): granted with a bay, "already granted", busy with
+  another ship, or no bay free; clearance runs out after 28,800 game seconds. The autopilot asks at
+  its approach point and stops if refused.
 - **Contact.** Within the face distance of the centre: in the corridor in front of the face
-  with clearance and under 250 m/s, the ship docks (the game's docked screen, at that
-  station); in the corridor otherwise, it is pushed back out along the axis; anywhere else,
-  pushed out from the centre (no damage). Launching puts the ship out on the docking axis of
-  the station it docked at, facing away.
+  with clearance and under 250 m/s, the ship touches the pad (F652) and the original's timed
+  docking stages start (about 26 s: align, open the door, into the lift, turn, close, wait, open the
+  inner door, into the bay) with the ship held still, then the docked screen at that station; in the
+  corridor otherwise, it is pushed back out along the axis; anywhere else, pushed out from the
+  centre (no damage). L from the docked screen asks permission (F654) and runs the launch stages
+  (about 20 s) before the ship is put out on the docking axis, facing away; the door then opens, and
+  the bay is released. The lift scenes are not drawn: the status line names each stage.
 - **Autopilot.** A station target is flown in two legs: to a point 20 km out on the docking
   axis (stopping within 1 km), then, with clearance taken there, toward the centre braking
   for a stop just inside the face, which the contact turns into docking. Sol's Daedalus,
@@ -93,11 +100,10 @@ passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`)
 - **Frames.** Bodies move between the navigator's refreshes; the ship is carried with the
   body it is near (the engaged target on its final approach, else a station within 200 km,
   else a planet or moon within 50 radii), so a station stays where the ship left it.
-- **Not the original yet.** The original asks traffic control (F655 -> F654, F650 for the
-  bay, the 0x98b7..0x98bc messages), detects the pad hit in the station's collision stream
-  (F569 flags 0x20 | 0x40) and runs the docking states 0xa..0x18 (align with the lift, door,
-  into the bay) before state 0x2a, docked (`jjffe-master/srctools/cplayer.txt`,
-  `cstarport.txt`, `plstate.txt`). Starports (landing on a planet) are not dockable here.
+- **Not the original yet.** The pad hit is this port's slot test, not the station's collision stream
+  (F569 flags 0x20 | 0x40, with the crash and bounce); the lift scenes (F1070-F1080), the sounds and the
+  ship's motion with the rotating station during the stages are not drawn or ported. Starports
+  (landing on a planet) are not dockable here.
 
 ## Known limits
 

@@ -113,7 +113,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "todo" },
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
-        { id: "flight-11", title: "Launch sequence", status: "todo" },
+        { id: "flight-11", title: "Launch sequence", status: "in-progress", version: "nav-docking" },
         { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "todo" }
       ]
     },
@@ -379,6 +379,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "Stations drawn at their generated places from their own models (F866 spin) and docking at them by ffe-rs rules (clearance, the +z slot, autopilot docks); flight-10 in progress until the original's traffic control and docking states are ported."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "Traffic control (F649-F657, F867) and the timed docking and launch stages (F1025, F1067-F1088) ported from the assembly and unit-tested; the differential oracle is written but unrun (Linux-only harness). flight-10 and flight-11 stay in progress: lift scenes, the pad hit in the collision stream and the crash branch remain."
     }
   ]
 };

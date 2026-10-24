@@ -1,5 +1,7 @@
 use ffe_rs::flight::{Flight, Mode};
-use ffe_rs::navigation::{autopilot, bodies, describe, distance, galaxy, standoff, Kind, Memory};
+use ffe_rs::navigation::{
+    autopilot, bodies, describe, distance, galaxy, standoff, Kind, Memory, Traffic,
+};
 use ffe_rs::original_flight::OriginalFlight;
 
 fn cache() -> ffe_content::VerifiedCache {
@@ -566,7 +568,7 @@ fn autopilot_docks_at_stations() {
             match nav.contact(flight.player().motion.position, speed) {
                 Some((index, Contact::Docked)) => {
                     docked = Some((index, speed));
-                    nav.dock(index);
+                    assert!(nav.begin_docking(index));
                     break;
                 }
                 Some((index, Contact::Collision { clear, reason })) => {
@@ -595,8 +597,39 @@ fn autopilot_docks_at_stations() {
         );
         assert_eq!(nav.bodies[index].name, wanted);
         assert_eq!(pushed, 0);
+        assert!(nav.target.is_none() && nav.cleared(index) && nav.holding());
+        // The timed stages of the original (about 26 s of game time), then docked.
+        let mut frames = 0;
+        let mut stages = Vec::new();
+        loop {
+            frames += 1;
+            assert!(frames < 2000, "docking never finished");
+            let events = nav.tick_traffic(994, 0.02);
+            stages.extend(events.iter().copied());
+            if events.contains(&Traffic::Docked(index)) {
+                break;
+            }
+        }
+        assert!((1300..1340).contains(&frames), "{frames} frames of docking");
+        assert_eq!(stages.len(), 8, "{stages:?}");
         assert_eq!(nav.station().map(|(n, _)| n), Some(wanted));
-        assert!(nav.target.is_none() && nav.clearance.is_none());
+        assert!(!nav.holding() && nav.sequence.is_none() && !nav.cleared(index));
+        // Launch: permission, the stages, the ship put out, the door open, released.
+        nav.begin_launch().unwrap();
+        assert!(nav.begin_launch().is_err(), "already launching");
+        let mut out = false;
+        let mut done = false;
+        for _ in 0..2000 {
+            for event in nav.tick_traffic(994, 0.02) {
+                out |= event == Traffic::LaunchOut(index);
+                done |= event == Traffic::LaunchDone(index);
+            }
+            if done {
+                break;
+            }
+        }
+        assert!(out && done && nav.sequence.is_none());
+        assert!(nav.starport(index).pads.iter().all(|p| *p == 0));
     }
 }
 
@@ -647,4 +680,34 @@ fn shot(
         ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
     }
     std::fs::write(path, ppm).unwrap();
+}
+
+/// Traffic control answers the player's request as F655 does: busy with another ship, no
+/// bay free, and granted with a bay; and the station remembers the player's clearance.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn traffic_control_answers_requests() {
+    use ffe_core::traffic::Reply;
+    use ffe_rs::navigation::{Navigator, PLAYER};
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let (_, at) = nav.station().map(|(n, at)| (n.to_owned(), at)).unwrap();
+    let (index, reply) = nav.request_clearance(at).expect("a station within 100 km");
+    assert!(
+        matches!(reply, Reply::Granted(bay) if bay.fresh),
+        "{reply:?}"
+    );
+    assert!(nav.cleared(index) && nav.cleared_anywhere());
+    // Asking again keeps the same bay.
+    assert!(matches!(
+        nav.request_clearance(at),
+        Some((_, Reply::Granted(bay))) if !bay.fresh
+    ));
+    // Give it up; another ship takes the station; the player is refused.
+    assert!(nav.cancel_clearance() && !nav.cleared_anywhere());
+    assert!(nav.starport(index).request(PLAYER + 1));
+    assert!(matches!(nav.request_clearance(at), Some((_, Reply::Busy))));
+    assert!(nav.begin_launch().is_err(), "launch refused while busy");
+    // Out of range of every station: nothing to ask.
+    assert!(nav.request_clearance([0, 0, 1_000_000_000_000]).is_none());
 }
