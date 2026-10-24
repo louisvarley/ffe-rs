@@ -783,15 +783,19 @@ fn run() -> Result<(), String> {
             };
             if let Some(model) = original.as_mut() {
                 let down = |keys: &[Key]| keys.iter().any(|key| held_controls.contains(key));
+                // Classic: the original's keys. Modern adds W/S for the set speed, the arrows
+                // for pitch (up is nose up, which is Z) and yaw, Q/E for roll.
+                let both =
+                    |classic: &[Key], extra: &[Key]| down(classic) || (modern && down(extra));
                 let mut keys = OriginalKeys {
-                    faster: down(&[Key::Enter]),
-                    slower: down(&[Key::LeftShift, Key::RightShift]),
-                    pitch_down: down(&[Key::Z]),
-                    pitch_up: down(&[Key::A]),
-                    left: down(&[Key::Comma]),
-                    right: down(&[Key::Period]),
-                    roll_left: down(&[Key::LeftBracket]),
-                    roll_right: down(&[Key::RightBracket]),
+                    faster: both(&[Key::Enter], &[Key::W]),
+                    slower: both(&[Key::LeftShift, Key::RightShift], &[Key::S]),
+                    pitch_down: both(&[Key::Z], &[Key::Up]),
+                    pitch_up: both(&[Key::A], &[Key::Down]),
+                    left: both(&[Key::Comma], &[Key::Left]),
+                    right: both(&[Key::Period], &[Key::Right]),
+                    roll_left: both(&[Key::LeftBracket], &[Key::Q]),
+                    roll_right: both(&[Key::RightBracket], &[Key::E]),
                 };
                 if let Some(nav) = nav.as_mut() {
                     if let Some((command, body)) = nav.command(&cache, model) {
@@ -912,6 +916,12 @@ fn run() -> Result<(), String> {
                 state.system_flight = true;
             }
             original = Some(model);
+            message = if modern {
+                "Launched. W/S speed, arrows pitch and yaw, Q/E roll; the map icons list systems."
+            } else {
+                "Launched. Enter/Shift speed, Z/A pitch, comma/period yaw, [ ] roll."
+            }
+            .to_owned();
         }
         last_mode = state.mode;
         if let Some(nav) = nav.as_ref() {

@@ -36,7 +36,7 @@ The game starts docked at the first station of Sol (L launches, which puts the s
 
 - The console's map icon (or G): the systems list. Up/Down or a click chooses; Enter, H or the console's H icon hyperspaces (an instant jump) to the chosen system.
 - The console's navigation-computer icon (or Tab): everything in this system. A click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns it off.
-- The top bar's button changes between modern and classic controls (modern by default; F3 too).
+- The top bar's button changes between modern and classic controls (modern by default; F3 too). Classic is the original's keys: Enter/Shift set speed, Z/A pitch, comma/period yaw, [ ] roll. Modern adds W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll).
 - F12 is the model viewer, Shift+F12 the model lab. The other console buttons and the playtest scenarios are not in this build.
 
 Planets move on the game clock (days plus a fraction), children relative to their parent. Long legs are transfers (the clock jumps and the ship lands short of the body's future position); the last stretch is flown in the target's frame (`Navigator::follow`) because the autopilot cannot catch a body moving at 30 km/s.
