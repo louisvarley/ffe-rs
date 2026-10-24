@@ -169,8 +169,8 @@ window.FFE_BURNDOWN = {
         { id: "ui-3", title: "Missile, combat and external camera views", status: "todo" },
         { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "todo" },
         { id: "ui-5", title: "Menu and text rendering for every screen", status: "todo" },
-        { id: "ui-6", title: "Galaxy and system map screens", status: "todo" },
-        { id: "ui-7", title: "Intro and new-game flow", status: "todo" },
+        { id: "ui-6", title: "Galaxy and system map screens", status: "done", version: "v0.48n" },
+        { id: "ui-7", title: "Intro and new-game flow", status: "in-progress", version: "v0.48p" },
         { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
         { id: "ui-9", title: "Options, key bindings screen", status: "todo" },
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "todo" },
@@ -449,7 +449,14 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-10-24",
       remaining: 80,
-      note: "F575's contact tail (soft landing, crash and bounce, F953's damage amount, flag 1) and F578's momentum response ported and verified: --collide and --world-tick match all 4,096 cases each, the 950 and 584 contacts included; flight-7 done. The same round imported F650's open-air pad tables (cache v26, --pads oracle) and fixed the planet approach's black wedges (surface queue limit, EXP-009). The playable's own station touch test still pushes the ship clear, so flight-10 keeps the pad hit."
+      note: "F575's contact tail (soft landing, crash and bounce, F953's damage amount, flag 1) and F578's momentum response ported and verified: --collide and --world-tick match all 4,096 cases each, the 950 and 584 contacts included; flight-7 done. The same round imported F650's open-air pad tables (cache v26, --pads oracle) and fixed the planet approach's black wedges (surface queue limit, EXP-009). The playable's own station touch test still pushes the ship clear, so flight-10 keeps the pad hit.",
+      note: "The original new game and intro timeline: default boot is F998 start type 1 (Ross 154, Sidewinder, 1000 CR, 8 t, state 0x30 on the F650 pad, 3250-01-01 12:00); ffe_rs::front_end models the F961/F962 logos, bitmap 0x42 and 18 credits, verified by 76 --intro cases; no JJFFE legal splash. Front-end drawing is not wired into boot yet and open-air takeoff is blocked (EXP-010). ui-6 done, ui-7 in progress."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 79,
+      note: "The original new game starts by default and the intro timeline is ported; the system and galaxy map screens are done (ui-6), so one more item is complete."
+
     }
   ]
 };

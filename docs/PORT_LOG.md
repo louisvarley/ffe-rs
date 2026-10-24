@@ -52,6 +52,27 @@ Notes: `docs/notes/collision.md`. `crates/ffe-core/src/landing.rs`,
   the F576 path never set; the port declines that (the original reads
   uninitialised stack). The playable still uses its own station touch test.
 
+## 2026-10-24 - The original new game and the intro timeline (v0.48p)
+
+- **Default boot is now F998's start type 1** (the owner: the DOS original is the
+  source of truth): Ross 154 at absolute clock `0x121cf7.5` days, Sidewinder
+  (model 23), 1000 CR, an 8 t hold, player state `0x30` on the open-air
+  starport's F650 pad, calendar `1-Jan-3250 12:00:00`. `--start sol` keeps the
+  Sol/Mars High sandbox for development and the existing tests.
+- `navigation::Body` keeps its physics slot, raw Q31 rows, class byte and
+  open-air flag; `Navigator::new_game` uses F650's pad maths for the seat.
+  `START_SYSTEMS` holds `DATA_006820`; only record 1 is verified (2-5 map to 1).
+- `ffe_rs::front_end` models the F961/F962 front end: models 177 then 176,
+  bitmap `0x42` from tics `0x795cc`, the 18 credits with their exact windows,
+  positions and wraps, and the V version line. **No JJFFE legal splash** (it is
+  the mod's, not the DOS game's). The timeline is not yet drawn by the boot loop.
+- Oracle: `--intro` hooks F962's text and model draws; `verify-intro.py` compares
+  76 cases (all tamper fields and an empty trace rejected); trace `a9489bbe…`.
+  `verify-all.py`: 46 of 47 (only the known Windows `--worldgen` ASLR case fails).
+- **Open-air starport takeoff is blocked** with a clear message (player states
+  `0x24`/`0x26` are not ported) instead of inventing a teleport (EXP-010).
+  Indoor stations keep the verified lift launch.
+
 ## 2026-10-24 - F650 pad tables (cache v26)
 
 - Imported `DATA_006175..006179` (16 pads, 192 bytes) plus the six dwords of
