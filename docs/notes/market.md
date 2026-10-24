@@ -64,10 +64,11 @@ at the first visit: water 0.9, grain 38.0, precious metals 1735.6, gem stones 30
   `DATA_006216..6253`, and the executable's own bytes at the recorded offset (run on 2026-10-24).
 - All 329 table systems generate a market (population at most 9, danger at most 7, so every table index
   is in range); `tests/market_view.rs` (local-only) trades, drifts, saves and draws.
-- **The differential oracle is written but not run**: `--market` in `headless.c` (F619 and F620 with the
-  game's tables and generator on 8,192 random cases), `verify-market.py` and `market_reference.rs`. The
-  harness builds only on Linux now: `tools/reference/build-linux.sh && python3
-  tools/reference/verify-market.py --reference .cache/jjffe-reference-linux/jjffe-smoke --cache data.bin`.
-  The C was syntax-checked and the Rust test's plumbing exercised on a trace the Rust code generated
-  itself. Until it runs, the formulas are "read from the assembly", not "verified against the executed
-  original".
+- **Verified against the executed original** (2026-10-24): `--market` in `headless.c` runs F619 and F620 with
+  the game's own tables and generator on 8,192 random commodities, populations, dangers and flags;
+  `tools/reference/verify-market.py` with `crates/ffe-rs/tests/market_reference.rs` finds every price, every
+  stock and the generator state after each call equal (4,137 negative-variance and 4,051 illegal cases);
+  repeat runs match, six tampered fields and an empty trace are rejected. Trace SHA-256
+  `edf4725858dabdbbb857dd0ff782e3d3408d8d7db3839ff74058636e341b7d97` (CRLF, Windows build). F622's loop,
+  F633's quarter-drift and F555/F556 are composed from those two routines and the assembly and are tested
+  synthetically, not run against the original.

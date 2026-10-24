@@ -62,6 +62,8 @@ ORACLES = [
     ("verify-child-models.py", ["--reference", "{commands}", "--game", "{game}",
                                 "--cache", "{cache}", "--depth", "0x50000"]),
     ("verify-animation.py", ["--reference", "{commands}", "--cache", "{cache}"]),
+    ("verify-traffic.py", ["--reference", "{commands}"]),
+    ("verify-market.py", ["--reference", "{commands}", "--cache", "{cache}"]),
 ]
 
 

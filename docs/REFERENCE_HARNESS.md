@@ -14,6 +14,12 @@ supplied `jjffe-master/` sources are **never edited**.
   into `ffe.asm`.
 - `tools/reference/build-smoke.ps1` — builds `jjffe-smoke.exe` (and the
   instrumented `jjffe-commands.exe`) from the unchanged sources plus `headless.c`.
+- `tools/reference/win-compat.h` and `tools/reference/winstub/` — forced include and empty headers that let
+  `headless.c` build with MSVC again: `sigsetjmp`, `setitimer` and `personality` are shimmed, and `fork` and
+  `open_memstream` report failure, so the scenarios that need a forked child (`--surface-draw`, and the fault
+  catchers) are Linux-only. 35 of the 36 oracles in `verify-all.py` pass on Windows; `verify-world.py` does not,
+  because `--worldgen` reads uninitialised stack words that hold addresses, which Linux pins by disabling ASLR
+  (`personality`) and Windows cannot.
 - `tools/reference/build-linux.sh` — the same two binaries as 32-bit ELF
   (`nasm`, `gcc -m32`) under `.cache/jjffe-reference-linux/`. Linux traces are
   LF-terminated; hash them with CRLF endings to compare with recorded hashes.

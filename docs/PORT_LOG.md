@@ -4,6 +4,20 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — The reference harness builds on Windows again; traffic and market oracles run
+
+`headless.c` had become Linux-only (POSIX headers, `sigsetjmp`, `fork`, `setitimer`, `personality`, `open_memstream`).
+`tools/reference/win-compat.h` (forced include) and `winstub/` (empty headers) shim them for MSVC and `build-smoke.ps1`
+uses both; the scenarios that need a forked child stay Linux-only. Both reference executables rebuilt.
+
+- `verify-traffic.py`: **8,192 cases match** (F650-F655, F657, F867); trace `b3d95748de13...`; tampers and empty rejected.
+- `verify-market.py`: **8,192 cases match** (F619, F620 with the game's tables and generator); trace `edf4725858dab...`.
+  This replaces the "written but not run" notes in the two entries below, which stay as the record of what was true then.
+- `verify-all.py` now lists both and runs **35 of 36** oracles to a pass on Windows in 251 s; `verify-world.py` fails only on
+  `--worldgen`'s run-to-run comparison (uninitialised stack words that hold addresses; Linux pins them with `personality`).
+
+---
+
 ## 2026-10-24 — Station markets and trading, cache v20 (`ffe_core::market`)
 
 Notes: `docs/notes/market.md`; deviation EXP-006.

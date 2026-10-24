@@ -32,7 +32,7 @@ try {
 }
 
 $harness = Join-Path $PSScriptRoot 'headless.c'
-$command = 'call "{0}" >nul && cd /d "{1}" && cl /nologo /TC /W3 /O2 /MT /DWIN32 /D__FFEWIN__ /D_CRT_SECURE_NO_WARNINGS /I"{2}" "{3}" "{2}\ffecfg.c" "{2}\ffemisc.c" /Fe:jjffe-smoke.exe /link /SAFESEH:NO ffe.obj ffebmp.obj legacy_stdio_definitions.lib' -f $vcPath, $output, $source, $harness
+$command = 'call "{0}" >nul && cd /d "{1}" && cl /nologo /TC /W3 /O2 /MT /DWIN32 /D__FFEWIN__ /D_CRT_SECURE_NO_WARNINGS /I"{4}\winstub" /FI"{4}\win-compat.h" /I"{2}" "{3}" "{2}\ffecfg.c" "{2}\ffemisc.c" /Fe:jjffe-smoke.exe /link /SAFESEH:NO ffe.obj ffebmp.obj legacy_stdio_definitions.lib' -f $vcPath, $output, $source, $harness, $PSScriptRoot
 Invoke-Native 'JJFFE smoke-adapter compile/link failed.' { & $env:ComSpec /d /c $command }
 
 # Build a separate, narrowly instrumented oracle; leave both supplied assembly and

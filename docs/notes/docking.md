@@ -45,11 +45,11 @@ bad touch (the playable pushes the ship clear instead, `docs/NAVIGATION.md`).
 
 ## Verification
 
-`traffic.rs` is tested by `crates/ffe-core/tests/traffic.rs` (10 tests written from the assembly). The
-differential oracle is written but has **not been run**: `headless.c` gained `--traffic` (F650-F655, F657, F867 on
-8,192 synthetic records; the C was syntax-checked in isolation), `exports.inc` the aliases, and
-`tools/reference/verify-traffic.py` with `crates/ffe-rs/tests/traffic_reference.rs` the comparison (its plumbing
-was checked against a trace the Rust code produced itself). The harness no longer builds on Windows (it includes
-`sys/time.h` and friends since the x87 work), so run it on the Linux build:
-`tools/reference/build-linux.sh && python3 tools/reference/verify-traffic.py --reference .cache/jjffe-reference-linux/jjffe-smoke`.
-Until then the port is "read from the assembly and unit-tested", not "verified against the executed original".
+`traffic.rs` is tested by `crates/ffe-core/tests/traffic.rs` (10 tests written from the assembly) and
+**verified against the executed original** (2026-10-24): `--traffic` in `headless.c` runs F650-F655, F657 and
+F867 on 8,192 synthetic station records, and `tools/reference/verify-traffic.py` with
+`crates/ffe-rs/tests/traffic_reference.rs` finds every record and return value equal; repeat runs match, nine
+tampered fields and an empty trace are rejected. Trace SHA-256
+`b3d95748de135d215fc85366263d820aef912cd699e76ab2ddebc61703004a3e` (CRLF, Windows build). The player-only parts of
+F650/F655 (query event 0x17, fines, messages) are not in the oracle; the stage machine (F1025, F1067-F1088) is
+tested against the assembly's constants only, not run against the original.

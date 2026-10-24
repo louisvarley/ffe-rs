@@ -10,12 +10,12 @@ coverage and `docs/notes/` for the feature records.
 `docs/NAVIGATION.md`: system and galaxy maps (Tab, G) and an autopilot to planets
 and stations, for testing the generated systems. Not part of the original game.
 Since 2026-10-24 the docked screen is the station's market (`docs/notes/market.md`: the original's
-price and stock formulas, daily drift, buying and selling, cache v20; the oracle is written but not
-run). The system's stations are drawn in flight and the player can dock
+price and stock formulas, daily drift, buying and selling, cache v20; F619 and F620 match the executed
+original). The system's stations are drawn in flight and the player can dock
 at them (D for clearance, or the autopilot), which closes the launch, fly, dock, trade
 loop inside a generated system. Traffic control and the timed docking and launch stages are the
-original's (`ffe_core::traffic`, `docs/notes/docking.md`; the differential oracle is written
-but unrun: it needs the Linux reference build); the slot test and the missing lift scenes are
+original's (`ffe_core::traffic`, `docs/notes/docking.md`; the record routines match the executed
+original on 8,192 cases); the slot test and the missing lift scenes are
 ffe-rs's own (EXP-005).
 
 ## How to read this repo
@@ -315,6 +315,10 @@ missile/combat views, the Alt-arrow nudge, and the turret angles' starting
 values.
 
 ## Known stale spots
+
+- `verify-all.py` on 2026-10-24 (Windows, with the new `win-compat.h` shims): **35 of 36 oracles pass**, including the
+  new `verify-traffic.py` and `verify-market.py`; `verify-world.py` fails only on `--worldgen`'s run-to-run comparison
+  (Linux pins ASLR with `personality`, Windows cannot). The scenarios that fork a child (`--surface-draw`) need Linux.
 
 - `verify-all.py` on 2026-10-23: **all 31 oracles pass** (the two broken since
   v0.48b were repaired: `verify-assets.py` now expects cache v14 with 1,781
