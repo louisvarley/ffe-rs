@@ -1168,9 +1168,9 @@ impl ModelViewer {
                 &mut sky,
                 &mut queue,
             );
-            if outcome.is_err() {
-                eprintln!("draw_planet: {outcome:?} queue {} words", queue.words.len());
-            }
+            // A failed patch leaves the rest of the planet undrawn; the caller
+            // reports the frame's skipped count rather than logging every frame.
+            let _ = &outcome;
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
             for (_, at) in order {

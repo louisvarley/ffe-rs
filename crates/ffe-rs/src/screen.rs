@@ -1504,10 +1504,6 @@ impl Screen {
             ) {
                 self.jitter.cursor = frame.jitter;
                 self.draw_shapes(scene, &frame.shapes);
-            } else {
-                // A missing lift model is an empty (black) picture, not an error
-                // the caller can see; say so once per frame.
-                eprintln!("lift model {:#x} not drawn", object.model);
             }
         }
     }
