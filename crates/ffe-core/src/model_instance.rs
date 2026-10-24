@@ -1,5 +1,6 @@
 //! Bounded live vertex slots: object memoization, view translation and original projection.
 use crate::model::{CachedVertex, ExternalVertices, ObjectCache, VertexContext};
+use crate::star_points::{StarField, StarTables};
 
 pub const NEAR_SENTINEL: [i16; 2] = [-32766; 2];
 
@@ -49,6 +50,7 @@ impl From<CachedVertex> for Vertex {
 pub struct Vertices<'a> {
     objects: ObjectCache<'a>,
     normal_records: &'a [u8],
+    stars: Option<(&'a StarTables, &'a StarField)>,
 }
 
 impl<'a> Vertices<'a> {
@@ -56,7 +58,19 @@ impl<'a> Vertices<'a> {
         Ok(Self {
             objects: ObjectCache::new(records, count)?,
             normal_records: &[],
+            stars: None,
         })
+    }
+
+    /// Attach the galaxy map's star tables and the object's stars, which opcode 30
+    /// `0x801e` (F1769) draws.
+    pub fn with_stars(mut self, tables: &'a StarTables, field: &'a StarField) -> Self {
+        self.stars = Some((tables, field));
+        self
+    }
+
+    pub fn stars(&self) -> Option<(&'a StarTables, &'a StarField)> {
+        self.stars
     }
 
     /// Attach the model's normal records (instance +0x154, six bytes per mirrored
@@ -82,6 +96,7 @@ impl<'a> Vertices<'a> {
         Ok(Self {
             objects,
             normal_records: &[],
+            stars: None,
         })
     }
 

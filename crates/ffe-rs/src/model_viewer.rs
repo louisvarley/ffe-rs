@@ -27,6 +27,7 @@ use ffe_core::model_texture::{
     draw_quad, draw_triangle, flat_colour, quad_uv, textured_colours, textured_path, triangle_uv,
 };
 use ffe_core::model_thruster::{line_colour, Shape as ThrusterShape};
+use ffe_core::star_points::{StarField, StarTables};
 use std::cell::Cell;
 
 /// One screen-space primitive in draw order (logical 320x158 view coordinates).
@@ -137,6 +138,9 @@ impl AnimationInputs {
     }
 }
 
+/// The model the galaxy map draws a sector's stars with.
+pub const STAR_MODEL: u32 = 0xab;
+
 /// Time-acceleration multipliers the viewer cycles through (diagnostic; the
 /// original's own acceleration levels are not modelled here).
 const RATES: [u32; 4] = [1, 10, 100, 1000];
@@ -184,6 +188,8 @@ pub struct ModelViewer {
     /// rendered frame ended with (taken over when the clock advances).
     jitter: [u32; 2],
     jitter_next: Cell<[u32; 2]>,
+    /// The galaxy map's star light-point tables (cache v23).
+    stars: Option<StarTables>,
 }
 
 /// The engine settings the viewer's E key steps through: off (the animation
@@ -326,6 +332,9 @@ impl ModelViewer {
         }
         let mut viewer = Self::from_models(models, table)?;
         viewer.textures = TextureSet::from_cache(cache);
+        viewer.stars = cache
+            .asset("base:world/star-points")
+            .and_then(|bytes| StarTables::new(bytes).ok());
         viewer.terrain = cache
             .asset("base:terrain/tables")
             .zip(cache.asset("base:terrain/maps"))
@@ -464,6 +473,7 @@ impl ModelViewer {
             thrust: None,
             jitter: JITTER_SEED,
             jitter_next: Cell::new(JITTER_SEED),
+            stars: None,
         })
     }
 
@@ -733,6 +743,69 @@ impl ModelViewer {
             return Err("Model too far for the 32-bit view space.".to_owned());
         }
         self.render_with(model, rows, position.map(|v| v as i32), light_view, inputs)
+    }
+
+    /// The star light-point tables, when the cache has them (v23).
+    pub fn star_tables(&self) -> Option<&StarTables> {
+        self.stars.as_ref()
+    }
+
+    /// Run the galaxy map's star model (0xab, opcode 30 `0x801e`) over one sector's star
+    /// records (`records`, six bytes per star as F841 writes them): the stalk lines, points
+    /// and labels of F1769 in the original's depth order. `matrix` is the object-to-view
+    /// rotation (rows in Q31), `position` the object's origin in view space.
+    pub fn execute_stars(
+        &self,
+        field: &StarField,
+        records: &[u8],
+        matrix: [i32; 9],
+        position: [i32; 3],
+    ) -> Result<Execution, String> {
+        let tables = self
+            .stars
+            .as_ref()
+            .ok_or("The star tables need cache v23.")?;
+        let model = self
+            .find(STAR_MODEL)
+            .ok_or("The star model is not in the cache.")?;
+        if field.types.len() > records.len() / 6 || records.len() > model.vertices.len() {
+            return Err("The star records do not match the model.".to_owned());
+        }
+        let mut padded = records.to_vec();
+        padded.resize(model.vertices.len(), 0);
+        let mut vertices = Vertices::new(&padded, model.vertex_count)?.with_stars(tables, field);
+        let mut context = VertexContext {
+            matrix,
+            basis: matrix,
+            scale: model.scale,
+            ..Default::default()
+        };
+        context.globals[1] = if field.stalks { 0x20 } else { 0 };
+        context.globals[2] = field.code as u16;
+        context.globals[3] = (field.code >> 16) as u16;
+        context.globals[4] = field.types.len() as u16;
+        let instance = InstanceContext {
+            position,
+            generation: GENERATION,
+            key_scale: 0,
+            operand_scale: model.scale as i32,
+            textures: false,
+        };
+        let visibility = VisibilityContext {
+            depth: 1,
+            scale: 0,
+            detail: [0, 0],
+            normals: &[],
+        };
+        execute_live(
+            &model.commands,
+            &mut vertices,
+            &mut context,
+            &visibility,
+            Some(&self.table),
+            instance,
+            4096,
+        )
     }
 
     fn render_at(&self, distance: f64) -> Result<Frame, String> {
@@ -1244,6 +1317,8 @@ impl ModelViewer {
                         frame.shapes.push(Shape::Line(a, b, self.rgb(colour)));
                     }
                 },
+                // A star's system name: drawn by the map, not the model viewer.
+                Primitive::SystemLabel(_) => frame.skipped += 1,
                 Primitive::Label(label) => match self.model_string(label.label.string) {
                     Ok(text) => frame.shapes.push(Shape::Label(
                         (i32::from(label.screen[0]), i32::from(label.screen[1])),

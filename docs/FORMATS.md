@@ -877,6 +877,10 @@ parts are future scope, not requirements for the first image exporter.
   `DATA_006164..6169` (RVA `0xdde08`; the supply, population and danger multipliers and the 33
   commodities' four dwords) followed by the 38 commodity names `DATA_006216..6253` (RVA `0xde970`,
   contiguous), each with its zero; floppy 1.02 only. See `docs/notes/market.md`.
+- V23 has 1792 assets: adds `base:world/star-points`, `world/star-points.bin`, 224 bytes: the galaxy map's star
+  light-point tables of 14 dwords each, `DATA_007820` (material), `7821` (size), `7822` (label depth limit) and
+  `7828` (stalk material), RVAs `0x104038`, `0x104070`, `0x1040a8`, `0x10410c`; floppy 1.02 only. See
+  `docs/notes/galaxy-map.md`.
 - V22 has 1791 assets: adds `base:text/system-strings`, `text/system-strings.bin`: the 267 strings the pointer table
   `DATA_006796` names (RVA `0xe0cf4`): the 117 hand-made star names, then the star, planet and system descriptions the
   galaxy map writes, each with its zero, in table order; floppy 1.02 only. See `docs/notes/hyperspace.md`.

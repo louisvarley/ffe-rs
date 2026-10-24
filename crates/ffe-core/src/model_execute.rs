@@ -17,6 +17,7 @@ use crate::model_instance::Vertices;
 use crate::model_math::{angle_operand, SineTable};
 use crate::model_order::Order;
 use crate::model_polygon::{self, Outline};
+use crate::star_points::StarTables;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Emission {
@@ -118,6 +119,19 @@ pub struct SoundEmission {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelEmission {
     pub label: Label,
+    pub key: Option<u32>,
+    pub screen: [i16; 2],
+}
+
+/// A star's label (F1769 through F1764): the vertex is projected (F1471); `key` is `None`
+/// unless its screen point lies within x 2..=317, y 4..=149, when F1764 queues a text entry
+/// of `selector` (0x8400, a system name) and `code` (the sector code with the star number
+/// in bits 26..31). F1764's pointer pick test is not modelled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemLabelEmission {
+    pub vertex: u8,
+    pub selector: u16,
+    pub code: u32,
     pub key: Option<u32>,
     pub screen: [i16; 2],
 }
@@ -235,6 +249,7 @@ pub enum Primitive {
     Line(LineEmission),
     Spline(SplineEmission),
     Label(LabelEmission),
+    SystemLabel(SystemLabelEmission),
     Thruster(crate::model_thruster::Entry),
 }
 
@@ -266,6 +281,8 @@ pub struct Execution {
     pub sounds: Vec<SoundEmission>,
     /// Labels in command order ([`execute_live`] only).
     pub labels: Vec<LabelEmission>,
+    /// Star labels of light points (opcode 30 `0x801e`) in star order ([`execute_live`] only).
+    pub system_labels: Vec<SystemLabelEmission>,
     /// Nested depth block boundaries in command order ([`execute_live`] only).
     pub blocks: Vec<BlockEmission>,
     /// Child-model calls in command order ([`execute_scene`] only): culled, skipped for
@@ -590,6 +607,206 @@ fn face_queue_key(
     Ok((!rejected(0, 320) && !rejected(1, 158)).then_some((key, projected, views)))
 }
 
+/// The point handler F1698 (and F1769's calls to F1699): the operand event, and with live
+/// vertices the projected, depth-keyed queue entry.
+#[allow(clippy::too_many_arguments)]
+fn emit_point(
+    offset: usize,
+    material: u16,
+    angle: i16,
+    flag: bool,
+    vertex: u8,
+    result: &mut Execution,
+    shared: &mut Shared<'_>,
+    vertices: Option<&mut Vertices<'_>>,
+    working: &mut VertexContext,
+    instance: &InstanceContext,
+) -> Result<(), String> {
+    if angle as u16 & 0xc0 == 0xc0 {
+        crate::model::checked_variable(angle as u8, working)?;
+    }
+    let emission = PointEmission {
+        offset,
+        material,
+        encoded_angle: angle,
+        angle: angle_operand(angle, working),
+        flag,
+        vertex,
+        context: working.clone(),
+        screen: None,
+    };
+    result.points.push(emission.clone());
+    if let (Some(queue), Some(live)) = (shared.order.as_mut(), vertices) {
+        let resolved = live.resolve(
+            vertex as i8,
+            working,
+            instance.position,
+            instance.generation,
+            false,
+        )?;
+        let key = model_depth::key(resolved.view, instance.key_scale);
+        let mut emission = emission;
+        emission.screen = crate::model_instance::project(resolved.view);
+        queue.push(key, Primitive::Point(emission))?;
+        shared.queue.push(QueueEvent::Point(key));
+    }
+    Ok(())
+}
+
+/// The line handler F1702 (and F1769's calls to F1703).
+#[allow(clippy::too_many_arguments)]
+fn emit_line(
+    offset: usize,
+    material: u16,
+    ends: [u8; 2],
+    result: &mut Execution,
+    shared: &mut Shared<'_>,
+    vertices: Option<&mut Vertices<'_>>,
+    working: &mut VertexContext,
+    instance: &InstanceContext,
+) -> Result<(), String> {
+    let emission = LineEmission {
+        offset,
+        material,
+        vertices: ends,
+        context: working.clone(),
+        screen: None,
+    };
+    result.lines.push(emission.clone());
+    if let (Some(queue), Some(live)) = (shared.order.as_mut(), vertices) {
+        let vertex = live.resolve(
+            ends[0] as i8,
+            working,
+            instance.position,
+            instance.generation,
+            false,
+        )?;
+        let key = model_depth::key(vertex.view, instance.key_scale);
+        // For drawing only: a failure here leaves the line undrawn
+        // rather than failing an execution the original completes.
+        let other = live
+            .clone()
+            .resolve(
+                ends[1] as i8,
+                working,
+                instance.position,
+                instance.generation,
+                false,
+            )
+            .ok();
+        // F1703 queues through F1704: both ends clipped onto the
+        // view (F1705) and stored with x - 1 when positive, or
+        // nothing when F1704 rejects the line.
+        let mut emission = emission;
+        emission.screen = other
+            .and_then(|other| crate::model_thruster::line(&vertex, &other).ok())
+            .flatten()
+            .map(|points| points.map(|[x, y]| [x as i16, y as i16]));
+        queue.push(key, Primitive::Line(emission))?;
+        shared.queue.push(QueueEvent::Line(key));
+    }
+    Ok(())
+}
+
+/// F1769, opcode 30 `0x801e`: the object's light points. For each of the `count` stars
+/// (global word 4) of type `t`, a stalk line from vertex `2i` to `2i + 1` when global word
+/// 1 has bit 5, the star's point at vertex `2i` and, when the depth of vertex slot 0 is at
+/// most the type's label limit, the star's label (F1764) naming the sector code with the
+/// star's number in bits 26..31.
+#[allow(clippy::too_many_arguments)]
+fn light_points(
+    offset: usize,
+    result: &mut Execution,
+    shared: &mut Shared<'_>,
+    vertices: Option<&mut Vertices<'_>>,
+    working: &mut VertexContext,
+    instance: &InstanceContext,
+) -> Result<(), String> {
+    let count = usize::from(working.globals[4]);
+    if count == 0 {
+        return Ok(());
+    }
+    let Some(live) = vertices else {
+        return Err(format!("Light points at {offset:#x} need live vertices."));
+    };
+    let Some((tables, field)) = live.stars() else {
+        return Err(format!(
+            "Light points at {offset:#x} need the original point tables."
+        ));
+    };
+    if field.types.len() < count {
+        return Err(format!(
+            "Light points at {offset:#x}: {count} stars but {} types.",
+            field.types.len()
+        ));
+    }
+    let mut live = Some(live);
+    for star in 0..count {
+        let kind = StarTables::index(field.types[star]).ok_or_else(|| {
+            format!(
+                "Star type {} at {offset:#x} is beyond the tables.",
+                field.types[star] & 15
+            )
+        })?;
+        let vertex = (2 * star) as u8;
+        if working.globals[1] & 0x20 != 0 {
+            emit_line(
+                offset,
+                tables.stalk[kind] as u16,
+                [vertex, vertex + 1],
+                result,
+                shared,
+                live.as_deref_mut(),
+                working,
+                instance,
+            )?;
+        }
+        emit_point(
+            offset,
+            tables.material[kind] as u16,
+            (tables.size[kind] as i32 >> 7) as i16,
+            false,
+            vertex,
+            result,
+            shared,
+            live.as_deref_mut(),
+            working,
+            instance,
+        )?;
+        let Some(vertices) = live.as_deref_mut() else {
+            continue;
+        };
+        // F1769 compares the depth of vertex slot 0, not the star's own.
+        let near = vertices.resolve(0, working, instance.position, instance.generation, false)?;
+        if i64::from(near.view[2]) <= i64::from(tables.label_depth[kind] as i32) {
+            let resolved = vertices.resolve(
+                vertex as i8,
+                working,
+                instance.position,
+                instance.generation,
+                true,
+            )?;
+            let [x, y] = resolved.screen.map(i32::from);
+            let key = ((2..=317).contains(&x) && (4..=149).contains(&y))
+                .then(|| model_depth::key(resolved.view, instance.key_scale));
+            let top = ((star as u32 & 0x3f) << 26) | (field.code & 0x03ff_ffff);
+            let emission = SystemLabelEmission {
+                vertex,
+                selector: 0x8400,
+                code: top,
+                key,
+                screen: resolved.screen,
+            };
+            if let (Some(key), Some(queue)) = (key, shared.order.as_mut()) {
+                queue.push(key, Primitive::SystemLabel(emission.clone()))?;
+                shared.queue.push(QueueEvent::Label(key));
+            }
+            result.system_labels.push(emission);
+        }
+    }
+    Ok(())
+}
+
 fn resolve_depth_key(
     depth: &DepthCommand,
     vertices: &mut Vertices<'_>,
@@ -796,6 +1013,7 @@ fn run(
         surfaces: Vec::new(),
         splines: Vec::new(),
         labels: Vec::new(),
+        system_labels: Vec::new(),
         sounds: Vec::new(),
         blocks: Vec::new(),
         children: Vec::new(),
@@ -823,83 +1041,33 @@ fn run(
             }
             1 => {
                 for point in program.points.iter().filter(|p| p.offset == offset) {
-                    if point.angle as u16 & 0xc0 == 0xc0 {
-                        crate::model::checked_variable(point.angle as u8, working)?;
-                    }
-                    let emission = PointEmission {
-                        offset: point.offset,
-                        material: point.material,
-                        encoded_angle: point.angle,
-                        angle: angle_operand(point.angle, working),
-                        flag: point.flag,
-                        vertex: point.vertex,
-                        context: working.clone(),
-                        screen: None,
-                    };
-                    result.points.push(emission.clone());
-                    if let (Some(queue), Some(live)) =
-                        (shared.order.as_mut(), vertices.as_deref_mut())
-                    {
-                        let vertex = live.resolve(
-                            point.vertex as i8,
-                            working,
-                            instance.position,
-                            instance.generation,
-                            false,
-                        )?;
-                        let key = model_depth::key(vertex.view, instance.key_scale);
-                        let mut emission = emission;
-                        emission.screen = crate::model_instance::project(vertex.view);
-                        queue.push(key, Primitive::Point(emission))?;
-                        shared.queue.push(QueueEvent::Point(key));
-                    }
+                    emit_point(
+                        point.offset,
+                        point.material,
+                        point.angle,
+                        point.flag,
+                        point.vertex,
+                        &mut result,
+                        shared,
+                        vertices.as_deref_mut(),
+                        working,
+                        &instance,
+                    )?;
                 }
                 Some(command.size as i32)
             }
             2 => {
                 for line in program.lines.iter().filter(|l| l.offset == offset) {
-                    let emission = LineEmission {
-                        offset: line.offset,
-                        material: line.material,
-                        vertices: line.vertices,
-                        context: working.clone(),
-                        screen: None,
-                    };
-                    result.lines.push(emission.clone());
-                    if let (Some(queue), Some(live)) =
-                        (shared.order.as_mut(), vertices.as_deref_mut())
-                    {
-                        let vertex = live.resolve(
-                            line.vertices[0] as i8,
-                            working,
-                            instance.position,
-                            instance.generation,
-                            false,
-                        )?;
-                        let key = model_depth::key(vertex.view, instance.key_scale);
-                        // For drawing only: a failure here leaves the line undrawn
-                        // rather than failing an execution the original completes.
-                        let other = live
-                            .clone()
-                            .resolve(
-                                line.vertices[1] as i8,
-                                working,
-                                instance.position,
-                                instance.generation,
-                                false,
-                            )
-                            .ok();
-                        // F1703 queues through F1704: both ends clipped onto the
-                        // view (F1705) and stored with x - 1 when positive, or
-                        // nothing when F1704 rejects the line.
-                        let mut emission = emission;
-                        emission.screen = other
-                            .and_then(|other| crate::model_thruster::line(&vertex, &other).ok())
-                            .flatten()
-                            .map(|points| points.map(|[x, y]| [x as i16, y as i16]));
-                        queue.push(key, Primitive::Line(emission))?;
-                        shared.queue.push(QueueEvent::Line(key));
-                    }
+                    emit_line(
+                        line.offset,
+                        line.material,
+                        line.vertices,
+                        &mut result,
+                        shared,
+                        vertices.as_deref_mut(),
+                        working,
+                        &instance,
+                    )?;
                 }
                 Some(command.size as i32)
             }
@@ -1225,13 +1393,15 @@ fn run(
             // variable count (F1473). Cached vertices are not invalidated either way.
             30 => {
                 if code == 0x801e {
-                    // F1769 loops over the count in global word 4 (+0xa4); each point
-                    // needs the original DATA_007820..7828 tables, not imported yet.
-                    if working.globals[4] != 0 {
-                        return Err(format!(
-                            "Light points at {offset:#x} need the original point tables."
-                        ));
-                    }
+                    // F1769 loops over the count in global word 4 (+0xa4).
+                    light_points(
+                        offset,
+                        &mut result,
+                        shared,
+                        vertices.as_deref_mut(),
+                        working,
+                        &instance,
+                    )?;
                 } else if code & 0x8000 == 0 {
                     return Err(format!(
                         "Vertex base offset command {code:#06x} at {offset:#x} is not ported."

@@ -681,6 +681,27 @@ pub fn decode_galaxy_tables(
     })
 }
 
+/// The four star light-point tables (`DATA_007820`, `7821`, `7822`, `7828`; RVAs), 14 dwords
+/// each, concatenated.
+pub fn decode_star_point_tables(bytes: &[u8], rvas: [u32; 4]) -> Result<EmbeddedTable, String> {
+    use ffe_core::star_points::{StarTables, TABLE_BYTES, TYPES};
+    let section = DataSection::parse(bytes)?;
+    let mut block = Vec::with_capacity(TABLE_BYTES);
+    let mut first = 0;
+    for (index, rva) in rvas.iter().enumerate() {
+        let offset = section.offset(*rva, TYPES * 4)?;
+        if index == 0 {
+            first = offset;
+        }
+        block.extend_from_slice(range(bytes, offset, TYPES * 4)?);
+    }
+    StarTables::new(&block)?;
+    Ok(EmbeddedTable {
+        source_offset: first,
+        bytes: block,
+    })
+}
+
 /// The 267 strings the pointer table `DATA_006796` names (RVA of the table), as NUL-terminated
 /// strings in order.
 pub fn decode_system_strings(bytes: &[u8], table_rva: u32) -> Result<EmbeddedTable, String> {

@@ -404,6 +404,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "System names (F830) ported with the 267 system strings, cache v22 (1791 assets); 8,292 cases match the executed original. The reference harness can now capture the real game's frame for the galaxy map; world-4 stays in progress."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "The galaxy map's stars (F1769 light points: stalks, points, labels) run through the model executor with the star tables imported (cache v23, 1792 assets); 240 sectors match the executed original. The point pixels, scene assembly and the map screen remain."
     }
   ]
 };

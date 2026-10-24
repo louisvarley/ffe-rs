@@ -127,6 +127,10 @@ pub enum AssetKind {
     SystemStrings {
         source_offset: u64,
     },
+    /// The galaxy map's star light-point tables (`DATA_007820`, `7821`, `7822`, `7828`; v23).
+    StarPointTables {
+        source_offset: u64,
+    },
     /// Per model table slot, the 20-byte record of the descriptor fields object
     /// set-up reads (scales, radii, shape and statistics flags; v16); see
     /// `ffe_convert::embedded::decode_model_record`.
@@ -253,7 +257,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=22) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=23) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -313,6 +317,10 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("The model records and gameplay tables require cache v16.".to_owned());
+        }
+        if manifest.format_version < 23 && matches!(record.asset, AssetKind::StarPointTables { .. })
+        {
+            return Err("The star point tables require cache v23.".to_owned());
         }
         if manifest.format_version < 22 && matches!(record.asset, AssetKind::SystemStrings { .. }) {
             return Err("The system strings require cache v22.".to_owned());
@@ -627,6 +635,9 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::SystemStrings { .. } => {
             ffe_core::sector::Strings::new(bytes)?;
+        }
+        AssetKind::StarPointTables { .. } => {
+            ffe_core::star_points::StarTables::new(bytes)?;
         }
         AssetKind::EffectWav => {
             if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt " {

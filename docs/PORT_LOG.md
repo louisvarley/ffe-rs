@@ -4,6 +4,20 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — The galaxy map's stars (F1769, cache v23)
+
+Notes: `docs/notes/galaxy-map.md`.
+
+- Cache v23 imports the four star light-point tables (`DATA_007820/7821/7822/7828`). `execute_live` runs opcode 30
+  `0x801e` (F1769): per star a stalk line, a point and, within the type's depth limit of **vertex slot 0**, a system-name
+  label (`Primitive::SystemLabel`); `ModelViewer::execute_stars` runs model `0xab` over a sector's F841 records.
+- The point and line handlers became helpers (`emit_point`, `emit_line`) shared with opcodes 1 and 2; behaviour unchanged.
+- **Verified against the executed original**: `--map-stars` (240 sectors, 1,589 stars, 831 stalks, 214 queued labels with
+  their keys) match. The oracle's point probe now resolves its vertex like F1699 (slot 0 is read by F1769 afterwards).
+- The point's pixels (F1700/F1701) and the scene assembly (F840) are next.
+
+---
+
 ## 2026-10-24 — System names (F830), cache v22
 
 - Cache v22 imports the 267 system strings (`DATA_006796`). `sector::system_name` and `sector_label` port F830; the

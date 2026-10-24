@@ -170,9 +170,17 @@ int trace_quad(void *instance, long material, unsigned long a, unsigned long b, 
 }
 
 static unsigned long point_line_count, point_line_kind[4096], point_line_a[4096], point_line_b[4096], point_line_c[4096], point_line_d[4096];
+/* Map-star mode: the real F1699 resolves its vertex (cache check, then F1471) before it draws, and
+   F1769 reads the depth of vertex slot 0 afterwards; the probe must leave the same slot behind. */
+static int point_projects;
+extern long *ref_project_vertex(void *instance,int index);
 void trace_point_args(void *instance, long material, long angle, long vertex, long flag)
 {
-    (void)instance;
+    if (point_projects) {
+        long *slots=ref_vertex_buffer;
+        int k=(signed char)vertex;
+        if (slots[k*9+5]!=((long *)instance)[0xf0/4]) ref_project_vertex(instance,k);
+    }
     if (point_line_count >= 4096) { fprintf(stderr,"too many point callbacks\n"); exit(2); }
     point_line_kind[point_line_count]=1;
     point_line_a[point_line_count]=(unsigned long)material;
@@ -258,10 +266,15 @@ unsigned long trace_label_key(void *instance, const long *view)
     nested_event(17,key,(unsigned long)view[-1],0);
     return key;
 }
+static unsigned long *label_entries[512];
+static unsigned long label_entry_count;
 unsigned long *trace_label_alloc(long words, unsigned long key, long force)
 {
+    unsigned long *entry;
     if (queue_mode) queue_event(6,0,key);
-    return ref_order_allocate(words,key,force);
+    entry=ref_order_allocate(words,key,force);
+    if (entry && label_entry_count<512) label_entries[label_entry_count++]=entry;
+    return entry;
 }
 /* F1737 (opcode 22): key, allocation, then the filled entry when F1326 converts its
    colour. Screen words are packed x | y << 16; the palette value is not modelled. */
@@ -4820,6 +4833,90 @@ static int system_name_vectors(void)
     return 0;
 }
 
+
+/* Map star oracle (--map-stars): the real F841 builds a sector's star records and the object's
+   star fields, then the real F1772 runs model 0xab (opcode 30 0x801e, F1769) with the point, line and
+   label calls recorded: every point, stalk line and label F1769 emits, with the label depth keys. */
+static int map_star_vectors(void)
+{
+#ifndef FFE_COMMAND_PROBE
+    fail("--map-stars requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static unsigned char normals[32768*8];
+    static unsigned long model_queue[65536];
+    static unsigned long instance[0x160/4], slots[128*9];
+    static unsigned char vectors[64*6], object[0x240];
+    static const long identity[9]={2147483647,0,0,0,2147483647,0,0,0,2147483647};
+    static const long turned[9]={1518500250,0,-1518500250,0,2147483647,0,1518500250,0,1518500250};
+    static const long tipped[9]={2147483647,0,0,0,1518500250,1518500250,0,-1518500250,1518500250};
+    static const long both[9]={1859775393,0,-1073741824,-759250125,1518500250,-1315016366,759250125,1518500250,1315016366};
+    static const long *const matrices[4]={identity,turned,tipped,both};
+    unsigned long *model, i, c, k;
+    long n;
+    fprintf(stderr,"JJFFE map-stars-v1: the real F841 sector records and the real F1772 over model 0xab (F1769 light points): every point, stalk line and label emitted, with label keys and entries. Not pixels.\n");
+    model=ref_model(0xab);
+    if(!model) fail("model 0xab is missing");
+    for(c=0;c<240;++c) {
+        unsigned long x, y, flags=(c&1)?0x20:0, depth, offset[2];
+        long out;
+        const long *matrix=matrices[(c/2)%4];
+        if(c<49) { unsigned long key=ref_special_sectors[c]; x=key&0xffff; y=key>>16; }
+        else { x=0x1700+sector_random()%0x40; y=0x1500+sector_random()%0x40; if(c%5==0) { x=sector_random()%0x2000; y=sector_random()%0x2000; } }
+        memset(object,0,sizeof object);memset(vectors,0,sizeof vectors);
+        n=ref_sector_stars(vectors,object,(long)(x<<16),(long)(y<<16),0);
+        *(unsigned short *)(object+0x9e)=(unsigned short)flags;
+        memset(instance,0,sizeof(instance));memset(slots,0,sizeof(slots));memset(normals,0,sizeof(normals));
+        memset(nested_descriptor,0,sizeof(nested_descriptor));
+        memcpy((char *)instance+0x14,matrix,36);
+        memcpy((char *)instance+0x9c,matrix,36);
+        depth=0x4000+sector_random()%0x40000;
+        offset[0]=(unsigned long)((long)(sector_random()%(depth*2))-(long)depth);
+        offset[1]=(unsigned long)((long)(sector_random()%(depth*2))-(long)depth);
+        instance[4/4]=offset[0]; instance[8/4]=offset[1]; instance[0xc/4]=depth;
+        instance[0x148/4]=model[5];
+        instance[0xf0/4]=2;
+        instance[0x14c/4]=(unsigned long)object;
+        instance[0x150/4]=(unsigned long)vectors;
+        instance[0x154/4]=model[3];
+        ref_vertex_buffer=(long *)slots;
+        ref_normal_buffer=normals;
+        ref_detail_primary=ref_detail_secondary=0;
+        nested_descriptor[0x1c/4]=-0x40000000L;
+        memset(model_queue,0,sizeof(model_queue));
+        ref_order_base=model_queue;ref_order_active=0;ref_order_state=0;
+        ref_order_init(model_queue);
+        queue_mode=1;queue_count=0;point_projects=1;
+        nested_station=1;nested_count=0;point_line_count=0;label_entry_count=0;
+        ref_command_alive=1;
+        ref_execute(instance,(void *)model[0]);
+        queue_mode=0;nested_station=0;point_projects=0;
+        out=(long)ref_command_alive;
+        printf("{\"case\":%lu,\"x\":%lu,\"y\":%lu,\"n\":%ld,\"flags\":%lu,\"code\":%lu,\"scale\":%lu,\"position\":[%ld,%ld,%ld],\"matrix\":[",
+               c,x,y,n,flags,*(unsigned long *)(object+0xa0),model[5],(long)instance[1],(long)instance[2],(long)instance[3]);
+        for(k=0;k<9;++k) printf("%s%ld",k?",":"",matrix[k]);
+        printf("],\"types\":[");
+        for(k=0;k<(unsigned long)n;++k) printf("%s%u",k?",":"",object[0xa6+2*k]);
+        printf("],\"records\":[");
+        for(k=0;k<(unsigned long)n*6;++k) printf("%s%u",k?",":"",vectors[k]);
+        printf("],\"calls\":[");
+        for(i=0;i<point_line_count;++i) {
+            if(point_line_kind[i]==1) printf("%s[1,%lu,%ld,%lu,%lu]",i?",":"",point_line_a[i]&0xffff,(long)(short)point_line_b[i],point_line_c[i]&0xff,point_line_d[i]);
+            else printf("%s[2,%lu,%lu,%lu,0]",i?",":"",point_line_a[i]&0xffff,point_line_b[i]&0xff,point_line_c[i]&0xff);
+        }
+        printf("],\"labels\":[");
+        for(i=0;i<label_entry_count;++i)
+            printf("%s[%lu,%lu,%lu]",i?",":"",label_entries[i][1],label_entries[i][2],label_entries[i][3]);
+        printf("],\"keys\":[");
+        for(i=0;i<nested_count;++i)
+            if(nested_kind[i]==17) printf("%s[%lu,%lu]",i?",":"",nested_value[i][0],nested_value[i][1]);
+        printf("],\"alive\":%ld}\n",out);
+    }
+    if (fflush(stdout)) fail("cannot flush map star vectors");
+    return 0;
+#endif
+}
+
 #ifdef FFE_COMMAND_PROBE
 extern void ref_object_frame(void *list, void *camera);
 extern void ref_display_object(void *object, void *descriptor);
@@ -5083,6 +5180,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--sectors")) return sector_vectors();
     if (argc == 2 && !strcmp(argv[1], "--hyperspace")) return hyper_vectors();
     if (argc == 2 && !strcmp(argv[1], "--system-names")) return system_name_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--map-stars")) return map_star_vectors();
     if (argc == 2 && !strcmp(argv[1], "--object-instance")) return object_instance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

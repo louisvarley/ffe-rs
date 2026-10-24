@@ -30,6 +30,7 @@ pub mod objects;
 pub mod physics;
 pub mod player;
 pub mod sector;
+pub mod star_points;
 pub mod surface;
 pub mod sysgen;
 pub mod terrain;

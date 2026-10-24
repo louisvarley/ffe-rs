@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 22 or len(manifest["files"]) != 1791:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 23 or len(manifest["files"]) != 1792:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,7 +143,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1792:
+            if archive.testzip() is not None or len(archive.infolist()) != 1793:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
@@ -185,6 +185,14 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                         expected = tail(label)
                         if payload[offset:offset + len(expected)] != expected:
                             raise RuntimeError(f"system table differs from JJFFE {label}")
+                if asset["kind"] == "star_point_tables":
+                    # DATA_007820, 7821, 7822 and 7828: 14 dwords each, in that order.
+                    blocks_p = declarations(reference / "ffedat.asm")
+                    expected = b"".join(db_bytes(blocks_p[f"DATA_00{n}"]) for n in (7820, 7821, 7822, 7828))
+                    if len(expected) != 224 or payload != expected:
+                        raise RuntimeError("star point tables differ from JJFFE DATA_007820..7828")
+                    if exe[asset["source_offset"]:asset["source_offset"] + 56] != payload[:56]:
+                        raise RuntimeError("star point tables source provenance differs")
                 if asset["kind"] == "system_strings":
                     # The 267 strings DATA_006830..7096 that the pointer table DATA_006796 names.
                     blocks_s = declarations(reference / "ffedat.asm")
