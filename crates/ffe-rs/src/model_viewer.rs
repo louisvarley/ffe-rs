@@ -892,7 +892,8 @@ impl ModelViewer {
     fn draw_surfaces(&self, result: &Execution, light: [i32; 3], frame: &mut Frame) {
         use ffe_core::terrain::Terrain;
         use ffe_core::terrain_draw::Scene;
-        use ffe_core::terrain_emit::{draw_surface, Queue, Shading};
+        use ffe_core::terrain_emit::{draw_planet, Queue, Shading, GROUP_CLOSE, GROUP_OPEN};
+        use ffe_core::terrain_haze::{Haze, Sky};
         for emission in &result.surfaces {
             let (Some((table, maps)), Some(origin), Some(vectors)) =
                 (&self.terrain, emission.origin, emission.axes)
@@ -939,12 +940,78 @@ impl ModelViewer {
             let mut queue = Queue::default();
             // An overflow of the original's arenas or queue ends the drawing early;
             // what was queued stands.
-            let _ = draw_surface(&mut terrain, &scene, &stream, &shading, &mut queue);
+            let word0 = i32::from(surface.word);
+            let material = [
+                ((word0 >> 8) & 15) as u8,
+                ((word0 >> 4) & 15) as u8,
+                (word0 & 15) as u8,
+            ];
+            let record = Haze {
+                origin,
+                axes: scene.axes,
+                material,
+                strength: i32::from(surface.parameters[1]).wrapping_shl(16),
+                scale: i32::from(surface.parameters[2]),
+                light,
+                shades: self.lighting.shades,
+            };
+            let shading = Shading {
+                material,
+                ..shading
+            };
+            let mut sky = Sky::default();
+            let _ = draw_planet(
+                &mut terrain,
+                &scene,
+                &stream,
+                &shading,
+                &record,
+                emission.context.scale as i32,
+                &self.table,
+                &mut sky,
+                &mut queue,
+            );
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
             for (_, at) in order {
                 let w = &queue.words;
                 let handler = w[at + 2];
+                if handler == GROUP_OPEN {
+                    // The atmosphere ring: bare entries up to the close marker.
+                    let mut pos = at + 3;
+                    while pos < w.len() && w[pos] != GROUP_CLOSE {
+                        let point = |k: usize| {
+                            let word = w[pos + k];
+                            (i32::from(word as i16), i32::from((word >> 16) as i16))
+                        };
+                        let colour = |value: u32| self.textures.rgb((value & 0xfff) as u16);
+                        match w[pos] & 0xff {
+                            5 => {
+                                // Corners (outer, inner, inner, outer); the seven colours
+                                // run from the inner edge to the outer.
+                                let (inner, outer) = (colour(w[pos + 6]), colour(w[pos + 12]));
+                                let points = [point(1), point(2), point(3), point(4)];
+                                let colours = [outer, inner, inner, outer];
+                                frame.shapes.push(Shape::Gouraud(
+                                    vec![points[0], points[1], points[2]],
+                                    vec![colours[0], colours[1], colours[2]],
+                                ));
+                                frame.shapes.push(Shape::Gouraud(
+                                    vec![points[0], points[2], points[3]],
+                                    vec![colours[0], colours[2], colours[3]],
+                                ));
+                                pos += 13;
+                            }
+                            10 => {
+                                let points = vec![point(1), point(2), point(3), point(4)];
+                                frame.shapes.push(Shape::Fill(points, colour(w[pos + 5])));
+                                pos += 6;
+                            }
+                            _ => break,
+                        }
+                    }
+                    continue;
+                }
                 let corners = match handler & 0xff {
                     4 | 7 | 8 => 3,
                     5 | 6 | 9 => 4,

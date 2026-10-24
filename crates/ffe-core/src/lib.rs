@@ -31,6 +31,7 @@ pub mod sysgen;
 pub mod terrain;
 pub mod terrain_draw;
 pub mod terrain_emit;
+pub mod terrain_haze;
 pub mod thrust;
 pub mod x87;
 

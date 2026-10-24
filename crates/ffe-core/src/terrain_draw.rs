@@ -67,7 +67,7 @@ fn reduce(v: [i32; 3]) -> [i32; 3] {
 }
 
 /// F1465: the length of a vector (the sum of its squares through F1467).
-fn length(v: [i32; 3]) -> i32 {
+pub(crate) fn length(v: [i32; 3]) -> i32 {
     let sum = v
         .iter()
         .fold(0i32, |sum, c| sum.wrapping_add(c.wrapping_mul(*c)));

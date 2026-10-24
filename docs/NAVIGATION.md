@@ -54,10 +54,13 @@ textured ones (the texture fills themselves are not drawn).
 
 The terrain's 32-bit arithmetic overflows for radii near 2^29 (the oversized slivers
 at close range were that), so the matrix is also shrunk until the radius is about
-2^24, the range the original runs it in. Known gaps: F1877's haze is not ported (it is about 1,200 instructions and needs F1521, F1878,
-F1879, F1780 and F1479 first; the oracle already prints its inputs and the queue).
-The planet is oriented by its object's rows (the spin is `clock[0] >> 17`, so they
-are identity until the clock passes 2^17 days). Looks checked by eye only (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
+2^24, the range the original runs it in. The atmosphere (F1877, F1878, F1879) is ported and verified (`terrain_haze.rs`), and
+the ring around a planet with a haze is drawn from its queued group. Known gaps: the
+textured fills (bitmaps 0x40, 0x43, 0x121) are drawn as flat colours or blends, the
+sky colour starts black each frame (the game sets it elsewhere), and the surface seed
+is the object's `+0xa0` only for bodies of the navigator. The planet is oriented by
+its object's rows (the spin is `clock[0] >> 17`, so they are identity until the clock
+passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
 
 ## Known limits
 

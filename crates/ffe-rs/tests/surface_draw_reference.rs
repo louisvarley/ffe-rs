@@ -1,6 +1,8 @@
+use ffe_core::model_math::SineTable;
 use ffe_core::terrain::{Fault, Terrain};
 use ffe_core::terrain_draw::Scene;
-use ffe_core::terrain_emit::{draw_surface, Queue, Shading};
+use ffe_core::terrain_emit::{draw_planet, Queue, Shading};
+use ffe_core::terrain_haze::{Haze, Left, Sky};
 use serde::Deserialize;
 
 fn cache_terrain() -> (Vec<u8>, Vec<u8>) {
@@ -11,6 +13,13 @@ fn cache_terrain() -> (Vec<u8>, Vec<u8>) {
         cache.asset("base:terrain/tables").unwrap().to_vec(),
         cache.asset("base:terrain/maps").unwrap().to_vec(),
     )
+}
+
+fn cache_sine() -> SineTable {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    SineTable::from_bytes(cache.asset("base:math/sine").unwrap()).unwrap()
 }
 
 #[derive(Deserialize)]
@@ -54,6 +63,16 @@ struct Case {
     #[serde(default)]
     word8: i32,
     #[serde(default)]
+    word10: i32,
+    #[serde(default)]
+    scale: i32,
+    #[serde(default)]
+    sky: [u8; 3],
+    #[serde(default)]
+    haze: [i64; 4],
+    #[serde(default)]
+    sky_out: [i64; 4],
+    #[serde(default)]
     light: [i32; 3],
     #[serde(default)]
     shades: Vec<u8>,
@@ -83,6 +102,43 @@ fn shading(case: &Case) -> Shading {
     }
 }
 
+fn planet(
+    case: &Case,
+    scene: &Scene,
+    table: &[u8],
+    maps: &[u8],
+    sine: &SineTable,
+    queue: &mut Queue,
+) -> Result<(Left, Sky), Fault> {
+    let mut terrain = Terrain::new(table, maps);
+    let shading = shading(case);
+    let record = Haze {
+        origin: case.origin,
+        axes: case.vectors,
+        material: shading.material,
+        strength: case.word8.wrapping_shl(16),
+        scale: case.word10,
+        light: case.light,
+        shades: shading.shades,
+    };
+    let mut sky = Sky {
+        colour: case.sky,
+        flag: 0,
+    };
+    let (_, left) = draw_planet(
+        &mut terrain,
+        scene,
+        &case.stream,
+        &shading,
+        &record,
+        case.scale,
+        sine,
+        &mut sky,
+        queue,
+    )?;
+    Ok((left, sky))
+}
+
 fn mix(hash: &mut u64, value: u32) {
     for k in 0..4 {
         *hash ^= u64::from((value >> (8 * k)) & 0xff);
@@ -98,6 +154,7 @@ fn mix(hash: &mut u64, value: u32) {
 #[ignore = "Local-only original world data; use tools/reference/verify-world.py"]
 fn executed_reference_surface_draw() {
     let (table, maps) = cache_terrain();
+    let sine = cache_sine();
     let input = std::fs::read_to_string(std::env::var_os("FFE_SURFACE_VECTORS").unwrap()).unwrap();
     assert!(input.len() < 256 << 20);
     let (mut cases, mut compared, mut emitted, mut queued, mut overflows) = (0, 0, 0, 0, 0);
@@ -105,38 +162,34 @@ fn executed_reference_surface_draw() {
         let case: Case = serde_json::from_str(line).unwrap();
         cases += 1;
         if case.fault {
-            // The original ran out of order queue (or crashed) on this one.
+            // The original ran out of order queue, or divided by zero, on this one.
             assert!(
-                case.overflow != 0 && !case.crashed && case.signal == 0,
+                !case.crashed && ((case.overflow != 0 && case.signal == 0) || case.signal == 8),
                 "case {}: unexpected crash",
                 case.case
             );
-            if case.word8 == 0 {
-                let mut terrain = Terrain::new(&table, &maps);
-                let scene = Scene {
-                    seed: case.seed,
-                    origin: case.origin,
-                    axes: case.vectors,
-                    kind: case.kind,
-                    detail: case.detail,
-                    zoom: case.zoom,
-                };
-                let mut queue = Queue::default();
-                let result = draw_surface(
-                    &mut terrain,
-                    &scene,
-                    &case.stream,
-                    &shading(&case),
-                    &mut queue,
-                );
-                assert_eq!(
-                    result.err(),
-                    Some(Fault::QueueFull),
-                    "case {}: the order queue should overflow",
-                    case.case
-                );
-                overflows += 1;
-            }
+            let scene = Scene {
+                seed: case.seed,
+                origin: case.origin,
+                axes: case.vectors,
+                kind: case.kind,
+                detail: case.detail,
+                zoom: case.zoom,
+            };
+            let mut queue = Queue::default();
+            let result = planet(&case, &scene, &table, &maps, &sine, &mut queue);
+            let expected = if case.signal == 8 {
+                Fault::Division
+            } else {
+                Fault::QueueFull
+            };
+            assert_eq!(
+                result.err(),
+                Some(expected),
+                "case {}: the fault",
+                case.case
+            );
+            overflows += 1;
             continue;
         }
         let mut terrain = Terrain::new(&table, &maps);
@@ -191,18 +244,48 @@ fn executed_reference_surface_draw() {
         assert_eq!(format!("{hash:016x}"), case.hash, "{context}: hash");
         assert_eq!(terrain.nodes_out(), case.nodes, "{context}: nodes");
         assert_eq!(terrain.edges_out(), case.edges, "{context}: edges");
-        if case.word8 == 0 {
-            // The emitter, when F1877 has nothing to set up.
-            let mut terrain = Terrain::new(&table, &maps);
+        {
+            // F1877 and the emitter.
             let mut queue = Queue::default();
-            draw_surface(
-                &mut terrain,
-                &scene,
-                &case.stream,
-                &shading(&case),
-                &mut queue,
-            )
-            .unwrap_or_else(|fault| panic!("{context}: {fault:?}"));
+            let (left, sky) = planet(&case, &scene, &table, &maps, &sine, &mut queue)
+                .unwrap_or_else(|fault| panic!("{context}: {fault:?}"));
+            if case.word8 != 0 && std::env::var_os("FFE_HAZE_TRACE").is_some() {
+                eprintln!(
+                    "case {} w10 {} haze {:?} got [{}, {}, {}, {}] sky {:?} got {:?}",
+                    case.case,
+                    case.word10,
+                    case.haze,
+                    left.flag,
+                    left.distance,
+                    left.colour,
+                    left.scale,
+                    case.sky_out,
+                    (sky.flag, sky.colour)
+                );
+                continue;
+            }
+            if case.word8 != 0 {
+                assert_eq!(
+                    [
+                        i64::from(left.flag),
+                        i64::from(left.distance),
+                        i64::from(left.colour),
+                        i64::from(left.scale)
+                    ],
+                    case.haze,
+                    "{context}: haze"
+                );
+                assert_eq!(
+                    [
+                        i64::from(sky.flag),
+                        i64::from(sky.colour[0]),
+                        i64::from(sky.colour[1]),
+                        i64::from(sky.colour[2])
+                    ],
+                    case.sky_out,
+                    "{context}: sky"
+                );
+            }
             if queue.words.len() != case.words {
                 eprintln!("got  {:x?}", &queue.words[..queue.words.len().min(60)]);
                 eprintln!("want {:x?}", &case.queue[..case.queue.len().min(60)]);

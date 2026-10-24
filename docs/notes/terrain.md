@@ -179,3 +179,23 @@ a single case, `--surface-draw N`) all of them, with the draw routines' addresse
 whose record has no word-8 parameter (so F1877 does nothing) match word for word, and the
 10 that overflow the queue overflow in the port. The cases with a haze are compared to the
 triangle level only until F1877 is ported.
+
+## The atmosphere (F1877, F1878, F1879)
+
+`crates/ffe-core/src/terrain_haze.rs`, `terrain_emit::draw_planet`. F1876 shifts the
+record's word `+10` by the instance's scale less eight, then F1877 runs when the record's
+word `+8` (shifted left sixteen) is non-zero: the axes are put in the order that makes
+each dominate its coordinate (`DATA_007895`, the six permutations in order), the origin is
+solved in their frame in single-precision x87 steps (`x87::Ext`: loads exact, every
+`fstp dword` rounds, the result times 32768 truncated), the haze state `DATA_009262..9267`
+is set (flag, the view distance of the ring, the colour, the scale as `scale * far /
+(far - near)` truncated), the sky colour is mixed or taken from the light, and the ring is
+queued in a group of its own (F1780: a header with key `0xffffffff` and the open marker,
+bare entries, the close marker): 32 steps round the planet, each a textured quad (F1805,
+13 words: four corners, bitmap `0x43`, seven colours from the material to the sky) and a
+ring quad (F1810, 6 words) from F1879, shaded by F1878's light on the ring's direction.
+A division by zero in the solve faults like the original's (`SIGFPE`, 2 of 512 cases).
+
+Oracle: `--surface-draw` now compares the haze state, the sky and the whole queue for the
+361 cases with a haze (311 with a ring; 2 change the sky, 4 are inside the haze), 465
+queues word for word and the 47 faults (45 queue overflows, 2 divisions by zero).

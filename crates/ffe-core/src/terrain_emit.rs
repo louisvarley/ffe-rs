@@ -8,8 +8,10 @@
 use crate::model::multiply;
 use crate::model_instance::project;
 use crate::model_math::fraction;
+use crate::model_math::SineTable;
 use crate::terrain::{tables, Fault, Terrain};
 use crate::terrain_draw::{Drawn, Emission, Scene};
+use crate::terrain_haze::{haze, Haze, Left, Sky};
 
 /// The words the order queue may hold before the original exits (F1778).
 pub const QUEUE_WORDS: usize = 0xc350;
@@ -28,7 +30,13 @@ pub struct Queue {
     pub words: Vec<u32>,
     /// The last header's position (`*DATA_007832`), zero before any.
     head: u32,
+    /// Between F1780's open and close: entries are bare words, without headers.
+    in_group: bool,
 }
+
+pub const GROUP_OPEN: u32 = 0xf180_0010;
+pub const GROUP_CLOSE: u32 = 0xf180_0011;
+pub const RING_QUAD: u32 = 0xf180_000a;
 
 impl Queue {
     /// The entries from the last queued back to the first: `(key, header position)`.
@@ -43,12 +51,31 @@ impl Queue {
         out
     }
 
+    /// F1780 opening a group: a header of its own (the key and the link), then the
+    /// open marker; the entries that follow carry no headers until [`Self::close`].
+    pub fn open(&mut self, key: u32) -> Result<(), Fault> {
+        let at = self.entry(key, 1)?;
+        self.words[at] = GROUP_OPEN;
+        self.in_group = true;
+        Ok(())
+    }
+
+    /// F1780 closing the group.
+    pub fn close(&mut self) -> Result<(), Fault> {
+        let at = self.entry(0, 1)?;
+        self.words[at] = GROUP_CLOSE;
+        self.in_group = false;
+        Ok(())
+    }
+
     /// A new entry of `count` words after its header; returns where the words start.
     pub fn entry(&mut self, key: u32, count: usize) -> Result<usize, Fault> {
-        let header = self.words.len();
-        self.words.push(key);
-        self.words.push(self.head);
-        self.head = 0xf200_0000 | header as u32;
+        if !self.in_group {
+            let header = self.words.len();
+            self.words.push(key);
+            self.words.push(self.head);
+            self.head = 0xf200_0000 | header as u32;
+        }
         let start = self.words.len();
         self.words.resize(start + count, 0);
         if self.words.len() > QUEUE_WORDS {
@@ -586,4 +613,35 @@ pub fn draw_surface(
     terrain.draw(scene, stream, &mut |t, emission| {
         emit(t, kind, shading, &colours, queue, &emission)
     })
+}
+
+/// What F1876 does in draw mode with the record's colour and the planet's haze: F1877
+/// first (the haze state and the ring's group), then the surface through the emitter.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_planet(
+    terrain: &mut Terrain<'_>,
+    scene: &Scene,
+    stream: &[u8],
+    shading: &Shading,
+    record: &Haze,
+    instance_scale: i32,
+    sine: &SineTable,
+    sky: &mut Sky,
+    queue: &mut Queue,
+) -> Result<(Drawn, Left), Fault> {
+    // F1876 shifts the record's word `+10` by the instance's scale less eight.
+    let shift = instance_scale.wrapping_sub(8);
+    let mut record = *record;
+    record.scale = if shift < 0 {
+        record.scale >> (shift.wrapping_neg() & 31)
+    } else {
+        record.scale.wrapping_shl(shift as u32 & 31)
+    };
+    let left = haze(&record, terrain.table, sine, sky, queue)?;
+    let shading = Shading {
+        atmosphere: left.atmosphere(),
+        ..*shading
+    };
+    let drawn = draw_surface(terrain, scene, stream, &shading, queue)?;
+    Ok((drawn, left))
 }

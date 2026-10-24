@@ -75,7 +75,7 @@ fn flight_view_shows_planet_surfaces() {
         let radius = body.radius as f64 / UNIT;
         let centre = body.position.map(|v| v as f64 / UNIT);
         // Three radii out along -z of the body, looking at it (forward is +z).
-        state.position = [centre[0], centre[1], centre[2] - 3.0 * radius];
+        state.position = [centre[0], centre[1], centre[2] - 8.0 * radius];
         screen.discs = vec![Disc {
             centre,
             radius,

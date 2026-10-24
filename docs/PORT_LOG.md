@@ -4,6 +4,18 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## v0.53 — Planet surfaces in the viewer and the flight view, the atmosphere (F1877-F1879)
+
+- `ModelViewer::draw_surfaces` runs the ported F1876 and emitter for curved surfaces; the
+  flight view draws planets from their models (`Screen::discs`), shrinking the matrix by a
+  power of two so the terrain's 32-bit arithmetic stays in the range the original runs
+  it in (radii near 2^29 overflowed into slivers). Detail entries blend their ramp
+  colours; the navigator's bodies carry model, seed and orientation.
+- F1877/F1878/F1879 and the order queue's groups (F1780) ported (`terrain_haze.rs`) and
+  verified on 361 haze cases of the executed original (queue word for word, haze state,
+  sky colour), with F1876's scale shift (`scale << (instance scale - 8)`) and the
+  original's `SIGFPE` cases.
+
 ## 2026-10-23 — Physics objects from system objects (v0.50c)
 
 Notes: `docs/notes/objects.md`. Cache v16 adds model records and gameplay tables.
