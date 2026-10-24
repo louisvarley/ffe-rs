@@ -50,8 +50,8 @@ ffe-rs's own (EXP-005).
   audit** (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 147 items, 56 done and 91 left on
-  2026-10-24). **Update it in the same commit as any progress change**:
+  in `burndown.js`; 14 milestones, 133 items, 58 done and 75 left on
+  2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
 

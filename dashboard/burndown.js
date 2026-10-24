@@ -16,7 +16,7 @@
 window.FFE_BURNDOWN = {
   project: "ffe-rs",
   unit: "work items",
-  updated: "2026-10-24",
+  updated: "2026-10-25",
   milestones: [
     {
       id: "foundation",
@@ -114,7 +114,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "todo" },
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
-        { id: "flight-11", title: "Launch sequence", status: "in-progress", version: "nav-docking" },
+        { id: "flight-11", title: "Launch sequence", status: "done", version: "v0.55" },
         { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "todo" }
       ]
     },
@@ -127,7 +127,7 @@ window.FFE_BURNDOWN = {
         { id: "world-2", title: "System generation: stars, planets and station placement (csysgen)", status: "done", version: "v0.51i" },
         { id: "world-3", title: "System object types and orbits (csystem)", status: "todo" },
         { id: "world-4", title: "Galaxy generation and the RNG stream question (KNOWN_ISSUES F1476)", status: "in-progress", version: "galaxy-v21" },
-        { id: "world-5", title: "Planet surfaces and landing approach", status: "todo" },
+        { id: "world-5", title: "Planet surfaces and landing approach", status: "done", version: "v0.54" },
         { id: "world-6", title: "Starports: services and events (cstarport)", status: "todo" },
         { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-8", title: "Navigation: system and galaxy maps", status: "todo" },
@@ -167,12 +167,12 @@ window.FFE_BURNDOWN = {
         { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "todo" },
         { id: "ui-2", title: "Crosshair, targeting and the HUD overlay", status: "todo" },
         { id: "ui-3", title: "Missile, combat and external camera views", status: "todo" },
-        { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "todo" },
+        { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "done", version: "v0.56" },
         { id: "ui-5", title: "Menu and text rendering for every screen", status: "todo" },
         { id: "ui-6", title: "Galaxy and system map screens", status: "done", version: "v0.48n" },
         { id: "ui-7", title: "Intro and new-game flow", status: "in-progress", version: "v0.48p" },
         { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
-        { id: "ui-9", title: "Options, key bindings screen", status: "todo" },
+        { id: "ui-9", title: "Options, key bindings screen", status: "done", version: "v0.48p" },
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "todo" },
         { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "todo" }
       ]
@@ -449,14 +449,38 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-10-24",
       remaining: 80,
-      note: "F575's contact tail (soft landing, crash and bounce, F953's damage amount, flag 1) and F578's momentum response ported and verified: --collide and --world-tick match all 4,096 cases each, the 950 and 584 contacts included; flight-7 done. The same round imported F650's open-air pad tables (cache v26, --pads oracle) and fixed the planet approach's black wedges (surface queue limit, EXP-009). The playable's own station touch test still pushes the ship clear, so flight-10 keeps the pad hit.",
-      note: "The original new game and intro timeline: default boot is F998 start type 1 (Ross 154, Sidewinder, 1000 CR, 8 t, state 0x30 on the F650 pad, 3250-01-01 12:00); ffe_rs::front_end models the F961/F962 logos, bitmap 0x42 and 18 credits, verified by 76 --intro cases; no JJFFE legal splash. Front-end drawing is not wired into boot yet and open-air takeoff is blocked (EXP-010). ui-6 done, ui-7 in progress."
+      note: "F575's contact tail (soft landing, crash and bounce, F953's damage amount, flag 1) and F578's momentum response ported and verified: --collide and --world-tick match all 4,096 cases each, the 950 and 584 contacts included; flight-7 done. The same round imported F650's open-air pad tables (cache v26, --pads oracle) and fixed the planet approach's black wedges (surface queue limit, EXP-009). The playable's own station touch test still pushes the ship clear, so flight-10 keeps the pad hit."
     },
     {
       date: "2026-10-24",
       remaining: 79,
       note: "The original new game starts by default and the intro timeline is ported; the system and galaxy map screens are done (ui-6), so one more item is complete."
 
+    },
+    {
+      date: "2026-10-25",
+      remaining: 79,
+      note: "Intro implementation plan merged (docs/notes/intro-todo.md): the remaining front-end, starport-takeoff, combat and mission work is now written down step by step. Documentation only, so no item changes."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 78,
+      note: "Planets merged (v0.54): the vanishing-planet fallback skips a shaded disc at or inside the eye, F1876 surfaces draw planets to the horizon, starports and buildings are placed on the surface, and F575's landing is wired to it (world-5 done). The approach and local frames are tested; the surface still has no whole-frame oracle."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 77,
+      note: "Launch lift merged (v0.55, EXP-011): F1088's seat and F1089's door word drive the launch, so the ship stays in the station until the outer door opens and the station's hull is skipped until it is clear; the lift view no longer shows the port's status block (flight-11 done). flight-9 and flight-10 keep the rotating frame and the pad hit."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 76,
+      note: "Station services merged (v0.56, EXP-014): the original's services, shipyard, stockmarket, upgrades and ships screens with the 0x2e buttons, arrows and F558 status line, over the existing market (ui-4 done). Equipment, hull and repair lists are empty shells until their tables and generators are imported."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 75,
+      note: "Escape preference pages merged (v0.48p, EXP-012/013): the original's five pages, hot areas and icons, a port Modern/Classic page and Quit; space colour and stars are applied. The default space colour is now the captured original entry 182 (#0c0c4c), Black stays #000000 with its stars, and the options screen is done (ui-9)."
     }
   ]
 };

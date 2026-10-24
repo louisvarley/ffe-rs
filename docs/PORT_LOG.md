@@ -4,6 +4,87 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Space colour uses the captured original default (#0c0c4c)
+
+Owner decision: the default flight background is the original's, not the old
+`#000044`.
+
+- `ffe_rs::prefs::space_colour_rgb` now draws the captured reference frame's
+  default: palette entry 182, six-bit `(3,3,19)` = `#0c0c4c`. The original stores
+  `(0,0,index)` in `DATA_008815..817` and clears with the nearest entry of its
+  runtime upper palette (`FUNC_001575`/`FUNC_001618`); the port has no runtime
+  palette, so it keeps that captured entry.
+- The other four settings are derived from the same entry (each six-bit
+  component scaled by index/4, rounded, then `v * 255 / 63`): `Black #000000`,
+  `Very Dark Blue #040414`, `Dark Blue #080828`, `Medium Blue #080838`,
+  `Light Blue #0c0c4c`. The intermediate ramp is an interpolation, not a capture;
+  recorded as EXP-013 with the quantisation.
+- "Black" stays the existing Graphic Detail row and renders `#000000`; the
+  original's stars are still drawn over it. Tests: the default sky pixels are
+  `#0c0c4c`, Black renders black with stars (a draw with stars on differs from
+  one with them off), and a Black selection survives closing and re-opening the
+  pages in the session. Frames regenerated in `docs/evidence/prefs/`
+  (`space-light-blue.png`, `space-black.png`).
+
+## 2026-10-25 - Escape preference pages merged (v0.48p, EXP-012/013)
+
+- Merged `prefs` (d37cb84, bf80d08) after `station-ui`; conflicts resolved in
+  `indexed.rs` (kept the navigation marker's `blit_colours` over the one
+  `blit_rgb`), `main.rs` (Escape block before the controls-button edge; kept
+  `--start`/`--skip-intro` with `--capture-prefs`), `screen.rs` (navigation-list
+  hiding, the prefs icons and the docked/status-block guards all kept) and
+  `STATUS.md` (both milestone rows). The branch's `shots-prefs/` captures moved
+  to `docs/evidence/prefs/` (the repo does not commit scratch frames), and the
+  duplicated EXP numbers were renumbered: EXP-012 (pages), EXP-013 (space
+  colour), EXP-014 (station screens).
+- `--capture-prefs` renders every page plus the two space colours against the
+  local cache; `cargo test --workspace --locked`, clippy `-D warnings` and
+  `cargo fmt --check` pass.
+
+## 2026-10-25 - Station services and stockmarket merged (v0.56, EXP-014)
+
+- Merged `station-ui` (f3cb3d8, d93b1ad): the docked screen is now the original's
+  services root, shipyard, stockmarket, upgrades and ships screens (F328/F330
+  buttons and arrows, F558's status line) with the market as one of them
+  (`crates/ffe-rs/src/station.rs`, `docs/notes/station.md`). The merge kept the
+  planets/lift work: the port's status block is skipped while docked or in the
+  station view, the navigation list still hides the top bar, the labels/places
+  icons and marker stay, and the starport message still distinguishes an
+  open-air landing. `tests/station_view.rs` (local, cache) draws the original
+  layout and passes; whole workspace green.
+- Equipment, hull and repair lists are empty shells until their tables and
+  generators are imported; the BBS is empty for the same reason.
+
+## 2026-10-25 - Launch lift fix merged (v0.55, EXP-011)
+
+- Merged `lift-fix` (204d717): the launch uses F1088's seat (the station's own
+  position) and F1089's `+0x9e` door word, stays in the lift until the door
+  opens, and skips the station hull until the ship is clear. `SystemStation.door`
+  is initialised by every caller, including the planet tests (0xffff, closed).
+- Conflicts: `main.rs` (kept the planets starport message and added the launch
+  grace), `screen.rs` (hides the status block while the lift or the station view
+  is drawn *and* while the navigation list is open), `DEVIATIONS.md` (the launch
+  entry was renumbered to EXP-011 because the new-game/starport entry already
+  held EXP-010). `tests/lift_view.rs` passes both synthetic tests and the two
+  local cached-frame tests.
+
+## 2026-10-25 - Planets merged (v0.54): surfaces, surface starports and landing
+
+- Merged `planets` (1bd1b71, a1e96f6): the shaded-disc fallback no longer draws
+  a planet at or inside the eye (the owner's vanishing planet), F1876 surfaces
+  reach the horizon, starports and buildings are drawn on the surface, and
+  F575's contact drives the landing parent. `navigation::Body` gained
+  `inner_radius` and `parent`; one test initialiser on main was updated.
+- `crates/ffe-rs/tests/planet_view.rs` (surface horizon, starport frame, landing
+  parent) passes; whole workspace, clippy and fmt green.
+
+## 2026-10-25 - Intro implementation plan merged (docs only)
+
+- Merged `intro-plan` (b6c0e16): `docs/notes/intro-todo.md` records the complete
+  remaining intro/front-end plan. No code or dashboard item changes.
+
+---
+
 ## 2026-10-24 — F575's contact tail: soft landing, crash and bounce (v0.48o)
 
 Notes: `docs/notes/collision.md`. `crates/ffe-core/src/landing.rs`,
