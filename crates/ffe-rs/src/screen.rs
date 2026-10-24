@@ -93,6 +93,24 @@ pub const MARKET_ROWS: usize = 8;
 /// The controls button in the top bar: left edge and right edge (logical pixels).
 pub const CONTROLS_BUTTON: (i32, i32) = (118, 236);
 
+/// The autopilot buttons beside them: target the next body, fly to the locked one (and dock
+/// at a station), stop.
+pub const AUTOPILOT_BUTTONS: [(i32, i32, &str); 3] = [
+    (154, 204, "TARGET"),
+    (208, 268, "AUTOPILOT"),
+    (272, 312, "STOP"),
+];
+
+/// The locked body as it shows in the view: its screen position, a pick radius in pixels,
+/// and whether the autopilot is flying to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetMark {
+    pub x: i32,
+    pub y: i32,
+    pub radius: i32,
+    pub engaged: bool,
+}
+
 /// The map buttons along the bottom of the view: left edge, right edge and label.
 pub const MAP_BUTTONS: [(i32, i32, &str); 2] = [(2, 62, "SYSTEMS"), (66, 150, "THIS SYSTEM")];
 const MAP_BUTTONS_Y: (i32, i32) = (128, 138);
@@ -119,6 +137,10 @@ pub struct Screen {
     pub station: String,
     /// The locked-on target and its range, while the autopilot has one.
     pub lock: String,
+    /// Where the locked body shows in the view (set by the caller each frame).
+    pub target_mark: Option<TargetMark>,
+    /// Whether a body is locked, for the autopilot buttons.
+    pub has_lock: bool,
     /// The original console view icons (secondary bitmaps 63..81), when cached.
     icons: Vec<Option<IndexedImage>>,
     jitter: Jitter,
@@ -243,7 +265,65 @@ impl Screen {
                 return Some(Click::Navigation);
             }
         }
+        if (MAP_BUTTONS_Y.0..=MAP_BUTTONS_Y.1).contains(&y) {
+            for ((x0, x1, _), click) in AUTOPILOT_BUTTONS.into_iter().zip([
+                Click::Target,
+                Click::Autopilot,
+                Click::AutopilotOff,
+            ]) {
+                if (x0..=x1).contains(&x) {
+                    return Some(click);
+                }
+            }
+        }
         crate::console::click(x, y)
+    }
+
+    /// The body under logical pixel (x, y): of `bodies` (an index, its centre and radius in
+    /// flight units), the one whose screen position is nearest the click and within its
+    /// pick radius.
+    pub fn pick(
+        state: &Flight,
+        views: &ViewState,
+        scene: Option<&ModelViewer>,
+        bodies: &[(usize, [f64; 3], f64)],
+        (x, y): (i32, i32),
+    ) -> Option<usize> {
+        bodies
+            .iter()
+            .filter_map(|(index, centre, radius)| {
+                let (sx, sy, reach) = Self::body_screen(state, views, scene, *centre, *radius)?;
+                let miss = f64::from((sx - x).pow(2) + (sy - y).pow(2)).sqrt();
+                (miss <= f64::from(reach)).then_some((*index, miss))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(index, _)| index)
+    }
+
+    /// Where a body shows in the view `state` and `views` give: its screen position and a
+    /// pick radius in pixels (the body's own size, at least 10), when it is in front of
+    /// the eye and on the view. `centre` and `radius` are in flight units.
+    pub fn body_screen(
+        state: &Flight,
+        views: &ViewState,
+        scene: Option<&ModelViewer>,
+        centre: [f64; 3],
+        radius: f64,
+    ) -> Option<(i32, i32, i32)> {
+        let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
+        let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
+        let camera = Camera::new(state, views, stats.as_ref(), scale);
+        let [x, y, z] = camera.point(centre);
+        if z <= 2.0 {
+            return None;
+        }
+        let (sx, sy) = (160.0 + 256.0 * x / z, 79.0 - 256.0 * y / z);
+        let pixels = (radius * 256.0 / z).clamp(10.0, 120.0);
+        ((-20.0..340.0).contains(&sx) && (-20.0..178.0).contains(&sy)).then_some((
+            sx as i32,
+            sy as i32,
+            pixels as i32,
+        ))
     }
 
     /// The logical 320x200 pixel under a mouse position in window client pixels
@@ -326,6 +406,8 @@ impl Screen {
             stations: Vec::new(),
             market: None,
             lift: None,
+            target_mark: None,
+            has_lock: false,
             system: String::new(),
             station: String::new(),
             lock: String::new(),
@@ -776,6 +858,18 @@ impl Screen {
             } else {
                 self.text(8, 16, "STATION BEHIND / OFF VIEW", 18);
             }
+            // The locked body: corner brackets around it, yellow while the autopilot is
+            // flying to it.
+            if let Some(mark) = self.target_mark {
+                let (x, y, r) = (mark.x, mark.y, mark.radius.min(40));
+                let colour = if mark.engaged { 18 } else { 17 };
+                let arm = (r / 2).max(4);
+                for (sx, sy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                    let corner = (x + sx * r, y + sy * r);
+                    self.line(corner, (corner.0 - sx * arm, corner.1), colour);
+                    self.line(corner, (corner.0, corner.1 - sy * arm), colour);
+                }
+            }
             if view == ViewMode::Front {
                 self.line((155, 79), (158, 79), 18);
                 self.line((162, 79), (165, 79), 18);
@@ -858,6 +952,32 @@ impl Screen {
             );
             self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, 18);
         }
+        if state.mode == Mode::Flight {
+            for (index, (x0, x1, label)) in AUTOPILOT_BUTTONS.into_iter().enumerate() {
+                self.rect(
+                    x0 as usize,
+                    MAP_BUTTONS_Y.0 as usize,
+                    (x1 - x0) as usize,
+                    10,
+                    1,
+                );
+                // Dim a button that has nothing to act on.
+                let live = match index {
+                    1 => self.has_lock,
+                    2 => self.target_mark.is_some_and(|mark| mark.engaged),
+                    _ => true,
+                };
+                let engaged = index == 1 && self.target_mark.is_some_and(|mark| mark.engaged);
+                let colour = if engaged {
+                    17
+                } else if live {
+                    18
+                } else {
+                    15
+                };
+                self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, colour);
+            }
+        }
         let mut lines = Vec::new();
         let mut line = String::new();
         for ch in message.chars() {
@@ -892,7 +1012,7 @@ impl Screen {
                 "Dock: D clearance (100 km), in the slot under 250 m/s",
                 "O original flight: Enter/Shift speed, Z/A , . [ ] steer",
                 "O then TAB system map, G galaxy: Up/Down, Enter flies/jumps",
-                "Autopilot to a station docks. Backspace stops it.",
+                "Click a body/T: lock. K: autopilot (docks). Bksp: stop.",
                 "H closes help. Map icon: systems. Nav icon: this system.",
             ]
             .iter()

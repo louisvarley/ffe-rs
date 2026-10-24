@@ -4,6 +4,20 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — Click-to-target and the autopilot buttons
+
+Owner request: click a station or space port and have the autopilot dock; autopilot buttons.
+
+- `Navigator::locked` (a lock, apart from the autopilot's `target`), `lock`, `cycle_lock`, `engage_locked`; `Screen::pick` and
+  `body_screen` find the body under a click from the camera's projection; TARGET / AUTOPILOT / STOP buttons beside the map
+  buttons, corner brackets and a `TARGET:` / `AUTOPILOT:` line. Keys T (Shift+T), K, Backspace. The autopilot itself
+  (`navigation::autopilot`, the two-leg approach, clearance, the docking stages) was already there.
+- Tests: `locking_and_engaging_a_target` (local cache), `the_autopilot_buttons_sit_beside_the_map_buttons`.
+- Not done: landing at open-air starports (F650's pad tables, `DATA_006175..6179`); the autopilot flies to a starport's
+  standoff only.
+
+---
+
 ## 2026-10-24 — Lift posters, launch world and text placement (cache v24)
 
 Owner report: black frames in the lift scenes when leaving a station, and the posters of the real game missing.

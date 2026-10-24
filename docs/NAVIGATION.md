@@ -38,6 +38,12 @@ The game starts docked at the first station of Sol (L launches, which puts the s
 - The console's map icon (or G): the systems list, each with its distance (in light years, the original's F833 units) and the fuel the jump needs, or `TOO FAR` or `NEEDS n T`. Up/Down or a click chooses; Enter, H or the console's H icon hyperspaces to the chosen system through the original's hyperdrive (F903): range and fuel are checked, the fuel is burnt from the hold (military fuel for the Eagle's class 10 drive, leaving radioactive waste), and the game clock moves by the jump time. A new game has no fuel; buy it at the station's market. The jump scene itself is not drawn.
 - The console's navigation-computer icon (or Tab): everything in this system. A click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns it off.
 - The top bar's button changes between modern and classic controls (modern by default; F3 too). Classic is the original's keys: Enter/Shift set speed, Z/A pitch, comma/period yaw, [ ] roll. Modern adds W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll).
+- **Target and autopilot buttons** (below the view, beside SYSTEMS and THIS SYSTEM): a click on a planet, moon or station in the
+  view locks it (green corner brackets and a `TARGET:` line with its range); **TARGET** (or T, Shift+T the previous; the
+  console's `t` icon too) locks the next body by range, nearest first. **AUTOPILOT** (or K) flies to the locked body: at a
+  station it flies to the approach point on the docking axis, asks for clearance and docks by itself; **STOP** (or
+  Backspace) turns it off. The brackets turn yellow and the line reads `AUTOPILOT:` while it is flying. The autopilot starts
+  the original flight model if it was not running (as O does). Open-air starports are flown to but not landed on yet.
 - D, flying in a system, asks the nearest station within 100 km for docking clearance (again cancels it). Fly into the slot on the station's docking face; or engage the autopilot on a station, which docks by itself.
 - F12 is the model viewer, Shift+F12 the model lab. The other console buttons and the playtest scenarios are not in this build.
 

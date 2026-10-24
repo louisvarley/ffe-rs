@@ -414,6 +414,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "Owner-reported lift fixes: the posters (child model 0xeb text, per-station seed), text placed at the record's size with newlines (cache v24), and the launch lift drawn over the world instead of black. Not pixel-verified against the original."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "Click-to-target and autopilot buttons in the playable: click a body (or T) to lock it, AUTOPILOT (K) flies there and docks at stations, STOP (Backspace) ends it. Landing at open-air starports is not ported."
     }
   ]
 };

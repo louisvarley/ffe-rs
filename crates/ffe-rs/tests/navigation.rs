@@ -777,3 +777,79 @@ fn hyperspace_uses_range_fuel_and_time() {
     );
     assert!(lines.iter().any(|l| l.contains("TOO FAR")), "{lines:?}");
 }
+
+/// A click on a body in the view locks it, the target button cycles the bodies by range, and
+/// the autopilot button's engage flies to the locked body (docking at a station).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn locking_and_engaging_a_target() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::navigation::Navigator;
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::Screen;
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let (_, at) = nav.station().map(|(n, at)| (n.to_owned(), at)).unwrap();
+    // The target button starts from the nearest body and walks outward, then wraps.
+    let first = nav.cycle_lock(at, 1).map(|b| b.name.clone()).unwrap();
+    let second = nav.cycle_lock(at, 1).map(|b| b.name.clone()).unwrap();
+    assert_ne!(first, second);
+    assert_eq!(nav.cycle_lock(at, -1).map(|b| b.name.clone()), Some(first));
+    // Engaging flies to the locked body and starts the approach afresh.
+    let locked = nav.locked.unwrap();
+    nav.final_leg = true;
+    assert_eq!(
+        nav.engage_locked().map(|b| b.name.clone()),
+        Some(nav.bodies[locked].name.clone())
+    );
+    assert_eq!(nav.target, Some(locked));
+    assert!(!nav.final_leg);
+    nav.disengage();
+    assert_eq!(nav.target, None);
+    // A station dead ahead 40 km away is picked by a click on its screen position and not
+    // by a click far from it.
+    let station = nav
+        .bodies
+        .iter()
+        .position(|b| b.kind == Kind::Station)
+        .unwrap();
+    let centre = nav.bodies[station].position;
+    let state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        position: [
+            centre[0] as f64 / UNIT,
+            centre[1] as f64 / UNIT,
+            centre[2] as f64 / UNIT - 40_000_000.0 / UNIT,
+        ],
+        axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        ..Flight::default()
+    };
+    let bodies: Vec<(usize, [f64; 3], f64)> = nav
+        .bodies
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            (
+                i,
+                b.position.map(|v| v as f64 / UNIT),
+                b.radius as f64 / UNIT,
+            )
+        })
+        .collect();
+    let views = ViewState::default();
+    let (x, y, radius) =
+        Screen::body_screen(&state, &views, None, bodies[station].1, bodies[station].2)
+            .expect("the station is in view");
+    assert!(radius >= 10);
+    assert_eq!(
+        Screen::pick(&state, &views, None, &bodies, (x, y)),
+        Some(station)
+    );
+    assert_eq!(
+        Screen::pick(&state, &views, None, &bodies, (x + 100, y + 50)),
+        None
+    );
+    nav.lock(station);
+    assert_eq!(nav.locked, Some(station));
+}

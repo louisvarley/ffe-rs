@@ -82,7 +82,12 @@ pub enum Click {
     Labels,
     Navigation,
     Hyperspace,
+    /// The target button: lock the next body by range.
     Target,
+    /// The autopilot buttons below the view: fly to the locked body (docking at a
+    /// station), and stop.
+    Autopilot,
+    AutopilotOff,
 }
 
 impl Click {
@@ -98,7 +103,6 @@ impl Click {
             Click::Combat => Some("The combat computer needs equipment (not ported)."),
             Click::Capsule => Some("The escape capsule is not ported yet."),
             Click::Labels => Some("Text labels are not ported yet."),
-            Click::Target => Some("Targeting is not ported yet."),
             _ => None,
         }
     }

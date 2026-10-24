@@ -102,3 +102,20 @@ fn acceleration_scales_the_world_but_not_the_controls() {
         "{moved_1x} {moved_10x}"
     );
 }
+
+#[test]
+fn the_autopilot_buttons_sit_beside_the_map_buttons() {
+    use ffe_rs::screen::{AUTOPILOT_BUTTONS, MAP_BUTTONS};
+    // The map buttons keep their places and the autopilot buttons follow them.
+    assert_eq!(Screen::console_click(10, 130), Some(Click::Screen(3)));
+    assert_eq!(Screen::console_click(100, 130), Some(Click::Navigation));
+    assert!(AUTOPILOT_BUTTONS[0].0 > MAP_BUTTONS[1].1);
+    assert_eq!(Screen::console_click(160, 130), Some(Click::Target));
+    assert_eq!(Screen::console_click(230, 133), Some(Click::Autopilot));
+    assert_eq!(Screen::console_click(290, 130), Some(Click::AutopilotOff));
+    // The gaps between them, and the row above, are not buttons.
+    assert_eq!(Screen::console_click(206, 130), None);
+    assert_eq!(Screen::console_click(230, 120), None);
+    // The target button is ported now.
+    assert_eq!(Click::Target.unported(), None);
+}

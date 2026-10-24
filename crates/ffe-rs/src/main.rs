@@ -507,8 +507,79 @@ fn run() -> Result<(), String> {
                         }
                     }
                 }
-                if pressed(Key::Backspace) && nav.target.take().is_some() {
+                if (pressed(Key::Backspace) || console_click == Some(Click::AutopilotOff))
+                    && nav.target.take().is_some()
+                {
+                    nav.disengage();
                     message = "Autopilot off.".to_owned();
+                }
+                // Targets: a click on a body in the view, T (Shift+T the previous) or the
+                // target buttons lock on to it; K or the AUTOPILOT button flies there, and
+                // at a station asks for clearance and docks.
+                if nav.view == NavView::Closed {
+                    let ship = ship_position(&original);
+                    if pressed(Key::T) || console_click == Some(Click::Target) {
+                        let back = window.is_key_down(Key::LeftShift)
+                            || window.is_key_down(Key::RightShift);
+                        if let Some(body) = nav.cycle_lock(ship, if back { -1 } else { 1 }) {
+                            message = format!(
+                                "Locked on {} {}. K or AUTOPILOT flies there.",
+                                body.name,
+                                describe(distance(ship, body.position))
+                            );
+                        }
+                    }
+                    if let Some(point) = click_point
+                        .filter(|(_, y)| console_click.is_none() && (12..118).contains(y))
+                    {
+                        let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                        let candidates: Vec<(usize, [f64; 3], f64)> = nav
+                            .bodies
+                            .iter()
+                            .enumerate()
+                            .map(|(index, body)| {
+                                (
+                                    index,
+                                    body.position.map(|v| v as f64 / unit),
+                                    body.radius as f64 / unit,
+                                )
+                            })
+                            .collect();
+                        let hit = Screen::pick(&state, &views, scene.as_ref(), &candidates, point);
+                        if let Some(body) = hit.and_then(|index| nav.lock(index)) {
+                            message = format!(
+                                "Locked on {} {}. K or AUTOPILOT flies there.",
+                                body.name,
+                                describe(distance(ship, body.position))
+                            );
+                        }
+                    }
+                    if pressed(Key::K) || console_click == Some(Click::Autopilot) {
+                        if nav.locked.is_none() {
+                            message =
+                                "Lock a target first: click it in the view, or press T.".to_owned();
+                        } else {
+                            held_controls.disarm(&keys_down);
+                            if original.is_none() {
+                                // The autopilot flies the original flight model: start it, as
+                                // O does.
+                                let stats = scene
+                                    .as_ref()
+                                    .and_then(|scene| scene.ship_stats(state.ship));
+                                original = Some(
+                                    OriginalFlight::from_flight(&state, stats.as_ref())
+                                        .with_time_acceleration(acceleration),
+                                );
+                            }
+                            if let Some(body) = nav.engage_locked() {
+                                message = if matches!(body.kind, NavKind::Station) {
+                                    format!("Autopilot: docking at {}.", body.name)
+                                } else {
+                                    format!("Autopilot to {}.", body.name)
+                                };
+                            }
+                        }
+                    }
                 }
             }
             if pressed(Key::P) && model_lab.is_none() && model_viewer.is_none() {
@@ -1242,15 +1313,45 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        screen.lock = match nav.as_ref().and_then(|nav| nav.target.map(|i| (nav, i))) {
+        // The autopilot's target, else the locked body: a line of text and brackets in the view.
+        let engaged = nav.as_ref().and_then(|nav| nav.target);
+        let marked = engaged.or_else(|| nav.as_ref().and_then(|nav| nav.locked));
+        screen.has_lock = nav.as_ref().is_some_and(|nav| nav.locked.is_some());
+        screen.lock = match nav.as_ref().zip(marked) {
             Some((nav, i)) => format!(
-                "LOCKED: {} {}",
+                "{}: {} {}",
+                if engaged.is_some() {
+                    "AUTOPILOT"
+                } else {
+                    "TARGET"
+                },
                 nav.bodies[i].name.to_ascii_uppercase(),
                 describe(distance(ship_position(&original), nav.bodies[i].position))
                     .to_ascii_uppercase()
             ),
             None => String::new(),
         };
+        screen.target_mark = nav
+            .as_ref()
+            .zip(marked)
+            .filter(|_| state.mode == ffe_rs::flight::Mode::Flight)
+            .and_then(|(nav, i)| {
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                let body = nav.bodies.get(i)?;
+                let (x, y, radius) = Screen::body_screen(
+                    &state,
+                    &views,
+                    scene.as_ref(),
+                    body.position.map(|v| v as f64 / unit),
+                    body.radius as f64 / unit,
+                )?;
+                Some(ffe_rs::screen::TargetMark {
+                    x,
+                    y,
+                    radius,
+                    engaged: engaged.is_some(),
+                })
+            });
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();

@@ -536,6 +536,9 @@ pub struct Navigator {
     pub selected: usize,
     /// The body the autopilot is flying to.
     pub target: Option<usize>,
+    /// The body the player has locked on (clicked in the view or cycled to): what the
+    /// autopilot button flies to.
+    pub locked: Option<usize>,
     /// The station the player is docked at (or last docked at).
     pub docked: Option<usize>,
     /// Each station's traffic record (F654 and friends), made when first needed.
@@ -669,6 +672,7 @@ impl Navigator {
             view: View::Closed,
             selected: 0,
             target: None,
+            locked: None,
             docked,
             traffic: HashMap::new(),
             sequence: None,
@@ -1133,6 +1137,7 @@ impl Navigator {
         self.bodies = bodies(cache, &self.entries[index], clock_words(self.clock))?;
         self.refreshed = self.clock;
         self.target = None;
+        self.locked = None;
         self.docked = None;
         self.traffic.clear();
         self.markets.clear();
@@ -1195,6 +1200,41 @@ impl Navigator {
     /// the player's target and its autopilot mode, then closes the list).
     pub fn engage(&mut self) -> Option<&Body> {
         let index = self.selected_body()?;
+        self.target = Some(index);
+        self.final_leg = false;
+        self.memory = Memory::default();
+        self.skips = 0;
+        self.view = View::Closed;
+        self.bodies.get(index)
+    }
+
+    /// Lock on to a body of this system (a click on it, or the target button).
+    pub fn lock(&mut self, index: usize) -> Option<&Body> {
+        let body = self.bodies.get(index)?;
+        self.locked = Some(index);
+        Some(body)
+    }
+
+    /// Lock the next body by range from `ship` (the previous one with `step` -1),
+    /// starting from the nearest.
+    pub fn cycle_lock(&mut self, ship: [i64; 3], step: i32) -> Option<&Body> {
+        let mut order: Vec<usize> = (0..self.bodies.len()).collect();
+        order.sort_by(|a, b| {
+            distance(ship, self.bodies[*a].position)
+                .total_cmp(&distance(ship, self.bodies[*b].position))
+        });
+        let next = match self.locked.and_then(|l| order.iter().position(|i| *i == l)) {
+            Some(at) => (at as i32 + step).rem_euclid(order.len() as i32) as usize,
+            None => 0,
+        };
+        let index = *order.get(next)?;
+        self.lock(index)
+    }
+
+    /// Engage the autopilot on the locked body: it flies there and, at a station, asks
+    /// for clearance and docks.
+    pub fn engage_locked(&mut self) -> Option<&Body> {
+        let index = self.locked?;
         self.target = Some(index);
         self.final_leg = false;
         self.memory = Memory::default();
