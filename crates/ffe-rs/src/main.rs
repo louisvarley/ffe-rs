@@ -688,6 +688,9 @@ fn run() -> Result<(), String> {
                 }
                 let action = if pressed(Key::L) {
                     Some(state.launch())
+                } else if pressed(Key::D) && state.system_flight {
+                    message = "Docking at the real stations is not in this build yet.".to_owned();
+                    None
                 } else if pressed(Key::D) {
                     Some(state.request_docking())
                 } else if pressed(Key::B) {
