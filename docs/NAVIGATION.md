@@ -42,11 +42,19 @@ Planets move on the game clock (days plus a fraction), children relative to thei
 
 ## Planets in the flight view
 
-`Screen::discs` (set each frame in `main.rs` from the navigator's bodies): stars,
-planets and moons as shaded discs, farthest first, sized and placed by the
-camera and lit toward the star. This is a stand-in: the surface renderer
-(F1874 scene set-up, the queue handlers F1805/F1806/F1808, F1877 haze) is not
-wired to the screen yet, so there is no terrain, colour bands or atmosphere.
+`Screen::discs` (set each frame in `main.rs` from the navigator's bodies). A body
+with a model is drawn as its real surface: the planet model runs through
+`ModelViewer::render_scene`, whose curved-surface command goes through the ported
+F1876 and emitter (`ModelViewer::draw_surfaces`; the body's `+0xa0` is the seed).
+The viewer's view space is 32-bit, so this only fits within about 3.4 radii of the
+planet (model 129's vertices reach 4.4e8 against a limit of 1.5e9); farther out, and
+for stars, the body is a shaded disc of the right size and phase.
+
+Known gaps: triangles with a corner near or behind the eye are dropped or show as
+wedges (the original's draw routines clip edges; the queue's coordinates wrap in
+16 bits here), textured entries are drawn flat in their first colour, F1877's haze
+is not ported, and the planet is not oriented by its object's matrix. Looks
+checked by eye only (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
 
 ## Known limits
 

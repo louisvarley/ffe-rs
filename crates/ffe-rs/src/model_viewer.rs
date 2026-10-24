@@ -156,6 +156,8 @@ pub struct ModelViewer {
     lighting: Lighting,
     /// The terrain tables and height maps (cache v17), for curved surfaces.
     terrain: Option<(Vec<u8>, Vec<u8>)>,
+    /// The seed (`+0xa0`) of the surface being drawn, set by the caller.
+    pub surface_seed: std::cell::Cell<u32>,
     /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
     descriptors: Vec<[i32; 2]>,
     ship_stats: Vec<Option<ShipStats>>,
@@ -444,6 +446,7 @@ impl ModelViewer {
             textures: TextureSet::default(),
             lighting: FALLBACK_LIGHTING,
             terrain: None,
+            surface_seed: std::cell::Cell::new(0),
             descriptors: Vec::new(),
             ship_stats: Vec::new(),
             model_strings: Vec::new(),
@@ -893,7 +896,7 @@ impl ModelViewer {
             let mut stream: Vec<u8> = surface.entries.iter().flatten().copied().collect();
             stream.extend([0, 0]);
             let scene = Scene {
-                seed: 0,
+                seed: self.surface_seed.get(),
                 origin,
                 axes: std::array::from_fn(|k| vectors[k / 3][k % 3]),
                 kind: surface.parameters[0].max(0) as usize,
@@ -928,6 +931,11 @@ impl ModelViewer {
                         (i32::from(word as i16), i32::from((word >> 16) as i16))
                     })
                     .collect();
+                // A corner behind the view or far off it has wrapped coordinates (the
+                // original's draw routines clip the edges; this does not yet).
+                if points.iter().any(|(x, y)| x.abs() > 1200 || y.abs() > 1200) {
+                    continue;
+                }
                 // Where the colour sits: after the corners (flat), or in the slots.
                 let colour = match handler & 0xff {
                     4 => w[at + 6],
@@ -937,7 +945,7 @@ impl ModelViewer {
                 } & 0xfff;
                 frame
                     .shapes
-                    .push(Shape::Flat(points, self.textures.rgb(colour as u16)));
+                    .push(Shape::Fill(points, self.textures.rgb(colour as u16)));
             }
         }
     }

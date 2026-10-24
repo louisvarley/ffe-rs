@@ -52,6 +52,9 @@ pub struct Body {
     pub position: [i64; 3],
     /// The body's own radius (millimetres), for the arrival distance.
     pub radius: i64,
+    /// The object's model and its `+0xa0` (the surface seed).
+    pub model: u32,
+    pub seed: u32,
 }
 
 /// A system that can be visited.
@@ -223,7 +226,9 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
         };
         let field = &system[at + 0x26..at + 0x3f];
         let text = &field[..field.iter().position(|b| *b == 0).unwrap_or(field.len())];
-        let radius = i64::from(list.dword(slot, 0x138) as i32).max(1_000_000);
+        let radius = ((u64::from(list.dword(slot, 0x13c)) << 32
+            | u64::from(list.dword(slot, 0x138))) as i64)
+            .max(1_000_000);
         // Positions are relative to the parent body (the system is a tree).
         let mut position = [coordinate(0), coordinate(1), coordinate(2)];
         if parent != 0 {
@@ -241,6 +246,8 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
             kind,
             position,
             radius,
+            model: list.dword(slot, 0x82),
+            seed: list.dword(slot, 0xa0),
         });
     }
     Ok(out)

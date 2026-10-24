@@ -22,6 +22,8 @@ pub struct Disc {
     pub light: [f64; 3],
     pub colours: (u8, u8),
     pub star: bool,
+    /// The body's model and surface seed, when it has a drawable surface.
+    pub model: Option<(u32, u32)>,
 }
 
 pub struct Screen {
@@ -243,7 +245,7 @@ impl Screen {
 
     /// Planets and moons as shaded discs, the farthest first (a stand-in for the
     /// surface renderer: size, position and phase are right, the surface is not).
-    fn draw_discs(&mut self, camera: &Camera) {
+    fn draw_discs(&mut self, camera: &Camera, viewer: Option<&ModelViewer>) {
         let mut order: Vec<(f64, Disc)> = self
             .discs
             .iter()
@@ -252,6 +254,21 @@ impl Screen {
             .collect();
         order.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (z, disc) in order {
+            // The real surface when the model fits the view space at this range.
+            if let (Some((model, seed)), Some(viewer)) = (disc.model, viewer) {
+                if let Some(radius) = viewer.find(model).and_then(|m| m.radius()) {
+                    let factor = radius / disc.radius;
+                    let position = camera.point(disc.centre).map(|v| v * factor);
+                    viewer.surface_seed.set(seed);
+                    let light = camera.direction(disc.light);
+                    let rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+                        .map(|axis| camera.direction(axis));
+                    if let Ok(frame) = viewer.render_scene(model, rows, position, light) {
+                        self.draw_shapes(viewer, &frame.shapes);
+                        continue;
+                    }
+                }
+            }
             let [cx, cy, _] = camera.point(disc.centre);
             let scale = 256.0 / z;
             let radius = disc.radius * scale;
@@ -488,7 +505,7 @@ impl Screen {
                     }
                 }
             }
-            self.draw_discs(&camera);
+            self.draw_discs(&camera, scene);
             // FUNC_001054 hides the player's own ship only in the front view.
             // Painter's order between the two objects: the farther one first.
             let own_ship = view != ViewMode::Front;
