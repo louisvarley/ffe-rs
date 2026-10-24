@@ -1,0 +1,800 @@
+# The in-flight ship dashboard / console
+
+Audit of the whole in-flight ship dashboard against JJFFE 2.8a7
+(`jjffe-master/ffe.asm`, the gameplay reference) and the port as it stands on
+2026-10-24 (cache v26, `crates/ffe-rs/src/{screen,console,main,navigation,camera}.rs`).
+This note is documentation only: no game code is changed by it.
+
+Where the reference is JJFFE and not the DOS release, the difference is called
+out. The DOS release is not executed in this repo, so DOS-only pixels/keys are
+marked **not established** rather than guessed.
+
+Related notes: `docs/notes/console.md` (button decode, v0.49i), `views.md`
+(view modes), `galaxy-map.md` (the map), `text.md` (fonts/labels),
+`NAVIGATION.md` (system list), `DEVIATIONS.md` (EXP-001/007/008).
+
+---
+
+## 1. Scope and definition of "fully original dashboard"
+
+A dashboard is fully original when, in every flight mode and at every window
+size, the 320x200 frame is composed the way the original composes it:
+
+1. **The 0..157 / 158..199 split is the original's.** The 3D scene is clipped
+   to y < 158 (`y < 0x9e`; `docs/notes/fills.md`, F1610/F1714), the lower 42
+   rows are the cockpit console.
+2. **The console panel is the original's primary bitmap 43** (320x43, blitted
+   at (0,158), its last row clipped away), not a port redraw.
+3. **Every visible button is a record from `DATA_005100`** and every button
+   image is `bmpindex[current]` selected by `FUNC_000262`; visibility and image
+   are the state variables the original maintains (`FUNC_000263/264`,
+   `FUNC_001116`, `FUNC_000991`, `FUNC_001120`), including radio groups.
+4. **Every hot area is a record from `DATA_007684`**, scanned in order with the
+   last match winning and inclusive edges; a click in the 3D view is action
+   `0xff` (`FUNC_001439`; mouse poll `ffe.asm:86045-86070`).
+5. **The readouts are the original's routines and positions**: `FUNC_000270`
+   gauges, `FUNC_000274/275` scanner, `FUNC_000271/272/273` message log,
+   `FUNC_001099` HUD text and `FUNC_001100/1111/1112` target reticles.
+6. **No port-only status line, top bar, button or icon covers the original's
+   pixels.** ffe-rs currently has several; see the inventory.
+
+"Dashboard" here excludes the station/market/mission screens except where they
+share the console; those are listed under mode-specific UI.
+
+---
+
+## 2. How the original composes the console
+
+### 2.1 The frame
+
+- Logical screen 320x200. The 3D buffer is the upper 320x158; the console is
+  the lower 42 rows. `screen.rs:13-14` has `HEIGHT=480`, `VIEW_HEIGHT=158`;
+  `indexed.rs:1-2` has 320x200; the outer 640x480 buffer is a port scaling
+  choice, not the original.
+- `FUNC_000272` (`ffe.asm:20794`) is the console draw. In order it:
+  1. builds the message-log header (date/time, then up to 10 log entries) at
+     `ffe.asm:20804-21018`;
+  2. blits **primary bitmap 43** at (0,158) (`push 0x9e / push 0 / push 0x2b`,
+     `ffe.asm:21021-21023`);
+  3. blits **secondary 254..261** at (101,175), selected by
+     `(DATA_008933 >> 9) & 7` (`ffe.asm:21025-21029`, `21114-21118`) — the
+     scanner-orientation overlay;
+  4. calls `FUNC_000261` (all visible buttons), `FUNC_000270` (gauges), and
+     `FUNC_000274` (scanner contacts) (`ffe.asm:21030-21035`);
+  5. wraps the log at 124 columns and writes it twice (shadow at x=195,y-1 in
+     colour 4; text at x=196,y=159-scroll, colour 0, clip ymin 158, height 8)
+     (`ffe.asm:21075-21097`, `FUNC_001586` at `ffe.asm:93785`);
+  6. flips the screen (`FUNC_001882_FlipScreenLow`, `ffe.asm:21102-21104`,
+     marked `; Big mod` in JJFFE).
+- `FUNC_000273` (`ffe.asm:21109`) is the console update: it derives
+  `DATA_005090` from the scanner word, scrolls the message log
+  (`DATA_005096`, animation in `DATA_005092/DATA_008677`), handles the scroll
+  actions `0xe/0xf`, auto-scrolls after `0x3cae6` ticks, and calls `F272`.
+- `FUNC_001439_GuiSetConsoleHotAreas` (`ffe.asm:86138`) clears the hot-area
+  list, appends `DATA_007684`, and shows buttons `0x0b..0x0e` and
+  `0x26..0x2b`.
+
+### 2.2 Panel and palette
+
+- Panel: `base:bitmap/primary/043`, 320x43, offset (0,0), `masked_zero=false`
+  (cache manifest; imported byte-exact). `screen.rs:711` blits it at y158.
+- All console art (primary 43, secondary 96..346) is 8-bit indices into the
+  **low palette**, `base:palette/low` (128 RGB6 entries). `screen.rs` expands
+  them with `palette_rgb6`. The runtime **upper palette** is not reproduced
+  (`docs/STATUS.md`, item 2), so colours the original approximates at runtime
+  (notably text and the map) are approximations.
+- Console text colours are COLPAL values passed through `FUNC_001399/1401/
+  1586`; the message log injects control bytes `0x01 0x04` (date) and
+  `0x01 0x06` (entries) (`ffe.asm:20814-20860`). The port picks fixed palette
+  indices 15/17/18 (`screen.rs:656-687`, call sites 946/1008/1030), which is a
+  port approximation, not the original's text-colour logic.
+
+### 2.3 Geometry summary
+
+| Item | Original | Source |
+|---|---|---|
+| Scene viewport | 0..157 (y < 0x9e) | `docs/notes/fills.md`; `screen.rs:14` |
+| Console | y 158..199, panel 43 rows (last clipped) | `ffe.asm:21021`; `screen.rs:711` |
+| Scanner centre | around (147,187) for contacts; panel art centred near x153 | `F275`, `ffe.asm:21500-21520` |
+| Message window | x196..320, y159..199, wrap 124, 8 px lines | `F272`, `ffe.asm:21075-21097` |
+| Gauges | x237/242/249, y161, 17x15 art, clip top `0xad - h` (h = value*12>>16) | `F270`, `ffe.asm:20585-20618` |
+| Scanner orientation | x101,y175, 92x30 | `F272`, `ffe.asm:21025-21029` |
+
+---
+
+## 3. Inventory
+
+States: **done**, **partial**, **drawn-but-inert** (pixels exist, no original
+behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
+
+| # | Element | Original source (asm refs) | Port state | Evidence | Gap |
+|---|---|---|---|---|---|
+| 1 | Console panel (primary 43 at y158) | `F272` `ffe.asm:21021`; `F1439` `86138` | done | `screen.rs:711`; cache asset `base:bitmap/primary/043`; `verify-assets.py` | Panel only; nothing below is drawn on it except the port's own UI |
+| 2 | 0..157 / 158 split | `F1610/F1714` y<0x9e; `fills.md` | done | `screen.rs:14`; `camera.rs` projection | — |
+| 3 | Low palette / colour | `F1601` etc.; low palette asset | partial | `screen.rs:206-264`, `palette_rgb6` | Runtime upper palette and original text colours unknown (`STATUS.md` item 2) |
+| 4 | Screen buttons F4,F3,F2,F1 (0x0b-0x0e) | `DATA_005100` 0x0b-0x0e; `F261`; `F1439` | partial | `console.rs:30-35`; `screen.rs:717-723`; `tests/console.rs` | F1 works; F2/F3/F4/F5 hot areas return `Click::Screen` and **nothing consumes it** (`unported()` is only used by tests) |
+| 5 | View buttons front/rear/turret/external (0x15-0x18) | `F1001/F1002/F1003`; `views.md` | done (4 of 6) | `screen.rs:198-203,732-743`; `tests/views.rs` | Missile (0x14) and combat (0x13) hidden by absent equipment; turret shown only >2 mounts as original |
+| 6 | Time-acceleration meter 0x26-0x2b | `F208` `ffe.asm:17066`; `F1439` | done | `console.rs:19-28`; `screen.rs:725-730`; `tests/console.rs:14-74` | 0x25 duplicate pause mark not drawn; `DATA_008808 -= 0xc22e` quirk not ported |
+| 7 | Right-hand buttons 0x0f-0x12 / 0x00-0x0a | `DATA_005100`; hot areas 0x6e/0x6c/0x48; `NAVIGATION.md` | **in progress elsewhere** | `console.rs:114-138` hot areas; `screen.rs` draws port buttons instead | Two right-hand icons (in-system list, labels) are being done in another branch; do not duplicate |
+| 8 | Autopilot/STOP/TARGET buttons | none (port addition) | drawn-but-inert (visual) | `screen.rs:113-115,987-1011` | Port-only; they cover the original HUD area and must move/retire for a fully original dashboard |
+| 9 | Button table/state engine (82 records, radios, visibility) | `DATA_005100` `ffedat.asm:4601`; `F261/262/263/264` `ffe.asm:20336-20490` | partial (hard-coded 14) | `console.rs`; `screen.rs:198` | Table not imported; visibility/cur/radio state not modelled; F262's radio reset not reproduced |
+| 10 | Three bar gauges | `F270` `ffe.asm:20554-20622` | **missing** | none | No gauge art/positions/values; `+0x11e`, `+0xea`, `DATA_008921` not modelled |
+| 11 | Scanner background/range rings | panel 43 art; `F272` | partial | `screen.rs:711` (panel art) | Rings are only the static art; no computed contacts/rings |
+| 12 | Scanner contacts | `F274/F275` `ffe.asm:21239-21526`; `F1569` `93327` | **partial / placeholder** | `screen.rs:907-915` draws one 3-pixel station blip | No object list scan, filter, stalk length, colour table, or scale |
+| 13 | Scanner orientation | `F273` `ffe.asm:21114-21118`; secondary 254-261 | **missing** | none | 8-frame overlay at (101,175) not drawn |
+| 14 | Message log (10 dated entries, wrap, scroll) | `F271/272/273`; `DATA_008681` `ffedat.asm:27851` | **missing** (port line) | `screen.rs:1013-1031` | One transient message, 2 lines at (3,139); no log, date/time, right column, scroll, colours |
+| 15 | Date/clock in flight | `F272` date/time header; `StringConvertDate/Time` | missing in flight | galaxy map has a date (`galaxy_map.rs`) | In-flight console has no date/time |
+| 16 | Speed / set speed / altitude | `F1099` string 0x8620/22, x15,y148 | partial (port line) | `screen.rs:936-950` (y13) | Port's own "SPEED ... SET ..." at y13 in m/s; original text/position/units differ |
+| 17 | Shields % | `F1099` `ffe.asm:80780-80820`, 0x8624 at (2,1) | **missing** | none | `ship+0xe0/+0xe2` not modelled; original text overwritten by top bar |
+| 18 | Hull % | `F1099` `ffe.asm:80821-80855`, 0x8638 at (2,11) | **missing** | none | `player+0x10e`, `ship+0xe4`, descriptor mass not modelled |
+| 19 | Target range / reticle / off-screen text | `F1100` `ffe.asm:81021-81344`; 0x8604/05, 0x8606-11; `F1112` bitmap 98 | partial | `screen.rs:891-906` corners; `lock` string y22 | No range at the target, no off-screen "Behind"/"Out of Range", no bitmap 98 X |
+| 20 | Target shields/hull readout | `F1099` `ffe.asm:80856-80900`, 0x8625/26 at (235,1) | **missing** | none | Target damage state not modelled |
+| 21 | Target warnings: Hyp.Analyser, bounty, clouds | `F1099` `ffe.asm:80900-80990`; 0x862f/30/31/32/34 | **missing** | none | No equipment/cloud/mission state |
+| 22 | Gunsight / fixed crosshair | `F1111` `ffe.asm:81954`; bitmap 97 at (129,48) | partial | `screen.rs:902-905` four lines, front only | Wrong art, wrong view rule (original checks per-view equipment; not views 4/6) |
+| 23 | Target X reticle | `F1112` `ffe.asm:81996`; bitmap 98 | partial | brackets at `screen.rs:891` | Not the original X, no size/clip rule |
+| 24 | Turret declination/rotation text | `F1099` `ffe.asm:80700-80740`; 0x8636 at (5,76) | **missing** | none | No turret readout |
+| 25 | Status lamps 0x37-0x39 | `DATA_005100`; initial images; `F151`/`F217` | missing | none | 3 ship-icon lamps at (52,185)/(71,189)/(87,188) |
+| 26 | Status lamps 0x45-0x49 | `F1116` `ffe.asm:82223-82346` | **missing** | none | Conditions/images not modelled |
+| 27 | Equipment page 0x3a-0x51 (engines off) | `F1120` `ffe.asm:82429-82620`; `F1117/1118` | **missing** | none | Whole alternate console (`0x3a` ship diagram, 10 equipment icons, 14 lamps) absent |
+| 28 | View-row equipment icons 0x10-0x19 | `F991` `ffe.asm:73469-73560` | **missing** | none | Equipment bits not modelled; `0x11-0x14` never shown, `0x16` mount rule not tied to the same state |
+| 29 | Front/rear/turret/external console/HUD | `F1099` view branches; `views.md` | partial | `main.rs:865-930`; `camera.rs` | Views work; HUD differs per view nowhere, crosshair rule wrong |
+| 30 | Missile / combat-computer views | `F1099` views 5/6; `F1110`; `views.md` | **missing** | `console.rs:95-105` messages only | Need equipment/missiles/targeting; buttons hidden |
+| 31 | Docked/landed screens | FFE station services; `F2` screens | partial (port screen) | `screen.rs:761-790`, `draw_market` | Port's own market/status box; no original station/cockpit screens |
+| 32 | Galaxy/system maps | `F840` etc.; `galaxy-map.md`; `NAVIGATION.md` | done (scene), partial (console) | `galaxy_map.rs`, `screen.rs:1121` | Map scene verified; console text/fuel line use port formatting |
+| 33 | Damage/death/escape capsule | `F1104` death; `F1098` capsule; `F12` | **missing** | `console.rs:95-105` | No hull/death/capsule; F12 is the model viewer (`main.rs:479-499`) |
+| 34 | Hyperspace countdown | `F908-F910`; `DEVIATIONS.md` EXP-007 | **missing** | `main.rs:605-705` immediate jump | No countdown UI/scene |
+| 35 | Autopilot indicator | `F1099` 0x8618 at (15,139); `F1116` 0x47 | partial (port) | `screen.rs` message/button | Port's AUTOPILOT button and text, not original indicator |
+| 36 | Text metrics / clipping | `F1586` `ffe.asm:93785`; font asset 9 rows | partial | `indexed.rs:9-80`; `screen.rs:656-687` | Port wraps by 308 px at x3; original console clips at y158..199, wraps 124, 8 px height |
+| 37 | Hot areas | `DATA_007684` `ffedat.asm:23641`; `F1439`; mouse poll `ffe.asm:86045-86070` | done (22/22) | `console.rs:114-147`; `tests/console.rs` | Exact coordinates/order; but 0xff view click and consumer behaviour port-side only |
+| 38 | Keys | `F1056`; `DATA_007688`; JJFFE 6-0 | partial | `views.md`; `main.rs` | F2/F4/F10 unused; F3 toggles controls, F11 screenshot, F12 viewer (deviations) |
+| 39 | Port-only top bar/status block/map buttons | none | drawn (deviation) | `screen.rs:958-1011` | Occupies original shields/hull/Autopilot positions; must be retired for originality |
+| 40 | Radio groups | `F262` `ffe.asm:20369-20413`; table | partial | `screen.rs:732` manual compare | Only group 1 views and group 3 meter approximated; no generic reset |
+| 41 | Contact colours | `DATA_008683` `ffedat.asm:27855`; `F275` | **missing** | none | 19-colour contact table not imported |
+| 42 | Button redraw/state updates | `F1116` `82223`; `F991`; `F1120`; `F1003` | **missing** | `screen.rs` redraws constants every frame | No per-mode visibility/image state or update-on-change |
+
+---
+
+## 4. The console button table (`DATA_005100`)
+
+### 4.1 Layout
+
+`DATA_005100` (`ffedat.asm:4601`) begins with a dword bitmap-base (0) followed by
+**82 `ConButton` records of 0x3e bytes** (`F261`, `ffe.asm:20336-20370`):
+
+```
++0x00 long xpos
++0x04 long ypos
++0x08 long bmpindex[10]
++0x30 long visible
++0x34 long curindex
++0x38 word unused
++0x3a long radioID
+```
+
+`F261` walks `DATA_005101` as the visible byte and draws `bmpindex[curindex]`
+for each visible record in index order. `F262` sets a record's image and, when
+the new image is non-zero, resets **every record with the same radioID** to
+image 0 (`ffe.asm:20369-20413`). `F263/F264` set/clear `visible`. Bitmap ids
+>= 96 are the secondary table (id-96); ids < 96 are primary.
+
+### 4.2 Full table (decoded from `ffedat.asm:4601`, byte-exact)
+
+`off/on` is `bmpindex[0]/bmpindex[1]`; records with ten images list all ten.
+
+```
+idx  x   y   bitmaps                                  vis cur radio
+00  296 178 102/179                                   0   0   1
+01  274 178 103/180                                   0   0   1
+02  261 177 104/181                                   0   0   1
+03  237 174 105/182                                   0   0   1
+04  224 169 106/183                                   0   0   1
+05  211 168 107/184                                   0   0   1
+06  198 165 108/185                                   0   0   1
+07  181 163 109/186                                   0   0   1
+08  162 163 110/187                                   0   0   1
+09  142 163 111/188                                   0   0   1
+0a  125 163 112/189                                   0   0   1
+0b  107 164 127/164                                   0   0   2
+0c   91 165 128/165                                   0   0   2
+0d   70 166 129/166                                   0   0   2
+0e   60 172 130/167                                   0   1   2   F1 starts lit
+0f  296 178 153/168                                   0   0   7
+10  274 178 154/169                                   0   0   6
+11  261 177 155/170                                   0   0   5
+12  237 174 156/171                                   0   0   1
+13  224 169 157/172                                   0   0   1
+14  211 168 158/173                                   0   0   1
+15  198 165 159/174                                   0   0   1
+16  181 163 160/175                                   0   0   1
+17  162 163 161/176                                   0   0   1
+18  142 163 162/177                                   0   0   1
+19  125 163 163/178                                   0   0   1
+1a  296 178 190/201                                   0   0   1
+1b  274 178 191/202                                   0   0   1
+1c  261 177 192/203                                   0   0   1
+1d  237 174 193/204                                   0   0   1
+1e  224 169 194/205                                   0   0   1
+1f  211 168 195/206                                   0   0   10
+20  198 165 196/207                                   0   0   10
+21  181 163 197/208                                   0   0   1
+22  162 163 198/209                                   0   0   1
+23  142 163 199/210                                   0   0   1
+24  125 163 200/211                                   0   0   1
+25   40 192 253/253                                   0   0   3   pause duplicate
+26   40 192 243/252                                   0   0   3   pause mark
+27   41 187 242/251                                   0   0   3   1x
+28   43 180 241/250                                   0   0   3   10x
+29   44 173 240/249                                   0   0   3   100x
+2a   45 165 239/248                                   0   0   3   1000x
+2b   48 158 238/247                                   0   0   3   10000x
+2c  296 178 131/142                                   0   0   7
+2d  274 178 132/143                                   0   0   6
+2e  261 177 133/144                                   0   0   5
+2f  237 174 134/145                                   0   0   1
+30  224 169 135/146                                   0   0   1
+31  211 168 136/147                                   0   0   1
+32  198 165 137/148                                   0   0   1
+33  181 163 138/149                                   0   0   1
+34  162 163 139/150                                   0   0   1
+35  142 163 140/151                                   0   0   1
+36  125 163 141/152                                   0   0   1
+37   52 185 212/213                                   0   0   35
+38   71 189 214/215                                   0   1   36
+39   87 188 216/217                                   0   0   37
+3a    0 157 268                                       0   0   23  60x45 ship diagram
+3b   14 165 [282,282,346,278,279,276,277,344,343,345] 0 0 13
+3c   33 164 [282,282,346,278,279,276,277,344,343,345] 0 0 14
+3d    9 167 [282,282,346,278,279,276,277,344,343,345] 0 0 15
+3e   38 166 [282,282,346,278,279,276,277,344,343,345] 0 0 16
+3f    1 168 [282,282,346,278,279,276,277,344,343,345] 0 0 17
+40   43 169 [282,282,346,278,279,276,277,344,343,345] 0 0 18
+41    1 180 [282,282,346,278,279,276,277,344,343,345] 0 0 19
+42   36 179 [282,282,346,278,279,276,277,344,343,345] 0 0 20
+43    8 177 [282,282,346,278,279,276,277,344,343,345] 0 0 21
+44   29 176 [282,282,346,278,279,276,277,344,343,345] 0 0 22
+45   17 174 267                                       0   0   23
+46    3 170 265/266                                   0   0   24
+47    5 175 262                                       0   0   25
+48    0 186 264/263                                   0   0   26
+49   24 158 287/280                                   0   0   27
+4a   12 190 284/272                                   0   0   28
+4b   44 156 269                                       0   0   29
+4c   18 169 283                                       0   0   30
+4d    0 157 285                                       0   0   31
+4e    0 157 286                                       0   0   32
+4f   24 158 288                                       0   0   33
+50  268 158 281                                       0   0   34
+51   17 179 271                                       0   0   35
+```
+
+Radio groups: **1** = 36 records (all view/equipment/page slots); **2** = the
+four screen buttons; **3** = the meter (plus the 0x25 duplicate); **5/6/7** =
+the right-hand slots; **10** = the missile/combat pair; **13..22** = the ten
+equipment icons; **23..37** = lamps.
+
+### 4.3 Handlers and current port coverage
+
+| Records | Role | Handler | Port |
+|---|---|---|---|
+| 0x0b-0x0e | screen buttons F4/F3/F2/F1 | `F1439` shows; `F1003`/screen callbacks | drawn; only F1 works |
+| 0x15-0x18 | front/rear/turret/external | `F1001/F1002/F1003` | done |
+| 0x13/0x14 | combat/missile views | `F1002/F1056`, equipment | hidden (no equipment) |
+| 0x26-0x2b | time acceleration | `F208` | done |
+| 0x0f-0x12, 0x00-0x0a | right-hand cluster (nav/labels/H/capsule mapping partly in progress) | hot areas 0x6e/0x6c/0x48; `F1116` | in progress elsewhere; port draws its own buttons |
+| 0x37-0x39 | three lamps | initial images; `F151`/`F217` | missing |
+| 0x3a-0x51 | engines-off systems page | `F1117/F1118/F1120` | missing |
+| 0x10-0x19 | view-row equipment icons | `F991` | missing |
+
+No port code consumes `Click::Screen(2/4/5)`, `Click::Missile`,
+`Click::Combat`, `Click::Capsule` or `Click::Labels`; `Click::unported()` is
+only used by `tests/console.rs`. They silently do nothing today, which the
+existing `console.md` describes inaccurately as "answers not ported yet".
+
+---
+
+## 5. Hot areas (`DATA_007684`)
+
+`ffedat.asm:23641`, 22 records of `(x0,y0,x1,y1,action)` (5 dwords each,
+terminated by -1). The mouse poll scans the whole list, **the last containing
+area wins**, all four edges inclusive, and `y >= 0x9e` with no area gives action
+0, while `y < 0x9e` gives action `0xff` (`ffe.asm:86045-86070`). A click is
+taken on the press edge (`DATA_007710/DATA_007708`).
+
+| # | Rect | Action | Meaning | Port |
+|---|---|---|---|---|
+| 0 | 40,194-52,200 | 0x07 | pause mark | `Click::Pause` |
+| 1 | 40,188-52,194 | 0xc1 | 1x | `Acceleration(0)` |
+| 2 | 41,182-53,188 | 0xc2 | 10x | `Acceleration(1)` |
+| 3 | 43,174-55,182 | 0xc3 | 100x | `Acceleration(2)` |
+| 4 | 44,166-56,174 | 0xc4 | 1000x | `Acceleration(3)` |
+| 5 | 45,158-57,166 | 0xc5 | 10000x | `Acceleration(4)` |
+| 6 | 64,172-79,191 | 0xf1 | F1 | `CycleView` |
+| 7 | 74,166-89,185 | 0xf2 | F2 | `Screen(2)` (inert) |
+| 8 | 95,165-110,184 | 0xf3 | F3 | `Screen(3)` (map) |
+| 9 | 111,163-126,182 | 0xf4 | F4 | `Screen(4)` (inert) |
+| 10 | 129,163-144,182 | 0xf5 | F5 | `Screen(5)` (inert) |
+| 11 | 146,163-161,182 | 0xf6 | F6 front | `Front` |
+| 12 | 166,163-181,182 | 0xf7 | F7 rear | `Rear` |
+| 13 | 185,163-200,182 | 0xf8 | F8 turret | `Turret` |
+| 14 | 202,165-217,184 | 0xf9 | F9 external | `External` |
+| 15 | 215,168-230,187 | 0xfa | F10 missile | `Missile` (inert) |
+| 16 | 228,169-243,188 | 0xfb | F11 combat | `Combat` (inert) |
+| 17 | 241,174-256,193 | 0xfc | F12 capsule | `Capsule` (inert) |
+| 18 | 265,177-280,196 | 0x6e | `n` nav computer | `Navigation` |
+| 19 | 280,178-295,197 | 0x6c | `l` labels | `Labels` (inert) |
+| 20 | 300,178-315,197 | 0x48 | `H` hyperspace | `Hyperspace` |
+| 21 | 24,158-41,166 | 0x74 | `t` target | `Target` |
+
+`console.rs:114-138` matches this table exactly, and `tests/console.rs` checks
+edges, overlap (F2 over F1 at x74-79), and the meter/pause boundary. That part
+of the audit is clean.
+
+---
+
+## 6. Readouts and indicators
+
+### 6.1 Speed, set speed, altitude (`F1099`, strings 0x8620/0x8622)
+
+`FUNC_001099` (`ffe.asm:80489`) is the flight HUD. It expands
+`0x8620`/`0x8622` (Set:/Act: and Set:/Act:/Alt:) through `F1399`
+(`StringDrawWrapShadow(code, vars, col, x, y, wrap)`) at **x=15, y=148,
+colour 2** (`ffe.asm:80720-80760`). When engines are off or the autopilot is
+on it uses the Act-only twin (`0x8621/0x8623`, selected by `inc edi`). The
+values are
+`[player+0x1b8]` (set), `[player+0xd8]` (actual), and the ship registration
+(`DATA_009124`). The same routine draws "Autopilot" (`0x8618`) at **x=15,
+y=139, colour 2** when `player+0xe8 == 2`.
+
+Port: its own line `SPEED n M/S SET n M/S TIME ... PAUSED` at `(3,13)`
+(`screen.rs:936-950`), in metres per second, not the original strings or
+positions. The original does not print a time-scale word; the lit meter is the
+indicator.
+
+### 6.2 Shields and hull (`F1099`, 0x8624/0x8638)
+
+- Shields: `[ship+0xe0] * 100 / [ship+0xe2]`, drawn as `0x8624` at **x=2,
+  y=1, colour 15** (`ffe.asm:80780-80820`). Skipped when the two words are
+  equal.
+- Hull: only when `[player+0x10e] != 0`; `[ship+0xe4] * 1000 / descriptor[+6]`
+  (descriptor mass), drawn as `0x8638` at **x=2, y=11, colour 15**
+  (`ffe.asm:80821-80855`).
+
+The port has no shield/hull/health state (`flight.rs:16-52`), so both are
+missing. The port's top bar (`screen.rs:959-975`) currently sits exactly on
+these rows.
+
+### 6.3 Target range, reticle and off-screen messages (`F1100`)
+
+`FUNC_001100` (`ffe.asm:81021`) gets the target (`player+0xed`), computes the
+distance through F590/F1466/F1489, converts it to km/AU (`DATA_008883` selects
+the range band; `0x8604` km, `0x8605` AU), and draws the number at the target's
+screen position minus 5 px. Off-screen/behind/out-of-range targets move to
+(50,50) or (50,60 for nav) and select `0x8606`-`0x8611` (`ffe.asm:81180-81330`).
+`F1112` (`ffe.asm:81996`) blits **bitmap 98** (35x35 X) at the target
+(`x-19,y-18`), clipped to the view.
+
+Port: corner brackets (`screen.rs:891-906`) and a `lock` string at `(3,22)`
+(`screen.rs:986-989`). No range at the target, no off-screen text, no X
+bitmap. `TargetMark` carries only x/y/radius/engaged (`screen.rs:122-127`).
+
+### 6.4 Target damage and warnings (`F1099`)
+
+At **x=235, y=1, colour 15**, `F1099` draws the target's shield/hull readout
+(`0x8625` when `target+0xe2 != 0`, else `0x8626`) (`ffe.asm:80856-80900`).
+Below it, when the target has the relevant equipment, it draws:
+
+- `0x862f` "Hyp.Analyser" at (235,51), colour 95;
+- a second status string `0x989e` at (235,61), colour 95;
+- `0x8634` "Bounty: $" at (235,71), colour 16;
+- cloud type/`0x8630/31/32` at (225,1), colour 15.
+
+None of this state exists in the port.
+
+### 6.5 Turret angles (`F1099`, 0x8636)
+
+In turret views (`view >= 2`), `F1099` converts `player+0x204/0x206` and draws
+`0x8636` ("Decn.: n^\nRotn.: n^") at **x=5, y=76, colour 18**
+(`ffe.asm:80700-80745`). Missing in the port; `camera.rs` holds the angles but
+nothing prints them.
+
+### 6.6 The three gauges (`F270`)
+
+`FUNC_000270` (`ffe.asm:20554-20622`) blits three 17x15 bars at y161 and clips
+each from the top at `ymin = 0xad - h`, with `h = value * 12 >> 16` (0..11), so
+the bar grows upward from its bottom:
+
+| x | bitmap | value |
+|---|---|---|
+| 249 | primary 275 (0x113) | `DATA_005089[ship+0xd0] * high16(ship+0x11e) >> 8`, capped at 0xffff when below 0x2000 and `DATA_008805 & 0x80` |
+| 242 | primary 274 (0x112) | `word [ship+0xea]` |
+| 237 | primary 273 (0x111) | `[DATA_008921]` |
+
+`+0x11e` is the ship's energy pool (F929 decrements it and triggers the
+low-energy failure, `ffe.asm:69356-69400`); `+0xea` is the heat accumulator
+(F930 raises it, clamped at 0xffff, and F931 treats above 0xf000 as the
+overheat threshold, `ffe.asm:69460-69545`); `DATA_008921` is only reset to 0 at
+player creation in this build (`ffe.asm:73943`), so its meaning is **not
+established**. Do not label the bars "fuel"/"shields" without
+an owner decision; the art itself has no text.
+
+Port: no gauges and none of the three state values (`flight.rs` has no energy,
+heat or third gauge). This is the largest purely visual gap after the message
+log.
+
+### 6.7 Scanner (`F274/F275`, `F1569`, orientation 254-261)
+
+- `FUNC_000274` (`ffe.asm:21239`) runs when `ship+0xca & 4`. It walks live
+  object slots `0x72..1`, taking those whose presence byte is non-zero and
+  whose scanner flag bit 0x10 is set, and calls `F275` for each.
+- `F275` (`ffe.asm:21296`) computes the relative position, applies the scanner
+  rotation and the range scaling, places the contact at `x = 0x93 + dx`,
+  `y = 0xbb - (dz * 10 / 45)`, picks a colour from `DATA_008683`
+  (`descriptor[+6] >> 4`), and calls `F1569_DrawScannerStalk`
+  (`ffe.asm:93327`) to draw one or two vertical stalks.
+- The scanner's **orientation** is the 92x30 overlay 254..261 at (101,175),
+  selected by `(DATA_008933 >> 9) & 7` (`F273`, `ffe.asm:21114-21118`);
+  `DATA_008933` is the scanner rotation word (`docs/notes/physics.md`).
+- Range rings are part of panel 43's art; the code does not compute them.
+
+Port: the panel art (rings) only, plus one 3-pixel station blip at
+`screen.rs:907-915` using port-only math. No contacts, no stalk length, no
+colour table, no orientation overlay.
+
+### 6.8 Message log and date/clock (`F271/F272/F273`)
+
+- `FUNC_000271` (`ffe.asm:20623`) adds an entry: it copies the string into one
+  of ten 1025-byte entry buffers (stride 0x40e) at `DATA_008681`
+  (`ffedat.asm:27851`), stores its date/time (`DATA_008678/79`) and flags
+  (`DATA_008682`), advances `DATA_005098/99` and sets the scroll target.
+  `DATA_005097` is the current slot.
+- `F272` builds the header (date then time using `StringConvertDate
+  [DATA_008807]` / `StringConvertTime [DATA_008804]`), then, if
+  `DATA_008810 != 0`, appends the ten stored entries with their dates/times
+  and names (`ffe.asm:20804-21018`).
+- It wraps the buffer at **124 columns**, then writes a shadow at (195,
+  159-1-scroll) in colour 4 and the text at (196, 159-scroll), clip ymin 158,
+  line height 8 (`ffe.asm:21075-21097`; `F1586` at `93785`).
+- `F273` scrolls with actions 0xe/0xf, animates `DATA_005096` (clamped to
+  -0x18), and auto-scrolls to the newest after `0x3cae6` ticks
+  (`ffe.asm:21114-21232`).
+
+Port: a single `message` string wrapped by pixel width 308 at `(3,139)`, max
+two lines, colour 18 (`screen.rs:1013-1031`). No log, no date/time, no scroll,
+no right-hand column. This is the largest behavioural gap in the dashboard.
+
+### 6.9 Reticles, gunsight, velocity marker
+
+- Fixed gunsight: `F1111` (`ffe.asm:81954`) blits **bitmap 97** (61x61 circled
+  X) at (129,48), i.e. centred on the view, when the current view's equipment
+  byte `ship+0xd2+view` is non-zero. It also draws the locked-target box/circle
+  when `DATA_007246/247` and the blink flag are set.
+- Target X: **bitmap 98** via `F1112` (above).
+- Target brackets: `F1113/F1114` (`ffe.asm:82024-82192`) draw four lines of a
+  square around the target with the size from its distance/shift; the port's
+  brackets are its own.
+- **No velocity-vector marker was found** in `F1099`/`F1100`/`F1111`/`F1112`.
+  If one exists it is outside the audited flight HUD. Do not invent one.
+- Bitmaps 99/100 (64x64 frame, 62x62 dashed frame) are imported but no
+  constant-index flight draw site was found; treat them as unused/unknown
+  until a reference frame shows them.
+
+### 6.10 Status lamps and the engines-off page
+
+`F1116` (`ffe.asm:82223-82346`) manages `0x45-0x49` (all invisible on the
+normal page until it runs):
+
+- `0x47` shown when `ship+0xe8 >= 0x2e` and `ship+0xf0 == 0`;
+- `0x45` shown when `ship+0x268 != 0`, `ship+0xe8 <= 6`, `ship+0xc6 & 0x40`
+  and `ship+0xc7 & 1`;
+- `0x46` always shown; `F1116` sets the images of both `0x38` and `0x46` to 0
+  when `ship+0xe9 & 2`, else 1;
+- `0x48` always shown; `0x49` shown when `DATA_007246 == 0`;
+- `0x48` image becomes 1 when `ship+0xe8 < 0x28` (and either `ship+0xe9 & 1`
+  is clear or `DATA_003fb6 & 2` is set);
+- `0x49` image 1 when the player's target is set and its `+0xca & 0x20`.
+
+`F1118` switches between `F1117` (normal) and `F1120` (engines off) on
+`DATA_008871 & 8`. `F1120` (`ffe.asm:82429-82620`):
+
+- hides `0x45-0x49`, shows `0x3a` (60x45 ship diagram at (0,157)), shows `0x4f`
+  when `DATA_007247 == 0`;
+- for `ebx = 9..0`, reads `ship+0xd6+ebx`; when non-zero shows `0x3b+ebx` with
+  image `byte & 0xf` (ten equipment icons around the diagram), else hides it;
+- shows `0x51` when `ship+0xc9 & 8` and `player+0x174 != 0`;
+- `0x4a` image 1 on `ship+0xca & 0x80`, image 0 and shown on `ship+0xca & 8`;
+- `0x4b` on `ship+0xcb & 4`; `0x4c` on `ship+0xcb & 1`; `0x4d` on
+  `ship+0xc8 & 4`; `0x4e` when `(player+0x511e != 0 && ship+0xe8 == 0x34)` or
+  `ship+0xc6 & 0x10`;
+- appends hot areas `DATA_007258`, sets `ship+0xe9 |= 8`, lights `0x19`.
+
+`F991` (`ffe.asm:73469-73560`) shows the ten view-row icons `0x10-0x19`
+(`0x10` always; `0x11-0x14` conditioned on equipment bits
+`ship+0xc8 & 0x20/0x8000000/0x40`, `ship+0xc9 & 2`, `ship+0xef`;
+`0x15` always; `0x16` only with more than two mounts; `0x17-0x19` always).
+
+Port: none of the above. The equipment bits, `0x268`, `0x174`, `0x511e` and
+the engines-off console page are absent.
+
+---
+
+## 7. Mode-specific UI
+
+| Mode | Original | Port |
+|---|---|---|
+| **Flight / front** | `F1099` HUD, console, scanner contacts, message log | panel/buttons/port line; no HUD/scanner/log |
+| **Rear** | same console; own ship hidden only in front; target range text still drawn (tunnels skip views 4/6) | same port console; own ship drawn; crosshair front-only (original is equipment/view-based) |
+| **Turrets** | same console; turret eye; `0x8636` declination/rotation text | view + eye; no text; arrows/A-Z aim |
+| **External** | same console; crosshair not drawn (views 4/6); ship drawn | view + camera; crosshair hidden |
+| **Missile (5)** | `F1099`/`F1100` missile branch, tracked missile, console | missing (no missiles/equipment) |
+| **Combat computer (6)** | bitmap 97 gunsight, target boxes, `F1108/F1109`, console | missing |
+| **Docked** | separate station/cockpit screens; the console art is shared | port market/status box; console buttons suppressed (`screen.rs:715`) |
+| **Landed (rough/normal)/take-off** | strings `0x8614-0x8617`; surface state; console | no landed state; docking is an immediate mode change |
+| **Map** | F3 galaxy map, system list, console date/name/type/fuel (`galaxy-map.md`, `NAVIGATION.md`) | galaxy scene + system list ported; console formatting is the port's |
+| **Damage/death** | hull/shield %, `F1104` death to external view, `F1098` escape capsule (F12) | no damage; F12 is the model viewer |
+| **Hyperspace** | `F908-F910` countdown/scene; console | immediate jump (`main.rs:605-705`, EXP-007) |
+| **Autopilot** | `0x8618` at (15,139), lamp `0x47`, targeter boxes | port message + AUTOPILOT button |
+
+---
+
+## 8. Input and layout rules
+
+- **Hot areas**: exact table in §5; last match wins, inclusive, press edge,
+  view click = 0xff.
+- **Radio groups**: `F262` resets same-radio buttons to image 0; the port only
+  compares `ViewMode` manually for the four view icons and `lit_step` for the
+  meter. A generic table engine must reproduce the reset, otherwise e.g.
+  selecting one view leaves stale images in the other pages.
+- **Keys**: DOS scancodes map through `DATA_007688`/`F1429`; F1-F10 ->
+  actions 0xf1-0xfa, F11 0xfb, F12 0xfc (`views.md`). JJFFE additionally maps
+  keys **6-0 to Shift+F1..F5** (stardreamer) and changes `F208`
+  (`ffe.asm:17066`, `add eax,0xffffffca ; was ffffff3f`); DOS uses
+  Shift+F1..F5. The port uses 6-0. JJFFE also moves F to FPS, R to refuel,
+  `;`/Insert to ECM and adds numpad thrust (`jjffe28.txt`).
+- **Port key deviations**: F3 toggles modern/classic controls
+  (`main.rs:513`) although the original F3 is the map; F10/F11/F12 are
+  repurposed; F2/F4/F5 are unused. F1/F6/F7/F9 and F8 match.
+- **Redraw**: original `F262` changes an image, `F263/264` visibility,
+  `F1439` hot areas, and `F1116`/`F991`/`F1120` re-derive state after mode,
+  target, equipment or engine changes; pixels are redrawn by `F272` each
+  frame. The port recomputes all icons from constants every frame and has no
+  state to update.
+- **Text/font**: `base:font/main` is 116 glyphs, 9 rows, advance 1..9
+  (`indexed.rs:9-80`). `F1586` takes a line height and a `ymin/ymax` clip; the
+  console uses height 8, ymin 158, ymax -1, and a 124-column wrap. The port
+  draws 9-row glyphs with 9/10 px spacing and wraps by 308 px at x3; its
+  console text is neither at the original's position nor clipped to its window.
+
+---
+
+## 9. Missing data, strings, bitmaps and assets
+
+**No required art is missing from the cache.** Verified against `data.bin`
+(cache v26): 96 primary bitmaps (0..95) and 251 secondary (96..346), including
+the panel 43, all button icons, 97/98/99/100, 254..261, 262..288 and
+343..346; `base:font/main`, `base:palette/low`, `base:cockpit/cabin0..5`, and
+the full string table (`base:text/system-strings`).
+
+What is missing is **tables and state**:
+
+| Need | Source | Notes |
+|---|---|---|
+| Console button table | `DATA_005100`, `ffedat.asm:4601` | 82 x 0x3e = 5,084 bytes. Not a cache asset; the port hard-codes 14 records. Suggest `base:ui/console-buttons`. |
+| Hot-area table | `DATA_007684`, `ffedat.asm:23641` | 22 x 20 = 440 bytes. Hard-coded in `console.rs`; importing it makes tests/data-driven drawing possible. |
+| Gauge table | `DATA_005089`, `ffedat.asm:4560` | 16 dwords used by gauge 1. |
+| Contact colour table | `DATA_008683`, `ffedat.asm:27855` | 76 bytes / 19 dwords. |
+| HUD string selectors | `DATA_007257`, `ffedat.asm:18634` | Pointer table for 0x8600..0x863a; strings already in the cache, so this can stay code (`0x8600 + n`). |
+| Ship/target state | `ship+0xe0/e2/e4`, `+0x11e`, `+0xea`, `+0xc8..+0xcb`, `+0xd2+view`, `+0x98/9a`, `+0x8a`, target `+0xe2` | None modelled in `flight.rs`/`ships.rs`; gauges/HUD/scanner need it or explicit placeholders. |
+| Scanner object list | live slots `0x72..1`, presence byte, scanner flag 0x10, model/descriptor | `Navigator` has bodies, but not the original's object flags/contact colour; `ModelViewer` has the models. |
+| Message log | `DATA_008681` ring, `DATA_008678/79/682` | Ten 1025-byte entry buffers (stride 0x40e); implement in Rust, no asset. |
+| Runtime upper palette | `docs/STATUS.md` item 2 | Unknown; affects text/colour fidelity. |
+
+RVAs are not recorded in the repo for these tables. Use `ffedat.asm` line refs
+and the asset-id convention above; if an RVA is required, derive it from the
+same importer that produced the primary/secondary tables rather than guessing.
+
+---
+
+## 10. TODO checklist (shippable slices)
+
+### Slice A - Import the console tables (S)
+- **What**: add `DATA_005100` (82 records), `DATA_007684` (22), `DATA_005089`
+  (16 dwords) and `DATA_008683` (19 dwords) as verified cache assets (or
+  generated Rust tables with a byte-exact verifier).
+- **Files**: `crates/ffe-convert/src/lib.rs` / `embedded.rs`,
+  `crates/ffe-content/src/lib.rs` (asset kinds), `crates/ffe-rs/src/console.rs`,
+  new `crates/ffe-rs/tests/console_table.rs`.
+- **Deps**: none.
+- **Acceptance**: a test parses each record and asserts x/y/bitmaps/visible/
+  cur/radio against a checked-in dump of `ffedat.asm`; `verify-assets.py` gains
+  a hash for the new assets.
+- **Size**: S.
+
+### Slice B - Table-driven buttons and state (M)
+- **What**: replace `SCREEN_BUTTONS`/`VIEW_BUTTONS` constants with a
+  `Console` state holding all 82 records, `visible`, `cur` and `radio`;
+  implement `F261` draw, `F262` set-image-with-radio-reset, `F263/264`
+  show/hide; drive the flight page from the table.
+- **Files**: `console.rs`, `screen.rs:711-743`, `main.rs` (state plumbing).
+- **Deps**: A.
+- **Acceptance**: new-game frame is pixel-identical to today's console for the
+  14 visible records; unit test radio reset; a scripted matrix (front/rear/
+  turret/external/engines off) shows exactly the original's visible indices.
+- **Size**: M.
+
+### Slice C - Gauges (S/M)
+- **What**: draw `F270`'s three bars at x237/242/249,y161, clipped at
+  `0xad - (value * 12 >> 16)`; add a `GaugeState { energy, heat, third }` fed by
+  the flight/player model or explicit placeholders.
+- **Files**: `screen.rs` draw console block; `console.rs`; `flight.rs`/state.
+- **Deps**: A (colour/table), B (draw order), gameplay fields for real values.
+- **Acceptance**: synthetic values 0..0xffff yield `h = 0..11` and exact
+  pixels for each; unit tests on the formula; a frame with three known values.
+- **Size**: S (draw) / M with real state.
+
+### Slice D - Message log and date/time (M)
+- **What**: ten-entry ring (`F271`), header date/time (`F272`), 124-column wrap,
+  shadow/text at (195/196, 159-scroll), scroll actions 0xe/0xf with the
+  -0x18 clamp and 0x3cae6 auto-scroll (`F273`).
+- **Files**: new `crates/ffe-rs/src/messages.rs` (or `console.rs`),
+  `screen.rs` (replace `lines` block 1013-1031), `main.rs` (log calls instead
+  of `message = ...`).
+- **Deps**: A/B for positions, font wrap helper (`F1398` not yet ported; a
+  faithful 124-column wrap needs the 256-byte width table `DATA_007648`,
+  `docs/notes/text.md`).
+- **Acceptance**: inject 12 messages, compare the ten visible entries, dates
+  and line breaks; scroll to top/bottom and auto-scroll test; frame.
+- **Size**: M.
+
+### Slice E - Scanner (M)
+- **What**: draw the 254..261 orientation overlay; scan live objects with the
+  original flags; draw stalks through `F1569`'s geometry; use `DATA_008683`
+  colours.
+- **Files**: `screen.rs` scanner block 907-915, `navigation.rs` (object/body
+  list), `model_viewer.rs` (contact sizes), `camera.rs` (relative vectors).
+- **Deps**: A (colour table), C/B (console state), object flags.
+- **Acceptance**: synthetic object list with known relative positions gives
+  exact stalk endpoints/colours; a front-view frame matches a reference
+  capture; orientation frame changes with `DATA_008933` values 0..7.
+- **Size**: M.
+
+### Slice F - HUD text and reticles (M)
+- **What**: port `F1099`'s positions and string selection: shields (2,1), hull
+  (2,11), Autopilot (15,139), Set/Act/Alt (15,148), target damage (235,1),
+  warnings (235,51/61/71), clouds (225,1), turret Decn/Rotn (5,76); bitmap 97
+  gunsight and bitmap 98 target X.
+- **Files**: `screen.rs` draw block, new `hud.rs`, `camera.rs`/`flight.rs` for
+  state, `console.rs` for strings.
+- **Deps**: C (state), E (target), strings already cached.
+- **Acceptance**: unit test each string id/position; frames for a full-shield
+  target and a damaged target; crosshair view matrix (front/rear/turret/
+  external/missile/combat).
+- **Size**: M.
+
+### Slice G - Status lamps and engines-off page (M)
+- **What**: implement `F1116`, `F1117`, `F1118`, `F1120`, `F991` as a state
+  machine over equipment bits; show `0x3a` ship diagram and the ten equipment
+  icons with their 10 images.
+- **Files**: `console.rs` (state), `screen.rs` (draw), `flight.rs`/`ships.rs`
+  (equipment bits).
+- **Deps**: B, equipment state.
+- **Acceptance**: a scenario matrix (engines on/off, nav/target/ECM bits,
+  mounts>2) matches the original's visible indices/images; unit test each
+  condition.
+- **Size**: M.
+
+### Slice H - Mode integration (L)
+- **What**: wire F2/F4/F5 screens, docked/landed UI, missile/combat views,
+  damage/death/capsule, hyperspace countdown, autopilot indicator.
+- **Files**: `main.rs` mode dispatch, `screen.rs`, `camera.rs`, `docking.rs`,
+  `navigation.rs`.
+- **Deps**: F/G; equipment, damage, missiles, hyperspace sequence.
+- **Acceptance**: one capture per mode; hot-area/key run-through; countdown
+  test; death/capsule state test.
+- **Size**: L.
+
+### Slice I - Retire/reposition port-only UI (S/M)
+- **What**: remove or move the top bar, `SPEED` line, status block, map buttons
+  and AUTOPILOT buttons so they do not cover the original HUD positions; decide
+  which remain as optional overlays.
+- **Files**: `screen.rs:918-1011`.
+- **Deps**: F/G.
+- **Acceptance**: original HUD positions unobstructed; a "modern overlay"
+  toggle (if kept) does not alter the original frame.
+- **Size**: S/M.
+
+### Slice J - Right-hand buttons (in progress elsewhere) (S after merge)
+- Do not duplicate the other branch's in-system-list and labels toggle. On
+  merge, only: add their records to the table state, verify hot areas 0x6e/0x6c,
+  and remove the port's `SYSTEMS`/`THIS SYSTEM` buttons if the original icons
+  replace them.
+- **Acceptance**: clicks at 265..295 open the right screens; labels toggle
+  works; no duplicate hot areas.
+- **Size**: S.
+
+---
+
+## 11. Missing pieces another agent can pick up now
+
+Prioritised; all are independent of the right-hand-button branch except J.
+
+1. **Message log** (`F271/F272/F273`). Highest-value visible gap; touches only
+   `screen.rs` and a new `messages.rs`. Start by porting the 124-column wrap
+   (`F1398`, needs `DATA_007648`; `docs/notes/text.md` says the width table is
+   not imported). Acceptance: 12 messages, dates, scroll.
+2. **Gauges** (`F270`). Small, isolated pixel work; add `GaugeState` with
+   placeholders so the art lands now.
+3. **HUD text skeleton** (`F1099`). Add the positions/strings with zeroed
+   state; shields/hull can read 100 until damage exists.
+4. **Target reticle** (`F1112`, bitmap 98) and **gunsight** (`F1111`, bitmap
+   97) — pure drawing, no simulation.
+5. **Scanner contacts** (`F274/F275`) — needs a read-only object scan; can use
+   `Navigator.bodies` first, then live objects.
+6. **Status lamps** (`F1116`) — a pure function of equipment bits; can land
+   before the bits are real.
+7. **Table import** (`DATA_005100/007684/005089/008683`) — unblocks all of the
+   above with data instead of constants.
+8. **Fix F3** (`main.rs:513`): the original F3 is the map; move the
+   modern/classic toggle to a non-original key (e.g. M) and make F3 call
+   `Click::Screen(3)`.
+9. **Make `Click::unported()` real**: feed it into the message/overlay so F2/
+   F4/F5/missile/combat/capsule/labels say what is missing instead of silently
+   doing nothing.
+10. **Retire the port status block** (`screen.rs:958-1011`) once 2/3 land; it
+    currently overwrites shields/hull/Autopilot.
+
+---
+
+## 12. Verification plan
+
+1. **Data**, unit level:
+   - parse `DATA_005100` and assert 82 records / 0x3e stride / the dump in §4.2;
+   - assert `DATA_007684` equals the 22 rows in §5;
+   - assert `DATA_005089`/`DATA_008683` byte-for-byte from `ffedat.asm`;
+   - `cargo test -p ffe-rs --test console` stays green.
+2. **Hot areas / keys**, unit level:
+   - every area's four corners and just-outside points; overlapping F1/F2;
+     last-match-wins; y=158 boundary (0xff above, 0 below); 6/7/8/9/0 steps.
+3. **Draw**, synthetic frames:
+   - `Screen::draw` with a fixed cache into a 320x200 buffer; compare the
+     console region to a golden PNG/PPM. Panel/icons are already byte-exact, so
+     only the new elements need goldens.
+   - Gauge formula: values 0, 0x2000, 0x8000, 0xffff at each x.
+   - Message log: 0, 1, 10, 12 entries; scroll top/bottom; long word wrap.
+   - Reticles: bitmap 97 at (129,48); bitmap 98 at target -19/-18 and clipped.
+4. **Executed original**:
+   - extend `tools/reference/headless.c` with a `--dashboard` mode that runs
+     `F272`/`F1099` on a scripted new game and dumps: the 320x200 low buffer
+     after `F272`, `DATA_005100`'s 82 visible/cur fields, `DATA_007684`, and
+     the HUD string positions/values. Add `verify-dashboard.py` + a reference
+     fixture in `crates/ffe-rs/tests/`.
+   - This is the only way to settle the uncertain gauge meanings, contact
+     colours, and text positions; a whole-frame pixel oracle does not exist yet
+     (`STATUS.md`).
+5. **Captures**:
+   - `ffe-rs.exe --root . --capture DIR` and `--capture-planet DIR` already
+     produce frames (`shots-capture*`); add a mode that opens the map/docked/
+     engines-off pages. Compare against DOS/JJFFE reference screenshots supplied
+     by the owner; none are checked in today.
+6. **Regression**: `cargo test --workspace --locked`, `cargo fmt --check`,
+   `cargo clippy -D warnings`, `verify-all.py` (29/29) must stay green.
+
+### Owner decisions needed
+
+1. **Reference build**: JJFFE 2.8a7 or DOS 1.02 for keys (6-0 vs Shift+F1-F5),
+   F3, F11/F12, and text colours. The repo currently follows JJFFE in gameplay
+   and ffe-rs dev keys in presentation.
+2. **Damage/energy/heat**: model them now (needed for shields/hull/gauges) or
+   draw the original art with explicit placeholder zeroes?
+3. **Message log vs toast**: adopt the original 10-entry dated log (bigger UI
+   change) or keep a modern single line as a deviation (EXP entry)?
+4. **Port-only UI**: remove the top bar/status/autopilot buttons, or keep an
+   optional "modern HUD" that is off by default?
+5. **Docked/landed scope**: whether the next slice includes the original
+   station screens or only the flight console.
+6. **Right-hand buttons**: confirm the other branch's mapping for 0x0f-0x12
+   (nav/labels/H/capsule) before table import fixes their state.
+7. **F12**: original escape capsule vs the port's model viewer; needs a
+   non-original key for the dev viewer.
+8. **Text fidelity**: accept a port wrap/colour approximation until
+   `DATA_007648` and the upper palette are available, or block the HUD slice on
+   them.
