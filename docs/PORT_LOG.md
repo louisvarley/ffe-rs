@@ -12,8 +12,13 @@ Running record of decisions, discrepancies and open questions. Newest entries at
   fixed default light (F960). Planet discs already had their own light.
 - Local test `local_star_light_changes_the_scene`: the picture changes with a sun
   and differs between opposite suns.
-- Not done: day/night, and the original's own light tables for these objects; the
-  fixed F960 light remains the fallback outside a system.
+- **Day/night on planet surfaces is already there and now checked**: the terrain
+  emitter shades triangles by the light it is given, so Earth rendered from
+  opposite sides has the same 955 triangles with different colours (local test
+  `planet_surface_has_a_day_night_terminator`, Earth at three surface extents).
+  Model 125 (Mars) culls at the distances tried and is not used in that check.
+- Not done: the original's own light tables for ships/stations/lifts; the fixed
+  F960 light remains the fallback outside a system.
 
 ## 2026-10-24 — A planet in the scenario (v0.48j)
 

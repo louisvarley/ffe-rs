@@ -433,7 +433,7 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-10-24",
       remaining: 81,
-      note: "Local-star lighting for ships, stations and lift objects (world-9 in progress): Screen::sun carries the direction toward the system's star and replaces the fixed default light; a local test shows the picture changes with the sun and differs between opposite suns. Day/night and the original's light tables for these objects remain."
+      note: "Local-star lighting for ships, stations and lift objects (world-9 in progress): Screen::sun carries the direction toward the system's star and replaces the fixed default light; a local test shows the picture changes with the sun and differs between opposite suns. Planet day/night is verified (Earth's 955 triangles shade differently from opposite suns). The original's own object light tables remain."
     }
   ]
 };

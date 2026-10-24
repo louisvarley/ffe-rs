@@ -136,6 +136,41 @@ fn boot_station_has_a_planet_in_view() {
     );
 }
 
+/// A planet's surface shades by the sun: the same body lit from opposite sides
+/// gives different triangle colours (the terminator follows the light).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn planet_surface_has_a_day_night_terminator() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let unit = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    // The setup the existing planet tests use: Earth, probe at 1e6, render at
+    // three surface extents (model 125 culls at the distances tried before).
+    let _ = viewer.render_scene(129, unit, [0.0, 0.0, 1.0e6], [0.0, 0.0, 1.0]);
+    let extent = viewer.surface_extent.get();
+    assert!(extent > 0.0, "Earth must have a surface");
+    let frame = |light: [f64; 3]| {
+        viewer
+            .render_scene(129, unit, [0.0, 0.0, 3.0 * extent], light)
+            .unwrap()
+    };
+    let day = frame([1.0, 0.0, 0.0]);
+    let night = frame([-1.0, 0.0, 0.0]);
+    eprintln!(
+        "Earth: {} shapes lit +x, {} lit -x",
+        day.shapes.len(),
+        night.shapes.len()
+    );
+    assert!(!day.shapes.is_empty(), "the day side must draw");
+    assert_ne!(
+        format!("{:?}", day.shapes),
+        format!("{:?}", night.shapes),
+        "the terminator must follow the sun"
+    );
+}
+
 /// The local star lights the station and the ship: two sun directions give
 /// different pictures (the fixed default light is the fallback without a sun).
 #[test]
