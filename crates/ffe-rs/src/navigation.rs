@@ -13,6 +13,7 @@ use ffe_core::model_math::SineTable;
 use ffe_core::names::Names;
 use ffe_core::objects::Models as ShipModels;
 use ffe_core::objects::{Models, PhysList, Placement};
+use ffe_core::pads::Pads;
 use ffe_core::sector::{distance as star_distance, Drive, Tables as GalaxyTables};
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
@@ -63,7 +64,17 @@ pub struct Body {
     /// The object's model and its `+0xa0` (the surface seed).
     pub model: u32,
     pub seed: u32,
-    /// The object's orientation rows (its first nine dwords, Q31).
+    /// The object's slot in the physics list (`+0x18` of its system record): the
+    /// index F1531/F1532 use to find the physics object.
+    pub slot: usize,
+    /// The object's first nine dwords, Q31: its orientation rows as the original
+    /// keeps them (F650 turns the pads by these, so the raw values are kept).
+    pub rows: [i32; 9],
+    /// The object's class byte (`+0x14c`).
+    pub class: u8,
+    /// Whether the class byte's 0x40 marks an open-air starport (F650's branch).
+    pub open_air: bool,
+    /// The object's orientation rows (its first nine dwords, Q31), as floats.
     pub orientation: [[f64; 3]; 3],
     /// F866's signed rotation speed byte (`+0xc8`) for a station; 0 otherwise.
     pub spin: i8,
@@ -298,6 +309,8 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
         if kind_code == 0 {
             continue;
         }
+        let rows: [i32; 9] = std::array::from_fn(|k| list.dword(slot, 4 * k) as i32);
+        let class = list.byte(slot, 0x14c);
         out.push(Body {
             name: String::from_utf8_lossy(text).into_owned(),
             kind,
@@ -305,10 +318,12 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
             radius,
             model: list.dword(slot, 0x82),
             seed: list.dword(slot, 0xa0),
+            slot,
+            rows,
+            class,
+            open_air: class & ffe_core::pads::OPEN_AIR_CLASS != 0,
             orientation: std::array::from_fn(|r| {
-                std::array::from_fn(|c| {
-                    f64::from(list.dword(slot, 4 * (3 * r + c)) as i32) / 2_147_483_648.0
-                })
+                std::array::from_fn(|c| f64::from(rows[3 * r + c]) / 2_147_483_648.0)
             }),
             spin: if kind == Kind::Station {
                 list.byte(slot, 0xc8) as i8
@@ -553,6 +568,11 @@ pub struct Navigator {
     pub bodies: Vec<Body>,
     /// The game clock in world seconds (it moves the planets).
     pub clock: f64,
+    /// The clock this game began at: the new game's absolute start, or 0 for the
+    /// sandbox. Dates and the market's day use the difference.
+    pub start_clock: f64,
+    /// The original's new-game fields, when this navigator started one.
+    pub new_game: Option<NewGameState>,
     /// How far the engaged target has moved since the ship last followed it.
     drift: [i64; 3],
     /// Transfers in a row that have not brought the ship in: after a few it flies.
@@ -682,6 +702,62 @@ pub fn clock_words(seconds: f64) -> [u32; 2] {
     [whole as u32, ((days - whole) * 4_294_967_296.0) as u32]
 }
 
+/// F829's start-system table (`DATA_006820`): five 20-byte records of galaxy x, y
+/// and z (16.16), the star's number in its sector, and one dword the original
+/// keeps beside them (`0x88` for the playable starts, `8` for the first and last).
+/// Record 1 is Ross 154 (`0x17176a00`, `0x15243200`, -0x3400, star 1); records 0
+/// and 4 are the same system (`0x17170200`, `0x15287600`, -222, star 6).
+pub const START_SYSTEMS: [(i32, i32, i32, u32, u32); 5] = [
+    (0x1717_0200, 0x1528_7600, -222, 6, 8),
+    (0x1717_6a00, 0x1524_3200, -0x3400, 1, 0x88),
+    (0x1718_8000, 0x1524_a000, -0x6c00, 0, 0x88),
+    (0x1715_e000, 0x151e_e000, 0, 0, 0x88),
+    (0x1717_0200, 0x1528_7600, -222, 6, 8),
+];
+
+/// The new game's clock: 1 Jan 3250, noon, in absolute GameTics
+/// (`0x121cf7.5` days at 86,400 seconds each).
+pub const NEW_GAME_CLOCK: f64 = 102_562_286_400.0;
+/// F998's starting cash (`DATA_008888`).
+pub const NEW_GAME_CASH: i32 = 1000;
+/// F998's ship for start type 1 (`+0x17`).
+pub const NEW_GAME_SHIP: u32 = 23;
+/// The player's state byte after F994 (`DATA_008870`): docked at an open-air starport.
+pub const NEW_GAME_PLAYER_STATE: u8 = 0x30;
+/// `DATA_008857`: the player's index among the physics objects (F994's `+0x86`).
+pub const NEW_GAME_PLAYER_INDEX: u8 = 107;
+/// F997's default time acceleration (`DATA_009012`).
+pub const NEW_GAME_ACCELERATION: u32 = 994;
+/// The tonnes the starting ship's equipment leaves out of its hold: the
+/// Sidewinder's 20 t statistic less this is the new game's 8 t.
+pub const NEW_GAME_HOLD_LOSS: i32 = 0xc;
+/// The physics-list slot of the starting starport (`0x6e`): F994's `F1532(0x6e)`
+/// is the object the player's ship is placed at and docked with.
+pub const NEW_GAME_STARPORT_SLOT: usize = 0x6e;
+
+/// The original's new-game state, kept for the local comparison with `--state`
+/// and the new-game oracle. The playable uses the navigator's own fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewGameState {
+    /// The start-system record F829 selected (`DATA_008881`).
+    pub start_type: u8,
+    /// The player's state byte after F994 (`DATA_008870`).
+    pub player_state: u8,
+    /// The player's object index (`DATA_008857`).
+    pub player_index: u8,
+    /// Cash on hand (`DATA_008888`).
+    pub cash: i32,
+    /// The player's ship model (`+0x82`).
+    pub ship: u32,
+    /// The hold in tonnes (`+0x116`, less the hyperdrive).
+    pub cargo: i32,
+    /// The starting time acceleration (`DATA_009012`).
+    pub acceleration: u32,
+    /// The bay F650 allocated and the pad position it gives (system frame, mm).
+    pub bay: u16,
+    pub seat: [i64; 3],
+}
+
 impl Navigator {
     pub fn new(cache: &VerifiedCache) -> Result<Self, String> {
         let entries = galaxy(cache)?;
@@ -689,12 +765,26 @@ impl Navigator {
         let bodies = bodies(cache, &entries[current], clock_words(0.0))?;
         // Start at a station in a planet's orbit, so the system's world is in view
         // after launch; deep-space stations only when the system has none.
-        let docked = orbital_station(&bodies).or_else(|| first_station(&bodies));
+        let mut nav = Self::assemble(cache, entries, current, bodies)?;
+        nav.docked = orbital_station(&nav.bodies).or_else(|| first_station(&nav.bodies));
+        Ok(nav)
+    }
+
+    /// The navigator's fields, without a start state: the sandbox and a new game
+    /// differ only in the clock, the bodies and the docking (F829/F998).
+    fn assemble(
+        cache: &VerifiedCache,
+        entries: Vec<Entry>,
+        current: usize,
+        bodies: Vec<Body>,
+    ) -> Result<Self, String> {
         Ok(Self {
             entries,
             current,
             bodies,
             clock: 0.0,
+            start_clock: 0.0,
+            new_game: None,
             drift: [0; 3],
             skips: 0,
             page: 0,
@@ -702,7 +792,7 @@ impl Navigator {
             selected: 0,
             target: None,
             locked: None,
-            docked,
+            docked: None,
             traffic: HashMap::new(),
             sequence: None,
             notice: None,
@@ -723,6 +813,79 @@ impl Navigator {
             memory: Memory::default(),
             refreshed: 0.0,
         })
+    }
+
+    /// The original's new game (F829/F998 for start type `start_type`): Ross 154 at
+    /// the 3250 start, the bodies placed at that clock, and the player docked at the
+    /// open-air starport's pad. `start_type` is the `DATA_006820` record (1 is
+    /// Ross 154, the default); the original's menu only offers 1 in this port.
+    pub fn new_game(cache: &VerifiedCache, start_type: u8) -> Result<Self, String> {
+        let record = *START_SYSTEMS
+            .get(usize::from(start_type))
+            .ok_or_else(|| format!("start type {start_type} is not in DATA_006820"))?;
+        let code = (record.0 >> 16) as u32 & 0x1fff
+            | ((record.1 >> 16) as u32 & 0x1fff) << 13
+            | (record.3 & 0x3f) << 26;
+        let entries = galaxy(cache)?;
+        let current = entries
+            .iter()
+            .position(|entry| entry.params.code == code)
+            .ok_or_else(|| format!("start system {code:#x} is not in the galaxy table"))?;
+        let bodies = bodies(cache, &entries[current], clock_words(NEW_GAME_CLOCK))?;
+        let index = bodies
+            .iter()
+            .position(|body| body.kind == Kind::Starport && body.slot == NEW_GAME_STARPORT_SLOT)
+            .ok_or_else(|| {
+                format!(
+                    "{} has no starport in slot {NEW_GAME_STARPORT_SLOT:#x}",
+                    entries[current].name
+                )
+            })?;
+        let pads = Pads::from_bytes(
+            cache
+                .asset("base:gameplay/pads")
+                .ok_or("no pad tables (cache v26)")?,
+        )?;
+        let mut port = ffe_core::traffic::Starport::new(bodies[index].bays);
+        let bay = port
+            .allocate(PLAYER)
+            .ok_or("the start starport has no free bay")?;
+        let body = &bodies[index];
+        let offset = pads.position(body.model, bay.index, body.rows, body.open_air)?;
+        let seat = [
+            body.position[0] + offset[0],
+            body.position[1] + offset[1],
+            body.position[2] + offset[2],
+        ];
+        let cargo = {
+            let models = Models {
+                records: cache
+                    .asset("base:model/records")
+                    .ok_or("no model records")?,
+                stats: cache.asset("base:ship/stats").ok_or("no ship statistics")?,
+                gameplay: cache
+                    .asset("base:gameplay/tables")
+                    .ok_or("no gameplay tables")?,
+            };
+            (models.cargo_space(NEW_GAME_SHIP).unwrap_or(0) - NEW_GAME_HOLD_LOSS).max(0)
+        };
+        let mut nav = Self::assemble(cache, entries, current, bodies)?;
+        nav.clock = NEW_GAME_CLOCK;
+        nav.start_clock = NEW_GAME_CLOCK;
+        nav.docked = Some(index);
+        nav.traffic.insert(index, port);
+        nav.new_game = Some(NewGameState {
+            start_type,
+            player_state: NEW_GAME_PLAYER_STATE,
+            player_index: NEW_GAME_PLAYER_INDEX,
+            cash: NEW_GAME_CASH,
+            ship: NEW_GAME_SHIP,
+            cargo,
+            acceleration: NEW_GAME_ACCELERATION,
+            bay: bay.index,
+            seat,
+        });
+        Ok(nav)
     }
 
     /// The station the player is docked at (at the start, the first station of the
@@ -769,9 +932,22 @@ impl Navigator {
         MarketTables::new(&self.market_tables).ok()
     }
 
-    /// The game day of the clock (the original's day counter).
+    /// World seconds since this game began (the sandbox starts at 0, the new game
+    /// at `0x121cf7.5` absolute days).
+    pub fn elapsed(&self) -> f64 {
+        self.clock - self.start_clock
+    }
+
+    /// The game day of the clock (the original's day counter, counted from the
+    /// new game's start so a new game's market drifts from day 0).
     pub fn day(&self) -> u32 {
-        (self.clock / 86_400.0) as u32
+        (self.elapsed().max(0.0) / 86_400.0) as u32
+    }
+
+    /// The console's date and time for this navigator's clock: the calendar counts
+    /// from 1 Jan 3250, noon, not from the absolute day counter (`0x121cf7.5`).
+    pub fn date_text(&self) -> String {
+        crate::galaxy_map::date_text(self.elapsed())
     }
 
     /// The per-commodity flags of this system's stock string (F870): supply class, price
@@ -829,6 +1005,13 @@ impl Navigator {
         }
         station.day = day.max(station.day);
         Ok(station)
+    }
+
+    /// The player's hold in tonnes: the new game's F998 value when this navigator
+    /// started one, else the ship model's cargo statistic.
+    pub fn hold(&self, cache: &VerifiedCache, ship: u32) -> i32 {
+        self.new_game
+            .map_or_else(|| self.cargo_space(cache, ship), |state| state.cargo)
     }
 
     /// The hold of a ship model, tonnes (`ffe_core::objects::Models::cargo_space`).
@@ -915,6 +1098,20 @@ impl Navigator {
         };
         if self.sequence.is_some() {
             return Err("Already launching.".to_owned());
+        }
+        // An open-air starport's takeoff (the original's states 0x24 -> 0x26:
+        // F1013's altitude/timer test, then normal flight clear of the pad) is
+        // not ported. The old path put the ship 20 km out, which is invented.
+        if self
+            .bodies
+            .get(index)
+            .is_some_and(|b| b.kind == Kind::Starport)
+        {
+            return Err(
+                "Open-air starport takeoff is not ported (player states 0x24/0x26); \
+                 launch blocked. Use an orbital station or --start sol."
+                    .to_owned(),
+            );
         }
         if !self.starport(index).request(PLAYER) {
             return Err("Launch refused: traffic control is busy.".to_owned());

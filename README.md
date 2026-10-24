@@ -489,7 +489,7 @@ python ci\check_forbidden.py
 ```
 
 Automated Rust tests use synthetic data, not proprietary game files.
-Windows validation currently runs 283 synthetic tests; an additional
+Windows validation currently runs 291 synthetic tests; an additional
 case/link-handling test is enabled on Unix. CI is configured for Windows and
 Linux; remote CI has not been run by this local implementation session.
 
@@ -500,7 +500,7 @@ binaries, `data.bin`, `game/`, the release tools and the supplied sources):
 python .\tools\reference\verify-all.py
 ```
 
-It checks the inputs exist, runs all 46 oracle entries against the executed JJFFE
+It checks the inputs exist, runs all 47 oracle entries against the executed JJFFE
 reference, prints one line each and a pass/fail summary, and exits non-zero on
 the first failure. The individual commands below remain useful when working on
 one family of helpers.

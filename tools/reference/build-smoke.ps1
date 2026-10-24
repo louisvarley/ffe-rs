@@ -88,6 +88,7 @@ $hashes = @($paths | ForEach-Object {
     command_probe_hooks = @('Two calls F1708 -> trace_triangle', 'Two calls F1712 -> trace_quad', 'Two calls F1699 -> trace_point_args', 'Two calls F1703 -> trace_line_args', 'F1747 nested calls -> trace_text_*', 'F1749/F1750 nested calls -> trace_submodel_*')
     text_submodel_adapter = 'text-submodel-v1'
     pads_adapter = 'pads-v1'
+    intro_adapter = 'intro-v1'
     command_probe_command = $probeCommand
     command_probe_sha256 = (Get-FileHash -LiteralPath (Join-Path $output 'jjffe-commands.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     command_probe_source_sha256 = (Get-FileHash -LiteralPath $probeSource -Algorithm SHA256).Hash.ToLowerInvariant()

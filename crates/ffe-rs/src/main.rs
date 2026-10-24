@@ -3,7 +3,7 @@ use ffe_rs::camera::{key_amount, ExternalKeys, ViewMode, ViewState};
 use ffe_rs::console::{acceleration_for_digit, Click, ConsoleState, ACCELERATION_NAMES};
 use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Controls, Flight, STEP};
-use ffe_rs::galaxy_map::{date_text, GalaxyMap};
+use ffe_rs::galaxy_map::GalaxyMap;
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
@@ -24,6 +24,15 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+/// Which game the boot starts: the original's new game or the development sandbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Boot {
+    /// Ross 154, Sidewinder, 1000 CR, on the starport pad (`--start 1` default).
+    NewGame(u8),
+    /// The existing Sol/Mars High sandbox (`--start sol`).
+    Sandbox,
+}
+
 struct Options {
     root: PathBuf,
     smoke_frames: Option<usize>,
@@ -34,6 +43,12 @@ struct Options {
     /// out from the nearest planet, the autopilot is engaged, and frames are
     /// saved through the approach.
     capture_planet: Option<PathBuf>,
+    /// The boot: the original new game (default) or `--start sol`'s sandbox.
+    boot: Boot,
+    /// `--skip-intro`: the logo/intro screens are not shown. The front end is
+    /// modelled in `ffe_rs::front_end`; its drawing is not wired into the boot
+    /// yet, so the new game currently starts directly.
+    skip_intro: bool,
 }
 
 fn options() -> Result<Options, String> {
@@ -41,12 +56,41 @@ fn options() -> Result<Options, String> {
     let mut smoke_frames = None;
     let mut capture = None;
     let mut capture_planet = None;
+    let mut boot = Boot::NewGame(1);
+    let mut boot_given = false;
+    let mut skip_intro = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
             root = Some(PathBuf::from(
                 args.next().ok_or("--root requires a directory")?,
             ));
+        } else if arg == "--start" && !boot_given {
+            let value = args
+                .next()
+                .ok_or("--start requires 1..5 or sol")?
+                .to_string_lossy()
+                .to_ascii_lowercase();
+            boot_given = true;
+            boot = if value == "sol" {
+                Boot::Sandbox
+            } else {
+                let start_type = value
+                    .parse::<u8>()
+                    .map_err(|_| "start type must be 1..5 or sol")?;
+                if !(1..=5).contains(&start_type) {
+                    return Err("start type must be 1..5 or sol".to_owned());
+                }
+                if start_type != 1 {
+                    eprintln!(
+                        "Start type {start_type} is the JJFFE mapping and is not verified; \
+                         starting type 1 (Ross 154)."
+                    );
+                }
+                Boot::NewGame(1)
+            };
+        } else if arg == "--skip-intro" && !skip_intro {
+            skip_intro = true;
         } else if arg == "--capture" && capture.is_none() {
             capture = Some(PathBuf::from(
                 args.next().ok_or("--capture requires a directory")?,
@@ -67,7 +111,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -91,6 +135,8 @@ fn options() -> Result<Options, String> {
         smoke_frames,
         capture,
         capture_planet,
+        boot,
+        skip_intro,
     })
 }
 
@@ -228,14 +274,36 @@ fn run() -> Result<(), String> {
         .as_ref()
         .map(|scene| ShipList::from_cache(&cache, scene))
         .unwrap_or_default();
-    // The systems, their bodies and the autopilot (Tab, G, Backspace).
-    let mut nav = match Navigator::new(&cache) {
-        Ok(nav) => Some(nav),
-        Err(error) => {
-            eprintln!("Navigation unavailable: {error}");
-            None
+    // The systems, their bodies and the autopilot (Tab, G, Backspace). The default
+    // boot is the original's new game at Ross 154; `--start sol` keeps the
+    // development sandbox for the existing tests and screenshots.
+    let mut nav = match options.boot {
+        Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
+        Boot::Sandbox => Navigator::new(&cache),
+    }
+    .map_err(|error| {
+        eprintln!("Navigation unavailable: {error}");
+    })
+    .ok();
+    if let Some(nav) = nav.as_ref() {
+        if let Some(new_game) = nav.new_game {
+            state.credits = u32::try_from(new_game.cash).unwrap_or(0);
+            state.ship = new_game.ship;
+            state.mode = ffe_rs::flight::Mode::Docked;
+            eprintln!(
+                "New game: {} (start type {}), {} CR, ship {}, hold {} t, time accel {}.",
+                nav.system_name(),
+                new_game.start_type,
+                new_game.cash,
+                new_game.ship,
+                new_game.cargo,
+                new_game.acceleration
+            );
         }
-    };
+    }
+    if options.skip_intro {
+        eprintln!("--skip-intro: the logo sequence and the credits are not shown.");
+    }
     // A scripted undock for screenshots: start the launch sequence immediately.
     if let Some(dir) = &options.capture {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
@@ -311,11 +379,15 @@ fn run() -> Result<(), String> {
     // The selected line of the station's market.
     let mut trade_row = 0usize;
     let mut last_mode = state.mode;
-    let mut message = match nav
-        .as_ref()
-        .and_then(|nav| nav.station().map(|(name, _)| name))
-    {
-        Some(name) => format!(
+    let mut message = match nav.as_ref().and_then(|nav| {
+        nav.docked
+            .map(|index| (nav.bodies[index].name.as_str(), nav.bodies[index].kind))
+    }) {
+        Some((name, NavKind::Starport)) => format!(
+            "Landed at {name}, {}. Up/Down choose goods, B buys, N sells; open-air takeoff is not ported yet, so L is blocked.",
+            nav.as_ref().map_or("", |nav| nav.system_name())
+        ),
+        Some((name, _)) => format!(
             "Docked at {name}, {}. Up/Down choose goods, B buys, N sells; L launches.",
             nav.as_ref().map_or("", |nav| nav.system_name())
         ),
@@ -1530,7 +1602,7 @@ fn run() -> Result<(), String> {
                         shapes,
                         sector: map.sector_text(),
                         fuel: map.fuel_text(report.as_ref()),
-                        date: date_text(nav.clock),
+                        date: nav.date_text(),
                         info: map
                             .describe(viewer, system_details.as_ref())
                             .unwrap_or_default(),
@@ -1545,7 +1617,7 @@ fn run() -> Result<(), String> {
                 if let Some(station) = nav.docked.filter(|_| nav.market_tables().is_some()) {
                     if let Ok(rows) = trade::listing(nav, &cache, station, &state) {
                         trade_row = trade_row.min(rows.len().saturating_sub(1));
-                        let hold = trade::hold_of(&state, nav.cargo_space(&cache, state.ship));
+                        let hold = trade::hold_of(&state, nav.hold(&cache, state.ship));
                         screen.market = Some(ffe_rs::screen::MarketView {
                             station: nav.bodies[station].name.clone(),
                             system: nav.system_name().to_owned(),

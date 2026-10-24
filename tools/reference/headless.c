@@ -4708,6 +4708,184 @@ static int lift_vectors(void)
 }
 
 
+/* Intro oracle (--intro): the real F961 (model 177/176 and the primary bitmap) and F962 (the
+   credit lines) at chosen GameTics. The model draw pointer DATA_007807 and the text draw pointer
+   DATA_007644 are captured; the real F1343 expands each credit string, which is printed plain
+   (line breaks kept, the in-line font codes replaced by a space). The version line is drawn by
+   setting the GUI action to 'V' for one case. The clocks, model thresholds, positions, wrap
+   widths and strings are the DOS/JJFFE data that agree; the legal splash is not this oracle's. */
+extern void ref_intro_961(void);
+extern void ref_intro_962(void);
+extern void (*ref_intro_text_hook)(void);
+extern unsigned char ref_intro_animation[];
+extern char *ref_expand_string(char *dest, long ffcode, void *vars);
+extern void ref_sys_init(void);
+extern void ref_palette(void *colour);
+extern void ref_display_mode(void);
+extern void ref_clear_buffer(void);
+extern long ref_gui_get_last_action(void);
+extern void ref_gui_set_last_action(long action);
+#define INTRO_TEXTS 8
+static struct {
+    long code, colour, x, y, wrap;
+    char text[1024];
+} intro_text[INTRO_TEXTS];
+static int intro_text_count;
+static long intro_model, intro_animation;
+static int intro_model_count;
+
+static void intro_plain(const unsigned char *src, char *dest)
+{
+    int at = 0;
+    while (*src && at < 1000) {
+        unsigned char c = *src;
+        if (c == 0x0d) { dest[at++] = '\n'; ++src; }
+        else if (c == 0xfe) { src += src[1] && src[2] ? 3 : 1; dest[at++] = ' '; }
+        else if (c == 0xfd || c == 0xff) { src += src[1] ? 2 : 1; dest[at++] = ' '; }
+        else if (c == 0x1e) { src += src[1] ? 2 : 1; dest[at++] = ' '; }
+        else if (c == 0x1f) { src += src[1] && src[2] ? 3 : 1; dest[at++] = ' '; }
+        else if (c == 0x03) { ++src; }
+        else if (c >= 0x20 && c < 0x7f) { dest[at++] = (char)c; ++src; }
+        else { ++src; }
+    }
+    dest[at] = 0;
+}
+
+static long intro_text_draw(long ffcode, void *vars, long colour, long x, long y, long wrap)
+{
+    if (intro_text_count < INTRO_TEXTS) {
+        static char expanded[2048];
+        int k = intro_text_count;
+        memset(expanded, 0, sizeof expanded);
+        ref_expand_string(expanded, ffcode, vars);
+        intro_text[k].code = ffcode;
+        intro_text[k].colour = colour;
+        intro_text[k].x = x;
+        intro_text[k].y = y;
+        intro_text[k].wrap = wrap;
+        intro_plain((const unsigned char *)expanded, intro_text[k].text);
+    }
+    ++intro_text_count;
+    return 1;
+}
+
+static void intro_model_draw(void *object)
+{
+    unsigned char *o = (unsigned char *)object;
+    intro_model = *(unsigned long *)(o + 0x82);
+    intro_animation = *(unsigned short *)ref_intro_animation;
+    ++intro_model_count;
+}
+
+static void intro_print_string(const char *s)
+{
+    putchar('"');
+    for (; *s; ++s) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '"' || c == '\\') printf("\\%c", c);
+        else if (c == '\n') printf("\\n");
+        else if (c == '\r') printf("\\r");
+        else if (c == '\t') printf("\\t");
+        else if (c < 0x20 || c >= 0x7f) printf("\\u%04x", c);
+        else putchar(c);
+    }
+    putchar('"');
+}
+
+static int intro_vectors(void)
+{
+    /* The credit windows, in F962's order: the first GameTics and the first tics
+       it no longer draws (0 = no upper bound). The Journal Entries line starts
+       one tic after 0x6d0954 (the original's `jna`), as the Rust table does. */
+    static const unsigned long firsts[] = {
+        0x8276e, 0x181534, 0x212f5c, 0x2375e6, 0x2d523c, 0x32a17e,
+        0x3bbba6, 0x48a0b4, 0x4ae73e, 0x4d2dc8, 0x588e7a, 0x5ad504,
+        0x626ad0, 0x657388, 0x6b84f8, 0x6d0955, 0x77a7d8, 0x77a7d8,
+    };
+    static const unsigned long ends[] = {
+        0xfbd3a, 0x1ee8d2, 0x24fa42, 0x2740cc, 0x34e808, 0x372e92,
+        0x3f868c, 0x4d2dc8, 0x4f7452, 0x50f8ae, 0x5d1b8e, 0x5e9fea,
+        0x67ba12, 0x693e6e, 0x70d43a, 0x725896, 0, 0,
+    };
+    static const unsigned long tics[] = {
+        0, 497000, 0x795cc, 0x795cc + 1, 0x8276e - 1, 0x8276e, 0x7e7b75,
+    };
+    unsigned long n;
+    fprintf(stderr, "JJFFE intro-v1: the original F961 (model 177/176, animation, primary bitmap 0x42) and F962 (the 18 credit strings with their GameTics windows, positions and wrap widths) at the threshold boundaries and extras; text expanded by F1343; the legal splash is not run.\n");
+    ref_sys_init();
+    {
+        static unsigned char black[3] = {0, 0, 0};
+        ref_palette(black);
+    }
+    ref_display_mode();
+    ref_clear_buffer();
+    ref_intro_text_hook = (void (*)(void))intro_text_draw;
+    ref_draw_hook = intro_model_draw;
+    for (n = 0; n < sizeof(tics) / sizeof(tics[0]); ++n) {
+        unsigned long at = tics[n], k;
+        intro_text_count = 0; intro_model_count = 0;
+        *(unsigned long *)ref_state = at;
+        ref_gui_set_last_action(0);
+        ref_intro_961();
+        ref_intro_962();
+        printf("{\"tics\":%lu,\"model\":%ld,\"animation\":%ld,\"version\":0,\"texts\":[",
+               at, intro_model, intro_animation);
+        for (k = 0; k < (unsigned long)intro_text_count && k < INTRO_TEXTS; ++k) {
+            printf("%s{\"code\":%ld,\"colour\":%ld,\"x\":%ld,\"y\":%ld,\"wrap\":%ld,\"text\":",
+                   k ? "," : "", intro_text[k].code, intro_text[k].colour,
+                   intro_text[k].x, intro_text[k].y, intro_text[k].wrap);
+            intro_print_string(intro_text[k].text);
+            printf("}");
+        }
+        printf("]}\n");
+    }
+    for (n = 0; n < sizeof(firsts) / sizeof(firsts[0]); ++n) {
+        unsigned long at[4], k, m = 0;
+        at[m++] = firsts[n] - 1;
+        at[m++] = firsts[n];
+        if (ends[n]) { at[m++] = ends[n] - 1; at[m++] = ends[n]; }
+        for (k = 0; k < m; ++k) {
+            unsigned long j;
+            intro_text_count = 0; intro_model_count = 0;
+            *(unsigned long *)ref_state = at[k];
+            ref_gui_set_last_action(0);
+            ref_intro_961();
+            ref_intro_962();
+            printf("{\"tics\":%lu,\"model\":%ld,\"animation\":%ld,\"version\":0,\"texts\":[",
+                   at[k], intro_model, intro_animation);
+            for (j = 0; j < (unsigned long)intro_text_count && j < INTRO_TEXTS; ++j) {
+                printf("%s{\"code\":%ld,\"colour\":%ld,\"x\":%ld,\"y\":%ld,\"wrap\":%ld,\"text\":",
+                       j ? "," : "", intro_text[j].code, intro_text[j].colour,
+                       intro_text[j].x, intro_text[j].y, intro_text[j].wrap);
+                intro_print_string(intro_text[j].text);
+                printf("}");
+            }
+            printf("]}\n");
+        }
+    }
+    {
+        unsigned long at = 0x8276e, k;
+        intro_text_count = 0; intro_model_count = 0;
+        *(unsigned long *)ref_state = at;
+        ref_gui_set_last_action(0x56);
+        ref_intro_961();
+        ref_intro_962();
+        printf("{\"tics\":%lu,\"model\":%ld,\"animation\":%ld,\"version\":1,\"texts\":[",
+               at, intro_model, intro_animation);
+        for (k = 0; k < (unsigned long)intro_text_count && k < INTRO_TEXTS; ++k) {
+            printf("%s{\"code\":%ld,\"colour\":%ld,\"x\":%ld,\"y\":%ld,\"wrap\":%ld,\"text\":",
+                   k ? "," : "", intro_text[k].code, intro_text[k].colour,
+                   intro_text[k].x, intro_text[k].y, intro_text[k].wrap);
+            intro_print_string(intro_text[k].text);
+            printf("}");
+        }
+        printf("]}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush intro vectors");
+    return 0;
+}
+
+
 /* Galaxy sector oracle (--sectors): the original F841 (a sector's stars, with the F861 generator
    and the hand-made sectors), F853 (the star count at several detail levels), F856 (a star's
    position) and F833 (the distance between two positions) on every hand-made sector, random
@@ -5346,6 +5524,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--pads")) return pads_vectors();
     if (argc == 2 && !strcmp(argv[1], "--market")) return market_vectors();
     if (argc == 2 && !strcmp(argv[1], "--lift")) return lift_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--intro")) return intro_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sectors")) return sector_vectors();
     if (argc == 2 && !strcmp(argv[1], "--hyperspace")) return hyper_vectors();
     if (argc == 2 && !strcmp(argv[1], "--system-names")) return system_name_vectors();

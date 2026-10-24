@@ -366,8 +366,11 @@ impl GalaxyMap {
     }
 }
 
-/// The game's date and time for a clock of `seconds` since the new game's start (1 Jan 3250,
-/// noon), as the console shows it. The calendar is the plain one.
+/// The game's date and time for `seconds` since the new game's start (1 Jan 3250,
+/// noon), as the console shows it. The calendar is the plain one. Callers with an
+/// absolute game clock (`Navigator::clock`, whose new game starts at
+/// `0x121cf7.5` days) use [`crate::navigation::Navigator::date_text`], which
+/// subtracts the start; otherwise the absolute day would be read as a year.
 pub fn date_text(seconds: f64) -> String {
     const MONTHS: [(&str, u32); 12] = [
         ("Jan", 31),

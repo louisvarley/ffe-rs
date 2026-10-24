@@ -12,10 +12,14 @@ systems, and an autopilot to planets, stations and other bodies for testing.
 | `navigation::autopilot` | done and tested (`tests/navigation.rs`, local cache): steers the original flight model with its own keys (pulsed), holds a braking-curve set speed, hands back a transfer for long legs |
 | Map and jump UI in the playable | in progress (keys below) |
 
-The playable starts docked at a station **in a planet's orbit** — the closest
-such station, else the first station — so the launch puts that world in view
-(Sol: Mars High, 1.61 Mars radii). This is a starting-scenario choice, not the
-original's fixed start.
+The default boot is now the original's new game: Ross 154, the Sidewinder,
+1000 CR, 1 Jan 3250 12:00, landed on the starport pad (`navigation::new_game`,
+`docs/notes/intro.md`). Open-air starport takeoff is blocked until F1013's
+0x24 -> 0x26 path is ported (EXP-010). The development sandbox (`--start sol`)
+starts docked at a station **in a planet's orbit** - the closest such station,
+else the first station - so the launch puts that world in view (Sol: Mars High,
+1.61 Mars radii). That is a starting-scenario choice, not the original's fixed
+start.
 | Stations in the flight view and docking | done (2026-10-24), ffe-rs rules: see "Docking" below |
 | Galaxy beyond the 12 hand-coded systems | not done: the other table systems need the sector star generator (F832-F856, tables `DATA_006799..6808`) and their name strings |
 

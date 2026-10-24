@@ -136,6 +136,71 @@ fn systems_and_autopilot() {
     }
 }
 
+/// The original's new game: Ross 154 at the 3250 start, docked at the open-air
+/// starport's allocated pad, with F998's cash, ship, hold and acceleration.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn new_game_starts_at_ross_154() {
+    use ffe_core::pads::Pads;
+    use ffe_rs::navigation::{Navigator, NEW_GAME_CLOCK};
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    assert_eq!(nav.system_name(), "Ross 154");
+    assert!((nav.clock - NEW_GAME_CLOCK).abs() < 1e-6);
+    let state = nav.new_game.expect("a new-game state");
+    assert_eq!(state.start_type, 1);
+    assert_eq!(state.player_state, 0x30);
+    assert_eq!(state.player_index, 107);
+    assert_eq!(state.cash, 1000);
+    assert_eq!(state.ship, 23);
+    assert_eq!(
+        state.cargo, 8,
+        "the hold is the ship's 20 t less the equipment"
+    );
+    assert_eq!(
+        nav.hold(&cache, state.ship),
+        8,
+        "the market uses the new hold"
+    );
+    assert_eq!(state.acceleration, 994);
+    let index = nav.docked.expect("docked at the start starport");
+    let body = &nav.bodies[index];
+    assert_eq!(body.kind, Kind::Starport);
+    assert_eq!(body.slot, 110, "F994 places the ship at object 0x6e");
+    assert!(body.open_air);
+    let pads = Pads::from_bytes(cache.asset("base:gameplay/pads").unwrap()).unwrap();
+    let offset = pads
+        .position(body.model, state.bay, body.rows, true)
+        .unwrap();
+    assert_eq!(
+        state.seat,
+        [
+            body.position[0] + offset[0],
+            body.position[1] + offset[1],
+            body.position[2] + offset[2]
+        ]
+    );
+    // Hand-checked: model 0x55 uses DATA_006177; bay 1 is (-250, 0, 250); the
+    // station rows are (Q31, from F1674)
+    //   [-906354405, 1945245414, 76650739,
+    //    -1938310550, -909597149, 163923668,
+    //    180966058, 0, 2139827798],
+    // so F1669 gives (126, -227, 240) and the <<10 wraps to this offset.
+    assert_eq!(offset, [129_024, -232_448, 245_760]);
+    eprintln!(
+        "seat {:?} (bay {}, station at {:?}, offset {offset:?})",
+        state.seat, state.bay, body.position
+    );
+    // The calendar counts from 0x121cf7.5 days, not from the absolute clock.
+    assert_eq!(nav.date_text(), "1-Jan-3250 12:00:00");
+    assert_eq!(nav.day(), 0);
+    // The original's 0x24 -> 0x26 takeoff is not ported; the launch is blocked
+    // rather than teleporting the ship 20 km out.
+    let error = nav.begin_launch().unwrap_err();
+    assert!(error.contains("starport takeoff"), "{error}");
+    assert!(nav.sequence.is_none());
+}
+
 /// The map state the keys drive: open, choose, jump, fly.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]

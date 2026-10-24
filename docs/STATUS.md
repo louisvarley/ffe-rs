@@ -7,6 +7,13 @@ coverage and `docs/notes/` for the feature records.
 
 ## Navigation aid
 
+The default boot is the original's new game (`ffe_rs::navigation::new_game`):
+Ross 154, the Sidewinder, 1000 CR, 1 Jan 3250 12:00 and player state 0x30 on
+the starport's pad; `--start sol` keeps the Sol/Mars High development sandbox.
+The front end's logo/credit timeline is `ffe_rs::front_end` (the JJFFE legal
+splash is not part of it; `docs/notes/intro.md`). Open-air starport takeoff is
+still blocked with a message (EXP-010).
+
 `docs/NAVIGATION.md`: system and galaxy maps (Tab, G) and an autopilot to planets
 and stations, for testing the generated systems. Not part of the original game.
 Hyperspace jumps use the original's drive range, fuel and jump time over real star positions
@@ -35,7 +42,8 @@ ffe-rs's own (EXP-005).
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
 - `docs/notes/` - per-feature records: polygons, textures, child models,
   thrusters, animation, views, text/labels, curved surfaces, lines, fills,
-  docking, market, hyperspace, navigation and the galaxy map.
+  docking, market, hyperspace, navigation, the galaxy map, and the front
+  end/new game (`intro.md`).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
   in `burndown.js`; 14 milestones, 147 items, 56 done and 91 left on
   2026-10-24). **Update it in the same commit as any progress change**:
@@ -89,7 +97,7 @@ Move-Item -Force .\data-new.bin .\data.bin
 python .\tools\reference\verify-all.py
 ```
 
-`verify-all.py` checks that every input exists first and then runs all 46 oracle
+`verify-all.py` checks that every input exists first and then runs all 47 oracle
 entries (about five minutes), printing one line each and a final pass/fail. It
 needs the player's own files, NASM and the MSVC x86 tools; none of it is public
 CI. Rebuild the reference after any change to `tools/reference/`, and note that
@@ -155,6 +163,7 @@ capture produced by two repeat runs of the local reference.
 | v0.45 animation inputs, station spin | `ffe-core::model_animation` | `model_animation.rs` (6) | `verify-animation.py` (2,640 rotation + 4,096 orbital + F1537/F1680/F1683 set-ups) | `10ed4039…`, `2ab63f4d…` | global 0 = GameTics >> 10, global 1 gear/door (F865); F866/F1675 spin, model 74 at speed 10 |
 | v0.46 ship statistics, eyes, turrets | cache v12 `base:ship/stats`, `ShipStats`, `camera` eye/turret views | `views.rs` | none (data imported byte-exact; views from the assembly) | — | thrust limits feed global 15; F8 turret views for > 2 gun mounts |
 | v0.48e surface plumbing | `trace_surface` queue words (events 60/61) | — | whole-table oracle unchanged (448, 0 mismatched) | `4431b861…` | F1823 (entry hash map) and F1833 (mode dispatch) read and documented; surfaces are planet-scale, so the synthetic z-2000 station context clips them all |
+| v0.48p front end and new game | `ffe_rs::front_end`, `navigation::{Body, START_SYSTEMS, NewGameState, new_game}`, date helper | `front_end.rs` (8), `navigation.rs` (+1, ignored), `intro_reference.rs` (1, ignored) | `verify-intro.py` (76 cases, 10 tamper fields) | `a9489bbe5d0a2765938c1d14f8ba70505c0726bcd110d492eb01959616eafc3d` | F961/F962's 18 credits, model 177/176, bitmap 0x42, animation and the F829/F998/F994 start (Ross 154, Sidewinder, 1000 CR, state 0x30, pad seat); default boot is the new game, `--start sol` the sandbox; JJFFE legal splash and V line are not boot data; starport takeoff blocked (EXP-010) |
 | v0.48d surface helpers | `ffe_core::model_surface::{cross_sign, mix32, max_abs_msb}` | `model_surface.rs` (2) | `--surface-sign` (12 pairs), `--surface-helpers` (8 mixes, 9 points) pinned | — | F1875, F1824, F1825 ported; F1816/F1817/F1820 are arena allocators to replace, not reproduce |
 | v0.48c surface resolution | `SurfaceEmission::{origin, axes}` (F1874), `trace_surface` probe | `model_execute.rs` (+1) | `verify-station-models.py`: 448 models, 40 surface resolutions, 0 mismatched | `2036461a…` | origin (F1470 view), word0/6/10 and the three axis vectors verified; F1876's patch rendering not ported (see `docs/notes/surfaces.md`) |
 | v0.48b 3D text | `ffe-convert::glyph_programs`, `GlyphSet`, `ModelViewer::draw_texts`, cache v14 | `text.rs` (1), `glyphs.rs` (1, ignored), `embedded.rs` (+1), `cache.rs` (+1) | census: all three font sets import; models 15/30/66/453 draw text with nothing skipped | — | F1747: each character's program runs through `execute_live` in an F1740 frame, its return word sets the next pen; `0x3016`/`0x3022` expand the object string |
@@ -165,9 +174,9 @@ Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 382 `#[test]` functions total; 98 are `#[ignore]`
+  `cargo clippy -D warnings`. 392 `#[test]` functions total; 100 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **283 runnable synthetic tests** (284 on Linux).
+  **291 runnable synthetic tests** (292 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
@@ -181,8 +190,9 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
   through the approach; it exposed the surface queue's 50,000-word limit
   truncating the planet at 3-2 radii (black wedge). The flight view now draws
   surfaces with 131,072 words (EXP-009); the oracles keep the original limit.
-- `verify-all.py`: **29 of 29 oracles pass** (the 26 below plus
-  `verify-thrusters.py`, the deep child-model run and `verify-animation.py`).
+- `verify-all.py` (2026-10-24, including the new `verify-intro.py`): **46 of
+  47 oracles pass**; the only failure is `verify-world.py`'s Windows
+  `--worldgen` run-to-run comparison (ASLR; see Known stale spots).
 - `verify-station-models.py`: all 448 models that both sides complete match the
   original command flow and final state; `verify-child-models.py`: all 440
   models that execute match, with 1330 child runs and no mismatch;
@@ -206,9 +216,10 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v14 (1781 assets, 462 of 466 models, 219 model strings,
-  3 glyph sets); `.cache/data-v1..v5-backup.bin`, `data-v10-backup.bin`,
-  `data-v12-backup.bin` and `data-v13-backup.bin` are retained.
+  `data.bin` is cache v26 (1794 assets, 462 of 466 models, 219 model strings,
+  3 glyph sets, the F650 pad tables); `.cache/data-v1..v5-backup.bin`,
+  `data-v10-backup.bin`, `data-v12-backup.bin` and `data-v13-backup.bin` are
+  retained.
 - The three glyph sets import with 95, 52 and 95 programs (3,008 / 874 / 624
   bytes); every program decodes and names an in-range pen vertex.
 - `text_census` (local-only): 236 text records with 136 codes (130 model
@@ -337,7 +348,8 @@ values.
 
 ## Known stale spots
 
-- `verify-all.py` on 2026-10-24 (Windows, with the new `win-compat.h` shims): **38 of 39 oracles pass**, including
+- `verify-all.py` on 2026-10-24 (Windows, with the new `win-compat.h` shims): **46 of 47 oracles pass**
+  (the new `verify-intro.py` runs on Windows), including
   `verify-traffic.py`, `verify-market.py`, `verify-lift.py`, `verify-sectors.py` and `verify-hyperspace.py`; `verify-world.py` fails only on `--worldgen`'s run-to-run comparison
   (Linux pins ASLR with `personality`, Windows cannot). The scenarios that fork a child (`--surface-draw`) need Linux.
 

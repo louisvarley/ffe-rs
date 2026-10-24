@@ -526,3 +526,30 @@ GLOBAL _ref_draw_particle
 _ref_draw_particle equ FUNC_001610_DrawParticleClipped
 GLOBAL _ref_point
 _ref_point equ FUNC_001699
+
+; Intro oracle (--intro): the real F961/F962 with the text draw (DATA_007644) and
+; the model draw (DATA_007807, already aliased as _ref_draw_hook) captured, the
+; display set-up the splash used, the real string expansion and the GUI action
+; the version key travels through.
+GLOBAL _ref_intro_961
+GLOBAL _ref_intro_962
+GLOBAL _ref_intro_text_hook
+GLOBAL _ref_intro_animation
+GLOBAL _ref_expand_string
+GLOBAL _ref_sys_init
+GLOBAL _ref_palette
+GLOBAL _ref_display_mode
+GLOBAL _ref_clear_buffer
+GLOBAL _ref_gui_get_last_action
+GLOBAL _ref_gui_set_last_action
+_ref_intro_961 equ FUNC_000961
+_ref_intro_962 equ FUNC_000962
+_ref_intro_text_hook equ DATA_007644
+_ref_intro_animation equ DATA_009129
+_ref_expand_string equ FUNC_001343_StringExpandFFCodeInternal
+_ref_sys_init equ FUNC_001527_SysInit
+_ref_palette equ FUNC_001575
+_ref_display_mode equ FUNC_001573
+_ref_clear_buffer equ FUNC_001577_ClearBuf
+_ref_gui_get_last_action equ FUNC_001414_GuiGetLastAction
+_ref_gui_set_last_action equ FUNC_001415_GuiSetLastAction
