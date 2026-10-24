@@ -1274,9 +1274,23 @@ fn run() -> Result<(), String> {
                                 nav.bodies[index].name
                             );
                         }
-                        Traffic::LaunchOut(_) => {
-                            if let Err(error) = state.launch() {
-                                message = error;
+                        Traffic::LaunchOut(index) => {
+                            // Leave from the station's slot: the prototype's
+                            // `launch` would teleport the ship to (0, 0, -500) in
+                            // system space, facing empty sky.
+                            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                            state.mode = ffe_rs::flight::Mode::Flight;
+                            state.docking_requested = false;
+                            state.system_flight = true;
+                            if let Some(port) = nav.port(index) {
+                                state.position =
+                                    port.point(port.front * 2.0).map(|v| v as f64 / unit);
+                                // Face out of the slot (the way the lift's view
+                                // faces), not the prototype's zero heading.
+                                let forward = port.axis;
+                                state.yaw = forward[0].atan2(forward[2]);
+                                state.pitch = forward[1].clamp(-1.0, 1.0).asin();
+                                state.axes = None;
                             }
                         }
                         Traffic::LaunchDone(index) => {
@@ -1513,11 +1527,11 @@ fn run() -> Result<(), String> {
             inside.axes = None;
             // The ship waits in the docking slot facing out, so the world (the stars, the
             // planet and the station seen from its slot) shows past the lift's open doors.
+            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
             if let Some(port) = nav
                 .as_ref()
                 .and_then(|nav| nav.docked.and_then(|index| nav.port(index)))
             {
-                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
                 inside.position = port.point(port.front * 0.9).map(|v| v as f64 / unit);
                 let forward = port.axis;
                 let up = [0.0, 1.0, 0.0];
@@ -1527,6 +1541,27 @@ fn run() -> Result<(), String> {
                     up[0] * forward[1] - up[1] * forward[0],
                 ];
                 inside.axes = Some([right, up, forward]);
+            } else if let Some(body) = nav
+                .as_ref()
+                .and_then(|nav| nav.docked.and_then(|index| nav.bodies.get(index)))
+            {
+                // No port geometry yet (it is made while drawing the station):
+                // sit at the station itself rather than at the prototype's origin,
+                // so the lift is not drawn over empty space.
+                inside.position = body.position.map(|v| v as f64 / unit);
+                if let Some(world) = nav
+                    .as_ref()
+                    .and_then(|nav| nav.nearest_world(body.position))
+                {
+                    let to = [
+                        world[0] as f64 / unit - inside.position[0],
+                        world[1] as f64 / unit - inside.position[1],
+                        world[2] as f64 / unit - inside.position[2],
+                    ];
+                    let length = to.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0);
+                    inside.yaw = (to[0] / length).atan2(to[2] / length);
+                    inside.pitch = (to[1] / length).asin();
+                }
             }
             screen.draw(&inside, views, scene.as_ref(), help, modern, &message);
         } else {
