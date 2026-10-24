@@ -167,6 +167,12 @@ pub enum AssetKind {
     GameplayTables {
         source_offset: u64,
     },
+    /// The five open-air starport pad tables `DATA_006175..6179` plus the first
+    /// six dwords of `DATA_006180` that a bay past the last table reads (216 raw
+    /// bytes; v26); see `ffe_core::pads`.
+    PadTables {
+        source_offset: u64,
+    },
     /// One font model's per-character glyph command programs (v14): `count`
     /// little-endian u32 start offsets relative to the payload's program block,
     /// then the block itself. The block follows the offsets at
@@ -265,7 +271,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=25) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=26) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -328,6 +334,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         }
         if manifest.format_version < 25 && matches!(record.asset, AssetKind::DotTables { .. }) {
             return Err("The dot tables require cache v25.".to_owned());
+        }
+        if manifest.format_version < 26 && matches!(record.asset, AssetKind::PadTables { .. }) {
+            return Err("The open-air pad tables require cache v26.".to_owned());
         }
         if manifest.format_version < 24
             && matches!(
@@ -604,6 +613,9 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
             if bytes.len() != 647 {
                 return Err("invalid gameplay table block".to_owned());
             }
+        }
+        AssetKind::PadTables { .. } => {
+            ffe_core::pads::Pads::from_bytes(bytes)?;
         }
         AssetKind::NameText { .. } => {
             // 120 bytes of ranges, 510 NUL-terminated strings, then the 7,706-byte

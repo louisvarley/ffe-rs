@@ -342,6 +342,28 @@ pub fn decode_gameplay_tables(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, S
     })
 }
 
+/// The five open-air pad tables `DATA_006175..6179` F650 selects between:
+/// 16 pads of three little-endian dwords, 192 bytes. `DATA_006176` and the later
+/// labels are not at the numeric addresses their names suggest; the tables are
+/// contiguous in declaration order and the next label is `DATA_006180`.
+pub const PAD_TABLES_BYTES: usize = 0xc0;
+
+/// F650 indexes the selected table by the bay number without bounds checking.
+/// Bays 6 and 7 of the last table (`DATA_006179`, models that take the default
+/// branch) read the first six dwords of `DATA_006180`, the ship index tables;
+/// those bytes are imported with the pads so the overrun can be reproduced.
+pub const PAD_OVERRUN_BYTES: usize = 0x18;
+
+pub fn decode_pad_tables(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, PAD_TABLES_BYTES + PAD_OVERRUN_BYTES)?;
+    let table = range(bytes, source_offset, PAD_TABLES_BYTES + PAD_OVERRUN_BYTES)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table.to_vec(),
+    })
+}
+
 /// The 48-byte statistics block descriptor +0x38 points to (object set-up reads
 /// forward thrust at +0x0, reverse thrust at +0x2, gun mounts at +0x4, mass at
 /// +0x6), or `None` when the pointer is null.

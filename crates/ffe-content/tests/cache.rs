@@ -67,7 +67,7 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         read(&bytes).unwrap().asset("base:model-commands/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 26] {
+    for version in [1, 2, 3, 27] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
 
@@ -104,7 +104,7 @@ fn normal_payloads_require_v5_and_validate_counts_and_anchor_bounds() {
         read(&bytes).unwrap().asset("base:model-normals/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 26] {
+    for version in [1, 2, 3, 4, 27] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for count in [0, 1, 3, 6, 258, u32::MAX] {
@@ -135,7 +135,7 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
         read(&bytes).unwrap().asset("base:model-vertices/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 26] {
+    for version in [1, 2, 27] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for (program, count, scale, index) in [
@@ -223,7 +223,7 @@ fn stored_cache_is_deterministic_sorted_and_loads_by_stable_id() {
 fn malformed_manifests_cannot_claim_complete_content_or_escape_paths() {
     let bytes = build(manifest(), assets()).unwrap();
     for (key, value) in [
-        ("format_version", serde_json::json!(26)),
+        ("format_version", serde_json::json!(27)),
         ("format", serde_json::json!("other")),
         ("complete_game_assets", serde_json::json!(true)),
         ("unresolved", serde_json::json!([])),
@@ -531,4 +531,21 @@ fn ship_stats_table_requires_v12_and_one_block_per_slot() {
     assert!(build(m.clone(), vec![table(vec![1; 466 * 48], 466)]).is_ok());
     assert!(build(m.clone(), vec![table(vec![0; 465 * 48], 465)]).is_err());
     assert!(build(m, vec![table(vec![0; 466 * 48 - 1], 466)]).is_err());
+}
+
+#[test]
+fn pad_tables_require_v26_and_the_five_tables_plus_the_overrun_window() {
+    let table = |bytes: Vec<u8>| Asset {
+        id: "base:gameplay/pads".to_owned(),
+        path: "gameplay/pads.bin".to_owned(),
+        kind: AssetKind::PadTables { source_offset: 1 },
+        bytes,
+    };
+    let mut m = manifest();
+    m.format_version = 25;
+    assert!(build(m.clone(), vec![table(vec![0; 216])]).is_err());
+    m.format_version = 26;
+    assert!(build(m.clone(), vec![table(vec![0; 216])]).is_ok());
+    assert!(build(m.clone(), vec![table(vec![0; 215])]).is_err());
+    assert!(build(m, vec![table(vec![0; 217])]).is_err());
 }

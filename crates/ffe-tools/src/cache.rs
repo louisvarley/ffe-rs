@@ -5,10 +5,10 @@ use ffe_convert::embedded::{
     decode_bitmaps, decode_colour_map, decode_default_lighting, decode_dot_tables, decode_font,
     decode_galaxy_tables, decode_gameplay_tables, decode_market_tables, decode_model_collision,
     decode_model_commands, decode_model_descriptor, decode_model_names, decode_model_normals,
-    decode_model_record, decode_model_vertices, decode_name_text, decode_ship_stats,
-    decode_sine_table, decode_star_point_tables, decode_star_shades, decode_system_strings,
-    decode_system_tables, decode_terrain_maps, decode_terrain_tables, decode_texture_descriptors,
-    BitmapLayout,
+    decode_model_record, decode_model_vertices, decode_name_text, decode_pad_tables,
+    decode_ship_stats, decode_sine_table, decode_star_point_tables, decode_star_shades,
+    decode_system_strings, decode_system_tables, decode_terrain_maps, decode_terrain_tables,
+    decode_texture_descriptors, BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -107,6 +107,17 @@ pub(crate) fn system_strings_layout(profile: &str) -> Option<u32> {
 pub(crate) fn gameplay_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xee98c),
+        _ => None,
+    }
+}
+
+/// Open-air pad tables (`DATA_006175..6179` plus the `DATA_006180` overrun
+/// window) RVA (v26), floppy 1.02 only. The five tables are contiguous in the
+/// executable even though the later `DATA_` labels do not encode their
+/// addresses; they run from here to the ship index table at 0xde2cc.
+pub(crate) fn pad_layout(profile: &str) -> Option<u32> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some(0xde20c),
         _ => None,
     }
 }
@@ -405,6 +416,17 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some(pads_rva) = pad_layout(profile.id) {
+                let table = decode_pad_tables(&bytes, pads_rva)?;
+                assets.push(Asset {
+                    id: "base:gameplay/pads".to_owned(),
+                    path: "gameplay/pads.bin".to_owned(),
+                    kind: AssetKind::PadTables {
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             if let Some((names_rva, text_rva)) = name_text_layout(profile.id) {
                 let table = decode_name_text(&bytes, names_rva, text_rva)?;
                 assets.push(Asset {
@@ -589,6 +611,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     } + usize::from(names_layout(profile.id).is_some())
         + usize::from(system_layout(profile.id).is_some())
         + usize::from(gameplay_layout(profile.id).is_some())
+        + usize::from(pad_layout(profile.id).is_some())
         + if terrain_layout(profile.id).is_some() {
             2
         } else {
@@ -610,7 +633,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 25,
+        format: "ffe-content-cache".to_owned(), format_version: 26,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

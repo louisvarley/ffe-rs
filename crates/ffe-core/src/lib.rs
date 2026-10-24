@@ -28,6 +28,7 @@ pub mod model_texture;
 pub mod model_thruster;
 pub mod names;
 pub mod objects;
+pub mod pads;
 pub mod physics;
 pub mod player;
 pub mod sector;

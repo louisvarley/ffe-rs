@@ -4502,6 +4502,62 @@ static int traffic_vectors(void)
 }
 
 
+/* Open-air pad oracle (--pads): the original F650 on synthetic open-air and
+   indoor station records. Each case fixes the ship's bay (empty or already the
+   ship's) so the allocation succeeds, then F650's model-to-table switch, the
+   bay index into the table (including the documented read past the last table
+   into DATA_006180) and F1669 with a random Q31 station matrix followed by the
+   <<10 are printed. Models 0x51..0x5a, bays 0..7, both class bytes and both the
+   player's and another ship's index are covered. The out position is 24 bytes:
+   x, x sign, y, y sign, z, z sign. */
+static unsigned long pads_state = 0x2468ace1UL;
+static unsigned long pads_random(void)
+{
+    pads_state ^= pads_state << 13; pads_state &= 0xffffffffUL;
+    pads_state ^= pads_state >> 17;
+    pads_state ^= pads_state << 5; pads_state &= 0xffffffffUL;
+    return pads_state;
+}
+static int pads_vectors(void)
+{
+    static unsigned char station[0x160];
+    long position[6];
+    long rows[9];
+    unsigned long i, j;
+    fprintf(stderr, "JJFFE pads-v1: original F650's open-air pad offset (the model table switch, the bay index including the DATA_006180 overrun, F1669 and <<10) on 8,192 synthetic station records; the indoor branch is the fixed (0,0,-1).\n");
+    for (i = 0; i < 8192; ++i) {
+        unsigned long model = 0x51 + i % 10;
+        unsigned long bay = pads_random() % 8;
+        unsigned long ship = pads_random() % 12 + 1;
+        unsigned long other = ship == 1 ? 2 : 1;
+        int open_air = (int)(pads_random() & 1);
+        int player = (int)(pads_random() & 1);
+        int existing = (int)(pads_random() & 1);
+        unsigned long result;
+        long flag = 0x5a5a5a5a, pad = 0x5a5a5a5a;
+        memset(station, 0, sizeof station);
+        for (j = 0; j < 6; ++j) position[j] = 0x5a5a5a5a;
+        for (j = 0; j < 9; ++j) rows[j] = (long)(int)pads_random();
+        memcpy(station, rows, sizeof rows);
+        *(unsigned long *)(station + 0x82) = model;
+        station[0x86] = (unsigned char)ship; /* F650's player-event argument */
+        *(unsigned short *)(station + 0xce) = (unsigned short)bay;
+        for (j = 0; j < 8; ++j) station[0xd0 + j] = (unsigned char)other;
+        station[0xd0 + bay] = existing ? (unsigned char)ship : 0;
+        station[0x14c] = open_air ? 0x40 : 0x10;
+        ref_player_index = player ? ship : 0x7f;
+        result = ref_traffic_alloc(station, (long)ship, position, &flag, &pad) & 0xffffffffUL;
+        printf("{\"case\":%lu,\"model\":%lu,\"bay\":%lu,\"open_air\":%d,\"player\":%d,\"existing\":%d,\"ship\":%lu,\"rows\":[", i, model, bay, open_air, player, existing, ship);
+        for (j = 0; j < 9; ++j) printf("%s%ld", j ? "," : "", rows[j]);
+        printf("],\"result\":%ld,\"flag\":%ld,\"pad\":%ld,\"out\":[", (long)result, flag, pad);
+        for (j = 0; j < 6; ++j) printf("%s%ld", j ? "," : "", position[j]);
+        printf("]}\n");
+    }
+    if (fflush(stdout)) fail("cannot flush pad vectors");
+    return 0;
+}
+
+
 /* Market oracle (--market): the original F619 (price) and F620 (stock), with the game's
    own tables and generator, for random commodities, populations, dangers, supply classes
    and flags (negative variance, illegal) from random generator states. Each case runs the
@@ -5287,6 +5343,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--animation")) return animation_vectors();
     if (argc == 2 && !strcmp(argv[1], "--traffic")) return traffic_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--pads")) return pads_vectors();
     if (argc == 2 && !strcmp(argv[1], "--market")) return market_vectors();
     if (argc == 2 && !strcmp(argv[1], "--lift")) return lift_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sectors")) return sector_vectors();

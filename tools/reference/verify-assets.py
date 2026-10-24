@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 25 or len(manifest["files"]) != 1793:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 26 or len(manifest["files"]) != 1794:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,13 +143,37 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1794:
+            if archive.testzip() is not None or len(archive.infolist()) != 1795:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
                 if len(payload) != record["size"] or hashlib.sha256(payload).hexdigest() != record["sha256"]:
                     raise RuntimeError("cache payload digest mismatch")
                 asset = record["asset"]
+                if asset["kind"] == "pad_tables":
+                    # DATA_006175..6179 (five pad tables, 192 bytes) and the first
+                    # six dwords of DATA_006180, which the last table's bays 6 and
+                    # 7 read. The labels do not encode their addresses; the tables
+                    # are contiguous in declaration order.
+                    blocks_pad = declarations(reference / "ffedat.asm")
+                    pad_tables = b"".join(db_bytes(blocks_pad[f"DATA_00{n}"])
+                                          for n in range(6175, 6180))
+                    overrun = b""
+                    for line in blocks_pad["DATA_006180"].splitlines():
+                        text = line.split(";")[0].strip()
+                        if not text.startswith("dd "):
+                            continue
+                        overrun += b"".join(struct.pack("<I", int(value.strip(), 0))
+                                            for value in text[3:].split(","))
+                        if len(overrun) >= 24:
+                            break
+                    expected = pad_tables + overrun[:24]
+                    if (len(pad_tables) != 192 or len(expected) != 216
+                            or payload != expected):
+                        raise RuntimeError("pad tables differ from JJFFE DATA_006175..6180")
+                    offset = asset["source_offset"]
+                    if exe[offset:offset + 216] != payload:
+                        raise RuntimeError("pad tables source provenance differs")
                 if asset["kind"] == "gameplay_tables":
                     blocks_g = declarations(reference / "ffedat.asm")
                     for n, at in [(7207, 0), (7208, 60), (7209, 100), (7210, 144), (7211, 204),

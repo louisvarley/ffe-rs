@@ -63,6 +63,7 @@ ORACLES = [
                                 "--cache", "{cache}", "--depth", "0x50000"]),
     ("verify-animation.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-traffic.py", ["--reference", "{commands}"]),
+    ("verify-pads.py", ["--reference", "{smoke}"]),
     ("verify-market.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-lift.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-sectors.py", ["--reference", "{commands}", "--cache", "{cache}"]),
