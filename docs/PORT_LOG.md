@@ -52,6 +52,24 @@ Notes: `docs/notes/collision.md`. `crates/ffe-core/src/landing.rs`,
   the F576 path never set; the port declines that (the original reads
   uninitialised stack). The playable still uses its own station touch test.
 
+## 2026-10-24 - Sound documentation and the HMP/MIDI player (v0.48q)
+
+- `docs/notes/sound.md`: all 40 effect slots (file, loop/pitch/voice, call
+  sites and conditions), the 17 HMP songs with their start/stop routines, the
+  sound globals and ESC action numbers, the HMP format (192 division,
+  `0x188000` tempo, `hmp.cpp` semantics - the 480-PPQN note in FORMATS.md is
+  wrong), and what can be verified locally.
+- `ffe-core::hmp` parses HMP into absolute-tick events, duration and SMF;
+  `ffe-audio` adds the runtime `MUSIC/*.HMP` library, a tick-driven player with
+  original timing/loop/volume semantics, a WinMM system-MIDI backend and
+  null/recording sinks, `AudioSettings`/`SoundFlags` and the `Audio` trait.
+  All 17 tracks parse (track counts, durations, tempo, division asserted).
+- Deviations recorded in the note: WinMM instead of DirectMusic/MCI, no `.mid`
+  override, player-owned deterministic RNG. Effects playback is still a no-op;
+  the 23 cached WAVs are mixed by nothing yet.
+- The prefs page can drive `AudioSettings`/`SoundFlags` (serde) through the
+  `Audio` trait; no prefs files were touched.
+
 ## 2026-10-24 - The original new game and the intro timeline (v0.48p)
 
 - **Default boot is now F998's start type 1** (the owner: the DOS original is the
