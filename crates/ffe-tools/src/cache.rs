@@ -2,7 +2,7 @@ use crate::external::{output_destination, recorded_bytes};
 use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
-    decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font,
+    decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font, decode_galaxy_tables,
     decode_gameplay_tables, decode_market_tables, decode_model_collision, decode_model_commands,
     decode_model_descriptor, decode_model_names, decode_model_normals, decode_model_record,
     decode_model_vertices, decode_name_text, decode_ship_stats, decode_sine_table,
@@ -65,6 +65,15 @@ pub(crate) fn system_layout(profile: &str) -> Option<u32> {
 pub(crate) fn market_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0xdde08, 0xde970)),
+        _ => None,
+    }
+}
+
+/// Galaxy generator tables: the hand-made vectors (`DATA_006793`), the sector tables
+/// (`DATA_006799`) and the drive records (`DATA_007187`) RVAs (v21), floppy 1.02 only.
+pub(crate) fn galaxy_layout(profile: &str) -> Option<(u32, u32, u32)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0xe094c, 0xe1154, 0xee224)),
         _ => None,
     }
 }
@@ -401,6 +410,17 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: maps.bytes,
                 });
             }
+            if let Some((vectors_rva, sector_rva, drives_rva)) = galaxy_layout(profile.id) {
+                let table = decode_galaxy_tables(&bytes, vectors_rva, sector_rva, drives_rva)?;
+                assets.push(Asset {
+                    id: "base:world/galaxy-tables".to_owned(),
+                    path: "world/galaxy-tables.bin".to_owned(),
+                    kind: AssetKind::GalaxyTables {
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             if let Some((tables_rva, names_rva)) = market_layout(profile.id) {
                 let table = decode_market_tables(&bytes, tables_rva, names_rva)?;
                 assets.push(Asset {
@@ -517,6 +537,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         }
         + usize::from(name_text_layout(profile.id).is_some())
         + usize::from(market_layout(profile.id).is_some())
+        + usize::from(galaxy_layout(profile.id).is_some())
         + 4;
     // Plus the v10 model descriptor table, the v12 ship statistics table and the
     // v16 model record table.
@@ -527,7 +548,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 20,
+        format: "ffe-content-cache".to_owned(), format_version: 21,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

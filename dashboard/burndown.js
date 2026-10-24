@@ -125,10 +125,10 @@ window.FFE_BURNDOWN = {
         { id: "world-1", title: "Name generation (cname): types 1-0x14", status: "done", version: "v0.51g" },
         { id: "world-2", title: "System generation: stars, planets and station placement (csysgen)", status: "done", version: "v0.51i" },
         { id: "world-3", title: "System object types and orbits (csystem)", status: "todo" },
-        { id: "world-4", title: "Galaxy generation and the RNG stream question (KNOWN_ISSUES F1476)", status: "todo" },
+        { id: "world-4", title: "Galaxy generation and the RNG stream question (KNOWN_ISSUES F1476)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-5", title: "Planet surfaces and landing approach", status: "todo" },
         { id: "world-6", title: "Starports: services and events (cstarport)", status: "todo" },
-        { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "todo" },
+        { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-8", title: "Navigation: system and galaxy maps", status: "todo" },
         { id: "world-9", title: "Lighting by the local star and day/night", status: "todo" },
         { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" },
@@ -384,6 +384,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "Traffic control (F649-F657, F867) and the timed docking and launch stages (F1025, F1067-F1088) ported from the assembly and unit-tested; the record routines match the executed original (8,192 cases). flight-10 and flight-11 stay in progress: lift scenes, the pad hit in the collision stream and the crash branch remain."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "The galaxy's stars (F841, F853, F856, F861), system distances (F833) and the hyperdrive's range, fuel and jump time (F903) ported, cache v21; all match the executed original (16,049 and 8,192 cases). world-4 and world-7 in progress: the hyperspace sequence and misjumps, and the systems beyond the 16 on offer, remain."
     },
     {
       date: "2026-10-24",

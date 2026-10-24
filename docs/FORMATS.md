@@ -877,4 +877,9 @@ parts are future scope, not requirements for the first image exporter.
   `DATA_006164..6169` (RVA `0xdde08`; the supply, population and danger multipliers and the 33
   commodities' four dwords) followed by the 38 commodity names `DATA_006216..6253` (RVA `0xde970`,
   contiguous), each with its zero; floppy 1.02 only. See `docs/notes/market.md`.
+- V21 has 1790 assets: adds `base:world/galaxy-tables`, `world/galaxy-tables.bin`, 18,916 bytes: the hand-made star
+  vectors (117 of 6 bytes) and type words (`DATA_006793..6795`, RVA `0xe094c`, 936 bytes), `DATA_006799..6811` (RVA
+  `0xe1154`, 17,740 bytes: the 49 special sector keys, their 52-dword index, `DATA_006802`, `DATA_006803/6804`, the
+  576-byte hash table, the 128 by 129 byte density grid and the two 32-byte star type tables) and the 15 hyperdrive
+  records of 16 bytes (`DATA_007187..`, RVA `0xee224`, 240 bytes); floppy 1.02 only. See `docs/notes/hyperspace.md`.
 

@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 20 or len(manifest["files"]) != 1789:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 21 or len(manifest["files"]) != 1790:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,7 +143,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1790:
+            if archive.testzip() is not None or len(archive.infolist()) != 1791:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
@@ -185,6 +185,19 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                         expected = tail(label)
                         if payload[offset:offset + len(expected)] != expected:
                             raise RuntimeError(f"system table differs from JJFFE {label}")
+                if asset["kind"] == "galaxy_tables":
+                    # DATA_006793..6795 (the hand-made star vectors and type words), DATA_006799..6811
+                    # (special sectors, index, density grid, hash and star type tables) and the
+                    # first 240 bytes of DATA_007187.. (the 15 hyperdrive records).
+                    blocks_g2 = declarations(reference / "ffedat.asm")
+                    def joined(numbers):
+                        return b"".join(db_bytes(blocks_g2[f"DATA_00{n}"]) for n in numbers)
+                    expected = (joined([6793, 6794, 6795]) + joined(range(6799, 6812))
+                                + joined([7187, 7188, 7189])[:240])
+                    if len(expected) != 18916 or payload != expected:
+                        raise RuntimeError("galaxy tables differ from JJFFE DATA_006793..6811 / DATA_007187")
+                    if exe[asset["source_offset"]:asset["source_offset"] + 936] != payload[:936]:
+                        raise RuntimeError("galaxy tables source provenance differs")
                 if asset["kind"] == "market_tables":
                     # DATA_006164..6169 (the supply, population and danger multipliers and the
                     # 33 goods) then the 38 names DATA_006216..6253, each with its zero.

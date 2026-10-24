@@ -711,3 +711,69 @@ fn traffic_control_answers_requests() {
     // Out of range of every station: nothing to ask.
     assert!(nav.request_clearance([0, 0, 1_000_000_000_000]).is_none());
 }
+
+/// The hyperdrive in the navigator: distances are the original's (Sol to Alpha Centauri is
+/// 4.35 light years), a jump needs fuel and takes game time, and range limits it.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn hyperspace_uses_range_fuel_and_time() {
+    use ffe_rs::navigation::{DriveState, Navigator};
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let names: Vec<String> = (0..16)
+        .map_while(|i| nav.system_position(i).map(|_| i))
+        .map(|i| format!("{i}"))
+        .collect();
+    assert!(names.len() >= 15, "{} systems have a position", names.len());
+    let centauri = (1..15)
+        .find(|i| nav.range_to(*i) == Some(435))
+        .expect("Alpha Centauri at 4.35 light years");
+    assert_eq!(nav.range_to(0), Some(0));
+    // The test systems have places of their own, none at Sol.
+    for i in 11..15 {
+        let d = nav.range_to(i).unwrap();
+        assert!(d > 0 && d < 5000, "test system {i} at {d}");
+    }
+    // The Eagle (mass 16, class 10): 30000 / 16 = 18.75 light years.
+    let drive = |fuel| DriveState {
+        mass: 16,
+        class: 10,
+        fuel,
+    };
+    nav.drive = Some(drive(0));
+    let error = nav.hyperspace(&cache, centauri).unwrap_err();
+    assert!(error.contains("Not enough fuel"), "{error}");
+    assert_eq!(nav.system_name(), "Sol");
+    nav.drive = Some(drive(3));
+    let (distance, report) = nav.jump_report(centauri).unwrap();
+    assert_eq!(
+        (distance, report.fuel_needed, report.max_range),
+        (435, 1, 1875)
+    );
+    let before = nav.clock;
+    let jumped = nav.hyperspace(&cache, centauri).unwrap();
+    assert_eq!((jumped.distance, jumped.fuel), (435, 1));
+    assert!(
+        jumped.days > 0.5 && jumped.days < 2.0,
+        "{} days",
+        jumped.days
+    );
+    assert!((nav.clock - before - jumped.days * 86_400.0).abs() < 1e-6);
+    assert!(nav.system_name().starts_with("Alpha Centauri"));
+    // From Alpha Centauri, Lave is far beyond 18.75 light years.
+    let lave = (0..11)
+        .find(|i| nav.range_to(*i).is_some_and(|d| d > 4000))
+        .unwrap();
+    nav.drive = Some(drive(50));
+    let error = nav.hyperspace(&cache, lave).unwrap_err();
+    assert!(error.contains("Out of range"), "{error}");
+    assert!(nav.hyperspace(&cache, nav.current).is_err());
+    // The list shows each system's distance and fuel (or why not).
+    nav.open(ffe_rs::navigation::View::Galaxy);
+    let lines = nav.lines([0; 3]);
+    assert!(
+        lines.iter().any(|l| l.contains("LY") && l.contains(" T")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|l| l.contains("TOO FAR")), "{lines:?}");
+}

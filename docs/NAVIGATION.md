@@ -35,7 +35,7 @@ transfer then about 300 s of flight), Mercury and Daedalus.
 
 The game starts docked at the first station of Sol (L launches, which puts the ship out from that station on the original flight model). Wired in `main.rs` (not the original's map screens):
 
-- The console's map icon (or G): the systems list. Up/Down or a click chooses; Enter, H or the console's H icon hyperspaces (an instant jump) to the chosen system.
+- The console's map icon (or G): the systems list, each with its distance (in light years, the original's F833 units) and the fuel the jump needs, or `TOO FAR` or `NEEDS n T`. Up/Down or a click chooses; Enter, H or the console's H icon hyperspaces to the chosen system through the original's hyperdrive (F903): range and fuel are checked, the fuel is burnt from the hold (military fuel for the Eagle's class 10 drive, leaving radioactive waste), and the game clock moves by the jump time. A new game has no fuel; buy it at the station's market. The jump scene itself is not drawn.
 - The console's navigation-computer icon (or Tab): everything in this system. A click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns it off.
 - The top bar's button changes between modern and classic controls (modern by default; F3 too). Classic is the original's keys: Enter/Shift set speed, Z/A pitch, comma/period yaw, [ ] roll. Modern adds W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll).
 - D, flying in a system, asks the nearest station within 100 km for docking clearance (again cancels it). Fly into the slot on the station's docking face; or engage the autopilot on a station, which docks by itself.

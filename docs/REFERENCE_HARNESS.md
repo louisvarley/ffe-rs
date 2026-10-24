@@ -17,7 +17,7 @@ supplied `jjffe-master/` sources are **never edited**.
 - `tools/reference/win-compat.h` and `tools/reference/winstub/` — forced include and empty headers that let
   `headless.c` build with MSVC again: `sigsetjmp`, `setitimer` and `personality` are shimmed, and `fork` and
   `open_memstream` report failure, so the scenarios that need a forked child (`--surface-draw`, and the fault
-  catchers) are Linux-only. 35 of the 36 oracles in `verify-all.py` pass on Windows; `verify-world.py` does not,
+  catchers) are Linux-only. 38 of the 39 oracles in `verify-all.py` pass on Windows; `verify-world.py` does not,
   because `--worldgen` reads uninitialised stack words that hold addresses, which Linux pins by disabling ASLR
   (`personality`) and Windows cannot.
 - The `--lift` scenario replaces the draw hook `DATA_007807` (the pointer F1070 calls through) with a capture, so a

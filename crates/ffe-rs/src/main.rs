@@ -389,6 +389,10 @@ fn run() -> Result<(), String> {
                 modern = !modern;
                 held_controls.disarm(&keys_down);
             }
+            // The hyperdrive's view of the ship and its fuel (the galaxy list and the jump).
+            if let Some(nav) = nav.as_mut() {
+                nav.drive = drive_state(scene.as_ref(), &state);
+            }
             // Navigation: Tab the system map, G the galaxy, Up/Down choose, Enter
             // flies to the body (or jumps to the system), Backspace stops the autopilot.
             if let Some(nav) = nav.as_mut().filter(|_| {
@@ -480,18 +484,22 @@ fn run() -> Result<(), String> {
                         }
                         if hyperspace {
                             let index = nav.selected;
-                            match nav.jump(&cache, index) {
-                                Ok(position) => {
+                            match nav.hyperspace(&cache, index) {
+                                Ok(jumped) => {
                                     if let Some(model) = original.as_mut() {
-                                        model.teleport(position);
+                                        model.teleport(jumped.arrival);
                                     }
+                                    burn_fuel(&mut state, nav.drive, jumped.fuel);
                                     message = format!(
-                                        "Hyperspace: arrived in the {} system.",
+                                        "Hyperspace: {} in {:.1} days, {} t of fuel. Arrived in the {} system.",
+                                        ffe_rs::navigation::range_text(jumped.distance),
+                                        jumped.days,
+                                        jumped.fuel,
                                         nav.system_name()
                                     );
                                     nav.view = NavView::Closed;
                                 }
-                                Err(error) => message = format!("Jump failed: {error}"),
+                                Err(error) => message = format!("Jump refused: {error}"),
                             }
                         } else if let Some(body) = nav.engage() {
                             message = format!("Autopilot to {}.", body.name);
@@ -1333,6 +1341,51 @@ fn run() -> Result<(), String> {
         println!("PASS: native window presented {frames} frames using verified cabin artwork.");
     }
     Ok(())
+}
+
+/// The ship's hyperdrive as the jump sees it: the statistics' mass, the drive class (the low
+/// byte of a negative drive word) and the fuel in the hold (military fuel from class 10).
+fn drive_state(
+    scene: Option<&ModelViewer>,
+    state: &ffe_rs::flight::Flight,
+) -> Option<ffe_rs::navigation::DriveState> {
+    let stats = scene?.ship_stats(state.ship)?;
+    let class = if stats.drive < 0 {
+        i32::from(stats.drive as u16 & 0xff)
+    } else {
+        0
+    };
+    let slot = if class >= ffe_core::hyperspace::MILITARY_CLASS {
+        ffe_core::hyperspace::MILITARY_FUEL
+    } else {
+        ffe_core::hyperspace::HYDROGEN
+    };
+    Some(ffe_rs::navigation::DriveState {
+        mass: i32::from(stats.mass as i16),
+        class,
+        fuel: i32::from(state.hold.get(slot).copied().unwrap_or(0)),
+    })
+}
+
+/// Burn the fuel of a jump from the hold: hydrogen, or military fuel which leaves the same
+/// tonnes of radioactive waste (F903).
+fn burn_fuel(
+    state: &mut ffe_rs::flight::Flight,
+    drive: Option<ffe_rs::navigation::DriveState>,
+    tonnes: i32,
+) {
+    let Some(drive) = drive else { return };
+    state.hold.resize(ffe_core::market::NAMES, 0);
+    let tonnes = u16::try_from(tonnes).unwrap_or(0);
+    if drive.class >= ffe_core::hyperspace::MILITARY_CLASS {
+        let slot = &mut state.hold[ffe_core::hyperspace::MILITARY_FUEL];
+        *slot = slot.saturating_sub(tonnes);
+        let waste = &mut state.hold[ffe_core::hyperspace::RADIOACTIVES];
+        *waste = waste.saturating_add(tonnes);
+    } else {
+        let slot = &mut state.hold[ffe_core::hyperspace::HYDROGEN];
+        *slot = slot.saturating_sub(tonnes);
+    }
 }
 
 /// The models a generated station can have (F892's tables): their docking faces

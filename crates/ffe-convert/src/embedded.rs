@@ -655,6 +655,32 @@ pub fn decode_market_tables(
     })
 }
 
+/// The galaxy generator's tables: the hand-made star vectors and type words
+/// (`DATA_006793..6795`), the special sector keys, index, density grid, hash table and star
+/// type tables (`DATA_006799..6811`) and the 15 hyperdrive records (`DATA_007187..`), as one
+/// block in that order.
+pub fn decode_galaxy_tables(
+    bytes: &[u8],
+    vectors_rva: u32,
+    sector_rva: u32,
+    drives_rva: u32,
+) -> Result<EmbeddedTable, String> {
+    use ffe_core::sector::{Tables, DRIVE_BYTES, SECTOR_BYTES, TABLE_BYTES, VECTORS_BYTES};
+    let section = DataSection::parse(bytes)?;
+    let first = section.offset(vectors_rva, VECTORS_BYTES)?;
+    let mut block = Vec::with_capacity(TABLE_BYTES);
+    block.extend_from_slice(range(bytes, first, VECTORS_BYTES)?);
+    let second = section.offset(sector_rva, SECTOR_BYTES)?;
+    block.extend_from_slice(range(bytes, second, SECTOR_BYTES)?);
+    let third = section.offset(drives_rva, DRIVE_BYTES)?;
+    block.extend_from_slice(range(bytes, third, DRIVE_BYTES)?);
+    Tables::new(&block)?;
+    Ok(EmbeddedTable {
+        source_offset: first,
+        bytes: block,
+    })
+}
+
 /// Bytes of the planet engine's tables (`DATA_007836..7899`).
 pub const TERRAIN_TABLE_BYTES: usize = 7539;
 /// Bytes of the two terrain height maps (`DATA_007637`, `DATA_007638`).

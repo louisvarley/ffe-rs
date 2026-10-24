@@ -4621,6 +4621,142 @@ static int lift_vectors(void)
     return 0;
 }
 
+
+/* Galaxy sector oracle (--sectors): the original F841 (a sector's stars, with the F861 generator
+   and the hand-made sectors), F853 (the star count at several detail levels), F856 (a star's
+   position) and F833 (the distance between two positions) on every hand-made sector, random
+   sectors and random vectors and points. */
+extern long ref_sector_stars(void *vectors, void *info, long x16, long y16, long render);
+extern long ref_sector_count(long x, long y, long quality);
+extern void ref_star_position(long x16, long y16, void *vector, long *out);
+extern long ref_star_distance(long ax, long ay, long az, long bx, long by, long bz);
+extern unsigned long ref_special_sectors[];
+static unsigned long sector_state = 0x3c6ef372UL;
+static unsigned long sector_random(void)
+{
+    sector_state ^= sector_state << 13; sector_state &= 0xffffffffUL;
+    sector_state ^= sector_state >> 17;
+    sector_state ^= sector_state << 5; sector_state &= 0xffffffffUL;
+    return sector_state;
+}
+static void sector_case(unsigned long x, unsigned long y)
+{
+    static unsigned char vectors[64 * 6], info[0x200];
+    long n, i;
+    memset(vectors, 0, sizeof vectors); memset(info, 0, sizeof info);
+    n = ref_sector_stars(vectors, info, (long)(x << 16), (long)(y << 16), 0);
+    printf("{\"k\":\"sector\",\"x\":%lu,\"y\":%lu,\"n\":%ld,\"stars\":[", x, y, n);
+    for (i = 0; i < n && i < 63; ++i) {
+        long j;
+        printf("%s{\"v\":[", i ? "," : "");
+        for (j = 0; j < 6; ++j) printf("%s%u", j ? "," : "", vectors[6 * i + j]);
+        printf("],\"kind\":%u}", (unsigned)(info[0xa6 + 2 * i] | info[0xa7 + 2 * i] << 8));
+    }
+    printf("]}\n");
+}
+static int sector_vectors(void)
+{
+    static const long qualities[] = {0, 0, 0, 1, 5, 15, 16, 20};
+    unsigned long i;
+    fprintf(stderr, "JJFFE sectors-v1: original F841 (stars of a sector), F853 (star counts), F856 (star positions) and F833 (distances) on every hand-made sector and random sectors, vectors and points.\n");
+    for (i = 0; i < 49; ++i) {
+        unsigned long key = ref_special_sectors[i];
+        sector_case(key & 0xffff, key >> 16);
+    }
+    for (i = 0; i < 3000; ++i) {
+        unsigned long x = i < 2000 ? sector_random() % 0x2000 : 0x1700 + sector_random() % 0x40;
+        unsigned long y = i < 2000 ? sector_random() % 0x2000 : 0x1500 + sector_random() % 0x40;
+        if (i % 97 == 0) { x = (i % 2) ? 0x2000 + sector_random() % 5 : 0x1fff; y = sector_random() % 0x2000; }
+        sector_case(x, y);
+    }
+    for (i = 0; i < 4000; ++i) {
+        unsigned long x = sector_random() % 0x2100, y = sector_random() % 0x2100;
+        long quality = qualities[i % 8];
+        printf("{\"k\":\"count\",\"x\":%lu,\"y\":%lu,\"quality\":%ld,\"value\":%ld}\n", x, y, quality, ref_sector_count((long)x, (long)y, quality));
+    }
+    for (i = 0; i < 3000; ++i) {
+        unsigned char vector[6];
+        long out[3] = {0x55555555, 0x55555555, 0x55555555}, j;
+        unsigned long x = sector_random() % 0x2000, y = sector_random() % 0x2000;
+        for (j = 0; j < 6; ++j) vector[j] = (unsigned char)sector_random();
+        vector[0] = 9;
+        ref_star_position((long)(x << 16), (long)(y << 16), vector, out);
+        printf("{\"k\":\"position\",\"x\":%lu,\"y\":%lu,\"v\":[%u,%u,%u,%u,%u,%u],\"out\":[%ld,%ld,%ld]}\n", x, y,
+               vector[0], vector[1], vector[2], vector[3], vector[4], vector[5], out[0], out[1], out[2]);
+    }
+    for (i = 0; i < 6000; ++i) {
+        long p[6], j;
+        long span = i % 5 == 0 ? 0x7fffffffL : (i % 5 == 1 ? 0x10000000L : (i % 5 == 2 ? 0x1000000L : 0x200000L));
+        for (j = 0; j < 6; ++j) p[j] = i % 5 == 0 ? (long)sector_random() : (long)(sector_random() % (unsigned long)(span / 2 * 2 + 1)) - span / 2;
+        if (i % 7 == 0) for (j = 3; j < 6; ++j) p[j] = p[j - 3] + (long)(sector_random() % 0x4000) - 0x2000;
+        printf("{\"k\":\"distance\",\"p\":[%ld,%ld,%ld,%ld,%ld,%ld],\"value\":%ld}\n", p[0], p[1], p[2], p[3], p[4], p[5],
+               ref_star_distance(p[0], p[1], p[2], p[3], p[4], p[5]));
+    }
+    if (fflush(stdout)) fail("cannot flush sector vectors");
+    return 0;
+}
+
+
+/* Hyperdrive oracle (--hyperspace): the original F903 (the test and the jump: range, fuel and
+   time) for non-player ships (fuel in the object) and for the player (hydrogen or military fuel
+   in the hold, the radioactive waste, the cargo used and the "jump possible" flag), on random
+   ships, drive classes, distances, fuel and modes. */
+extern long ref_hyper(void *ship, long *distance, long *name, long *fuel, long *range, long *time, long *max_range, long mode);
+extern unsigned short ref_hydrogen, ref_military_fuel, ref_radioactives, ref_player_flags;
+extern unsigned long ref_cargo_used;
+static unsigned long hyper_state = 0x1b873593UL;
+static unsigned long hyper_random(void)
+{
+    hyper_state ^= hyper_state << 13; hyper_state &= 0xffffffffUL;
+    hyper_state ^= hyper_state >> 17;
+    hyper_state ^= hyper_state << 5; hyper_state &= 0xffffffffUL;
+    return hyper_state;
+}
+static int hyper_vectors(void)
+{
+    static const unsigned long ships[] = {14, 15, 16, 17, 20, 23, 28, 33, 35, 38, 40};
+    static unsigned char ship[0x160];
+    unsigned long i;
+    fprintf(stderr, "JJFFE hyperspace-v1: original F903 (hyperdrive range, fuel and jump time; the test and the jump) on 8,192 random ships, drive classes, distances and fuel, for a non-player ship and the player.\n");
+    for (i = 0; i < 8192; ++i) {
+        unsigned long model = ships[hyper_random() % 11], player = i % 2, mode = 1 + hyper_random() % 2;
+        long class_ = (long)(hyper_random() % 15), distance, name = 0x5a5a5a5aL, fuel = 0x5a5a5a5aL, range = 0x5a5a5a5aL;
+        long time = 0x5a5a5a5aL, max_range = 0x5a5a5a5aL, result;
+        unsigned long fuel_in = hyper_random() % 3 == 0 ? hyper_random() % 4 : hyper_random() % 120;
+        unsigned long flags = hyper_random() & 0xffff;
+        long reach;
+        unsigned long used_in, radio_in;
+        memset(ship, 0, sizeof ship);
+        *(unsigned long *)(ship + 0x82) = model;
+        ship[0x86] = 5; ship[0xd0] = (unsigned char)class_;
+        ref_player_index = player ? 5 : 0x7f;
+        ref_hydrogen = 0; ref_military_fuel = 0; radio_in = hyper_random() % 50; ref_radioactives = (unsigned short)radio_in;
+        used_in = hyper_random() % 80; ref_cargo_used = used_in; ref_player_flags = (unsigned short)flags;
+        if (!player) ship[0x119] = (unsigned char)fuel_in;
+        else if (class_ >= 10) ref_military_fuel = (unsigned short)fuel_in;
+        else ref_hydrogen = (unsigned short)fuel_in;
+        reach = 0;
+        { /* a distance around the drive's reach: ask the drive for it */
+            long d = 0, n = 0, f = 0, r = 0, t = 0, m = 0;
+            ref_hyper(ship, &d, &n, &f, &r, &t, &m, 1);
+            reach = m;
+        }
+        switch (hyper_random() % 6) {
+        case 0: distance = 0; break;
+        case 1: distance = reach + 1 + (long)(hyper_random() % 100); break;
+        case 2: distance = reach; break;
+        default: distance = reach > 0 ? 1 + (long)(hyper_random() % (unsigned long)reach) : 1; break;
+        }
+        ref_player_flags = (unsigned short)flags;
+        result = ref_hyper(ship, &distance, &name, &fuel, &range, &time, &max_range, (long)mode);
+        printf("{\"model\":%lu,\"class\":%ld,\"player\":%lu,\"mode\":%lu,\"distance_in\":%ld,\"fuel_in\":%lu,\"flags_in\":%lu,\"used_in\":%lu,\"radio_in\":%lu,\"result\":%ld,\"name\":%ld,\"fuel\":%ld,\"range\":%ld,\"time\":%ld,\"max_range\":%ld,\"ship_fuel\":%u,\"hydrogen\":%u,\"military\":%u,\"radioactives\":%u,\"flags\":%u,\"used\":%lu}\n",
+               model, class_, player, mode, (long)distance, fuel_in, flags, used_in, radio_in, result, name, fuel, range, time, max_range,
+               (unsigned)ship[0x119], (unsigned)ref_hydrogen, (unsigned)ref_military_fuel, (unsigned)ref_radioactives, (unsigned)ref_player_flags, (unsigned long)ref_cargo_used);
+    }
+    if (fflush(stdout)) fail("cannot flush hyperspace vectors");
+    return 0;
+}
+
 #ifdef FFE_COMMAND_PROBE
 extern void ref_object_frame(void *list, void *camera);
 extern void ref_display_object(void *object, void *descriptor);
@@ -4881,6 +5017,8 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--traffic")) return traffic_vectors();
     if (argc == 2 && !strcmp(argv[1], "--market")) return market_vectors();
     if (argc == 2 && !strcmp(argv[1], "--lift")) return lift_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--sectors")) return sector_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--hyperspace")) return hyper_vectors();
     if (argc == 2 && !strcmp(argv[1], "--object-instance")) return object_instance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

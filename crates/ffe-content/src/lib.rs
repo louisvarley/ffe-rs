@@ -116,6 +116,12 @@ pub enum AssetKind {
     MarketTables {
         source_offset: u64,
     },
+    /// The galaxy generator's tables: the hand-made star vectors and type words, the
+    /// special sector index, the density grid and hash table, the star type tables and the
+    /// hyperdrive records (v21); see `ffe_core::sector`.
+    GalaxyTables {
+        source_offset: u64,
+    },
     /// Per model table slot, the 20-byte record of the descriptor fields object
     /// set-up reads (scales, radii, shape and statistics flags; v16); see
     /// `ffe_convert::embedded::decode_model_record`.
@@ -242,7 +248,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=20) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=21) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -302,6 +308,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("The model records and gameplay tables require cache v16.".to_owned());
+        }
+        if manifest.format_version < 21 && matches!(record.asset, AssetKind::GalaxyTables { .. }) {
+            return Err("The galaxy tables require cache v21.".to_owned());
         }
         if manifest.format_version < 20 && matches!(record.asset, AssetKind::MarketTables { .. }) {
             return Err("The market tables require cache v20.".to_owned());
@@ -604,6 +613,9 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::MarketTables { .. } => {
             ffe_core::market::Tables::new(bytes)?;
+        }
+        AssetKind::GalaxyTables { .. } => {
+            ffe_core::sector::Tables::new(bytes)?;
         }
         AssetKind::EffectWav => {
             if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt " {

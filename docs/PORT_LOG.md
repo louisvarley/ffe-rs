@@ -4,6 +4,24 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — The galaxy's stars and the hyperdrive (`ffe_core::sector`, `hyperspace`), cache v21
+
+Notes: `docs/notes/hyperspace.md`; deviation EXP-007.
+
+- Cache v21 imports the galaxy generator's tables and the hyperdrive records (18,916 bytes, matching JJFFE's declarations
+  and the executable). `sector.rs` ports F853 (star counts), F841 with F861 (a sector's stars), F856 (positions) and F833
+  (distances); `hyperspace.rs` ports F903 (range, fuel, jump time; the test and the jump).
+- **Verified against the executed original**: `--sectors` (16,049 cases: every hand-made sector, 3,000 others, 4,000 counts at
+  seven detail levels, 3,000 positions, 6,000 distances including full 32-bit values) and `--hyperspace` (8,192 cases for
+  non-player ships and the player). All match; tampers and empty traces rejected. Corrections to the `srctools` notes: F861's
+  second rotation is 5 bits; F853's grid cell and neighbours read the 128 by 129 table at `+1`, `+128`, `+129`.
+- Distances are hundredths of a light year: Sol to Alpha Centauri 4.35, Sirius 8.68, 61 Cygni 11.2, matching the real stars.
+- The playable's galaxy list shows distance and fuel; the jump burns fuel (hydrogen; military fuel with waste for class 10 and
+  up) and advances the game clock. The four test systems now have real sector codes. The jump scene (F908-F910) and the galaxy
+  map screen are not done.
+
+---
+
 ## 2026-10-24 — The lift scenes of docking and launching (`ffe_core::lift`)
 
 Notes: `docs/notes/docking.md` ("The lift scenes").

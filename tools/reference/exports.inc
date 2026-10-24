@@ -487,3 +487,30 @@ GLOBAL _ref_scene_flag
 _ref_scene_flag equ DATA_008630
 GLOBAL _ref_station_object
 _ref_station_object equ DATA_008862
+
+; Galaxy sector oracle (--sectors): the star generator F841 (with F861), the star count F853,
+; the star position F856 and the distance F833.
+GLOBAL _ref_sector_stars
+GLOBAL _ref_sector_count
+GLOBAL _ref_star_position
+GLOBAL _ref_star_distance
+_ref_sector_stars equ FUNC_000841
+_ref_sector_count equ FUNC_000853
+_ref_star_position equ FUNC_000856
+_ref_star_distance equ FUNC_000833
+GLOBAL _ref_special_sectors
+_ref_special_sectors equ DATA_006799
+
+; Hyperdrive oracle (--hyperspace): F903 and the player's fuel, cargo and flag words it touches.
+GLOBAL _ref_hyper
+GLOBAL _ref_hydrogen
+GLOBAL _ref_military_fuel
+GLOBAL _ref_radioactives
+GLOBAL _ref_cargo_used
+GLOBAL _ref_player_flags
+_ref_hyper equ FUNC_000903
+_ref_hydrogen equ DATA_008901
+_ref_military_fuel equ DATA_008902
+_ref_radioactives equ DATA_008903
+_ref_cargo_used equ DATA_008891
+_ref_player_flags equ DATA_008860

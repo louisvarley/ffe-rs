@@ -24,8 +24,12 @@ pub struct ShipStats {
     pub gun_mounts: i8,
     /// +0x6, hull mass in tonnes (object +0xe4 holds it times 4).
     pub mass: u16,
+    /// +0x8, the cargo space (tonnes, signed word) before the hyperdrive's mass.
+    pub cargo: i16,
     /// +0x12, missile mounts.
     pub missiles: u16,
+    /// +0x14, the hyperdrive word: negative means a drive of the class in its low byte.
+    pub drive: i16,
     /// +0x18/+0x1a, the cockpit eye: along the forward axis, along the up axis
     /// (FUNC_001054 front and rear views).
     pub eye: [i16; 2],
@@ -44,7 +48,9 @@ impl ShipStats {
             reverse_thrust: word(2) as i16,
             gun_mounts: block[4] as i8,
             mass: word(6),
+            cargo: word(8) as i16,
             missiles: word(0x12),
+            drive: word(0x14) as i16,
             eye: [word(0x18) as i16, word(0x1a) as i16],
             top_turret: [word(0x28) as i16, word(0x2a) as i16],
             bottom_turret: [word(0x2c) as i16, word(0x2e) as i16],

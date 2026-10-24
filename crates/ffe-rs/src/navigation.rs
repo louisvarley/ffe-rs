@@ -7,11 +7,13 @@ use crate::docking::{Contact, Port, CLEARANCE_RANGE};
 use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND};
 use ffe_content::VerifiedCache;
 use ffe_core::galaxy::{tables, Tables};
+use ffe_core::hyperspace::{plan as jump_plan, Report};
 use ffe_core::market::{Conditions, Market, Tables as MarketTables};
 use ffe_core::model_math::SineTable;
 use ffe_core::names::Names;
 use ffe_core::objects::Models as ShipModels;
 use ffe_core::objects::{Models, PhysList, Placement};
+use ffe_core::sector::{distance as star_distance, Drive, Tables as GalaxyTables};
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
 use ffe_core::traffic::{begin_exit, finish_touch, state, Reply, Stages, Starport};
@@ -160,13 +162,48 @@ pub fn galaxy(cache: &VerifiedCache) -> Result<Vec<Entry>, String> {
                 seed,
                 mass,
                 stars,
-                code: entries.first().map_or(0, |e| e.params.code),
+                code: test_code(cache, n, entries.first().map_or(0, |e| e.params.code)),
                 population: 30,
                 name,
             },
         });
     }
     Ok(entries)
+}
+
+/// A system code for test system `n`: star 0 of the `n`th nearest populated sector to
+/// `home` (Sol), so that it has a real place in the galaxy for the jump distances. Falls back
+/// to `home` itself when the cache has no galaxy tables.
+fn test_code(cache: &VerifiedCache, n: usize, home: u32) -> u32 {
+    let Some(tables) = cache
+        .asset("base:world/galaxy-tables")
+        .and_then(|bytes| GalaxyTables::new(bytes).ok())
+    else {
+        return home;
+    };
+    let (hx, hy) = ((home & 0x1fff) as i32, ((home >> 13) & 0x1fff) as i32);
+    let mut found = Vec::new();
+    'search: for radius in 1..16i32 {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx.abs().max(dy.abs()) != radius {
+                    continue;
+                }
+                let (x, y) = (hx + dx, hy + dy);
+                if (0..0x2000).contains(&x)
+                    && (0..0x2000).contains(&y)
+                    && tables.star_count(x as u32, y as u32, 0) >> 10 > 0
+                    && tables.special_free(x as u16, y as u16)
+                {
+                    found.push((x as u32) | (y as u32) << 13);
+                    if found.len() > n {
+                        break 'search;
+                    }
+                }
+            }
+        }
+    }
+    found.get(n).copied().unwrap_or(home)
 }
 
 /// A system's bodies at a game clock.
@@ -290,6 +327,11 @@ pub fn distance(from: [i64; 3], to: [i64; 3]) -> f64 {
         .map(|k| ((to[k] - from[k]) as f64).powi(2))
         .sum::<f64>()
         .sqrt()
+}
+
+/// A hyperdrive distance as the galaxy list shows it (units of a hundredth of a light year).
+pub fn range_text(units: i32) -> String {
+    format!("{}.{:02} LY", units / 100, units % 100)
 }
 
 /// A distance as the map shows it.
@@ -506,6 +548,10 @@ pub struct Navigator {
     carry: f64,
     /// The market tables and names (cache v20), when the cache has them.
     market_tables: Vec<u8>,
+    /// The galaxy tables (cache v21): star positions and the hyperdrive records.
+    galaxy_tables: Vec<u8>,
+    /// The ship and fuel the galaxy list and the jump use.
+    pub drive: Option<DriveState>,
     /// The markets of the stations visited in this system.
     markets: HashMap<usize, StationMarket>,
     /// The autopilot has reached a station's approach point and is flying into
@@ -519,6 +565,27 @@ pub struct Navigator {
     ports: HashMap<u32, (Option<f64>, Option<f64>)>,
     memory: Memory,
     refreshed: f64,
+}
+
+/// The player's ship as the hyperdrive sees it: its mass, drive class and the fuel on
+/// board (hydrogen, or military fuel for class 10 and up), set by the caller each frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DriveState {
+    pub mass: i32,
+    pub class: i32,
+    pub fuel: i32,
+}
+
+/// A hyperspace jump made: where the ship arrives and what it cost.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Jumped {
+    pub arrival: [i64; 3],
+    /// The distance in the drive's units (about a hundredth of a light year).
+    pub distance: i32,
+    /// Tonnes of fuel burnt (military fuel leaves as much radioactive waste).
+    pub fuel: i32,
+    /// Game days the jump took.
+    pub days: f64,
 }
 
 /// A station's market with the stream its daily drift draws from and the game day it
@@ -612,6 +679,11 @@ impl Navigator {
                 .map(<[u8]>::to_vec)
                 .unwrap_or_default(),
             markets: HashMap::new(),
+            galaxy_tables: cache
+                .asset("base:world/galaxy-tables")
+                .map(<[u8]>::to_vec)
+                .unwrap_or_default(),
+            drive: None,
             final_leg: false,
             frame: None,
             ports: HashMap::new(),
@@ -984,8 +1056,75 @@ impl Navigator {
         self.refreshed = self.clock;
     }
 
-    /// Jump to the selected system: the bodies are rebuilt and the arrival point
-    /// (just off the first planet, or the star) returned.
+    /// The position of system `index` (F852: its star in its sector), 16.16 fixed point.
+    pub fn system_position(&self, index: usize) -> Option<[i32; 3]> {
+        let tables = GalaxyTables::new(&self.galaxy_tables).ok()?;
+        tables.system_position(self.entries.get(index)?.params.code)
+    }
+
+    /// The distance from the current system to system `index`, in the drive's units.
+    pub fn range_to(&self, index: usize) -> Option<i32> {
+        Some(star_distance(
+            self.system_position(self.current)?,
+            self.system_position(index)?,
+        ))
+    }
+
+    fn drives(&self) -> Option<Vec<Drive>> {
+        let tables = GalaxyTables::new(&self.galaxy_tables).ok()?;
+        (0..15).map(|class| tables.drive(class)).collect()
+    }
+
+    /// What the hyperdrive says about a jump to system `index` (F899: nothing is burnt).
+    pub fn jump_report(&self, index: usize) -> Option<(i32, Report)> {
+        let (drive, distance) = (self.drive?, self.range_to(index)?);
+        let report = jump_plan(
+            &self.drives()?,
+            drive.mass,
+            drive.class,
+            distance,
+            drive.fuel,
+            false,
+            true,
+        )
+        .ok()?;
+        Some((distance, report))
+    }
+
+    /// Jump to system `index` through the hyperdrive (F901): the fuel is checked and the
+    /// game clock moves by the jump time; the caller burns `Jumped::fuel`. Refused with a
+    /// reason when the system is out of range, the same system, or the hold has too little fuel.
+    pub fn hyperspace(&mut self, cache: &VerifiedCache, index: usize) -> Result<Jumped, String> {
+        let Some((distance, report)) = self.jump_report(index) else {
+            return Err("No hyperdrive data for this ship or system.".to_owned());
+        };
+        if index == self.current {
+            return Err("You are already in this system.".to_owned());
+        }
+        if report.result < 0 {
+            return Err(if report.fuel_needed < 0 {
+                format!(
+                    "Out of range: {} against the drive's {}.",
+                    range_text(distance),
+                    range_text(report.max_range)
+                )
+            } else {
+                format!("Not enough fuel: the jump needs {} t.", report.fuel_needed)
+            });
+        }
+        let days = f64::from(report.jump_time.unwrap_or(0)) / 65_536.0;
+        self.clock += days * 86_400.0;
+        let arrival = self.jump(cache, index)?;
+        Ok(Jumped {
+            arrival,
+            distance,
+            fuel: report.fuel_needed,
+            days,
+        })
+    }
+
+    /// Enter system `index` at once (no fuel, no time): the bodies are rebuilt and the arrival
+    /// point (just off the first planet, or the star) returned.
     pub fn jump(&mut self, cache: &VerifiedCache, index: usize) -> Result<[i64; 3], String> {
         if index >= self.entries.len() {
             return Err("no such system".to_owned());
@@ -1194,7 +1333,25 @@ impl Navigator {
                 .enumerate()
                 .map(|(i, e)| {
                     let here = if i == self.current { "*" } else { " " };
-                    format!("{}{} {}", mark(i), here, e.name)
+                    let detail = if i == self.current {
+                        String::new()
+                    } else {
+                        match self.jump_report(i) {
+                            Some((distance, report)) if report.result >= 0 => {
+                                format!("  {}  {} T", range_text(distance), report.fuel_needed)
+                            }
+                            Some((distance, report)) if report.fuel_needed < 0 => {
+                                format!("  {}  TOO FAR", range_text(distance))
+                            }
+                            Some((distance, report)) => format!(
+                                "  {}  NEEDS {} T",
+                                range_text(distance),
+                                report.fuel_needed
+                            ),
+                            None => String::new(),
+                        }
+                    };
+                    format!("{}{} {}{}", mark(i), here, e.name, detail)
                 })
                 .collect(),
             View::System => self

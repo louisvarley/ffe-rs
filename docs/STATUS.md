@@ -9,7 +9,8 @@ coverage and `docs/notes/` for the feature records.
 
 `docs/NAVIGATION.md`: system and galaxy maps (Tab, G) and an autopilot to planets
 and stations, for testing the generated systems. Not part of the original game.
-Docking and launching show the original's lift scenes (`ffe_core::lift`, verified on 8,192 cases against the
+Hyperspace jumps use the original's drive range, fuel and jump time over real star positions
+(`docs/notes/hyperspace.md`; both match the executed original; the jump scene is not drawn). Docking and launching show the original's lift scenes (`ffe_core::lift`, verified on 8,192 cases against the
 executed original; `docs/notes/docking.md`). Since 2026-10-24 the docked screen is the station's market (`docs/notes/market.md`: the original's
 price and stock formulas, daily drift, buying and selling, cache v20; F619 and F620 match the executed
 original). The system's stations are drawn in flight and the player can dock
@@ -317,8 +318,8 @@ values.
 
 ## Known stale spots
 
-- `verify-all.py` on 2026-10-24 (Windows, with the new `win-compat.h` shims): **35 of 36 oracles pass**, including the
-  new `verify-traffic.py` and `verify-market.py`; `verify-world.py` fails only on `--worldgen`'s run-to-run comparison
+- `verify-all.py` on 2026-10-24 (Windows, with the new `win-compat.h` shims): **38 of 39 oracles pass**, including
+  `verify-traffic.py`, `verify-market.py`, `verify-lift.py`, `verify-sectors.py` and `verify-hyperspace.py`; `verify-world.py` fails only on `--worldgen`'s run-to-run comparison
   (Linux pins ASLR with `personality`, Windows cannot). The scenarios that fork a child (`--surface-draw`) need Linux.
 
 - `verify-all.py` on 2026-10-23: **all 31 oracles pass** (the two broken since
