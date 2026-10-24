@@ -1364,7 +1364,9 @@ impl Screen {
     fn draw_lift(&mut self, scene: &ModelViewer, lift: &LiftView, camera: &Camera, eye: [i16; 2]) {
         let mut objects = lift.objects.clone();
         objects.sort_by_key(|object| std::cmp::Reverse(object.depth));
-        let light = self.scene_light(scene, camera);
+        // The lift is inside the station: the original's fixed default light,
+        // not the local star (which leaves the door faces black as it closes).
+        let light = camera.direction(scene.light_direction());
         for object in objects {
             let position = ffe_core::lift::view_position(&object, eye).map(f64::from);
             let mut inputs = AnimationInputs::original(lift.tics, object.word, &scene.shades());
