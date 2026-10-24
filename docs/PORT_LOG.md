@@ -52,7 +52,19 @@ Notes: `docs/notes/collision.md`. `crates/ffe-core/src/landing.rs`,
   the F576 path never set; the port declines that (the original reads
   uninitialised stack). The playable still uses its own station touch test.
 
-## 2026-10-24 — Black wedges on a planet approach (v0.48n)
+## 2026-10-24 - F650 pad tables (cache v26)
+
+- Imported `DATA_006175..006179` (16 pads, 192 bytes) plus the six dwords of
+  `DATA_006180` their bays 6/7 read past into, 216 bytes at file `0xc7e0c`
+  (RVA `0xde20c`, floppy 1.02), located by matching the declared bytes - the
+  derived RVA in the plan was wrong. Verified byte-for-byte against the
+  executable and the declarations. `ffe_core::pads` maps model to table exactly
+  as F650, applies F1669 and the wrapping `<< 10`, and keeps the indoor
+  `(0, 0, -1)`.
+- `--pads` oracle: 8,192 cases with tampering; trace `1ee017c0…`. Cache v26
+  (1,794 assets).
+
+## 2026-10-24 - Black wedges on a planet approach (v0.48n)
 
 Owner report: "weird black issues when I try to go to a planet".
 
