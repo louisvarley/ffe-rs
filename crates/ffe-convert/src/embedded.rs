@@ -625,6 +625,36 @@ pub fn decode_system_tables(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, Str
     })
 }
 
+/// The market tables (`DATA_006164..6169`, 704 bytes) and the 38 commodity names that
+/// `DATA_006162` points at (`DATA_006216..6253`, contiguous in the executable), as one
+/// block: the tables, then each name with its zero.
+pub fn decode_market_tables(
+    bytes: &[u8],
+    tables_rva: u32,
+    names_rva: u32,
+) -> Result<EmbeddedTable, String> {
+    use ffe_core::market::{Tables, NAMES, TABLE_BYTES};
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(tables_rva, TABLE_BYTES)?;
+    let mut block = range(bytes, source_offset, TABLE_BYTES)?.to_vec();
+    let names_offset = section.offset(names_rva, 1)?;
+    let mut at = names_offset;
+    for _ in 0..NAMES {
+        let rest = bytes.get(at..).ok_or("market names run past the file")?;
+        let length = rest
+            .iter()
+            .position(|b| *b == 0)
+            .ok_or("a market name is not terminated")?;
+        block.extend_from_slice(&rest[..=length]);
+        at += length + 1;
+    }
+    Tables::new(&block)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: block,
+    })
+}
+
 /// Bytes of the planet engine's tables (`DATA_007836..7899`).
 pub const TERRAIN_TABLE_BYTES: usize = 7539;
 /// Bytes of the two terrain height maps (`DATA_007637`, `DATA_007638`).

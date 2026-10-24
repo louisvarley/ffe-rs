@@ -3,11 +3,11 @@ use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
     decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font,
-    decode_gameplay_tables, decode_model_collision, decode_model_commands, decode_model_descriptor,
-    decode_model_names, decode_model_normals, decode_model_record, decode_model_vertices,
-    decode_name_text, decode_ship_stats, decode_sine_table, decode_star_shades,
-    decode_system_tables, decode_terrain_maps, decode_terrain_tables, decode_texture_descriptors,
-    BitmapLayout,
+    decode_gameplay_tables, decode_market_tables, decode_model_collision, decode_model_commands,
+    decode_model_descriptor, decode_model_names, decode_model_normals, decode_model_record,
+    decode_model_vertices, decode_name_text, decode_ship_stats, decode_sine_table,
+    decode_star_shades, decode_system_tables, decode_terrain_maps, decode_terrain_tables,
+    decode_texture_descriptors, BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -56,6 +56,15 @@ pub(crate) fn lighting_layout(profile: &str) -> Option<(u32, u32)> {
 pub(crate) fn system_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xe71d8),
+        _ => None,
+    }
+}
+
+/// Market tables (`DATA_006164`) and commodity names (`DATA_006216`) RVAs (v20),
+/// floppy 1.02 only.
+pub(crate) fn market_layout(profile: &str) -> Option<(u32, u32)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0xdde08, 0xde970)),
         _ => None,
     }
 }
@@ -392,6 +401,17 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: maps.bytes,
                 });
             }
+            if let Some((tables_rva, names_rva)) = market_layout(profile.id) {
+                let table = decode_market_tables(&bytes, tables_rva, names_rva)?;
+                assets.push(Asset {
+                    id: "base:market/tables".to_owned(),
+                    path: "market/tables.bin".to_owned(),
+                    kind: AssetKind::MarketTables {
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             if let Some(tables_rva) = system_layout(profile.id) {
                 let table = decode_system_tables(&bytes, tables_rva)?;
                 assets.push(Asset {
@@ -496,6 +516,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             0
         }
         + usize::from(name_text_layout(profile.id).is_some())
+        + usize::from(market_layout(profile.id).is_some())
         + 4;
     // Plus the v10 model descriptor table, the v12 ship statistics table and the
     // v16 model record table.
@@ -506,7 +527,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 19,
+        format: "ffe-content-cache".to_owned(), format_version: 20,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

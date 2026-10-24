@@ -873,4 +873,8 @@ parts are future scope, not requirements for the first image exporter.
 - V19 (still 1788 assets) appends to `base:text/names` the 7,706 bytes of the hand-coded
   systems' text from `DATA_007139` (RVA `0xec3d0`) to the end of `La Soeur du Dan Ham`:
   the names F873/F874 copy by offset (`Sol` is at `0x18bd`).
+- V20 has 1789 assets: adds `base:market/tables`, `market/tables.bin`, 704 bytes of
+  `DATA_006164..6169` (RVA `0xdde08`; the supply, population and danger multipliers and the 33
+  commodities' four dwords) followed by the 38 commodity names `DATA_006216..6253` (RVA `0xde970`,
+  contiguous), each with its zero; floppy 1.02 only. See `docs/notes/market.md`.
 

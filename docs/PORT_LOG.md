@@ -4,6 +4,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — Station markets and trading, cache v20 (`ffe_core::market`)
+
+Notes: `docs/notes/market.md`; deviation EXP-006.
+
+- Cache v20 imports the market tables (`DATA_006164..6169`) and the 38 commodity names; `verify-assets.py`
+  matches them to JJFFE's declarations and the executable (run). F619, F620, F622, F633's market half and F555/F556 are
+  ported from the assembly (the `srctools` notes have F619's cap and F620's two draws right but are easy to misread).
+- The docked screen is now the market (25 legal goods at Sol, price, stock, held), with Up/Down, B and N, cash in the
+  original's units (1000 = 100.0 credits) and the ship model's hold (5 t for the Eagle); the hold is saved.
+- All 329 table systems generate a market. Negative prices (radioactives, rubbish) pay the player to take them, as the
+  original's buy code allows.
+- **Not run against the original**: `--market` in `headless.c`, `verify-market.py`, `market_reference.rs` are written
+  (the harness builds only on Linux); the C was syntax-checked and the test plumbing exercised on a self-made trace.
+
+---
+
 ## 2026-10-24 — Traffic control and the docking and launch stages (`ffe_core::traffic`)
 
 Notes: `docs/notes/docking.md`. Replaces the always-granted clearance and the instant dock of the entry below.

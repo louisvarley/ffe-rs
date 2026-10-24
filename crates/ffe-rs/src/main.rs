@@ -14,6 +14,7 @@ use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
 use ffe_rs::ships::ShipList;
+use ffe_rs::trade;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use minifb::{MouseButton, MouseMode};
 use std::collections::HashMap;
@@ -210,13 +211,15 @@ fn run() -> Result<(), String> {
         }
     }
     let mut paused = false;
+    // The selected line of the station's market.
+    let mut trade_row = 0usize;
     let mut last_mode = state.mode;
     let mut message = match nav
         .as_ref()
         .and_then(|nav| nav.station().map(|(name, _)| name))
     {
         Some(name) => format!(
-            "Docked at {name}, {}. L launches; the map icons list systems and this system.",
+            "Docked at {name}, {}. Up/Down choose goods, B buys, N sells; L launches.",
             nav.as_ref().map_or("", |nav| nav.system_name())
         ),
         None => "Docked. L launches.".to_owned(),
@@ -679,6 +682,21 @@ fn run() -> Result<(), String> {
                         .unwrap_or(0);
                     views.external.step(keys, elapsed_ms, minimum);
                 }
+                if state.mode == ffe_rs::flight::Mode::Docked {
+                    let step = i32::from(pressed(Key::Down)) - i32::from(pressed(Key::Up));
+                    if step != 0 {
+                        let docked = nav.as_ref().and_then(|nav| nav.docked);
+                        let rows = match (nav.as_mut(), docked) {
+                            (Some(nav), Some(station)) => {
+                                trade::listing(nav, &cache, station, &state).map_or(0, |r| r.len())
+                            }
+                            _ => 0,
+                        };
+                        if rows > 0 {
+                            trade_row = (trade_row as i32 + step).rem_euclid(rows as i32) as usize;
+                        }
+                    }
+                }
                 let ship_step = i32::from(pressed(Key::PageDown)) - i32::from(pressed(Key::PageUp));
                 if ship_step != 0 {
                     message = match ships.step(state.ship, ship_step) {
@@ -759,10 +777,45 @@ fn run() -> Result<(), String> {
                     None
                 } else if pressed(Key::D) {
                     Some(state.request_docking())
-                } else if pressed(Key::B) {
-                    Some(state.buy())
-                } else if pressed(Key::N) {
-                    Some(state.sell())
+                } else if pressed(Key::B) || pressed(Key::N) {
+                    // At a station of a system the original's market; the prototype's
+                    // one-item trade otherwise.
+                    let buying = pressed(Key::B);
+                    let station = nav.as_ref().and_then(|nav| nav.docked);
+                    let shift =
+                        window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
+                    match (nav.as_mut(), station) {
+                        (Some(nav), Some(station))
+                            if state.mode == ffe_rs::flight::Mode::Docked
+                                && nav.market_tables().is_some() =>
+                        {
+                            let rows = trade::listing(nav, &cache, station, &state);
+                            match rows.map(|rows| rows.get(trade_row).map(|row| row.good)) {
+                                Ok(Some(good)) => {
+                                    match trade::trade(
+                                        nav,
+                                        &cache,
+                                        &mut state,
+                                        station,
+                                        good,
+                                        buying,
+                                        if shift { 10 } else { 1 },
+                                    ) {
+                                        Ok(text) => message = text,
+                                        Err(error) => message = format!("Trade failed: {error}"),
+                                    }
+                                    None
+                                }
+                                Ok(None) => None,
+                                Err(error) => {
+                                    message = format!("Market unavailable: {error}");
+                                    None
+                                }
+                            }
+                        }
+                        _ if buying => Some(state.buy()),
+                        _ => Some(state.sell()),
+                    }
                 } else {
                     None
                 };
@@ -1023,7 +1076,7 @@ fn run() -> Result<(), String> {
                             state.thrust = 0.0;
                             state.docking_requested = false;
                             message = format!(
-                                "Docked at {}. B buys food, N sells; F5 saves; L launches.",
+                                "Docked at {}. Up/Down choose goods, B buys, N sells (Shift: 10); L launches.",
                                 nav.bodies[index].name
                             );
                         }
@@ -1134,6 +1187,34 @@ fn run() -> Result<(), String> {
             }
             None => Vec::new(),
         };
+        screen.market = None;
+        if state.mode == ffe_rs::flight::Mode::Docked {
+            if let Some(nav) = nav.as_mut() {
+                if let Some(station) = nav.docked.filter(|_| nav.market_tables().is_some()) {
+                    if let Ok(rows) = trade::listing(nav, &cache, station, &state) {
+                        trade_row = trade_row.min(rows.len().saturating_sub(1));
+                        let hold = trade::hold_of(&state, nav.cargo_space(&cache, state.ship));
+                        screen.market = Some(ffe_rs::screen::MarketView {
+                            station: nav.bodies[station].name.clone(),
+                            system: nav.system_name().to_owned(),
+                            rows: rows
+                                .into_iter()
+                                .map(|row| ffe_rs::screen::MarketRow {
+                                    name: row.name,
+                                    price: row.price,
+                                    stock: row.stock,
+                                    held: row.held,
+                                })
+                                .collect(),
+                            selected: trade_row,
+                            cash: i32::try_from(state.credits).unwrap_or(i32::MAX),
+                            used: hold.used,
+                            capacity: hold.capacity,
+                        });
+                    }
+                }
+            }
+        }
         screen.lock = match nav.as_ref().and_then(|nav| nav.target.map(|i| (nav, i))) {
             Some((nav, i)) => format!(
                 "LOCKED: {} {}",

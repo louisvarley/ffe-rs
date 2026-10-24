@@ -14,3 +14,4 @@ pub mod saves;
 pub mod screen;
 pub mod ships;
 pub mod textures;
+pub mod trade;

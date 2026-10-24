@@ -41,6 +41,11 @@ pub struct Flight {
     /// origin): the prototype's boundary, docking and safety reset do not apply.
     #[serde(skip)]
     pub system_flight: bool,
+    /// Tonnes of each commodity in the hold (the original's 38-word cargo array,
+    /// `ffe_core::market`); empty is an empty hold. Saves from before the market
+    /// load empty.
+    #[serde(default)]
+    pub hold: Vec<u16>,
 }
 
 fn default_ship() -> u32 {
@@ -72,6 +77,7 @@ impl Default for Flight {
             thrust: 0.0,
             axes: None,
             system_flight: false,
+            hold: Vec::new(),
         }
     }
 }
@@ -116,6 +122,8 @@ impl Flight {
             || self.credits > 1_000_000_000
             || !(crate::ships::FIRST_SHIP..=crate::ships::LAST_SHIP).contains(&self.ship)
             || !(self.thrust.is_finite() && self.thrust.abs() <= 1.0)
+            || !(self.hold.is_empty() || self.hold.len() == ffe_core::market::NAMES)
+            || self.hold.iter().map(|t| u32::from(*t)).sum::<u32>() > 100_000
         {
             return Err("save contains out-of-range prototype state".to_owned());
         }

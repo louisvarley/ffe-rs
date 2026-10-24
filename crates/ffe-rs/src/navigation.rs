@@ -7,12 +7,15 @@ use crate::docking::{Contact, Port, CLEARANCE_RANGE};
 use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND};
 use ffe_content::VerifiedCache;
 use ffe_core::galaxy::{tables, Tables};
+use ffe_core::market::{Conditions, Market, Tables as MarketTables};
 use ffe_core::model_math::SineTable;
 use ffe_core::names::Names;
+use ffe_core::objects::Models as ShipModels;
 use ffe_core::objects::{Models, PhysList, Placement};
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
 use ffe_core::traffic::{begin_exit, finish_touch, state, Reply, Stages, Starport};
+use ffe_core::RandomState;
 use std::collections::HashMap;
 
 /// The reverse thrust's deceleration (metres per second squared, world time).
@@ -501,6 +504,10 @@ pub struct Navigator {
     pub notice: Option<String>,
     /// Game seconds not yet handed to the clearance countdowns.
     carry: f64,
+    /// The market tables and names (cache v20), when the cache has them.
+    market_tables: Vec<u8>,
+    /// The markets of the stations visited in this system.
+    markets: HashMap<usize, StationMarket>,
     /// The autopilot has reached a station's approach point and is flying into
     /// the slot.
     pub final_leg: bool,
@@ -513,6 +520,18 @@ pub struct Navigator {
     memory: Memory,
     refreshed: f64,
 }
+
+/// A station's market with the stream its daily drift draws from and the game day it
+/// was last brought up to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StationMarket {
+    pub market: Market,
+    rng: RandomState,
+    day: u32,
+}
+
+/// The most days of drift applied at once (a long transfer or a wait).
+const MAX_DRIFT_DAYS: u32 = 30;
 
 /// The player's index in a station's bay table (the original's `DATA_008857`; 0 is an
 /// empty bay).
@@ -588,6 +607,11 @@ impl Navigator {
             sequence: None,
             notice: None,
             carry: 0.0,
+            market_tables: cache
+                .asset("base:market/tables")
+                .map(<[u8]>::to_vec)
+                .unwrap_or_default(),
+            markets: HashMap::new(),
             final_leg: false,
             frame: None,
             ports: HashMap::new(),
@@ -633,6 +657,95 @@ impl Navigator {
             .filter(|(_, range)| *range <= CLEARANCE_RANGE)
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(i, _)| i)
+    }
+
+    /// The commodity tables and names, when the cache has them.
+    pub fn market_tables(&self) -> Option<MarketTables<'_>> {
+        MarketTables::new(&self.market_tables).ok()
+    }
+
+    /// The game day of the clock (the original's day counter).
+    pub fn day(&self) -> u32 {
+        (self.clock / 86_400.0) as u32
+    }
+
+    /// The per-commodity flags of this system's stock string (F870): supply class, price
+    /// variance sign and legality; 37 bytes.
+    pub fn stock_flags(&self, cache: &VerifiedCache) -> Result<[u8; 37], String> {
+        Ok(self.conditions(cache)?.2)
+    }
+
+    /// What this system's stock string, population and danger say (F870).
+    fn conditions(&self, cache: &VerifiedCache) -> Result<(i64, i64, [u8; 37]), String> {
+        let blob = cache
+            .asset("base:world/system-tables")
+            .ok_or("no system tables")?;
+        let tables = Tables::new(blob)?;
+        let market = tables.market(self.entries[self.current].params.code);
+        Ok((
+            i64::from(market.population),
+            i64::from(market.danger),
+            market.stock,
+        ))
+    }
+
+    /// The market of station `index`: generated on the first visit (F622's loop for one
+    /// station, from a stream seeded by the system and the station, so a market is the
+    /// same whenever it is first seen), and brought up to the day by the daily drift
+    /// (F633's market half, at most 30 days at once).
+    pub fn market(
+        &mut self,
+        cache: &VerifiedCache,
+        index: usize,
+    ) -> Result<&mut StationMarket, String> {
+        let day = self.day();
+        let (population, danger, flags) = self.conditions(cache)?;
+        let conditions = Conditions {
+            population,
+            danger,
+            flags: &flags,
+        };
+        let tables = MarketTables::new(&self.market_tables)
+            .map_err(|_| "this cache has no market tables (cache v20)".to_owned())?;
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.markets.entry(index) {
+            let mut rng = RandomState::new(
+                self.entries[self.current].params.code ^ 0x4d41_524b,
+                (index as u32 + 1).wrapping_mul(0x9e37_79b9),
+            );
+            let market = Market::generate(&tables, &conditions, &mut rng)?;
+            slot.insert(StationMarket { market, rng, day });
+        }
+        let station = self.markets.get_mut(&index).expect("just made");
+        let days = day.saturating_sub(station.day).min(MAX_DRIFT_DAYS);
+        for _ in 0..days {
+            station
+                .market
+                .daily(&tables, &conditions, &mut station.rng)?;
+        }
+        station.day = day.max(station.day);
+        Ok(station)
+    }
+
+    /// The hold of a ship model, tonnes (`ffe_core::objects::Models::cargo_space`).
+    pub fn cargo_space(&self, cache: &VerifiedCache, ship: u32) -> i32 {
+        let (Some(records), Some(stats), Some(gameplay)) = (
+            cache.asset("base:model/records"),
+            cache.asset("base:ship/stats"),
+            cache.asset("base:gameplay/tables"),
+        ) else {
+            return 0;
+        };
+        if 48 * (ship as usize + 1) > stats.len() || 20 * (ship as usize + 1) > records.len() {
+            return 0;
+        }
+        ShipModels {
+            records,
+            stats,
+            gameplay,
+        }
+        .cargo_space(ship)
+        .unwrap_or(0)
+        .max(0)
     }
 
     /// The traffic record of a station, made on first use with its bay count.
@@ -872,6 +985,7 @@ impl Navigator {
         self.target = None;
         self.docked = None;
         self.traffic.clear();
+        self.markets.clear();
         self.sequence = None;
         self.final_leg = false;
         self.frame = None;

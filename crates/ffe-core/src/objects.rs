@@ -65,6 +65,20 @@ impl Models<'_> {
         }
     }
 
+    /// The hold of a ship model, tonnes: the statistics' cargo word (`+8`) less the
+    /// hyperdrive's mass when it has one (F1533 puts it at `+0x116`, F992 copies it
+    /// into the player's hold). `None` for a model without statistics.
+    pub fn cargo_space(&self, model: u32) -> Option<i32> {
+        let stats = self.info(model).stats?;
+        let word = |at: usize| u16::from_le_bytes([stats[at], stats[at + 1]]);
+        let mut space = i32::from(word(8) as i16);
+        let drive = word(0x14);
+        if (drive as i16) < 0 {
+            space = space.wrapping_sub(self.hyperdrive(drive as u8 as i8));
+        }
+        Some(space)
+    }
+
     /// `DATA_007210`, indexed by a signed byte (negative indexes read the table
     /// before it, which the gameplay block holds).
     fn hyperdrive(&self, index: i8) -> i32 {

@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 19 or len(manifest["files"]) != 1788:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 20 or len(manifest["files"]) != 1789:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,7 +143,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1789:
+            if archive.testzip() is not None or len(archive.infolist()) != 1790:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
@@ -185,6 +185,16 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                         expected = tail(label)
                         if payload[offset:offset + len(expected)] != expected:
                             raise RuntimeError(f"system table differs from JJFFE {label}")
+                if asset["kind"] == "market_tables":
+                    # DATA_006164..6169 (the supply, population and danger multipliers and the
+                    # 33 goods) then the 38 names DATA_006216..6253, each with its zero.
+                    blocks_m = declarations(reference / "ffedat.asm")
+                    tables = b"".join(db_bytes(blocks_m[f"DATA_00{n}"]) for n in range(6164, 6170))
+                    names = b"".join(db_text_bytes(blocks_m[f"DATA_00{n}"]) for n in range(6216, 6254))
+                    if len(tables) != 704 or payload != tables + names or names.count(b"\0") != 38:
+                        raise RuntimeError("market tables or names differ from JJFFE DATA_006164..6253")
+                    if exe[asset["source_offset"]:asset["source_offset"] + 704] != payload[:704]:
+                        raise RuntimeError("market tables source provenance differs")
                 if asset["kind"] == "model_names":
                     # DATA_004682, the "Ship string table": each pointer's string, NUL-terminated.
                     data_blocks = declarations(reference / "ffedat.asm")

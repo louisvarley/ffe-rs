@@ -48,6 +48,30 @@ pub struct SystemStation {
 /// view space is 32-bit, and an orbital city is under a pixel beyond it.
 const STATION_DRAW_RANGE: f64 = 2.0e9;
 
+/// One commodity line of the station's market screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketRow {
+    pub name: String,
+    pub price: i32,
+    pub stock: i32,
+    pub held: u16,
+}
+
+/// The station's market as the docked screen shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MarketView {
+    pub station: String,
+    pub system: String,
+    pub rows: Vec<MarketRow>,
+    pub selected: usize,
+    pub cash: i32,
+    pub used: i32,
+    pub capacity: i32,
+}
+
+/// Rows of the market list shown at once.
+pub const MARKET_ROWS: usize = 8;
+
 /// The controls button in the top bar: left edge and right edge (logical pixels).
 pub const CONTROLS_BUTTON: (i32, i32) = (118, 236);
 
@@ -68,6 +92,8 @@ pub struct Screen {
     pub discs: Vec<Disc>,
     /// The system's stations (set by the caller each frame, in system flight).
     pub stations: Vec<SystemStation>,
+    /// The market the docked screen shows; the prototype's one-item screen without it.
+    pub market: Option<MarketView>,
     /// The system and the station the player is at, for the docked screen and the top bar.
     pub system: String,
     pub station: String,
@@ -278,6 +304,7 @@ impl Screen {
             stars,
             discs: Vec::new(),
             stations: Vec::new(),
+            market: None,
             system: String::new(),
             station: String::new(),
             lock: String::new(),
@@ -592,7 +619,10 @@ impl Screen {
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
             *pixel = self.palette[usize::from(*index)];
         }
-        if state.mode == Mode::Docked {
+        if state.mode == Mode::Docked && self.market.is_some() {
+            self.frame[..320 * 158].copy_from_slice(&self.cabin);
+            self.draw_market();
+        } else if state.mode == Mode::Docked {
             self.frame[..320 * 158].copy_from_slice(&self.cabin);
             self.rect(24, 24, 272, 92, 1);
             self.text(
@@ -775,11 +805,11 @@ impl Screen {
             3,
             120,
             &format!(
-                "SPD {:5.1}  RNG {:7.1}  CR {}  CARGO {}/10",
+                "SPD {:5.1}  RNG {:7.1}  CR {}  CARGO {} T",
                 state.speed(),
                 state.distance(),
-                state.credits,
-                state.cargo
+                crate::trade::credits(i32::try_from(state.credits).unwrap_or(i32::MAX)),
+                state.cargo + state.hold.iter().map(|t| u32::from(*t)).sum::<u32>()
             ),
             15,
         );
@@ -821,7 +851,7 @@ impl Screen {
                 "Original console, station and ship models.",
                 "DEFAULT MODERN: W/S thrust; arrows yaw/pitch",
                 "CLASSIC-LIKE: Enter/Shift thrust; ,/. yaw; A/Z pitch",
-                "X brake  D dock  L launch  B buy  N sell  PGUP/DN ship",
+                "X brake  D clearance  L launch  B/N trade  PGUP/DN ship",
                 "VIEWS: F1 cycle F6 front F7 rear F8 turret F9 external",
                 "External: arrows turn, +/- zoom. Turret: arrows aim",
                 "F12 models (Shift+F12 lab). P pause. Esc quit.",
@@ -1035,6 +1065,67 @@ impl Screen {
                 }
             }
         }
+    }
+
+    /// The market screen: the station, cash and hold, then the commodity list with the
+    /// selected row lit (a window of [`MARKET_ROWS`] around it).
+    fn draw_market(&mut self) {
+        let Some(view) = self.market.take() else {
+            return;
+        };
+        self.rect(6, 13, 308, 106, 1);
+        self.text(
+            12,
+            15,
+            &format!(
+                "{} STATION, {} SYSTEM",
+                view.station.to_ascii_uppercase(),
+                view.system.to_ascii_uppercase()
+            ),
+            18,
+        );
+        self.text(
+            12,
+            25,
+            &format!(
+                "CASH {} CR     HOLD {}/{} T",
+                crate::trade::credits(view.cash),
+                view.used,
+                view.capacity
+            ),
+            17,
+        );
+        self.text(12, 36, "COMMODITY", 12);
+        self.text(150, 36, "PRICE", 12);
+        self.text(208, 36, "STOCK", 12);
+        self.text(262, 36, "HELD", 12);
+        let first = view
+            .selected
+            .saturating_sub(MARKET_ROWS / 2)
+            .min(view.rows.len().saturating_sub(MARKET_ROWS));
+        for (k, row) in view.rows.iter().enumerate().skip(first).take(MARKET_ROWS) {
+            let y = 46 + 9 * (k - first);
+            let lit = k == view.selected;
+            if lit {
+                self.rect(8, y, 304, 9, 4);
+            }
+            let colour = if lit { 18 } else { 15 };
+            self.text(12, y, &row.name.to_ascii_uppercase(), colour);
+            self.text(150, y, &crate::trade::credits(row.price), colour);
+            self.text(208, y, &row.stock.to_string(), colour);
+            if row.held > 0 {
+                self.text(262, y, &row.held.to_string(), 17);
+            }
+        }
+        if view.rows.len() > MARKET_ROWS {
+            self.text(
+                250,
+                15,
+                &format!("{}/{}", view.selected + 1, view.rows.len()),
+                12,
+            );
+        }
+        self.market = Some(view);
     }
 
     /// The station as the original model 74, executed by the verified port and

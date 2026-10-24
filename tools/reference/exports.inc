@@ -442,3 +442,11 @@ _ref_traffic_dock equ FUNC_000655
 _ref_traffic_docking equ FUNC_000657
 _ref_traffic_elapse equ FUNC_000867
 _ref_player_index equ DATA_008857
+
+; Market oracle (--market): F619 (price), F620 (stock) and the goods table they read.
+GLOBAL _ref_market_price
+GLOBAL _ref_market_stock
+GLOBAL _ref_market_goods
+_ref_market_price equ FUNC_000619
+_ref_market_stock equ FUNC_000620
+_ref_market_goods equ DATA_006169

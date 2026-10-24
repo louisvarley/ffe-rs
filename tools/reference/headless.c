@@ -4471,6 +4471,46 @@ static int traffic_vectors(void)
     return 0;
 }
 
+
+/* Market oracle (--market): the original F619 (price) and F620 (stock), with the game's
+   own tables and generator, for random commodities, populations, dangers, supply classes
+   and flags (negative variance, illegal) from random generator states. Each case runs the
+   price from the state, then the stock from the same state; the results and the states
+   after are printed. */
+extern long ref_market_price(void *good, long population, long danger, long supply, long flags);
+extern long ref_market_stock(void *good, long population, long danger, long supply, long flags);
+extern unsigned char ref_market_goods[];
+static unsigned long market_state = 0x2545f491UL;
+static unsigned long market_random(void)
+{
+    market_state ^= market_state << 13; market_state &= 0xffffffffUL;
+    market_state ^= market_state >> 17;
+    market_state ^= market_state << 5; market_state &= 0xffffffffUL;
+    return market_state;
+}
+static int market_vectors(void)
+{
+    unsigned long i;
+    fprintf(stderr, "JJFFE market-v1: original F619 (price) and F620 (stock) with the game's tables and generator on 8,192 random cases; the stock follows the price from the same generator state.\n");
+    for (i = 0; i < 8192; ++i) {
+        unsigned long good = market_random() % 33, population = market_random() % 10;
+        unsigned long danger = market_random() % 8, flags = market_random() & 0xff;
+        unsigned long a = market_random(), b = market_random();
+        long price, stock;
+        unsigned long price_a, price_b, stock_a, stock_b;
+        state_set_u32(0x24, a); state_set_u32(0x28, b);
+        price = ref_market_price(ref_market_goods + 16 * good, (long)population, (long)danger, (long)(flags & 7), (long)(signed char)flags);
+        price_a = state_u32(0x24); price_b = state_u32(0x28);
+        state_set_u32(0x24, a); state_set_u32(0x28, b);
+        stock = ref_market_stock(ref_market_goods + 16 * good, (long)population, (long)danger, (long)(flags & 7), (long)(signed char)flags);
+        stock_a = state_u32(0x24); stock_b = state_u32(0x28);
+        printf("{\"good\":%lu,\"population\":%lu,\"danger\":%lu,\"flags\":%lu,\"a\":%lu,\"b\":%lu,\"price\":%ld,\"price_a\":%lu,\"price_b\":%lu,\"stock\":%ld,\"stock_a\":%lu,\"stock_b\":%lu}\n",
+               good, population, danger, flags, a, b, price, price_a, price_b, stock, stock_a, stock_b);
+    }
+    if (fflush(stdout)) fail("cannot flush market vectors");
+    return 0;
+}
+
 #ifdef FFE_COMMAND_PROBE
 extern void ref_object_frame(void *list, void *camera);
 extern void ref_display_object(void *object, void *descriptor);
@@ -4729,6 +4769,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--base-transform")) return base_transform_vectors();
     if (argc == 2 && !strcmp(argv[1], "--animation")) return animation_vectors();
     if (argc == 2 && !strcmp(argv[1], "--traffic")) return traffic_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--market")) return market_vectors();
     if (argc == 2 && !strcmp(argv[1], "--object-instance")) return object_instance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

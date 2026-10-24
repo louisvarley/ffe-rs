@@ -6,6 +6,7 @@ pub mod frames;
 pub mod galaxy;
 pub mod handcoded;
 pub mod landing;
+pub mod market;
 pub mod model;
 pub mod model_animation;
 pub mod model_commands;

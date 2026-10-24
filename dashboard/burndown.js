@@ -140,7 +140,7 @@ window.FFE_BURNDOWN = {
       title: "Gameplay systems (phase 4)",
       status: "planned",
       tasks: [
-        { id: "gameplay-1", title: "Market and economy tables, pricing and cargo", status: "todo" },
+        { id: "gameplay-1", title: "Market and economy tables, pricing and cargo", status: "in-progress", version: "market-v20" },
         { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "todo" },
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "todo" },
         { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "todo" },
@@ -204,7 +204,7 @@ window.FFE_BURNDOWN = {
       title: "Complete content import (phase 2)",
       status: "planned",
       tasks: [
-        { id: "content-1", title: "Gameplay tables (ships, equipment, economy)", status: "todo" },
+        { id: "content-1", title: "Gameplay tables (ships, equipment, economy)", status: "in-progress", version: "market-v20" },
         { id: "content-2", title: "Message strings, journal and remaining fonts", status: "todo" },
         { id: "content-3", title: "Music data (HMP) cached losslessly", status: "todo" },
         { id: "content-4", title: "Optional CD media inventory (videos and stills)", status: "todo" },
@@ -384,6 +384,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "Traffic control (F649-F657, F867) and the timed docking and launch stages (F1025, F1067-F1088) ported from the assembly and unit-tested; the differential oracle is written but unrun (Linux-only harness). flight-10 and flight-11 stay in progress: lift scenes, the pad hit in the collision stream and the crash branch remain."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "Station markets (F619, F620, F622, F633, F555, F556) and the market screen with the original's tables (cache v20, 1789 assets); the tables match JJFFE's declarations, the formula oracle is written but unrun. gameplay-1 and content-1 in progress: black market, mission cargo and equipment-changed holds remain."
     }
   ]
 };

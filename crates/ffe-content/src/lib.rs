@@ -111,6 +111,11 @@ pub enum AssetKind {
     SystemTables {
         source_offset: u64,
     },
+    /// The market tables `DATA_006164..6169` (704 bytes) followed by the 38 commodity
+    /// names, each ending in a zero (v20); see `ffe_core::market`.
+    MarketTables {
+        source_offset: u64,
+    },
     /// Per model table slot, the 20-byte record of the descriptor fields object
     /// set-up reads (scales, radii, shape and statistics flags; v16); see
     /// `ffe_convert::embedded::decode_model_record`.
@@ -237,7 +242,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=19) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=20) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -297,6 +302,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("The model records and gameplay tables require cache v16.".to_owned());
+        }
+        if manifest.format_version < 20 && matches!(record.asset, AssetKind::MarketTables { .. }) {
+            return Err("The market tables require cache v20.".to_owned());
         }
         if manifest.format_version < 19 && matches!(record.asset, AssetKind::NameText { .. }) {
             return Err("The name text requires cache v19.".to_owned());
@@ -593,6 +601,9 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::SystemTables { .. } => {
             ffe_core::galaxy::Tables::new(bytes)?;
+        }
+        AssetKind::MarketTables { .. } => {
+            ffe_core::market::Tables::new(bytes)?;
         }
         AssetKind::EffectWav => {
             if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt " {
