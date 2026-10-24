@@ -313,6 +313,25 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
     Ok(out)
 }
 
+/// A station in low orbit around a planet or moon, so a launch from it puts that
+/// world in the sky; the closest orbit wins. `None` when the system has none.
+fn orbital_station(bodies: &[Body]) -> Option<usize> {
+    bodies
+        .iter()
+        .enumerate()
+        .filter(|(_, body)| body.kind == Kind::Station)
+        .filter_map(|(index, station)| {
+            let away = bodies
+                .iter()
+                .filter(|body| matches!(body.kind, Kind::Planet | Kind::Moon))
+                .map(|body| distance(station.position, body.position) / body.radius.max(1) as f64)
+                .min_by(f64::total_cmp)?;
+            (away < 10.0).then_some((index, away))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(index, _)| index)
+}
+
 /// The first station of a system (else its first starport).
 fn first_station(bodies: &[Body]) -> Option<usize> {
     bodies
@@ -660,7 +679,9 @@ impl Navigator {
         let entries = galaxy(cache)?;
         let current = entries.iter().position(|e| e.name == "Sol").unwrap_or(0);
         let bodies = bodies(cache, &entries[current], clock_words(0.0))?;
-        let docked = first_station(&bodies);
+        // Start at a station in a planet's orbit, so the system's world is in view
+        // after launch; deep-space stations only when the system has none.
+        let docked = orbital_station(&bodies).or_else(|| first_station(&bodies));
         Ok(Self {
             entries,
             current,

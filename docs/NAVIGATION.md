@@ -11,6 +11,11 @@ systems, and an autopilot to planets, stations and other bodies for testing.
 | `navigation::bodies` | done: a system's stars, planets, moons, stations and starports with the original's names, placed by F880 at a game clock (positions in millimetres) |
 | `navigation::autopilot` | done and tested (`tests/navigation.rs`, local cache): steers the original flight model with its own keys (pulsed), holds a braking-curve set speed, hands back a transfer for long legs |
 | Map and jump UI in the playable | in progress (keys below) |
+
+The playable starts docked at a station **in a planet's orbit** — the closest
+such station, else the first station — so the launch puts that world in view
+(Sol: Mars High, 1.61 Mars radii). This is a starting-scenario choice, not the
+original's fixed start.
 | Stations in the flight view and docking | done (2026-10-24), ffe-rs rules: see "Docking" below |
 | Galaxy beyond the 12 hand-coded systems | not done: the other table systems need the sector star generator (F832-F856, tables `DATA_006799..6808`) and their name strings |
 

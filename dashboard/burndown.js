@@ -95,7 +95,7 @@ window.FFE_BURNDOWN = {
         { id: "v0.48-15", title: "Upper runtime palette", status: "todo" },
         { id: "v0.48-16", title: "Sprites, particles and circles (F1609-F1612)", status: "todo" },
         { id: "v0.48-17", title: "Remaining 17 of 466 model slots and the CD 1.01 census", status: "todo" },
-        { id: "v0.48-18", title: "A planet in the flight scenario", status: "todo" }
+        { id: "v0.48-18", title: "A planet in the flight scenario", status: "done", version: "v0.48j" }
       ]
     },
     {
@@ -424,6 +424,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "The galaxy map as the original draws it: the dot rasteriser (F1611, F1699-F1701) matches the executed original pixel for pixel on 12,000 cases; the scene (grid, nine sectors of stars, sphere, marker, selection, text) matches its map frame in 8,249 of 8,270 overlay pixels (cache v25). The jump sequence itself is not drawn."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 81,
+      note: "A planet in the scenario: the player now starts docked at a station in a planet's orbit (Mars High, 1.61 Mars radii) instead of a deep-space station, so the launched view has Mars filling the sky. The local test checks the orbit distance and that the surface draws."
     }
   ]
 };

@@ -4,6 +4,23 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — A planet in the scenario (v0.48j)
+
+Owner request: "we need a planet on our scenario".
+
+- `Navigator::new` now docks the player at a station **in low orbit of a planet
+  or moon** (closest orbit under ten radii), falling back to the first station.
+  In Sol that is **Mars High, 1.61 Mars radii**, so a launch faces Mars; the old
+  start was Daedalus, a deep-space station with no world in view. This is a
+  starting-scenario choice, not a ported original behaviour; `docs/NAVIGATION.md`
+  says so.
+- The planet surface path already existed (terrain emitter, `screen::Disc`); the
+  new local test `boot_station_has_a_planet_in_view` checks the orbit distance
+  and that Mars's surface draws in the flight view (extent 13,238,272, 1,584
+  colours on screen).
+- Landing on the surface, local-star lighting and the whole-frame pixel oracle
+  remain.
+
 ## 2026-10-24 — The galaxy map (F840, F862, F1699-F1701, F1611), cache v25
 
 Owner request: "Galaxy map as per original game". Notes: `docs/notes/galaxy-map.md`; deviation EXP-008.

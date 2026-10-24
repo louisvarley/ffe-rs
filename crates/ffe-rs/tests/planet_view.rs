@@ -43,6 +43,99 @@ fn planet_models_draw_triangles() {
     }
 }
 
+/// The boot scenario: how far the station the player starts at is from the
+/// nearest planet, and whether that planet draws in the flight view.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn boot_station_has_a_planet_in_view() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{distance, galaxy, Kind, Navigator};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::Disc;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let nav = Navigator::new(&cache).unwrap();
+    let orbit = &nav.bodies[nav.docked.expect("boot station")];
+    let station = orbit.name.as_str();
+    let entry = galaxy(&cache)
+        .unwrap()
+        .into_iter()
+        .nth(nav.current)
+        .unwrap();
+    // The navigator's own bodies (its clock), not a fresh list at another clock.
+    let list = &nav.bodies;
+    let mut planets: Vec<_> = list.iter().filter(|b| b.kind == Kind::Planet).collect();
+    planets.sort_by(|a, b| {
+        distance(orbit.position, a.position).total_cmp(&distance(orbit.position, b.position))
+    });
+    let body = planets[0];
+    let radii = distance(orbit.position, body.position) / body.radius as f64;
+    eprintln!(
+        "{station} in {}; nearest planet {} (model {}) is {radii:.2} radii from the station",
+        entry.name, body.name, body.model
+    );
+    // Which stations of Sol actually orbit a planet? That is where a launch
+    // would put one in view.
+    for b in list.iter().filter(|b| b.kind == Kind::Station) {
+        if let Some((near, away)) = planets
+            .iter()
+            .map(|p| (p, distance(b.position, p.position) / p.radius as f64))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        {
+            eprintln!(
+                "  station {:<22} nearest {:<10} {:>9.2} radii",
+                b.name, near.name, away
+            );
+        }
+    }
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    let radius = body.radius as f64 / UNIT;
+    let centre = body.position.map(|v| v as f64 / UNIT);
+    state.position = [centre[0], centre[1], centre[2] - 8.0 * radius];
+    // Just the world the station orbits: the draw path for the others is the
+    // same and is covered by `flight_view_shows_planet_surfaces`.
+    screen.discs = vec![Disc {
+        centre,
+        radius,
+        light: [1.0, 0.0, 0.0],
+        colours: (12, 4),
+        star: false,
+        model: Some((body.model, body.seed)),
+        orientation: body.orientation,
+    }];
+    screen.draw(
+        &state,
+        ViewState::default(),
+        Some(&viewer),
+        false,
+        false,
+        "",
+    );
+    let extent = viewer.surface_extent.get();
+    eprintln!(
+        "surface extent {extent}, {} discs, {} distinct colours on screen",
+        screen.discs.len(),
+        screen
+            .logical_pixels()
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    );
+    assert!(extent > 0.0, "the planet's surface must draw");
+    assert!(
+        radii < 10.0,
+        "nearest planet is {radii:.1} radii from the station"
+    );
+}
+
 /// Earth and the Moon from near orbit, in the flight view's own camera.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
