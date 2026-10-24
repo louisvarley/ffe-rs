@@ -195,6 +195,9 @@ pub struct ViewState {
     pub mode: ViewMode,
     pub external: ExternalCamera,
     pub turret: TurretCamera,
+    /// The original's "Lock external view to ship" (`DATA_009020`): the external
+    /// camera's offset follows the turned forward axis; off uses the ship's own.
+    pub lock_external: bool,
     /// What the console shows besides the views (time acceleration, speeds).
     pub console: crate::console::ConsoleState,
 }
@@ -205,6 +208,7 @@ impl Default for ViewState {
             mode: ViewMode::Front,
             external: ExternalCamera::default(),
             turret: TurretCamera::default(),
+            lock_external: true,
             console: crate::console::ConsoleState::default(),
         }
     }
@@ -299,14 +303,21 @@ impl Camera {
                 }
             }
             // rot(C, A, yaw), then rot(B, C, pitch); the camera sits at
-            // distance / 256 along the turned forward axis ("lock to ship" on).
+            // distance / 256 along the turned forward axis with "Lock external
+            // view to ship" on, the ship's own forward axis with it off.
             ViewMode::External => {
                 let external = views.external;
+                let ship_forward = forward;
                 let (forward, right) = rotate(forward, right, external.yaw);
                 let (up, forward) = rotate(up, forward, external.pitch);
                 let offset = f64::from(external.distance) / 256.0 / model_scale;
+                let along = if views.lock_external {
+                    forward
+                } else {
+                    ship_forward
+                };
                 Self {
-                    position: std::array::from_fn(|i| state.position[i] + forward[i] * offset),
+                    position: std::array::from_fn(|i| state.position[i] + along[i] * offset),
                     axes: [right, up, forward],
                 }
             }

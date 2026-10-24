@@ -3,6 +3,7 @@ use crate::flight::{Flight, Mode};
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
+use crate::prefs::{self, Mark, Prefs};
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::JITTER_SEED;
 use ffe_core::model_fill::{fill_polygon, fill_quad, fill_triangle};
@@ -139,6 +140,13 @@ pub struct Screen {
     palette: [u32; 128],
     indexed: Box<[u8; 64000]>,
     stars: Vec<[f64; 3]>,
+    /// The flight view's background: the original's space colour
+    /// (`DATA_008815..817`, set by the Graphic Detail page), RGB.
+    pub sky: u32,
+    /// The original's "Background stars" option; off leaves the sky empty.
+    pub stars_visible: bool,
+    /// The original's "Lock external view to ship" option (camera offset axis).
+    pub lock_external: bool,
     /// The system's bodies as discs (set by the caller each frame).
     pub discs: Vec<Disc>,
     /// The system's stations (set by the caller each frame, in system flight).
@@ -164,6 +172,9 @@ pub struct Screen {
     pub has_lock: bool,
     /// The original console view icons (secondary bitmaps 63..81), when cached.
     icons: Vec<Option<IndexedImage>>,
+    /// The SysMenu's on/off icon bitmaps (primary 0x2c/0x2d), when cached.
+    prefs_on: Option<IndexedImage>,
+    prefs_off: Option<IndexedImage>,
     jitter: Jitter,
 }
 
@@ -258,6 +269,32 @@ impl Screen {
                 }
             })
             .collect();
+        // The SysMenu's own icon bitmaps: primary 0x2c ("on") and 0x2d
+        // ("off"), 11x10 masked, drawn at the hot area's origin.
+        let primary = |id: &str| -> Option<IndexedImage> {
+            let asset_id = format!("base:bitmap/primary/{id}");
+            let record = cache.manifest().files.iter().find(|r| r.id == asset_id)?;
+            match record.asset {
+                AssetKind::IndexedBitmap {
+                    width,
+                    height,
+                    offset_x,
+                    offset_y,
+                    masked_zero,
+                    ..
+                } => IndexedImage::new(
+                    width,
+                    height,
+                    [offset_x, offset_y],
+                    masked_zero,
+                    cache.asset(&asset_id)?,
+                )
+                .ok(),
+                _ => None,
+            }
+        };
+        screen.prefs_on = primary("044");
+        screen.prefs_off = primary("045");
         Ok(screen)
     }
 
@@ -423,6 +460,11 @@ impl Screen {
             palette,
             indexed: Box::new([0; 64000]),
             stars,
+            // `FUNC_000219_SysMenuInit`'s default: "Light Blue" (4), the
+            // requested four-bit colour (0, 0, 4).
+            sky: prefs::space_colour_rgb(4),
+            stars_visible: true,
+            lock_external: true,
             discs: Vec::new(),
             stations: Vec::new(),
             sun: None,
@@ -435,6 +477,8 @@ impl Screen {
             station: String::new(),
             lock: String::new(),
             icons: Vec::new(),
+            prefs_on: None,
+            prefs_off: None,
             jitter: Jitter::default(),
         })
     }
@@ -709,6 +753,8 @@ impl Screen {
     ) {
         self.indexed.fill(0);
         self.panel.blit(&mut self.indexed, 0, 158);
+        let mut views = views;
+        views.lock_external = self.lock_external;
         let view = views.mode;
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
@@ -744,6 +790,13 @@ impl Screen {
         }
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
             *pixel = self.palette[usize::from(*index)];
+        }
+        // The original clears the upper view to `DATA_009222`, the palette entry
+        // nearest its space colour (FUNC_001618_ClearUpperBuf); the port draws
+        // the requested colour (`DATA_008815..817`) directly. The docked screen
+        // and the maps paint over it.
+        if state.mode != Mode::Docked {
+            self.frame[..320 * VIEW_HEIGHT].fill(self.sky);
         }
         if let Some(map) = self.galaxy.take().filter(|_| scene.is_some()) {
             self.draw_galaxy(scene.unwrap(), &map);
@@ -788,7 +841,7 @@ impl Screen {
             self.jitter.cursor = self.jitter.start;
             let world = self.lift.as_ref().is_none_or(|lift| lift.world);
             for index in 0..self.stars.len() {
-                if !world {
+                if !world || !self.stars_visible {
                     break;
                 }
                 if let Some((x, y)) = camera.project(self.stars[index], false) {
@@ -1039,13 +1092,13 @@ impl Screen {
                 "X brake  D clearance  L launch  B/N trade  PGUP/DN ship",
                 "VIEWS: F1 cycle F6 front F7 rear F8 turret F9 external",
                 "External: arrows turn, +/- zoom. Turret: arrows aim",
-                "F12 models (Shift+F12 lab). F11 screenshot. P pause. Esc quit.",
+                "F12 models (Shift+F12 lab). F11 screenshot. P pause. Esc prefs.",
                 "F5 save snapshot; Shift+F5 load newest snapshot.",
                 "Dock: D clearance (100 km), in the slot under 250 m/s",
                 "O original flight: Enter/Shift speed, Z/A , . [ ] steer",
                 "TAB system map. G galaxy map: arrows, PgUp/Dn, C, H jumps",
                 "Click a body/T: lock. K: autopilot (docks). Bksp: stop.",
-                "H closes help. Map icon: systems. Nav icon: this system.",
+                "H closes help. Esc: preference pages (controls, space colour).",
             ]
             .iter()
             .enumerate()
@@ -1063,6 +1116,75 @@ impl Screen {
             self.text(20, 47 + index * 13, line, 15);
         }
         self.present();
+    }
+
+    /// The Escape preference pages: `FUNC_000225_SysMenuDisplayNonFile`'s
+    /// 320x158 upper view over the console. Background palette index 3 is the
+    /// original's clear colour for (3,3,3) (`DATA_009222`), the icons are
+    /// `0x2c`/`0x2d`, and every rectangle is `DATA_004903`..`DATA_004905`.
+    /// The `>` marks the port's keyboard selection (the original is mouse-only).
+    pub fn draw_prefs(&mut self, prefs: &Prefs) {
+        // The original only clears the upper view; the console below it stays
+        // visible (`FUNC_000225` calls `FUNC_001618_ClearUpperBuf`).
+        self.indexed.fill(0);
+        self.panel.blit(&mut self.indexed, 0, VIEW_HEIGHT as i32);
+        for y in VIEW_HEIGHT..LOGICAL_HEIGHT {
+            for x in 0..LOGICAL_WIDTH {
+                let index = self.indexed[y * LOGICAL_WIDTH + x];
+                self.frame[y * LOGICAL_WIDTH + x] = self.palette[usize::from(index)];
+            }
+        }
+        self.rect(0, 0, 320, VIEW_HEIGHT, 3);
+        let rows = prefs.rows();
+        for row in &rows {
+            let on = match row.mark {
+                Mark::Action => row.applied,
+                Mark::Radio(on) | Mark::Toggle(on) => on,
+            };
+            self.prefs_icon(row.x, row.y, on);
+            let colour = if row.applied { row.colour } else { 8 };
+            self.shadow_text(row.x + 16, row.y, row.label, colour);
+        }
+        for text in prefs.texts() {
+            self.shadow_text(text.x, text.y, text.text, text.colour);
+        }
+        if let Some(row) = rows.get(prefs.selected) {
+            self.shadow_text(row.x - 10, row.y, ">", 18);
+        }
+        self.present();
+    }
+
+    /// `0x2c` (on) and `0x2d` (off): a red or grey square with a dark border,
+    /// as the menu icon bitmap draws it at the hot area's origin.
+    fn prefs_icon(&mut self, x: i32, y: i32, on: bool) {
+        let bitmap = if on {
+            self.prefs_on.as_ref()
+        } else {
+            self.prefs_off.as_ref()
+        };
+        if let Some(bitmap) = bitmap {
+            bitmap.blit_rgb(&mut self.frame, &self.palette, x, y);
+            return;
+        }
+        // Fallback for a cache without the primary bitmaps: the same 11x10
+        // pattern, hand-drawn (the on icon's captured pixel values).
+        let (edge, body, shade) = if on { (16u8, 29u8, 26u8) } else { (8, 0, 8) };
+        let (x, y) = (x.max(0) as usize, y.max(0) as usize);
+        self.rect(x + 2, y + 1, 7, 1, edge);
+        self.rect(x + 2, y + 2, 1, 5, edge);
+        self.rect(x + 3, y + 2, 6, 5, body);
+        self.rect(x + 9, y + 2, 1, 5, shade);
+        self.rect(x + 2, y + 7, 7, 1, body);
+        self.rect(x + 3, y + 8, 6, 1, shade);
+    }
+
+    /// FFE text with its one-pixel black drop shadow.
+    fn shadow_text(&mut self, x: i32, y: i32, message: &str, colour: u8) {
+        if x < 0 || y < 0 {
+            return;
+        }
+        self.text(x as usize + 1, y as usize + 1, message, 0);
+        self.text(x as usize, y as usize, message, colour);
     }
 
     /// The navigation map: a scrolling list at the left and a plot of the bodies

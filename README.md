@@ -70,6 +70,7 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | Action | Binding |
 |---|---|
 | Help / named reset scenarios / input preset | H / F2 / F3 |
+| Preference pages (graphic detail, space colour, sound, others, maps, port options) | Escape |
 | Views (as the original): cycle / front / rear / turret / external; or click the console view icons (any window size) | F1 / F6 / F7 / F8 / F9 |
 | External view: turn camera; zoom out / in (both of a pair resets) | arrows; + / - |
 | Change ship (the original's named craft) | Page Up / Page Down |
@@ -85,14 +86,16 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | Launch / request or cancel docking | L / D |
 | Classic-like thrust / reverse; yaw; pitch | Enter / Left Shift; comma / period; A / Z |
 | Modern thrust / reverse; yaw; pitch | W / S; Left / Right; Up / Down |
-| Brake / pause / quit | X / P / Escape |
+| Brake / pause | X / P |
+| Quit (in the preference pages) | click `Quit`, or select it and press Enter |
 | Buy / sell one unit of food (docked only) | B / N |
 | New save snapshot / load newest snapshot | F5 / Shift+F5 |
 
 Modern input (W/S and arrows) is the initial preset on every launch. F3 switches
-to the optional Classic-like preset; these are **not yet verified original
-bindings** and remapping/settings persistence are not implemented. F3 changes
-input only. Help, scenario menus, the model lab, pause and focus loss stop the simulation;
+to the optional Classic-like preset, and Escape → `Port Options` exposes the same
+choice; these are **not yet verified original bindings** and remapping/settings
+persistence are not implemented. F3 changes input only. Help, scenario menus,
+the model lab, pause, the preference pages and focus loss stop the simulation;
 refocus and press controls afresh. No audio, combat, planets, hyperspace,
 time acceleration, old-save import or Enhanced/HD-pack toggle is implemented.
 

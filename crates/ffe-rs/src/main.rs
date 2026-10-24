@@ -11,6 +11,9 @@ use ffe_rs::navigation::{
     describe, distance, refusal, Kind as NavKind, Navigator, Traffic, View as NavView,
 };
 use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
+use ffe_rs::prefs::{
+    self, Activate, Key as PrefsKey, Prefs, GRAPHIC, MAIN, MAPS, OTHERS, PORT, SOUND,
+};
 use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
@@ -34,6 +37,9 @@ struct Options {
     /// out from the nearest planet, the autopilot is engaged, and frames are
     /// saved through the approach.
     capture_planet: Option<PathBuf>,
+    /// Directory for one frame of every preference page plus a flight frame
+    /// showing the selected space colour; exits without opening a window.
+    capture_prefs: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -41,6 +47,7 @@ fn options() -> Result<Options, String> {
     let mut smoke_frames = None;
     let mut capture = None;
     let mut capture_planet = None;
+    let mut capture_prefs = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
@@ -55,6 +62,10 @@ fn options() -> Result<Options, String> {
             capture_planet = Some(PathBuf::from(
                 args.next().ok_or("--capture-planet requires a directory")?,
             ));
+        } else if arg == "--capture-prefs" && capture_prefs.is_none() {
+            capture_prefs = Some(PathBuf::from(
+                args.next().ok_or("--capture-prefs requires a directory")?,
+            ));
         } else if arg == "--smoke-frames" && smoke_frames.is_none() {
             let frames = args
                 .next()
@@ -67,7 +78,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-prefs DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -91,6 +102,7 @@ fn options() -> Result<Options, String> {
         smoke_frames,
         capture,
         capture_planet,
+        capture_prefs,
     })
 }
 
@@ -168,6 +180,43 @@ fn run() -> Result<(), String> {
     let options = options()?;
     let cache = ffe_content::read(&read_cache(&options.root.join("data.bin"))?)?;
     let mut screen = Screen::new(&cache)?;
+    // Diagnostic frames of the preference pages and of the space colour, for
+    // the port's screenshot comparisons. No window is opened.
+    if let Some(dir) = &options.capture_prefs {
+        fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        let mut shown = Prefs {
+            open: true,
+            ..Default::default()
+        };
+        for (page, name) in [
+            (MAIN, "prefs-main.ppm"),
+            (GRAPHIC, "prefs-graphic.ppm"),
+            (SOUND, "prefs-sound.ppm"),
+            (OTHERS, "prefs-others.ppm"),
+            (MAPS, "prefs-maps.ppm"),
+            (PORT, "prefs-port.ppm"),
+        ] {
+            shown.page = page;
+            shown.selected = 0;
+            screen.draw_prefs(&shown);
+            write_shot(dir, name, &screen);
+        }
+        let scene = ModelViewer::new(&cache).ok();
+        let state = Flight::free_flight();
+        for (index, name) in [(4, "space-light-blue.ppm"), (0, "space-black.ppm")] {
+            screen.sky = prefs::space_colour_rgb(index);
+            screen.draw(
+                &state,
+                ViewState::default(),
+                scene.as_ref(),
+                false,
+                true,
+                &format!("SPACE COLOUR: {}", prefs::SPACE_COLOURS[index]),
+            );
+            write_shot(dir, name, &screen);
+        }
+        return Ok(());
+    }
     let save_dir = options.root.join("saves");
     if save_dir.exists() {
         let meta = fs::symlink_metadata(&save_dir).map_err(|e| e.to_string())?;
@@ -191,7 +240,9 @@ fn run() -> Result<(), String> {
     .map_err(|e| format!("Cannot open game window: {e}"))?;
     window.set_target_fps(60);
     let mut state = Flight::default();
-    let mut modern = true;
+    // The Escape pages, including the modern/classic control preset the top
+    // bar's button and F3 also toggle.
+    let mut prefs = Prefs::default();
     let mut help = false;
     let mut scenarios = false;
     let mut model_lab = None;
@@ -328,7 +379,7 @@ fn run() -> Result<(), String> {
     let mut accumulator = 0.0;
     let mut frames = 0;
     let mut held_controls = input::HeldControls::default();
-    while window.is_open() && !window.is_key_down(Key::Escape) {
+    while window.is_open() {
         let now = Instant::now();
         let measured = now.duration_since(last).as_secs_f64().min(0.1);
         last = now;
@@ -365,14 +416,65 @@ fn run() -> Result<(), String> {
         } else {
             None
         };
+        // Escape opens the original's preference pages; Escape in the pages
+        // closes them again. The original reaches the same screen through a
+        // first Escape that stops time (FUNC_000224); this port opens the
+        // pages directly, as the owner asked.
+        if active && pressed(Key::Escape) {
+            prefs.escape();
+            held_controls.disarm(&keys_down);
+            last = now;
+        }
+        // While the pages are open the game is frozen: only the page state and
+        // the page picture change. The original stops the clock in FUNC_000220.
+        if prefs.open {
+            if active {
+                let key = [
+                    (Key::Up, PrefsKey::Up),
+                    (Key::Down, PrefsKey::Down),
+                    (Key::Left, PrefsKey::Left),
+                    (Key::Right, PrefsKey::Right),
+                    (Key::Enter, PrefsKey::Enter),
+                    (Key::Backspace, PrefsKey::Backspace),
+                ]
+                .into_iter()
+                .find(|(key, _)| pressed(*key))
+                .map(|(_, action)| action);
+                if let Some(key) = key {
+                    if prefs.key(key) == Activate::Quit {
+                        return Ok(());
+                    }
+                }
+            }
+            if let Some((x, y)) = edge_point {
+                match prefs.click(x, y) {
+                    Activate::Quit => return Ok(()),
+                    Activate::Close => {
+                        held_controls.disarm(&keys_down);
+                        message = "Returned to the game.".to_owned();
+                    }
+                    Activate::None => {}
+                }
+            }
+            // Consume the mouse-down edge while the pages are open; the page
+            // loop returns before the flight loop's edge bookkeeping.
+            mouse_was_down = mouse_down;
+            screen.draw_prefs(&prefs);
+            window
+                .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
+                .map_err(|e| format!("Window update: {e}"))?;
+            frames += 1;
+            last = Instant::now();
+            continue;
+        }
         if let Some((x, y)) = edge_point {
             if y < 11
                 && (ffe_rs::screen::CONTROLS_BUTTON.0..ffe_rs::screen::CONTROLS_BUTTON.1)
                     .contains(&x)
             {
-                modern = !modern;
+                prefs.modern = !prefs.modern;
                 held_controls.disarm(&keys_down);
-                message = if modern {
+                message = if prefs.modern {
                     "Modern controls."
                 } else {
                     "Classic controls."
@@ -511,7 +613,7 @@ fn run() -> Result<(), String> {
                 }
             }
             if pressed(Key::F3) {
-                modern = !modern;
+                prefs.modern = !prefs.modern;
                 held_controls.disarm(&keys_down);
             }
             // The hyperdrive's view of the ship and its fuel (the galaxy list and the jump).
@@ -1142,13 +1244,18 @@ fn run() -> Result<(), String> {
                 f64::from(u8::from(held_controls.contains(&positive)))
                     - f64::from(u8::from(held_controls.contains(&negative)))
             };
+            // The original's "Reverse left-right controls" and "Reverse up-down
+            // controls" (DATA_009021/DATA_009022, toggled by FUNC_000216).
+            let reverse_lr = prefs.others[3];
+            let reverse_ud = prefs.others[4];
+            let flip = |value: f64, reverse: bool| if reverse { -value } else { value };
             // In the external view the arrows move the camera, so Modern steering
             // falls back to the Classic-like keys there.
             let external_view = views.mode == ViewMode::External;
             let input = if views.mode.is_turret() {
                 // The steering keys aim the turret (FUNC_001038).
                 Controls {
-                    thrust: if modern {
+                    thrust: if prefs.modern {
                         axis(Key::W, Key::S)
                     } else {
                         axis(Key::Enter, Key::LeftShift)
@@ -1157,25 +1264,25 @@ fn run() -> Result<(), String> {
                     pitch: 0.0,
                     brake: held_controls.contains(&Key::X),
                 }
-            } else if modern && !external_view {
+            } else if prefs.modern && !external_view {
                 Controls {
                     thrust: axis(Key::W, Key::S),
-                    yaw: axis(Key::Right, Key::Left),
-                    pitch: axis(Key::Up, Key::Down),
+                    yaw: flip(axis(Key::Right, Key::Left), reverse_lr),
+                    pitch: flip(axis(Key::Up, Key::Down), reverse_ud),
                     brake: held_controls.contains(&Key::X),
                 }
-            } else if modern {
+            } else if prefs.modern {
                 Controls {
                     thrust: axis(Key::W, Key::S),
-                    yaw: axis(Key::Period, Key::Comma),
-                    pitch: axis(Key::A, Key::Z),
+                    yaw: flip(axis(Key::Period, Key::Comma), reverse_lr),
+                    pitch: flip(axis(Key::A, Key::Z), reverse_ud),
                     brake: held_controls.contains(&Key::X),
                 }
             } else {
                 Controls {
                     thrust: axis(Key::Enter, Key::LeftShift),
-                    yaw: axis(Key::Period, Key::Comma),
-                    pitch: axis(Key::A, Key::Z),
+                    yaw: flip(axis(Key::Period, Key::Comma), reverse_lr),
+                    pitch: flip(axis(Key::A, Key::Z), reverse_ud),
                     brake: held_controls.contains(&Key::X),
                 }
             };
@@ -1184,7 +1291,7 @@ fn run() -> Result<(), String> {
                 // Classic: the original's keys. Modern adds W/S for the set speed, the arrows
                 // for pitch (up is nose up, which is Z) and yaw, Q/E for roll.
                 let both =
-                    |classic: &[Key], extra: &[Key]| down(classic) || (modern && down(extra));
+                    |classic: &[Key], extra: &[Key]| down(classic) || (prefs.modern && down(extra));
                 let mut keys = OriginalKeys {
                     faster: both(&[Key::Enter], &[Key::W]),
                     slower: both(&[Key::LeftShift, Key::RightShift], &[Key::S]),
@@ -1195,6 +1302,12 @@ fn run() -> Result<(), String> {
                     roll_left: both(&[Key::LeftBracket], &[Key::Q]),
                     roll_right: both(&[Key::RightBracket], &[Key::E]),
                 };
+                if reverse_lr {
+                    std::mem::swap(&mut keys.left, &mut keys.right);
+                }
+                if reverse_ud {
+                    std::mem::swap(&mut keys.pitch_down, &mut keys.pitch_up);
+                }
                 let mut command_face = None;
                 if nav.as_ref().is_some_and(|nav| nav.holding()) {
                     keys = OriginalKeys::default();
@@ -1419,7 +1532,7 @@ fn run() -> Result<(), String> {
                 state.system_flight = true;
             }
             original = Some(model);
-            message = if modern {
+            message = if prefs.modern {
                 "Launched. W/S speed, arrows pitch and yaw, Q/E roll; the map icons list systems."
             } else {
                 "Launched. Enter/Shift speed, Z/A pitch, comma/period yaw, [ ] roll."
@@ -1606,6 +1719,11 @@ fn run() -> Result<(), String> {
                     engaged: engaged.is_some(),
                 })
             });
+        // The Graphic Detail page's space colour and the Others page's stars
+        // option (the original's DATA_008815..817 / DATA_009019).
+        screen.sky = prefs::space_colour_rgb(prefs.space_colour);
+        screen.stars_visible = prefs.others[1];
+        screen.lock_external = prefs.others[2];
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();
@@ -1650,9 +1768,9 @@ fn run() -> Result<(), String> {
                     inside.pitch = (to[1] / length).asin();
                 }
             }
-            screen.draw(&inside, views, scene.as_ref(), help, modern, &message);
+            screen.draw(&inside, views, scene.as_ref(), help, prefs.modern, &message);
         } else {
-            screen.draw(&state, views, scene.as_ref(), help, modern, &message);
+            screen.draw(&state, views, scene.as_ref(), help, prefs.modern, &message);
         }
         if let Some(dir) = &options.capture {
             if frames % 10 == 0 {
