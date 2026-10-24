@@ -16,7 +16,7 @@
 window.FFE_BURNDOWN = {
   project: "ffe-rs",
   unit: "work items",
-  updated: "2026-10-23",
+  updated: "2026-10-24",
   milestones: [
     {
       id: "foundation",
@@ -82,9 +82,9 @@ window.FFE_BURNDOWN = {
         { id: "v0.48-2", title: "3D text: glyph programs and F1747 placement", status: "done", version: "v0.48b" },
         { id: "v0.48-3", title: "F1874 surface origin and axis resolution", status: "done", version: "v0.48c" },
         { id: "v0.48-4", title: "Surface helpers F1875 / F1824 / F1825", status: "done", version: "v0.48d" },
-        { id: "v0.48-5", title: "F1823 entry map (replace the legacy hash arena)", status: "in-progress", version: "v0.48e" },
+        { id: "v0.48-5", title: "F1823 entry map (replace the legacy hash arena)", status: "done", version: "v0.52a" },
         { id: "v0.48-6", title: "F1833 flat/textured emitter dispatch", status: "in-progress", version: "v0.48e" },
-        { id: "v0.48-7", title: "F1834 / F1835 quad emission (with F1868-F1873)", status: "todo" },
+        { id: "v0.48-7", title: "F1834 / F1835 quad emission (with F1868-F1873)", status: "in-progress", version: "v0.52a" },
         { id: "v0.48-8", title: "Surface quad oracle at a planet-scale distance", status: "todo" },
         { id: "v0.48-9", title: "F1616 line rasteriser", status: "done", version: "v0.48f" },
         { id: "v0.48-10", title: "F1811 curve rasteriser", status: "done", version: "v0.48g" },
@@ -359,6 +359,16 @@ window.FFE_BURNDOWN = {
       date: "2026-10-23",
       remaining: 85,
       note: "v0.50c: physics objects from system objects (F927, F1533, F880, orbit helpers) verified on 1,024 systems; cache v16; starport placement waits for the terrain query (F1876 distance mode)."
+    },
+    {
+      date: "2026-10-23",
+      remaining: 83,
+      note: "v0.51i: terrain query, shape collisions, planets in the collision scan, names (F791) and names in system generation (cache v19) verified; system generation done."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "v0.52a: the planet surface subdivision (F1876 draw mode, F1868/F1869) verified on 461 patches (207,689 triangles); the emitter F1840, F1877 and the F1806/F1808 handlers remain."
     }
   ]
 };

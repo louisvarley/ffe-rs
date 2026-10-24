@@ -2,9 +2,9 @@
 
 `crates/ffe-core/src/terrain.rs`. A planet is an icosahedron (twelve corners,
 twenty faces, thirty edges, tables `DATA_007892..7894`) whose faces are
-subdivided edge by edge; F1876 either draws the result (mode 0, the x87 path
-and the rasterisers, not ported) or measures the distance from a point to the
-surface (mode 1, the collision query).
+subdivided edge by edge; F1876 either draws the result (mode 0; the subdivision and
+the triangles it hands the emitter are ported, see "Drawing" below) or measures the
+distance from a point to the surface (mode 1, the collision query).
 
 ## Arenas
 
@@ -82,3 +82,57 @@ away, near and a few units from the surface, off-axis, fourteen types, details 0
 streams of random non-overlapping records and of a record on every face or sub
 triangle): the distance, bytes consumed, the unlimited distance, the arena counts
 and the layer tables match.
+
+## Drawing (F1876, mode 0)
+
+`crates/ffe-core/src/terrain_draw.rs`, `Terrain::draw(scene, stream, emit)`. F1874
+calls F1876 with its twelfth argument 0. The set-up differs from the query's only in
+three places: `DATA_007837` (the detail minus one, plus one for each of 1/16 and 1/8
+of the planet's radius that the view is away) feeds the level base; each corner is also
+projected (F1479) into its screen words `+0`/`+2`; and F1833 installs the screen
+functions `DATA_009280..9282` (F1715, F1716 and F1847 in place of F1831, F1832 and
+F1848, `Projection::Flat`), the emitter `DATA_009270` (F1840) and its set-up (F1841),
+and `DATA_009264`, `0x1dcd6500 >> zoom`, the depth added to a triangle's key position.
+With `Projection::Flat` a node's `+0`/`+2` are screen coordinates (the midpoint routines
+average them where the texture mode averages map coordinates), `+0x24`/`+0x26` their
+region codes (1 below, 2 inside, 4 above, 8 for a node nearer than 0x40).
+
+Each of the twenty faces goes through F1834 (as in the query) and then F1868, or F1869
+when the planet type's span (third dword) is odd and at least 8 (the types with a sea).
+F1868 takes the three nodes, the three edges, the level, the slack bound and the
+feature tree node:
+
+1. The slack is the bound, or from level 10 on the bound plus the height spread
+   (`(max - min) >> 3` of the clamped heights, times the sum of the first node's edge
+   vector magnitudes). The triangle is dropped if the first node (plus the slack) is
+   nearer than 0x40, or lies outside the view's pyramid: `|x|` or `|y|` minus the slack
+   beyond the depth plus the slack.
+2. With all three nodes at least 0x40 deep: the screen area is the cross product of two
+   edges. The triangle is final when the level exceeds 13, when it exceeds all three
+   nodes' own levels, or when its area is small (0 to 0x95) and the level above 8 (F1869
+   counts the nodes at or below the sea and, when it is not 0 or 3, takes one level off
+   the tests). A final triangle is dropped if the OR of its region codes is wholly outside
+   (`DATA_007838`, 16 dwords) or if it faces away (area not positive; F1869 keeps
+   triangles across the sea whatever their facing); otherwise it goes to the emitter with
+   its unit normal (F1827, 15 bits), the depth key (F1777) of the first node's view
+   position pushed forward by `DATA_009264`, and the level.
+3. A triangle that is not final is dropped at the first two levels when it lies wholly
+   beyond the horizon (each corner's reduced position (F1826) dotted with the normal
+   against `(-0x5000 >> level) * length`).
+4. With a corner behind the view (a depth under 0x40): dropped if the bound is under
+   0x1f4 or all three corners lie to the same side in x or in y.
+5. Otherwise the feature layers of the tree node are put in place for the levels they
+   cover (and the corners' map coordinates saved), the three midpoints are made (the
+   routine pair of F1834: level below five or not), three edge records are made, and
+   the four sub-triangles are drawn (corner A, B, C, the middle; the bound halves);
+   afterwards the layers are cleared and the coordinates restored, and the three edge
+   records (with whatever hangs below them) are given back.
+
+An arena overflow ends the whole drawing (the triangles already emitted stand).
+`--surface-draw` (probe build) runs 512 planet-scale patches through the original F1876,
+one child process each (the original exits when the 50,000-word order buffer is full,
+which 51 of them do): the model's own record (70%) or a random type and records, a random
+orientation and distance (1.02 to 60 radii), the instance's scale, zoom, light and
+colours, and detail -1 to 4. The probe hook on the emitter call records each triangle's
+nodes (screen and view positions, region codes, heights, level), normal, key and level:
+all 461 completing cases match, 207,689 triangles (391 cases drew), with the arena counts.

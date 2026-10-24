@@ -387,8 +387,16 @@ GLOBAL _ref_surface_cmd
 _ref_surface_cmd equ FUNC_001874
 GLOBAL _ref_surface
 _ref_surface equ FUNC_001876
+GLOBAL _ref_emit
+GLOBAL _ref_emit_level
+GLOBAL _ref_det_a
+GLOBAL _ref_det_b
 GLOBAL _ref_surface_sign
 _ref_surface_sign equ FUNC_001875
+_ref_emit equ DATA_009270
+_ref_emit_level equ DATA_009286
+_ref_det_a equ FUNC_001806
+_ref_det_b equ FUNC_001808
 GLOBAL _ref_surface_mix
 _ref_surface_mix equ FUNC_001824
 GLOBAL _ref_surface_vector_msb

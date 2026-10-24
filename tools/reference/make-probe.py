@@ -59,6 +59,15 @@ SCOPED_HOOKS = [
     ("FUNC_001874", "FUNC_001875", [
         ("FUNC_001876", "trace_surface", 1),              # F1874 -> F1876 arguments
     ]),
+    ("FUNC_001778", "FUNC_001779", [
+        ("FUNC_001529_SysExit", "trace_queue_overflow", 1),  # the 50,000-word order buffer is full
+    ]),
+    ("FUNC_001868", "FUNC_001869", [
+        ("near [DATA_009270]", "trace_surface_emit", 1),  # F1868 hands a triangle to the emitter
+    ]),
+    ("FUNC_001869", "FUNC_001870", [
+        ("near [DATA_009270]", "trace_surface_emit", 1),  # F1869: the same with sea level
+    ]),
     ("FUNC_001738", "FUNC_001739", [
         ("FUNC_001777", "trace_thruster_key", 2),         # glow depth keys (core, shaft)
         ("FUNC_001778", "trace_thruster_alloc", 2),       # glow queue allocations (F1805)

@@ -2,7 +2,8 @@
 
 --terrain-mid: the nineteen terrain midpoint routines F1849-F1867 (with F1829, F1846 and the
 distance-mode vertex functions) on synthetic nodes. --names: F791 (name types 1 to 0x14). --planet: F576 (F579-F583) for a ship sphere against the collision streams of the game's models,
-terrain records included. --terrain: the terrain query F1876 in distance mode (F1823, F1833, F1834, F1875 and the arenas) on
+terrain records included. --surface-draw: F1876 in draw mode (F1833, F1834, F1868/F1869 and the emitter's arguments) on
+planet records and random planets. --terrain: the terrain query F1876 in distance mode (F1823, F1833, F1834, F1875 and the arenas) on
 synthetic planets. --worldgen: F880 (with F927, F1533, F879 and the orbit helpers) on generated systems at
 synthetic clocks; physics object bytes with names zeroed (starports included: F879 uses the terrain
 query through F574 and F575's reorienting contact). --sysgen: F875 and F878 (system generation: the hand-coded objects and 4,160 generated
@@ -38,6 +39,10 @@ SCENARIOS = [
      "executed_reference_terrain_distance",
      ["seed", "max", "detail", "kind", "translation", "matrix", "stream", "value", "consumed",
       "raw", "nodes", "edges"]),
+    ("surface-draw", "--surface-draw", b"JJFFE surface-draw-v1", "FFE_SURFACE_VECTORS",
+     "surface_draw_reference", "executed_reference_surface_draw",
+     ["seed", "kind", "detail", "zoom", "origin", "vectors", "stream", "emits", "hash", "nodes",
+      "edges", "first"]),
     ("planet", "--planet", b"JJFFE planet-v1", "FFE_PLANET_VECTORS", "surface_reference",
      "executed_reference_surface_hits",
      ["planet", "ship", "detail", "seed", "words", "planet_matrix", "relpos",
@@ -69,6 +74,8 @@ def alter(row, field):
         row[field] = [[(b + 1) & 0xff for b in inner] for inner in value]
     elif isinstance(value, list):
         row[field] = [v + 1 for v in value]
+    elif isinstance(value, str):
+        row[field] = "0" + value
     else:
         row[field] = value + 1
 

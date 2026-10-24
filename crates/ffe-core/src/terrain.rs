@@ -23,6 +23,9 @@ pub const NIL: usize = usize::MAX;
 
 /// Offsets into the cache's terrain table block (`DATA_007836`).
 pub mod tables {
+    /// `DATA_007838`: per region-code mask, nonzero when a triangle lies wholly
+    /// outside the view (16 dwords).
+    pub const OUTCODES: usize = 15;
     /// `DATA_007839`: the displacement scale per level (dwords).
     pub const SCALE: usize = 79;
     /// `DATA_007840`: the edge-vector scale per level (dwords).
@@ -118,18 +121,29 @@ pub type LayerEntry = [u8; 2];
 
 /// The query's arenas and globals.
 pub struct Terrain<'a> {
-    table: &'a [u8],
+    pub(crate) table: &'a [u8],
     maps: &'a [u8],
-    nodes: Vec<Node>,
+    pub(crate) nodes: Vec<Node>,
     free_nodes: Vec<usize>,
     nodes_out: u32,
-    edges: Vec<Edge>,
+    pub(crate) edges: Vec<Edge>,
     free_edges: Vec<usize>,
     edges_out: u32,
+    /// What the screen-position functions `DATA_009280..9282` are: the map
+    /// quadrants of the distance mode or the screen coordinates of drawing.
+    pub projection: Projection,
     /// `DATA_009269`: the detail level base F1829 counts down from.
     pub level_base: i32,
     /// `DATA_009260`: per layer and level, the maps of the feature at hand.
     pub layers: [[LayerEntry; 32]; 2],
+}
+
+/// The functions behind `DATA_009280..9282` (F1833 installs them): F1831, F1832 and
+/// F1848 for the distance query, F1715, F1716 and F1847 for drawing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Projection {
+    Texture,
+    Flat,
 }
 
 /// How a midpoint routine differs from the family's pattern.
@@ -253,6 +267,74 @@ pub fn quadrant_node(node: &mut Node) {
     }
 }
 
+/// F1715 (`DATA_009280` when drawing): the region code of a screen x.
+pub fn flat_x(value: i32) -> i16 {
+    flat(value, 0x140)
+}
+
+/// F1716 (`DATA_009281` when drawing): the region code of a screen y.
+pub fn flat_y(value: i32) -> i16 {
+    flat(value, 0x9e)
+}
+
+fn flat(value: i32, limit: u32) -> i16 {
+    if value == -0x7ffe {
+        8
+    } else if (value as u32) < limit {
+        2
+    } else if value >= 0 {
+        4
+    } else {
+        1
+    }
+}
+
+/// F1847 (`DATA_009282` when drawing): a node's screen coordinates (`+0`, `+2`) from
+/// its view position, and their region codes (`+0x24`, `+0x26`); eight for both
+/// when the node is too near.
+pub fn flat_node(node: &mut Node) {
+    let z = node.z();
+    if z < 0x40 {
+        node.set_word(0x24, 8);
+        node.set_word(0x26, 8);
+        return;
+    }
+    let (x, y) = if z > 0x10000 {
+        let d = z >> 8;
+        (node.x() / d, node.y() / d)
+    } else {
+        (node.x().wrapping_shl(8) / z, node.y().wrapping_shl(8) / z)
+    };
+    let sx = x.wrapping_add(0xa0);
+    let sy = 0x4f_i32.wrapping_sub(y);
+    node.set_word(
+        0x24,
+        if (sx as u32) > 0x140 {
+            if sx >= 0 {
+                4
+            } else {
+                1
+            }
+        } else {
+            2
+        },
+    );
+    node.set_word(
+        0x26,
+        if (sy as u32) >= 0x9e {
+            if sy >= 0 {
+                4
+            } else {
+                1
+            }
+        } else {
+            2
+        },
+    );
+    node.set_word(0, sx as i16);
+    node.set_word(2, sy as i16);
+}
+
 fn msb(value: u32) -> i32 {
     31 - value.max(1).leading_zeros() as i32
 }
@@ -269,6 +351,7 @@ impl<'a> Terrain<'a> {
             edges: Vec::new(),
             free_edges: Vec::new(),
             edges_out: 0,
+            projection: Projection::Texture,
             level_base: 0,
             layers: [[[0; 2]; 32]; 2],
         };
@@ -371,7 +454,7 @@ impl<'a> Terrain<'a> {
         self.edges_out
     }
 
-    fn table_dword(&self, at: usize) -> i32 {
+    pub(crate) fn table_dword(&self, at: usize) -> i32 {
         i32::from_le_bytes(self.table[at..at + 4].try_into().unwrap())
     }
 
@@ -465,7 +548,7 @@ impl<'a> Terrain<'a> {
                 self.nodes[node].set_dword(at, mean(at));
             }
             if na.z() < 0x40 || nb.z() < 0x40 {
-                quadrant_node(&mut self.nodes[node]);
+                self.project(node);
             } else {
                 self.coarse_coordinates(which, node, a, b, c);
             }
@@ -497,7 +580,7 @@ impl<'a> Terrain<'a> {
                 let displacement = multiply(self.nodes[node].dword(from), scale);
                 self.nodes[node].set_dword(at, displacement.wrapping_add(mean(at)));
             }
-            quadrant_node(&mut self.nodes[node]);
+            self.project(node);
         }
         self.set_level(node);
         Ok(())
@@ -541,10 +624,27 @@ impl<'a> Terrain<'a> {
             m.set_word(0, m.word(0).wrapping_add(du));
             m.set_word(2, m.word(2).wrapping_add(dv));
         }
+        self.classify(node);
+    }
+
+    /// `DATA_009282`: the node's quadrant or screen position and region words.
+    fn project(&mut self, node: usize) {
+        match self.projection {
+            Projection::Texture => quadrant_node(&mut self.nodes[node]),
+            Projection::Flat => flat_node(&mut self.nodes[node]),
+        }
+    }
+
+    /// `DATA_009280` and `DATA_009281` on the node's words `+0` and `+2`.
+    pub(crate) fn classify(&mut self, node: usize) {
         let m = &mut self.nodes[node];
         let (u, v) = (i32::from(m.word(0)), i32::from(m.word(2)));
-        m.set_word(0x24, quadrant_u(u));
-        m.set_word(0x26, quadrant_v(v));
+        let (x, y) = match self.projection {
+            Projection::Texture => (quadrant_u(u), quadrant_v(v)),
+            Projection::Flat => (flat_x(u), flat_y(v)),
+        };
+        m.set_word(0x24, x);
+        m.set_word(0x26, y);
     }
 
     /// The layers' feature heights: each layer with a map at this level turns the
@@ -576,22 +676,22 @@ impl<'a> Terrain<'a> {
 /// A feature record of the stream: the feature type and the map coordinates of
 /// the face's three corners (u, v words each).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Record {
-    kind: i32,
-    corners: [[i16; 2]; 3],
+pub(crate) struct Record {
+    pub(crate) kind: i32,
+    pub(crate) corners: [[i16; 2]; 3],
 }
 
 /// A node of F1823's tree of the stream's records: the path from the face down
 /// to a record's place, two slots at each node (a record, or the count of levels
 /// an enclosing record still covers) and four children (twenty at the root).
 #[derive(Debug, Clone)]
-struct TreeNode {
-    slots: [Slot; 2],
-    children: [usize; 20],
+pub(crate) struct TreeNode {
+    pub(crate) slots: [Slot; 2],
+    pub(crate) children: [usize; 20],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Slot {
+pub(crate) enum Slot {
     /// Zero, or the levels an enclosing record still covers, as a non-positive count.
     Count(i32),
     Record(usize),
@@ -599,9 +699,9 @@ enum Slot {
 
 /// The stream's records as F1823 files them: the root and every node below it.
 #[derive(Debug, Clone)]
-struct Tree {
-    nodes: Vec<TreeNode>,
-    records: Vec<Record>,
+pub(crate) struct Tree {
+    pub(crate) nodes: Vec<TreeNode>,
+    pub(crate) records: Vec<Record>,
 }
 
 /// Why a query could not be answered as the original would.
@@ -618,7 +718,7 @@ pub enum Fault {
 
 /// Why the search stopped early.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Stop {
+pub(crate) enum Stop {
     Abort(Abort),
     Fault(Fault),
 }
@@ -645,17 +745,17 @@ pub struct Distance {
     pub found: bool,
 }
 
-fn find_msb(value: u32) -> i32 {
+pub(crate) fn find_msb(value: u32) -> i32 {
     31 - value.max(1).leading_zeros() as i32
 }
 
 /// F1825: the highest bit of the largest component magnitude (OR'd).
-fn extent(vector: [i32; 3]) -> i32 {
+pub(crate) fn extent(vector: [i32; 3]) -> i32 {
     find_msb(vector.iter().fold(0u32, |a, v| a | v.wrapping_abs() as u32))
 }
 
 /// The length of a matrix row (the part of F1876 before the corners).
-fn row_length(row: [i32; 3]) -> i32 {
+pub(crate) fn row_length(row: [i32; 3]) -> i32 {
     let shift = extent(row) - 14;
     let square = |c: i32| c.wrapping_mul(c);
     if shift > 0 {
@@ -670,7 +770,7 @@ fn row_length(row: [i32; 3]) -> i32 {
 }
 
 /// F1875: -1 if the cross product `p x q` of the two points' x and y is negative.
-fn side(p: [i32; 3], q: [i32; 3]) -> i32 {
+pub(crate) fn side(p: [i32; 3], q: [i32; 3]) -> i32 {
     let product = |a: i32, b: i32| i64::from(a) * i64::from(b);
     -i32::from(product(p[0], q[1]) - product(p[1], q[0]) < 0)
 }
@@ -678,7 +778,7 @@ fn side(p: [i32; 3], q: [i32; 3]) -> i32 {
 impl Tree {
     /// F1823: file the stream's records (16 bytes each: a key, the feature type,
     /// six words) until the zero key; returns the tree and the bytes consumed.
-    fn build(stream: &[u8]) -> Result<(Self, usize), Fault> {
+    pub(crate) fn build(stream: &[u8]) -> Result<(Self, usize), Fault> {
         let mut tree = Self {
             nodes: vec![TreeNode {
                 slots: [Slot::Count(0); 2],
@@ -747,21 +847,21 @@ impl Tree {
 impl Terrain<'_> {
     /// The planet type's third dword (what F1833 returns), the table entry for
     /// `kind`.
-    fn type_dword(&self, kind: usize, field: usize) -> i32 {
+    pub(crate) fn type_dword(&self, kind: usize, field: usize) -> i32 {
         self.table_dword(tables::TYPES + 48 * kind + field)
     }
 
     /// F1834 for the distance mode: the detail level and quadrant words of a
     /// face's corners, and the feature records' effect on their heights.
-    fn prepare_face(&mut self, corners: [usize; 3], tree: Option<usize>, tree_data: &Tree) {
+    pub(crate) fn prepare_face(
+        &mut self,
+        corners: [usize; 3],
+        tree: Option<usize>,
+        tree_data: &Tree,
+    ) {
         for node in corners {
             self.set_level(node);
-            let (u, v) = (
-                i32::from(self.nodes[node].word(0)),
-                i32::from(self.nodes[node].word(2)),
-            );
-            self.nodes[node].set_word(0x24, quadrant_u(u));
-            self.nodes[node].set_word(0x26, quadrant_v(v));
+            self.classify(node);
         }
         if let Some(tree) = tree {
             for slot in tree_data.nodes[tree].slots {

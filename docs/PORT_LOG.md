@@ -2347,3 +2347,14 @@ Cache v19 appends the hand-coded systems' text (`DATA_007139`, 7,706 bytes) to
 `base:text/names`; F873/F874 and F878's hand-coded path copy their names from it, so
 the hand-coded systems' names are compared too (nothing in the system oracles is
 masked any more).
+
+## v0.52a: planet surface subdivision (F1876 draw mode)
+
+`ffe_core::terrain_draw` ports F1876's draw mode up to the emitter: the draw set-up,
+F1834, F1868 and F1869, F1826/F1827, and the screen functions F1715/F1716/F1847
+(`Terrain::projection`). `--surface-draw` (probe build, forks per case) runs the original
+on 512 planet patches and records every emitter call: 461 cases complete (51 fill the
+50,000-word order buffer, where the original exits), 207,689 triangles match field for
+field with the arena counts. Next: the emitter F1840 (queue entries via F1837-F1839, the
+colour tables of F1841), F1877 for the textured planets, and the F1806/F1808 handlers.
+Notes: `docs/notes/terrain.md` ("Drawing").

@@ -1,7 +1,8 @@
 # Curved surfaces (opcode 31, F1874 / F1876)
 
-Status (2026-10-23): **operands and F1874's resolution ported and verified;
-F1876's patch rendering is not ported.** The executor resolves the surface's
+Status (2026-10-23): **operands and F1874's resolution, and F1876's subdivision (the
+triangles it hands the emitter), are ported and verified; the emitter F1840, its set-up F1841
+and F1877, and the queue handlers are not.** The executor resolves the surface's
 origin and axis vectors exactly as F1874 does — the whole-table oracle compares
 all 40 surfaces in 39 models against the original, 0 mismatched. Nothing curved
 is drawn yet.

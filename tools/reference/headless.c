@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <sys/personality.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3288,6 +3289,250 @@ static int terrain_vectors(void)
     return 0;
 }
 
+/* Curved surfaces in draw mode. surface_draw drives the original F1876 with its
+   twelfth argument 0, as F1874 calls it, for planet-scale patches: the surface
+   record of one of the planet models (type, colour, parameters, feature records)
+   or a random type and records, a random orientation and distance, the instance's
+   scale, zoom, light and colours, and the detail setting. The probe build hooks the
+   call every F1868/F1869 makes to the emitter (DATA_009270) and records what it is
+   handed; the words F1876 leaves in the order queue are printed too, with the draw
+   routines' addresses replaced by 0xf18000nn. */
+#ifdef FFE_COMMAND_PROBE
+extern void (*ref_emit)(void *,void *,void *,long *,long);
+extern long ref_emit_level;
+extern unsigned char ref_det_a[],ref_det_b[];
+static unsigned long draw_emits;
+static uint64_t draw_hash;
+static unsigned long draw_first[48][35];
+static int draw_dump,draw_overflow;
+static FILE *draw_out;
+static void draw_mix(unsigned long v)
+{
+    int i;
+    for(i=0;i<4;++i) {draw_hash^=(v>>(8*i))&0xff;draw_hash*=UINT64_C(1099511628211);}
+}
+static int draw_signal;
+static void draw_fault(int signal_number) {draw_signal=signal_number;siglongjmp(terrain_jump,1);}
+void trace_queue_overflow(void)
+{
+    draw_overflow=1;
+    siglongjmp(terrain_jump,1);
+}
+void trace_surface_emit(unsigned char *a,unsigned char *b,unsigned char *c,long *vec,long key)
+{
+    unsigned char *nodes[3];
+    unsigned long row[35],k=0,i;
+    nodes[0]=a;nodes[1]=b;nodes[2]=c;
+    for(i=0;i<3;++i) {
+        unsigned char *p=nodes[i];
+        row[k++]=(unsigned long)(long)*(short *)(p+0);
+        row[k++]=(unsigned long)(long)*(short *)(p+2);
+        row[k++]=*(unsigned long *)(p+4);
+        row[k++]=*(unsigned long *)(p+8);
+        row[k++]=*(unsigned long *)(p+0xc);
+        row[k++]=(unsigned long)(long)*(short *)(p+0x24);
+        row[k++]=(unsigned long)(long)*(short *)(p+0x26);
+        row[k++]=*(unsigned long *)(p+0x3c);
+        row[k++]=*(unsigned long *)(p+0x40);
+        row[k++]=*(unsigned long *)(p+0x44);
+    }
+    row[k++]=(unsigned long)vec[0];row[k++]=(unsigned long)vec[1];row[k++]=(unsigned long)vec[2];
+    row[k++]=(unsigned long)key;row[k++]=(unsigned long)ref_emit_level;
+    for(i=0;i<k;++i) draw_mix(row[i]);
+    if(draw_emits<48) memcpy(draw_first[draw_emits],row,sizeof(row));
+    if(draw_dump) {
+        fprintf(draw_out,"%s[",draw_emits?",":"");
+        for(i=0;i<k;++i) fprintf(draw_out,"%s%ld",i?",":"",(long)row[i]);
+        fprintf(draw_out,"]");
+    }
+    ++draw_emits;
+    ref_emit(a,b,c,vec,key);
+}
+static const int surface_models[39]={113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,445,447,449};
+static unsigned long draw_handler(unsigned long word)
+{
+    if(word==(unsigned long)ref_flat_draw_triangle) return 0xf1800004UL;
+    if(word==(unsigned long)ref_tex_draw_quad) return 0xf1800005UL;
+    if(word==(unsigned long)ref_det_a) return 0xf1800006UL;
+    if(word==(unsigned long)ref_tex_draw_triangle) return 0xf1800007UL;
+    if(word==(unsigned long)ref_det_b) return 0xf1800008UL;
+    if(word==(unsigned long)ref_flat_draw_quad) return 0xf1800009UL;
+    return word;
+}
+#endif
+static int surface_draw_vectors(int only)
+{
+#ifndef FFE_COMMAND_PROBE
+    (void)only;
+    fail("--surface-draw requires the separate instrumented jjffe-commands.exe");
+    return 2;
+#else
+    static unsigned char object[0x200],normals[32768*8];
+    static unsigned long model_queue[65536];
+    static unsigned long instance[0x160/4],globals[0x120/4],slots[128*9];
+    static const long identity[9]={2147483647,0,0,0,2147483647,0,0,0,2147483647};
+    unsigned char stream[16*100+16];
+    unsigned long n,drew=0;
+    fprintf(stderr,"JJFFE surface-draw-v1: original F1876 in draw mode (F1692, F1691, F1877, F1833, F1834, F1868/F1869, the emitter F1840/F1841 and its helpers) for planet-scale patches: a planet model's surface record or a random type and feature records, orientation, distance, instance scale, zoom, light and colours, and detail. Prints the emitter's arguments and the order queue.\n");
+    texture_rng=0x3c6ef372UL;
+    signal(SIGFPE,draw_fault);
+    signal(SIGSEGV,draw_fault);
+    for(n=0;n<512;++n) {
+        unsigned long seed=((unsigned long)texture_random(0,0xffff)<<16)|(unsigned long)texture_random(0,0xffff);
+        unsigned long *model;
+        unsigned char *program;
+        long index=surface_models[texture_random(0,38)];
+        long word0,kind,word8,word10,records=0,used=0,k,fault;
+        long origin[3],vectors[9],detail=texture_random(-1,4);
+        double rotation[9],radius=(double)(1UL<<texture_random(21,28))*(0.5+terrain_unit()),zf;
+        unsigned long keys[16],consumed=0,words,i;
+        int own=texture_random(0,9)<7;
+        model=ref_model(index);
+        program=(unsigned char *)model[0];
+        word0=(short)(program[2]|program[3]<<8);
+        kind=(short)(program[2+6]|program[2+7]<<8);
+        word8=(short)(program[2+8]|program[2+9]<<8);
+        word10=(short)(program[2+10]|program[2+11]<<8);
+        memset(stream,0,sizeof(stream));
+        if(own) {
+            /* The model's own feature records, up to the zero key. */
+            const unsigned char *q=program+2+12;
+            while((q[0]|q[1]<<8)!=0 && used<99) {memcpy(stream+16*used,q,16);q+=16;++used;}
+        } else {
+            kind=texture_random(0,13);
+            records=(kind==3||kind==5||kind==6||texture_random(0,3)==0)?0:texture_random(1,8);
+            for(k=0;k<records && used<10;++k) {
+                long depth=texture_random(0,5),face=texture_random(0,19),m,j,clash=0;
+                unsigned long key,bits;
+                if(depth==0 && k!=records-1) depth=1;
+                if(depth==0) key=(unsigned long)texture_random(1,15);
+                else {
+                    m=2*depth+3;
+                    bits=((unsigned long)face<<(2*(depth-1)));
+                    for(j=0;j<depth-1;++j) bits|=((unsigned long)texture_random(0,3))<<(2*j);
+                    key=(1UL<<m)|bits;
+                }
+                for(j=0;j<used;++j) {
+                    unsigned long x=key,y=keys[j];
+                    while(x>y && x>1) x>>=2;
+                    if(x==y) clash=1;
+                    x=key;
+                    while(y>x && y>1) y>>=2;
+                    if(x==y) clash=1;
+                }
+                if(clash) continue;
+                keys[used]=key;
+                {
+                    short w[8];
+                    long j2;
+                    w[0]=(short)key;w[1]=12;
+                    for(j2=2;j2<8;++j2) w[j2]=texture_random(0,3)==0?(short)texture_random(-200,300):(short)texture_random(0,0x7f);
+                    memcpy(stream+16*used,w,16);
+                }
+                ++used;
+            }
+            word0=texture_random(0,3)==0?(long)(short)texture_random(0,0x3fff):word0;
+            word8=texture_random(0,2)==0?0:(long)texture_random(1,0x2000);
+            word10=texture_random(0,8);
+        }
+        consumed=16*used+2;
+        terrain_rotation(rotation);
+        for(k=0;k<9;++k) vectors[k]=(long)(rotation[k]*radius);
+        switch(texture_random(0,4)) {
+        case 0: zf=1.02+0.5*terrain_unit(); break;
+        case 1: case 2: zf=1.5+3.0*terrain_unit(); break;
+        case 3: zf=4.0+16.0*terrain_unit(); break;
+        default: zf=1.0+terrain_unit()*60.0; break;
+        }
+        origin[2]=(long)(radius*zf);
+        origin[0]=(long)((terrain_unit()-0.5)*radius*zf*(texture_random(0,2)?0.6:2.0));
+        origin[1]=(long)((terrain_unit()-0.5)*radius*zf*(texture_random(0,2)?0.4:1.5));
+        memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));memset(object,0,sizeof(object));
+        memset(slots,0,sizeof(slots));memset(normals,0,sizeof(normals));
+        memcpy((char *)instance+0x14,identity,36);
+        memcpy((char *)instance+0x9c,identity,36);
+        instance[0xc/4]=2000;
+        instance[0x148/4]=model[5]+(texture_random(0,5)==0?(unsigned long)texture_random(-2,2):0);
+        instance[0xf0/4]=2;
+        instance[0x14c/4]=(unsigned long)object;
+        instance[0x150/4]=model[1];
+        instance[0x154/4]=model[3];
+        instance[0x130/4]=texture_random(0,4)==0?(unsigned long)texture_random(1,5):0;
+        {
+            double lv[3],ln;
+            unsigned char *shades=(unsigned char *)instance+0x84;
+            do {for(k=0;k<3;++k) lv[k]=terrain_unit()-0.5; ln=sqrt(lv[0]*lv[0]+lv[1]*lv[1]+lv[2]*lv[2]);} while(ln<0.1);
+            for(k=0;k<3;++k) instance[0x134/4+k]=(unsigned long)(long)(lv[k]/ln*2147483647.0);
+            for(k=0;k<24;++k) shades[k]=(unsigned char)texture_random(0,15);
+        }
+        memcpy(object+0xa0,&seed,4);
+        ref_vertex_buffer=(long *)slots;
+        ref_normal_buffer=normals;
+        ref_detail_primary=ref_detail_secondary=0;
+        ref_detail=detail;ref_tr_raw=0x12345678;
+        memset(ref_tr_pool,0,sizeof(ref_tr_pool));memset(ref_tr_edge_pool,0,sizeof(ref_tr_edge_pool));
+        memset(ref_tr_layers,0,sizeof(unsigned long)*128);
+        ref_tr_nodes_used=0;ref_tr_edges_used=0;
+        memset(model_queue,0,sizeof(model_queue));
+        ref_order_base=model_queue;ref_order_active=0;ref_order_state=0;
+        ref_order_init(model_queue);
+        ref_jitter_a=0x12345678UL;ref_jitter_b=0x456789abUL;
+        draw_emits=0;draw_hash=UINT64_C(14695981039346656037);
+        memset(draw_first,0,sizeof(draw_first));
+        draw_dump=(only==(int)n);
+        if(only>=0 && !draw_dump) continue;
+        {
+            /* Each case runs in a child: an overflow or a fault leaves the original's
+               state unusable, and a crash must not end the run. */
+            int status=0;
+            pid_t child;
+            fflush(stdout);
+            child=fork();
+            if(child<0) fail("fork failed");
+            if(child>0) {
+                waitpid(child,&status,0);
+                if(!(WIFEXITED(status) && WEXITSTATUS(status)==0)) printf("{\"case\":%lu,\"fault\":true,\"crashed\":true}\n",n);
+                continue;
+            }
+        }
+        {
+            char *buffer=0;size_t size=0;
+            draw_out=open_memstream(&buffer,&size);
+        fprintf(draw_out,"{\"case\":%lu,\"model\":%ld,\"seed\":%lu,\"word0\":%ld,\"kind\":%ld,\"word8\":%ld,\"word10\":%ld,\"detail\":%ld,\"scale\":%ld,\"zoom\":%ld,\"origin\":[%ld,%ld,%ld],\"vectors\":[",n,index,seed,word0,kind,word8,word10,detail,(long)instance[0x148/4],(long)instance[0x130/4],origin[0],origin[1],origin[2]);
+        for(k=0;k<9;++k) fprintf(draw_out,"%s%ld",k?",":"",vectors[k]);
+        fprintf(draw_out,"],\"light\":[%ld,%ld,%ld],\"shades\":[",(long)instance[0x134/4],(long)instance[0x138/4],(long)instance[0x13c/4]);
+        for(k=0;k<24;++k) fprintf(draw_out,"%s%u",k?",":"",((unsigned char *)instance)[0x84+k]);
+        fprintf(draw_out,"],\"stream\":[");
+        for(k=0;k<(long)consumed;++k) fprintf(draw_out,"%s%u",k?",":"",stream[k]);
+        fprintf(draw_out,"],\"all\":[");
+        draw_overflow=0;draw_signal=0;
+        fault=sigsetjmp(terrain_jump,1);
+        if(!fault) {
+            long result=0x55555555;
+            ref_surface((long)&result,0,(long)object,(long)instance,(long)stream,(long)origin,(long)vectors,kind,word10,word8<<16,word0,0);
+        }
+        if(draw_dump) fprintf(draw_out,"]");
+        words=(unsigned long)(ref_order_cursor-ref_order_base);
+        if(fault) {fprintf(draw_out,"%s\"fault\":true,\"overflow\":%d,\"signal\":%d}\n",draw_dump?",":"],",draw_overflow,draw_signal);fclose(draw_out);fwrite(buffer,1,size,stdout);fflush(stdout);_exit(0);}
+        fprintf(draw_out,"%s\"fault\":false,\"emits\":%lu,\"hash\":\"%016llx\",\"nodes\":%lu,\"edges\":%lu,\"first\":[",draw_dump?",":"],",draw_emits,(unsigned long long)draw_hash,ref_tr_nodes_used,ref_tr_edges_used);
+        for(i=0;i<draw_emits && i<48;++i) {
+            unsigned long j;
+            fprintf(draw_out,"%s[",i?",":"");
+            for(j=0;j<35;++j) fprintf(draw_out,"%s%ld",j?",":"",(long)draw_first[i][j]);
+            fprintf(draw_out,"]");
+        }
+        fprintf(draw_out,"],\"words\":[");
+        for(i=0;i<words && i<20000;++i) fprintf(draw_out,"%s%lu",i?",":"",draw_handler(ref_order_base[i]));
+        fprintf(draw_out,"]}\n");
+        fclose(draw_out);fwrite(buffer,1,size,stdout);fflush(stdout);_exit(0);
+        }
+    }
+    (void)drew;
+    if (fflush(stdout)) fail("cannot flush surface-draw vectors");
+    return 0;
+#endif
+}
+
 /* Shape collisions. planet drives the original F576 (with F579, F580, F581,
    F582, F583 and, for a planet's terrain record, F1876) for a ship sphere against
    a model's collision stream: any of the game's models stands in as the complex
@@ -4344,6 +4589,8 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
     if (argc == 2 && !strcmp(argv[1], "--terrain-mid")) return terrain_mid_vectors();
     if (argc == 2 && !strcmp(argv[1], "--terrain")) return terrain_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--surface-draw")) return surface_draw_vectors(-1);
+    if (argc == 3 && !strcmp(argv[1], "--surface-draw")) return surface_draw_vectors(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--planet")) return planet_vectors();
     if (argc == 2 && !strcmp(argv[1], "--names")) return name_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sysgen")) return sysgen_vectors();

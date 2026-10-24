@@ -66,6 +66,15 @@ fn model_text_and_label_census() {
         };
         if !program.surfaces.is_empty() {
             surface_models.insert(index);
+            for surface in &program.surfaces {
+                println!(
+                    "surface model={index} offset={:#x} word={:#x} parameters={:x?} entries={}",
+                    surface.offset,
+                    surface.word,
+                    surface.parameters,
+                    surface.entries.len()
+                );
+            }
             surfaces += program.surfaces.len();
             surface_entries += program
                 .surfaces
