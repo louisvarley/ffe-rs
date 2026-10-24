@@ -514,3 +514,9 @@ _ref_military_fuel equ DATA_008902
 _ref_radioactives equ DATA_008903
 _ref_cargo_used equ DATA_008891
 _ref_player_flags equ DATA_008860
+
+; System name oracle (--system-names): F830.
+GLOBAL _ref_system_name
+_ref_system_name equ FUNC_000830
+GLOBAL _ref_special_index
+_ref_special_index equ DATA_006800

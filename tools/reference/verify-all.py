@@ -67,6 +67,7 @@ ORACLES = [
     ("verify-lift.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-sectors.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-hyperspace.py", ["--reference", "{commands}", "--cache", "{cache}"]),
+    ("verify-system-names.py", ["--reference", "{commands}", "--cache", "{cache}"]),
 ]
 
 

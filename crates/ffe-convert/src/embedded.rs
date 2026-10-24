@@ -681,6 +681,36 @@ pub fn decode_galaxy_tables(
     })
 }
 
+/// The 267 strings the pointer table `DATA_006796` names (RVA of the table), as NUL-terminated
+/// strings in order.
+pub fn decode_system_strings(bytes: &[u8], table_rva: u32) -> Result<EmbeddedTable, String> {
+    use ffe_core::sector::{Strings, STRING_COUNT};
+    let section = DataSection::parse(bytes)?;
+    let table = section.offset(table_rva, 4 * STRING_COUNT)?;
+    let pointers = range(bytes, table, 4 * STRING_COUNT)?;
+    let mut block = Vec::new();
+    for pointer in pointers.chunks_exact(4) {
+        let address = u32::from_le_bytes(pointer.try_into().unwrap());
+        let rva = address
+            .checked_sub(section.image_base)
+            .ok_or("a system string pointer is below the image base")?;
+        let start = section.offset(rva, 1)?;
+        let rest = bytes
+            .get(start..)
+            .ok_or("a system string runs past the file")?;
+        let length = rest
+            .iter()
+            .position(|b| *b == 0)
+            .ok_or("a system string is not terminated")?;
+        block.extend_from_slice(&rest[..=length]);
+    }
+    Strings::new(&block)?;
+    Ok(EmbeddedTable {
+        source_offset: table,
+        bytes: block,
+    })
+}
+
 /// Bytes of the planet engine's tables (`DATA_007836..7899`).
 pub const TERRAIN_TABLE_BYTES: usize = 7539;
 /// Bytes of the two terrain height maps (`DATA_007637`, `DATA_007638`).

@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 21 or len(manifest["files"]) != 1790:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 22 or len(manifest["files"]) != 1791:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,7 +143,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1791:
+            if archive.testzip() is not None or len(archive.infolist()) != 1792:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
@@ -185,6 +185,13 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                         expected = tail(label)
                         if payload[offset:offset + len(expected)] != expected:
                             raise RuntimeError(f"system table differs from JJFFE {label}")
+                if asset["kind"] == "system_strings":
+                    # The 267 strings DATA_006830..7096 that the pointer table DATA_006796 names.
+                    blocks_s = declarations(reference / "ffedat.asm")
+                    labels = re.findall(r"^\s*dd (DATA_\d+)\b", blocks_s["DATA_006796"], re.MULTILINE)
+                    expected = b"".join(db_text_bytes(blocks_s[label]).split(b"\0")[0] + b"\0" for label in labels)
+                    if len(labels) != 267 or payload != expected:
+                        raise RuntimeError("system strings differ from JJFFE DATA_006796")
                 if asset["kind"] == "galaxy_tables":
                     # DATA_006793..6795 (the hand-made star vectors and type words), DATA_006799..6811
                     # (special sectors, index, density grid, hash and star type tables) and the

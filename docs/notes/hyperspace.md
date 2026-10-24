@@ -43,6 +43,14 @@ mass 16) reaches 18.75 light years.
   chance) and the arrival procedure), the galaxy map screen, and the systems beyond the 12 hand-coded ones and four test
   ones: their positions are known (`system_position`) but the playable lists only those 16.
 
+## System names (F830, cache v22)
+
+`sector::system_name` gives a system code's name: a hand-made star's name from the string table (the 117 strings of
+`DATA_006796`, imported in v22), the Gateway, or a generated pronounceable name built from the syllable table
+(`DATA_006802`) with F861-style hashing of the code. `sector_label` is the "(x,y)" form. All 117 hand-made names and
+8,000 generated codes match the executed original (`--system-names`, `verify-system-names.py`,
+`names_map_reference.rs`: 8,292 cases).
+
 ## Verification
 
 - `--sectors` in `headless.c`: F841 on the 49 hand-made sectors and 3,000 others, F853 on 4,000 sectors at seven detail

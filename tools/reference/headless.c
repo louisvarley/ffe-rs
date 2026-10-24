@@ -466,6 +466,9 @@ static unsigned char palette[256 * 3];
 static unsigned long frames, limit = 32, milliseconds, clock_reads, blits;
 static int sent_accept;
 static int state_mode, vector_mode, sent_start;
+/* --game-frame <frames> <key> [<key>...]: the real game from the new game on, keys sent by scan code every 40 frames after frame 200, the 320x200 frame and palette written to game-frame.bin at the end. */
+static int game_frame_mode;
+static unsigned long game_keys[16], game_key_count, game_key_next, game_key_frame = 200;
 
 static unsigned long state_u32(size_t offset)
 {
@@ -576,9 +579,13 @@ long InputKeybGetLastKey(void)
         sent_accept = 1;
         return 0x15;
     }
-    if (state_mode && !sent_start && frames >= 160) {
+    if ((state_mode || game_frame_mode) && !sent_start && frames >= 160) {
         sent_start = 1;
         return 0x02; /* Intro choice 1, after the 100-tick splash lockout. */
+    }
+    if (game_frame_mode && game_key_next < game_key_count && frames >= game_key_frame) {
+        game_key_frame = frames + 40;
+        return (long)game_keys[game_key_next++];
     }
     return 0xff;
 }
@@ -593,7 +600,10 @@ void TimerSleep(void) { ++milliseconds; }
 void TimerFrameUpdate(void)
 {
     if (vector_mode) return;
-    if (state_mode) {
+    if (game_frame_mode) {
+        /* a frame hash only: the trace stays small */
+        printf("{\"frame\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+    } else if (state_mode) {
         printf("{\"frame\":%lu,\"clock_ms\":%lu,\"game_tics\":%lu,\"game_days\":%lu,\"rng_a\":%lu,\"rng_b\":%lu,\"player_state\":%u,\"player_index\":%lu,\"cash\":%lu,\"start_type\":%lu,\"time_accel\":%lu,\"system_counter\":%lu,\"accel_counter\":%lu,\"pixels_fnv1a64\":\"%016llx\",\"palette_fnv1a64\":\"%016llx\"}\n",
             frames, milliseconds, state_u32(0), state_u32(4), state_u32(0x24), state_u32(0x28),
             (unsigned)ref_state[0xe8], state_u32(0xc0), state_u32(0x114), state_u32(0xfa),
@@ -606,6 +616,13 @@ void TimerFrameUpdate(void)
             (unsigned long long)fingerprint(palette, sizeof(palette)));
     }
     if (fflush(stdout)) fail("cannot flush trace");
+    if (game_frame_mode && frames + 1 >= limit) {
+        FILE *out = fopen("game-frame.bin", "wb");
+        if (!out) fail("cannot write game-frame.bin");
+        fwrite(pixels, 1, sizeof pixels, out);
+        fwrite(palette, 1, sizeof palette, out);
+        fclose(out);
+    }
     if (++frames >= limit) exit(0);
 }
 void SoundCheckInit(long *all, long *digi, long *midi) { *all = 0; *digi = 0; *midi = 0; }
@@ -4757,6 +4774,52 @@ static int hyper_vectors(void)
     return 0;
 }
 
+
+/* System name oracle (--system-names): the original F830, the name of a system by its code (a hand-made
+   star from the string table, the Gateway, or a generated pronounceable name), a string by table index, and
+   the "(x,y)" sector form, for every hand-made star and random system codes. */
+extern char *ref_system_name(long selector, void *vars, char *dest, unsigned long code);
+extern unsigned long ref_special_sectors[];
+extern unsigned long ref_special_index[];
+static unsigned long name_oracle_state = 0x9e3779b9UL;
+static unsigned long name_oracle_random(void)
+{
+    name_oracle_state ^= name_oracle_state << 13; name_oracle_state &= 0xffffffffUL;
+    name_oracle_state ^= name_oracle_state >> 17;
+    name_oracle_state ^= name_oracle_state << 5; name_oracle_state &= 0xffffffffUL;
+    return name_oracle_state;
+}
+static void system_name_case(long selector, unsigned long code)
+{
+    static unsigned char vars[64];
+    char dest[512];
+    unsigned long i;
+    memset(vars, 0, sizeof vars); memset(dest, 0, sizeof dest);
+    ref_system_name(selector, vars, dest, code);
+    printf("{\"selector\":%ld,\"code\":%lu,\"name\":[", selector, code);
+    for (i = 0; dest[i] && i < 200; ++i) printf("%s%u", i ? "," : "", (unsigned char)dest[i]);
+    printf("]}\n");
+}
+static int system_name_vectors(void)
+{
+    unsigned long i, k;
+    fprintf(stderr, "JJFFE system-names-v1: original F830 (the name of a system code, a table string, the sector form) on every hand-made star and random codes.\n");
+    for (i = 0; i < 49; ++i) {
+        unsigned long key = ref_special_sectors[i];
+        for (k = 0; k < ref_special_index[i + 1] - ref_special_index[i]; ++k) system_name_case(0x8400, (key & 0xffff) | ((key >> 16) << 13) | (k << 26));
+    }
+    system_name_case(0x8400, 0x1aa51717UL);
+    for (i = 1; i <= 267; i += 2) system_name_case((long)i, 0);
+    for (i = 0; i < 40; ++i) system_name_case(0x1fe, (0x1718UL + i * 37 % 200) | ((0x1524UL + i * 53 % 200) << 13));
+    for (i = 0; i < 8000; ++i) {
+        unsigned long code = name_oracle_random() & 0xffffffffUL;
+        if (i % 3 == 0) code = (code & 0xfc00000) | ((name_oracle_random() % 0x2000)) | ((name_oracle_random() % 0x2000) << 13);
+        system_name_case(0x8400 | (long)(name_oracle_random() % 2 ? 0 : 0), code);
+    }
+    if (fflush(stdout)) fail("cannot flush system name vectors");
+    return 0;
+}
+
 #ifdef FFE_COMMAND_PROBE
 extern void ref_object_frame(void *list, void *camera);
 extern void ref_display_object(void *object, void *descriptor);
@@ -5019,6 +5082,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--lift")) return lift_vectors();
     if (argc == 2 && !strcmp(argv[1], "--sectors")) return sector_vectors();
     if (argc == 2 && !strcmp(argv[1], "--hyperspace")) return hyper_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--system-names")) return system_name_vectors();
     if (argc == 2 && !strcmp(argv[1], "--object-instance")) return object_instance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();
@@ -5034,6 +5098,14 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(-1);
     if (argc == 3 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--vertex-program")) return vertex_program_vector(atoi(argv[2]));
+    if (argc >= 4 && !strcmp(argv[1], "--game-frame")) {
+        int k;
+        game_frame_mode = 1; limit = strtoul(argv[2], 0, 0);
+        for (k = 3; k < argc && game_key_count < 16; ++k) game_keys[game_key_count++] = strtoul(argv[k], 0, 0);
+        fprintf(stderr, "JJFFE game-frame-v1: the real game from the new game, scripted keys, final 320x200 frame and palette in game-frame.bin.\n");
+        asmmain(0, NULL);
+        return 2;
+    }
     state_mode = argc == 3 && !strcmp(argv[1], "--state");
     if (argc != 2 && !state_mode)
         fail("usage: jjffe-smoke <frames> | --state <frames> | --vectors | --font | --blit | --models");

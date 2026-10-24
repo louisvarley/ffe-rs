@@ -4,6 +4,14 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — System names (F830), cache v22
+
+- Cache v22 imports the 267 system strings (`DATA_006796`). `sector::system_name` and `sector_label` port F830; the
+  `--system-names` oracle matches 8,292 cases (all hand-made stars, table strings, 8,000 generated codes). The harness
+  also gained `--game-frame`, which captures the real game's 320x200 frame and palette for the galaxy map's pixel oracle.
+
+---
+
 ## 2026-10-24 — The galaxy's stars and the hyperdrive (`ffe_core::sector`, `hyperspace`), cache v21
 
 Notes: `docs/notes/hyperspace.md`; deviation EXP-007.

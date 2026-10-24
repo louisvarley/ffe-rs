@@ -305,3 +305,89 @@ pub fn distance(a: [i32; 3], b: [i32; 3]) -> i32 {
     };
     root.wrapping_mul(0xc8b4) >> (shift & 31)
 }
+
+/// Strings in the system string table (`DATA_006796`).
+pub const STRING_COUNT: usize = 267;
+
+/// The 267 system strings: 117 hand-made star names, then star, planet and system
+/// descriptions (cache v22).
+#[derive(Debug, Clone, Copy)]
+pub struct Strings<'a> {
+    bytes: &'a [u8],
+}
+
+impl<'a> Strings<'a> {
+    pub fn new(bytes: &'a [u8]) -> Result<Self, String> {
+        let zeros = bytes.iter().filter(|b| **b == 0).count();
+        if zeros != STRING_COUNT || bytes.last() != Some(&0) {
+            return Err("the system strings are not 267 terminated strings".to_owned());
+        }
+        Ok(Self { bytes })
+    }
+
+    /// String `index` (without its zero).
+    pub fn get(&self, index: usize) -> Option<&'a [u8]> {
+        self.bytes
+            .split(|b| *b == 0)
+            .nth(index)
+            .filter(|_| index < STRING_COUNT)
+    }
+}
+
+/// F827: rotate a 16-bit value left by `count`.
+fn rotate16(value: u16, count: u32) -> u16 {
+    value.rotate_left(count & 15)
+}
+
+impl Tables<'_> {
+    /// The syllable `index` (0..32) of `DATA_006802`: up to three letters in four bytes.
+    fn syllable(&self, index: usize) -> &[u8] {
+        let at = SPECIAL + 404 + 4 * index;
+        let slot = &self.bytes[at..at + 4];
+        &slot[..slot.iter().position(|b| *b == 0).unwrap_or(4)]
+    }
+
+    /// F830 for a system code: the hand-made star's name from the string table, the
+    /// gateway's, or a pronounceable name made from the sector and star number.
+    pub fn system_name(&self, strings: &Strings, code: u32) -> Option<Vec<u8>> {
+        let (x, y) = ((code & 0x1fff) as u16, ((code >> 13) & 0x1fff) as u16);
+        let number = ((code >> 26) & 0x3f) as usize;
+        if let Some(k) = self.special(x, y) {
+            let index = self.start(k) as usize + number;
+            return strings.get(index).map(<[u8]>::to_vec);
+        }
+        // The only other special name: the Gateway system.
+        if code == 0x1aa5_1717 {
+            return Some(b"Gateway".to_vec());
+        }
+        let mut b = x.wrapping_add(number as u16);
+        let mut d = y.wrapping_add(b);
+        b = rotate16(b, 3);
+        b = b.wrapping_add(d);
+        d = rotate16(d, 5);
+        d = d.wrapping_add(b);
+        d = rotate16(d, 4);
+        b = rotate16(b, (number & 0xf) as u32);
+        b = b.wrapping_add(d);
+        let first = usize::from((b & 0x7c) >> 2);
+        let b = rotate16(b, 11);
+        let second = usize::from((b & 0x7c) >> 2);
+        let b = rotate16(b, 11);
+        let third = usize::from((b & 0x7c) >> 2);
+        let mut name = Vec::new();
+        for index in [first, second, third] {
+            name.extend_from_slice(self.syllable(index));
+        }
+        if let Some(letter) = name.first_mut() {
+            *letter = letter.wrapping_add(0xe0);
+        }
+        Some(name)
+    }
+}
+
+/// F830's `(x,y)` form (selector `0x1fe`): the sector relative to Sol's, `(0,0)`.
+pub fn sector_label(code: u32) -> String {
+    let x = i32::try_from(code & 0x1fff).unwrap_or(0) - 0x1718;
+    let y = i32::try_from((code >> 13) & 0x1fff).unwrap_or(0) - 0x1524;
+    format!("({x},{y})")
+}
