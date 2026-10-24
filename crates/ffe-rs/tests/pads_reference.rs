@@ -64,8 +64,8 @@ fn executed_reference_pads() {
             "position of case {} ({line})",
             case.case
         );
-        for axis in 0..3 {
-            let sign = if got[axis] < 0 { -1 } else { 0 };
+        for (axis, value) in got.iter().enumerate() {
+            let sign = if *value < 0 { -1 } else { 0 };
             assert_eq!(
                 case.out[2 * axis + 1],
                 sign,

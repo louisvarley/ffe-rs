@@ -4,6 +4,54 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — F575's contact tail: soft landing, crash and bounce (v0.48o)
+
+Notes: `docs/notes/collision.md`. `crates/ffe-core/src/landing.rs`,
+`crates/ffe-core/src/collision.rs`.
+
+- **The tail (F575 `JUMP_002410`).** A pair that touches now runs the decision:
+  flag 2, `speed = |vx|+|vy|+|vz|`, the surface's up (terrain: F1658 cut to
+  0x1c then F1503 to Q31; sphere: F1519 of the low dwords) and `dot = up . row1`
+  through F1521. A soft landing needs `speed <= 0x258`, the word at `+0x9e`
+  equal to `0xffff` and `dot >= 0x78000000`; it sets 0x40, clears 0x80, puts the
+  body on the surface and settles its orientation. Otherwise
+  `DATA_008699 = DATA_008700` and flag 0x80 is set; the player's body bounces
+  (`2v/3 - 10(up.v)up/12`, the direction becomes row 1, F1520), and F953's
+  damage amount is returned. A missile or escape capsule (`+0x87` 0x0b/0x0e) is
+  turned to the surface and stopped instead. Flag 1 (the planet's two radii
+  differ) and the `DATA_008698` object record close the tail.
+- **F578** (touching a body that is not the parent) ported too: flag 0x80, the
+  heavier/lighter ordering by the statistics' mass word, the F1519 direction and
+  the momentum exchange with F953's amount, unchanged from the supplied
+  `FIX: Missile retardation` block.
+- The crash mask is threaded as an argument: 0xff for the player's scan (F569,
+  `Player::tick_with`, `Bodies::collide`), zero for F568/F574. The bounce
+  compares the body's `+0x86` with `DATA_008857`, now `Bodies::player` (zero
+  until a game sets it, as in the reference process); the damage needs F1538's
+  record, so `Shapes` grew a `model` method and a scan without the cache
+  declines a touch.
+- Found by the oracle: `DATA_008705` (the altitude) is not reset by F570. When a
+  shape pair finds the body inside a planet's inner radius, F575's terrain
+  placement uses the altitude left by the *previous* terrain record, even from
+  an earlier case. It is now `Bodies::altitude`, carried by the tests like the
+  stale `DATA_008704`.
+- Re-enabled the grown oracles: **`--collide` 4,096 of 4,096 match, including
+  950 contacts** (`verify-collide.py`, trace SHA-256
+  `29144e66671d1f214e6fa3f7fe47b5c62710ee3a3e8431fc2a3ae0ff4ec5c57d`), and
+  **`--world-tick` 4,096 of 4,096, including 584 contacts**
+  (`verify-world-tick.py`, SHA-256
+  `4258a0b2756c09c53c102a805a365cce9e6b7c51770894d801875603fa43d6ac`). The older
+  notes' 993/620 contact counts predate the current generator; the traces now
+  report 950 and 584 and nothing is declined. Both scripts run the oracle twice,
+  the Rust test once, then reject ten altered fields each and an empty trace.
+- Synthetic tests: `crates/ffe-core/tests/landing.rs` (4) pin each boundary of
+  the landing test (`0x258`, `0x9e`, `0x78000000`, at and either side), the
+  bounce velocity formula and F953's amount, the three crash branches and flag 1.
+- Still open: a complex shape whose stream ends between the planet's radii
+  (`DATA_008707` 0xff) takes F575's sphere placement from F577's squares, which
+  the F576 path never set; the port declines that (the original reads
+  uninitialised stack). The playable still uses its own station touch test.
+
 ## 2026-10-24 — Black wedges on a planet approach (v0.48n)
 
 Owner report: "weird black issues when I try to go to a planet".

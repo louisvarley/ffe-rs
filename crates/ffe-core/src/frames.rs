@@ -125,8 +125,16 @@ pub struct Bodies {
     /// `DATA_008704:DATA_008703`, the collision distance, which persists
     /// between scans (F570 resets only the low dword).
     pub distance: i64,
+    /// `DATA_008706:DATA_008705`, the altitude F581 leaves, which persists
+    /// between scans (F570 does not clear it; a pair that finds the body inside
+    /// a planet's inner radius reads whatever an earlier terrain record left).
+    pub altitude: i64,
     /// The frame's time (`DATA_009155`), which counts the frame-switch delay down.
     pub frame_tics: u32,
+    /// `DATA_008857`: the player's craft number, which F575's bounce compares with
+    /// a body's `+0x86`. Zero when no game is running (the original leaves it
+    /// clear until a game starts).
+    pub player: u8,
     /// The `(a, b)` pairs passed to F148 (always `(0xb, 0)`: frame changed).
     pub events: Vec<(u32, u32)>,
 }
@@ -184,7 +192,9 @@ impl Default for Bodies {
             stamp: 0,
             physical: vec![false; OBJECTS],
             distance: 0,
+            altitude: 0,
             frame_tics: 0,
+            player: 0,
             events: Vec::new(),
         }
     }

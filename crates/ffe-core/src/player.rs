@@ -394,7 +394,9 @@ impl Player {
         self.tick_with(keys, time, world, index, None)
     }
 
-    /// [`Player::tick_in`] with the data complex shapes (planets) need.
+    /// [`Player::tick_in`] with the data complex shapes (planets) need. The scan
+    /// is the player's (F569): the crash mask is `0xff`, so touching a planet
+    /// crashes rather than settles.
     pub fn tick_with(
         &mut self,
         keys: &ThrusterKeys,
@@ -406,9 +408,9 @@ impl Player {
         self.step_in(keys, time, world, index)?;
         world.body[index].take_motion(&self.motion);
         world.frame_tics = self.frame_tics;
-        let Some(contact) = world.collide_with(index, tools) else {
-            return Err("Contact with a body is not ported.".to_owned());
-        };
+        let contact = world
+            .collide_with(index, tools, 0xff)
+            .ok_or("The collision scan needs the models' records for this touch.")?;
         world.body[index].give_motion(&mut self.motion);
         self.altitude = contact.altitude();
         self.contact_flags = contact.flags;

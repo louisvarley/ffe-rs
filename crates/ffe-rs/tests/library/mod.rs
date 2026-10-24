@@ -18,6 +18,14 @@ impl Library {
 }
 
 impl Shapes for Library {
+    fn model(&self, model: u32) -> Option<ffe_core::objects::ModelInfo> {
+        ffe_core::objects::ModelInfo::read(
+            self.cache.asset("base:model/records")?,
+            self.cache.asset("base:ship/stats")?,
+            model,
+        )
+    }
+
     fn shape(&self, model: u32) -> Option<Shape<'_>> {
         // A model whose vertices did not import still serves as the moving body: only
         // its scale and region chain are read.

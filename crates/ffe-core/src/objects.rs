@@ -47,12 +47,14 @@ pub struct Models<'a> {
     pub gameplay: &'a [u8],
 }
 
-impl Models<'_> {
-    pub fn info(&self, model: u32) -> ModelInfo {
+impl ModelInfo {
+    /// The record for `model` from the cache's 20-byte model records and its
+    /// 48-byte statistics records (`base:model/records`, `base:ship/stats`).
+    pub fn read(records: &[u8], stats: &[u8], model: u32) -> Option<ModelInfo> {
         let slot = model as usize;
-        let r = &self.records[20 * slot..20 * slot + 20];
-        let stats: [u8; 48] = self.stats[48 * slot..48 * slot + 48].try_into().unwrap();
-        ModelInfo {
+        let r = records.get(20 * slot..20 * slot + 20)?;
+        let stats: [u8; 48] = stats.get(48 * slot..48 * slot + 48)?.try_into().unwrap();
+        Some(ModelInfo {
             radius_dword: u32::from(u16::from_le_bytes([r[10], r[11]]))
                 | u32::from(u16::from_le_bytes([r[16], r[17]])) << 16,
             scale: i32::from_le_bytes(r[0..4].try_into().unwrap()),
@@ -62,7 +64,13 @@ impl Models<'_> {
             radius: i16::from_le_bytes([r[10], r[11]]),
             collision_radius: i16::from_le_bytes([r[12], r[13]]),
             stats: (r[14] != 0).then_some(stats),
-        }
+        })
+    }
+}
+
+impl Models<'_> {
+    pub fn info(&self, model: u32) -> ModelInfo {
+        ModelInfo::read(self.records, self.stats, model).expect("model inside the cache's records")
     }
 
     /// The hold of a ship model, tonnes: the statistics' cargo word (`+8`) less the

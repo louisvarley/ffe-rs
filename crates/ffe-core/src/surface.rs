@@ -74,6 +74,14 @@ pub struct Shape<'a> {
 /// Where the shapes of child models come from.
 pub trait Shapes {
     fn shape(&self, model: u32) -> Option<Shape<'_>>;
+
+    /// F1538's model record (`+0x14` scale, `+0x18` scale offset, `+0x2c` radius
+    /// and `+0x30` collision radius words, `+0x38` statistics), which F575's
+    /// landing, crash and bounce code reads. `None` where the cache has no
+    /// record, which leaves a touch declined.
+    fn model(&self, _model: u32) -> Option<crate::objects::ModelInfo> {
+        None
+    }
 }
 
 /// What the tests read of a physics object.

@@ -168,17 +168,22 @@ rolls, agent behaviour) will not match the original roll for roll. Recorded in
 `docs/DEVIATIONS.md`.
 
 
-## Station velocity and the crash and bounce contact are not ported (frames, collision)
+## Station velocity is not ported (frames)
 
 `ffe_core::frames` handles rotating frames (F1677, F572, F573) but not a
 station's own velocity (F595 through F1533/F866), which returns `None`.
-`ffe_core::collision` covers the contact-free path of F570/F575/F577, complex
-shapes (`+0x14c` negative; F576, F579-F583), terrain (F581/F1876) and the
-reorienting landing of F575 (crash mask clear, as for F574 and the starports
-F879 places). Still returning `None`: F578 (the collision damage and bounce, with
-F953), and the crash and bounce branch of F575 for a non-zero crash mask
-(`DATA_008700`). Note that F577's far branch (distance beyond 2^30 units)
+`ffe_core::collision` now covers every path of F569/F570: the distance and frame
+switching, complex shapes (`+0x14c` negative; F576, F579-F583), terrain
+(F581/F1876), F575's soft landing and crash/bounce tail (`DATA_008699`,
+`DATA_008700`; F953's damage amount is returned) and F578's response to touching
+another body. A touch needs the models' records and statistics (`Shapes::model`,
+F1538); without them the scan returns `None`. One path still returns `None`: a
+complex shape whose terrain stream ends between the planet's inner and outer
+radii (`DATA_008707` 0xff) falls into F575's sphere placement, which reads
+F577's squares from a local the F576 path never set (the original reads
+uninitialised stack). Note that F577's far branch (distance beyond 2^30 units)
 tests the sum of the bodies' outer radii (`+0x138`), not the collision radii
 (`+0x140`) that its near branch uses (a JJFFE "FIX" applied to one branch only),
 so a planet's atmosphere counts as contact at long range; the port keeps this.
-Needed for flying into the ground or another ship.
+The playable still pushes the ship clear of a station instead of running this
+code (`docs/NAVIGATION.md`).

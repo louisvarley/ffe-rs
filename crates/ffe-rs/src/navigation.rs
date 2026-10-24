@@ -82,6 +82,14 @@ pub struct Entry {
 struct Library<'a>(&'a VerifiedCache);
 
 impl Shapes for Library<'_> {
+    fn model(&self, model: u32) -> Option<ffe_core::objects::ModelInfo> {
+        ffe_core::objects::ModelInfo::read(
+            self.0.asset("base:model/records")?,
+            self.0.asset("base:ship/stats")?,
+            model,
+        )
+    }
+
     fn shape(&self, model: u32) -> Option<Shape<'_>> {
         let cache = self.0;
         let vertices = cache

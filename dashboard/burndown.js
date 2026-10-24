@@ -110,7 +110,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-4", title: "Flight integration decoupled from the frame; fixed 50 Hz step", status: "in-progress", version: "v0.49h" },
         { id: "flight-5", title: "Original input processing, key accumulation and remapping", status: "in-progress", version: "v0.49g" },
         { id: "flight-6", title: "Time acceleration and its RNG consumption", status: "in-progress", version: "v0.49i" },
-        { id: "flight-7", title: "Collision detection and response (ccoll)", status: "in-progress", version: "v0.49n" },
+        { id: "flight-7", title: "Collision detection and response (ccoll)", status: "done", version: "v0.48o" },
         { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "todo" },
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
@@ -445,6 +445,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 81,
       note: "Owner-reported black wedges on a planet approach: the original 50,000-word surface queue overflows at 3-2 radii (59,190-63,125 words) and the port drew only what was queued. The flight view now uses a 131,072-word surface queue (EXP-009); the oracles keep the original limit. New --capture-planet frames the approach, and a local regression test checks the disc has no unpainted pixels."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 91,
+      note: "F575's contact tail (soft landing, crash and bounce, F953's damage amount, flag 1) and F578's momentum response ported and verified: --collide and --world-tick now match all 4,096 cases each, the 950 and 584 contacts included (verify-collide.py, verify-world-tick.py); flight-7 (collision detection and response) done. The playable's own station touch test still pushes the ship clear, so flight-10 keeps the pad hit. The count is reconciled against the task lists (147 items, 56 done): it is 10 above the previous point because items found since then were not added to it."
     }
   ]
 };

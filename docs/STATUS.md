@@ -37,7 +37,7 @@ ffe-rs's own (EXP-005).
   thrusters, animation, views, text/labels, curved surfaces, lines, fills,
   docking, market, hyperspace, navigation and the galaxy map.
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 133 items, 52 done and 81 left on
+  in `burndown.js`; 14 milestones, 147 items, 56 done and 91 left on
   2026-10-24). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -89,8 +89,8 @@ Move-Item -Force .\data-new.bin .\data.bin
 python .\tools\reference\verify-all.py
 ```
 
-`verify-all.py` checks that every input exists first and then runs all 29
-oracles (about five minutes), printing one line each and a final pass/fail. It
+`verify-all.py` checks that every input exists first and then runs all 46 oracle
+entries (about five minutes), printing one line each and a final pass/fail. It
 needs the player's own files, NASM and the MSVC x86 tools; none of it is public
 CI. Rebuild the reference after any change to `tools/reference/`, and note that
 the child oracle's trace SHA-256 changes with every rebuild (see below).
@@ -165,9 +165,15 @@ Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 242 `#[test]` functions total; 36 are `#[ignore]`
+  `cargo clippy -D warnings`. 382 `#[test]` functions total; 98 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **205 runnable synthetic tests** (206 on Linux).
+  **283 runnable synthetic tests** (284 on Linux).
+- Collision contacts: F575's soft landing, crash and bounce tail and F578's
+  momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
+  **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
+  including 950 and 584 contacts (`verify-collide.py`,
+  `verify-world-tick.py`; `docs/notes/collision.md`). The playable still pushes
+  the ship clear of a station instead of running it.
 - `ffe-rs.exe --root . --smoke-frames 30` presents frames with the local
   cache v14.
 - `ffe-rs.exe --root . --capture-planet DIR` flies the original flight model and

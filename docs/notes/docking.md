@@ -79,8 +79,10 @@ the real game: the interior model with word 0 (the waiting stages) is nearly emp
 
 Kept: the record and every routine above, the stage order and timeouts, the clearance countdown, the lift scenes.
 Left out: the player's velocity matching the station's rotation (F1025 sets it from F589/F591, F1088 at the end);
-sounds; the open-air starport pads (F650's tables `DATA_006175..6179`) and landing; the crash and bounce of a
-bad touch (the playable pushes the ship clear instead, `docs/NAVIGATION.md`).
+sounds; the open-air starport pads (F650's tables `DATA_006175..6179`) and landing; the playable's own docking
+touch test still pushes the ship clear instead of running the collision stream and F575's crash and bounce
+(ported in `ffe_core::landing`/`collision`, see `docs/notes/collision.md`, but not wired into `ffe_rs::navigation`,
+`docs/NAVIGATION.md`).
 
 ## Verification
 

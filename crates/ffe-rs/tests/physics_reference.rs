@@ -571,12 +571,13 @@ struct Collide {
 /// Original F569/F570 (`--collide`): the distance to the parent body, the
 /// switch between linear and rotating frames, and the scan of the other
 /// physical bodies, on 4096 seven-body trees aimed into the band where the
-/// player is in reach of its parent without touching it. Cases where the
-/// original reports a contact (an object index or the crash/landing flags) are
-/// not ported and must be the ones the port declines; every other case must
-/// match in the return value, flags, distance, registers and every body.
+/// player is in reach of its parent. Contacts (a soft landing, a crash, or
+/// F578's response to touching another body) are compared too; the crash mask
+/// is F569's 0xff and `DATA_008857` is zero, as in the reference process.
+/// Every case must match in the return value, flags, distance, registers and
+/// every body.
 #[test]
-#[ignore = "Local-only original physics; use tools/reference/verify-physics.py"]
+#[ignore = "Local-only original physics; use tools/reference/verify-collide.py"]
 fn executed_reference_collide() {
     let input = std::fs::read_to_string(std::env::var_os("FFE_COLLIDE_VECTORS").unwrap()).unwrap();
     let library = library::Library::load();
@@ -587,8 +588,11 @@ fn executed_reference_collide() {
         detail: 0,
     };
     assert!(input.len() < 96 << 20);
-    let (mut cases, mut compared, mut declined, mut valid, mut switched, mut planets) =
+    let (mut cases, mut compared, mut touched, mut valid, mut switched, mut planets) =
         (0, 0, 0, 0, 0, 0);
+    // DATA_008705 persists across scans (F570 does not clear it), so a pair that
+    // finds the player inside a planet's inner radius reads the previous case's.
+    let mut altitude = 0i64;
     for line in input.lines() {
         let case: Collide = serde_json::from_str(line).unwrap();
         assert_eq!(case.case, cases);
@@ -597,6 +601,7 @@ fn executed_reference_collide() {
             stamp: case.stamp,
             frame_tics: case.tics,
             distance: (i64::from(case.high) << 32) | 0x1234_5678,
+            altitude,
             ..Bodies::default()
         };
         for (i, row) in case.bodies.iter().enumerate() {
@@ -626,21 +631,9 @@ fn executed_reference_collide() {
                 words: Words(b.words.clone().try_into().unwrap()),
             };
         }
-        let contact_in_original = case.flags & 0xc0 != 0;
-        let Some(contact) = world.collide_with(7, Some(&tools)) else {
-            assert!(
-                contact_in_original,
-                "declined a contact-free case {}",
-                case.case
-            );
-            declined += 1;
-            continue;
-        };
-        assert!(
-            !contact_in_original,
-            "case {} had a contact the port missed",
-            case.case
-        );
+        let contact = world
+            .collide_with(7, Some(&tools), 0xff)
+            .expect("the scan needs the models' records");
         assert_eq!(
             (
                 contact.flags,
@@ -698,6 +691,8 @@ fn executed_reference_collide() {
         }
         compared += 1;
         valid += usize::from(contact.distance != -1);
+        touched += usize::from(contact.touch.is_some());
+        altitude = world.altitude;
         switched += usize::from(case.bodies[6].before.rotating != case.bodies[6].after.rotating);
         let parent = usize::from(case.bodies[6].before.parent);
         planets += usize::from(parent != 0 && case.bodies[parent - 1].before.shape & 0x80 != 0);
@@ -707,7 +702,7 @@ fn executed_reference_collide() {
         compared > 2500 && valid > 500 && switched > 500 && planets > 300,
         "too little coverage: {compared} {valid} {switched}"
     );
-    eprintln!("compared {compared} collide cases ({valid} with a distance, {switched} frame switches, {planets} around a planet), {declined} declined for a contact");
+    eprintln!("compared {compared} collide cases ({valid} with a distance, {switched} frame switches, {planets} around a planet), {touched} contacts");
 }
 
 #[derive(Deserialize)]
@@ -971,12 +966,11 @@ struct TickCase {
 
 /// One whole player tick in a world (`--world-tick`): the original F1041
 /// (gravity, auto-roll, the frame countdown), F601/F602, F1512 and the
-/// collision scan with its linear/rotating frame switch, against
-/// `Player::tick_in`. Cases where the original reports a contact are the ones
-/// the port declines; every other case must match in the player's fields, the
+/// collision scan with its linear/rotating frame switch and its contacts,
+/// against `Player::tick_in`. Every case must match in the player's fields, the
 /// altitude, the contact flags and every body.
 #[test]
-#[ignore = "Local-only original player update; use tools/reference/verify-physics.py"]
+#[ignore = "Local-only original player update; use tools/reference/verify-world-tick.py"]
 fn executed_reference_world_tick() {
     let input = std::fs::read_to_string(std::env::var_os("FFE_TICK_VECTORS").unwrap()).unwrap();
     let library = library::Library::load();
@@ -987,8 +981,10 @@ fn executed_reference_world_tick() {
         detail: 0,
     };
     assert!(input.len() < 160 << 20);
-    let (mut cases, mut compared, mut declined, mut valid, mut switched, mut moved) =
+    let (mut cases, mut compared, mut touched, mut valid, mut switched, mut moved) =
         (0, 0, 0, 0, 0, 0);
+    // DATA_008705 persists across scans, as in the collide test.
+    let mut altitude = 0i64;
     for line in input.lines() {
         let case: TickCase = serde_json::from_str(line).unwrap();
         assert_eq!(case.case, cases);
@@ -997,6 +993,8 @@ fn executed_reference_world_tick() {
             stamp: case.stamp,
             frame_tics: case.tics,
             distance: (i64::from(case.high) << 32) | 0x1234_5678,
+            altitude,
+            player: case.player as u8,
             ..Bodies::default()
         };
         for (i, row) in case.bodies.iter().enumerate() {
@@ -1078,22 +1076,10 @@ fn executed_reference_world_tick() {
             right: k[8],
             left: k[9],
         };
-        let contact_in_original = case.contact.flags & 0xc0 != 0;
         let contact = player.tick_with(&keys, case.time, &mut world, 7, Some(&tools));
         let Ok(contact) = contact else {
-            assert!(
-                contact_in_original,
-                "declined a contact-free tick {}",
-                case.case
-            );
-            declined += 1;
-            continue;
+            panic!("tick {} declined: {:?}", case.case, contact.err());
         };
-        assert!(
-            !contact_in_original,
-            "tick {} had a contact the port missed",
-            case.case
-        );
         let a = &case.after;
         let expected = [
             [a.matrix[0], a.matrix[1], a.matrix[2]],
@@ -1207,6 +1193,8 @@ fn executed_reference_world_tick() {
         }
         compared += 1;
         valid += usize::from(contact.distance != -1);
+        touched += usize::from(contact.touch.is_some());
+        altitude = world.altitude;
         switched += usize::from(me.rotating != case.bodies[6].after.rotating);
         moved += usize::from(me.parent != case.bodies[6].after.parent);
     }
@@ -1215,7 +1203,7 @@ fn executed_reference_world_tick() {
         compared > 2500 && valid > 150 && switched > 300,
         "too little coverage: {compared} {valid} {switched}"
     );
-    eprintln!("compared {compared} world ticks ({valid} with a distance, {switched} frame switches, {moved} parent changes), {declined} declined for a contact");
+    eprintln!("compared {compared} world ticks ({valid} with a distance, {switched} frame switches, {moved} parent changes), {touched} contacts");
 }
 
 #[derive(Deserialize)]

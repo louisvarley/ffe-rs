@@ -1,8 +1,10 @@
-//! The end of F575 for a body that has touched its parent, in the branch where
-//! the crash mask (`DATA_008700`, zero for F574 and F568) is clear: the body is
-//! put on the surface, its orientation turned to the surface's up and its velocity
-//! cleared. (The crash and bounce branch, for a non-zero mask, is not ported.)
-//! Verified through the starports F879 places (`docs/notes/objects.md`).
+//! F575's contact code for a pair of bodies that touch, and F574's use of it:
+//! `DATA_008696 |= 2` and the test that decides a soft landing (`DATA_008699`
+//! cleared, flag `0x40`) from a crash (`DATA_008699` = the crash mask, flag
+//! `0x80`); the body is then put on the surface, settled when it landed, or
+//! bounced when it crashed and it is the player.
+//! Verified through the starports F879 places (`docs/notes/objects.md`) and the
+//! collision oracles (`docs/notes/collision.md`).
 
 use crate::model::multiply;
 use crate::model_math::square_root;
@@ -58,6 +60,17 @@ pub enum Surface {
     Sphere { squares: u32 },
 }
 
+/// What F575's contact tail resolved (`DATA_008699`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Touch {
+    /// A soft landing: `DATA_008699` cleared, flags `0x40` set and the crash bit
+    /// cleared; the body is left on the surface and turned to its up.
+    Landing,
+    /// A crash: `DATA_008699` set and flags `0x80`. `damage` is the amount passed
+    /// to F953 (which itself raises a negative amount to `0x7fffffff`).
+    Crash { damage: i32 },
+}
+
 /// Both objects' bytes and models.
 pub struct Pair<'a> {
     pub body: &'a mut [u8],
@@ -78,40 +91,106 @@ fn qword(object: &[u8], at: usize) -> i64 {
     i64::from_le_bytes(object[at..at + 8].try_into().unwrap())
 }
 
-/// F575 from `DATA_008696 |= 2` to the end for the reorienting branch. `relpos` is
-/// the body's position relative to the planet; `flags` is `DATA_008696`, updated and
-/// returned.
-pub fn settle(pair: &mut Pair, relpos: [i64; 3], surface: Surface, mut flags: u8) -> u8 {
-    let Pair {
-        body,
-        planet,
-        body_model,
-        planet_model,
-    } = pair;
-    flags |= 2;
-    let speed = (0..3).fold(0i32, |sum, k| {
-        sum.wrapping_add(dword(body, 0x8c + 4 * k).wrapping_abs())
-    });
-    let low = |k: usize| relpos[k] as i32;
-    let mut up;
+/// The surface's up vector as F575 builds it (`JUMP_002411`/`JUMP_002410`): the
+/// relative position cut to 0x1c bits and scaled to Q31 for the terrain, the
+/// sphere's low dwords normalised (F1519) otherwise.
+pub fn up(relpos: [i64; 3], surface: Surface) -> [i32; 3] {
     match surface {
         Surface::Terrain { .. } => {
             let (cut, _) = crate::frames::truncate(relpos, 0x1c);
-            up = [cut[0] as i32, cut[1] as i32, cut[2] as i32];
+            let mut up = [cut[0] as i32, cut[1] as i32, cut[2] as i32];
             set_magnitude(&mut up, 0x7fff_ffff);
+            up
         }
         Surface::Sphere { .. } => {
-            up = crate::physics::normalise([low(0), low(1), low(2)]);
+            crate::physics::normalise([relpos[0] as i32, relpos[1] as i32, relpos[2] as i32])
         }
     }
-    let dot = (0..3).fold(0i32, |sum, k| {
-        sum.wrapping_add(multiply(dword(body, 0xc + 4 * k), up[k]))
-    });
-    let word_9e = u16::from_le_bytes([body[0x9e], body[0x9f]]);
-    if speed <= 0x258 && word_9e == 0xffff && dot >= 0x7800_0000 {
+}
+
+/// F575 from `DATA_008696 |= 2` to the end for a pair of bodies that touch.
+/// `relpos` is the body's position relative to the planet; `crash` is the crash
+/// mask (`DATA_008700`: 0xff for the player's scan F569, zero for F574 and
+/// F568); `player` is `DATA_008857`, the craft number whose body is bounced.
+/// Returns the flags (`DATA_008696`) and the touch.
+pub fn contact(
+    pair: &mut Pair,
+    relpos: [i64; 3],
+    surface: Surface,
+    mut flags: u8,
+    crash: u8,
+    player: u8,
+) -> (u8, Touch) {
+    flags |= 2;
+    let speed = {
+        let body = &*pair.body;
+        (0..3).fold(0i32, |sum, k| {
+            sum.wrapping_add(dword(body, 0x8c + 4 * k).wrapping_abs())
+        })
+    };
+    let up = up(relpos, surface);
+    let dot = {
+        let body = &*pair.body;
+        (0..3).fold(0i32, |sum, k| {
+            sum.wrapping_add(multiply(dword(body, 0xc + 4 * k), up[k]))
+        })
+    };
+    let word = u16::from_le_bytes([pair.body[0x9e], pair.body[0x9f]]);
+    let landing = speed <= 0x258 && word == 0xffff && dot >= 0x7800_0000;
+    let crash = if landing {
         flags |= 0x40;
         flags &= 0x7f;
+        0
+    } else {
+        crash
+    };
+    // JUMP_002414: put the body on the surface (or inside the planet's radius).
+    place(pair, relpos, &up, surface);
+    let touch = if crash != 0 {
+        flags |= 0x80;
+        let body = &*pair.body;
+        if body[0x86] == player {
+            let damage = bounce(pair, up, speed);
+            Touch::Crash { damage }
+        } else if dword(body, 0x82) > 0xd && (body[0x87] == 0xb || body[0x87] == 0xe) {
+            // JUMP_002426/002427: any other ship is turned to the surface, its
+            // velocity cleared and - when the mask is set - F953 is given -1.
+            realign(pair, up);
+            Touch::Crash { damage: -1 }
+        } else {
+            Touch::Crash { damage: 0 }
+        }
+    } else {
+        // JUMP_002428.
+        realign(pair, up);
+        Touch::Landing
+    };
+    // JUMP_002429: the planet's collision radius differs from its outer radius.
+    if qword(pair.planet, 0x140) != qword(pair.planet, 0x138) {
+        flags |= 1;
     }
+    (flags, touch)
+}
+
+/// F575's tail for F574's scan, whose crash mask is zero: the body is settled on
+/// the surface whether or not the landing test passed, and the flags are
+/// returned. `relpos` is the body's position relative to the planet.
+pub fn settle(pair: &mut Pair, relpos: [i64; 3], surface: Surface, flags: u8) -> u8 {
+    contact(pair, relpos, surface, flags, 0, 0).0
+}
+
+/// JUMP_002414: put the touched body on the surface. For the terrain the
+/// body's `+0x140` less the altitude (both 64-bit, the low dword used) is added
+/// along the up vector; for the sphere the position is rebuilt from the
+/// relative position, scaled to the planet's radius plus the body's collision
+/// radius and to `squares`.
+fn place(pair: &mut Pair, relpos: [i64; 3], up: &[i32; 3], surface: Surface) {
+    let Pair {
+        body,
+        planet_model,
+        body_model,
+        ..
+    } = pair;
     match surface {
         Surface::Terrain { altitude } => {
             let difference = qword(body, 0x140).wrapping_sub(altitude);
@@ -138,7 +217,7 @@ pub fn settle(pair: &mut Pair, relpos: [i64; 3], surface: Surface, mut flags: u8
                 length = ((length as u32) >> 1) as i32;
                 squares = squares.wrapping_add(1);
             }
-            let mut direction = [low(0), low(1), low(2)];
+            let mut direction = [relpos[0] as i32, relpos[1] as i32, relpos[2] as i32];
             set_length(&mut direction, length, squares);
             let right = 0x38i32.wrapping_sub(planet_zoom);
             let left = 0x20 - right;
@@ -151,8 +230,12 @@ pub fn settle(pair: &mut Pair, relpos: [i64; 3], surface: Surface, mut flags: u8
             }
         }
     }
-    // Reorientate: the surface's up becomes the second row, then rows are swapped
-    // (F571), re-orthogonalised (F1520) and swapped back.
+}
+
+/// JUMP_002428: the surface's up becomes the second row, then rows are swapped
+/// (F571), re-orthogonalised (F1520) and swapped back; the velocity is cleared.
+fn realign(pair: &mut Pair, up: [i32; 3]) {
+    let body = &mut *pair.body;
     for (k, v) in up.iter().enumerate() {
         set_dword(body, 0xc + 4 * k, *v);
     }
@@ -162,10 +245,70 @@ pub fn settle(pair: &mut Pair, relpos: [i64; 3], surface: Surface, mut flags: u8
     for k in 0..3 {
         set_dword(body, 0x8c + 4 * k, 0);
     }
-    if dword(planet, 0x140) != dword(planet, 0x138) {
-        flags |= 1;
+}
+
+/// F575's player bounce (`JUMP_002421` after the craft comparison): the
+/// surface's up becomes the second row, the rows are swapped (F571),
+/// re-orthogonalised (F1520) and swapped back, and the velocity is reflected
+/// about the surface plane as `v[k] = 2 v[k] / 3 - 10 (up[k] . v) / 12` with the
+/// dot products F1521. The reflected direction is flipped to keep the body's
+/// forward sense (the saved row 2), or replaced by it when it cancels; it then
+/// becomes row 1 and F1520 runs again. Returns the damage F953 is called with:
+/// the model's mass word (`statistics + 6`) times four, times the speed lost,
+/// over 0x708, but at least the mass over four.
+pub fn bounce(pair: &mut Pair, up: [i32; 3], speed: i32) -> i32 {
+    let body = &mut *pair.body;
+    let saved: [i32; 9] = std::array::from_fn(|k| dword(body, 4 * k));
+    for (k, v) in up.iter().enumerate() {
+        set_dword(body, 0xc + 4 * k, *v);
     }
-    flags
+    swap_rows(body);
+    renormalise(body);
+    swap_rows(body);
+    let dot = (0..3).fold(0i32, |sum, k| {
+        sum.wrapping_add(multiply(up[k], dword(body, 0x8c + 4 * k)))
+    });
+    let mut direction = [0i32; 3];
+    for (k, component) in direction.iter_mut().enumerate() {
+        let v = dword(body, 0x8c + 4 * k);
+        let reflected = multiply(up[k], dot).wrapping_mul(10) / 12;
+        *component = v.wrapping_mul(2) / 3 - reflected;
+        set_dword(body, 0x8c + 4 * k, *component);
+    }
+    let forward = [saved[6], saved[7], saved[8]];
+    let along = (0..3).fold(0i32, |sum, k| {
+        sum.wrapping_add(multiply(direction[k], forward[k]))
+    });
+    if along < 0 {
+        for v in &mut direction {
+            *v = v.wrapping_neg();
+        }
+    }
+    if direction == [0; 3] {
+        direction = forward;
+    }
+    set_magnitude(&mut direction, 0x7fff_ffff);
+    for (k, v) in saved.iter().enumerate() {
+        set_dword(body, 4 * k, *v);
+    }
+    for (k, v) in direction.iter().enumerate() {
+        set_dword(body, 0x18 + 4 * k, *v);
+    }
+    renormalise(body);
+    let new_speed = (0..3).fold(0i32, |sum, k| {
+        sum.wrapping_add(dword(body, 0x8c + 4 * k).wrapping_abs())
+    });
+    let loss = speed.wrapping_sub(new_speed);
+    let mass = pair.body_model.stats.map_or(0, |stats| {
+        i32::from(i16::from_le_bytes([stats[6], stats[7]]))
+    });
+    let mass = mass.wrapping_mul(4);
+    let product = i64::from(mass) * i64::from(loss);
+    // The original's `idiv` faults where the quotient does not fit 32 bits; game
+    // speeds keep it far below that.
+    let share = (product / 0x708) as i32;
+    let floor = mass / 4;
+    share.max(floor)
 }
 
 /// F571: the second and third rows trade places and the first is negated.

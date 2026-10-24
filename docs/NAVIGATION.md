@@ -134,7 +134,8 @@ scripted launch.
   body it is near (the engaged target on its final approach, else a station within 200 km,
   else a planet or moon within 50 radii), so a station stays where the ship left it.
 - **Not the original yet.** The pad hit is this port's slot test, not the station's collision stream
-  (F569 flags 0x20 | 0x40, with the crash and bounce); the sounds and the ship's motion with the rotating station
+  (F569 flags 0x20 | 0x40, with F575's crash and bounce, which `ffe_core::collision`/`landing` now port and verify but
+  the playable does not call); the sounds and the ship's motion with the rotating station
   during the stages are not ported. Starports
   (landing on a planet) are not dockable here.
 
