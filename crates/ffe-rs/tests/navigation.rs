@@ -475,3 +475,176 @@ fn body_counts() {
         );
     }
 }
+
+/// From the launch point of the starting station, the autopilot flies to stations
+/// of different models (a trading post, an orbital city, an orbital station),
+/// takes clearance at the approach point and enters the slot.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn autopilot_docks_at_stations() {
+    use ffe_rs::docking::Contact;
+    use ffe_rs::model_viewer::ModelViewer;
+    use ffe_rs::navigation::{Navigator, View};
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    for wanted in ["Daedalus", "Abraham Lincoln", "Galileo"] {
+        let mut nav = Navigator::new(&cache).unwrap();
+        for model in [69, 72, 73, 74, 75, 76, 77, 78, 79, 80] {
+            let found = viewer.find(model);
+            nav.set_port_geometry(
+                model,
+                found.and_then(|m| m.front()),
+                found.and_then(|m| m.radius()),
+            );
+        }
+        let (start, at) = nav.station().map(|(n, at)| (n.to_owned(), at)).unwrap();
+        let mut flight = OriginalFlight::from_flight(
+            &Flight {
+                mode: Mode::Flight,
+                ..Flight::default()
+            },
+            None,
+        );
+        flight.teleport(at);
+        nav.open(View::System);
+        nav.selected = nav
+            .listed()
+            .iter()
+            .position(|i| nav.bodies[*i].name == wanted)
+            .unwrap_or_else(|| {
+                nav.turn_page(1);
+                nav.listed()
+                    .iter()
+                    .position(|i| nav.bodies[*i].name == wanted)
+                    .expect(wanted)
+            });
+        let target = nav.engage().unwrap().name.clone();
+        assert_eq!(target, wanted);
+        let mut docked = None;
+        let mut shots: Vec<&str> = Vec::new();
+        let mut pushed = 0;
+        let mut elapsed = 0.0;
+        while elapsed < 2_000.0 {
+            let Some((command, _)) = nav.command(&cache, &flight) else {
+                break;
+            };
+            if let Some((landing, seconds)) = command.skip {
+                flight.teleport(landing);
+                nav.transfer(&cache, seconds);
+                continue;
+            }
+            if let Some(face) = command.face {
+                flight.turn_toward(face, 0.05, 1.0);
+            }
+            flight.step(0.05, &command.keys).unwrap();
+            elapsed += 0.05;
+            nav.advance(&cache, 0.05);
+            if let Some(moved) = nav.follow(flight.player().motion.position) {
+                flight.shift(moved);
+            }
+            let velocity = flight.player().motion.velocity;
+            let speed = velocity
+                .iter()
+                .map(|v| (f64::from(*v) * ffe_rs::original_flight::MM_PER_SECOND / 1000.0).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+                // Frames on the way in, at about 20 km, 2 km and 0.6 km from the centre.
+                let range = distance(
+                    flight.player().motion.position,
+                    nav.bodies[nav.target.unwrap()].position,
+                );
+                for (mark, name) in [(20.0e6, "far"), (2.0e6, "near"), (0.6e6, "slot")] {
+                    if range < mark && !shots.contains(&name) {
+                        shots.push(name);
+                        let path = std::path::Path::new(&dir)
+                            .join(format!("dock-{}-{name}.ppm", wanted.replace(' ', "_")));
+                        shot(&cache, &viewer, &nav, &flight, &path);
+                    }
+                }
+            }
+            match nav.contact(flight.player().motion.position, speed) {
+                Some((index, Contact::Docked)) => {
+                    docked = Some((index, speed));
+                    nav.dock(index);
+                    break;
+                }
+                Some((index, Contact::Collision { clear, reason })) => {
+                    eprintln!(
+                        "{wanted}: pushed clear by {} ({reason:?})",
+                        nav.bodies[index].name
+                    );
+                    flight.teleport(clear);
+                    pushed += 1;
+                }
+                _ => {}
+            }
+        }
+        let (index, speed) = docked.unwrap_or_else(|| {
+            panic!(
+                "{wanted} not docked from {start}: {} away after {elapsed:.0} s",
+                describe(distance(
+                    flight.player().motion.position,
+                    nav.bodies[nav.target.unwrap()].position
+                ))
+            )
+        });
+        eprintln!(
+            "{wanted}: docked after {elapsed:.0} s at {speed:.0} m/s ({pushed} pushes, clock {:.0} s)",
+            nav.clock
+        );
+        assert_eq!(nav.bodies[index].name, wanted);
+        assert_eq!(pushed, 0);
+        assert_eq!(nav.station().map(|(n, _)| n), Some(wanted));
+        assert!(nav.target.is_none() && nav.clearance.is_none());
+    }
+}
+
+/// The flight view as the playable draws it, with the system's stations.
+fn shot(
+    cache: &ffe_content::VerifiedCache,
+    viewer: &ffe_rs::model_viewer::ModelViewer,
+    nav: &ffe_rs::navigation::Navigator,
+    flight: &OriginalFlight,
+    path: &std::path::Path,
+) {
+    use ffe_rs::original_flight::{TICS_PER_SECOND, UNITS_PER_FLIGHT_UNIT as UNIT};
+    let mut screen = ffe_rs::screen::Screen::new(cache).unwrap();
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    flight.apply(&mut state);
+    state.system_flight = true;
+    let tics = ffe_core::model_animation::START_TICS
+        .wrapping_add((nav.clock * TICS_PER_SECOND) as u64 as u32);
+    screen.stations = nav
+        .bodies
+        .iter()
+        .filter(|b| b.kind == Kind::Station)
+        .map(|b| ffe_rs::screen::SystemStation {
+            model: b.model,
+            centre: b.position.map(|v| v as f64 / UNIT),
+            orientation: b.orientation,
+            speed: b.spin,
+            tics,
+        })
+        .collect();
+    screen.draw(
+        &state,
+        ffe_rs::camera::ViewState::default(),
+        Some(viewer),
+        false,
+        true,
+        "",
+    );
+    let mut ppm = b"P6
+320 200
+255
+"
+    .to_vec();
+    for p in screen.logical_pixels() {
+        ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+    }
+    std::fs::write(path, ppm).unwrap();
+}

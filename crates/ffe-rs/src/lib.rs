@@ -2,6 +2,7 @@
 //! runs the verified free-flight physics from `ffe-core`.
 pub mod camera;
 pub mod console;
+pub mod docking;
 pub mod flight;
 pub mod indexed;
 pub mod input;

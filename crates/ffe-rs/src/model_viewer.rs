@@ -92,6 +92,8 @@ pub struct ViewerModel {
     normal_count: u32,
     /// Largest object-space vertex distance at input 0, or the evaluation error.
     radius: Result<f64, String>,
+    /// Largest object-space z of a vertex at input 0 (a station's docking face).
+    front: Option<f64>,
 }
 
 /// The global words and locals a top-level model runs with.
@@ -1415,6 +1417,12 @@ impl ViewerModel {
         self.radius.as_ref().ok().copied()
     }
 
+    /// Largest object-space z of a vertex at input 0, when evaluable alone: for a
+    /// station, how far its docking face (the +z end) stands from the centre.
+    pub fn front(&self) -> Option<f64> {
+        self.front
+    }
+
     pub fn new(
         index: u32,
         vertex_count: u32,
@@ -1424,15 +1432,21 @@ impl ViewerModel {
         normals: &[u8],
         normal_count: u32,
     ) -> Self {
-        let radius = evaluate(
+        let points = evaluate(
             vertices,
             vertex_count,
             &VertexContext {
                 scale,
                 ..Default::default()
             },
-        )
-        .map(|points| {
+        );
+        let front = points.as_ref().ok().and_then(|points| {
+            points
+                .iter()
+                .map(|p| f64::from(p[2]))
+                .max_by(f64::total_cmp)
+        });
+        let radius = points.map(|points| {
             points
                 .iter()
                 .map(|p| p.iter().map(|c| f64::from(*c).powi(2)).sum::<f64>().sqrt())
@@ -1447,6 +1461,7 @@ impl ViewerModel {
             normals: normals.to_vec(),
             normal_count,
             radius,
+            front,
         }
     }
 }

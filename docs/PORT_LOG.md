@@ -4,6 +4,31 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — Stations in system flight and docking at them (ffe-rs rules)
+
+Notes: `docs/NAVIGATION.md` ("Docking"); deviation EXP-005.
+
+- The flight view draws every station of the system from its own model at its generated
+  place, turned by F866 at the station's speed byte (`+0xc8`, now `Body::spin`). Before
+  this, launching into a system left no station to come back to and D said docking was
+  not in the build.
+- All generated station models (72, 73, 74, 80 looked at) have the slot on the +z face;
+  the face distance is the model's largest vertex z (`ViewerModel::front`), except the
+  orbital city, whose root vertices stop short of its hub (a child model) and which takes a
+  quarter of its radius.
+- `ffe_rs::docking::Port`: clearance from the nearest station within 100 km, docking on
+  crossing the face inside the corridor under 250 m/s, a push clear otherwise. The
+  autopilot to a station flies to the docking axis, takes clearance and flies in; Sol's
+  Daedalus, Abraham Lincoln and Galileo dock from the start (local test). Docking at a
+  station makes it the one the docked screen names and the one the next launch leaves.
+- The navigator now carries the ship with the body it is near between refreshes (was: the
+  engaged target only), so a station orbiting at km/s stays put for a ship that has
+  stopped near it. The every-jump autopilot test still arrives at 50 of 52 bodies.
+- Not ported: the original's traffic control F654/F655/F650, the pad hit in the collision
+  stream and the docking states 0xa..0x18.
+
+---
+
 ## v0.53 — Planet surfaces in the viewer and the flight view, the atmosphere (F1877-F1879)
 
 - `ModelViewer::draw_surfaces` runs the ported F1876 and emitter for curved surfaces; the

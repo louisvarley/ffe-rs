@@ -1,5 +1,6 @@
 use ffe_rs::camera::{key_amount, ExternalKeys, ViewMode, ViewState};
 use ffe_rs::console::{acceleration_for_digit, Click, ConsoleState, ACCELERATION_NAMES};
+use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
@@ -194,6 +195,17 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // The station models' docking faces (their +z ends) and sizes, from the vertices.
+    if let (Some(nav), Some(scene)) = (nav.as_mut(), scene.as_ref()) {
+        for model in STATION_MODELS {
+            let found = scene.find(model);
+            nav.set_port_geometry(
+                model,
+                found.and_then(|m| m.front()),
+                found.and_then(|m| m.radius()),
+            );
+        }
+    }
     let mut paused = false;
     let mut last_mode = state.mode;
     let mut message = match nav
@@ -701,8 +713,25 @@ fn run() -> Result<(), String> {
                 }
                 let action = if pressed(Key::L) {
                     Some(state.launch())
-                } else if pressed(Key::D) && state.system_flight {
-                    message = "Docking at the real stations is not in this build yet.".to_owned();
+                } else if pressed(Key::D)
+                    && state.system_flight
+                    && state.mode == ffe_rs::flight::Mode::Flight
+                {
+                    let ship = ship_position(&original);
+                    message = match nav.as_mut() {
+                        Some(nav) if nav.clearance.is_some() => {
+                            nav.clearance = None;
+                            "Docking clearance cancelled.".to_owned()
+                        }
+                        Some(nav) => match nav.request_clearance(ship) {
+                            Some(station) => format!(
+                                "{}: docking clearance granted. Enter the slot on the docking face.",
+                                station.name
+                            ),
+                            None => "No station within 100 km to ask for clearance.".to_owned(),
+                        },
+                        None => "No stations: navigation is unavailable.".to_owned(),
+                    };
                     None
                 } else if pressed(Key::D) {
                     Some(state.request_docking())
@@ -825,6 +854,10 @@ fn run() -> Result<(), String> {
                         } else if command.arrived {
                             message = format!("Arrived at {}.", body.name);
                             nav.target = None;
+                        } else if nav.docking() {
+                            let range = distance(model.player().motion.position, body.position);
+                            message =
+                                format!("Autopilot: docking at {} {}.", body.name, describe(range));
                         } else {
                             let range = distance(model.player().motion.position, body.position);
                             message = format!("Autopilot: {} {}.", body.name, describe(range));
@@ -849,6 +882,34 @@ fn run() -> Result<(), String> {
                 match model.step(elapsed, &keys) {
                     Ok(()) => {
                         model.apply(&mut state);
+                        // The stations: the slot docks a cleared ship, the hull pushes it clear.
+                        if let Some(nav) = nav.as_mut().filter(|_| state.system_flight) {
+                            let ship = model.player().motion.position;
+                            if let Some((index, contact)) = nav.contact(ship, state.speed() * 9.7) {
+                                let name = nav.bodies[index].name.clone();
+                                match contact {
+                                    Contact::None => {}
+                                    Contact::Docked => {
+                                        nav.dock(index);
+                                        state.mode = ffe_rs::flight::Mode::Docked;
+                                        state.position = [0.0, 0.0, -60.0];
+                                        state.velocity = [0.0; 3];
+                                        state.thrust = 0.0;
+                                        state.docking_requested = false;
+                                        message = format!(
+                                            "Docked at {name}. B buys food, N sells; F5 saves; L launches."
+                                        );
+                                    }
+                                    Contact::Collision { clear, reason } => {
+                                        model.teleport(clear);
+                                        model.face(nav.bodies[index].position);
+                                        model.apply(&mut state);
+                                        message =
+                                            format!("{name}: {}. Pushed clear.", reason.text());
+                                    }
+                                }
+                            }
+                        }
                         let (view, turret) = model.view();
                         if views.mode.is_turret() {
                             views.mode = if view == 3 {
@@ -934,7 +995,13 @@ fn run() -> Result<(), String> {
                 .with_time_acceleration(acceleration);
             if let Some((_, at)) = nav.as_ref().and_then(|nav| nav.station()) {
                 model.teleport(at);
-                if let Some(world) = nav.as_ref().and_then(|nav| nav.nearest_world(at)) {
+                // Out of the slot along the docking axis, else toward the nearest world.
+                let port = nav
+                    .as_ref()
+                    .and_then(|nav| nav.docked.and_then(|index| nav.port(index)));
+                if let Some(port) = port {
+                    model.face(port.point(port.front + 1.0e12));
+                } else if let Some(world) = nav.as_ref().and_then(|nav| nav.nearest_world(at)) {
                     model.face(world);
                 }
                 state.system_flight = true;
@@ -978,6 +1045,26 @@ fn run() -> Result<(), String> {
                 })
                 .collect()
         });
+        screen.stations = match nav.as_ref().filter(|_| state.system_flight) {
+            Some(nav) => {
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                let tics = ffe_core::model_animation::START_TICS.wrapping_add(
+                    (nav.clock * ffe_rs::original_flight::TICS_PER_SECOND) as u64 as u32,
+                );
+                nav.bodies
+                    .iter()
+                    .filter(|b| b.kind == NavKind::Station)
+                    .map(|b| ffe_rs::screen::SystemStation {
+                        model: b.model,
+                        centre: b.position.map(|v| v as f64 / unit),
+                        orientation: b.orientation,
+                        speed: b.spin,
+                        tics,
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
         screen.lock = match nav.as_ref().and_then(|nav| nav.target.map(|i| (nav, i))) {
             Some((nav, i)) => format!(
                 "LOCKED: {} {}",
@@ -1074,6 +1161,10 @@ fn run() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// The models a generated station can have (F892's tables): their docking faces
+/// are read from their vertices at start-up.
+const STATION_MODELS: [u32; 10] = [69, 72, 73, 74, 75, 76, 77, 78, 79, 80];
 
 fn ship_position(original: &Option<OriginalFlight>) -> [i64; 3] {
     original

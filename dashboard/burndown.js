@@ -112,7 +112,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-7", title: "Collision detection and response (ccoll)", status: "in-progress", version: "v0.49n" },
         { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "todo" },
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
-        { id: "flight-10", title: "Docking rules and station position/orientation", status: "todo" },
+        { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
         { id: "flight-11", title: "Launch sequence", status: "todo" },
         { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "todo" }
       ]
@@ -374,6 +374,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "Navigation (not a routine port): system map, galaxy map and an autopilot to planets and stations for testing; see docs/NAVIGATION.md."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "Stations drawn at their generated places from their own models (F866 spin) and docking at them by ffe-rs rules (clearance, the +z slot, autopilot docks); flight-10 in progress until the original's traffic control and docking states are ported."
     }
   ]
 };

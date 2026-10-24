@@ -11,6 +11,7 @@ systems, and an autopilot to planets, stations and other bodies for testing.
 | `navigation::bodies` | done: a system's stars, planets, moons, stations and starports with the original's names, placed by F880 at a game clock (positions in millimetres) |
 | `navigation::autopilot` | done and tested (`tests/navigation.rs`, local cache): steers the original flight model with its own keys (pulsed), holds a braking-curve set speed, hands back a transfer for long legs |
 | Map and jump UI in the playable | in progress (keys below) |
+| Stations in the flight view and docking | done (2026-10-24), ffe-rs rules: see "Docking" below |
 | Galaxy beyond the 12 hand-coded systems | not done: the other table systems need the sector star generator (F832-F856, tables `DATA_006799..6808`) and their name strings |
 
 ## The autopilot
@@ -37,6 +38,7 @@ The game starts docked at the first station of Sol (L launches, which puts the s
 - The console's map icon (or G): the systems list. Up/Down or a click chooses; Enter, H or the console's H icon hyperspaces (an instant jump) to the chosen system.
 - The console's navigation-computer icon (or Tab): everything in this system. A click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns it off.
 - The top bar's button changes between modern and classic controls (modern by default; F3 too). Classic is the original's keys: Enter/Shift set speed, Z/A pitch, comma/period yaw, [ ] roll. Modern adds W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll).
+- D, flying in a system, asks the nearest station within 100 km for docking clearance (again cancels it). Fly into the slot on the station's docking face; or engage the autopilot on a station, which docks by itself.
 - F12 is the model viewer, Shift+F12 the model lab. The other console buttons and the playtest scenarios are not in this build.
 
 Planets move on the game clock (days plus a fraction), children relative to their parent. Long legs are transfers (the clock jumps and the ship lands short of the body's future position); the last stretch is flown in the target's frame (`Navigator::follow`) because the autopilot cannot catch a body moving at 30 km/s.
@@ -63,10 +65,46 @@ is the object's `+0xa0` only for bodies of the navigator. The planet is oriented
 its object's rows (the spin is `clock[0] >> 17`, so they are identity until the clock
 passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
 
+## Docking (ffe-rs rules; EXP-005 in docs/DEVIATIONS.md)
+
+`ffe_rs::docking::Port` and the navigator's `request_clearance`, `contact` and `dock`.
+
+- **Stations in the view.** `Screen::stations` (set each frame in `main.rs`): every station of
+  the system drawn from its own model (72 trading post, 73 orbital station, 80 orbital city,
+  ...) at its generated place, turned by F866 at its own speed byte (`Body::spin`, `+0xc8`)
+  over the navigator's clock, lit from the star. Beyond 2,000 km from the eye a station is
+  not drawn (under a pixel; the viewer's view space is 32-bit).
+- **The slot.** Every generated station model has its slot on the +z face (looked at for
+  72, 73, 74 and 80), so the docking axis is the object's third row. The face distance is the
+  largest vertex z of the model (72: 197 m, 73: 238 m, 74: 156 m); the orbital city's root
+  vertices stop short of its hub (a child model), so it takes a quarter of the radius (1.96
+  km). The corridor into the slot is 15% of the face distance either side of the axis, at
+  least 60 m.
+- **Contact.** Within the face distance of the centre: in the corridor in front of the face
+  with clearance and under 250 m/s, the ship docks (the game's docked screen, at that
+  station); in the corridor otherwise, it is pushed back out along the axis; anywhere else,
+  pushed out from the centre (no damage). Launching puts the ship out on the docking axis of
+  the station it docked at, facing away.
+- **Autopilot.** A station target is flown in two legs: to a point 20 km out on the docking
+  axis (stopping within 1 km), then, with clearance taken there, toward the centre braking
+  for a stop just inside the face, which the contact turns into docking. Sol's Daedalus,
+  Abraham Lincoln and Galileo dock from the start (`tests/navigation.rs`,
+  `autopilot_docks_at_stations`; `FFE_SHOT_DIR` saves frames on the way in).
+- **Frames.** Bodies move between the navigator's refreshes; the ship is carried with the
+  body it is near (the engaged target on its final approach, else a station within 200 km,
+  else a planet or moon within 50 radii), so a station stays where the ship left it.
+- **Not the original yet.** The original asks traffic control (F655 -> F654, F650 for the
+  bay, the 0x98b7..0x98bc messages), detects the pad hit in the station's collision stream
+  (F569 flags 0x20 | 0x40) and runs the docking states 0xa..0x18 (align with the lift, door,
+  into the bay) before state 0x2a, docked (`jjffe-master/srctools/cplayer.txt`,
+  `cstarport.txt`, `plstate.txt`). Starports (landing on a planet) are not dockable here.
+
 ## Known limits
 
 - The orientation the physics integrates drifts off orthonormal (rows 0.985 long after a
   while); the autopilot orthonormalises before steering.
+- Docking entry speeds through the autopilot are 110-170 m/s: the set speed steps down at the
+  keys' fixed rate, so it lags the braking curve over the last few hundred metres.
 - Planets are not drawn in the flight view yet (the surface renderer is partly ported:
   `docs/notes/terrain.md`), so the map and the autopilot's messages are the way to see
   where bodies are.

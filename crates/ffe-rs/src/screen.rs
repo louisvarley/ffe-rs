@@ -28,6 +28,26 @@ pub struct Disc {
     pub orientation: [[f64; 3]; 3],
 }
 
+/// A station of the system in the flight view: its own model at its place in the
+/// system, turning about its docking axis as F866 turns it (set by the caller each
+/// frame).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SystemStation {
+    pub model: u32,
+    /// Centre in flight space.
+    pub centre: [f64; 3],
+    /// The object's rows in flight space.
+    pub orientation: [[f64; 3]; 3],
+    /// F866's signed speed byte (`+0xc8`); 0 does not turn.
+    pub speed: i8,
+    /// The game tics the spin and the animation are taken at.
+    pub tics: u32,
+}
+
+/// The farthest a station is drawn from (millimetres from the eye): the viewer's
+/// view space is 32-bit, and an orbital city is under a pixel beyond it.
+const STATION_DRAW_RANGE: f64 = 2.0e9;
+
 /// The controls button in the top bar: left edge and right edge (logical pixels).
 pub const CONTROLS_BUTTON: (i32, i32) = (118, 236);
 
@@ -46,6 +66,8 @@ pub struct Screen {
     stars: Vec<[f64; 3]>,
     /// The system's bodies as discs (set by the caller each frame).
     pub discs: Vec<Disc>,
+    /// The system's stations (set by the caller each frame, in system flight).
+    pub stations: Vec<SystemStation>,
     /// The system and the station the player is at, for the docked screen and the top bar.
     pub system: String,
     pub station: String,
@@ -255,6 +277,7 @@ impl Screen {
             indexed: Box::new([0; 64000]),
             stars,
             discs: Vec::new(),
+            stations: Vec::new(),
             system: String::new(),
             station: String::new(),
             lock: String::new(),
@@ -613,7 +636,13 @@ impl Screen {
             // FUNC_001054 hides the player's own ship only in the front view.
             // Painter's order between the two objects: the farther one first.
             let own_ship = view != ViewMode::Front;
+            if state.system_flight {
+                if let Some(scene) = scene {
+                    self.draw_system_stations(scene, state, &camera, own_ship);
+                }
+            }
             let ship_first = own_ship
+                && !state.system_flight
                 && distance(camera.position, state.position) > distance(camera.position, [0.0; 3]);
             if ship_first {
                 if let Some(scene) = scene {
@@ -623,7 +652,7 @@ impl Screen {
             // In a system the prototype's station at the origin is not there.
             let drawn = state.system_flight
                 || scene.is_some_and(|scene| self.draw_station(scene, state, &camera));
-            if !ship_first && own_ship {
+            if !ship_first && own_ship && !state.system_flight {
                 if let Some(scene) = scene {
                     self.draw_ship(scene, state, &camera);
                 }
@@ -788,7 +817,7 @@ impl Screen {
         if help {
             self.rect(0, 13, 320, 145, 1);
             for (index, line) in [
-                "NATIVE RUST PLAYABLE SLICE - STILL SYNTHETIC FLIGHT",
+                "NATIVE RUST PLAYABLE SLICE - DOCKING IS FFE-RS RULES",
                 "Original console, station and ship models.",
                 "DEFAULT MODERN: W/S thrust; arrows yaw/pitch",
                 "CLASSIC-LIKE: Enter/Shift thrust; ,/. yaw; A/Z pitch",
@@ -797,10 +826,10 @@ impl Screen {
                 "External: arrows turn, +/- zoom. Turret: arrows aim",
                 "F12 models (Shift+F12 lab). P pause. Esc quit.",
                 "F5 save snapshot; Shift+F5 load newest snapshot.",
-                "Dock: range <80, speed <20, aim at station.",
+                "Dock: D clearance (100 km), in the slot under 250 m/s",
                 "O original flight: Enter/Shift speed, Z/A , . [ ] steer",
                 "O then TAB system map, G galaxy: Up/Down, Enter flies/jumps",
-                "Backspace stops the autopilot (docs/NAVIGATION.md)",
+                "Autopilot to a station docks. Backspace stops it.",
                 "H closes help. Map icon: systems. Nav icon: this system.",
             ]
             .iter()
@@ -1029,6 +1058,69 @@ impl Screen {
         let mut inputs = AnimationInputs::original(tics, 0, &scene.shades());
         inputs.jitter = self.jitter.cursor;
         match scene.render_scene_with(STATION_MODEL, rows, origin, light, &inputs) {
+            Ok(frame) => {
+                self.jitter.cursor = frame.jitter;
+                self.draw_shapes(scene, &frame.shapes);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// The system's stations, the farthest first, with the player's own ship (when
+    /// it shows) in painter's order among them.
+    fn draw_system_stations(
+        &mut self,
+        scene: &ModelViewer,
+        state: &Flight,
+        camera: &Camera,
+        own_ship: bool,
+    ) {
+        let mut order: Vec<(f64, SystemStation)> = self
+            .stations
+            .iter()
+            .map(|s| (distance(camera.position, s.centre), *s))
+            .collect();
+        order.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let ship_range = distance(camera.position, state.position);
+        let mut ship_drawn = !own_ship;
+        for (range, station) in order {
+            if !ship_drawn && range < ship_range {
+                self.draw_ship(scene, state, camera);
+                ship_drawn = true;
+            }
+            self.draw_system_station(scene, &station, camera);
+        }
+        if !ship_drawn {
+            self.draw_ship(scene, state, camera);
+        }
+    }
+
+    /// One station of the system: F866's spin about its z (docking) axis applied to
+    /// the object's rows, lit from the system's star at the origin.
+    fn draw_system_station(
+        &mut self,
+        scene: &ModelViewer,
+        station: &SystemStation,
+        camera: &Camera,
+    ) -> bool {
+        let Some(scale) = model_scale(scene) else {
+            return false;
+        };
+        let origin = camera.point(station.centre).map(|v| v * scale);
+        if origin[2] <= 0.0 || origin.iter().any(|v| v.abs() > STATION_DRAW_RANGE) {
+            return false;
+        }
+        let spin = scene.station_rows(station.tics, station.speed);
+        let axes: [[f64; 3]; 3] = std::array::from_fn(|k| {
+            std::array::from_fn(|i| (0..3).map(|j| spin[k][j] * station.orientation[j][i]).sum())
+        });
+        let rows = axes.map(|axis| camera.direction(axis));
+        let length = station.centre.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let light = camera.direction(station.centre.map(|v| -v / length.max(1.0)));
+        let mut inputs = AnimationInputs::original(station.tics, 0, &scene.shades());
+        inputs.jitter = self.jitter.cursor;
+        match scene.render_scene_with(station.model, rows, origin, light, &inputs) {
             Ok(frame) => {
                 self.jitter.cursor = frame.jitter;
                 self.draw_shapes(scene, &frame.shapes);

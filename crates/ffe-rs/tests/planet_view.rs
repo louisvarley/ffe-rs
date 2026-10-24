@@ -385,7 +385,13 @@ fn nav_list_layout() {
         .listed()
         .into_iter()
         .enumerate()
-        .map(|(row, i)| (nav.bodies[i].name.clone(), row == nav.selected, nav.target == Some(i)))
+        .map(|(row, i)| {
+            (
+                nav.bodies[i].name.clone(),
+                row == nav.selected,
+                nav.target == Some(i),
+            )
+        })
         .collect();
     screen.draw_nav_list(&rows, "EARTH PLANET 1.00 AU PAGE 1/3  LEFT/RIGHT: PAGES");
     if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {

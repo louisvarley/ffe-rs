@@ -3,6 +3,7 @@
 //! give them, the positions F880 places them at for a game clock, and an autopilot
 //! that flies the original flight model to a chosen body with the same keys a
 //! player presses. See `docs/NAVIGATION.md`.
+use crate::docking::{Contact, Port, CLEARANCE_RANGE};
 use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND};
 use ffe_content::VerifiedCache;
 use ffe_core::galaxy::{tables, Tables};
@@ -11,6 +12,7 @@ use ffe_core::names::Names;
 use ffe_core::objects::{Models, PhysList, Placement};
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
+use std::collections::HashMap;
 
 /// The reverse thrust's deceleration (metres per second squared, world time).
 const BRAKING: f64 = 90.0;
@@ -57,6 +59,8 @@ pub struct Body {
     pub seed: u32,
     /// The object's orientation rows (its first nine dwords, Q31).
     pub orientation: [[f64; 3]; 3],
+    /// F866's signed rotation speed byte (`+0xc8`) for a station; 0 otherwise.
+    pub spin: i8,
 }
 
 /// A system that can be visited.
@@ -255,9 +259,22 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
                     f64::from(list.dword(slot, 4 * (3 * r + c)) as i32) / 2_147_483_648.0
                 })
             }),
+            spin: if kind == Kind::Station {
+                list.byte(slot, 0xc8) as i8
+            } else {
+                0
+            },
         });
     }
     Ok(out)
+}
+
+/// The first station of a system (else its first starport).
+fn first_station(bodies: &[Body]) -> Option<usize> {
+    bodies
+        .iter()
+        .position(|b| b.kind == Kind::Station)
+        .or_else(|| bodies.iter().position(|b| b.kind == Kind::Starport))
 }
 
 /// Distance in millimetres between a player position and a body.
@@ -470,9 +487,31 @@ pub struct Navigator {
     pub selected: usize,
     /// The body the autopilot is flying to.
     pub target: Option<usize>,
+    /// The station the player is docked at (or last docked at).
+    pub docked: Option<usize>,
+    /// The station that has granted docking clearance.
+    pub clearance: Option<usize>,
+    /// The autopilot has reached a station's approach point and is flying into
+    /// the slot.
+    pub final_leg: bool,
+    /// The body whose motion carries the ship between refreshes (the original's
+    /// frame of reference, chosen here by distance): the target on its final
+    /// approach, a nearby station, or the planet or moon the ship is near.
+    frame: Option<usize>,
+    /// Docking face and bounding radius (millimetres) of each station model.
+    ports: HashMap<u32, (Option<f64>, Option<f64>)>,
     memory: Memory,
     refreshed: f64,
 }
+
+/// Distance to a station's approach point on its docking axis, beyond the face.
+const STATION_APPROACH: f64 = 20.0e6;
+/// How close to the approach point the autopilot's first leg stops.
+const APPROACH_STOP: f64 = 1.0e6;
+/// Within this of a station, its motion carries the ship (200 km).
+const STATION_FRAME: f64 = 2.0e8;
+/// Within this many radii of a planet or moon, its motion carries the ship.
+const WORLD_FRAME_RADII: f64 = 50.0;
 
 /// World seconds to the original's clock words: whole days, then the fraction of a
 /// day in 2^-32ths (the orbits turn once in 365 days).
@@ -487,6 +526,7 @@ impl Navigator {
         let entries = galaxy(cache)?;
         let current = entries.iter().position(|e| e.name == "Sol").unwrap_or(0);
         let bodies = bodies(cache, &entries[current], clock_words(0.0))?;
+        let docked = first_station(&bodies);
         Ok(Self {
             entries,
             current,
@@ -498,27 +538,82 @@ impl Navigator {
             view: View::Closed,
             selected: 0,
             target: None,
+            docked,
+            clearance: None,
+            final_leg: false,
+            frame: None,
+            ports: HashMap::new(),
             memory: Memory::default(),
             refreshed: 0.0,
         })
     }
 
-    /// The first station of this system, where the player starts and launches: its
-    /// name and a point a little out from it.
+    /// The station the player is docked at (at the start, the first station of the
+    /// system): its name and the point a launch puts the ship at.
     pub fn station(&self) -> Option<(&str, [i64; 3])> {
-        self.bodies
-            .iter()
-            .find(|b| matches!(b.kind, Kind::Station))
-            .or_else(|| {
-                self.bodies
-                    .iter()
-                    .find(|b| matches!(b.kind, Kind::Starport))
+        let index = self.docked.or_else(|| first_station(&self.bodies))?;
+        let body = &self.bodies[index];
+        let at = match self.port(index) {
+            Some(port) => port.launch_point(),
+            None => {
+                let mut at = body.position;
+                at[2] -= 3 * standoff(body) as i64;
+                at
+            }
+        };
+        Some((body.name.as_str(), at))
+    }
+
+    /// Record a station model's docking face and bounding radius (millimetres,
+    /// from its vertices), for [`Self::port`].
+    pub fn set_port_geometry(&mut self, model: u32, front: Option<f64>, radius: Option<f64>) {
+        self.ports.insert(model, (front, radius));
+    }
+
+    /// The docking port of a station body (`None` for any other body).
+    pub fn port(&self, index: usize) -> Option<Port> {
+        let body = self.bodies.get(index).filter(|b| b.kind == Kind::Station)?;
+        let (front, radius) = self.ports.get(&body.model).copied().unwrap_or((None, None));
+        Some(Port::new(body, front, radius))
+    }
+
+    /// The nearest station within clearance range of `ship`.
+    pub fn nearest_station(&self, ship: [i64; 3]) -> Option<usize> {
+        (0..self.bodies.len())
+            .filter(|i| self.bodies[*i].kind == Kind::Station)
+            .map(|i| (i, distance(ship, self.bodies[i].position)))
+            .filter(|(_, range)| *range <= CLEARANCE_RANGE)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    }
+
+    /// Ask the nearest station for docking clearance (granted while traffic is not
+    /// modelled). Returns the station, or `None` with none in range.
+    pub fn request_clearance(&mut self, ship: [i64; 3]) -> Option<&Body> {
+        let index = self.nearest_station(ship)?;
+        self.clearance = Some(index);
+        self.bodies.get(index)
+    }
+
+    /// The first station whose slot or hull the ship at `ship`, moving at `speed`
+    /// metres per second (relative to the station's frame), is touching.
+    pub fn contact(&self, ship: [i64; 3], speed: f64) -> Option<(usize, Contact)> {
+        (0..self.bodies.len())
+            .filter(|i| self.bodies[*i].kind == Kind::Station)
+            .filter(|i| distance(ship, self.bodies[*i].position) < CLEARANCE_RANGE)
+            .find_map(|index| {
+                let port = self.port(index)?;
+                let contact = port.contact(ship, speed, self.clearance == Some(index));
+                (contact != Contact::None).then_some((index, contact))
             })
-            .map(|b| {
-                let mut at = b.position;
-                at[2] -= 3 * standoff(b) as i64;
-                (b.name.as_str(), at)
-            })
+    }
+
+    /// The ship has docked at `index`: the clearance and the autopilot end.
+    pub fn dock(&mut self, index: usize) {
+        self.docked = Some(index);
+        self.clearance = None;
+        self.target = None;
+        self.final_leg = false;
     }
 
     /// The nearest planet or moon to a point (what the ship faces on launch).
@@ -580,7 +675,7 @@ impl Navigator {
     pub fn refresh(&mut self, cache: &VerifiedCache) {
         if let Ok(list) = bodies(cache, &self.entries[self.current], clock_words(self.clock)) {
             if list.len() == self.bodies.len() {
-                if let Some(t) = self.target {
+                if let Some(t) = self.frame {
                     for k in 0..3 {
                         self.drift[k] += list[t].position[k] - self.bodies[t].position[k];
                     }
@@ -601,6 +696,11 @@ impl Navigator {
         self.bodies = bodies(cache, &self.entries[index], clock_words(self.clock))?;
         self.refreshed = self.clock;
         self.target = None;
+        self.docked = None;
+        self.clearance = None;
+        self.final_leg = false;
+        self.frame = None;
+        self.drift = [0; 3];
         self.memory = Memory::default();
         let anchor = self
             .bodies
@@ -657,26 +757,52 @@ impl Navigator {
     pub fn engage(&mut self) -> Option<&Body> {
         let index = self.selected_body()?;
         self.target = Some(index);
+        self.final_leg = false;
         self.memory = Memory::default();
         self.skips = 0;
         self.view = View::Closed;
         self.bodies.get(index)
     }
 
-    /// The ship's position carried along with the engaged target, once it is on the
-    /// final approach: the autopilot cannot catch a body moving at 30 km/s, so the
-    /// last stretch is flown in the target's frame.
+    /// The ship's position carried along with the body whose frame it is in: the
+    /// engaged target on its final approach (the autopilot cannot catch a body
+    /// moving at 30 km/s), else a station or world close by, so that a station
+    /// stays where the ship left it. Also picks the frame for the next refresh.
     pub fn follow(&mut self, ship: [i64; 3]) -> Option<[i64; 3]> {
         let drift = std::mem::take(&mut self.drift);
-        let target = self.bodies.get(self.target?)?;
-        if distance(ship, target.position) > 10.0 * APPROACH + standoff(target) {
-            return None;
+        self.frame = self.choose_frame(ship);
+        (drift != [0; 3]).then(|| std::array::from_fn(|k| ship[k] + drift[k]))
+    }
+
+    fn choose_frame(&self, ship: [i64; 3]) -> Option<usize> {
+        if let Some(t) = self.target {
+            if let Some(body) = self.bodies.get(t) {
+                if distance(ship, body.position) <= 10.0 * APPROACH + standoff(body) {
+                    return Some(t);
+                }
+            }
         }
-        Some(std::array::from_fn(|k| ship[k] + drift[k]))
+        let nearest = |kinds: &[Kind], reach: &dyn Fn(&Body) -> f64| {
+            (0..self.bodies.len())
+                .filter(|i| kinds.contains(&self.bodies[*i].kind))
+                .map(|i| {
+                    let body = &self.bodies[i];
+                    (i, distance(ship, body.position) / reach(body))
+                })
+                .filter(|(_, ratio)| *ratio <= 1.0)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(i, _)| i)
+        };
+        nearest(&[Kind::Station, Kind::Starport], &|_| STATION_FRAME).or_else(|| {
+            nearest(&[Kind::Planet, Kind::Moon], &|b| {
+                b.radius as f64 * WORLD_FRAME_RADII
+            })
+        })
     }
 
     pub fn disengage(&mut self) {
         self.target = None;
+        self.final_leg = false;
     }
 
     /// The autopilot's command for this frame, when engaged.
@@ -687,8 +813,28 @@ impl Navigator {
     ) -> Option<(Command, Body)> {
         let index = self.target?;
         let body = self.bodies.get(index)?.clone();
-        let stop = standoff(&body);
-        let mut command = autopilot(flight, body.position, stop, &mut self.memory);
+        // A station is flown to in two legs, as the original's autopilot docks: to
+        // a point out on the docking axis, then (with clearance) into the slot.
+        let port = self.port(index);
+        let (offset, stop) = match port {
+            Some(port) if self.final_leg => ([0.0; 3], port.front * 0.92),
+            Some(port) => (
+                port.axis.map(|a| a * (port.front + STATION_APPROACH)),
+                APPROACH_STOP,
+            ),
+            None => ([0.0; 3], standoff(&body)),
+        };
+        let aim = |at: [i64; 3]| -> [i64; 3] {
+            std::array::from_fn(|k| at[k] + offset[k].round() as i64)
+        };
+        let mut command = autopilot(flight, aim(body.position), stop, &mut self.memory);
+        if port.is_some() && command.arrived && !self.final_leg {
+            // The approach point: ask for clearance and fly in.
+            self.final_leg = true;
+            self.clearance = Some(index);
+            self.memory = Memory::default();
+            command.arrived = false;
+        }
         if let Some((_, seconds)) = command.skip {
             // The body moves while the ship travels: aim for where it will be.
             let ship = flight.player().motion.position;
@@ -703,7 +849,7 @@ impl Navigator {
                     break;
                 };
                 let Some(there) = list.get(index) else { break };
-                future = there.position;
+                future = aim(there.position);
                 let range = distance(ship, future);
                 seconds = transfer_seconds((range - stop - APPROACH).max(0.0) / 1000.0);
             }
@@ -723,6 +869,11 @@ impl Navigator {
             self.skips = 0;
         }
         Some((command, body))
+    }
+
+    /// The autopilot's leg into a station's slot is running.
+    pub fn docking(&self) -> bool {
+        self.final_leg && self.target.is_some()
     }
 
     /// The lines of the map showing, the selected one marked.

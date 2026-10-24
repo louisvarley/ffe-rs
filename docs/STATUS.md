@@ -9,6 +9,9 @@ coverage and `docs/notes/` for the feature records.
 
 `docs/NAVIGATION.md`: system and galaxy maps (Tab, G) and an autopilot to planets
 and stations, for testing the generated systems. Not part of the original game.
+Since 2026-10-24 the system's stations are drawn in flight and the player can dock
+at them (D for clearance, or the autopilot), by ffe-rs rules (EXP-005), which closes
+the launch, fly, dock, trade loop inside a generated system.
 
 ## How to read this repo
 
