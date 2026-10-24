@@ -99,6 +99,7 @@ fn the_market_screen_draws() {
                     held: r.held,
                 })
                 .collect(),
+            scroll: selected.saturating_sub(12),
             selected,
             cash: state.credits as i32,
             used: 3,

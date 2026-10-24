@@ -11,9 +11,12 @@ coverage and `docs/notes/` for the feature records.
 and stations, for testing the generated systems. Not part of the original game.
 Hyperspace jumps use the original's drive range, fuel and jump time over real star positions
 (`docs/notes/hyperspace.md`; both match the executed original; the jump scene is not drawn). Docking and launching show the original's lift scenes (`ffe_core::lift`, verified on 8,192 cases against the
-executed original; `docs/notes/docking.md`). Since 2026-10-24 the docked screen is the station's market (`docs/notes/market.md`: the original's
-price and stock formulas, daily drift, buying and selling, cache v20; F619 and F620 match the executed
-original). The system's stations are drawn in flight and the player can dock
+executed original; `docs/notes/docking.md`). Since 2026-10-24 the docked screen is the original's station services menu and stockmarket
+(`docs/notes/station.md`: the `DATA_005304` screen table, the `0x98xx` strings, the row buttons,
+hot areas and keys; checked against frames of the DOS release; the services and shipyard roots
+and the market are ported, the equipment/ship/repair lists and BBS generation are not). The
+market itself is `docs/notes/market.md` (the original's price and stock formulas, daily drift,
+buying and selling, cache v20; F619 and F620 match the executed original). The system's stations are drawn in flight and the player can dock
 at them (D for clearance, or the autopilot), which closes the launch, fly, dock, trade
 loop inside a generated system. Traffic control and the timed docking and launch stages are the
 original's (`ffe_core::traffic`, `docs/notes/docking.md`; the record routines match the executed
@@ -35,7 +38,7 @@ ffe-rs's own (EXP-005).
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
 - `docs/notes/` - per-feature records: polygons, textures, child models,
   thrusters, animation, views, text/labels, curved surfaces, lines, fills,
-  docking, market, hyperspace, navigation and the galaxy map.
+  docking, station screens, market, hyperspace, navigation and the galaxy map.
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
   in `burndown.js`; 14 milestones, 147 items, 56 done and 91 left on
   2026-10-24). **Update it in the same commit as any progress change**:

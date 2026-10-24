@@ -15,6 +15,7 @@ use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
 use ffe_rs::ships::ShipList;
+use ffe_rs::station::{self, Action as StationAction, DockState, Screen as StationScreen};
 use ffe_rs::trade;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use minifb::{MouseButton, MouseMode};
@@ -308,17 +309,14 @@ fn run() -> Result<(), String> {
         }
     }
     let mut paused = false;
-    // The selected line of the station's market.
-    let mut trade_row = 0usize;
+    // The station screen the commander is on (the services root by default).
+    let mut dock = DockState::default();
     let mut last_mode = state.mode;
     let mut message = match nav
         .as_ref()
         .and_then(|nav| nav.station().map(|(name, _)| name))
     {
-        Some(name) => format!(
-            "Docked at {name}, {}. Up/Down choose goods, B buys, N sells; L launches.",
-            nav.as_ref().map_or("", |nav| nav.system_name())
-        ),
+        Some(_) => station::SERVICES_HINT.to_owned(),
         None => "Docked. L launches.".to_owned(),
     };
     if let Some(name) = &captured_planet {
@@ -365,7 +363,7 @@ fn run() -> Result<(), String> {
         } else {
             None
         };
-        if let Some((x, y)) = edge_point {
+        if let Some((x, y)) = edge_point.filter(|_| state.mode != ffe_rs::flight::Mode::Docked) {
             if y < 11
                 && (ffe_rs::screen::CONTROLS_BUTTON.0..ffe_rs::screen::CONTROLS_BUTTON.1)
                     .contains(&x)
@@ -408,6 +406,22 @@ fn run() -> Result<(), String> {
                 .get_unscaled_mouse_pos(MouseMode::Pass)
                 .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
                 .and_then(|(x, y)| Screen::console_click(x, y))
+        } else {
+            None
+        };
+        // A click on a docked screen's button (F328 hot areas) on the mouse-down edge.
+        let dock_click = if active
+            && mouse_down
+            && !mouse_was_down
+            && state.mode == ffe_rs::flight::Mode::Docked
+            && !help
+            && !scenarios
+            && model_lab.is_none()
+            && model_viewer.is_none()
+        {
+            window
+                .get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
         } else {
             None
         };
@@ -958,18 +972,95 @@ fn run() -> Result<(), String> {
                         .unwrap_or(0);
                     views.external.step(keys, elapsed_ms, minimum);
                 }
-                if state.mode == ffe_rs::flight::Mode::Docked {
+                let mut dock_action: Option<StationAction> = None;
+                if state.mode == ffe_rs::flight::Mode::Docked
+                    && !help
+                    && !scenarios
+                    && model_lab.is_none()
+                    && model_viewer.is_none()
+                {
+                    let market_rows = if dock.screen == StationScreen::Market {
+                        match nav
+                            .as_mut()
+                            .and_then(|nav| nav.docked.map(|station| (nav, station)))
+                        {
+                            Some((nav, station)) => trade::listing(nav, &cache, station, &state)
+                                .map_or(0, |rows| rows.len()),
+                            None => 0,
+                        }
+                    } else {
+                        0
+                    };
+                    let rows = station::row_count(dock.screen, 0, market_rows);
                     let step = i32::from(pressed(Key::Down)) - i32::from(pressed(Key::Up));
                     if step != 0 {
-                        let docked = nav.as_ref().and_then(|nav| nav.docked);
-                        let rows = match (nav.as_mut(), docked) {
-                            (Some(nav), Some(station)) => {
-                                trade::listing(nav, &cache, station, &state).map_or(0, |r| r.len())
+                        dock.step(step, rows);
+                    }
+                    // F354: keys 1..4 are actions 0x31..0x34, one per visible row.
+                    for (key, number) in [
+                        (Key::Key1, 1usize),
+                        (Key::Key2, 2),
+                        (Key::Key3, 3),
+                        (Key::Key4, 4),
+                    ] {
+                        if pressed(key) {
+                            let index = dock.scroll + number - 1;
+                            if index < rows {
+                                dock.selected = index;
+                                if dock.screen == StationScreen::Market {
+                                    // A number selects the market line; B/N trade it.
+                                } else if let Some(entry) =
+                                    station::menu_entry(dock.screen, index, 0)
+                                {
+                                    dock_action = Some(entry.action);
+                                }
                             }
-                            _ => 0,
-                        };
-                        if rows > 0 {
-                            trade_row = (trade_row as i32 + step).rem_euclid(rows as i32) as usize;
+                        }
+                    }
+                    if pressed(Key::Enter)
+                        && dock.screen != StationScreen::Market
+                        && dock.selected < rows
+                    {
+                        if let Some(entry) = station::menu_entry(dock.screen, dock.selected, 0) {
+                            dock_action = Some(entry.action);
+                        }
+                    }
+                    if pressed(Key::Backspace) {
+                        dock_action = Some(StationAction::Back);
+                    }
+                    if let Some((x, y)) = dock_click {
+                        if let Some(hot) = station::click(dock.screen, dock.scroll, rows, x, y) {
+                            match hot {
+                                station::Hot::Row(index) => {
+                                    if let Some(entry) = station::menu_entry(dock.screen, index, 0)
+                                    {
+                                        dock_action = Some(entry.action);
+                                    }
+                                }
+                                station::Hot::Market { buy, row } => {
+                                    dock.selected = row;
+                                    dock_action = Some(StationAction::Trade { buy, row });
+                                }
+                                station::Hot::More => {
+                                    let visible = station::layout(dock.screen).visible();
+                                    dock.scroll += visible;
+                                    dock.scroll = dock.scroll.min(rows.saturating_sub(visible));
+                                    dock.selected = dock.scroll;
+                                }
+                                station::Hot::Up => {
+                                    dock.scroll = dock.scroll.saturating_sub(1);
+                                    dock.selected = dock.scroll;
+                                }
+                                station::Hot::Down => {
+                                    let visible = station::layout(dock.screen).visible();
+                                    dock.scroll = dock.scroll.saturating_add(1);
+                                    dock.scroll = dock.scroll.min(rows.saturating_sub(visible));
+                                    dock.selected = dock.scroll;
+                                }
+                                station::Hot::Back => {
+                                    dock_action = Some(StationAction::Back);
+                                }
+                            }
                         }
                     }
                 }
@@ -1007,6 +1098,56 @@ fn run() -> Result<(), String> {
                         }
                         None => "No ship list: rebuild data.bin (cache v11).".to_owned(),
                     };
+                }
+                if let Some(station_action) = dock_action {
+                    match station_action {
+                        StationAction::Launch => {
+                            if let Some(nav) = nav.as_mut() {
+                                match nav.begin_launch() {
+                                    Ok(()) => {
+                                        acceleration = 0;
+                                        message =
+                                            "Launch permission granted: moving into the lift."
+                                                .to_owned();
+                                    }
+                                    Err(error) => message = error,
+                                }
+                            }
+                        }
+                        StationAction::Open(screen) => {
+                            dock.open(screen);
+                            message = station::hint(screen, 0).to_owned();
+                        }
+                        StationAction::Back => {
+                            dock.back();
+                            message = station::hint(dock.screen, 0).to_owned();
+                        }
+                        StationAction::Trade { buy, row } => {
+                            let station = nav.as_ref().and_then(|nav| nav.docked);
+                            let shift = window.is_key_down(Key::LeftShift)
+                                || window.is_key_down(Key::RightShift);
+                            if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
+                                if let Some(good) = trade::listing(nav, &cache, station, &state)
+                                    .ok()
+                                    .and_then(|rows| rows.get(row).map(|line| line.good))
+                                {
+                                    match trade::trade(
+                                        nav,
+                                        &cache,
+                                        &mut state,
+                                        station,
+                                        good,
+                                        buy,
+                                        if shift { 10 } else { 1 },
+                                    ) {
+                                        Ok(text) => message = text,
+                                        Err(error) => message = format!("Trade failed: {error}"),
+                                    }
+                                }
+                            }
+                        }
+                        StationAction::NotPorted(text) => message = text.to_owned(),
+                    }
                 }
                 let action = if pressed(Key::L) {
                     match nav.as_mut() {
@@ -1063,10 +1204,11 @@ fn run() -> Result<(), String> {
                     match (nav.as_mut(), station) {
                         (Some(nav), Some(station))
                             if state.mode == ffe_rs::flight::Mode::Docked
+                                && dock.screen == StationScreen::Market
                                 && nav.market_tables().is_some() =>
                         {
                             let rows = trade::listing(nav, &cache, station, &state);
-                            match rows.map(|rows| rows.get(trade_row).map(|row| row.good)) {
+                            match rows.map(|rows| rows.get(dock.selected).map(|row| row.good)) {
                                 Ok(Some(good)) => {
                                     match trade::trade(
                                         nav,
@@ -1345,16 +1487,14 @@ fn run() -> Result<(), String> {
                                 }
                             );
                         }
-                        Traffic::Docked(index) => {
+                        Traffic::Docked(_) => {
                             state.mode = ffe_rs::flight::Mode::Docked;
                             state.position = [0.0, 0.0, -60.0];
                             state.velocity = [0.0; 3];
                             state.thrust = 0.0;
                             state.docking_requested = false;
-                            message = format!(
-                                "Docked at {}. Up/Down choose goods, B buys, N sells (Shift: 10); L launches.",
-                                nav.bodies[index].name
-                            );
+                            dock.open(StationScreen::Services);
+                            message = station::SERVICES_HINT.to_owned();
                         }
                         Traffic::LaunchOut(index) => {
                             // Leave from the station's slot: the prototype's
@@ -1425,6 +1565,9 @@ fn run() -> Result<(), String> {
                 "Launched. Enter/Shift speed, Z/A pitch, comma/period yaw, [ ] roll."
             }
             .to_owned();
+        }
+        if last_mode != ffe_rs::flight::Mode::Docked && state.mode == ffe_rs::flight::Mode::Docked {
+            dock.open(StationScreen::Services);
         }
         last_mode = state.mode;
         if let Some(nav) = nav.as_ref() {
@@ -1539,29 +1682,67 @@ fn run() -> Result<(), String> {
                 Err(error) => message = format!("Map error: {error}"),
             }
         }
+        screen.dock = None;
         screen.market = None;
         if state.mode == ffe_rs::flight::Mode::Docked {
             if let Some(nav) = nav.as_mut() {
-                if let Some(station) = nav.docked.filter(|_| nav.market_tables().is_some()) {
-                    if let Ok(rows) = trade::listing(nav, &cache, station, &state) {
-                        trade_row = trade_row.min(rows.len().saturating_sub(1));
-                        let hold = trade::hold_of(&state, nav.cargo_space(&cache, state.ship));
-                        screen.market = Some(ffe_rs::screen::MarketView {
-                            station: nav.bodies[station].name.clone(),
-                            system: nav.system_name().to_owned(),
-                            rows: rows
-                                .into_iter()
-                                .map(|row| ffe_rs::screen::MarketRow {
-                                    name: row.name,
-                                    price: row.price,
-                                    stock: row.stock,
-                                    held: row.held,
-                                })
-                                .collect(),
-                            selected: trade_row,
-                            cash: i32::try_from(state.credits).unwrap_or(i32::MAX),
-                            used: hold.used,
-                            capacity: hold.capacity,
+                if let Some(station) = nav.docked {
+                    let hold = trade::hold_of(&state, nav.cargo_space(&cache, state.ship));
+                    let status = station::Status {
+                        cargo_used: hold.used,
+                        cargo_capacity: hold.capacity,
+                        cash: i32::try_from(state.credits).unwrap_or(i32::MAX),
+                        cabins_used: 0,
+                        cabins_total: 0,
+                    };
+                    let station_name = nav.bodies[station].name.clone();
+                    if dock.screen == StationScreen::Market && nav.market_tables().is_some() {
+                        if let Ok(rows) = trade::listing(nav, &cache, station, &state) {
+                            let visible = station::layout(StationScreen::Market).visible();
+                            dock.selected = dock.selected.min(rows.len().saturating_sub(1));
+                            dock.scroll = dock.scroll.min(rows.len().saturating_sub(visible));
+                            screen.market = Some(ffe_rs::screen::MarketView {
+                                station: station_name,
+                                system: nav.system_name().to_owned(),
+                                rows: rows
+                                    .into_iter()
+                                    .map(|row| ffe_rs::screen::MarketRow {
+                                        name: row.name,
+                                        price: row.price,
+                                        stock: row.stock,
+                                        held: row.held,
+                                    })
+                                    .collect(),
+                                scroll: dock.scroll,
+                                selected: dock.selected,
+                                cash: status.cash,
+                                used: status.cargo_used,
+                                capacity: status.cargo_capacity,
+                            });
+                        }
+                    } else {
+                        let entries: &[station::Entry] = match dock.screen {
+                            StationScreen::Services => &station::SERVICES,
+                            StationScreen::Shipyard => &station::SHIPYARD,
+                            _ => &[],
+                        };
+                        let rows = entries
+                            .iter()
+                            .skip(dock.scroll)
+                            .map(|entry| ffe_rs::station::DockRow {
+                                main: entry.title.to_owned(),
+                                detail: entry.detail.map(str::to_owned),
+                                columns: Vec::new(),
+                            })
+                            .collect();
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title: station::title(dock.screen, &station_name),
+                            rows,
+                            status,
+                            scroll: dock.scroll,
+                            selected: dock.selected,
+                            total: entries.len(),
                         });
                     }
                 }

@@ -127,6 +127,27 @@ impl IndexedImage {
         })
     }
 
+    /// Blit a cached indexed bitmap straight into a 32-bit logical frame, as
+    /// the docked screens' buttons and arrows are drawn after the palette pass.
+    pub fn blit_rgb(&self, frame: &mut [u32], palette: &[u32; 128], x: i32, y: i32) {
+        for row in 0..self.height {
+            let py = i64::from(y) + i64::from(self.offset[1]) + row as i64;
+            if !(0..200).contains(&py) {
+                continue;
+            }
+            for col in 0..self.width {
+                let px = i64::from(x) + i64::from(self.offset[0]) + col as i64;
+                if !(0..320).contains(&px) {
+                    continue;
+                }
+                let index = self.indices[row * self.width + col];
+                if index != 0 || !self.masked_zero {
+                    frame[py as usize * 320 + px as usize] = palette[usize::from(index)];
+                }
+            }
+        }
+    }
+
     pub fn blit(&self, pixels: &mut [u8; 64000], x: i32, y: i32) {
         for row in 0..self.height {
             let py = i64::from(y) + i64::from(self.offset[1]) + row as i64;
