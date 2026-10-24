@@ -46,15 +46,17 @@ Planets move on the game clock (days plus a fraction), children relative to thei
 with a model is drawn as its real surface: the planet model runs through
 `ModelViewer::render_scene`, whose curved-surface command goes through the ported
 F1876 and emitter (`ModelViewer::draw_surfaces`; the body's `+0xa0` is the seed).
-The viewer's view space is 32-bit, so this only fits within about 3.4 radii of the
-planet (model 129's vertices reach 4.4e8 against a limit of 1.5e9); farther out, and
-for stars, the body is a shaded disc of the right size and phase.
+The viewer's view space is 32-bit, so a distant planet is drawn through a model
+matrix shrunk by a power of two with its position (the picture is unchanged); the
+body is a shaded disc only when the model cannot be drawn, and for stars. Height
+bands pick the ramp colour of the detail entries and the middle slot colour of the
+textured ones (the texture fills themselves are not drawn).
 
-Known gaps: triangles with a corner near or behind the eye are dropped or show as
-wedges (the original's draw routines clip edges; the queue's coordinates wrap in
-16 bits here), textured entries are drawn flat in their first colour, F1877's haze
-is not ported, and the planet is not oriented by its object's matrix. Looks
-checked by eye only (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
+Known gaps: at close range (about 3 radii or less) the larger planet models show
+oversized slivers (the original's draw routines clip edges; this does not, and
+the queue's coordinates wrap in 16 bits), so slivers wider than the planet are
+left out; F1877's haze is not ported; the planet is not oriented by its object's
+matrix. Looks checked by eye only (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
 
 ## Known limits
 

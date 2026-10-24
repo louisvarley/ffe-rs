@@ -256,16 +256,46 @@ impl Screen {
         for (z, disc) in order {
             // The real surface when the model fits the view space at this range.
             if let (Some((model, seed)), Some(viewer)) = (disc.model, viewer) {
-                if let Some(radius) = viewer.find(model).and_then(|m| m.radius()) {
-                    let factor = radius / disc.radius;
-                    let position = camera.point(disc.centre).map(|v| v * factor);
-                    viewer.surface_seed.set(seed);
-                    let light = camera.direction(disc.light);
-                    let rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-                        .map(|axis| camera.direction(axis));
-                    if let Ok(frame) = viewer.render_scene(model, rows, position, light) {
-                        self.draw_shapes(viewer, &frame.shapes);
-                        continue;
+                // The planet's radius in the model's units is its surface axes' length;
+                // one render at the origin reads it (the model's vertices reach farther).
+                if viewer.find(model).is_some() {
+                    viewer.surface_extent.set(0.0);
+                    let unit = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+                    let _ = viewer.render_scene(model, unit, [0.0, 0.0, 1.0e6], [0.0, 0.0, 1.0]);
+                    let radius = viewer.surface_extent.get();
+                    if radius > 0.0 {
+                        let factor = radius / disc.radius;
+                        let mut position = camera.point(disc.centre).map(|v| v * factor);
+                        viewer.surface_seed.set(seed);
+                        let light = camera.direction(disc.light);
+                        // The view space is 32-bit: a distant planet is drawn through a
+                        // matrix shrunk by a power of two (the position shrinks with it),
+                        // which leaves the picture as it was.
+                        let reach = position.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+                        let shrink = (reach / 1.0e9).max(1.0).log2().ceil().min(10.0);
+                        let shrunk = 0.5_f64.powf(shrink);
+                        position = position.map(|v| v * shrunk);
+                        let rows = unit.map(|axis| camera.direction(axis).map(|v| v * shrunk));
+                        if let Ok(mut frame) = viewer.render_scene(model, rows, position, light) {
+                            // Slivers wider than the planet itself are the clipping the
+                            // original's draw routines do and this does not: leave them out.
+                            let limit = (disc.radius * 256.0
+                                / (z * z - disc.radius * disc.radius).max(1.0).sqrt()
+                                * 2.4) as i32
+                                + 8;
+                            frame.shapes.retain(|shape| match shape {
+                                Shape::Fill(points, _) => {
+                                    let span = |f: fn(&(i32, i32)) -> i32| {
+                                        points.iter().map(f).max().unwrap_or(0)
+                                            - points.iter().map(f).min().unwrap_or(0)
+                                    };
+                                    span(|p| p.0) <= limit && span(|p| p.1) <= limit
+                                }
+                                _ => true,
+                            });
+                            self.draw_shapes(viewer, &frame.shapes);
+                            continue;
+                        }
                     }
                 }
             }

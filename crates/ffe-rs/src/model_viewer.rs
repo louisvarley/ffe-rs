@@ -158,6 +158,9 @@ pub struct ModelViewer {
     terrain: Option<(Vec<u8>, Vec<u8>)>,
     /// The seed (`+0xa0`) of the surface being drawn, set by the caller.
     pub surface_seed: std::cell::Cell<u32>,
+    /// The longest axis vector of the last surface drawn: the planet's radius in
+    /// the model's units.
+    pub surface_extent: std::cell::Cell<f64>,
     /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
     descriptors: Vec<[i32; 2]>,
     ship_stats: Vec<Option<ShipStats>>,
@@ -447,6 +450,7 @@ impl ModelViewer {
             lighting: FALLBACK_LIGHTING,
             terrain: None,
             surface_seed: std::cell::Cell::new(0),
+            surface_extent: std::cell::Cell::new(0.0),
             descriptors: Vec::new(),
             ship_stats: Vec::new(),
             model_strings: Vec::new(),
@@ -893,6 +897,12 @@ impl ModelViewer {
                 continue;
             };
             let surface = &emission.surface;
+            self.surface_extent.set(
+                vectors
+                    .iter()
+                    .map(|v| v.iter().map(|c| f64::from(*c).powi(2)).sum::<f64>().sqrt())
+                    .fold(0.0, f64::max),
+            );
             let mut stream: Vec<u8> = surface.entries.iter().flatten().copied().collect();
             stream.extend([0, 0]);
             let scene = Scene {
@@ -902,6 +912,17 @@ impl ModelViewer {
                 kind: surface.parameters[0].max(0) as usize,
                 detail: 2,
                 zoom: 0,
+            };
+            // A scaled-down matrix (distant planets) shortens the light vector.
+            let length = light
+                .iter()
+                .map(|c| f64::from(*c).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            let light = if length > 0.0 {
+                light.map(|c| (f64::from(c) / length * 32_768.0) as i32)
+            } else {
+                light
             };
             let shading = Shading {
                 light,
@@ -936,13 +957,32 @@ impl ModelViewer {
                 if points.iter().any(|(x, y)| x.abs() > 1200 || y.abs() > 1200) {
                     continue;
                 }
-                // Where the colour sits: after the corners (flat), or in the slots.
+                // Where the colour sits: the flat colour, the middle of the seven slots,
+                // or the ramp step the vertices' height bands pick (the textures
+                // themselves are not drawn).
+                let band_step = |bands: u32, first: usize, count: usize| -> u32 {
+                    let step = ((bands * 21) >> 9).min(20) as usize;
+                    let word = w[at + 2 + first + step / 2];
+                    let _ = count;
+                    if step % 2 == 0 {
+                        word & 0xfff
+                    } else {
+                        (word >> 16) & 0xfff
+                    }
+                };
                 let colour = match handler & 0xff {
-                    4 => w[at + 6],
-                    7 => w[at + 7],
-                    5 => w[at + 8],
-                    _ => w[at + 7],
-                } & 0xfff;
+                    4 => w[at + 6] & 0xfff,
+                    7 => w[at + 10] & 0xfff,
+                    5 => w[at + 11] & 0xfff,
+                    8 => {
+                        let bands = (w[at + 6] >> 16) + (w[at + 7] >> 16) + (w[at + 8] >> 16);
+                        band_step(bands / 3, 9, 0x16)
+                    }
+                    _ => {
+                        let bands = (w[at + 7] >> 16) + (w[at + 8] >> 16);
+                        band_step(bands / 4, 11, 0x16)
+                    }
+                };
                 frame
                     .shapes
                     .push(Shape::Fill(points, self.textures.rgb(colour as u16)));
