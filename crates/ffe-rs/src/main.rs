@@ -909,6 +909,7 @@ fn run() -> Result<(), String> {
                 .with_time_acceleration(acceleration);
             if let Some((_, at)) = nav.as_ref().and_then(|nav| nav.station()) {
                 model.teleport(at);
+                state.system_flight = true;
             }
             original = Some(model);
         }

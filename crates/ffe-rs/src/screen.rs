@@ -604,7 +604,9 @@ impl Screen {
                     self.draw_ship(scene, state, &camera);
                 }
             }
-            let drawn = scene.is_some_and(|scene| self.draw_station(scene, state, &camera));
+            // In a system the prototype's station at the origin is not there.
+            let drawn = state.system_flight
+                || scene.is_some_and(|scene| self.draw_station(scene, state, &camera));
             if !ship_first && own_ship {
                 if let Some(scene) = scene {
                     self.draw_ship(scene, state, &camera);
@@ -658,7 +660,8 @@ impl Screen {
                     self.line(a, b, if state.docking_requested { 17 } else { 18 });
                 }
             }
-            if let Some((x, y)) = camera.project([0.0; 3], true) {
+            if state.system_flight {
+            } else if let Some((x, y)) = camera.project([0.0; 3], true) {
                 if x > 8 && x < 260 && y > 12 && y < 115 {
                     self.text(x as usize + 5, y as usize, "STATION", 17);
                 }
@@ -672,13 +675,15 @@ impl Screen {
                 self.line((160, 81), (160, 84), 18);
             }
             // Prototype contact on the original scanner artwork, not original scanner math.
-            let relative = station_relative(state);
-            let scale = state.distance().max(200.0);
-            let sx = (153.0 + relative[0] / scale * 38.0) as i32;
-            let sy = (188.0 - relative[2] / scale * 6.0) as i32;
-            self.pixel(sx, sy, 17);
-            self.pixel(sx - 1, sy, 17);
-            self.pixel(sx + 1, sy, 17);
+            if !state.system_flight {
+                let relative = station_relative(state);
+                let scale = state.distance().max(200.0);
+                let sx = (153.0 + relative[0] / scale * 38.0) as i32;
+                let sy = (188.0 - relative[2] / scale * 6.0) as i32;
+                self.pixel(sx, sy, 17);
+                self.pixel(sx - 1, sy, 17);
+                self.pixel(sx + 1, sy, 17);
+            }
         }
         self.rect(0, 0, 320, 11, 0);
         self.text(

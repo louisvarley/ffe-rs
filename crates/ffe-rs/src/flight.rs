@@ -37,6 +37,10 @@ pub struct Flight {
     /// a loaded game falls back to `yaw` and `pitch`.
     #[serde(skip)]
     pub axes: Option<[[f64; 3]; 3]>,
+    /// Flying in a system (the navigator's bodies, not the prototype's station at the
+    /// origin): the prototype's boundary, docking and safety reset do not apply.
+    #[serde(skip)]
+    pub system_flight: bool,
 }
 
 fn default_ship() -> u32 {
@@ -67,6 +71,7 @@ impl Default for Flight {
             ship: default_ship(),
             thrust: 0.0,
             axes: None,
+            system_flight: false,
         }
     }
 }
@@ -247,6 +252,9 @@ impl Flight {
     /// What follows a step of either flight model: the prototype boundary,
     /// docking and the station safety reset. Returns the message when one fired.
     pub fn finish_step(&mut self) -> Option<&'static str> {
+        if self.system_flight {
+            return None;
+        }
         let forward = self.forward();
         if self
             .position
