@@ -1,6 +1,7 @@
 use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::navigation::{
-    autopilot, bodies, describe, distance, galaxy, standoff, Kind, Memory, Traffic,
+    autopilot, bodies, describe, distance, galaxy, place_indices, standoff, Body, Kind, Memory,
+    Traffic,
 };
 use ffe_rs::original_flight::OriginalFlight;
 
@@ -917,4 +918,72 @@ fn locking_and_engaging_a_target() {
     );
     nav.lock(station);
     assert_eq!(nav.locked, Some(station));
+}
+
+/// The original navigation computer's entries: only the places (stations and
+/// starports), in the system's own order (F880's object order).
+#[test]
+fn the_place_list_is_stations_and_starports_in_system_order() {
+    let body = |name: &str, kind: Kind| Body {
+        name: name.to_owned(),
+        kind,
+        position: [0; 3],
+        radius: 1,
+        model: 0,
+        seed: 0,
+        orientation: [[0.0; 3]; 3],
+        spin: 0,
+        bays: 0,
+    };
+    let list = [
+        body("A", Kind::Star),
+        body("B", Kind::Planet),
+        body("C", Kind::Starport),
+        body("D", Kind::Moon),
+        body("E", Kind::Station),
+        body("F", Kind::Station),
+    ];
+    assert_eq!(place_indices(&list), [2, 4, 5]);
+    assert!(Kind::Station.is_place() && Kind::Starport.is_place());
+    assert!(!Kind::Star.is_place() && !Kind::Planet.is_place() && !Kind::Moon.is_place());
+}
+
+/// The console's `n` icon: Sol's list, the original's names and order, a click
+/// on a row locking and engaging the autopilot.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_navigation_computer_lists_the_systems_places() {
+    use ffe_rs::navigation::{Navigator, View};
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    assert_eq!(nav.system_name(), "Sol");
+    nav.open(View::Places);
+    assert_eq!(nav.view, View::Places);
+    let expected = place_indices(&nav.bodies);
+    assert!(!expected.is_empty());
+    let rows = nav.listed();
+    assert_eq!(rows, expected.iter().copied().take(18).collect::<Vec<_>>());
+    assert!(rows.iter().all(|i| nav.bodies[*i].kind.is_place()));
+    // The names are the original's: just the object's own name, no distance.
+    let names = nav.lines([0; 3]);
+    eprintln!("{} places: {names:?}", names.len());
+    assert_eq!(
+        names,
+        rows.iter()
+            .map(|i| nav.bodies[*i].name.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(nav.pages(), expected.len().div_ceil(18).max(1));
+    // F1099's action 0xd1+n: lock the row's object and engage the autopilot.
+    nav.selected = 0;
+    let index = nav.selected_body().unwrap();
+    let name = nav.bodies[index].name.clone();
+    assert_eq!(nav.engage().map(|b| b.name.clone()), Some(name));
+    assert_eq!(
+        (nav.target, nav.locked, nav.view),
+        (Some(index), Some(index), View::Closed)
+    );
+    // The ffe-rs system map still lists every body, in its own order.
+    nav.open(View::System);
+    assert!(nav.listed().iter().any(|i| !nav.bodies[*i].kind.is_place()));
 }

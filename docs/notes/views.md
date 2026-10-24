@@ -71,6 +71,11 @@ modelled), eye offsets (the rear view does not draw the own ship), the
 Alt-arrow mouse nudge. ffe-rs moved its own development keys off the original
 ones: help F1 -> H, model viewer F6 -> M, load F9 -> Shift+F5.
 
+The right-hand console buttons (hyperspace 0x0f, text labels 0x10 and the
+navigation computer 0x11) are recorded in `labels.md`; they share the console
+table and hot areas but not the view radio group (their radio ids are 7, 6 and
+5).
+
 ## Turrets and eyes (ported)
 
 Ship statistics (descriptor +0x38, 48 bytes, cache v12 `base:ship/stats`): +0x0

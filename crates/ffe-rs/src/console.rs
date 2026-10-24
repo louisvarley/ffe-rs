@@ -34,15 +34,35 @@ pub const SCREEN_BUTTONS: [(i32, i32, u16, u16, u8); 4] = [
     (60, 172, 130, 167, 1),
 ];
 
+/// The right-hand console buttons (`DATA_005100` records 0x0f-0x11): position,
+/// idle and lit secondary bitmap ids, and the click. The table gives
+/// hyperspace 0x99/0xa8 at 296,178, text labels 0x9a/0xa9 at 274,178 and the
+/// navigation computer 0x9b/0xaa at 261,177. Their hot areas (`DATA_007684`)
+/// are 15 pixels wide and skip the artwork's left edge: 300-315, 280-295 and
+/// 265-280 respectively, at y 178-197 (177-196 for the navigation computer).
+pub const RIGHT_BUTTONS: [(i32, i32, u16, u16, Click); 3] = [
+    (296, 178, 0x99, 0xa8, Click::Hyperspace),
+    (274, 178, 0x9a, 0xa9, Click::Labels),
+    (261, 177, 0x9b, 0xaa, Click::Navigation),
+];
+
+/// The navigation computer's list marker (`Bitmap 0x31`, 11x10, masked zero).
+pub const NAV_MARKER_BITMAP: &str = "base:bitmap/primary/049";
+
 /// What the console shows besides the views: the time acceleration step,
 /// whether the game is paused, the ship's speed in metres per second and, when
-/// the original flight model is running, its set speed.
+/// the original flight model is running, its set speed. The right-hand buttons'
+/// on/off states are the original's `ConsoleSetButtonImage` images: the labels
+/// button is lit while player flag `+0xe9` bit 2 is set (`l`), the navigation
+/// computer while its list is open (`n`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ConsoleState {
     pub acceleration: usize,
     pub paused: bool,
     pub speed: i32,
     pub set_speed: Option<i32>,
+    pub labels: bool,
+    pub navigation: bool,
 }
 
 impl ConsoleState {
@@ -102,7 +122,8 @@ impl Click {
             Click::Missile => Some("The missile view needs equipment (not ported)."),
             Click::Combat => Some("The combat computer needs equipment (not ported)."),
             Click::Capsule => Some("The escape capsule is not ported yet."),
-            Click::Labels => Some("Text labels are not ported yet."),
+            // The labels toggle is the original's player flag +0xe9 bit 2.
+            Click::Labels => None,
             _ => None,
         }
     }

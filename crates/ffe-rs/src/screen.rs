@@ -126,6 +126,14 @@ pub struct TargetMark {
     pub engaged: bool,
 }
 
+/// An object's name label in the flight view (the original F1108's text from
+/// object `+0x124`). `centre` is in flight units, as the camera takes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BodyLabel {
+    pub name: String,
+    pub centre: [f64; 3],
+}
+
 /// The map buttons along the bottom of the view: left edge, right edge and label.
 pub const MAP_BUTTONS: [(i32, i32, &str); 2] = [(2, 62, "SYSTEMS"), (66, 150, "THIS SYSTEM")];
 const MAP_BUTTONS_Y: (i32, i32) = (128, 138);
@@ -158,12 +166,16 @@ pub struct Screen {
     pub lock: String,
     /// Where the locked body shows in the view (set by the caller each frame).
     pub target_mark: Option<TargetMark>,
+    /// The names the labels toggle draws over the view (the original's F1108).
+    pub labels: Vec<BodyLabel>,
     /// The galaxy map to draw instead of the flight view, when it is open.
     pub galaxy: Option<MapScene>,
     /// Whether a body is locked, for the autopilot buttons.
     pub has_lock: bool,
     /// The original console view icons (secondary bitmaps 63..81), when cached.
     icons: Vec<Option<IndexedImage>>,
+    /// The navigation list's marker, primary bitmap 0x31.
+    marker: Option<IndexedImage>,
     jitter: Jitter,
 }
 
@@ -258,6 +270,31 @@ impl Screen {
                 }
             })
             .collect();
+        // The navigation list's 10x10 marker button (bitmap 0x31, primary table).
+        let marker_id = crate::console::NAV_MARKER_BITMAP;
+        screen.marker = cache
+            .manifest()
+            .files
+            .iter()
+            .find(|record| record.id == marker_id)
+            .and_then(|record| match record.asset {
+                AssetKind::IndexedBitmap {
+                    width,
+                    height,
+                    offset_x,
+                    offset_y,
+                    masked_zero,
+                    ..
+                } => IndexedImage::new(
+                    width,
+                    height,
+                    [offset_x, offset_y],
+                    masked_zero,
+                    cache.asset(marker_id)?,
+                )
+                .ok(),
+                _ => None,
+            });
         Ok(screen)
     }
 
@@ -429,12 +466,14 @@ impl Screen {
             market: None,
             lift: None,
             target_mark: None,
+            labels: Vec::new(),
             galaxy: None,
             has_lock: false,
             system: String::new(),
             station: String::new(),
             lock: String::new(),
             icons: Vec::new(),
+            marker: None,
             jitter: Jitter::default(),
         })
     }
@@ -697,7 +736,17 @@ impl Screen {
         &self.frame
     }
 
-    /// `scene`, when present, draws the station as the original model 74.
+    /// The labels the original's F989/F1108 would draw this frame.
+    pub fn label_positions(&self, camera: &Camera) -> Vec<(String, i32, i32)> {
+        body_label_positions(&self.labels, camera)
+    }
+
+    fn draw_body_labels(&mut self, camera: &Camera) {
+        for (name, x, y) in self.label_positions(camera) {
+            self.text(x as usize, y as usize, &name, 15);
+        }
+    }
+
     pub fn draw(
         &mut self,
         state: &Flight,
@@ -735,6 +784,20 @@ impl Screen {
                     ViewButton::Turret if !turrets => continue,
                     ViewButton::Turret => view.is_turret(),
                     ViewButton::Cycle => false,
+                };
+                let id = if lit { on } else { off };
+                if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
+                    icon.blit(&mut self.indexed, x, y);
+                }
+            }
+            // The right-hand console buttons (the labels and navigation computer
+            // are the owner's two). The hyperspace icon has no lit state in the
+            // original's own code, so it is always its idle image.
+            for (x, y, off, on, click) in crate::console::RIGHT_BUTTONS {
+                let lit = match click {
+                    crate::console::Click::Labels => views.console.labels,
+                    crate::console::Click::Navigation => views.console.navigation,
+                    _ => false,
                 };
                 let id = if lit { on } else { off };
                 if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
@@ -878,6 +941,11 @@ impl Screen {
                 self.draw_lift(scene, &lift, &camera, stats.map_or([0, 0], |s| s.eye));
                 self.lift = Some(lift);
             }
+            // Text labels (`l`): the original's F989 walks the live objects and
+            // F1108 draws each name at its screen position (font 15, colour 15).
+            if world && views.console.labels {
+                self.draw_body_labels(&camera);
+            }
             if state.system_flight {
             } else if let Some((x, y)) = camera.project([0.0; 3], true) {
                 if x > 8 && x < 260 && y > 12 && y < 115 {
@@ -915,49 +983,54 @@ impl Screen {
                 self.pixel(sx + 1, sy, 17);
             }
         }
-        self.rect(0, 0, 320, 11, 0);
-        self.text(
-            3,
-            1,
-            &format!("{} SYSTEM", self.system.to_ascii_uppercase()),
-            18,
-        );
-        // The controls button: modern or classic, clicked to change.
-        let label = if modern {
-            "MODERN CONTROLS"
-        } else {
-            "CLASSIC CONTROLS"
-        };
-        self.rect(CONTROLS_BUTTON.0 as usize, 0, 118, 11, 1);
-        self.text(CONTROLS_BUTTON.0 as usize + 3, 1, label, 17);
-        if state.mode != Mode::Docked {
-            // ffe-rs readout (not the original's): speed, set speed, time scale.
-            let console = views.console;
-            let mut line = format!("SPEED {} M/S", console.speed);
-            if let Some(set) = console.set_speed {
-                line.push_str(&format!("  SET {set} M/S"));
+        // The port's top bar and readouts are not the original's; the original
+        // navigation list is drawn straight over the view from y 5, so hide them
+        // while it is open.
+        if !views.console.navigation {
+            self.rect(0, 0, 320, 11, 0);
+            self.text(
+                3,
+                1,
+                &format!("{} SYSTEM", self.system.to_ascii_uppercase()),
+                18,
+            );
+            // The controls button: modern or classic, clicked to change.
+            let label = if modern {
+                "MODERN CONTROLS"
+            } else {
+                "CLASSIC CONTROLS"
+            };
+            self.rect(CONTROLS_BUTTON.0 as usize, 0, 118, 11, 1);
+            self.text(CONTROLS_BUTTON.0 as usize + 3, 1, label, 17);
+            if state.mode != Mode::Docked {
+                // ffe-rs readout (not the original's): speed, set speed, time scale.
+                let console = views.console;
+                let mut line = format!("SPEED {} M/S", console.speed);
+                if let Some(set) = console.set_speed {
+                    line.push_str(&format!("  SET {set} M/S"));
+                }
+                line.push_str(&format!(
+                    "  TIME {}",
+                    crate::console::ACCELERATION_NAMES[console.acceleration.min(4)]
+                ));
+                if console.paused {
+                    line.push_str("  PAUSED");
+                }
+                self.text(3, 13, &line, 15);
             }
-            line.push_str(&format!(
-                "  TIME {}",
-                crate::console::ACCELERATION_NAMES[console.acceleration.min(4)]
-            ));
-            if console.paused {
-                line.push_str("  PAUSED");
+            if state.mode != Mode::Docked {
+                let name = view.name().to_ascii_uppercase();
+                let width = self.font.width(&name).unwrap_or(0);
+                self.text(317usize.saturating_sub(width), 1, &name, 15);
             }
-            self.text(3, 13, &line, 15);
-        }
-        if state.mode != Mode::Docked {
-            let name = view.name().to_ascii_uppercase();
-            let width = self.font.width(&name).unwrap_or(0);
-            self.text(317usize.saturating_sub(width), 1, &name, 15);
-        }
-        if !self.lock.is_empty() {
-            let lock = self.lock.clone();
-            self.text(3, 22, &lock, 17);
+            if !self.lock.is_empty() {
+                let lock = self.lock.clone();
+                self.text(3, 22, &lock, 17);
+            }
         }
         // The port's own status block is not the original's, and it would clear
         // the bottom 39 rows of a lift scene (the door closes over them).
-        if self.lift.is_none() {
+        if self.lift.is_none() && !views.console.navigation {
             self.rect(0, 119, 320, 39, 0);
             self.text(
                 3,
@@ -1044,8 +1117,9 @@ impl Screen {
                 "Dock: D clearance (100 km), in the slot under 250 m/s",
                 "O original flight: Enter/Shift speed, Z/A , . [ ] steer",
                 "TAB system map. G galaxy map: arrows, PgUp/Dn, C, H jumps",
+                "N icon: station list. L: object labels on/off.",
                 "Click a body/T: lock. K: autopilot (docks). Bksp: stop.",
-                "H closes help. Map icon: systems. Nav icon: this system.",
+                "H closes help. Map icon: systems. N icon: places list.",
             ]
             .iter()
             .enumerate()
@@ -1091,6 +1165,27 @@ impl Screen {
         (row < 9).then_some(column * 9 + row)
     }
 
+    /// The original navigation computer's marker under (x, y): F1099 adds a
+    /// hot area from the marker's top-left corner, 10 pixels wide and high
+    /// (ffe.asm 80536-80551), in the first column at x 5..=15 and the second
+    /// at x 230..=240, nine rows from y 5 every 15 pixels.
+    pub fn place_row(x: i32, y: i32) -> Option<usize> {
+        if !(5..140).contains(&y) {
+            return None;
+        }
+        let row = ((y - 5) / 15) as usize;
+        if row >= 9 {
+            return None;
+        }
+        if (5..=15).contains(&x) {
+            Some(row)
+        } else if (230..=240).contains(&x) {
+            Some(9 + row)
+        } else {
+            None
+        }
+    }
+
     /// The navigation computer: a marker square and a name per body, nine rows in two
     /// columns; `rows` are (name, selected, locked on).
     pub fn draw_nav_list(&mut self, rows: &[(String, bool, bool)], detail: &str) {
@@ -1116,6 +1211,26 @@ impl Screen {
         }
         self.rect(0, 142, 320, 1, 15);
         self.text(5, 146, detail, 18);
+    }
+
+    /// The original navigation computer's list (F1099): the marker bitmap 0x31 and
+    /// the name fifteen pixels to its right, nine rows of fifteen pixels from y 5,
+    /// then a second column from x 230. It is drawn over the flight view (the
+    /// original calls F1100 first and F1099 then draws only the markers and names),
+    /// with no title, selection, distance or background.
+    pub fn draw_places(&mut self, rows: &[String]) {
+        for (index, name) in rows.iter().take(18).enumerate() {
+            let (x, y) = if index < 9 {
+                (5i32, 5 + 15 * (index as i32))
+            } else {
+                (230i32, 5 + 15 * ((index - 9) as i32))
+            };
+            if let Some(marker) = &self.marker {
+                marker.blit_colours(&mut self.frame, &self.palette, x, y);
+            }
+            self.text((x + 15) as usize, y as usize, name, 0x11);
+        }
+        self.present();
     }
 
     pub fn draw_map(
@@ -1694,6 +1809,20 @@ impl Screen {
         self.present();
         Ok(())
     }
+}
+
+/// The labels the original's F989/F1108 would draw: each object's name at its
+/// screen position, skipping the ones F989's bounds reject (x <= 0,
+/// x + 3 >= 316, y <= 0, y - 4 >= 149) and anything behind the eye.
+pub fn body_label_positions(labels: &[BodyLabel], camera: &Camera) -> Vec<(String, i32, i32)> {
+    labels
+        .iter()
+        .filter_map(|label| {
+            let (x, y) = camera.project(label.centre, true)?;
+            (x > 0 && x + 3 < 0x13c && y > 0 && y - 4 < 0x95)
+                .then(|| (label.name.clone(), x + 1, y))
+        })
+        .collect()
 }
 
 fn station_relative(state: &Flight) -> [f64; 3] {

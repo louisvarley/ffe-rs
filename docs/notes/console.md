@@ -15,6 +15,7 @@ index order (`FUNC_000261`). The flight console shows:
 | 0x0b-0x0e | 107,164 / 91,165 / 70,166 / 60,172 | the screen buttons F4 (phone), F3 (map), F2 (clipboard), F1 (eye); F1 starts lit |
 | 0x26-0x2b | 40,192 / 41,187 / 43,180 / 44,173 / 45,165 / 48,158 | the **time acceleration meter**: a pause mark and five steps, grey with a red lit twin, one lit at a time |
 | 0x15-0x19 | 198,165 .. 125,163 | the view buttons (front, rear, turret, external, missile, combat), see `views.md` |
+| 0x0f-0x11 | 296,178 / 274,178 / 261,177 | the right-hand buttons: hyperspace (0x99/0xa8), text labels (0x9a/0xa9) and navigation computer (0x9b/0xaa); see `labels.md` |
 
 The meter is not a throttle. `FUNC_000208` turns a click (actions 0xc1-0xc5) or a
 key (6, 7, 8, 9 and 0, the latter remapped from `0x30` to `0x3a`) into the frame
@@ -43,7 +44,11 @@ hyperspace) and 0x74 (`t` target). F1 and F2 overlap at x 74-79, where F2 wins.
 - Clicking a step, or keys 6 7 8 9 0, sets the time acceleration; it applies to
   the original flight model (key O) and is remembered for when it starts. The
   bottom mark pauses (and resumes), as P does.
-- F2-F5, the missile and combat views, the escape capsule, labels, navigation,
-  hyperspace and target buttons answer with "not ported yet".
+- The right-hand icons are drawn: the labels button (lit while `l` is on), the
+  navigation computer (lit while its list is open) and hyperspace. The
+  navigation list, the labels toggle, hyperspace and target are ported; see
+  `labels.md`.
+- F2-F5, the missile and combat views and the escape capsule answer with "not
+  ported yet".
 - A readout under the title shows speed, the set speed (original model) and the
   time scale; it is ffe-rs's, not the original's.
