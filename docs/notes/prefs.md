@@ -116,8 +116,11 @@ Page 4 (`DATA_004905`): 0x81..0x85 the five map toggles (`0x3f78..0x3f7c`:
 Very High `(1, 1, 0)` (identical in JJFFE 2.8a7). The port stores the radio but
 always draws full detail, so the page marks the rows grey and says so.
 
-The space colour is the 3-byte `DATA_008815..817` ("3-byte used for background
-setting by SysMenu", ffedat.asm 27795): `(0, 0, index)` with four-bit components.
+The space colour is the 3-byte `DATA_008815..817` (declared at ffedat.asm
+28120; the inventory calls it the background colour): `(0, 0, index)` with
+four-bit components. (`DATA_008653` at 27795, "3-byte used for background
+setting by SysMenu", is the *menu* background F229 sets to 3,3,3, not the space
+colour.)
 `FUNC_001575` copies it, `FUNC_001578`/`FUNC_001579` pick the nearest palette
 entry for the clear colour, `FUNC_001618_ClearUpperBuf` clears the flight view
 with it, and the surface renderer mixes the same three bytes into the sky. The
