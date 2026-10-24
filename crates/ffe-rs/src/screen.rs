@@ -143,6 +143,10 @@ pub struct Screen {
     pub discs: Vec<Disc>,
     /// The system's stations (set by the caller each frame, in system flight).
     pub stations: Vec<SystemStation>,
+    /// Direction toward the local star in flight space (`None` outside a system):
+    /// ships, stations and lift objects are lit by it instead of the original's
+    /// fixed default light. Planet discs carry their own light.
+    pub sun: Option<[f64; 3]>,
     /// The market the docked screen shows; the prototype's one-item screen without it.
     pub market: Option<MarketView>,
     /// The lift scene to draw this frame, in a docking or launching sequence.
@@ -421,6 +425,7 @@ impl Screen {
             stars,
             discs: Vec::new(),
             stations: Vec::new(),
+            sun: None,
             market: None,
             lift: None,
             target_mark: None,
@@ -1318,6 +1323,15 @@ impl Screen {
 
     /// The station as the original model 74, executed by the verified port and
     /// placed by the synthetic flight camera. False when it cannot be drawn.
+    /// The light ships, stations and lift objects are drawn with: the local
+    /// star's direction in system flight, else the original's fixed F960 light.
+    fn scene_light(&self, scene: &ModelViewer, camera: &Camera) -> [f64; 3] {
+        match self.sun {
+            Some(direction) => camera.direction(direction),
+            None => camera.direction(scene.light_direction()),
+        }
+    }
+
     fn draw_station(&mut self, scene: &ModelViewer, state: &Flight, camera: &Camera) -> bool {
         let Some(scale) = model_scale(scene) else {
             return false;
@@ -1333,7 +1347,7 @@ impl Screen {
         let rows = axes.map(|axis| camera.direction(axis));
         let origin = camera.point([0.0; 3]).map(|v| v * scale);
         // The original default light (F960), fixed in flight space.
-        let light = camera.direction(scene.light_direction());
+        let light = self.scene_light(scene, camera);
         let mut inputs = AnimationInputs::original(tics, 0, &scene.shades());
         inputs.jitter = self.jitter.cursor;
         match scene.render_scene_with(STATION_MODEL, rows, origin, light, &inputs) {
@@ -1350,7 +1364,7 @@ impl Screen {
     fn draw_lift(&mut self, scene: &ModelViewer, lift: &LiftView, camera: &Camera, eye: [i16; 2]) {
         let mut objects = lift.objects.clone();
         objects.sort_by_key(|object| std::cmp::Reverse(object.depth));
-        let light = camera.direction(scene.light_direction());
+        let light = self.scene_light(scene, camera);
         for object in objects {
             let position = ffe_core::lift::view_position(&object, eye).map(f64::from);
             let mut inputs = AnimationInputs::original(lift.tics, object.word, &scene.shades());
@@ -1441,7 +1455,7 @@ impl Screen {
         };
         let rows = ship_axes(state).map(|axis| camera.direction(axis));
         let origin = camera.point(state.position).map(|v| v * scale);
-        let light = camera.direction(scene.light_direction());
+        let light = self.scene_light(scene, camera);
         // The original inputs over flight time (gear up), with global 15 as the
         // object's z thrust word the engine glows read: the throttle scaled to the
         // ship's own limits (F600). Without statistics (a cache before v12), full

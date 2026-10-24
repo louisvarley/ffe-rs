@@ -136,6 +136,48 @@ fn boot_station_has_a_planet_in_view() {
     );
 }
 
+/// The local star lights the station and the ship: two sun directions give
+/// different pictures (the fixed default light is the fallback without a sun).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn local_star_light_changes_the_scene() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    let draw = |screen: &mut Screen| {
+        screen.draw(
+            &state,
+            ViewState::default(),
+            Some(&viewer),
+            false,
+            false,
+            "",
+        );
+        let mut hash = 14695981039346656037u64;
+        for pixel in screen.logical_pixels() {
+            hash = (hash ^ u64::from(*pixel)).wrapping_mul(1099511628211);
+        }
+        hash
+    };
+    screen.sun = None;
+    let fixed = draw(&mut screen);
+    screen.sun = Some([1.0, 0.0, 0.0]);
+    let starboard = draw(&mut screen);
+    screen.sun = Some([-1.0, 0.0, 0.0]);
+    let port = draw(&mut screen);
+    eprintln!("fixed {fixed:016x} sun +x {starboard:016x} sun -x {port:016x}");
+    assert_ne!(starboard, fixed, "the sun must light the scene");
+    assert_ne!(starboard, port, "opposite suns must differ");
+}
+
 /// Earth and the Moon from near orbit, in the flight view's own camera.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]

@@ -4,6 +4,17 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — Local-star lighting for ships, stations and lifts (v0.48k)
+
+- `Screen::sun` carries the direction toward the system's star (computed each
+  frame from the star's position and the ship's); `scene_light` uses it for the
+  player's ship, the stations and the lift objects instead of the original's
+  fixed default light (F960). Planet discs already had their own light.
+- Local test `local_star_light_changes_the_scene`: the picture changes with a sun
+  and differs between opposite suns.
+- Not done: day/night, and the original's own light tables for these objects; the
+  fixed F960 light remains the fallback outside a system.
+
 ## 2026-10-24 — A planet in the scenario (v0.48j)
 
 Owner request: "we need a planet on our scenario".

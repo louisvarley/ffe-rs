@@ -1304,6 +1304,18 @@ fn run() -> Result<(), String> {
                 .station()
                 .map_or_else(String::new, |(n, _)| n.to_owned());
         }
+        // The local star lights ships, stations and the lift scene in a system.
+        screen.sun = nav.as_ref().and_then(|nav| {
+            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+            let star = nav.bodies.iter().find(|b| b.kind == NavKind::Star)?;
+            let toward = [
+                star.position[0] as f64 / unit - state.position[0],
+                star.position[1] as f64 / unit - state.position[1],
+                star.position[2] as f64 / unit - state.position[2],
+            ];
+            let length = toward.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0);
+            Some(toward.map(|v| v / length))
+        });
         screen.discs = nav.as_ref().map_or_else(Vec::new, |nav| {
             let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
             nav.bodies

@@ -130,7 +130,7 @@ window.FFE_BURNDOWN = {
         { id: "world-6", title: "Starports: services and events (cstarport)", status: "todo" },
         { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-8", title: "Navigation: system and galaxy maps", status: "todo" },
-        { id: "world-9", title: "Lighting by the local star and day/night", status: "todo" },
+        { id: "world-9", title: "Lighting by the local star (ships, stations, lift) and day/night", status: "in-progress", version: "v0.48k" },
         { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" },
         { id: "world-11", title: "Terrain distance query and complex-shape collisions (F1876 mode 1, F576-F583), starports placed on planets", status: "done", version: "v0.51e" }
       ]
@@ -429,6 +429,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 81,
       note: "A planet in the scenario: the player now starts docked at a station in a planet's orbit (Mars High, 1.61 Mars radii) instead of a deep-space station, so the launched view has Mars filling the sky. The local test checks the orbit distance and that the surface draws."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 81,
+      note: "Local-star lighting for ships, stations and lift objects (world-9 in progress): Screen::sun carries the direction toward the system's star and replaces the fixed default light; a local test shows the picture changes with the sun and differs between opposite suns. Day/night and the original's light tables for these objects remain."
     }
   ]
 };
