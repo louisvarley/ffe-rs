@@ -91,7 +91,8 @@ passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`)
   corridor otherwise, it is pushed back out along the axis; anywhere else, pushed out from the
   centre (no damage). L from the docked screen asks permission (F654) and runs the launch stages
   (about 20 s) before the ship is put out on the docking axis, facing away; the door then opens, and
-  the bay is released. The lift scenes are not drawn: the status line names each stage.
+  the bay is released. The lift scenes are the original's (`ffe_core::lift`): the cage, shaft and bay models in the
+  front view, over the outside view when docking and alone when launching; the status line also names each stage.
 - **Autopilot.** A station target is flown in two legs: to a point 20 km out on the docking
   axis (stopping within 1 km), then, with clearance taken there, toward the centre braking
   for a stop just inside the face, which the contact turns into docking. Sol's Daedalus,
@@ -101,8 +102,8 @@ passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`)
   body it is near (the engaged target on its final approach, else a station within 200 km,
   else a planet or moon within 50 radii), so a station stays where the ship left it.
 - **Not the original yet.** The pad hit is this port's slot test, not the station's collision stream
-  (F569 flags 0x20 | 0x40, with the crash and bounce); the lift scenes (F1070-F1080), the sounds and the
-  ship's motion with the rotating station during the stages are not drawn or ported. Starports
+  (F569 flags 0x20 | 0x40, with the crash and bounce); the sounds and the ship's motion with the rotating station
+  during the stages are not ported. Starports
   (landing on a planet) are not dockable here.
 
 ## Known limits

@@ -1187,6 +1187,20 @@ fn run() -> Result<(), String> {
             }
             None => Vec::new(),
         };
+        // The lift scenes of the docking and launching stages (the front view).
+        screen.lift = None;
+        let mut launching_scene = false;
+        if let Some((objects, launching)) = nav.as_ref().and_then(|nav| nav.lift_scene()) {
+            views.mode = ViewMode::Front;
+            launching_scene = launching && state.mode == ffe_rs::flight::Mode::Docked;
+            screen.lift = Some(ffe_rs::screen::LiftView {
+                objects,
+                world: !launching,
+                tics: ffe_core::model_animation::START_TICS.wrapping_add(
+                    (nav.as_ref().map_or(0.0, |nav| nav.clock) * 49_700.0) as u64 as u32,
+                ),
+            });
+        }
         screen.market = None;
         if state.mode == ffe_rs::flight::Mode::Docked {
             if let Some(nav) = nav.as_mut() {
@@ -1224,7 +1238,16 @@ fn run() -> Result<(), String> {
             ),
             None => String::new(),
         };
-        screen.draw(&state, views, scene.as_ref(), help, modern, &message);
+        if launching_scene {
+            // Inside the station, from the cockpit: the flight view with only the lift in it.
+            let mut inside = state.clone();
+            inside.mode = ffe_rs::flight::Mode::Flight;
+            inside.system_flight = true;
+            inside.axes = None;
+            screen.draw(&inside, views, scene.as_ref(), help, modern, &message);
+        } else {
+            screen.draw(&state, views, scene.as_ref(), help, modern, &message);
+        }
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);
         } else if let Some(lab) = &model_lab {

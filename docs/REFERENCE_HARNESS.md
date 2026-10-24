@@ -20,6 +20,8 @@ supplied `jjffe-master/` sources are **never edited**.
   catchers) are Linux-only. 35 of the 36 oracles in `verify-all.py` pass on Windows; `verify-world.py` does not,
   because `--worldgen` reads uninitialised stack words that hold addresses, which Linux pins by disabling ASLR
   (`personality`) and Windows cannot.
+- The `--lift` scenario replaces the draw hook `DATA_007807` (the pointer F1070 calls through) with a capture, so a
+  game routine that draws can be run on its own and its arguments compared; the same trick works for other draw calls.
 - `tools/reference/build-linux.sh` — the same two binaries as 32-bit ELF
   (`nasm`, `gcc -m32`) under `.cache/jjffe-reference-linux/`. Linux traces are
   LF-terminated; hash them with CRLF endings to compare with recorded hashes.

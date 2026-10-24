@@ -571,6 +571,13 @@ impl ModelViewer {
     /// the docking axis, by `((tics << (speed - 1)) >> 16)` / 65536 turns; model
     /// 74 is generated with speed 10 (one turn per 2^23 tics, about 169 s at
     /// acceleration 1). Identity for speed 0.
+    pub fn lift_rows(&self, angle: u16) -> [[f64; 3]; 3] {
+        let matrix = ffe_core::model_animation::build_yzt(&self.table, 0, i32::from(angle));
+        std::array::from_fn(|k| {
+            std::array::from_fn(|j| f64::from(matrix[3 * k + j]) / 2_147_483_648.0)
+        })
+    }
+
     pub fn station_rows(&self, tics: u32, speed: i8) -> [[f64; 3]; 3] {
         let rotation = ffe_core::model_animation::OrbitalRotation::station(speed);
         let matrix = rotation

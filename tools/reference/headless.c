@@ -4511,6 +4511,116 @@ static int market_vectors(void)
     return 0;
 }
 
+
+/* Lift scene oracle (--lift): the original stage functions F1069-F1087 (the docking and launch
+   lift scenes) and F1086, with the draw call F1070 makes through DATA_007807 replaced by a
+   capture, on random stage timeouts and frame times, ships and stations. Prints the objects the
+   stage would draw (model, position dwords, orientation, animation words) and the stage state
+   and timeout after the call. The expiry frames run F48's event dispatch, which does nothing
+   here. */
+extern void ref_lift_1069(void);
+extern void ref_lift_1074(void);
+extern void ref_lift_1075(void);
+extern void ref_lift_1076(void);
+extern void ref_lift_1078(void);
+extern void ref_lift_1081(void);
+extern void ref_lift_1082(void);
+extern void ref_lift_1083(void);
+extern void ref_lift_1084(void);
+extern void ref_lift_1085(void);
+extern void ref_lift_1087(void);
+extern void ref_lift_leave(void *station, long timeout);
+extern void (*ref_draw_hook)(void *);
+extern unsigned char ref_stage_state;
+extern unsigned long ref_stage_timeout;
+extern signed char ref_scene_flag;
+extern unsigned char *ref_station_object;
+static void (*const lift_functions[])(void) = {
+    ref_lift_1069,
+    ref_lift_1074,
+    ref_lift_1075,
+    ref_lift_1076,
+    ref_lift_1078,
+    ref_lift_1081,
+    ref_lift_1082,
+    ref_lift_1083,
+    ref_lift_1084,
+    ref_lift_1085,
+    ref_lift_1087,
+};
+static const unsigned char lift_stages[] = {0x0c, 0x0e, 0x10, 0x12, 0x14, 0x16, 0x18, 0x1a, 0x1c, 0x1e, 0x20};
+static unsigned char lift_capture_data[4][0x160];
+static int lift_captured;
+static void lift_capture(void *object)
+{
+    if (lift_captured < 4) memcpy(lift_capture_data[lift_captured], object, 0x160);
+    ++lift_captured;
+}
+static unsigned long lift_state = 0x6d2b79f5UL;
+static unsigned long lift_random(void)
+{
+    lift_state ^= lift_state << 13; lift_state &= 0xffffffffUL;
+    lift_state ^= lift_state >> 17;
+    lift_state ^= lift_state << 5; lift_state &= 0xffffffffUL;
+    return lift_state;
+}
+static int lift_vectors(void)
+{
+    static const unsigned long ships[] = {14, 20, 23, 35, 38, 40, 17, 28};
+    static unsigned char player[0x160], station[0x160];
+    static const unsigned long frames[] = {0, 1, 994, 1988, 9940, 0x4000, 0x20000, 0x7fffffffUL};
+    unsigned long i;
+    fprintf(stderr, "JJFFE lift-v1: original lift scene stage functions F1069-F1087 and F1086 with the draw call captured, on 8,192 random stage timeouts, frame times, ships and stations.\n");
+    ref_scene_flag = -1;
+    ref_draw_hook = lift_capture;
+    for (i = 0; i < 8192; ++i) {
+        unsigned long which = lift_random() % 12, model = ships[lift_random() % 8], k;
+        long timeout; unsigned long frame = frames[lift_random() % 8], tics = lift_random();
+        unsigned char stage, flag = lift_random() % 2 ? 0x20 : 0, seat = (unsigned char)(lift_random() % 8);
+        unsigned long seed = lift_random();
+        memset(player, 0, sizeof player); memset(station, 0, sizeof station);
+        *(unsigned long *)(player + 0x82) = model;
+        *(unsigned long *)(station + 0x82) = 72;
+        *(unsigned long *)(station + 0xa0) = seed;
+        station[0x14c] = flag;
+        strcpy((char *)station + 0x124, "Daedalus Station");
+        state_set_u32(0xc8, (unsigned long)player); state_set_u32(0xcc, (unsigned long)station);
+        ref_station_object = station;
+        ref_state[0xf4] = seat;
+        state_set_u32(0, tics);
+        ref_frame_time = frame;
+        lift_captured = 0;
+        if (which == 11) {
+            timeout = (long)(lift_random() % 0x22000) - 0x1000;
+            stage = 0x22;
+            ref_lift_leave(station, timeout);
+            ref_stage_state = stage; ref_stage_timeout = (unsigned long)timeout;
+        } else {
+            unsigned long span = lift_random() % 4 == 0 ? (frame ? frame + 1 : 1) : 0x20000;
+            stage = lift_stages[which];
+            timeout = (long)(lift_random() % span);
+            ref_stage_state = stage; ref_stage_timeout = (unsigned long)timeout;
+            lift_functions[which]();
+        }
+        printf("{\"stage\":%u,\"timeout\":%ld,\"frame\":%lu,\"ship\":%lu,\"seat\":%u,\"tics\":%lu,\"seed\":%lu,\"flag\":%u,\"after_state\":%u,\"after_timeout\":%ld,\"objects\":[",
+               stage, timeout, frame, model, seat, tics, seed, flag, ref_stage_state, (long)ref_stage_timeout);
+        for (k = 0; k < (unsigned long)lift_captured && k < 4; ++k) {
+            const unsigned char *o = lift_capture_data[k];
+            unsigned long j;
+            printf("%s{\"model\":%lu,\"word\":%u,\"time_word\":%u,\"seed\":%lu,\"outdoor\":%lu,\"position\":[",
+                   k ? "," : "", *(unsigned long *)(o + 0x82), *(unsigned short *)(o + 0x9e), *(unsigned short *)(o + 0x9c),
+                   *(unsigned long *)(o + 0xa0), *(unsigned long *)(o + 0xa4));
+            for (j = 0; j < 6; ++j) printf("%s%lu", j ? "," : "", *(unsigned long *)(o + 0x26 + 4 * j));
+            printf("],\"matrix\":[");
+            for (j = 0; j < 9; ++j) printf("%s%ld", j ? "," : "", *(long *)(o + 4 * j));
+            printf("],\"name\":\"%s\"}", (const char *)(o + 0x124));
+        }
+        printf("],\"count\":%d}\n", lift_captured);
+    }
+    if (fflush(stdout)) fail("cannot flush lift vectors");
+    return 0;
+}
+
 #ifdef FFE_COMMAND_PROBE
 extern void ref_object_frame(void *list, void *camera);
 extern void ref_display_object(void *object, void *descriptor);
@@ -4770,6 +4880,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--animation")) return animation_vectors();
     if (argc == 2 && !strcmp(argv[1], "--traffic")) return traffic_vectors();
     if (argc == 2 && !strcmp(argv[1], "--market")) return market_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--lift")) return lift_vectors();
     if (argc == 2 && !strcmp(argv[1], "--object-instance")) return object_instance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

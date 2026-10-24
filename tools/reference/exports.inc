@@ -450,3 +450,40 @@ GLOBAL _ref_market_goods
 _ref_market_price equ FUNC_000619
 _ref_market_stock equ FUNC_000620
 _ref_market_goods equ DATA_006169
+
+; Lift scene oracle (--lift): the stage functions F1069-F1087 and F1086, the draw hook F1070
+; calls (DATA_007807), and the globals they read.
+GLOBAL _ref_lift_1069
+_ref_lift_1069 equ FUNC_001069
+GLOBAL _ref_lift_1074
+_ref_lift_1074 equ FUNC_001074
+GLOBAL _ref_lift_1075
+_ref_lift_1075 equ FUNC_001075
+GLOBAL _ref_lift_1076
+_ref_lift_1076 equ FUNC_001076
+GLOBAL _ref_lift_1078
+_ref_lift_1078 equ FUNC_001078
+GLOBAL _ref_lift_1081
+_ref_lift_1081 equ FUNC_001081
+GLOBAL _ref_lift_1082
+_ref_lift_1082 equ FUNC_001082
+GLOBAL _ref_lift_1083
+_ref_lift_1083 equ FUNC_001083
+GLOBAL _ref_lift_1084
+_ref_lift_1084 equ FUNC_001084
+GLOBAL _ref_lift_1085
+_ref_lift_1085 equ FUNC_001085
+GLOBAL _ref_lift_1087
+_ref_lift_1087 equ FUNC_001087
+GLOBAL _ref_lift_leave
+_ref_lift_leave equ FUNC_001086
+GLOBAL _ref_draw_hook
+_ref_draw_hook equ DATA_007807
+GLOBAL _ref_stage_state
+_ref_stage_state equ DATA_008870
+GLOBAL _ref_stage_timeout
+_ref_stage_timeout equ DATA_008884
+GLOBAL _ref_scene_flag
+_ref_scene_flag equ DATA_008630
+GLOBAL _ref_station_object
+_ref_station_object equ DATA_008862

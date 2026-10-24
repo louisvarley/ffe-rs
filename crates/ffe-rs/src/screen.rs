@@ -48,6 +48,18 @@ pub struct SystemStation {
 /// view space is 32-bit, and an orbital city is under a pixel beyond it.
 const STATION_DRAW_RANGE: f64 = 2.0e9;
 
+/// The lift scene of a docking or launching stage (`ffe_core::lift`), drawn in the
+/// front view after the outside world (or alone, inside the station).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiftView {
+    pub objects: Vec<ffe_core::lift::Object>,
+    /// Draw the stars, planets, stations and the ship first (docking, outside); false
+    /// inside the station (launching) where only the lift is drawn.
+    pub world: bool,
+    /// The game tics the models' time word reads.
+    pub tics: u32,
+}
+
 /// One commodity line of the station's market screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketRow {
@@ -94,6 +106,8 @@ pub struct Screen {
     pub stations: Vec<SystemStation>,
     /// The market the docked screen shows; the prototype's one-item screen without it.
     pub market: Option<MarketView>,
+    /// The lift scene to draw this frame, in a docking or launching sequence.
+    pub lift: Option<LiftView>,
     /// The system and the station the player is at, for the docked screen and the top bar.
     pub system: String,
     pub station: String,
@@ -305,6 +319,7 @@ impl Screen {
             discs: Vec::new(),
             stations: Vec::new(),
             market: None,
+            lift: None,
             system: String::new(),
             station: String::new(),
             lock: String::new(),
@@ -655,23 +670,30 @@ impl Screen {
                 self.jitter.start = self.jitter.cursor;
             }
             self.jitter.cursor = self.jitter.start;
+            let world = self.lift.as_ref().is_none_or(|lift| lift.world);
             for index in 0..self.stars.len() {
+                if !world {
+                    break;
+                }
                 if let Some((x, y)) = camera.project(self.stars[index], false) {
                     if y < 158 {
                         self.pixel(x, y, 12);
                     }
                 }
             }
-            self.draw_discs(&camera, scene);
+            if world {
+                self.draw_discs(&camera, scene);
+            }
             // FUNC_001054 hides the player's own ship only in the front view.
             // Painter's order between the two objects: the farther one first.
             let own_ship = view != ViewMode::Front;
-            if state.system_flight {
+            if state.system_flight && world {
                 if let Some(scene) = scene {
                     self.draw_system_stations(scene, state, &camera, own_ship);
                 }
             }
             let ship_first = own_ship
+                && world
                 && !state.system_flight
                 && distance(camera.position, state.position) > distance(camera.position, [0.0; 3]);
             if ship_first {
@@ -680,9 +702,10 @@ impl Screen {
                 }
             }
             // In a system the prototype's station at the origin is not there.
-            let drawn = state.system_flight
+            let drawn = !world
+                || state.system_flight
                 || scene.is_some_and(|scene| self.draw_station(scene, state, &camera));
-            if !ship_first && own_ship && !state.system_flight {
+            if !ship_first && own_ship && world && !state.system_flight {
                 if let Some(scene) = scene {
                     self.draw_ship(scene, state, &camera);
                 }
@@ -734,6 +757,10 @@ impl Screen {
                 if let (Some(a), Some(b)) = (camera.project(a, true), camera.project(b, true)) {
                     self.line(a, b, if state.docking_requested { 17 } else { 18 });
                 }
+            }
+            if let (Some(lift), Some(scene)) = (self.lift.take(), scene) {
+                self.draw_lift(scene, &lift, &camera, stats.map_or([0, 0], |s| s.eye));
+                self.lift = Some(lift);
             }
             if state.system_flight {
             } else if let Some((x, y)) = camera.project([0.0; 3], true) {
@@ -1155,6 +1182,28 @@ impl Screen {
                 true
             }
             Err(_) => false,
+        }
+    }
+
+    /// The lift models of a docking or launching stage, the farthest first, in view space.
+    fn draw_lift(&mut self, scene: &ModelViewer, lift: &LiftView, camera: &Camera, eye: [i16; 2]) {
+        let mut objects = lift.objects.clone();
+        objects.sort_by_key(|object| std::cmp::Reverse(object.depth));
+        let light = camera.direction(scene.light_direction());
+        for object in objects {
+            let position = ffe_core::lift::view_position(&object, eye).map(f64::from);
+            let mut inputs = AnimationInputs::original(lift.tics, object.word, &scene.shades());
+            inputs.jitter = self.jitter.cursor;
+            if let Ok(frame) = scene.render_scene_with(
+                object.model,
+                scene.lift_rows(object.angle),
+                position,
+                light,
+                &inputs,
+            ) {
+                self.jitter.cursor = frame.jitter;
+                self.draw_shapes(scene, &frame.shapes);
+            }
         }
     }
 

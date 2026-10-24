@@ -4,6 +4,23 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — The lift scenes of docking and launching (`ffe_core::lift`)
+
+Notes: `docs/notes/docking.md` ("The lift scenes").
+
+- F1070 draws the cage, interior or bay model (`0xea`, `0xec`, `0xe9`) in the player's view at a depth in the ship's
+  frame less the eye offset, turned about the vertical, with the door word; F1071-F1080, F1086 and F1092 are the per-stage
+  calls. `ffe_core::lift::{objects, view_position}` is that arithmetic; `traffic::Stages::drawn` records which stage drew
+  with what remaining timeout each frame (zero on the frame a stage ends).
+- **Verified against the executed original**: `--lift` runs the stage functions with the draw call (`DATA_007807`) captured on
+  8,192 random cases; every object's model, position dwords, MatBuildYZT orientation, animation and time words, and the stage
+  state and timeout after the call match (trace `08f72014103b...`); nine tampered fields and an empty trace are rejected.
+- The playable draws them (`Screen::lift`): over the outside view when docking, alone when launching. The frames show the
+  original's cage, shaft and bay. The interior model with word 0 (the two waiting stages) draws almost nothing, so those
+  frames are dark; the arguments are the original's, so this is expected but worth comparing against the real game.
+
+---
+
 ## 2026-10-24 — The reference harness builds on Windows again; traffic and market oracles run
 
 `headless.c` had become Linux-only (POSIX headers, `sigsetjmp`, `fork`, `setitimer`, `personality`, `open_memstream`).

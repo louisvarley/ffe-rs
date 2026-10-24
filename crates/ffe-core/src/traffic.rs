@@ -243,6 +243,9 @@ pub const LAUNCH_TIMEOUT: i32 = 0x1_7530;
 pub struct Stages {
     pub state: u8,
     pub timeout: i32,
+    /// The lift scene of the last frame: the stage that drew it and the timeout it left
+    /// in `*t` (zero on the frame the stage ended); see [`crate::lift::objects`].
+    pub drawn: Option<(u8, i32)>,
 }
 
 impl Stages {
@@ -255,6 +258,7 @@ impl Stages {
                 state::ALIGN
             },
             timeout: TOUCH_TIMEOUT,
+            drawn: None,
         }
     }
 
@@ -263,6 +267,7 @@ impl Stages {
         Stages {
             state: state::LAUNCH_INTO_LIFT,
             timeout: LAUNCH_TIMEOUT,
+            drawn: None,
         }
     }
 
@@ -279,6 +284,7 @@ impl Stages {
     /// F1068: count the timeout down; when it passes zero take `next` and `then`.
     fn stage(&mut self, dt: i32, next: u8, then: i32) {
         self.timeout = self.timeout.wrapping_sub(dt);
+        self.drawn = Some((self.state, self.timeout.max(0)));
         if self.timeout < 0 {
             self.state = next;
             self.timeout = then;
@@ -292,6 +298,7 @@ impl Stages {
     pub fn step(&mut self, dt: i32, thargoid: bool, door: u16) -> Option<u8> {
         use state::*;
         let before = self.state;
+        self.drawn = None;
         match self.state {
             ALIGN | STARPORT_ALIGN => {
                 // F1025: leaves when less than a frame is left.
@@ -340,6 +347,7 @@ impl Stages {
     /// station's door starts to open.
     fn leave(&mut self, dt: i32) {
         self.timeout = self.timeout.wrapping_sub(dt);
+        self.drawn = Some((state::LAUNCH_OUT, self.timeout));
         if self.timeout <= 0 {
             self.state = state::LAUNCHING_STATION;
         }

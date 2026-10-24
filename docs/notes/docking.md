@@ -35,11 +35,40 @@ into the lift → 0x1c close → 0x1e wait → 0x20 open → 0x22 into the docki
 (the ship is put out, the station's mode is set to `0xff` and its door word to `0xffff` so the door opens)
 → 0x26 when the door word is 0 (F1089). The bay is released afterwards.
 
+## The lift scenes (`ffe_core::lift`)
+
+Every frame of a lift stage the original draws one or two models in the player's view (F1070, called through
+F1071-F1080, F1086, F1092): model `0xea` (the cage), `0xec` (its interior) or `0xe9` (the bay beyond), at a
+**depth in the ship's frame** less the eye's offset (the ship statistics' words `+0x18`/`+0x1a` times 8, so the
+object sits at view-space `(0, -up*8, depth - along*8)`), turned about the vertical by an angle
+(`MatBuildYZT(a = 0, b)`), with the animation word (global 1: the door, 0 open) and the time word (global 0).
+`t` is what F1067/F1068 leave in `*t`: the timeout still to run, zero on the frame the stage ends.
+
+| Stage | Drawn |
+|---|---|
+| 0x0c open door | cage, depth 0x30000, word `t >> 1`, turned half a turn |
+| 0x0e into the lift | cage, depth `2t`, word 0, half a turn |
+| 0x10 turn | cage, depth 0, word and angle `t >> 2` |
+| 0x12 close door | cage, depth 0, word `~((t >> 1) & 0xffff)` |
+| 0x14 / 0x1e wait | interior, depth -1, word 0 |
+| 0x16 open inner door | interior at 0 and bay at 0x2ea60, word `t >> 1` |
+| 0x18 into the bay | bay, depth and word `2t` |
+| 0x1a out of the bay | bay, depth `0x2ea60 - 2t`, word `2t` |
+| 0x1c close inner door | interior at 0 and bay at 0x2ea60, word `~(t >> 1)` |
+| 0x20 open cage door | cage, depth 0, word `t >> 1` |
+| 0x22 away (F1086) | cage, depth `max(2t, 0) - 0x30000`, word 0 |
+| 0x2a docked (F1092) | bay, depth 0, word 0 |
+
+In the playable (`Screen::lift`, `LiftView`): a docking draws them over the outside view (the stars, the station and
+the ship are drawn first); a launch draws only the lift, from the cockpit, with the flight view's HUD. The ship is
+held still during a docking. The models are the original's, run by the verified executor; the frames look like the
+original's cage, shaft and bay (`tests/lift_view.rs` saves them with `FFE_SHOT_DIR`). One thing to look at against
+the real game: the interior model with word 0 (the waiting stages) is nearly empty, so those frames are dark.
+
 ## What the port keeps and leaves out
 
-Kept: the record and every routine above, the stage order and timeouts, the clearance countdown. Left out: the
-lift scenes the original draws during the stages (F1070-F1080 build a lift object, models 0xe9/0xea/0xec, and
-slide it); the player's velocity matching the station's rotation (F1025 sets it from F589/F591, F1088 at the end);
+Kept: the record and every routine above, the stage order and timeouts, the clearance countdown, the lift scenes.
+Left out: the player's velocity matching the station's rotation (F1025 sets it from F589/F591, F1088 at the end);
 sounds; the open-air starport pads (F650's tables `DATA_006175..6179`) and landing; the crash and bounce of a
 bad touch (the playable pushes the ship clear instead, `docs/NAVIGATION.md`).
 
@@ -52,4 +81,8 @@ F867 on 8,192 synthetic station records, and `tools/reference/verify-traffic.py`
 tampered fields and an empty trace are rejected. Trace SHA-256
 `b3d95748de135d215fc85366263d820aef912cd699e76ab2ddebc61703004a3e` (CRLF, Windows build). The player-only parts of
 F650/F655 (query event 0x17, fines, messages) are not in the oracle; the stage machine (F1025, F1067-F1088) is
-tested against the assembly's constants only, not run against the original.
+tested against the assembly's constants only, not run against the original. The lift scenes and the stage
+transitions of the timed stages (F1069-F1087, F1086) are verified: `--lift` runs the original stage functions with the
+draw call captured on 8,192 random timeouts, frame times, ships and stations, and `verify-lift.py` finds every drawn
+model, view-space position, orientation, animation and time word, and the state and timeout after the frame equal
+(trace SHA-256 `08f72014103b925f72c0b89a0730b88458a7bcc4c0133c4a07867432ccfdcd0e`, CRLF).

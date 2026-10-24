@@ -388,6 +388,11 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-10-24",
       remaining: 82,
+      note: "The lift scenes of docking and launching (F1070-F1087, F1092) ported and drawn in the playable; the stage placement matches the executed original on 8,192 cases. flight-10 and flight-11 stay in progress: the pad hit in the collision stream, the ship's motion with the rotating station and the crash branch remain."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
       note: "Station markets (F619, F620, F622, F633, F555, F556) and the market screen with the original's tables (cache v20, 1789 assets); the tables match JJFFE's declarations and the price and stock formulas match the executed original (8,192 cases). gameplay-1 and content-1 in progress: black market, mission cargo and equipment-changed holds remain."
     }
   ]

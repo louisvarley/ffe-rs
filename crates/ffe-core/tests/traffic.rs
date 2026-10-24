@@ -199,6 +199,7 @@ fn docking_runs_the_stages_in_order_with_the_original_timeouts() {
     let mut stages = Stages {
         state: state::DOCKED_THARGOID,
         timeout: 0,
+        drawn: None,
     };
     assert_eq!(stages.step(994, false, 0), Some(state::DOCKED_THARGOID));
     assert_eq!(stages.state, state::DOCKED);

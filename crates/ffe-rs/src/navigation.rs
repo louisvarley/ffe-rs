@@ -823,6 +823,17 @@ impl Navigator {
         Ok(())
     }
 
+    /// The lift models this frame's stage draws, and whether it is a launch (drawn alone,
+    /// inside the station) rather than a docking (over the outside view).
+    pub fn lift_scene(&self) -> Option<(Vec<ffe_core::lift::Object>, bool)> {
+        let sequence = self.sequence?;
+        let (stage, remaining) = sequence.stages.drawn?;
+        Some((
+            ffe_core::lift::objects(stage, remaining)?,
+            sequence.launching,
+        ))
+    }
+
     /// The ship is held still: it is in the lift of a docking sequence.
     pub fn holding(&self) -> bool {
         self.sequence.is_some_and(|s| !s.launching)
