@@ -1066,6 +1066,39 @@ impl Navigator {
         tables.system_position(self.entries.get(index)?.params.code)
     }
 
+    /// The position of the system the player is in.
+    pub fn current_position(&self) -> Option<[i32; 3]> {
+        self.system_position(self.current)
+    }
+
+    /// The system on offer with this code, if any.
+    pub fn entry_for_code(&self, code: u32) -> Option<usize> {
+        self.entries.iter().position(|e| e.params.code == code)
+    }
+
+    /// What the hyperdrive says about a jump of `distance` (F899: nothing is burnt).
+    pub fn report_for(&self, distance: i32) -> Option<Report> {
+        let drive = self.drive?;
+        jump_plan(
+            &self.drives()?,
+            drive.mass,
+            drive.class,
+            distance,
+            drive.fuel,
+            false,
+            true,
+        )
+        .ok()
+    }
+
+    /// The drive's range for the player's ship (what F900 leaves in `DATA_008907`).
+    pub fn reach(&self) -> Option<i32> {
+        let drive = self.drive?;
+        jump_plan(&self.drives()?, drive.mass, drive.class, 0, 0, false, true)
+            .ok()
+            .map(|report| report.max_range)
+    }
+
     /// The distance from the current system to system `index`, in the drive's units.
     pub fn range_to(&self, index: usize) -> Option<i32> {
         Some(star_distance(

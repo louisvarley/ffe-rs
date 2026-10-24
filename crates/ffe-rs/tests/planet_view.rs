@@ -188,6 +188,7 @@ fn earth_shape_kinds() {
             Shape::Textured(..) => "textured",
             Shape::Glow(..) => "glow",
             Shape::Label(..) => "label",
+            Shape::Spans(..) => "spans",
         };
         *counts.entry(name).or_insert(0) += 1;
     }
@@ -293,6 +294,7 @@ fn star_models() {
                                 Shape::Textured(..) => "textured",
                                 Shape::Glow(..) => "glow",
                                 Shape::Label(..) => "label",
+                                Shape::Spans(..) => "spans",
                             };
                             *kinds.entry(name).or_insert(0) += 1;
                         }

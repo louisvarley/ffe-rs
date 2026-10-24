@@ -4917,6 +4917,118 @@ static int map_star_vectors(void)
 #endif
 }
 
+
+/* Dot oracles. --particle: the original F1610/F1611 particle on a 320x200 buffer (0xff) at centres
+   on and off the view and sizes 0..70 (and the 948 limit); the pixels written are counted, bounded
+   and hashed. --dots: the original F1699 (a point command) and F1700/F1701 with a prepared vertex
+   slot, then the order queue flushed (F1800/F1801 draw the particles): positions written, and
+   those written in the colour at the centre. */
+extern void ref_draw_particle(const short *centre,long size,unsigned long colour);
+extern long *ref_point(void *instance,long material,long angle,long vertex,long flag);
+static unsigned long dot_state=0x2545f491UL;
+static unsigned long dot_random(void)
+{
+    dot_state^=dot_state<<13; dot_state&=0xffffffffUL;
+    dot_state^=dot_state>>17;
+    dot_state^=dot_state<<5; dot_state&=0xffffffffUL;
+    return dot_state;
+}
+static long dot_range(long low,long high) { return low+(long)(dot_random()%(unsigned long)(high-low+1)); }
+static int particle_vectors(void)
+{
+    static unsigned char buffer[320*200];
+    unsigned long n,i,count;
+    long minx,miny,maxx,maxy;
+    fprintf(stderr,"JJFFE particle-v1: original F1610/F1611 on a 320x200 buffer filled with 0xff, colour 7, centres from -40..360 by -40..200 and sizes 0..70 (plus 947, 948 and 1000).\n");
+    ref_framebuffer=buffer;
+    for(n=0;n<6000;++n) {
+        short centre[2];
+        long size=n%25==0?(n%75==0?947:(n%50==0?948:1000)):(n%3==0?dot_range(0,9):dot_range(0,70));
+        centre[0]=(short)(n%7==0?dot_range(-40,360):dot_range(0,319));
+        centre[1]=(short)(n%11==0?dot_range(-40,200):dot_range(0,157));
+        if(n%13==0) { centre[0]=(short)dot_range(0,4); centre[1]=(short)dot_range(0,4); }
+        if(n%17==0) { centre[0]=(short)dot_range(315,320); centre[1]=(short)dot_range(153,160); }
+        memset(buffer,0xff,sizeof buffer);
+        ref_draw_particle(centre,size,7);
+        count=0;minx=miny=100000;maxx=maxy=-1;
+        for(i=0;i<sizeof buffer;++i) if(buffer[i]!=0xff) {
+            long x=(long)(i%320),y=(long)(i/320);
+            ++count;
+            if(x<minx) minx=x; if(x>maxx) maxx=x; if(y<miny) miny=y; if(y>maxy) maxy=y;
+        }
+        printf("{\"case\":%lu,\"centre\":[%d,%d],\"size\":%ld,\"written\":%lu,\"bounds\":[%ld,%ld,%ld,%ld],\"pixels_fnv1a64\":\"%016llx\"}\n",
+               n,centre[0],centre[1],size,count,count?minx:0,count?miny:0,count?maxx:0,count?maxy:0,
+               (unsigned long long)fingerprint(buffer,sizeof buffer));
+    }
+    if (fflush(stdout)) fail("cannot flush particle vectors");
+    return 0;
+}
+static int dot_vectors(void)
+{
+    static unsigned char buffer[320*200];
+    static unsigned long instance[0x160/4],slots[128*9],globals[0x120/4];
+    unsigned long n,i,count,centre_count;
+    long minx,miny,maxx,maxy;
+    fprintf(stderr,"JJFFE dots-v1: original F1699/F1700/F1701 for unlit points over a prepared vertex slot, the order queue flushed through F1789 (F1800/F1801 particles); pixels written and the pixels in the centre pixel's value, hashed by position.\n");
+    ref_framebuffer=buffer;
+    for(n=0;n<6000;++n) {
+        long material,angle,scale,x,y,depth,vx,vy;
+        unsigned char colour[3];
+        unsigned long positions=UINT64_C(14695981039346656037)&0xffffffffUL,centre_positions=0;
+        unsigned char centre_value;
+        material=0x2000|(dot_range(0,15)<<8)|(dot_range(0,15)<<4)|dot_range(0,15);
+        if(n%9==0) material|=0x1000;
+        scale=dot_range(6,11);
+        angle=dot_range(1,11)<<(n%5==0?0:2);
+        {
+            long radius=((angle&0x7f)<<9),span;
+            radius=(short)radius;
+            radius=scale<8?(long)((unsigned long)radius>>(8-scale)):radius<<(scale-8);
+            if(radius<1) radius=1;
+            span=radius*8;
+            /* Mostly the far path (depth 8 to 300 times the radius); some the near path and the cut-offs. */
+            if(n%10==0) depth=dot_range(radius>0x40?radius:0x40,span);
+            else if(n%37==0) depth=dot_range(0,0x80);
+            else depth=span+dot_range(0,span*(n%3==0?40:6));
+            if(depth<0) depth=0;
+        }
+        x=n%7==0?dot_range(-30,350):dot_range(0,319);
+        y=n%11==0?dot_range(-30,190):dot_range(0,157);
+        colour[0]=(unsigned char)dot_range(0,15);colour[1]=(unsigned char)dot_range(0,15);colour[2]=(unsigned char)dot_range(0,15);
+        memset(instance,0,sizeof instance);memset(slots,0,sizeof slots);memset(globals,0,sizeof globals);
+        instance[0xf0/4]=2;
+        instance[0x148/4]=(unsigned long)scale;
+        instance[0x14c/4]=(unsigned long)globals;
+        memcpy((char *)instance+0xf4,colour,3);
+        slots[0]=((unsigned long)x&0xffff)|((unsigned long)y<<16);
+        vx=dot_range(-50000,50000);vy=dot_range(-50000,50000);
+        slots[1]=(unsigned long)vx;
+        slots[2]=(unsigned long)vy;
+        slots[3]=(unsigned long)depth;
+        slots[5]=2;
+        ref_vertex_buffer=(long *)slots;
+        order_init();
+        memset(buffer,0xff,sizeof buffer);
+        ref_point(instance,material,angle,0,0);
+        ref_order_group(0,0);
+        ref_order_flush();
+        count=0;centre_count=0;minx=miny=100000;maxx=maxy=-1;
+        centre_value=(x>=0&&x<320&&y>=0&&y<200)?buffer[y*320+x]:0xff;
+        for(i=0;i<sizeof buffer;++i) if(buffer[i]!=0xff) {
+            long px=(long)(i%320),py=(long)(i/320);
+            ++count;
+            positions=(positions^(unsigned long)i)*16777619UL;
+            if(buffer[i]==centre_value) { ++centre_count; centre_positions=(centre_positions^(unsigned long)i)*16777619UL; }
+            if(px<minx) minx=px; if(px>maxx) maxx=px; if(py<miny) miny=py; if(py>maxy) maxy=py;
+        }
+        printf("{\"case\":%lu,\"material\":%ld,\"angle\":%ld,\"scale\":%ld,\"screen\":[%ld,%ld],\"view\":[%ld,%ld],\"depth\":%ld,\"instance\":[%u,%u,%u],\"written\":%lu,\"bounds\":[%ld,%ld,%ld,%ld],\"positions\":%lu,\"centre\":%u,\"centre_written\":%lu,\"centre_positions\":%lu}\n",
+               n,material,angle,scale,x,y,vx,vy,depth,colour[0],colour[1],colour[2],count,
+               count?minx:0,count?miny:0,count?maxx:0,count?maxy:0,positions&0xffffffffUL,(unsigned)centre_value,centre_count,centre_positions&0xffffffffUL);
+    }
+    if (fflush(stdout)) fail("cannot flush dot vectors");
+    return 0;
+}
+
 #ifdef FFE_COMMAND_PROBE
 extern void ref_object_frame(void *list, void *camera);
 extern void ref_display_object(void *object, void *descriptor);
@@ -5181,6 +5293,8 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--hyperspace")) return hyper_vectors();
     if (argc == 2 && !strcmp(argv[1], "--system-names")) return system_name_vectors();
     if (argc == 2 && !strcmp(argv[1], "--map-stars")) return map_star_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--particle")) return particle_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--dots")) return dot_vectors();
     if (argc == 2 && !strcmp(argv[1], "--object-instance")) return object_instance_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth")) return depth_vectors();
     if (argc == 2 && !strcmp(argv[1], "--depth-commands")) return depth_command_vectors();

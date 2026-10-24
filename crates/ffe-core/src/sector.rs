@@ -110,6 +110,11 @@ impl<'a> Tables<'a> {
         dword(self.bytes, INDEX + 4 * k)
     }
 
+    /// The index of the hand-made sector at (`x`, `y`) among the 49.
+    pub fn special_index(&self, x: u16, y: u16) -> Option<usize> {
+        self.special(x, y)
+    }
+
     /// The index of the hand-made sector at (`x`, `y`).
     fn special(&self, x: u16, y: u16) -> Option<usize> {
         let key = u32::from(x) | u32::from(y) << 16;

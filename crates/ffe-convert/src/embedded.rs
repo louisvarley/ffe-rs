@@ -692,6 +692,19 @@ pub fn decode_galaxy_tables(
     })
 }
 
+/// The small-dot size tables (`DATA_007835` then `DATA_007836`, nine bytes each, contiguous).
+pub fn decode_dot_tables(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    use ffe_core::model_dot::{DotTables, TABLE_BYTES};
+    let section = DataSection::parse(bytes)?;
+    let offset = section.offset(rva, TABLE_BYTES)?;
+    let block = range(bytes, offset, TABLE_BYTES)?.to_vec();
+    DotTables::new(&block)?;
+    Ok(EmbeddedTable {
+        source_offset: offset,
+        bytes: block,
+    })
+}
+
 /// The four star light-point tables (`DATA_007820`, `7821`, `7822`, `7828`; RVAs), 14 dwords
 /// each, concatenated.
 pub fn decode_star_point_tables(bytes: &[u8], rvas: [u32; 4]) -> Result<EmbeddedTable, String> {

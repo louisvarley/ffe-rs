@@ -14,6 +14,7 @@ use ffe_core::model_animation::{
     door_step, time_word, top_level_locals, START_TICS, TICS_PER_FRAME,
 };
 use ffe_core::model_commands::{material, VisibilityContext};
+use ffe_core::model_dot::{point_dot, DotShape, DotTables};
 use ffe_core::model_execute::{
     execute_live, execute_scene, resolve_colour, ChildEnvironment, ChildModel, ChildModels,
     ChildOutcome, ChildRun, Execution, InstanceContext, Primitive,
@@ -22,7 +23,7 @@ use ffe_core::model_fill::near_outline;
 use ffe_core::model_instance::{Vertices, NEAR_SENTINEL};
 use ffe_core::model_lighting::{default_lighting, pack, Lighting};
 use ffe_core::model_math::SineTable;
-use ffe_core::model_normals::{self, Normal, NormalContext};
+use ffe_core::model_normals::{self, NormalContext};
 use ffe_core::model_texture::{
     draw_quad, draw_triangle, flat_colour, quad_uv, textured_colours, textured_path, triangle_uv,
 };
@@ -55,6 +56,8 @@ pub enum Shape {
     /// F1812: a model-name-table string in the original bitmap font at the
     /// label's queued screen point (colour 15, clipped, unshadowed).
     Label((i32, i32), Vec<u8>),
+    /// A particle or dot (F1611): horizontal runs `[x, y, width]` in one colour.
+    Spans(Vec<[i32; 3]>, [u8; 3]),
 }
 
 /// A textured F1807/F1805 queue entry: screen points in queue order (the face's
@@ -190,6 +193,11 @@ pub struct ModelViewer {
     jitter_next: Cell<[u32; 2]>,
     /// The galaxy map's star light-point tables (cache v23).
     stars: Option<StarTables>,
+    /// The small-dot size tables (cache v25) and the ambient colour their halos mix with.
+    dots: Option<DotTables>,
+    sky: [u8; 3],
+    /// The galaxy tables and system strings (cache v21, v22) that name a star's label.
+    names: Option<(Vec<u8>, Vec<u8>)>,
 }
 
 /// The engine settings the viewer's E key steps through: off (the animation
@@ -344,6 +352,13 @@ impl ModelViewer {
         viewer.stars = cache
             .asset("base:world/star-points")
             .and_then(|bytes| StarTables::new(bytes).ok());
+        viewer.dots = cache
+            .asset("base:world/dot-tables")
+            .and_then(|bytes| DotTables::new(bytes).ok());
+        viewer.names = cache
+            .asset("base:world/galaxy-tables")
+            .zip(cache.asset("base:text/system-strings"))
+            .map(|(tables, strings)| (tables.to_vec(), strings.to_vec()));
         viewer.terrain = cache
             .asset("base:terrain/tables")
             .zip(cache.asset("base:terrain/maps"))
@@ -490,6 +505,9 @@ impl ModelViewer {
             jitter: JITTER_SEED,
             jitter_next: Cell::new(JITTER_SEED),
             stars: None,
+            dots: None,
+            sky: [0; 3],
+            names: None,
         })
     }
 
@@ -691,6 +709,7 @@ impl ModelViewer {
                 Shape::Gouraud(points, _) => points.clone(),
                 Shape::Glow(_) => Vec::new(),
                 Shape::Label(_, _) => Vec::new(),
+                Shape::Spans(spans, _) => spans.iter().map(|s| (s[0], s[1])).collect(),
             })
             .map(|(x, y)| (x - 160).abs().max((y - 79).abs()))
             .max()
@@ -759,6 +778,39 @@ impl ModelViewer {
             return Err("Model too far for the 32-bit view space.".to_owned());
         }
         self.render_with(model, rows, position.map(|v| v as i32), light_view, inputs)
+    }
+
+    /// The matrix F1675 builds: yaw `a` about the vertical, then pitch `b` (binary angles).
+    pub fn matrix_yzt(&self, a: i32, b: i32) -> [i32; 9] {
+        ffe_core::model_animation::build_yzt(&self.table, a, b)
+    }
+
+    /// F1686's cull radius of a model: its descriptor's radius shifted by its scale.
+    pub fn model_radius(&self, index: u32) -> Option<i32> {
+        let model = self.find(index)?;
+        let [_, radius] = *self.descriptors.get(index as usize)?;
+        Some(radius.wrapping_shl(model.scale))
+    }
+
+    /// F830: the name of a system code (cache v21 and v22).
+    pub fn system_name(&self, code: u32) -> Option<Vec<u8>> {
+        let (tables, strings) = self.names.as_ref()?;
+        let tables = ffe_core::sector::Tables::new(tables).ok()?;
+        let strings = ffe_core::sector::Strings::new(strings).ok()?;
+        tables.system_name(&strings, code)
+    }
+
+    /// One of the system strings (cache v22) by its F830 selector (`0x84xx`).
+    pub fn system_string(&self, selector: u32) -> Option<Vec<u8>> {
+        let (_, strings) = self.names.as_ref()?;
+        let strings = ffe_core::sector::Strings::new(strings).ok()?;
+        let index = (selector & 0x1ff).checked_sub(1)? as usize;
+        strings.get(index).map(<[u8]>::to_vec)
+    }
+
+    /// The ambient colour a dot's halo mixes with (`DATA_008815`).
+    pub fn set_sky(&mut self, colour: [u8; 3]) {
+        self.sky = colour;
     }
 
     /// The star light-point tables, when the cache has them (v23).
@@ -867,6 +919,24 @@ impl ModelViewer {
                 matrix[3 * k + axis] = (value * 2_147_483_647.0).round() as i32;
             }
         }
+        self.render_matrix(model, matrix, rows, position, light_view, inputs, None)
+    }
+
+    /// Run `model` with an exact object matrix (rows in Q31, as the original keeps it) and
+    /// draw what it queues. `rows` are the same axes as unit vectors (for the observer and the
+    /// light). `stars` replaces the model's vertex records with a sector's star records and
+    /// gives its light points their tables (the galaxy map's model 0xab).
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_matrix(
+        &self,
+        model: &ViewerModel,
+        matrix: [i32; 9],
+        rows: [[f64; 3]; 3],
+        position: [i32; 3],
+        light_view: [f64; 3],
+        inputs: &AnimationInputs,
+        stars: Option<(&StarField, &[u8])>,
+    ) -> Result<Frame, String> {
         // Camera and light in object space, record units, for the original normal
         // test: the camera sits at -position in view space.
         let unit = 2f64.powi(model.scale as i32);
@@ -896,8 +966,23 @@ impl ModelViewer {
                 shades: self.lighting.shades,
             },
         )?;
-        let mut vertices =
-            Vertices::new(&model.vertices, model.vertex_count)?.with_normal_records(&model.normals);
+        let padded;
+        let mut vertices = match (stars, &self.stars) {
+            (Some((field, records)), Some(tables)) => {
+                if field.types.len() > records.len() / 6 || records.len() > model.vertices.len() {
+                    return Err("The star records do not match the model.".to_owned());
+                }
+                let mut bytes = records.to_vec();
+                bytes.resize(model.vertices.len(), 0);
+                padded = bytes;
+                Vertices::new(&padded, model.vertex_count)?
+                    .with_normal_records(&model.normals)
+                    .with_stars(tables, field)
+            }
+            (Some(_), None) => return Err("The star tables need cache v23.".to_owned()),
+            (None, _) => Vertices::new(&model.vertices, model.vertex_count)?
+                .with_normal_records(&model.normals),
+        };
         vertices.set_jitter(inputs.jitter);
         let mut context = VertexContext {
             matrix,
@@ -977,8 +1062,15 @@ impl ModelViewer {
             ..Frame::default()
         };
         self.draw_primitives(&result, &mut frame)?;
-        self.draw_texts(&result, model.index, &mut vertices, instance, &mut frame)?;
-        self.draw_child_texts(&result.children, &mut frame)?;
+        self.draw_texts(
+            &result,
+            model.index,
+            &mut vertices,
+            instance,
+            light_view,
+            &mut frame,
+        )?;
+        self.draw_child_texts(&result.children, light_view, &mut frame)?;
         self.draw_surfaces(&result, light, &mut frame);
         Ok(frame)
     }
@@ -1274,8 +1366,54 @@ impl ModelViewer {
                         emitted.context.colour,
                         [0; 3],
                     ));
-                    if let Some(p) = emitted.screen.and_then(point) {
-                        frame.shapes.push(Shape::Point(p, rgb));
+                    // An unlit point is a dot (F1699 to F1801): a halo and a core, or one
+                    // particle. A lit one is a shaded sphere, not ported: a pixel.
+                    let dot = match (&self.dots, emitted.screen, emitted.view) {
+                        (Some(tables), Some(screen), Some(view))
+                            if material(emitted.material).unlit =>
+                        {
+                            point_dot(
+                                emitted.material,
+                                emitted.angle,
+                                emitted.scale,
+                                emitted.context.colour,
+                                screen,
+                                [view[0], view[1]],
+                                view[2],
+                                tables,
+                                self.sky,
+                            )
+                            .ok()
+                        }
+                        _ => None,
+                    };
+                    match dot {
+                        Some(Some(dot)) => {
+                            let (x, y) = (dot.x, dot.y);
+                            let particles: Vec<(i32, [u8; 3])> = match dot.shape {
+                                DotShape::One { size, colour } => vec![(size, colour)],
+                                DotShape::Two {
+                                    halo_size,
+                                    halo,
+                                    core_size,
+                                    core,
+                                } => vec![(halo_size, halo), (core_size, core)],
+                            };
+                            for (size, colour) in particles {
+                                let spans = ffe_core::model_dot::particle_clipped(x, y, size)
+                                    .into_iter()
+                                    .map(|s| [s.x, s.y, s.width])
+                                    .collect();
+                                frame.shapes.push(Shape::Spans(spans, self.rgb(colour)));
+                            }
+                        }
+                        // Off the view or too near: nothing.
+                        Some(None) => {}
+                        None => {
+                            if let Some(p) = emitted.screen.and_then(point) {
+                                frame.shapes.push(Shape::Point(p, rgb));
+                            }
+                        }
                     }
                 }
                 Primitive::Spline(spline) => {
@@ -1332,8 +1470,15 @@ impl ModelViewer {
                         frame.shapes.push(Shape::Line(a, b, self.rgb(colour)));
                     }
                 },
-                // A star's system name: drawn by the map, not the model viewer.
-                Primitive::SystemLabel(_) => frame.skipped += 1,
+                // A star's system name (F1812 with the 0x84xx string), in the bitmap font.
+                Primitive::SystemLabel(label) => match self.system_name(label.code) {
+                    Some(name) if label.key.is_some() => frame.shapes.push(Shape::Label(
+                        (i32::from(label.screen[0]), i32::from(label.screen[1])),
+                        name,
+                    )),
+                    Some(_) => {}
+                    None => frame.skipped += 1,
+                },
                 Primitive::Label(label) => match self.model_string(label.label.string) {
                     Ok(text) => frame.shapes.push(Shape::Label(
                         (i32::from(label.screen[0]), i32::from(label.screen[1])),
@@ -1349,7 +1494,12 @@ impl ModelViewer {
     /// The texts of child models (the lift's posters are child models of the lift
     /// and the bay): each executed child's texts are drawn in its own instance, with
     /// a fresh vertex cache over its records and the externals its parent gave it.
-    fn draw_child_texts(&self, runs: &[ChildRun], frame: &mut Frame) -> Result<(), String> {
+    fn draw_child_texts(
+        &self,
+        runs: &[ChildRun],
+        light_view: [f64; 3],
+        frame: &mut Frame,
+    ) -> Result<(), String> {
         for run in runs {
             let (ChildOutcome::Executed(execution), Some(setup)) = (&run.outcome, &run.setup)
             else {
@@ -1366,9 +1516,10 @@ impl ModelViewer {
                 u32::from(run.model),
                 &mut vertices,
                 setup.instance,
+                light_view,
                 frame,
             )?;
-            self.draw_child_texts(&execution.children, frame)?;
+            self.draw_child_texts(&execution.children, light_view, frame)?;
         }
         Ok(())
     }
@@ -1386,6 +1537,7 @@ impl ModelViewer {
         model: u32,
         parent: &mut Vertices<'_>,
         instance: InstanceContext,
+        light_view: [f64; 3],
         frame: &mut Frame,
     ) -> Result<(), String> {
         for emission in &result.texts {
@@ -1453,16 +1605,48 @@ impl ModelViewer {
                 colour: emission.context.colour,
                 ..Default::default()
             };
-            // The glyph faces are flat decals: every normal is visible and lit only
-            // by the material and instance colour (the font's own lighting is not
-            // evaluated yet).
-            let normals = vec![
-                Normal {
+            // The glyphs are lit as any object: the font's normal records, with the camera and
+            // the light in the text's frame (F1685, run once for the string).
+            let axes: [[f64; 3]; 3] = std::array::from_fn(|k| {
+                std::array::from_fn(|j| f64::from(matrix[3 * k + j]) / 2_147_483_648.0)
+            });
+            let unit = 2f64.powi(size as i32);
+            let observer = axes.map(|row| {
+                let along: f64 = row.iter().zip(pen).map(|(a, p)| a * f64::from(p)).sum();
+                (-along / unit) as i32
+            });
+            let length = light_view
+                .iter()
+                .map(|v| v * v)
+                .sum::<f64>()
+                .sqrt()
+                .max(1e-9);
+            let light = axes.map(|row| {
+                (row.iter().zip(light_view).map(|(a, b)| a * b).sum::<f64>() / length * 32_768.0)
+                    as i32
+            });
+            let mut normals = model_normals::evaluate(
+                &font.normals,
+                font.normal_count,
+                &font.vertices,
+                font.vertex_count,
+                &NormalContext {
+                    scale: size,
+                    observer_scale: size,
+                    observer,
+                    light,
+                    shades: self.lighting.shades,
+                },
+            )?;
+            // The fonts declare no normal records, yet some glyph faces name normals 2 and 3,
+            // which the original reads from whatever its buffer held: visible and unlit here.
+            normals.resize(
+                256,
+                ffe_core::model_normals::Normal {
                     culled: false,
                     colour: [0; 3],
-                };
-                32_768
-            ];
+                },
+            );
             let visibility = VisibilityContext {
                 depth: 1,
                 scale: 0,

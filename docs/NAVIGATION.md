@@ -35,7 +35,11 @@ transfer then about 300 s of flight), Mercury and Daedalus.
 
 The game starts docked at the first station of Sol (L launches, which puts the ship out from that station on the original flight model). Wired in `main.rs` (not the original's map screens):
 
-- The console's map icon (or G): the systems list, each with its distance (in light years, the original's F833 units) and the fuel the jump needs, or `TOO FAR` or `NEEDS n T`. Up/Down or a click chooses; Enter, H or the console's H icon hyperspaces to the chosen system through the original's hyperdrive (F903): range and fuel are checked, the fuel is burnt from the hold (military fuel for the Eagle's class 10 drive, leaving radioactive waste), and the game clock moves by the jump time. A new game has no fuel; buy it at the station's market. The jump scene itself is not drawn.
+- The console's map icon (or G): the **galaxy map**, the original's 3D scene (`docs/notes/galaxy-map.md`): the stars around the
+  centre with their names, the grid, the range sphere of the drive and a marker on the star nearest the centre, whose name,
+  distance and description show in the console and whose jump cost shows under the sector. Arrows scroll, Page Up/Down or
+  +/- zoom (Shift slower), dragging turns the view, C returns to your system, H or Enter jumps to the selected star if it is
+  one of the systems on offer, G closes. The jump is the hyperdrive's as below; the list of systems is gone from the playable.
 - The console's navigation-computer icon (or Tab): everything in this system. A click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns it off.
 - The top bar's button changes between modern and classic controls (modern by default; F3 too). Classic is the original's keys: Enter/Shift set speed, Z/A pitch, comma/period yaw, [ ] roll. Modern adds W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll).
 - **Target and autopilot buttons** (below the view, beside SYSTEMS and THIS SYSTEM): a click on a planet, moon or station in the

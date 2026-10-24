@@ -131,6 +131,10 @@ pub enum AssetKind {
     StarPointTables {
         source_offset: u64,
     },
+    /// The core and halo sizes of the small dots points draw (`DATA_007835`, `7836`; v25).
+    DotTables {
+        source_offset: u64,
+    },
     /// Per model table slot, the 20-byte record of the descriptor fields object
     /// set-up reads (scales, radii, shape and statistics flags; v16); see
     /// `ffe_convert::embedded::decode_model_record`.
@@ -261,7 +265,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=24) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=25) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -321,6 +325,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("The model records and gameplay tables require cache v16.".to_owned());
+        }
+        if manifest.format_version < 25 && matches!(record.asset, AssetKind::DotTables { .. }) {
+            return Err("The dot tables require cache v25.".to_owned());
         }
         if manifest.format_version < 24
             && matches!(
@@ -657,6 +664,9 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::StarPointTables { .. } => {
             ffe_core::star_points::StarTables::new(bytes)?;
+        }
+        AssetKind::DotTables { .. } => {
+            ffe_core::model_dot::DotTables::new(bytes)?;
         }
         AssetKind::EffectWav => {
             if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt " {

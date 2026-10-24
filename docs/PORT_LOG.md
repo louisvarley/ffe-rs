@@ -4,6 +4,24 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — The galaxy map (F840, F862, F1699-F1701, F1611), cache v25
+
+Owner request: "Galaxy map as per original game". Notes: `docs/notes/galaxy-map.md`; deviation EXP-008.
+
+- **Dots** (`ffe_core::model_dot`): F1611/F1610 (the particle rasteriser), F1699's far and near paths and F1700/F1701's dot
+  branches for unlit points (stars). **Verified against the executed original** pixel for pixel: `--particle` (6,000
+  centres and sizes) and `--dots` (6,000 points through the real F1699 and the queue flush, far and near path, 3,285 two-tone
+  and 1,838 single dots); `verify-dots.py`, `dots_reference.rs`. Cache v25 imports the two size tables.
+- **The scene** (`ffe_rs::galaxy_map`): camera matrix, nine sectors, grid, sphere, marker, selection, console text, F828's
+  corner text; `ModelViewer::render_matrix` runs a model with an exact matrix and star records. Lines are projected as
+  F1703 does (they were not: a latent bug that left lines with stale screen points).
+- **Verified against the executed original's map frame** (`jjffe-smoke --game-frame 400 0x3d`, a new game's F3 screen):
+  `verify-galaxy-map.py` finds 8,249 of the original's 8,270 overlay pixels where ours are (8,269); 85% of those in the same
+  colour (the rest: the original's runtime-palette approximations of dim colours, and the textured "CORE").
+- Text is lit by the font's own normals; the playable's G key and SYSTEMS button open the map.
+
+---
+
 ## 2026-10-24 — Click-to-target and the autopilot buttons
 
 Owner request: click a station or space port and have the autopilot dock; autopilot buttons.

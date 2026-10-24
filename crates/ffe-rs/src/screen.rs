@@ -66,6 +66,21 @@ pub struct LiftView {
     pub starport: bool,
 }
 
+/// The galaxy map as the screen draws it: the scene's shapes over the cabin art and the corner
+/// and console texts (`galaxy_map`).
+#[derive(Debug, Clone, Default)]
+pub struct MapScene {
+    pub shapes: Vec<Shape>,
+    /// "Sector: x,y", at the lower left of the view.
+    pub sector: String,
+    /// The fuel the selected jump needs, or why it cannot be made.
+    pub fuel: Option<String>,
+    /// The game's date and time, in green at the top of the console text.
+    pub date: String,
+    /// The selected star's description, wrapped to the console text's width here.
+    pub info: String,
+}
+
 /// One commodity line of the station's market screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketRow {
@@ -139,6 +154,8 @@ pub struct Screen {
     pub lock: String,
     /// Where the locked body shows in the view (set by the caller each frame).
     pub target_mark: Option<TargetMark>,
+    /// The galaxy map to draw instead of the flight view, when it is open.
+    pub galaxy: Option<MapScene>,
     /// Whether a body is locked, for the autopilot buttons.
     pub has_lock: bool,
     /// The original console view icons (secondary bitmaps 63..81), when cached.
@@ -407,6 +424,7 @@ impl Screen {
             market: None,
             lift: None,
             target_mark: None,
+            galaxy: None,
             has_lock: false,
             system: String::new(),
             station: String::new(),
@@ -722,6 +740,11 @@ impl Screen {
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
             *pixel = self.palette[usize::from(*index)];
         }
+        if let Some(map) = self.galaxy.take().filter(|_| scene.is_some()) {
+            self.draw_galaxy(scene.unwrap(), &map);
+            self.present();
+            return;
+        }
         if state.mode == Mode::Docked && self.market.is_some() {
             self.frame[..320 * 158].copy_from_slice(&self.cabin);
             self.draw_market();
@@ -1011,7 +1034,7 @@ impl Screen {
                 "F5 save snapshot; Shift+F5 load newest snapshot.",
                 "Dock: D clearance (100 km), in the slot under 250 m/s",
                 "O original flight: Enter/Shift speed, Z/A , . [ ] steer",
-                "O then TAB system map, G galaxy: Up/Down, Enter flies/jumps",
+                "TAB system map. G galaxy map: arrows, PgUp/Dn, C, H jumps",
                 "Click a body/T: lock. K: autopilot (docks). Bksp: stop.",
                 "H closes help. Map icon: systems. Nav icon: this system.",
             ]
@@ -1198,6 +1221,18 @@ impl Screen {
                             frame[y as usize * 320 + x as usize] = value(*rgb);
                         }
                     });
+                }
+                Shape::Spans(spans, rgb) => {
+                    let frame = &mut self.frame;
+                    for [x, y, width] in spans {
+                        if (0..VIEW_HEIGHT as i32).contains(y) {
+                            for column in *x..*x + *width {
+                                if (0..320).contains(&column) {
+                                    frame[*y as usize * 320 + column as usize] = value(*rgb);
+                                }
+                            }
+                        }
+                    }
                 }
                 Shape::Point((x, y), rgb) => {
                     if (0..VIEW_HEIGHT as i32).contains(y) && (0..320).contains(x) {
@@ -1425,6 +1460,43 @@ impl Screen {
                 true
             }
             Err(_) => false,
+        }
+    }
+
+    /// The galaxy map (F840, F828, F863): the cabin art behind the scene, the sector and fuel
+    /// lines with a shadow at the lower left, and the date and the star's text in the console.
+    fn draw_galaxy(&mut self, viewer: &ModelViewer, map: &MapScene) {
+        self.frame[..320 * VIEW_HEIGHT].copy_from_slice(&self.cabin[..320 * VIEW_HEIGHT]);
+        self.draw_shapes(viewer, &map.shapes);
+        let shadowed = |screen: &mut Self, x: usize, y: usize, text: &str| {
+            screen.text(x + 1, y + 1, text, 0);
+            screen.text(x, y, text, 15);
+        };
+        shadowed(self, 6, 147, &map.sector);
+        if let Some(fuel) = &map.fuel {
+            shadowed(self, 6, 137, fuel);
+        }
+        // The console text: the date, then the description wrapped to 120 pixels.
+        self.text(195, 164, &map.date, 17);
+        let mut y = 173;
+        for paragraph in map.info.split('\r') {
+            let mut line = String::new();
+            for word in paragraph.split(' ') {
+                let trial = if line.is_empty() {
+                    word.to_owned()
+                } else {
+                    format!("{line} {word}")
+                };
+                if self.font.width(&trial).is_ok_and(|width| width > 120) && !line.is_empty() {
+                    self.text(195, y, &line, 15);
+                    y += 8;
+                    line = word.to_owned();
+                } else {
+                    line = trial;
+                }
+            }
+            self.text(195, y, &line, 15);
+            y += 8;
         }
     }
 

@@ -2,12 +2,13 @@ use crate::external::{output_destination, recorded_bytes};
 use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
-    decode_bitmaps, decode_colour_map, decode_default_lighting, decode_font, decode_galaxy_tables,
-    decode_gameplay_tables, decode_market_tables, decode_model_collision, decode_model_commands,
-    decode_model_descriptor, decode_model_names, decode_model_normals, decode_model_record,
-    decode_model_vertices, decode_name_text, decode_ship_stats, decode_sine_table,
-    decode_star_point_tables, decode_star_shades, decode_system_strings, decode_system_tables,
-    decode_terrain_maps, decode_terrain_tables, decode_texture_descriptors, BitmapLayout,
+    decode_bitmaps, decode_colour_map, decode_default_lighting, decode_dot_tables, decode_font,
+    decode_galaxy_tables, decode_gameplay_tables, decode_market_tables, decode_model_collision,
+    decode_model_commands, decode_model_descriptor, decode_model_names, decode_model_normals,
+    decode_model_record, decode_model_vertices, decode_name_text, decode_ship_stats,
+    decode_sine_table, decode_star_point_tables, decode_star_shades, decode_system_strings,
+    decode_system_tables, decode_terrain_maps, decode_terrain_tables, decode_texture_descriptors,
+    BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -74,6 +75,14 @@ pub(crate) fn market_layout(profile: &str) -> Option<(u32, u32)> {
 pub(crate) fn galaxy_layout(profile: &str) -> Option<(u32, u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0xe094c, 0xe1154, 0xee224)),
+        _ => None,
+    }
+}
+
+/// The small-dot size tables (`DATA_007835`, `7836`) RVA (v25), floppy 1.02 only.
+pub(crate) fn dot_table_layout(profile: &str) -> Option<u32> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some(0x10415c),
         _ => None,
     }
 }
@@ -427,6 +436,17 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: maps.bytes,
                 });
             }
+            if let Some(rva) = dot_table_layout(profile.id) {
+                let table = decode_dot_tables(&bytes, rva)?;
+                assets.push(Asset {
+                    id: "base:world/dot-tables".to_owned(),
+                    path: "world/dot-tables.bin".to_owned(),
+                    kind: AssetKind::DotTables {
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             if let Some(rvas) = star_point_layout(profile.id) {
                 let table = decode_star_point_tables(&bytes, rvas)?;
                 assets.push(Asset {
@@ -579,6 +599,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         + usize::from(galaxy_layout(profile.id).is_some())
         + usize::from(system_strings_layout(profile.id).is_some())
         + usize::from(star_point_layout(profile.id).is_some())
+        + usize::from(dot_table_layout(profile.id).is_some())
         + 4;
     // Plus the v10 model descriptor table, the v12 ship statistics table and the
     // v16 model record table.
@@ -589,7 +610,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 24,
+        format: "ffe-content-cache".to_owned(), format_version: 25,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

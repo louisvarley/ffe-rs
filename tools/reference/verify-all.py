@@ -69,6 +69,8 @@ ORACLES = [
     ("verify-hyperspace.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-system-names.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-map-stars.py", ["--reference", "{commands}", "--cache", "{cache}"]),
+    ("verify-dots.py", ["--reference", "{commands}", "--cache", "{cache}"]),
+    ("verify-galaxy-map.py", ["--smoke", "{smoke}", "--cache", "{cache}"]),
 ]
 
 

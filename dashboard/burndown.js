@@ -419,6 +419,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "Click-to-target and autopilot buttons in the playable: click a body (or T) to lock it, AUTOPILOT (K) flies there and docks at stations, STOP (Backspace) ends it. Landing at open-air starports is not ported."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "The galaxy map as the original draws it: the dot rasteriser (F1611, F1699-F1701) matches the executed original pixel for pixel on 12,000 cases; the scene (grid, nine sectors of stars, sphere, marker, selection, text) matches its map frame in 8,249 of 8,270 overlay pixels (cache v25). The jump sequence itself is not drawn."
     }
   ]
 };

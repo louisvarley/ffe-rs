@@ -44,7 +44,49 @@ in the order `7820`, `7821`, `7822`, `7828`; RVAs `0x104038`, `0x104070`, `0x104
 - `verify-assets.py`: the imported tables equal JJFFE's `DATA_007820`, `7821`, `7822` and `7828`.
 - Synthetic tests: `crates/ffe-core/tests/star_points.rs`.
 
-## Not yet
+## The dots (F1699, F1700, F1701, F1800, F1801, F1610, F1611) — ported, cache v25
 
-The point's pixels (`F1699`, `F1700`, `F1701`: the dot or shaded disc), the scene assembly of `F840`, the grid, sphere
-and marker, the selection logic, the console text and the screen in the playable.
+An unlit point (material bit `0x2000`: the stars) is a sphere seen from afar. F1699 turns its angle word (F1474) into a radius
+(shifted by the instance scale less 8) and, when the radius is at most an eighth of the depth, divides it by the depth
+(`special_divide`) into a size in pixels; nearer it computes the ellipse's centre and size from the exact projection (the near
+path, `model_dot::unlit_dot`); a radius of the depth or more draws nothing, and a depth under 0x40 is too near. F1700 then
+clips the dot to the view and queues F1800 (size 0 or over 9: one particle in the colour F1691 gives) or F1801 (sizes 1 to 9: a
+halo particle, of the size `DATA_007836[size-1]` in the colour mixed a third towards the sky, then a core of
+`DATA_007835[size-1]`). F1611 is the particle: sizes 0..5 are hand-drawn patterns, larger ones circles built from a midpoint
+walk, drawn as runs clipped to 320 by 158. Lit points are shaded spheres drawn by polygons, which are not ported.
+
+`ModelViewer` draws a point as `Shape::Spans` through `model_dot::point_dot`; a star's label is the system name (F830, selector
+`0x8400`) in the bitmap font at the projected point.
+
+## The scene (F840, F862, F828) — ported
+
+`ffe_rs::galaxy_map::GalaxyMap`: the centre (16.16 sectors), the zoom depth (`0x30d40`), the flags (`0x69`: grid, stalks),
+the two accumulators and the player's own position. The camera matrix is `build_yzt(lo << 7, hi << 7)` with its rows permuted
+as F840 does; the centre sector sits at `M * (0, -fy, -fx) >> 14` (+ zoom in z) with `fx`, `fy` the centre's offset from the
+sector middle, and the neighbours `M * (0, 0, 2^29) >> 13` and `M * (0, 2^29, 0) >> 13` further along. Order of drawing: the grid
+(`0xa6`), then for the centre sector and its eight neighbours the stars (`0xab`) and, for the 49 hand-made sectors, the model
+`DATA_008776` gives (`0xa8`, `0x155..0x159`, `0xad`, `0xae`: labels such as "CORE"), then the range sphere (`0xaa`, its radius word
+`range * 65535 / 3200`) about the player's system and the marker (`0xa9`) on the selection (F862 places both). Each model is culled
+as F1686 does. The selection is the star of the centre sector nearest the centre by `|dx| + |dy|` (the star bytes against the centre's
+offset in 512 units), within 32; it is looked for again when the centre moves.
+
+The console shows the date (green), then `name Dist. d light years`, a line break, the star's type text (`0x8488 + class`, with
+`0x8498 + n` before it for multiple stars) and `: ` and the system's description (F869's first dword, a `0x84xx` string); the
+corner shows `Sector: x,y` (relative to Sol's `0x1718, 0x1524`) and the fuel line (F828: `Fuel Required: n`, `Insufficient Fuel`,
+`Out of Range`).
+
+## Verification
+
+- `--map-stars` (see above) for the stars' calls and labels.
+- `--particle` and `--dots`: the particle rasteriser and unlit dots against the real F1610/F1611 and F1699 with the queue flushed;
+  `verify-dots.py`, `dots_reference.rs`: all 12,000 cases match pixel for pixel; trace SHA-256 in `verify-dots.py`'s output.
+- `verify-galaxy-map.py`: the real game's F3 map at a new game (Ross 154) against ours (`galaxy_map_view.rs`): 8,249 of the
+  original's 8,270 overlay pixels are ours too (we draw 8,269); 85% in the same colour. The rest are the dim grid lines and stalks,
+  whose 12-bit colours the original approximates in its runtime palette (not reproduced), and the textured "CORE" letters, which
+  the original shows in a light peach and we in grey.
+- Synthetic tests: `crates/ffe-core/tests/{star_points,model_dot}.rs`.
+
+## Not done
+
+The hyperspace jump sequence (F908-F910), the details page (F842) and picture mode (F844-F849), the string engine's templates
+(the fuel line's number is plain), the textured text colour, the mouse's hover pick of a star, and the lit-sphere branch of F1700.

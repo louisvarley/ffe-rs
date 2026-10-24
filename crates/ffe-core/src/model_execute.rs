@@ -50,6 +50,10 @@ pub struct PointEmission {
     /// F1479 projection of the vertex's view when queued (`None` if near or not
     /// queued); computed from the resolved view, not by the original handler.
     pub screen: Option<[i16; 2]>,
+    /// The vertex's view-space position when queued (what F1699 reads from the slot).
+    pub view: Option<[i32; 3]>,
+    /// The instance's operand scale (`+0x148`) F1699 shifts the radius by.
+    pub scale: i32,
 }
 
 /// A line operand event. This is the original handler's decoded input, not a
@@ -634,6 +638,8 @@ fn emit_point(
         vertex,
         context: working.clone(),
         screen: None,
+        view: None,
+        scale: instance.operand_scale,
     };
     result.points.push(emission.clone());
     if let (Some(queue), Some(live)) = (shared.order.as_mut(), vertices) {
@@ -647,6 +653,7 @@ fn emit_point(
         let key = model_depth::key(resolved.view, instance.key_scale);
         let mut emission = emission;
         emission.screen = crate::model_instance::project(resolved.view);
+        emission.view = Some(resolved.view);
         queue.push(key, Primitive::Point(emission))?;
         shared.queue.push(QueueEvent::Point(key));
     }
@@ -679,7 +686,7 @@ fn emit_line(
             working,
             instance.position,
             instance.generation,
-            false,
+            true,
         )?;
         let key = model_depth::key(vertex.view, instance.key_scale);
         // For drawing only: a failure here leaves the line undrawn
@@ -691,7 +698,7 @@ fn emit_line(
                 working,
                 instance.position,
                 instance.generation,
-                false,
+                true,
             )
             .ok();
         // F1703 queues through F1704: both ends clipped onto the

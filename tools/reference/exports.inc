@@ -520,3 +520,9 @@ GLOBAL _ref_system_name
 _ref_system_name equ FUNC_000830
 GLOBAL _ref_special_index
 _ref_special_index equ DATA_006800
+
+; Dot oracles (--particle, --dots): F1610 and F1699.
+GLOBAL _ref_draw_particle
+_ref_draw_particle equ FUNC_001610_DrawParticleClipped
+GLOBAL _ref_point
+_ref_point equ FUNC_001699

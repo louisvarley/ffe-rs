@@ -3,6 +3,7 @@ use ffe_rs::camera::{key_amount, ExternalKeys, ViewMode, ViewState};
 use ffe_rs::console::{acceleration_for_digit, Click, ConsoleState, ACCELERATION_NAMES};
 use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Controls, Flight, STEP};
+use ffe_rs::galaxy_map::{date_text, GalaxyMap};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
@@ -167,6 +168,15 @@ fn run() -> Result<(), String> {
     let mut help = false;
     let mut scenarios = false;
     let mut model_lab = None;
+    // The galaxy map's state and the tables it reads (cache v21 to v25).
+    let mut galaxy: Option<GalaxyMap> = None;
+    let mut map_drag: Option<(i32, i32)> = None;
+    let sector_tables = cache
+        .asset("base:world/galaxy-tables")
+        .and_then(|bytes| ffe_core::sector::Tables::new(bytes).ok());
+    let system_details = cache
+        .asset("base:world/system-tables")
+        .and_then(|bytes| ffe_core::galaxy::Tables::new(bytes).ok());
     let mut views = ViewState::default();
     // The original flight model (key O); None runs the synthetic prototype flight.
     let mut original: Option<OriginalFlight> = None;
@@ -419,6 +429,63 @@ fn run() -> Result<(), String> {
                     toggle(nav, NavView::Galaxy);
                     held_controls.disarm(&keys_down);
                 }
+                // The galaxy map (the original's F3 screen) stands in for the system list.
+                if nav.view == NavView::Galaxy {
+                    if galaxy.is_none() && sector_tables.is_some() {
+                        if let Some(home) = nav.current_position() {
+                            galaxy = Some(GalaxyMap::new(home, nav.reach().unwrap_or(0)));
+                        }
+                    }
+                } else {
+                    galaxy = None;
+                }
+                if let Some(map) = galaxy.as_mut() {
+                    let held = |key| window.is_key_down(key);
+                    let slow = held(Key::LeftShift) || held(Key::RightShift);
+                    let rate = if slow { 0.25 } else { 1.0 };
+                    // Arrows move the centre (three quarters of a sector a second), Page Up/Down
+                    // or +/- zoom (the original's 0x1f40 a frame), dragging turns the view.
+                    let step =
+                        (f64::from(ffe_rs::galaxy_map::SECTOR) * 0.75 * rate * elapsed) as i32;
+                    let (mut dx, mut dy) = (0, 0);
+                    if held(Key::Left) {
+                        dx -= step;
+                    }
+                    if held(Key::Right) {
+                        dx += step;
+                    }
+                    if held(Key::Up) {
+                        dy += step;
+                    }
+                    if held(Key::Down) {
+                        dy -= step;
+                    }
+                    if dx != 0 || dy != 0 {
+                        map.scroll(dx, dy);
+                    }
+                    let zoom = (f64::from(0x1f40) * rate * elapsed / 0.02) as i32;
+                    if held(Key::PageUp) || held(Key::Equal) || held(Key::NumPadPlus) {
+                        map.zoom_by(-zoom);
+                    }
+                    if held(Key::PageDown) || held(Key::Minus) || held(Key::NumPadMinus) {
+                        map.zoom_by(zoom);
+                    }
+                    map.zoom = map.zoom.max(0x2000);
+                    if pressed(Key::C) {
+                        map.recentre();
+                    }
+                    let point = window
+                        .get_unscaled_mouse_pos(MouseMode::Pass)
+                        .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()));
+                    if active && mouse_down {
+                        if let (Some(before), Some(now)) = (map_drag, point) {
+                            map.rotate((now.0 - before.0) as i16, (now.1 - before.1) as i16);
+                        }
+                        map_drag = point;
+                    } else {
+                        map_drag = None;
+                    }
+                }
                 let mut hyperspace = false;
                 if console_click == Some(Click::Hyperspace) {
                     if nav.view == NavView::Galaxy {
@@ -429,10 +496,10 @@ fn run() -> Result<(), String> {
                     }
                 }
                 if nav.view != NavView::Closed {
-                    if pressed(Key::Up) {
+                    if pressed(Key::Up) && galaxy.is_none() {
                         nav.step_selection(-1);
                     }
-                    if pressed(Key::Down) {
+                    if pressed(Key::Down) && galaxy.is_none() {
                         nav.step_selection(1);
                     }
                     if nav.view == NavView::System {
@@ -444,7 +511,7 @@ fn run() -> Result<(), String> {
                         }
                     }
                     let mut enter = pressed(Key::Enter);
-                    if let Some((x, y)) = click_point {
+                    if let Some((x, y)) = click_point.filter(|_| galaxy.is_none()) {
                         let count = nav.lines(ship_position(&original)).len();
                         let row = if nav.view == NavView::System {
                             Screen::nav_row(x, y).filter(|row| *row < count)
@@ -481,6 +548,21 @@ fn run() -> Result<(), String> {
                                 OriginalFlight::from_flight(&state, stats.as_ref())
                                     .with_time_acceleration(acceleration),
                             );
+                        }
+                        if hyperspace && galaxy.is_some() {
+                            // The map's selection must be a system the game has bodies for.
+                            let entry = galaxy
+                                .as_ref()
+                                .and_then(|map| map.selected.as_ref())
+                                .and_then(|selected| nav.entry_for_code(selected.code));
+                            match entry {
+                                Some(index) => nav.selected = index,
+                                None => {
+                                    hyperspace = false;
+                                    message = "Unexplored system: only the systems on offer can be entered (centre one of them)."
+                                        .to_owned();
+                                }
+                            }
                         }
                         if hyperspace {
                             let index = nav.selected;
@@ -1285,6 +1367,32 @@ fn run() -> Result<(), String> {
                 ),
             });
         }
+        screen.galaxy = None;
+        if let (Some(map), Some(tables), Some(viewer), Some(nav)) = (
+            galaxy.as_mut(),
+            sector_tables.as_ref(),
+            scene.as_ref(),
+            nav.as_ref(),
+        ) {
+            map.update_selection(tables);
+            match map.render(viewer, tables) {
+                Ok(shapes) => {
+                    let report = map.selected.as_ref().and_then(|selected| {
+                        nav.report_for(ffe_core::sector::distance(map.home, selected.position))
+                    });
+                    screen.galaxy = Some(ffe_rs::screen::MapScene {
+                        shapes,
+                        sector: map.sector_text(),
+                        fuel: map.fuel_text(report.as_ref()),
+                        date: date_text(nav.clock),
+                        info: map
+                            .describe(viewer, system_details.as_ref())
+                            .unwrap_or_default(),
+                    });
+                }
+                Err(error) => message = format!("Map error: {error}"),
+            }
+        }
         screen.market = None;
         if state.mode == ffe_rs::flight::Mode::Docked {
             if let Some(nav) = nav.as_mut() {
@@ -1402,7 +1510,10 @@ fn run() -> Result<(), String> {
                 ],
             );
         }
-        if let Some(nav) = nav.as_ref().filter(|nav| nav.view != NavView::Closed) {
+        if let Some(nav) = nav
+            .as_ref()
+            .filter(|nav| nav.view != NavView::Closed && galaxy.is_none())
+        {
             let ship = original
                 .as_ref()
                 .map_or([0; 3], |model| model.player().motion.position);

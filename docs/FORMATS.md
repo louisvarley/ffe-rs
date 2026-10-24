@@ -877,6 +877,9 @@ parts are future scope, not requirements for the first image exporter.
   `DATA_006164..6169` (RVA `0xdde08`; the supply, population and danger multipliers and the 33
   commodities' four dwords) followed by the 38 commodity names `DATA_006216..6253` (RVA `0xde970`,
   contiguous), each with its zero; floppy 1.02 only. See `docs/notes/market.md`.
+- V25 has 1793 assets: adds `base:world/dot-tables`, `world/dot-tables.bin`, 18 bytes: the core sizes (`DATA_007835`) then
+  the halo sizes (`DATA_007836`) of the small dots a point command draws, nine each; RVA `0x10415c`, floppy 1.02 only. See
+  `docs/notes/galaxy-map.md`.
 - V24 (still 1792 assets): each `base:model-glyphs/NNN` record gains `newline_vertex`, the font descriptor's byte `+0x3c`
   (58, 38 and 20 for fonts 0, 1 and 2): the vertex F1747 moves the pen to for a control code, i.e. a new line. Absent in
   older caches, where a text with a newline stops at it.

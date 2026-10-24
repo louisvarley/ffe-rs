@@ -4,6 +4,7 @@ pub mod camera;
 pub mod console;
 pub mod docking;
 pub mod flight;
+pub mod galaxy_map;
 pub mod indexed;
 pub mod input;
 pub mod model_lab;
