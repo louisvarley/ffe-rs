@@ -3302,6 +3302,8 @@ extern void (*ref_emit)(void *,void *,void *,long *,long);
 extern long ref_emit_level;
 extern unsigned char ref_det_a[],ref_det_b[];
 extern unsigned long ref_order_head;
+extern unsigned char ref_group_open[],ref_group_close[],ref_ring_quad[],ref_sky[];
+extern unsigned long ref_haze_flag,ref_haze_distance,ref_haze_colour,ref_haze_scale,ref_sky_flag;
 static unsigned long draw_emits;
 static uint64_t draw_hash;
 static unsigned long draw_first[48][35];
@@ -3359,6 +3361,9 @@ static unsigned long draw_handler(unsigned long word,unsigned long position)
     if(word==(unsigned long)ref_tex_draw_triangle) return 0xf1800007UL;
     if(word==(unsigned long)ref_det_b) return 0xf1800008UL;
     if(word==(unsigned long)ref_flat_draw_quad) return 0xf1800009UL;
+    if(word==(unsigned long)ref_ring_quad) return 0xf180000aUL;
+    if(word==(unsigned long)ref_group_open) return 0xf1800010UL;
+    if(word==(unsigned long)ref_group_close) return 0xf1800011UL;
     /* A header's link to the previous header: that header's position. */
     if(position<65536 && draw_link[position] && word) return 0xf2000000UL|((word-(unsigned long)ref_order_base)/4);
     return word;
@@ -3400,6 +3405,7 @@ static int surface_draw_vectors(int only)
         long word0,kind,word8,word10,records=0,used=0,k,fault;
         long origin[3],vectors[9],detail=texture_random(-1,4);
         double rotation[9],radius=(double)(1UL<<texture_random(21,28))*(0.5+terrain_unit()),zf;
+        unsigned char sky_in[3];
         unsigned long keys[16],consumed=0,words,i;
         int own=texture_random(0,9)<7;
         model=ref_model(index);
@@ -3488,6 +3494,8 @@ static int surface_draw_vectors(int only)
         memset(ref_tr_pool,0,sizeof(ref_tr_pool));memset(ref_tr_edge_pool,0,sizeof(ref_tr_edge_pool));
         memset(ref_tr_layers,0,sizeof(unsigned long)*128);
         ref_tr_nodes_used=0;ref_tr_edges_used=0;
+        ref_haze_flag=ref_haze_distance=ref_haze_colour=ref_haze_scale=0;ref_sky_flag=0;
+        for(k=0;k<3;++k) {sky_in[k]=(unsigned char)texture_random(0,15);ref_sky[k]=sky_in[k];}
         memset(model_queue,0,sizeof(model_queue));
         ref_order_base=model_queue;ref_order_active=0;ref_order_state=0;
         ref_order_init(model_queue);
@@ -3515,7 +3523,7 @@ static int surface_draw_vectors(int only)
             draw_out=open_memstream(&buffer,&size);
         fprintf(draw_out,"{\"case\":%lu,\"model\":%ld,\"seed\":%lu,\"word0\":%ld,\"kind\":%ld,\"word8\":%ld,\"word10\":%ld,\"detail\":%ld,\"scale\":%ld,\"zoom\":%ld,\"origin\":[%ld,%ld,%ld],\"vectors\":[",n,index,seed,word0,kind,word8,word10,detail,(long)instance[0x148/4],(long)instance[0x130/4],origin[0],origin[1],origin[2]);
         for(k=0;k<9;++k) fprintf(draw_out,"%s%ld",k?",":"",vectors[k]);
-        fprintf(draw_out,"],\"light\":[%ld,%ld,%ld],\"shades\":[",(long)instance[0x134/4],(long)instance[0x138/4],(long)instance[0x13c/4]);
+        fprintf(draw_out,"],\"sky\":[%u,%u,%u],\"light\":[%ld,%ld,%ld],\"shades\":[",sky_in[0],sky_in[1],sky_in[2],(long)instance[0x134/4],(long)instance[0x138/4],(long)instance[0x13c/4]);
         for(k=0;k<24;++k) fprintf(draw_out,"%s%u",k?",":"",((unsigned char *)instance)[0x84+k]);
         fprintf(draw_out,"],\"stream\":[");
         for(k=0;k<(long)consumed;++k) fprintf(draw_out,"%s%u",k?",":"",stream[k]);
@@ -3544,7 +3552,7 @@ static int surface_draw_vectors(int only)
                 int j;
                 for(j=0;j<4;++j) {queue_hash^=(w>>(8*j))&0xff;queue_hash*=UINT64_C(1099511628211);}
             }
-            fprintf(draw_out,"],\"words\":%lu,\"queue_hash\":\"%016llx\",\"queue\":[",words,(unsigned long long)queue_hash);
+            fprintf(draw_out,"],\"haze\":[%ld,%ld,%lu,%ld],\"sky_out\":[%ld,%u,%u,%u],\"words\":%lu,\"queue_hash\":\"%016llx\",\"queue\":[",(long)ref_haze_flag,(long)ref_haze_distance,ref_haze_colour,(long)ref_haze_scale,(long)ref_sky_flag,ref_sky[0],ref_sky[1],ref_sky[2],words,(unsigned long long)queue_hash);
             for(i=0;i<words && (i<600 || draw_dump);++i) fprintf(draw_out,"%s%lu",i?",":"",draw_handler(ref_order_base[i],i));
         }
         fprintf(draw_out,"]}\n");

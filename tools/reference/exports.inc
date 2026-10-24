@@ -388,6 +388,15 @@ _ref_surface_cmd equ FUNC_001874
 GLOBAL _ref_surface
 _ref_surface equ FUNC_001876
 GLOBAL _ref_order_head
+GLOBAL _ref_group_open
+GLOBAL _ref_group_close
+GLOBAL _ref_ring_quad
+GLOBAL _ref_haze_flag
+GLOBAL _ref_haze_distance
+GLOBAL _ref_haze_colour
+GLOBAL _ref_haze_scale
+GLOBAL _ref_sky_flag
+GLOBAL _ref_sky
 GLOBAL _ref_emit
 GLOBAL _ref_emit_level
 GLOBAL _ref_det_a
@@ -395,6 +404,15 @@ GLOBAL _ref_det_b
 GLOBAL _ref_surface_sign
 _ref_surface_sign equ FUNC_001875
 _ref_order_head equ DATA_009255
+_ref_group_open equ FUNC_001792
+_ref_group_close equ FUNC_001793
+_ref_ring_quad equ FUNC_001810
+_ref_haze_flag equ DATA_009262
+_ref_haze_distance equ DATA_009263
+_ref_haze_colour equ DATA_009265
+_ref_haze_scale equ DATA_009267
+_ref_sky_flag equ DATA_008814
+_ref_sky equ DATA_008815
 _ref_emit equ DATA_009270
 _ref_emit_level equ DATA_009286
 _ref_det_a equ FUNC_001806
