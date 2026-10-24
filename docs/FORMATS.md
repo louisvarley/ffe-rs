@@ -183,6 +183,12 @@ contract, not the full schema/examples in sections 2.1 onward.
   the 329-record galaxy table of 54-byte records at offset 432, the four special
   system codes at 18,252 and the system generator's tables from 18,492; see
   `ffe_core::galaxy`. The relocated handler pointers at 19,048 are not used).
+- V26 adds `base:gameplay/pads` (`gameplay/pads.bin`, type `pad_tables`): F650's
+  five open-air pad tables `DATA_006175..006179` (16 pads, 192 bytes) plus the
+  first six dwords of `DATA_006180` (24 bytes) that the default table's bays 6/7
+  read past into, exactly as the original does; 216 bytes from file offset
+  `0xc7e0c` (RVA `0xde20c`) in floppy 1.02, verified byte-for-byte against the
+  executable and the declarations. Semantics: `ffe_core::pads`.
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
   v10). Tools read every version. The playable requires v2 font content;
