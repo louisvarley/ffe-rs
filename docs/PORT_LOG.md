@@ -4,6 +4,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — Object light sign and one frame-wide light (v0.48m)
+
+Read from F1534/F1535/F1481 (see the analysis below); **not yet pixel-verified**.
+
+- The original's light vector is the **observer's global position, normalised**
+  (the star is assumed at the origin): light travels *from the star towards the
+  observer*. F1481 lights a face when `dot(object light, normal) < 0`.
+- The port's `Screen::sun` points **towards** the star and was passed through
+  unnegated, so ships and stations were lit on the wrong side. `scene_light`
+  now negates it, and `draw_system_station` uses that one frame-wide light
+  instead of a per-station direction.
+- Still to do (world-9): the star's own shade table (`DATA_007759`, selected by
+  the star model descriptor `+0x24 >> 4 & 7`) is imported but never used — every
+  object uses the default F960 shades. The planet path (`Disc.light` is
+  "towards star" and F1840 tests `dot > 0`) needs its sign checked separately.
+
 ## 2026-10-24 — The black band in the lift (v0.48l)
 
 - The lift filled the view correctly; `Screen::draw` then cleared rows 119..157

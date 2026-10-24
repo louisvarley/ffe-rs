@@ -745,6 +745,9 @@ impl Screen {
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
             *pixel = self.palette[usize::from(*index)];
         }
+        if std::env::var_os("FFE_DEBUG_VIEW_BG").is_some() {
+            self.frame[..320 * VIEW_HEIGHT].fill(0x00ff_00ff);
+        }
         if let Some(map) = self.galaxy.take().filter(|_| scene.is_some()) {
             self.draw_galaxy(scene.unwrap(), &map);
             self.present();
@@ -1331,7 +1334,9 @@ impl Screen {
     /// star's direction in system flight, else the original's fixed F960 light.
     fn scene_light(&self, scene: &ModelViewer, camera: &Camera) -> [f64; 3] {
         match self.sun {
-            Some(direction) => camera.direction(direction),
+            // `sun` points toward the star; the original's light vector (F1535,
+            // F1481's `dot < 0` test) points from the star toward the observer.
+            Some(direction) => camera.direction(direction.map(|value| -value)),
             None => camera.direction(scene.light_direction()),
         }
     }
@@ -1444,8 +1449,9 @@ impl Screen {
             std::array::from_fn(|i| (0..3).map(|j| spin[k][j] * station.orientation[j][i]).sum())
         });
         let rows = axes.map(|axis| camera.direction(axis));
-        let length = station.centre.iter().map(|v| v * v).sum::<f64>().sqrt();
-        let light = camera.direction(station.centre.map(|v| -v / length.max(1.0)));
+        // One frame-wide light from the local star (F1535), not a per-station
+        // direction; the sign convention is `scene_light`'s.
+        let light = self.scene_light(scene, camera);
         let mut inputs = AnimationInputs::original(station.tics, 0, &scene.shades());
         inputs.jitter = self.jitter.cursor;
         match scene.render_scene_with(station.model, rows, origin, light, &inputs) {

@@ -1149,7 +1149,7 @@ impl ModelViewer {
                 ..shading
             };
             let mut sky = Sky::default();
-            let _ = draw_planet(
+            let outcome = draw_planet(
                 &mut terrain,
                 &scene,
                 &stream,
@@ -1160,6 +1160,7 @@ impl ModelViewer {
                 &mut sky,
                 &mut queue,
             );
+            eprintln!("draw_planet: {outcome:?} queue {} words", queue.words.len());
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
             for (_, at) in order {

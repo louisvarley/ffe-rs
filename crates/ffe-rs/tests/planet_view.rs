@@ -540,6 +540,93 @@ fn flight_view_shows_stars() {
     }
 }
 
+/// The approach from far out to the standoff: how much of the disc is black at
+/// each range, and whether any range loses the surface altogether.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn planet_approach_distances() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{bodies, galaxy};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::Disc;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let entries = galaxy(&cache).unwrap();
+    let sol = entries.iter().find(|e| e.name == "Sol").unwrap();
+    let list = bodies(&cache, sol, [0x1000, 0]).unwrap();
+    let body = list.iter().find(|b| b.name == "Mars").unwrap();
+    let radius = body.radius as f64 / UNIT;
+    let centre = body.position.map(|v| v as f64 / UNIT);
+    for d in [16.0f64, 10.0, 6.0, 4.0, 3.0, 2.5, 2.0, 1.8, 1.6, 1.5] {
+        let mut state = Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        };
+        state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        state.position = [centre[0], centre[1], centre[2] - d * radius];
+        screen.discs = vec![Disc {
+            centre,
+            radius,
+            light: [0.0, 0.0, -1.0],
+            colours: (12, 4),
+            star: false,
+            model: Some((body.model, body.seed)),
+            orientation: body.orientation,
+        }];
+        screen.draw(
+            &state,
+            ViewState::default(),
+            Some(&viewer),
+            false,
+            false,
+            "",
+        );
+        let extent = viewer.surface_extent.get();
+        // The disc's expected screen radius (tan of the angular radius).
+        let angular = (radius * radius / (d * d * radius * radius - radius * radius))
+            .sqrt()
+            .atan();
+        let px = 256.0 * angular.tan();
+        let mut inside = 0usize;
+        let mut black = 0usize;
+        let mut untouched = 0usize;
+        for y in 0..158i32 {
+            for x in 0..320i32 {
+                let (dx, dy) = (f64::from(x) + 0.5 - 160.0, f64::from(y) + 0.5 - 79.0);
+                if dx * dx + dy * dy <= (px * 0.85) * (px * 0.85) {
+                    inside += 1;
+                    let pixel = screen.logical_pixels()[y as usize * 320 + x as usize];
+                    if pixel == 0 {
+                        black += 1;
+                    }
+                    if pixel == 0x00ff_00ff {
+                        untouched += 1;
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "d {d:>4} radii: extent {extent}, disc {px:.1}px, black {}/{} untouched {}",
+            black, inside, untouched
+        );
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let mut ppm = b"P6\n320 200\n255\n".to_vec();
+            for p in screen.logical_pixels() {
+                ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+            }
+            std::fs::write(
+                std::path::Path::new(&dir).join(format!("approach_{d:.1}.ppm")),
+                ppm,
+            )
+            .unwrap();
+        }
+    }
+}
+
 /// The navigation list's layout.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]

@@ -30,12 +30,17 @@ struct Options {
     /// Directory for a scripted undock capture (starts the launch sequence and
     /// saves every tenth frame, then exits).
     capture: Option<PathBuf>,
+    /// Directory for a scripted planet approach: the ship is placed a few radii
+    /// out from the nearest planet, the autopilot is engaged, and frames are
+    /// saved through the approach.
+    capture_planet: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
     let mut root = None;
     let mut smoke_frames = None;
     let mut capture = None;
+    let mut capture_planet = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
@@ -45,6 +50,10 @@ fn options() -> Result<Options, String> {
         } else if arg == "--capture" && capture.is_none() {
             capture = Some(PathBuf::from(
                 args.next().ok_or("--capture requires a directory")?,
+            ));
+        } else if arg == "--capture-planet" && capture_planet.is_none() {
+            capture_planet = Some(PathBuf::from(
+                args.next().ok_or("--capture-planet requires a directory")?,
             ));
         } else if arg == "--smoke-frames" && smoke_frames.is_none() {
             let frames = args
@@ -58,7 +67,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--smoke-frames 1..300]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -81,6 +90,7 @@ fn options() -> Result<Options, String> {
             .map_err(|e| format!("Cannot resolve root: {e}"))?,
         smoke_frames,
         capture,
+        capture_planet,
     })
 }
 
@@ -144,6 +154,14 @@ fn snapshot(directory: &Path, state: &Flight) -> Result<String, String> {
     Ok(format!(
         "Saved {name}. Shift+F5 reloads it; prior snapshots kept."
     ))
+}
+
+fn write_shot(dir: &Path, name: &str, screen: &Screen) {
+    let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+    for pixel in &screen.pixels {
+        out.extend([(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]);
+    }
+    let _ = fs::write(dir.join(name), out);
 }
 
 fn run() -> Result<(), String> {
@@ -225,6 +243,64 @@ fn run() -> Result<(), String> {
             let _ = nav.begin_launch();
         }
     }
+    // A scripted approach to the nearest planet for screenshots: put the ship a
+    // few radii out on the same side as the starting station, flying the same
+    // autopilot and original flight model the playable uses.
+    let mut captured_planet: Option<String> = None;
+    if let Some(dir) = &options.capture_planet {
+        fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        if let Some(nav) = nav.as_mut() {
+            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+            let from = nav
+                .docked
+                .and_then(|index| nav.bodies.get(index))
+                .map_or([0; 3], |station| station.position);
+            let nearest = nav
+                .bodies
+                .iter()
+                .enumerate()
+                .filter(|(_, body)| body.kind == NavKind::Planet)
+                .min_by(|a, b| {
+                    distance(from, a.1.position).total_cmp(&distance(from, b.1.position))
+                })
+                .map(|(index, _)| index);
+            if let Some(index) = nearest {
+                let body = nav.bodies[index].clone();
+                // Three radii out, on the station's side of the planet (the face the
+                // launch shows), so the local star lights the same hemisphere.
+                let out: [f64; 3] = std::array::from_fn(|k| (from[k] - body.position[k]) as f64);
+                let length = out.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0);
+                let reach =
+                    (3.0 * body.radius as f64).max(ffe_rs::navigation::standoff(&body) * 1.5);
+                let start: [f64; 3] = std::array::from_fn(|k| {
+                    body.position[k] as f64 / unit + out[k] / length * reach / unit
+                });
+                state.mode = ffe_rs::flight::Mode::Flight;
+                state.system_flight = true;
+                state.position = start;
+                state.axes = None;
+                state.yaw = 0.0;
+                state.pitch = 0.0;
+                let stats = scene
+                    .as_ref()
+                    .and_then(|scene| scene.ship_stats(state.ship));
+                let mut model = OriginalFlight::from_flight(&state, stats.as_ref())
+                    .with_time_acceleration(acceleration);
+                model.teleport(start.map(|v| (v * unit) as i64));
+                model.face(body.position);
+                model.apply(&mut state);
+                original = Some(model);
+                nav.lock(index);
+                nav.engage_locked();
+                captured_planet = Some(body.name);
+                eprintln!(
+                    "capture: planet {} index {index} start {start:?} target {:?}",
+                    captured_planet.as_deref().unwrap_or(""),
+                    nav.target
+                );
+            }
+        }
+    }
     // The station models' docking faces (their +z ends) and sizes, from the vertices.
     if let (Some(nav), Some(scene)) = (nav.as_mut(), scene.as_ref()) {
         for model in STATION_MODELS {
@@ -250,14 +326,28 @@ fn run() -> Result<(), String> {
         ),
         None => "Docked. L launches.".to_owned(),
     };
+    if let Some(name) = &captured_planet {
+        message = format!("Capture: autopilot to {name} from three radii.");
+    }
     let mut last = Instant::now();
     let mut accumulator = 0.0;
     let mut frames = 0;
     let mut held_controls = input::HeldControls::default();
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        if options.capture_planet.is_some() && frames < 3 {
+            eprintln!("capture: loop frame {frames} open {}", window.is_open());
+        }
         let now = Instant::now();
-        let elapsed = now.duration_since(last).as_secs_f64().min(0.1);
+        let measured = now.duration_since(last).as_secs_f64().min(0.1);
         last = now;
+        // The planet capture is scripted: a fixed 0.1 s (the original model's
+        // largest frame) per presented frame, so the approach takes minutes of
+        // world time in a minute of wall time.
+        let elapsed = if options.capture_planet.is_some() {
+            0.1
+        } else {
+            measured
+        };
         let active = window.is_active();
         let keys_down = window.get_keys();
         held_controls.update(
@@ -1574,11 +1664,13 @@ fn run() -> Result<(), String> {
         }
         if let Some(dir) = &options.capture {
             if frames % 10 == 0 {
-                let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
-                for pixel in &screen.pixels {
-                    out.extend([(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]);
-                }
-                let _ = fs::write(dir.join(format!("shot-{frames:04}.ppm")), out);
+                write_shot(dir, &format!("shot-{frames:04}.ppm"), &screen);
+            }
+        } else if let Some(dir) = &options.capture_planet {
+            // Every tenth of a second of screen time (every 100 frames) through
+            // the approach, plus the first frame.
+            if frames % 100 == 0 {
+                write_shot(dir, &format!("planet-{frames:04}.ppm"), &screen);
             }
         }
         if let Some(viewer) = &model_viewer {
@@ -1661,8 +1753,14 @@ fn run() -> Result<(), String> {
             .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
             .map_err(|e| format!("Window update: {e}"))?;
         frames += 1;
+        let arrived = options.capture_planet.is_some()
+            && nav.as_ref().is_some_and(|nav| nav.target.is_none());
+        if arrived {
+            eprintln!("capture: arrived after {frames} frames");
+        }
         if options.smoke_frames.is_some_and(|limit| frames >= limit)
             || (options.capture.is_some() && frames >= 400)
+            || (options.capture_planet.is_some() && (frames >= 6000 || arrived))
         {
             break;
         }
