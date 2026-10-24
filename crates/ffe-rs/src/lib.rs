@@ -13,6 +13,7 @@ pub mod model_lab;
 pub mod model_viewer;
 pub mod navigation;
 pub mod original_flight;
+pub mod prefs;
 pub mod saves;
 pub mod screen;
 pub mod ships;

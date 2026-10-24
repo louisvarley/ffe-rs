@@ -252,6 +252,21 @@ fn cameras_sit_on_the_ship_or_behind_it_along_the_turned_axes() {
     );
     assert!((side.position[2] - 30.0).abs() < 1e-9 && (side.position[0] - 10.0).abs() > 9.0);
     assert_eq!(side.project(state.position, true), Some((160, 79)));
+    // "Lock external view to ship" off: the same quarter turn leaves the offset
+    // on the ship's own forward axis (`DATA_009020`).
+    let mut unlocked = views(
+        ViewMode::External,
+        ExternalCamera {
+            yaw: 0x4000,
+            ..level
+        },
+    );
+    unlocked.lock_external = false;
+    let unlocked = Camera::new(&state, &unlocked, None, 100.0);
+    assert!((unlocked.position[2] - 20.0).abs() < 1e-9);
+    assert!((unlocked.position[0] - 10.0).abs() < 1e-9);
+    // It still turns; the ship is no longer centred because the offset did not turn.
+    assert_ne!(unlocked.axes[2], [0.0, 0.0, 1.0]);
 }
 
 #[test]
