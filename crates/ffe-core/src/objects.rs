@@ -48,6 +48,26 @@ pub struct Models<'a> {
 }
 
 impl ModelInfo {
+    /// F1533's two radii (`+0x138` outer, `+0x140` inner) in world units: the
+    /// model's radius words shifted by `scale + scale_offset + 7 - 15`.
+    pub fn radii(&self) -> (i64, i64) {
+        let exponent = self.scale.wrapping_add(self.scale_offset).wrapping_add(7);
+        (
+            ffp_to_i64(Ffp::new(self.radius, exponent as i16)),
+            ffp_to_i64(Ffp::new(self.collision_radius, exponent as i16)),
+        )
+    }
+
+    /// F1533's class byte (`+0x14c`): the model's `flags >> 4 & 7`, with 0x80
+    /// for a complex collision shape.
+    pub fn class(&self) -> u8 {
+        let mut class = (self.flags >> 4) & 7;
+        if self.complex {
+            class |= 0x80;
+        }
+        class
+    }
+
     /// The record for `model` from the cache's 20-byte model records and its
     /// 48-byte statistics records (`base:model/records`, `base:ship/stats`).
     pub fn read(records: &[u8], stats: &[u8], model: u32) -> Option<ModelInfo> {

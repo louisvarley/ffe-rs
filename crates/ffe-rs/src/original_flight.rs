@@ -7,8 +7,12 @@
 //! original's. See `docs/notes/player.md`.
 use crate::flight::Flight;
 use crate::ships::ShipStats;
+use ffe_core::collision::Contact;
+use ffe_core::frames::{Bodies, Body, Words};
+use ffe_core::objects::ModelInfo;
 use ffe_core::physics::Motion;
 use ffe_core::player::{Controls, Player, SteerKeys, ThrusterKeys};
+use ffe_core::surface::SurfaceTools;
 use ffe_core::thrust::Limits;
 
 /// Position units (about a millimetre) per flight unit.
@@ -77,6 +81,7 @@ impl OriginalFlight {
                 model: flight.ship,
                 gun_mounts: stats.map_or(0, |s| s.gun_mounts),
                 drift: 0x3c,
+                craft: 1,
                 ..Motion::default()
             },
             limits,
@@ -238,6 +243,108 @@ impl OriginalFlight {
     /// One frame of `elapsed` seconds with `keys` held: F1037/F1038 then F1041,
     /// F601/F602 and F1512 over the elapsed time in the original's units.
     pub fn step(&mut self, elapsed: f64, keys: &Keys) -> Result<(), String> {
+        let (_, world_tics) = self.prepare(elapsed, keys);
+        self.player
+            .step(&ThrusterKeys::default(), i64::from(world_tics))
+    }
+
+    /// One frame with F569's collision scan against `parent` (a planet, moon or
+    /// starport) as the player's frame of reference: the original's F570/F575
+    /// contact code runs, so a soft touch settles the ship on the terrain or the
+    /// starport and a crash bounces it. `parent.position` is the body's absolute
+    /// position. The player is body 1 and the parent body 2 in a two-body world;
+    /// the scan's object index in the returned [`Contact`] is 2.
+    pub fn step_landing(
+        &mut self,
+        elapsed: f64,
+        keys: &Keys,
+        parent: &Body,
+        parent_position: [i64; 3],
+        player_model: &ModelInfo,
+        tools: Option<&SurfaceTools>,
+    ) -> Result<Contact, String> {
+        let (_, world_tics) = self.prepare(elapsed, keys);
+        let (outer_radius, inner_radius) = player_model.radii();
+        let vector: [i64; 3] = std::array::from_fn(|k| {
+            self.player.motion.position[k].wrapping_sub(parent_position[k])
+        });
+        // The playable keeps the ship's absolute position between frames; the scan
+        // wants it in the parent's linear frame.
+        self.player.motion.parent = 2;
+        self.player.motion.rotating = 0;
+        self.player.motion.updated = 0;
+        self.player.motion.switch_delay = 0;
+        self.player.motion.craft = 1;
+        self.player.motion.position = vector;
+        // The two-body world is rebuilt every frame; do not let the original's
+        // 13-tick frame selector run against it.
+        self.player.reference_counter = 0xd;
+        // A mathematically exact Q31 row set makes the landing dot product of two
+        // unit vectors round past 0x7fffffff and wrap negative; the original's
+        // integrated rows are a hair under unit length. Keep the same margin.
+        for row in &mut self.player.motion.orientation {
+            for value in row {
+                *value = (f64::from(*value) * 0.999_99) as i32;
+            }
+        }
+
+        let mut world = Bodies {
+            stamp: 1,
+            frame_tics: world_tics,
+            player: 1,
+            ..Bodies::default()
+        };
+        world.live[1] = true;
+        world.physical[1] = true;
+        world.live[2] = true;
+        world.physical[2] = true;
+        let motion = self.player.motion;
+        let mut words = Words::default();
+        // The landing gear is down (`+0x9e` word 1 = 0xffff): a slow, level touch
+        // lands instead of crashing.
+        words.0[1] = 0xffff;
+        world.body[1] = Body {
+            position: vector,
+            velocity: motion.velocity,
+            parent: 2,
+            index: 1,
+            kind: 0,
+            orientation: std::array::from_fn(|k| motion.orientation[k / 3][k % 3]),
+            outer_radius,
+            inner_radius,
+            shape: player_model.class(),
+            model: motion.model,
+            words,
+            ..Body::default()
+        };
+        let mut planet = *parent;
+        planet.position = parent_position;
+        planet.parent = 0;
+        planet.rotating = 0;
+        planet.index = 2;
+        world.body[2] = planet;
+
+        let contact = self.player.tick_with(
+            &ThrusterKeys::default(),
+            i64::from(world_tics),
+            &mut world,
+            1,
+            tools,
+        )?;
+        // Undo the per-frame landing margin so it does not accumulate.
+        self.player.motion.renormalise();
+        let absolute = world.absolute(1).unwrap_or(vector);
+        self.player.motion.position = absolute;
+        self.player.motion.parent = 0;
+        self.player.motion.rotating = 0;
+        self.player.motion.updated = 0;
+        self.player.motion.switch_delay = 0;
+        Ok(contact)
+    }
+
+    /// The key state F1037/F1038 and set speed for one frame; returns the input
+    /// tics and the accelerated world tics.
+    fn prepare(&mut self, elapsed: f64, keys: &Keys) -> (u32, u32) {
         // The input time is real time; the world time is that scaled by the
         // acceleration (`ms * acceleration / 20`, 994 per 20 ms at 1x).
         let tics = (elapsed.clamp(0.0, 0.1) * TICS_PER_SECOND) as u32;
@@ -276,8 +383,7 @@ impl OriginalFlight {
         self.player.input_time = tics;
         self.player.frame_tics = world_tics;
         self.player.update_set_speed(&controls);
-        self.player
-            .step(&ThrusterKeys::default(), i64::from(world_tics))
+        (tics, world_tics)
     }
 
     /// Copy the state into `flight`: position and velocity in flight units, the

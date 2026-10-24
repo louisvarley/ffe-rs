@@ -9,6 +9,8 @@ fn station() -> Body {
         kind: Kind::Station,
         position: [2_000_000, 0, 0],
         radius: 1_000_000,
+        inner_radius: 1_000_000,
+        parent: None,
         model: 72,
         seed: 0,
         slot: 1,

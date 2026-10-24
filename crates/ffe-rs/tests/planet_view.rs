@@ -659,3 +659,416 @@ fn nav_list_layout() {
         std::fs::write(std::path::Path::new(&dir).join("nav_list.ppm"), ppm).unwrap();
     }
 }
+
+/// The planet is still drawn when the eye is at its surface radius: the old
+/// `z > radius` filter dropped the whole body as soon as the centre was nearer
+/// than one radius along the view axis, which is where a landing approach ends
+/// up. The ground under the eye and the horizon must stay in the frame.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn planet_is_drawn_at_and_inside_one_radius() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{bodies, galaxy};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::Disc;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let entries = galaxy(&cache).unwrap();
+    let sol = entries.iter().find(|e| e.name == "Sol").unwrap();
+    let list = bodies(&cache, sol, [0x1000, 0]).unwrap();
+    let earth = list.iter().find(|b| b.name == "Earth").unwrap();
+    let radius = earth.radius as f64 / UNIT;
+    let centre = earth.position.map(|v| v as f64 / UNIT);
+
+    for k in [1.5, 1.2, 1.05, 1.0] {
+        // Stand on the +y side and look along +z: the horizon is ahead and the
+        // ground is below the eye, the view a landing approach ends in.
+        let mut state = Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        };
+        state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        state.position = [centre[0], centre[1] + k * radius, centre[2]];
+        screen.discs = vec![Disc {
+            centre,
+            radius,
+            light: [1.0, 0.0, 0.0],
+            colours: (12, 4),
+            star: false,
+            model: Some((earth.model, earth.seed)),
+            orientation: earth.orientation,
+        }];
+        screen.draw(
+            &state,
+            ViewState::default(),
+            Some(&viewer),
+            false,
+            false,
+            "",
+        );
+        let ground = screen.logical_pixels()[..320 * 158]
+            .iter()
+            .filter(|p| **p != 0)
+            .count();
+        eprintln!("k {k}: {ground} non-black view pixels");
+        assert!(
+            ground > 2_000,
+            "the surface must stay drawn at {k} radii ({ground} pixels)"
+        );
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let mut ppm = b"P6\n320 200\n255\n".to_vec();
+            for p in screen.logical_pixels() {
+                ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+            }
+            std::fs::write(
+                std::path::Path::new(&dir).join(format!("surface-k{k:.2}.ppm")),
+                ppm,
+            )
+            .unwrap();
+        }
+    }
+}
+
+/// A starport of a planet is one of the system's `screen.stations` and draws
+/// from the surface: the near-side building is visible against its world.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn surface_frame_shows_a_starport() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{bodies, galaxy, Kind};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::{Disc, SystemStation};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let entries = galaxy(&cache).unwrap();
+    let sol = entries.iter().find(|e| e.name == "Sol").unwrap();
+    let list = bodies(&cache, sol, [0x1000, 0]).unwrap();
+    let port = list
+        .iter()
+        .find(|b| b.kind == Kind::Starport && b.name == "London")
+        .unwrap();
+    let planet = &list[port.parent.unwrap()];
+    let up: [f64; 3] = std::array::from_fn(|k| {
+        (port.position[k] as f64 - planet.position[k] as f64)
+            / (0..3)
+                .map(|i| (port.position[i] as f64 - planet.position[i] as f64).powi(2))
+                .sum::<f64>()
+                .sqrt()
+    });
+    // 100 km above the port, looking down at it.
+    let forward = up.map(|v| -v);
+    let right = {
+        let c = [
+            forward[1] * 0.0 - forward[2] * 1.0,
+            forward[2] * 0.0 - forward[0] * 0.0,
+            forward[0] * 1.0 - forward[1] * 0.0,
+        ];
+        let l = c.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+        c.map(|v| v / l)
+    };
+    let up_cam = [
+        forward[1] * right[2] - forward[2] * right[1],
+        forward[2] * right[0] - forward[0] * right[2],
+        forward[0] * right[1] - forward[1] * right[0],
+    ];
+    let mut state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ..Flight::default()
+    };
+    state.axes = Some([right, up_cam, forward]);
+    let disc = Disc {
+        centre: planet.position.map(|v| v as f64 / UNIT),
+        radius: planet.inner_radius as f64 / UNIT,
+        light: [1.0, 0.0, 0.0],
+        colours: (12, 4),
+        star: false,
+        model: Some((planet.model, planet.seed)),
+        orientation: planet.orientation,
+    };
+    screen.discs = vec![disc];
+    for (height, name) in [
+        (100_000_000.0, "surface-starport.ppm"),
+        (500_000.0, "surface-starport-near.ppm"),
+    ] {
+        state.position =
+            std::array::from_fn(|k| port.position[k] as f64 / UNIT + up[k] * height / UNIT);
+        screen.stations.clear();
+        screen.draw(
+            &state,
+            ViewState::default(),
+            Some(&viewer),
+            false,
+            false,
+            "",
+        );
+        let without = screen.logical_pixels().to_vec();
+        screen.stations = vec![SystemStation {
+            model: port.model,
+            centre: port.position.map(|v| v as f64 / UNIT),
+            orientation: port.orientation,
+            speed: 0,
+            tics: 0,
+        }];
+        screen.draw(
+            &state,
+            ViewState::default(),
+            Some(&viewer),
+            false,
+            false,
+            "",
+        );
+        let with = screen.logical_pixels().to_vec();
+        let changed = with.iter().zip(&without).filter(|(a, b)| a != b).count();
+        eprintln!(
+            "starport {} model {:#x} at {height} mm: {changed} pixels changed",
+            port.name, port.model
+        );
+        assert!(changed > 100, "the starport must draw ({changed} pixels)");
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let mut ppm = b"P6\n320 200\n255\n".to_vec();
+            for p in &with {
+                ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+            }
+            std::fs::write(std::path::Path::new(&dir).join(name), ppm).unwrap();
+        }
+    }
+}
+
+/// F575's contact tail in the playable: a slow, level touch of the terrain
+/// settles the ship (flag 0x40, `Touch::Landing`); a fast one bounces (0x80,
+/// damage). `step_landing` is the playable's `Player::tick_with` path.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn soft_touch_lands_and_fast_touch_bounces() {
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{bodies, galaxy, landing_body, Library};
+    use ffe_rs::original_flight::{OriginalFlight, UNITS_PER_FLIGHT_UNIT as UNIT};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let entries = galaxy(&cache).unwrap();
+    let sol = entries.iter().find(|e| e.name == "Sol").unwrap();
+    let list = bodies(&cache, sol, [0x1000, 0]).unwrap();
+    let port = list.iter().find(|b| b.name == "London").unwrap();
+    let planet = &list[port.parent.unwrap()];
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let player_info = ffe_core::objects::ModelInfo::read(records, stats, 14).unwrap();
+    let planet_info = ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap();
+    let parent = landing_body(planet, &planet_info);
+    let library = Library(&cache);
+    let tools = ffe_core::surface::SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
+    let up: [f64; 3] = std::array::from_fn(|k| (port.position[k] - planet.position[k]) as f64);
+    let length = up.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let up = up.map(|v| v / length);
+    let make = |height: f64, velocity: f64| {
+        let at: [i64; 3] =
+            std::array::from_fn(|k| (port.position[k] as f64 + up[k] * height) as i64);
+        let mut flight = Flight {
+            mode: Mode::Flight,
+            position: at.map(|v| v as f64 / UNIT),
+            velocity: up.map(|v| -v * velocity),
+            ..Flight::default()
+        };
+        flight.ship = 14;
+        flight.axes = Some([[1.0, 0.0, 0.0], up, [up[2], 0.0, -up[0]]]);
+        OriginalFlight::from_flight(&flight, None)
+    };
+    // The starport's anchor is on the terrain; 10 m below it is inside the
+    // surface and the ship is level and slow.
+    let mut slow = make(-10_000.0, 0.0);
+    let landed = slow
+        .step_landing(
+            0.02,
+            &Default::default(),
+            &parent,
+            planet.position,
+            &player_info,
+            Some(&tools),
+        )
+        .unwrap();
+    eprintln!("slow touch: flags {:#x} {:?}", landed.flags, landed.touch);
+    assert_eq!(landed.flags & 0x40, 0x40, "a slow level touch lands");
+    assert_eq!(landed.flags & 0x80, 0, "a landing is not a crash");
+    assert!(matches!(
+        landed.touch,
+        Some(ffe_core::landing::Touch::Landing)
+    ));
+
+    // A fast touch bounces: flag 0x80 and the reflected velocity.
+    let mut fast = make(-10_000.0, 200.0);
+    let crashed = fast
+        .step_landing(
+            0.02,
+            &Default::default(),
+            &parent,
+            planet.position,
+            &player_info,
+            Some(&tools),
+        )
+        .unwrap();
+    eprintln!("fast touch: flags {:#x} {:?}", crashed.flags, crashed.touch);
+    assert_eq!(crashed.flags & 0x80, 0x80, "a fast touch crashes");
+    assert!(crashed.damage > 0, "the crash deals damage");
+    assert!(matches!(
+        crashed.touch,
+        Some(ffe_core::landing::Touch::Crash { .. })
+    ));
+}
+
+/// The playable's parent choice: a ship at a starport is in that starport's
+/// frame, one inside a planet's outer radius is in the planet's, and free space
+/// has none.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn landing_parent_chooses_the_surface_body() {
+    use ffe_rs::navigation::{distance, Navigator};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let nav = Navigator::new(&cache).unwrap();
+    let port = nav.bodies.iter().position(|b| b.name == "London").unwrap();
+    let port_body = &nav.bodies[port];
+    let planet_index = port_body.parent.unwrap();
+    let planet = &nav.bodies[planet_index];
+    assert_eq!(nav.landing_parent(port_body.position, 3_000), Some(port));
+    // Just inside the atmosphere radius, on the planet's outward axis.
+    let away: [i64; 3] = std::array::from_fn(|k| {
+        planet.position[k] + (port_body.position[k] - planet.position[k]) * 9 / 10
+    });
+    assert_eq!(nav.landing_parent(away, 3_000), Some(planet_index));
+    assert_eq!(
+        nav.landing_parent([0, 0, 0], 3_000),
+        None,
+        "Sol's centre is not a landing body"
+    );
+    assert!(distance(away, planet.position) < planet.radius as f64);
+}
+
+/// Level flight 100 km above a starport: the horizon and the ground under the
+/// eye stay drawn (the same surface path the flight view uses).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn level_flight_near_the_surface_shows_the_horizon() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{bodies, galaxy, Kind};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::{Disc, SystemStation};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let entries = galaxy(&cache).unwrap();
+    let sol = entries.iter().find(|e| e.name == "Sol").unwrap();
+    let list = bodies(&cache, sol, [0x1000, 0]).unwrap();
+    let port = list
+        .iter()
+        .find(|b| b.kind == Kind::Starport && b.name == "London")
+        .unwrap();
+    let planet = &list[port.parent.unwrap()];
+    let up: [f64; 3] = std::array::from_fn(|k| (port.position[k] - planet.position[k]) as f64);
+    let length = up.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let up = up.map(|v| v / length);
+    let mut forward = [up[1], -up[0], 0.0];
+    let l = forward.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+    forward = forward.map(|v| v / l);
+    // Ten degrees nose-down, the attitude a landing approach holds.
+    let (sin, cos) = 10f64.to_radians().sin_cos();
+    let forward = std::array::from_fn(|k| forward[k] * cos - up[k] * sin);
+    let right = [
+        up[1] * forward[2] - up[2] * forward[1],
+        up[2] * forward[0] - up[0] * forward[2],
+        up[0] * forward[1] - up[1] * forward[0],
+    ];
+    let l = right.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+    let right = right.map(|v| v / l);
+    let up_cam = [
+        forward[1] * right[2] - forward[2] * right[1],
+        forward[2] * right[0] - forward[0] * right[2],
+        forward[0] * right[1] - forward[1] * right[0],
+    ];
+    let mut state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        position: std::array::from_fn(|k| {
+            port.position[k] as f64 / UNIT + up[k] * 100_000_000.0 / UNIT
+        }),
+        ..Flight::default()
+    };
+    state.axes = Some([right, up_cam, forward]);
+    screen.discs = vec![Disc {
+        centre: planet.position.map(|v| v as f64 / UNIT),
+        radius: planet.inner_radius as f64 / UNIT,
+        light: [1.0, 0.0, 0.0],
+        colours: (12, 4),
+        star: false,
+        model: Some((planet.model, planet.seed)),
+        orientation: planet.orientation,
+    }];
+    screen.stations = vec![SystemStation {
+        model: port.model,
+        centre: port.position.map(|v| v as f64 / UNIT),
+        orientation: port.orientation,
+        speed: 0,
+        tics: 0,
+    }];
+    screen.draw(
+        &state,
+        ViewState::default(),
+        Some(&viewer),
+        false,
+        false,
+        "",
+    );
+    let with = screen.logical_pixels().to_vec();
+    screen.discs.clear();
+    screen.stations.clear();
+    screen.draw(
+        &state,
+        ViewState::default(),
+        Some(&viewer),
+        false,
+        false,
+        "",
+    );
+    let without = screen.logical_pixels().to_vec();
+    let changed = with.iter().zip(&without).filter(|(a, b)| a != b).count();
+    let lower = with[320 * 79..320 * 158]
+        .iter()
+        .zip(&without[320 * 79..320 * 158])
+        .filter(|(a, b)| a != b)
+        .count();
+    let ground = changed;
+    eprintln!("level at 100 km: {ground} world pixels, {lower} in the lower half");
+    assert!(
+        lower > 2_000,
+        "the ground under the eye must draw ({lower})"
+    );
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        let mut ppm = b"P6\n320 200\n255\n".to_vec();
+        for p in &with {
+            ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+        }
+        std::fs::write(
+            std::path::Path::new(&dir).join("surface-horizon-100km.ppm"),
+            ppm,
+        )
+        .unwrap();
+    }
+}

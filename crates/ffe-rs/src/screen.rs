@@ -491,7 +491,6 @@ impl Screen {
             .discs
             .iter()
             .map(|d| (camera.point(d.centre)[2], *d))
-            .filter(|(z, d)| *z > d.radius.max(2.0))
             .collect();
         order.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (z, disc) in order {
@@ -532,6 +531,11 @@ impl Screen {
                         }
                     }
                 }
+            }
+            // The shaded disc is only a stand-in when the surface cannot be drawn;
+            // it has no answer for an eye at or inside the sphere.
+            if z <= 0.0 || z <= disc.radius.max(2.0) {
+                continue;
             }
             let [cx, cy, _] = camera.point(disc.centre);
             let scale = 256.0 / z;

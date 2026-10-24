@@ -92,6 +92,18 @@ is the object's `+0xa0` only for bodies of the navigator. The planet is oriented
 its object's rows (the spin is `clock[0] >> 17`, so they are identity until the clock
 passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
 
+**The close-range fix (2026-10-24).** Two things used to make a planet disappear on
+approach. The flight view dropped every disc with `z <= radius` (the centre nearer than
+one radius along the view axis), which is exactly the geometry of a landing approach;
+and the surface was scaled so its base sphere had the *outer* radius `+0x138` (the
+atmosphere's), while F879 places starports on the terrain at the *inner* radius
+`+0x140` (the solid body; Earth is 4,970 km against 7,810 km). At starport altitude the
+eye was therefore inside the drawn sphere and every terrain triangle was a backface.
+The filter is gone and `main.rs` now uses the inner radius for the surface; the course
+from 3 radii down to the ground stays drawn (regression:
+`planet_is_drawn_at_and_inside_one_radius`, frames `surface-k1.00.ppm` ... in
+`FFE_SHOT_DIR`). The outer radius is still the collision/atmosphere radius.
+
 **The surface queue at close range.** F1876's triangles go through F1778's
 order queue, whose original buffer is 50,000 words. A planet at 3 and 2 radii
 needs 59,190 and 63,125 words, so the original exits there; the port used to
@@ -106,18 +118,41 @@ a planet that remain are its night side, not holes.
 ship three radii out from the nearest planet on the station's side, locks and
 autopilots to it with the real controller and original flight model, presents a
 fixed 0.1 s per frame and saves `planet-XXXX.ppm` every 100 frames (about 60
-frames and two minutes of wall time for Sol/Mars). `--capture DIR` remains the
-scripted launch.
+frames and two minutes of wall time for Sol/Mars). When the planet standoff is
+reached it re-targets the nearest starport of the system and flies to its 1.5-hull
+standoff, so the last frames show the buildings; the 6,000-frame cap is enough for
+small worlds but large ones (Mars is still 6,000 km out at the cap) need the
+surface test frames below. `--capture DIR` remains the scripted launch.
+
+## Starports and cities
+
+There are no separate surface city or
+building objects in the original's system generator. `F891` (`ffe.asm:66229`) creates up to
+four starports per planet, copying the template `DATA_008796`, naming them with type 6 and
+taking their model from `DATA_007132` (the 0x51-0x5a range; Sol's Earth gets 0x53, 0x54 and
+0x5a, the Moon 0x60). `F880` (`ffe.asm:64596`) makes them kind 0x23 objects, sets the
+open-air class bit 0x40 for models 0x51-0x5a, gives them 5 or 1 bays and calls F879 to put
+them on the planet at the generated latitude/longitude. The buildings are inside those
+starport models (their child models), not separate system objects. The only "city" object
+is the orbital city: kind 0x22, model 0x50, created by `F892` (`ffe.asm:66365`) in orbit,
+which the flight view already drew. So the missing pieces were not extra city objects: the
+port did not put `Kind::Starport` into `Screen::stations` at all, and the planet's close-range
+scale hid what was there. Starport models 0x51-0x60 are now drawn from the surface, from
+orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
+`surface-starport.ppm`). The original's models can be checked with `--station-model` and
+`tests/station_models_reference.rs`.
 
 ## Docking (ffe-rs rules; EXP-005 in docs/DEVIATIONS.md)
 
 `ffe_rs::docking::Port` and the navigator's `request_clearance`, `contact` and `dock`.
 
-- **Stations in the view.** `Screen::stations` (set each frame in `main.rs`): every station of
-  the system drawn from its own model (72 trading post, 73 orbital station, 80 orbital city,
-  ...) at its generated place, turned by F866 at its own speed byte (`Body::spin`, `+0xc8`)
-  over the navigator's clock, lit from the star. Beyond 2,000 km from the eye a station is
-  not drawn (under a pixel; the viewer's view space is 32-bit).
+- **Stations and starports in the view.** `Screen::stations` (set each frame in `main.rs`): every
+  station and starport of the system drawn from its own model (72 trading post, 73 orbital station,
+  80 orbital city, 0x51-0x60 starports, ...) at its generated place, turned by F866 at its own
+  speed byte (`Body::spin`, `+0xc8`) over the navigator's clock, lit from the star. Starports have
+  speed 0 (F865/F866 only animate stations; `docs/notes/animation.md`), so their F879 surface
+  orientation stands. Beyond 2,000 km from the eye a station is not drawn (under a pixel; the
+  viewer's view space is 32-bit).
 - **The slot.** Every generated station model has its slot on the +z face (looked at for
   72, 73, 74 and 80), so the docking axis is the object's third row. The face distance is the
   largest vertex z of the model (72: 197 m, 73: 238 m, 74: 156 m); the orbital city's root
@@ -145,11 +180,23 @@ scripted launch.
 - **Frames.** Bodies move between the navigator's refreshes; the ship is carried with the
   body it is near (the engaged target on its final approach, else a station within 200 km,
   else a planet or moon within 50 radii), so a station stays where the ship left it.
-- **Not the original yet.** The pad hit is this port's slot test, not the station's collision stream
-  (F569 flags 0x20 | 0x40, with F575's crash and bounce, which `ffe_core::collision`/`landing` now port and verify but
-  the playable does not call); the sounds and the ship's motion with the rotating station
-  during the stages are not ported. Starports
-  (landing on a planet) are not dockable here.
+- **Landing (2026-10-24).** The playable now runs F569's scan through
+  `OriginalFlight::step_landing` (`Player::tick_with` with the 0xff crash mask) whenever
+  `Navigator::landing_parent` puts the ship in a body's frame: the nearest starport within its
+  hull plus the ship's radius, else the nearest planet/moon whose outer radius contains the ship.
+  A two-body world (player 1, parent 2) gives F575/F576 the parent-relative position, so the
+  terrain or the starport's collision stream runs with `SurfaceTools`; the landing gear word
+  `+0x9e` is 0xffff. A slow, level touch (speed <= 0x258, dot >= 0x78000000) sets flag 0x40 and
+  settles the ship on the surface; a faster one sets 0x80 and bounces it (damage from F953's
+  amount is shown on the status line). Regression: `soft_touch_lands_and_fast_touch_bounces`.
+  The ship's mode is still the playable's `Mode::Flight`; the original's 0x32 -> 0x34 landed
+  state is not a separate screen yet (see "Known limits").
+- **Not the original yet.** The pad hit when docking at an orbital station is this port's slot
+  test, not the station's collision stream; the sounds and the ship's motion with the rotating
+  station during the stages are not ported. The starport/planet scan does not yet draw the ship
+  in the rotating frame between ticks (it is flattened to the parent's linear frame each frame),
+  and starports on the far side of their planet are not hidden by it (there is no depth buffer
+  between the planet surface and the station models).
 
 ## Known limits
 
@@ -160,6 +207,11 @@ scripted launch.
 - Planet surfaces draw their triangles, but the textured fills are flat colours or
   blends (see above), so the detail is blockier than the original's; the night side is
   drawn with the shade table and has no atmospheric glow except the ported haze ring.
+- A landing is F575's settled contact, not the original's 0x32 -> 0x34 landed state: the
+  ship is on the surface with the status line saying so and can thrust off again, but there is
+  no landed screen, takeoff gear sequence or starport services from the surface.
+- Planet/station painter order has no depth test: a starport on the far side of its planet is
+  drawn over it. A sphere line-of-sight test is the cheap fix; the original's queue is global.
 
 ## The original's navigation computer (read from the code, not yet a port)
 

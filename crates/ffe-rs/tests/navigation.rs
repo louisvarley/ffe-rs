@@ -929,6 +929,8 @@ fn the_place_list_is_stations_and_starports_in_system_order() {
         kind,
         position: [0; 3],
         radius: 1,
+        inner_radius: 1,
+        parent: None,
         model: 0,
         seed: 0,
         slot: 0,

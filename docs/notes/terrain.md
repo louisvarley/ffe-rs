@@ -199,3 +199,15 @@ A division by zero in the solve faults like the original's (`SIGFPE`, 2 of 512 c
 Oracle: `--surface-draw` now compares the haze state, the sky and the whole queue for the
 361 cases with a haze (311 with a ring; 2 change the sky, 4 are inside the haze), 465
 queues word for word and the 47 faults (45 queue overflows, 2 divisions by zero).
+
+## The close-range base sphere (ffe-rs flight view)
+
+`Screen::draw_discs` scales a planet's surface axes so their world radius is the body's
+**inner** radius (`+0x140`), not the outer atmosphere radius (`+0x138`). F879 places an
+open-air starport on the terrain at about 0.9 of the outer radius (Earth: 7,032 km against
+7,810 outer and 4,970 inner), so scaling to the outer radius put the eye inside the drawn
+base sphere at starport altitude; F1876 then dropped every triangle as a backface and the
+ground vanished. The inner radius also matches the surface model's base sphere in the
+starport frame (`surface-starport` in `tests/planet_view.rs`). The old `z > radius` disc
+filter is gone as well: it removed the body at exactly the range a landing approach reaches.
+The outer radius remains the collision/atmosphere radius, so the haze (F1877) still spans it.
