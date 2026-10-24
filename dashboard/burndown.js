@@ -448,8 +448,8 @@ window.FFE_BURNDOWN = {
     },
     {
       date: "2026-10-24",
-      remaining: 91,
-      note: "F575's contact tail (soft landing, crash and bounce, F953's damage amount, flag 1) and F578's momentum response ported and verified: --collide and --world-tick now match all 4,096 cases each, the 950 and 584 contacts included (verify-collide.py, verify-world-tick.py); flight-7 (collision detection and response) done. The playable's own station touch test still pushes the ship clear, so flight-10 keeps the pad hit. The count is reconciled against the task lists (147 items, 56 done): it is 10 above the previous point because items found since then were not added to it."
+      remaining: 80,
+      note: "F575's contact tail (soft landing, crash and bounce, F953's damage amount, flag 1) and F578's momentum response ported and verified: --collide and --world-tick match all 4,096 cases each, the 950 and 584 contacts included; flight-7 done. The same round imported F650's open-air pad tables (cache v26, --pads oracle) and fixed the planet approach's black wedges (surface queue limit, EXP-009). The playable's own station touch test still pushes the ship clear, so flight-10 keeps the pad hit."
     }
   ]
 };
