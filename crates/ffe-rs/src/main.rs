@@ -27,16 +27,24 @@ use std::time::Instant;
 struct Options {
     root: PathBuf,
     smoke_frames: Option<usize>,
+    /// Directory for a scripted undock capture (starts the launch sequence and
+    /// saves every tenth frame, then exits).
+    capture: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
     let mut root = None;
     let mut smoke_frames = None;
+    let mut capture = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
             root = Some(PathBuf::from(
                 args.next().ok_or("--root requires a directory")?,
+            ));
+        } else if arg == "--capture" && capture.is_none() {
+            capture = Some(PathBuf::from(
+                args.next().ok_or("--capture requires a directory")?,
             ));
         } else if arg == "--smoke-frames" && smoke_frames.is_none() {
             let frames = args
@@ -72,6 +80,7 @@ fn options() -> Result<Options, String> {
             .canonicalize()
             .map_err(|e| format!("Cannot resolve root: {e}"))?,
         smoke_frames,
+        capture,
     })
 }
 
@@ -209,6 +218,13 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // A scripted undock for screenshots: start the launch sequence immediately.
+    if let Some(dir) = &options.capture {
+        fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        if let Some(nav) = nav.as_mut() {
+            let _ = nav.begin_launch();
+        }
+    }
     // The station models' docking faces (their +z ends) and sizes, from the vertices.
     if let (Some(nav), Some(scene)) = (nav.as_mut(), scene.as_ref()) {
         for model in STATION_MODELS {
@@ -1516,6 +1532,15 @@ fn run() -> Result<(), String> {
         } else {
             screen.draw(&state, views, scene.as_ref(), help, modern, &message);
         }
+        if let Some(dir) = &options.capture {
+            if frames % 10 == 0 {
+                let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+                for pixel in &screen.pixels {
+                    out.extend([(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]);
+                }
+                let _ = fs::write(dir.join(format!("shot-{frames:04}.ppm")), out);
+            }
+        }
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);
         } else if let Some(lab) = &model_lab {
@@ -1596,7 +1621,9 @@ fn run() -> Result<(), String> {
             .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
             .map_err(|e| format!("Window update: {e}"))?;
         frames += 1;
-        if options.smoke_frames.is_some_and(|limit| frames >= limit) {
+        if options.smoke_frames.is_some_and(|limit| frames >= limit)
+            || (options.capture.is_some() && frames >= 400)
+        {
             break;
         }
     }
