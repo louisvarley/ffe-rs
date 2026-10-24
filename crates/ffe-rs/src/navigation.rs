@@ -58,8 +58,14 @@ pub struct Body {
     pub kind: Kind,
     /// Position in the system frame (millimetres).
     pub position: [i64; 3],
-    /// The body's own radius (millimetres), for the arrival distance.
+    /// The body's outer radius (`+0x138`, millimetres): the atmosphere's for a
+    /// planet, the hull's for a station.
     pub radius: i64,
+    /// The body's inner radius (`+0x140`, millimetres): the solid surface's for
+    /// a planet.
+    pub inner_radius: i64,
+    /// The system-object index of the body this one orbits, when it has one.
+    pub parent: Option<usize>,
     /// The object's model and its `+0xa0` (the surface seed).
     pub model: u32,
     pub seed: u32,
@@ -79,7 +85,7 @@ pub struct Entry {
 }
 
 /// The models' collision data, for placing starports on planets.
-struct Library<'a>(&'a VerifiedCache);
+pub struct Library<'a>(pub &'a VerifiedCache);
 
 impl Shapes for Library<'_> {
     fn model(&self, model: u32) -> Option<ffe_core::objects::ModelInfo> {
@@ -286,6 +292,9 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
         let radius = ((u64::from(list.dword(slot, 0x13c)) << 32
             | u64::from(list.dword(slot, 0x138))) as i64)
             .max(1_000_000);
+        let inner_radius = ((u64::from(list.dword(slot, 0x144)) << 32
+            | u64::from(list.dword(slot, 0x140))) as i64)
+            .max(1_000_000);
         // Positions are relative to the parent body (the system is a tree).
         let mut position = [coordinate(0), coordinate(1), coordinate(2)];
         if parent != 0 {
@@ -303,6 +312,8 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
             kind,
             position,
             radius,
+            inner_radius,
+            parent: parent.checked_sub(1),
             model: list.dword(slot, 0x82),
             seed: list.dword(slot, 0xa0),
             orientation: std::array::from_fn(|r| {
@@ -356,6 +367,58 @@ pub fn distance(from: [i64; 3], to: [i64; 3]) -> f64 {
         .sqrt()
 }
 
+/// A body as the collision scan's [`ffe_core::frames::Body`]: `+0x138`/`+0x140`
+/// radii, the Q31 orientation, the class byte and the terrain seed. Its position
+/// is the body's absolute position (the caller passes it as the scan's parent,
+/// which has no parent of its own).
+pub fn landing_body(body: &Body, model: &ffe_core::objects::ModelInfo) -> ffe_core::frames::Body {
+    ffe_core::frames::Body {
+        position: body.position,
+        parent: 0,
+        index: 2,
+        kind: if body.kind == Kind::Starport { 1 } else { 0 },
+        locked: body.kind == Kind::Starport,
+        orientation: std::array::from_fn(|k| {
+            (body.orientation[k / 3][k % 3] * 2_147_483_647.0) as i32
+        }),
+        outer_radius: body.radius,
+        inner_radius: body.inner_radius,
+        shape: model.class(),
+        model: body.model,
+        seed: body.seed,
+        ..ffe_core::frames::Body::default()
+    }
+}
+
+impl Navigator {
+    /// The body whose frame the ship is in for F569's collision scan: the nearest
+    /// starport within its own hull plus the ship's radius, else the nearest
+    /// planet or moon whose outer (atmosphere) radius the ship is inside. `None`
+    /// in free space.
+    pub fn landing_parent(&self, from: [i64; 3], ship_radius: i64) -> Option<usize> {
+        let reach =
+            |body: &Body| distance(from, body.position) - (body.radius + ship_radius) as f64;
+        self.bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, body)| body.kind == Kind::Starport)
+            .map(|(index, body)| (reach(body), index))
+            .filter(|(gap, _)| *gap <= 0.0)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, index)| index)
+            .or_else(|| {
+                self.bodies
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, body)| matches!(body.kind, Kind::Planet | Kind::Moon))
+                    .map(|(index, body)| (reach(body), index))
+                    .filter(|(gap, _)| *gap <= 0.0)
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, index)| index)
+            })
+    }
+}
+
 /// A hyperdrive distance as the galaxy list shows it (units of a hundredth of a light year).
 pub fn range_text(units: i32) -> String {
     format!("{}.{:02} LY", units / 100, units % 100)
@@ -375,7 +438,9 @@ pub fn describe(mm: f64) -> String {
 /// The standoff the autopilot stops at: just off the body's surface or station.
 pub fn standoff(body: &Body) -> f64 {
     match body.kind {
-        Kind::Station | Kind::Starport => 20.0e6,
+        Kind::Station => 20.0e6,
+        // An open-air starport is tens of kilometres across (F880 gives it a
+        // 20-32 km hull), so 20 km would be inside it.
         _ => body.radius as f64 * 1.5 + 50.0e6,
     }
 }

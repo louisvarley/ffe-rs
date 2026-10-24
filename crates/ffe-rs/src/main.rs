@@ -223,6 +223,22 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // F569's scan needs the model collision streams and the terrain tables. They
+    // are borrowed from the cache for the whole run.
+    let landing_library = ffe_rs::navigation::Library(&cache);
+    let landing_tools = cache
+        .asset("base:terrain/tables")
+        .zip(cache.asset("base:terrain/maps"))
+        .map(
+            |(terrain_table, terrain_maps)| ffe_core::surface::SurfaceTools {
+                shapes: &landing_library,
+                terrain_table,
+                terrain_maps,
+                detail: 0,
+            },
+        );
+    let model_records = cache.asset("base:model/records").unwrap_or(&[]);
+    let model_stats = cache.asset("base:ship/stats").unwrap_or(&[]);
     // The original's named craft (cache v11); Page Up/Down changes the player's ship.
     let ships = scene
         .as_ref()
@@ -247,6 +263,7 @@ fn run() -> Result<(), String> {
     // few radii out on the same side as the starting station, flying the same
     // autopilot and original flight model the playable uses.
     let mut captured_planet: Option<String> = None;
+    let mut capture_port = false;
     if let Some(dir) = &options.capture_planet {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
         if let Some(nav) = nav.as_mut() {
@@ -1229,6 +1246,28 @@ fn run() -> Result<(), String> {
                     if let Some(moved) = nav.follow(model.player().motion.position) {
                         model.shift(moved);
                     }
+                    // The planet capture continues to the nearest open-air
+                    // starport once the planet's standoff is reached, so the saved
+                    // frames show the buildings on the surface.
+                    if options.capture_planet.is_some() && !capture_port && nav.target.is_none() {
+                        let from = model.player().motion.position;
+                        let port = nav
+                            .bodies
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, body)| body.kind == NavKind::Starport)
+                            .min_by(|a, b| {
+                                distance(from, a.1.position)
+                                    .total_cmp(&distance(from, b.1.position))
+                            })
+                            .map(|(index, _)| index);
+                        if let Some(index) = port {
+                            nav.locked = Some(index);
+                            nav.engage_locked();
+                            capture_port = true;
+                            message = format!("Capture: starport {}.", nav.bodies[index].name);
+                        }
+                    }
                 }
                 let view = match views.mode {
                     ViewMode::TopTurret => 2,
@@ -1239,7 +1278,45 @@ fn run() -> Result<(), String> {
                 if let Some(target) = command_face {
                     model.turn_toward(target, elapsed, 1.0);
                 }
-                match model.step(elapsed, &keys) {
+                let ship_at = model.player().motion.position;
+                let player_info =
+                    ffe_core::objects::ModelInfo::read(model_records, model_stats, state.ship);
+                let landing = nav
+                    .as_ref()
+                    .filter(|_| state.system_flight)
+                    .and_then(|nav| {
+                        let info = player_info?;
+                        let index = nav.landing_parent(ship_at, info.radii().0)?;
+                        let body = nav.bodies.get(index)?;
+                        let parent_info = ffe_core::objects::ModelInfo::read(
+                            model_records,
+                            model_stats,
+                            body.model,
+                        )?;
+                        Some((
+                            index,
+                            ffe_rs::navigation::landing_body(body, &parent_info),
+                            body.position,
+                            info,
+                        ))
+                    });
+                let step_result = if let Some((_, parent, at, info)) = landing {
+                    model
+                        .step_landing(elapsed, &keys, &parent, at, &info, landing_tools.as_ref())
+                        .map(|contact| {
+                            if contact.flags & 0x40 != 0 {
+                                message = "Landed. The ship is settled on the surface.".to_owned();
+                            } else if contact.flags & 0x80 != 0 {
+                                message = format!(
+                                    "Crash: damage {}. The ship bounced off the surface.",
+                                    contact.damage.max(0)
+                                );
+                            }
+                        })
+                } else {
+                    model.step(elapsed, &keys)
+                };
+                match step_result {
                     Ok(()) => {
                         model.apply(&mut state);
                         // The stations: the slot docks a cleared ship, the hull pushes it clear.
@@ -1455,7 +1532,14 @@ fn run() -> Result<(), String> {
                     let light = b.position.map(|v| -(v as f64) / length.sqrt().max(1.0));
                     ffe_rs::screen::Disc {
                         centre: b.position.map(|v| v as f64 / unit),
-                        radius: b.radius as f64 / unit,
+                        // The visible surface is the solid radius; the outer one
+                        // is the atmosphere's, and using it would put the eye
+                        // inside the rendered ground at a starport.
+                        radius: if b.kind == NavKind::Star {
+                            b.radius as f64 / unit
+                        } else {
+                            b.inner_radius as f64 / unit
+                        },
                         light,
                         colours: match b.kind {
                             NavKind::Star => (17, 17),
@@ -1477,7 +1561,7 @@ fn run() -> Result<(), String> {
                 );
                 nav.bodies
                     .iter()
-                    .filter(|b| b.kind == NavKind::Station)
+                    .filter(|b| matches!(b.kind, NavKind::Station | NavKind::Starport))
                     .map(|b| ffe_rs::screen::SystemStation {
                         model: b.model,
                         centre: b.position.map(|v| v as f64 / unit),
