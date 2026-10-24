@@ -464,6 +464,8 @@ pub struct Navigator {
     drift: [i64; 3],
     /// Transfers in a row that have not brought the ship in: after a few it flies.
     skips: u32,
+    /// The page of the system list (18 rows a page).
+    pub page: usize,
     pub view: View,
     pub selected: usize,
     /// The body the autopilot is flying to.
@@ -492,6 +494,7 @@ impl Navigator {
             clock: 0.0,
             drift: [0; 3],
             skips: 0,
+            page: 0,
             view: View::Closed,
             selected: 0,
             target: None,
@@ -537,9 +540,10 @@ impl Navigator {
         } else {
             view
         };
+        self.page = 0;
         self.selected = match self.view {
             View::Galaxy => self.current,
-            _ => self.target.unwrap_or(0),
+            _ => 0,
         };
     }
 
@@ -547,7 +551,7 @@ impl Navigator {
     pub fn step_selection(&mut self, delta: i32) {
         let length = match self.view {
             View::Galaxy => self.entries.len(),
-            View::System => self.bodies.len(),
+            View::System => self.listed().len(),
             View::Closed => return,
         };
         if length > 0 {
@@ -612,16 +616,51 @@ impl Navigator {
         ])
     }
 
-    /// Engage the autopilot on the selected body.
+    /// The bodies the navigation computer lists: 18 a page (two columns of nine, as the
+    /// original's), the star and planets first, then the ports and stations, then moons.
+    pub fn listed(&self) -> Vec<usize> {
+        let rank = |k: Kind| match k {
+            Kind::Star => 0,
+            Kind::Planet => 1,
+            Kind::Starport => 2,
+            Kind::Station => 3,
+            Kind::Moon => 4,
+        };
+        let mut all: Vec<usize> = (0..self.bodies.len()).collect();
+        all.sort_by_key(|i| (rank(self.bodies[*i].kind), *i));
+        all.into_iter()
+            .skip(18 * self.pages_clamped())
+            .take(18)
+            .collect()
+    }
+
+    fn pages_clamped(&self) -> usize {
+        self.page.min(self.pages().saturating_sub(1))
+    }
+
+    pub fn pages(&self) -> usize {
+        self.bodies.len().div_ceil(18).max(1)
+    }
+
+    pub fn turn_page(&mut self, delta: i32) {
+        self.page = (self.page as i32 + delta).rem_euclid(self.pages() as i32) as usize;
+        self.selected = 0;
+    }
+
+    /// The body under the selected row of the system list.
+    pub fn selected_body(&self) -> Option<usize> {
+        self.listed().get(self.selected).copied()
+    }
+
+    /// The original's row click: lock on to the body and engage the autopilot (it sets
+    /// the player's target and its autopilot mode, then closes the list).
     pub fn engage(&mut self) -> Option<&Body> {
-        if self.selected < self.bodies.len() {
-            self.target = Some(self.selected);
-            self.memory = Memory::default();
-            self.view = View::Closed;
-            self.bodies.get(self.selected)
-        } else {
-            None
-        }
+        let index = self.selected_body()?;
+        self.target = Some(index);
+        self.memory = Memory::default();
+        self.skips = 0;
+        self.view = View::Closed;
+        self.bodies.get(index)
     }
 
     /// The ship's position carried along with the engaged target, once it is on the
@@ -701,14 +740,15 @@ impl Navigator {
                 })
                 .collect(),
             View::System => self
-                .bodies
-                .iter()
+                .listed()
+                .into_iter()
                 .enumerate()
-                .map(|(i, b)| {
+                .map(|(row, i)| {
+                    let b = &self.bodies[i];
                     let flag = if self.target == Some(i) { "=>" } else { "  " };
                     format!(
                         "{}{} {} ({}) {}",
-                        mark(i),
+                        mark(row),
                         flag,
                         b.name,
                         b.kind.label(),
@@ -739,7 +779,7 @@ impl Navigator {
                     (dx / range * radius) as f32,
                     (dz / range * radius) as f32,
                     b.kind,
-                    self.selected == i,
+                    self.selected_body() == Some(i),
                 )
             })
             .collect()

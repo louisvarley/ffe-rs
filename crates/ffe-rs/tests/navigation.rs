@@ -455,3 +455,23 @@ fn trace_station_approach() {
         }
     }
 }
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn body_counts() {
+    let cache = cache();
+    for entry in galaxy(&cache).unwrap() {
+        let list = bodies(&cache, &entry, [0x1000, 0]).unwrap();
+        let count = |k: Kind| list.iter().filter(|b| b.kind == k).count();
+        eprintln!(
+            "{}: {} bodies (star {}, planet {}, moon {}, station {}, starport {})",
+            entry.name,
+            list.len(),
+            count(Kind::Star),
+            count(Kind::Planet),
+            count(Kind::Moon),
+            count(Kind::Station),
+            count(Kind::Starport)
+        );
+    }
+}

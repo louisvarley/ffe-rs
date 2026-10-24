@@ -49,6 +49,8 @@ pub struct Screen {
     /// The system and the station the player is at, for the docked screen and the top bar.
     pub system: String,
     pub station: String,
+    /// The locked-on target and its range, while the autopilot has one.
+    pub lock: String,
     /// The original console view icons (secondary bitmaps 63..81), when cached.
     icons: Vec<Option<IndexedImage>>,
     jitter: Jitter,
@@ -255,6 +257,7 @@ impl Screen {
             discs: Vec::new(),
             system: String::new(),
             station: String::new(),
+            lock: String::new(),
             icons: Vec::new(),
             jitter: Jitter::default(),
         })
@@ -734,6 +737,10 @@ impl Screen {
             let width = self.font.width(&name).unwrap_or(0);
             self.text(317usize.saturating_sub(width), 1, &name, 15);
         }
+        if !self.lock.is_empty() {
+            let lock = self.lock.clone();
+            self.text(3, 22, &lock, 17);
+        }
         self.rect(0, 119, 320, 39, 0);
         self.text(
             3,
@@ -827,6 +834,44 @@ impl Screen {
             .saturating_sub(rows / 2)
             .min(count.saturating_sub(rows));
         (row < rows && first + row < count).then_some(first + row)
+    }
+
+    /// The row of the navigation list under logical pixel (x, y): the original's two
+    /// columns of nine, 15 pixels apart from y 5, the second column from x 230.
+    pub fn nav_row(x: i32, y: i32) -> Option<usize> {
+        if !(5..140).contains(&y) || !(10..310).contains(&x) {
+            return None;
+        }
+        let row = ((y - 5) / 15) as usize;
+        let column = usize::from(x >= 230);
+        (row < 9).then_some(column * 9 + row)
+    }
+
+    /// The navigation computer: a marker square and a name per body, nine rows in two
+    /// columns; `rows` are (name, selected, locked on).
+    pub fn draw_nav_list(&mut self, rows: &[(String, bool, bool)], detail: &str) {
+        self.rect(0, 0, 320, 158, 1);
+        for (k, (name, selected, locked)) in rows.iter().enumerate() {
+            let (x, y) = (if k < 9 { 10 } else { 230 }, 5 + 15 * (k % 9));
+            let colour = if *locked {
+                17
+            } else if *selected {
+                18
+            } else {
+                12
+            };
+            self.rect(x, y, 10, 10, colour);
+            let room = if k < 9 { 28 } else { 10 };
+            let text: String = name.chars().take(room).collect();
+            self.text(
+                x + 15,
+                y + 1,
+                &text.to_ascii_uppercase(),
+                if *selected { 18 } else { 15 },
+            );
+        }
+        self.rect(0, 142, 320, 1, 15);
+        self.text(5, 146, detail, 18);
     }
 
     pub fn draw_map(

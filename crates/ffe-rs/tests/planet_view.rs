@@ -367,3 +367,32 @@ fn flight_view_shows_stars() {
         }
     }
 }
+
+/// The navigation list's layout.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn nav_list_layout() {
+    use ffe_rs::navigation::{Navigator, View};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut nav = Navigator::new(&cache).unwrap();
+    nav.open(View::System);
+    nav.selected = 3;
+    nav.target = nav.listed().get(1).copied();
+    let rows: Vec<(String, bool, bool)> = nav
+        .listed()
+        .into_iter()
+        .enumerate()
+        .map(|(row, i)| (nav.bodies[i].name.clone(), row == nav.selected, nav.target == Some(i)))
+        .collect();
+    screen.draw_nav_list(&rows, "EARTH PLANET 1.00 AU PAGE 1/3  LEFT/RIGHT: PAGES");
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        let mut ppm = b"P6\n320 200\n255\n".to_vec();
+        for p in screen.logical_pixels() {
+            ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+        }
+        std::fs::write(std::path::Path::new(&dir).join("nav_list.ppm"), ppm).unwrap();
+    }
+}

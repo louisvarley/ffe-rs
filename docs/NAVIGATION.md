@@ -70,3 +70,33 @@ passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`)
 - Planets are not drawn in the flight view yet (the surface renderer is partly ported:
   `docs/notes/terrain.md`), so the map and the autopilot's messages are the way to see
   where bodies are.
+
+## The original's navigation computer (read from the code, not yet a port)
+
+From the executed binary (`ffelnx.asm`, the key handler at `JUMP_004383..004405` and the
+list builder before `JUMP_004516`):
+
+- The `n` icon toggles the list (`DATA_007250`) when the ship has the navigation-computer
+  equipment bit (`+0xc8` bit `0x20`). The list walks the live objects from slot `0x72`
+  down and takes those whose flag byte has bit `0x10`; each gets a 10x10 marker button
+  (hot area `0xd1 + n`, bitmap `0x31`) and its name. Nine rows of 15 pixels from y 5,
+  then a second column from x `0xe6`: at most 18 (`0xd1..0xe2`).
+- A click on row k finds the k-th such object, stores its slot in the player's target
+  byte (`+0xec`), clears the target-select mode (`DATA_007246`) and, when the player's
+  mode (`+0xe8`) is neither 2 nor 0x28 or more, calls `F1020`: it sets the target
+  object's AI state byte (`+0xff`) to 8, the player's mode to 2 (autopilot), plays the
+  click and redraws the console buttons (`F1116`). The list closes. So one click both
+  locks on and engages the autopilot.
+- The `t` icon needs the target-computer bit (`+0xc8` bit `0x80`) and cycles the target
+  select modes (`F1116`/`F1120`) over the ships around, which needs scanner contacts.
+- The autopilot's steering runs in the AI state tables (`DATA_006255/6`, 16 bytes a
+  state: set-up, step, and two more routines; state 8's set-up is `F741`, its step
+  `F727`) with the turn rates `+0x110/+0x112/+0x114` that `F585` adds when its
+  autopilot flag is set (docs/notes/physics.md). Those routines are not ported.
+
+What ffe-rs does: the list has the original's layout (two columns of nine, marker
+squares), page by page (Left/Right) because the systems have far more bodies than 18;
+a click locks on and engages the autopilot, and the lock shows under the top bar.
+The autopilot controller itself is ffe-rs's own (a direct turn toward the target, set
+speed from the braking distance, time transfers for the long legs), tested on every
+system after a jump (50 of 52 bodies arrive).

@@ -413,10 +413,23 @@ fn run() -> Result<(), String> {
                     if pressed(Key::Down) {
                         nav.step_selection(1);
                     }
+                    if nav.view == NavView::System {
+                        if pressed(Key::Right) || pressed(Key::PageDown) {
+                            nav.turn_page(1);
+                        }
+                        if pressed(Key::Left) || pressed(Key::PageUp) {
+                            nav.turn_page(-1);
+                        }
+                    }
                     let mut enter = pressed(Key::Enter);
                     if let Some((x, y)) = click_point {
                         let count = nav.lines(ship_position(&original)).len();
-                        if let Some(row) = Screen::map_row(nav.selected, count, x, y) {
+                        let row = if nav.view == NavView::System {
+                            Screen::nav_row(x, y).filter(|row| *row < count)
+                        } else {
+                            Screen::map_row(nav.selected, count, x, y)
+                        };
+                        if let Some(row) = row {
                             nav.selected = row;
                             // A click on a body of this system engages the autopilot; a
                             // click on a system selects it (H hyperspaces).
@@ -965,6 +978,15 @@ fn run() -> Result<(), String> {
                 })
                 .collect()
         });
+        screen.lock = match nav.as_ref().and_then(|nav| nav.target.map(|i| (nav, i))) {
+            Some((nav, i)) => format!(
+                "LOCKED: {} {}",
+                nav.bodies[i].name.to_ascii_uppercase(),
+                describe(distance(ship_position(&original), nav.bodies[i].position))
+                    .to_ascii_uppercase()
+            ),
+            None => String::new(),
+        };
         screen.draw(&state, views, scene.as_ref(), help, modern, &message);
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);
@@ -1000,17 +1022,44 @@ fn run() -> Result<(), String> {
                     nav.system_name().to_uppercase()
                 ),
             };
-            screen.draw_map(
-                &title,
-                &nav.lines(ship),
-                nav.selected,
-                &nav.points(ship),
-                if message.is_empty() {
-                    "MAP ICON/G SYSTEMS  N ICON/TAB THIS SYSTEM  H HYPERSPACE  BKSP OFF"
-                } else {
-                    &message
-                },
-            );
+            if nav.view == NavView::System {
+                let rows: Vec<(String, bool, bool)> = nav
+                    .listed()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(row, i)| {
+                        (
+                            nav.bodies[i].name.clone(),
+                            row == nav.selected,
+                            nav.target == Some(i),
+                        )
+                    })
+                    .collect();
+                let detail = match nav.selected_body().map(|i| &nav.bodies[i]) {
+                    Some(body) => format!(
+                        "{} {} {} PAGE {}/{}  LEFT/RIGHT: PAGES",
+                        body.name.to_ascii_uppercase(),
+                        body.kind.label().to_ascii_uppercase(),
+                        describe(distance(ship, body.position)).to_ascii_uppercase(),
+                        nav.page + 1,
+                        nav.pages()
+                    ),
+                    None => String::new(),
+                };
+                screen.draw_nav_list(&rows, &detail);
+            } else {
+                screen.draw_map(
+                    &title,
+                    &nav.lines(ship),
+                    nav.selected,
+                    &nav.points(ship),
+                    if message.is_empty() {
+                        "MAP ICON/G SYSTEMS  H HYPERSPACE  ENTER"
+                    } else {
+                        &message
+                    },
+                );
+            }
         }
         window
             .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
