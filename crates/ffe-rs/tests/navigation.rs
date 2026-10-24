@@ -55,6 +55,9 @@ fn systems_and_autopilot() {
                 continue;
             }
             flight.set_time_acceleration(command.acceleration);
+            if let Some(target) = command.face {
+                flight.turn_toward(target, 0.05, 1.0);
+            }
             flight.step(0.05, &command.keys).unwrap();
             elapsed += 0.05;
             if command.arrived {
@@ -106,6 +109,9 @@ fn systems_and_autopilot() {
                 continue;
             }
             flight.set_time_acceleration(command.acceleration);
+            if let Some(target) = command.face {
+                flight.turn_toward(target, 0.05, 1.0);
+            }
             flight.step(0.05, &command.keys).unwrap();
             elapsed += 0.05;
             if command.arrived {
@@ -166,6 +172,9 @@ fn navigator_flow() {
             flight.teleport(landing);
             nav.transfer(&cache, seconds);
             continue;
+        }
+        if let Some(target) = command.face {
+            flight.turn_toward(target, 0.05, 1.0);
         }
         flight.step(0.05, &command.keys).unwrap();
         nav.advance(&cache, 0.05);
@@ -302,4 +311,147 @@ fn launch_surroundings() {
     flight.face(world);
     let command = autopilot(&flight, world, 1.0, &mut Memory::default());
     assert!(command.aligned > 0.999, "aligned {}", command.aligned);
+}
+
+/// Jump to every system, then autopilot to each kind of body there.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn autopilot_after_every_jump() {
+    use ffe_rs::navigation::{Navigator, View};
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let count = nav.lines([0; 3]).len();
+    let _ = count;
+    nav.open(View::Galaxy);
+    let systems = nav.lines([0; 3]).len();
+    nav.view = View::Closed;
+    for system in 0..systems {
+        let arrival = nav.jump(&cache, system).unwrap();
+        let name = nav.system_name().to_owned();
+        let kinds: Vec<usize> = {
+            let mut picks = Vec::new();
+            for wanted in [
+                Kind::Planet,
+                Kind::Moon,
+                Kind::Station,
+                Kind::Starport,
+                Kind::Star,
+            ] {
+                if let Some(i) = nav.bodies.iter().position(|b| b.kind == wanted) {
+                    picks.push(i);
+                }
+            }
+            picks
+        };
+        for index in kinds {
+            nav.target = Some(index);
+            let target_name = nav.bodies[index].name.clone();
+            let mut flight = OriginalFlight::from_flight(
+                &Flight {
+                    mode: Mode::Flight,
+                    ..Flight::default()
+                },
+                None,
+            );
+            flight.teleport(arrival);
+            let mut arrived = false;
+            let mut steps = 0;
+            let mut last_aligned = 0.0;
+            for _ in 0..200_000 {
+                let Some((command, _)) = nav.command(&cache, &flight) else {
+                    break;
+                };
+                steps += 1;
+                last_aligned = command.aligned;
+                if let Some((landing, seconds)) = command.skip {
+                    flight.teleport(landing);
+                    nav.transfer(&cache, seconds);
+                    continue;
+                }
+                if let Some(target) = command.face {
+                    flight.turn_toward(target, 0.05, 1.0);
+                }
+                flight.step(0.05, &command.keys).unwrap();
+                nav.advance(&cache, 0.05);
+                if let Some(moved) = nav.follow(flight.player().motion.position) {
+                    flight.shift(moved);
+                }
+                if command.arrived {
+                    arrived = true;
+                    break;
+                }
+            }
+            let range = distance(flight.player().motion.position, nav.bodies[index].position);
+            eprintln!(
+                "{name} -> {target_name} ({:?}): arrived {arrived} in {steps} steps, range {} stop {} set {} m/s aligned {last_aligned:.4} clock {:.0}",
+                nav.bodies[index].kind,
+                describe(range),
+                describe(standoff(&nav.bodies[index])),
+                flight.set_speed_metres(),
+                nav.clock
+            );
+        }
+        nav.target = None;
+    }
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn trace_station_approach() {
+    use ffe_rs::navigation::{Navigator, View};
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let arrival = nav.jump(&cache, 0).unwrap();
+    nav.view = View::Closed;
+    let index = nav
+        .bodies
+        .iter()
+        .position(|b| b.kind == Kind::Station)
+        .unwrap();
+    nav.target = Some(index);
+    let mut flight = OriginalFlight::from_flight(
+        &Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        },
+        None,
+    );
+    flight.teleport(arrival);
+    for step in 0..60_000 {
+        let Some((command, _)) = nav.command(&cache, &flight) else {
+            break;
+        };
+        if let Some((landing, seconds)) = command.skip {
+            flight.teleport(landing);
+            nav.transfer(&cache, seconds);
+            continue;
+        }
+        if let Some(target) = command.face {
+            flight.turn_toward(target, 0.05, 1.0);
+        }
+        flight.step(0.05, &command.keys).unwrap();
+        nav.advance(&cache, 0.05);
+        if let Some(moved) = nav.follow(flight.player().motion.position) {
+            flight.shift(moved);
+        }
+        if step % 1500 == 0 {
+            let v = flight.player().motion.velocity;
+            let speed = (v.iter().map(|c| f64::from(*c).powi(2)).sum::<f64>()).sqrt()
+                * ffe_rs::original_flight::MM_PER_SECOND
+                / 1000.0;
+            eprintln!(
+                "t{step}: range {} speed {speed:.0} m/s set {:.0} aligned {:.5} accel {}",
+                describe(distance(
+                    flight.player().motion.position,
+                    nav.bodies[index].position
+                )),
+                flight.set_speed_metres(),
+                command.aligned,
+                flight.acceleration_step()
+            );
+        }
+        if command.arrived {
+            break;
+        }
+    }
 }

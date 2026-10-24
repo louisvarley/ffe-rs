@@ -117,6 +117,61 @@ impl OriginalFlight {
         self.player.set_speed = 0;
     }
 
+    /// Turn toward a point by at most `rate` radians per second over `seconds`: the
+    /// original's autopilot sets the turn rates itself rather than pressing keys.
+    pub fn turn_toward(&mut self, target: [i64; 3], seconds: f64, rate: f64) {
+        let at = self.player.motion.position;
+        let want: [f64; 3] = std::array::from_fn(|k| (target[k] - at[k]) as f64);
+        let length = want.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if length < 1.0 {
+            return;
+        }
+        let want = want.map(|v| v / length);
+        let rows: [[f64; 3]; 3] = self
+            .player
+            .motion
+            .orientation
+            .map(|row| row.map(|v| f64::from(v) / 2_147_483_648.0));
+        let norm = |v: [f64; 3]| {
+            let l = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-12);
+            v.map(|c| c / l)
+        };
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let forward = norm(rows[2]);
+        let cosine = dot(forward, want).clamp(-1.0, 1.0);
+        let angle = cosine.acos();
+        if angle < 1e-9 {
+            return;
+        }
+        let mut axis = cross(forward, want);
+        if axis.iter().map(|c| c * c).sum::<f64>() < 1e-18 {
+            // Dead astern: turn about the ship's up axis.
+            axis = norm(rows[1]);
+        }
+        let axis = norm(axis);
+        let step = angle.min(rate * seconds);
+        let (sin, cos) = step.sin_cos();
+        // Rodrigues' rotation of each row about the axis.
+        let turned = rows.map(|v| {
+            let c = cross(axis, v);
+            let d = dot(axis, v);
+            std::array::from_fn(|k| v[k] * cos + c[k] * sin + axis[k] * d * (1.0 - cos))
+        });
+        // Re-orthonormalise: forward first, then right and up from it.
+        let forward = norm(turned[2]);
+        let right = norm(cross(turned[1], forward));
+        let up = cross(forward, right);
+        let q = |v: f64| (v * 2_147_483_647.0) as i32;
+        self.player.motion.orientation = [right, up, forward].map(|row| row.map(q));
+    }
+
     /// Turn the ship to face a point (keeping it level against the system's y axis).
     pub fn face(&mut self, target: [i64; 3]) {
         let at = self.player.motion.position;

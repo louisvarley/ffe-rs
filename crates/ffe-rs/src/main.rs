@@ -800,9 +800,11 @@ fn run() -> Result<(), String> {
                     roll_left: both(&[Key::LeftBracket], &[Key::Q]),
                     roll_right: both(&[Key::RightBracket], &[Key::E]),
                 };
+                let mut command_face = None;
                 if let Some(nav) = nav.as_mut() {
                     if let Some((command, body)) = nav.command(&cache, model) {
                         keys = command.keys;
+                        command_face = command.face;
                         if let Some((landing, seconds)) = command.skip {
                             model.teleport(landing);
                             nav.transfer(&cache, seconds);
@@ -828,6 +830,9 @@ fn run() -> Result<(), String> {
                     _ => 4,
                 };
                 model.set_view(view, [views.turret.yaw, views.turret.pitch]);
+                if let Some(target) = command_face {
+                    model.turn_toward(target, elapsed, 1.0);
+                }
                 match model.step(elapsed, &keys) {
                     Ok(()) => {
                         model.apply(&mut state);

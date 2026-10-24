@@ -296,6 +296,9 @@ pub struct Command {
     pub arrived: bool,
     /// The cosine of the angle between the nose and the target.
     pub aligned: f64,
+    /// The point to turn toward this frame (the original's autopilot sets the turn
+    /// rates directly; the caller turns the ship with `OriginalFlight::turn_toward`).
+    pub face: Option<[i64; 3]>,
     /// A leg too long to fly in real time: where the ship is when only the final
     /// approach is left, and the world seconds the transfer takes at the ship's
     /// thrust and braking. The caller moves the ship and advances the clock.
@@ -321,9 +324,6 @@ pub fn transfer_seconds(metres: f64) -> f64 {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Memory {
     angle: Option<f64>,
-    /// Frames the steering keys have been held: the amounts grow with the time held,
-    /// so they are let go now and then.
-    held: u32,
 }
 
 /// One frame of the autopilot: turn toward `target` with the steering keys, hold
@@ -366,6 +366,7 @@ pub fn autopilot(
             acceleration: 0,
             arrived: flight.set_speed_metres() < 1.0,
             aligned: forward,
+            face: None,
             skip: None,
         };
     }
@@ -378,22 +379,9 @@ pub fn autopilot(
             acceleration: 0,
             arrived: false,
             aligned: forward,
+            face: Some(target),
             skip: None,
         };
-    }
-    let dead = if fast { 2.0 } else { 0.004 };
-    // Pulsed bang-bang steering: the keys build a turn rate, so they are let go
-    // (below) before the nose is on target and the rate carries it the rest.
-    // Dead astern: turn the same way as if slightly off.
-    if right > dead || (forward < 0.0 && right.abs() <= dead) {
-        keys.right = true;
-    } else if right < -dead {
-        keys.left = true;
-    }
-    if up > dead {
-        keys.pitch_up = true;
-    } else if up < -dead {
-        keys.pitch_down = true;
     }
     // Too far to fly in real time: once the nose is on the target, hand back the
     // transfer for the caller to carry out (the final approach is flown).
@@ -406,21 +394,9 @@ pub fn autopilot(
             acceleration: 0,
             arrived: false,
             aligned: forward,
+            face: Some(target),
             skip: Some((landing, transfer_seconds(cover / 1000.0))),
         };
-    }
-    let steering = keys.left || keys.right || keys.pitch_up || keys.pitch_down;
-    if steering {
-        memory.held += 1;
-        if memory.held > 20 {
-            keys.left = false;
-            keys.right = false;
-            keys.pitch_up = false;
-            keys.pitch_down = false;
-            memory.held = 0;
-        }
-    } else {
-        memory.held = 0;
     }
     // Speed: the most that can still be stopped within the distance left (the
     // reverse thrust gives about 90 m/s per second), held while the nose swings.
@@ -463,6 +439,7 @@ pub fn autopilot(
         acceleration,
         arrived: false,
         aligned: forward,
+        face: Some(target),
         skip: None,
     }
 }
@@ -485,6 +462,8 @@ pub struct Navigator {
     pub clock: f64,
     /// How far the engaged target has moved since the ship last followed it.
     drift: [i64; 3],
+    /// Transfers in a row that have not brought the ship in: after a few it flies.
+    skips: u32,
     pub view: View,
     pub selected: usize,
     /// The body the autopilot is flying to.
@@ -512,6 +491,7 @@ impl Navigator {
             bodies,
             clock: 0.0,
             drift: [0; 3],
+            skips: 0,
             view: View::Closed,
             selected: 0,
             target: None,
@@ -693,7 +673,15 @@ impl Navigator {
                 let unit = (future[k] - ship[k]) as f64 / range.max(1.0);
                 future[k] - (unit * (stop + APPROACH)) as i64
             });
-            command.skip = Some((landing, seconds));
+            self.skips += 1;
+            if self.skips > 3 {
+                // A target that outruns the transfers: fly the rest.
+                command.skip = None;
+            } else {
+                command.skip = Some((landing, seconds));
+            }
+        } else {
+            self.skips = 0;
         }
         Some((command, body))
     }
