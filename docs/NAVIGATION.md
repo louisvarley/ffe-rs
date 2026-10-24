@@ -52,10 +52,9 @@ body is a shaded disc only when the model cannot be drawn, and for stars. Height
 bands pick the ramp colour of the detail entries and the middle slot colour of the
 textured ones (the texture fills themselves are not drawn).
 
-Known gaps: at close range (about 3 radii or less) the larger planet models show
-oversized slivers (the original's draw routines clip edges; this does not, and
-the queue's coordinates wrap in 16 bits), so slivers wider than the planet are
-left out; F1877's haze is not ported (it is about 1,200 instructions and needs F1521, F1878,
+The terrain's 32-bit arithmetic overflows for radii near 2^29 (the oversized slivers
+at close range were that), so the matrix is also shrunk until the radius is about
+2^24, the range the original runs it in. Known gaps: F1877's haze is not ported (it is about 1,200 instructions and needs F1521, F1878,
 F1879, F1780 and F1479 first; the oracle already prints its inputs and the queue).
 The planet is oriented by its object's rows (the spin is `clock[0] >> 17`, so they
 are identity until the clock passes 2^17 days). Looks checked by eye only (`tests/planet_view.rs`, `FFE_SHOT_DIR`).

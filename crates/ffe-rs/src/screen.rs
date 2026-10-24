@@ -274,29 +274,20 @@ impl Screen {
                         // matrix shrunk by a power of two (the position shrinks with it),
                         // which leaves the picture as it was.
                         let reach = position.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-                        let shrink = (reach / 1.0e9).max(1.0).log2().ceil().min(10.0);
+                        // The terrain's 32-bit arithmetic keeps the planet's radius and distance well
+                        // inside the range the original runs it in (radii of 2^20 to 2^26).
+                        let shrink = (reach / 1.0e9)
+                            .max(radius / 16_777_216.0)
+                            .max(1.0)
+                            .log2()
+                            .ceil()
+                            .min(16.0);
                         let shrunk = 0.5_f64.powf(shrink);
                         position = position.map(|v| v * shrunk);
                         let rows = disc
                             .orientation
                             .map(|axis| camera.direction(axis).map(|v| v * shrunk));
-                        if let Ok(mut frame) = viewer.render_scene(model, rows, position, light) {
-                            // Slivers wider than the planet itself are the clipping the
-                            // original's draw routines do and this does not: leave them out.
-                            let limit = (disc.radius * 256.0
-                                / (z * z - disc.radius * disc.radius).max(1.0).sqrt()
-                                * 2.4) as i32
-                                + 8;
-                            frame.shapes.retain(|shape| match shape {
-                                Shape::Fill(points, _) => {
-                                    let span = |f: fn(&(i32, i32)) -> i32| {
-                                        points.iter().map(f).max().unwrap_or(0)
-                                            - points.iter().map(f).min().unwrap_or(0)
-                                    };
-                                    span(|p| p.0) <= limit && span(|p| p.1) <= limit
-                                }
-                                _ => true,
-                            });
+                        if let Ok(frame) = viewer.render_scene(model, rows, position, light) {
                             self.draw_shapes(viewer, &frame.shapes);
                             continue;
                         }

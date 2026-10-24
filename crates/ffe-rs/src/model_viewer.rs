@@ -952,11 +952,6 @@ impl ModelViewer {
                         (i32::from(word as i16), i32::from((word >> 16) as i16))
                     })
                     .collect();
-                // A corner behind the view or far off it has wrapped coordinates (the
-                // original's draw routines clip the edges; this does not yet).
-                if points.iter().any(|(x, y)| x.abs() > 1200 || y.abs() > 1200) {
-                    continue;
-                }
                 // Where the colour sits: the flat colour, the middle of the seven slots,
                 // or the ramp step the vertices' height bands pick (the textures
                 // themselves are not drawn).
