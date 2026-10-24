@@ -293,11 +293,6 @@ fn run() -> Result<(), String> {
                 nav.lock(index);
                 nav.engage_locked();
                 captured_planet = Some(body.name);
-                eprintln!(
-                    "capture: planet {} index {index} start {start:?} target {:?}",
-                    captured_planet.as_deref().unwrap_or(""),
-                    nav.target
-                );
             }
         }
     }
@@ -334,9 +329,6 @@ fn run() -> Result<(), String> {
     let mut frames = 0;
     let mut held_controls = input::HeldControls::default();
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        if options.capture_planet.is_some() && frames < 3 {
-            eprintln!("capture: loop frame {frames} open {}", window.is_open());
-        }
         let now = Instant::now();
         let measured = now.duration_since(last).as_secs_f64().min(0.1);
         last = now;
@@ -1755,9 +1747,6 @@ fn run() -> Result<(), String> {
         frames += 1;
         let arrived = options.capture_planet.is_some()
             && nav.as_ref().is_some_and(|nav| nav.target.is_none());
-        if arrived {
-            eprintln!("capture: arrived after {frames} frames");
-        }
         if options.smoke_frames.is_some_and(|limit| frames >= limit)
             || (options.capture.is_some() && frames >= 400)
             || (options.capture_planet.is_some() && (frames >= 6000 || arrived))

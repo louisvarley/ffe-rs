@@ -80,6 +80,23 @@ is the object's `+0xa0` only for bodies of the navigator. The planet is oriented
 its object's rows (the spin is `clock[0] >> 17`, so they are identity until the clock
 passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
 
+**The surface queue at close range.** F1876's triangles go through F1778's
+order queue, whose original buffer is 50,000 words. A planet at 3 and 2 radii
+needs 59,190 and 63,125 words, so the original exits there; the port used to
+stop drawing at the limit and leave a large black (unpainted) wedge. The flight
+view now draws surfaces with a 131,072-word queue (`Queue::with_limit`,
+EXP-009 in `docs/DEVIATIONS.md`); the queued words and their pixels are
+unchanged and the reference oracles keep the original limit. At the autopilot's
+standoff (1.5 radii + 50 km) the queue fits in 50,000 anyway. The dark parts of
+a planet that remain are its night side, not holes.
+
+**Capturing an approach.** `ffe-rs.exe --root . --capture-planet DIR` puts the
+ship three radii out from the nearest planet on the station's side, locks and
+autopilots to it with the real controller and original flight model, presents a
+fixed 0.1 s per frame and saves `planet-XXXX.ppm` every 100 frames (about 60
+frames and two minutes of wall time for Sol/Mars). `--capture DIR` remains the
+scripted launch.
+
 ## Docking (ffe-rs rules; EXP-005 in docs/DEVIATIONS.md)
 
 `ffe_rs::docking::Port` and the navigator's `request_clearance`, `contact` and `dock`.
@@ -127,9 +144,9 @@ passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`)
   while); the autopilot orthonormalises before steering.
 - Docking entry speeds through the autopilot are 110-170 m/s: the set speed steps down at the
   keys' fixed rate, so it lags the braking curve over the last few hundred metres.
-- Planets are not drawn in the flight view yet (the surface renderer is partly ported:
-  `docs/notes/terrain.md`), so the map and the autopilot's messages are the way to see
-  where bodies are.
+- Planet surfaces draw their triangles, but the textured fills are flat colours or
+  blends (see above), so the detail is blockier than the original's; the night side is
+  drawn with the shade table and has no atmospheric glow except the ported haze ring.
 
 ## The original's navigation computer (read from the code, not yet a port)
 

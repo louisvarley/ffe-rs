@@ -37,7 +37,7 @@ ffe-rs's own (EXP-005).
   thrusters, animation, views, text/labels, curved surfaces, lines, fills,
   docking, market, hyperspace, navigation and the galaxy map.
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 132 items, 50 done and 82 left on
+  in `burndown.js`; 14 milestones, 133 items, 52 done and 81 left on
   2026-10-24). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -170,6 +170,11 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
   **205 runnable synthetic tests** (206 on Linux).
 - `ffe-rs.exe --root . --smoke-frames 30` presents frames with the local
   cache v14.
+- `ffe-rs.exe --root . --capture-planet DIR` flies the original flight model and
+  the real autopilot from three radii to the nearest planet and saves frames
+  through the approach; it exposed the surface queue's 50,000-word limit
+  truncating the planet at 3-2 radii (black wedge). The flight view now draws
+  surfaces with 131,072 words (EXP-009); the oracles keep the original limit.
 - `verify-all.py`: **29 of 29 oracles pass** (the 26 below plus
   `verify-thrusters.py`, the deep child-model run and `verify-animation.py`).
 - `verify-station-models.py`: all 448 models that both sides complete match the
@@ -216,8 +221,8 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 ## Next milestone: v0.48 "Every model fully drawn"
 
 **Progress.** Tracked in `dashboard/`: the burndown covers the whole project
-from the first commit to a finished like-for-like port (132 items, 50 done,
-82 left on 2026-10-24; v0.48 itself is 10 of 18). Keep it current with every
+from the first commit to a finished like-for-like port (133 items, 52 done,
+81 left on 2026-10-24; v0.48 itself is 11 of 19). Keep it current with every
 progress commit.
 
 **Goal.** The F6 viewer and the flight view draw every primitive the executor

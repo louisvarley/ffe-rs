@@ -25,13 +25,31 @@ pub const DETAIL_TRIANGLE: u32 = 0xf180_0008;
 
 /// F1778 for a queue that is not in a group: every entry is a header (its depth key
 /// and the position of the previous header) and the words the draw routine reads.
-#[derive(Debug, Default, Clone)]
+///
+/// The original's buffer holds [`QUEUE_WORDS`] and exits when one more is asked for.
+/// The flight view draws a planet that close with the emitter's own full detail, so
+/// it gives the queue a larger limit with [`Queue::with_limit`] (recorded in
+/// `docs/DEVIATIONS.md`, EXP-009); the reference oracles keep the original limit.
+#[derive(Debug, Clone)]
 pub struct Queue {
     pub words: Vec<u32>,
     /// The last header's position (`*DATA_007832`), zero before any.
     head: u32,
     /// Between F1780's open and close: entries are bare words, without headers.
     in_group: bool,
+    /// The words the queue may hold (`QUEUE_WORDS` unless the viewer enlarges it).
+    limit: usize,
+}
+
+impl Default for Queue {
+    fn default() -> Self {
+        Self {
+            words: Vec::new(),
+            head: 0,
+            in_group: false,
+            limit: QUEUE_WORDS,
+        }
+    }
 }
 
 pub const GROUP_OPEN: u32 = 0xf180_0010;
@@ -39,6 +57,17 @@ pub const GROUP_CLOSE: u32 = 0xf180_0011;
 pub const RING_QUAD: u32 = 0xf180_000a;
 
 impl Queue {
+    /// A queue with a limit other than the original's 50,000 words: the viewer's
+    /// planet surfaces at close range need more (EXP-009).
+    pub fn with_limit(limit: usize) -> Self {
+        Self {
+            words: Vec::new(),
+            head: 0,
+            in_group: false,
+            limit,
+        }
+    }
+
     /// The entries from the last queued back to the first: `(key, header position)`.
     pub fn headers(&self) -> Vec<(u32, usize)> {
         let mut out = Vec::new();
@@ -78,7 +107,7 @@ impl Queue {
         }
         let start = self.words.len();
         self.words.resize(start + count, 0);
-        if self.words.len() > QUEUE_WORDS {
+        if self.words.len() > self.limit {
             return Err(Fault::QueueFull);
         }
         Ok(start)

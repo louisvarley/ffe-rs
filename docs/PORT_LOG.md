@@ -4,6 +4,43 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — Black wedges on a planet approach (v0.48n)
+
+Owner report: "weird black issues when I try to go to a planet".
+
+- **Reproduced.** A new scripted run, `--capture-planet DIR`, puts the ship
+  three radii out from the nearest planet on the station's side, locks it and
+  engages the real autopilot and original flight model, presenting a fixed 0.1 s
+  per frame and saving every 100th frame. Its frames (and the local test
+  `planet_approach_fills_the_disc`) show it: at 3 and 2 radii a large wedge of
+  the planet is unpainted and shows the black sky. Marking the view's untouched
+  background separately (a temporary debug fill) proved the wedge was **not**
+  painted black but never drawn.
+- **Cause.** F1876's terrain triangles queue through F1778, whose buffer holds
+  50,000 words. A planet at close range needs **59,190 words at 3 radii** and
+  **63,125 at 2 radii**; the original exits when one more is asked for, while the
+  port's `ModelViewer` ignored `Fault::QueueFull` and drew the entries queued so
+  far. The missing wedge is the rest of the surface. At the standoff (1.5-1.6
+  radii) the queue is about 45,000 and the view always drew completely, which is
+  why the planet looked right in the earlier tests and at arrival.
+- **Fix.** `Queue::with_limit` lets the flight view give the surface queue
+  0x2_0000 (131,072) words; `Queue::default` and every reference oracle keep the
+  original 50,000-word limit and its `QueueFull` fault, so the queued words and
+  pixels that the oracles compare are unchanged. Recorded as EXP-009. A queue
+  failure is now also reported on stderr instead of silently truncating.
+- **Not a bug:** the remaining dark regions on a planet are its night side
+  (shading by the local star) and the port's own status block drawn over the
+  view's bottom rows; with the queue fixed, no background pixel remains inside
+  the disc in the clear part of the view (< 100 of ~15,000-34,000 sampled pixels
+  at 3, 2 and 1.6 radii; 672 before the fix at 3 radii).
+- **Also checked, no defect found:** the `surface_extent` probe at z=1e6 (it
+  still resolves the axes), the 1.5e9 "too far" limit and the power-of-two
+  matrix shrink (the shrunk rows shorten the light, and `draw_surfaces`
+  renormalises it before shading), and `ModelViewer` surface culling.
+- Regression: `planet_approach_fills_the_disc` (local, ignored, cache needed)
+  renders Mars at 3, 2 and 1.6 radii through the flight view and fails with 672
+  background pixels at 3 radii without the larger queue.
+
 ## 2026-10-24 — Object light sign and one frame-wide light (v0.48m)
 
 Read from F1534/F1535/F1481 (see the analysis below); **not yet pixel-verified**.

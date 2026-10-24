@@ -148,6 +148,14 @@ pub const STAR_MODEL: u32 = 0xab;
 /// original's own acceleration levels are not modelled here).
 const RATES: [u32; 4] = [1, 10, 100, 1000];
 
+/// The words a planet surface's order queue may hold in the flight view. The
+/// original's buffer is 50,000 words and the game exits when one more is asked
+/// for; a planet at a few radii completely fills that queue, which would leave a
+/// large hole in the surface, so the viewer draws it with room to spare instead
+/// (EXP-009 in `docs/DEVIATIONS.md`). The emitters' reference oracles still use
+/// the original 50,000-word limit.
+pub const SURFACE_QUEUE_WORDS: usize = 0x2_0000;
+
 pub struct ModelViewer {
     models: Vec<ViewerModel>,
     table: SineTable,
@@ -1126,7 +1134,7 @@ impl ModelViewer {
                 material: [8, 8, 8],
             };
             let mut terrain = Terrain::new(table, maps);
-            let mut queue = Queue::default();
+            let mut queue = Queue::with_limit(SURFACE_QUEUE_WORDS);
             // An overflow of the original's arenas or queue ends the drawing early;
             // what was queued stands.
             let word0 = i32::from(surface.word);
@@ -1160,7 +1168,9 @@ impl ModelViewer {
                 &mut sky,
                 &mut queue,
             );
-            eprintln!("draw_planet: {outcome:?} queue {} words", queue.words.len());
+            if outcome.is_err() {
+                eprintln!("draw_planet: {outcome:?} queue {} words", queue.words.len());
+            }
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
             for (_, at) in order {

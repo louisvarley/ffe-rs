@@ -95,7 +95,8 @@ window.FFE_BURNDOWN = {
         { id: "v0.48-15", title: "Upper runtime palette", status: "todo" },
         { id: "v0.48-16", title: "Sprites, particles and circles (F1609-F1612)", status: "todo" },
         { id: "v0.48-17", title: "Remaining 17 of 466 model slots and the CD 1.01 census", status: "todo" },
-        { id: "v0.48-18", title: "A planet in the flight scenario", status: "done", version: "v0.48j" }
+        { id: "v0.48-18", title: "A planet in the flight scenario", status: "done", version: "v0.48j" },
+        { id: "v0.48-19", title: "Planet approach draws the whole surface (surface queue, EXP-009)", status: "done", version: "v0.48n" }
       ]
     },
     {
@@ -439,6 +440,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 81,
       note: "The black band in the station lift is fixed: the port's own status block (rows 119-157) was cleared after the lift had drawn; it is now skipped while a lift scene is shown, so the door fills the view. Regression assertion on the closing-door stage."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 81,
+      note: "Owner-reported black wedges on a planet approach: the original 50,000-word surface queue overflows at 3-2 radii (59,190-63,125 words) and the port drew only what was queued. The flight view now uses a 131,072-word surface queue (EXP-009); the oracles keep the original limit. New --capture-planet frames the approach, and a local regression test checks the disc has no unpainted pixels."
     }
   ]
 };

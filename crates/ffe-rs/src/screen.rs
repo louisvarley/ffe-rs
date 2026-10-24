@@ -745,9 +745,6 @@ impl Screen {
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
             *pixel = self.palette[usize::from(*index)];
         }
-        if std::env::var_os("FFE_DEBUG_VIEW_BG").is_some() {
-            self.frame[..320 * VIEW_HEIGHT].fill(0x00ff_00ff);
-        }
         if let Some(map) = self.galaxy.take().filter(|_| scene.is_some()) {
             self.draw_galaxy(scene.unwrap(), &map);
             self.present();

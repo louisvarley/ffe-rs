@@ -540,11 +540,15 @@ fn flight_view_shows_stars() {
     }
 }
 
-/// The approach from far out to the standoff: how much of the disc is black at
-/// each range, and whether any range loses the surface altogether.
+/// The approach to a planet fills its disc. At three and two radii the surface
+/// used to leave large black wedges: the original's 50,000-word order queue
+/// overflows there and the drawing stops (the original exits), so the flight
+/// view now gives the surface queue room to spare (EXP-009). The clear part of
+/// the view (between the top bar and the status block) must have no background
+/// pixels inside the disc but a handful of genuinely black surface colours.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
-fn planet_approach_distances() {
+fn planet_approach_fills_the_disc() {
     use ffe_rs::camera::ViewState;
     use ffe_rs::flight::{Flight, Mode};
     use ffe_rs::navigation::{bodies, galaxy};
@@ -561,7 +565,7 @@ fn planet_approach_distances() {
     let body = list.iter().find(|b| b.name == "Mars").unwrap();
     let radius = body.radius as f64 / UNIT;
     let centre = body.position.map(|v| v as f64 / UNIT);
-    for d in [16.0f64, 10.0, 6.0, 4.0, 3.0, 2.5, 2.0, 1.8, 1.6, 1.5] {
+    for d in [3.0f64, 2.0, 1.6] {
         let mut state = Flight {
             mode: Mode::Flight,
             ..Flight::default()
@@ -571,7 +575,7 @@ fn planet_approach_distances() {
         screen.discs = vec![Disc {
             centre,
             radius,
-            light: [0.0, 0.0, -1.0],
+            light: [1.0, 0.0, 0.0],
             colours: (12, 4),
             star: false,
             model: Some((body.model, body.seed)),
@@ -586,32 +590,26 @@ fn planet_approach_distances() {
             "",
         );
         let extent = viewer.surface_extent.get();
+        assert!(extent > 0.0, "the surface must draw at {d} radii");
         // The disc's expected screen radius (tan of the angular radius).
-        let angular = (radius * radius / (d * d * radius * radius - radius * radius))
-            .sqrt()
-            .atan();
-        let px = 256.0 * angular.tan();
+        let px = 256.0 / (d * d - 1.0).sqrt();
         let mut inside = 0usize;
-        let mut black = 0usize;
-        let mut untouched = 0usize;
-        for y in 0..158i32 {
+        let mut background = 0usize;
+        for y in 12..119i32 {
             for x in 0..320i32 {
                 let (dx, dy) = (f64::from(x) + 0.5 - 160.0, f64::from(y) + 0.5 - 79.0);
-                if dx * dx + dy * dy <= (px * 0.85) * (px * 0.85) {
+                if dx * dx + dy * dy <= (px * 0.9) * (px * 0.9) {
                     inside += 1;
-                    let pixel = screen.logical_pixels()[y as usize * 320 + x as usize];
-                    if pixel == 0 {
-                        black += 1;
-                    }
-                    if pixel == 0x00ff_00ff {
-                        untouched += 1;
+                    if screen.logical_pixels()[y as usize * 320 + x as usize] == 0 {
+                        background += 1;
                     }
                 }
             }
         }
-        eprintln!(
-            "d {d:>4} radii: extent {extent}, disc {px:.1}px, black {}/{} untouched {}",
-            black, inside, untouched
+        eprintln!("Mars at {d} radii: {background} background pixels of {inside}");
+        assert!(
+            background < 100,
+            "the surface left {background} background pixels of {inside} at {d} radii"
         );
         if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
             let mut ppm = b"P6\n320 200\n255\n".to_vec();
