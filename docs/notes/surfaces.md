@@ -8,6 +8,12 @@ origin and axis vectors exactly as F1874 does — the whole-table oracle compare
 all 40 surfaces in 39 models against the original, 0 mismatched. Nothing curved
 is drawn yet.
 
+**Update (v0.53):** `ModelViewer::draw_surfaces` runs the ported F1876 and emitter for every
+surface and draws the queue far to near as flat triangles (textured entries take their
+first slot colour; no haze or texture fills). Seed 0, detail 2, zoom 0. Checked by eye
+on models 113 and 445 (`tests/planet_view.rs`, `FFE_SHOT_DIR` writes PPMs); models too
+large for the viewer's 32-bit view space still error.
+
 Rust: `ffe_core::model_commands::Surface` (decoded, cache independent),
 `model_execute::SurfaceEmission::{origin, axes}` (F1874). The viewer does not
 consume surfaces.

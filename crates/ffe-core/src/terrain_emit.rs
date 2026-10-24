@@ -31,6 +31,18 @@ pub struct Queue {
 }
 
 impl Queue {
+    /// The entries from the last queued back to the first: `(key, header position)`.
+    pub fn headers(&self) -> Vec<(u32, usize)> {
+        let mut out = Vec::new();
+        let mut link = self.head;
+        while link != 0 && out.len() < self.words.len() {
+            let at = (link & 0x00ff_ffff) as usize;
+            out.push((self.words[at], at));
+            link = self.words[at + 1];
+        }
+        out
+    }
+
     /// A new entry of `count` words after its header; returns where the words start.
     pub fn entry(&mut self, key: u32, count: usize) -> Result<usize, Fault> {
         let header = self.words.len();

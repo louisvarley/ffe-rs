@@ -154,6 +154,8 @@ pub struct ModelViewer {
     door_state: i8,
     textures: TextureSet,
     lighting: Lighting,
+    /// The terrain tables and height maps (cache v17), for curved surfaces.
+    terrain: Option<(Vec<u8>, Vec<u8>)>,
     /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
     descriptors: Vec<[i32; 2]>,
     ship_stats: Vec<Option<ShipStats>>,
@@ -314,6 +316,10 @@ impl ModelViewer {
         }
         let mut viewer = Self::from_models(models, table)?;
         viewer.textures = TextureSet::from_cache(cache);
+        viewer.terrain = cache
+            .asset("base:terrain/tables")
+            .zip(cache.asset("base:terrain/maps"))
+            .map(|(t, m)| (t.to_vec(), m.to_vec()));
         if let Some(lighting) = cache
             .asset("base:lighting/default")
             .and_then(|bytes| default_lighting(bytes).ok())
@@ -437,6 +443,7 @@ impl ModelViewer {
             door_state: 0,
             textures: TextureSet::default(),
             lighting: FALLBACK_LIGHTING,
+            terrain: None,
             descriptors: Vec::new(),
             ship_stats: Vec::new(),
             model_strings: Vec::new(),
@@ -864,10 +871,75 @@ impl ModelViewer {
         };
         self.draw_primitives(&result, &mut frame)?;
         self.draw_texts(&result, model.index, &mut vertices, instance, &mut frame)?;
-        // Opcode 31's patch rendering (F1876) is not ported: report every surface
-        // rather than leaving it out of the count.
-        frame.skipped += result.surfaces.len();
+        self.draw_surfaces(&result, light, &mut frame);
         Ok(frame)
+    }
+
+    /// Opcode 31: the curved surfaces through the ported F1876 and its emitter,
+    /// the queue drawn far to near as flat triangles (the textured entries take
+    /// their first colour; F1877's haze and the texture fills are not ported).
+    fn draw_surfaces(&self, result: &Execution, light: [i32; 3], frame: &mut Frame) {
+        use ffe_core::terrain::Terrain;
+        use ffe_core::terrain_draw::Scene;
+        use ffe_core::terrain_emit::{draw_surface, Queue, Shading};
+        for emission in &result.surfaces {
+            let (Some((table, maps)), Some(origin), Some(vectors)) =
+                (&self.terrain, emission.origin, emission.axes)
+            else {
+                frame.skipped += 1;
+                continue;
+            };
+            let surface = &emission.surface;
+            let mut stream: Vec<u8> = surface.entries.iter().flatten().copied().collect();
+            stream.extend([0, 0]);
+            let scene = Scene {
+                seed: 0,
+                origin,
+                axes: std::array::from_fn(|k| vectors[k / 3][k % 3]),
+                kind: surface.parameters[0].max(0) as usize,
+                detail: 2,
+                zoom: 0,
+            };
+            let shading = Shading {
+                light,
+                shades: self.lighting.shades,
+                detail: scene.detail,
+                atmosphere: None,
+                material: [8, 8, 8],
+            };
+            let mut terrain = Terrain::new(table, maps);
+            let mut queue = Queue::default();
+            // An overflow of the original's arenas or queue ends the drawing early;
+            // what was queued stands.
+            let _ = draw_surface(&mut terrain, &scene, &stream, &shading, &mut queue);
+            let mut order = queue.headers();
+            order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+            for (_, at) in order {
+                let w = &queue.words;
+                let handler = w[at + 2];
+                let corners = match handler & 0xff {
+                    4 | 7 | 8 => 3,
+                    5 | 6 | 9 => 4,
+                    _ => continue,
+                };
+                let points: Vec<(i32, i32)> = (0..corners)
+                    .map(|k| {
+                        let word = w[at + 3 + k];
+                        (i32::from(word as i16), i32::from((word >> 16) as i16))
+                    })
+                    .collect();
+                // Where the colour sits: after the corners (flat), or in the slots.
+                let colour = match handler & 0xff {
+                    4 => w[at + 6],
+                    7 => w[at + 7],
+                    5 => w[at + 8],
+                    _ => w[at + 7],
+                } & 0xfff;
+                frame
+                    .shapes
+                    .push(Shape::Flat(points, self.textures.rgb(colour as u16)));
+            }
+        }
     }
 
     /// Turn one executed stream's render-ordered primitives into shapes.
