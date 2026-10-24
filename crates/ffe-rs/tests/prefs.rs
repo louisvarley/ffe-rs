@@ -50,7 +50,10 @@ fn graphic_page_sets_the_space_colour_and_the_stored_shape_detail() {
     for (y, colour) in [(80, 0), (90, 1), (100, 2), (110, 3), (120, 4)] {
         prefs.click(34, y);
         assert_eq!(prefs.space_colour, colour);
-        assert_eq!(prefs::space_colour_rgb(colour), 0x11 * colour as u32);
+        assert_eq!(
+            prefs::space_colour_rgb(colour),
+            [0x00_0000, 0x04_0414, 0x08_0828, 0x08_0838, 0x0c_0c4c][colour]
+        );
     }
     // `0x9e`: Main Menu.
     assert_eq!(prefs.click(34, 136), Activate::None);
@@ -179,7 +182,16 @@ fn the_flight_background_is_the_original_space_colour() {
     let mut screen = screen();
     let state = Flight::free_flight();
     let view = 320 * 158;
-    for (index, expected) in [(4, 0x00_0044), (0, 0x00_0000), (2, 0x00_0022)] {
+    // The captured original: the default "Light Blue" is palette entry 182,
+    // six-bit (3,3,19).
+    assert_eq!(screen.sky, 0x0c_0c4c);
+    for (index, expected) in [
+        (4, 0x0c_0c4c),
+        (0, 0x00_0000),
+        (2, 0x08_0828),
+        (3, 0x08_0838),
+        (1, 0x04_0414),
+    ] {
         screen.sky = prefs::space_colour_rgb(index);
         screen.draw(
             &state,
@@ -198,4 +210,71 @@ fn the_flight_background_is_the_original_space_colour() {
             "space colour {index}: {count} of {view} pixels"
         );
     }
+}
+
+/// The Graphic Detail page's "Black" still leaves the original's stars drawn
+/// over the black sky (the "Background stars" option in Others stays on).
+#[test]
+fn the_black_space_colour_still_draws_the_stars() {
+    let mut screen = screen();
+    let state = Flight::free_flight();
+    let view = 320 * 158;
+    assert_eq!(prefs::space_colour_rgb(0), 0x00_0000);
+    screen.sky = prefs::space_colour_rgb(0);
+    screen.stars_visible = true;
+    screen.draw(
+        &state,
+        ffe_rs::camera::ViewState::default(),
+        None,
+        false,
+        true,
+        "test",
+    );
+    let with_stars = screen.logical_pixels().to_vec();
+    let black = with_stars[..view]
+        .iter()
+        .filter(|pixel| **pixel == 0)
+        .count();
+    assert!(black > view / 2, "black sky: {black} of {view} pixels");
+    screen.stars_visible = false;
+    screen.draw(
+        &state,
+        ffe_rs::camera::ViewState::default(),
+        None,
+        false,
+        true,
+        "test",
+    );
+    let stars = with_stars[..view]
+        .iter()
+        .zip(&screen.logical_pixels()[..view])
+        .filter(|(with, without)| with != without)
+        .count();
+    assert!(stars > 0, "the stars are still drawn over black space");
+}
+
+/// A selection made on the Graphic Detail page survives closing and
+/// re-opening the pages in the same session.
+#[test]
+fn the_space_colour_persists_within_the_session() {
+    let mut prefs = Prefs::default();
+    assert_eq!(prefs.space_colour, 4);
+    prefs.escape();
+    prefs.page = GRAPHIC;
+    // The existing "Black" row at y 80 (`DATA_004903`'s 0x85).
+    assert_eq!(prefs.click(34, 80), Activate::None);
+    assert_eq!(prefs.space_colour, 0);
+    // Return to Game, then Escape again: the page state and the choice remain.
+    assert_eq!(prefs.click(34, 136), Activate::None);
+    assert_eq!(prefs.page, MAIN);
+    prefs.key(Key::Escape);
+    assert!(!prefs.open);
+    prefs.escape();
+    prefs.page = GRAPHIC;
+    assert_eq!(prefs.space_colour, 0);
+    let rows = prefs.rows();
+    let black = rows.iter().find(|row| row.label == "Black").unwrap();
+    let blue = rows.iter().find(|row| row.label == "Light Blue").unwrap();
+    assert_eq!(black.mark, prefs::Mark::Radio(true));
+    assert_eq!(blue.mark, prefs::Mark::Radio(false));
 }

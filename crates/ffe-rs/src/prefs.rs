@@ -106,8 +106,25 @@ pub const MUSIC: [&str; 16] = [
 /// `FUNC_001578`/`FUNC_001579` look up the nearest palette entry for the
 /// clear colour (`DATA_009222`), and the terrain code mixes the three bytes
 /// into the sky. The five settings only change the blue component.
+///
+/// The original quantises the request to its runtime 256-colour palette; the
+/// captured reference frame's default ("Light Blue", requested index 4) is
+/// palette entry 182, six-bit `(3, 3, 19)` = `#0c0c4c`. The port has no runtime
+/// upper palette, so it uses that captured entry for the default and scales its
+/// six-bit components linearly with the requested index for the other four
+/// settings: each component is rounded to the nearest six-bit value and then
+/// expanded with `v * 255 / 63`, which reproduces the capture's `#0c0c4c` and
+/// makes index 0 exactly `#000000`. This is the quantisation recorded in
+/// `docs/DEVIATIONS.md` EXP-013.
 pub fn space_colour_rgb(index: usize) -> u32 {
-    u32::from(index.min(4) as u8) * 0x11
+    /// The captured default: palette entry 182, six-bit `(3, 3, 19)`.
+    const LIGHT_BLUE: [u32; 3] = [3, 3, 19];
+    let index = index.min(4) as u32;
+    let component = |six: u32| {
+        let six = (six * index + 2) / 4;
+        six * 255 / 63
+    };
+    (component(LIGHT_BLUE[0]) << 16) | (component(LIGHT_BLUE[1]) << 8) | component(LIGHT_BLUE[2])
 }
 
 /// What a row or key does. `Other`, `Map` and `Sound` carry the row index.
@@ -740,13 +757,15 @@ mod tests {
     }
 
     #[test]
-    fn space_colours_are_the_original_four_bit_rgb_triples() {
+    fn space_colours_are_the_captured_original_ramp() {
+        // The captured default is palette entry 182, six-bit (3,3,19);
+        // the rest scale that entry with the requested index.
         assert_eq!(space_colour_rgb(0), 0x00_0000);
-        assert_eq!(space_colour_rgb(1), 0x00_0011);
-        assert_eq!(space_colour_rgb(2), 0x00_0022);
-        assert_eq!(space_colour_rgb(3), 0x00_0033);
-        assert_eq!(space_colour_rgb(4), 0x00_0044);
-        assert_eq!(space_colour_rgb(99), 0x00_0044);
+        assert_eq!(space_colour_rgb(1), 0x04_0414);
+        assert_eq!(space_colour_rgb(2), 0x08_0828);
+        assert_eq!(space_colour_rgb(3), 0x08_0838);
+        assert_eq!(space_colour_rgb(4), 0x0c_0c4c);
+        assert_eq!(space_colour_rgb(99), 0x0c_0c4c);
     }
 
     #[test]

@@ -124,11 +124,18 @@ colour.)
 `FUNC_001575` copies it, `FUNC_001578`/`FUNC_001579` pick the nearest palette
 entry for the clear colour, `FUNC_001618_ClearUpperBuf` clears the flight view
 with it, and the surface renderer mixes the same three bytes into the sky. The
-default is index 4, `Light Blue`, from `FUNC_000219` (18164-18168). The five RGB
-values the port draws are therefore `#000000`, `#000011`, `#000022`, `#000033`,
-`#000044`. The original then quantises the request to the nearest entry in its
-runtime 256-colour palette (captured default: six-bit 3,3,19 = `#0c0c4c`); the
-port has no runtime upper palette, so it draws the requested colour.
+default is index 4, `Light Blue`, from `FUNC_000219` (18164-18168).
+
+The original quantises the request to the nearest entry in its runtime 256-colour
+palette; the captured reference frame's default is palette entry 182, six-bit
+(3,3,19) = `#0c0c4c`. The port has no runtime upper palette and cannot repeat the
+lookup, so it draws that captured entry for the default and derives the other
+four settings from it: each six-bit component scaled by index/4, rounded to the
+nearest six-bit value, then expanded with `v * 255 / 63`
+(`ffe_rs::prefs::space_colour_rgb`). The five values are therefore `Black
+#000000`, `Very Dark Blue #040414`, `Dark Blue #080828`, `Medium Blue #080838`,
+`Light Blue #0c0c4c`; the ramp is a documented interpolation (`docs/DEVIATIONS.md`
+EXP-013), and Black keeps the stars drawn.
 
 ## Defaults (`DATA_004895`, FUNC_000219)
 
@@ -160,7 +167,8 @@ reproduce the intermediate pause step (`docs/DEVIATIONS.md`, EXP-012).
   DOS`; keyboard navigation (arrow keys, Enter, Backspace) and a `>` marker.
 - Not ported: commander rename (`0x8c`), Load/Save/Delete/New Game dialogs, the
   music list selection, shape-detail application, targeting tunnels, filename
-  extensions, video, map toggles, and the upper-palette quantisation above.
+  extensions, video, map toggles, and the original's runtime upper-palette lookup
+  itself (its captured default and a documented ramp stand in, EXP-013).
 - The strings and hot-area tables are **not** in the cache: the port hard-codes
   them from the assembly (source offsets above). Importing `DATA_004894` and the
   text block would make them cache assets; the icon bitmaps already are.

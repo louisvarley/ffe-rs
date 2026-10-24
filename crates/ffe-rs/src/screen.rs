@@ -534,8 +534,8 @@ impl Screen {
             palette,
             indexed: Box::new([0; 64000]),
             stars,
-            // `FUNC_000219_SysMenuInit`'s default: "Light Blue" (4), the
-            // requested four-bit colour (0, 0, 4).
+            // `FUNC_000219_SysMenuInit`'s default: "Light Blue" (4), drawn as
+            // the captured quantised palette entry (`#0c0c4c`).
             sky: prefs::space_colour_rgb(4),
             stars_visible: true,
             lock_external: true,
@@ -898,10 +898,10 @@ impl Screen {
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
             *pixel = self.palette[usize::from(*index)];
         }
-        // The original clears the upper view to `DATA_009222`, the palette entry
-        // nearest its space colour (FUNC_001618_ClearUpperBuf); the port draws
-        // the requested colour (`DATA_008815..817`) directly. The docked screen
-        // and the maps paint over it.
+        // The original clears the upper view to the palette entry nearest its
+        // space colour (FUNC_001618_ClearUpperBuf); the port draws the captured
+        // quantised colour (`prefs::space_colour_rgb`, `DATA_008815..817`)
+        // directly. The docked screen and the maps paint over it.
         if state.mode != Mode::Docked {
             self.frame[..320 * VIEW_HEIGHT].fill(self.sky);
         }

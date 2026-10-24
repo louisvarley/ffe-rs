@@ -181,9 +181,9 @@ Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 392 `#[test]` functions total; 100 are `#[ignore]`
+  `cargo clippy -D warnings`. 444 `#[test]` functions total; 112 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **291 runnable synthetic tests** (292 on Linux).
+  **331 runnable synthetic tests** (332 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

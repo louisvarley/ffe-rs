@@ -428,7 +428,14 @@ fn flight_view_draws_the_station_model_in_place_of_the_placeholder() {
     // sine table the station's rotation collapses the triangle to one point, which
     // the original F1604 fills with nothing, so no model pixel is expected.)
     assert_ne!(placeholder, station);
-    assert!(station[..320 * 158].iter().all(|p| *p <= 255));
+    // The composed view is RGB: most of it is the configured space colour.
+    assert!(
+        station[..320 * 158]
+            .iter()
+            .filter(|p| **p == screen.sky)
+            .count()
+            > 320 * 158 / 2
+    );
     assert_eq!(state, before);
     // A cache without model 74 keeps the placeholder.
     let other = ModelViewer::from_models(
