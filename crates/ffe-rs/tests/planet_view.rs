@@ -71,6 +71,7 @@ fn flight_view_shows_planet_surfaces() {
             ..Flight::default()
         };
         state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        eprintln!("   orientation {:?}", body.orientation);
         let radius = body.radius as f64 / UNIT;
         let centre = body.position.map(|v| v as f64 / UNIT);
         // Three radii out along -z of the body, looking at it (forward is +z).
@@ -82,6 +83,7 @@ fn flight_view_shows_planet_surfaces() {
             colours: (12, 4),
             star: false,
             model: Some((body.model, body.seed)),
+            orientation: body.orientation,
         }];
         screen.draw(
             &state,

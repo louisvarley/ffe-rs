@@ -252,6 +252,7 @@ fn planet_discs_are_drawn() {
         colours: (100, 101),
         star: false,
         model: None,
+        orientation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
     }];
     let discs = std::mem::take(&mut screen.discs);
     screen.draw(&state, ViewState::default(), None, false, false, "");

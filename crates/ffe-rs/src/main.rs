@@ -833,6 +833,7 @@ fn run() -> Result<(), String> {
                         },
                         star: b.kind == NavKind::Star,
                         model: (b.kind != NavKind::Star).then_some((b.model, b.seed)),
+                        orientation: b.orientation,
                     }
                 })
                 .collect()

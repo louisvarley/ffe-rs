@@ -55,6 +55,8 @@ pub struct Body {
     /// The object's model and its `+0xa0` (the surface seed).
     pub model: u32,
     pub seed: u32,
+    /// The object's orientation rows (its first nine dwords, Q31).
+    pub orientation: [[f64; 3]; 3],
 }
 
 /// A system that can be visited.
@@ -248,6 +250,11 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
             radius,
             model: list.dword(slot, 0x82),
             seed: list.dword(slot, 0xa0),
+            orientation: std::array::from_fn(|r| {
+                std::array::from_fn(|c| {
+                    f64::from(list.dword(slot, 4 * (3 * r + c)) as i32) / 2_147_483_648.0
+                })
+            }),
         });
     }
     Ok(out)

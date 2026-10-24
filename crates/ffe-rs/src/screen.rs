@@ -24,6 +24,8 @@ pub struct Disc {
     pub star: bool,
     /// The body's model and surface seed, when it has a drawable surface.
     pub model: Option<(u32, u32)>,
+    /// The object's rows in flight space.
+    pub orientation: [[f64; 3]; 3],
 }
 
 pub struct Screen {
@@ -275,7 +277,9 @@ impl Screen {
                         let shrink = (reach / 1.0e9).max(1.0).log2().ceil().min(10.0);
                         let shrunk = 0.5_f64.powf(shrink);
                         position = position.map(|v| v * shrunk);
-                        let rows = unit.map(|axis| camera.direction(axis).map(|v| v * shrunk));
+                        let rows = disc
+                            .orientation
+                            .map(|axis| camera.direction(axis).map(|v| v * shrunk));
                         if let Ok(mut frame) = viewer.render_scene(model, rows, position, light) {
                             // Slivers wider than the planet itself are the clipping the
                             // original's draw routines do and this does not: leave them out.
