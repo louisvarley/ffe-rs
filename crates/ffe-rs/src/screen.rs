@@ -40,6 +40,9 @@ pub struct SystemStation {
     pub orientation: [[f64; 3]; 3],
     /// F866's signed speed byte (`+0xc8`); 0 does not turn.
     pub speed: i8,
+    /// The station record's door word (`+0x9e`, global 1): 0 is open, 0xffff
+    /// closed (F865).
+    pub door: u16,
     /// The game tics the spin and the animation are taken at.
     pub tics: u32,
 }
@@ -151,6 +154,9 @@ pub struct Screen {
     pub market: Option<MarketView>,
     /// The lift scene to draw this frame, in a docking or launching sequence.
     pub lift: Option<LiftView>,
+    /// The view is from inside a station (a launch before the ship is in
+    /// flight): the port's own status block and map buttons are left out.
+    pub station_view: bool,
     /// The system and the station the player is at, for the docked screen and the top bar.
     pub system: String,
     pub station: String,
@@ -428,6 +434,7 @@ impl Screen {
             sun: None,
             market: None,
             lift: None,
+            station_view: false,
             target_mark: None,
             galaxy: None,
             has_lock: false,
@@ -956,8 +963,9 @@ impl Screen {
             self.text(3, 22, &lock, 17);
         }
         // The port's own status block is not the original's, and it would clear
-        // the bottom 39 rows of a lift scene (the door closes over them).
-        if self.lift.is_none() {
+        // the bottom 39 rows of a lift scene (the door closes over them) or of the
+        // station view while a launch's outer door opens.
+        if self.lift.is_none() && !self.station_view {
             self.rect(0, 119, 320, 39, 0);
             self.text(
                 3,
@@ -1438,7 +1446,7 @@ impl Screen {
             return false;
         };
         let origin = camera.point(station.centre).map(|v| v * scale);
-        if origin[2] <= 0.0 || origin.iter().any(|v| v.abs() > STATION_DRAW_RANGE) {
+        if origin.iter().any(|v| v.abs() > STATION_DRAW_RANGE) {
             return false;
         }
         let spin = scene.station_rows(station.tics, station.speed);
@@ -1449,7 +1457,7 @@ impl Screen {
         // One frame-wide light from the local star (F1535), not a per-station
         // direction; the sign convention is `scene_light`'s.
         let light = self.scene_light(scene, camera);
-        let mut inputs = AnimationInputs::original(station.tics, 0, &scene.shades());
+        let mut inputs = AnimationInputs::original(station.tics, station.door, &scene.shades());
         inputs.jitter = self.jitter.cursor;
         match scene.render_scene_with(station.model, rows, origin, light, &inputs) {
             Ok(frame) => {

@@ -63,7 +63,10 @@ fn the_lift_scenes_draw() {
             let mut inside = state.clone();
             inside.mode = Mode::Flight;
             inside.system_flight = true;
-            inside.position = slot.point(slot.front * 0.9).map(|v| v as f64 / UNIT);
+            inside.position = nav
+                .launch_seat(station)
+                .map(|v| v.map(|v| v as f64 / UNIT))
+                .unwrap_or_else(|| slot.point(slot.front * 0.9).map(|v| v as f64 / UNIT));
             let forward = slot.axis;
             let up = [0.0, 1.0, 0.0];
             let right = [
@@ -81,6 +84,7 @@ fn the_lift_scenes_draw() {
                     centre: b.position.map(|v| v as f64 / UNIT),
                     orientation: b.orientation,
                     speed: b.spin,
+                    door: 0xffff,
                     tics: 0x8000_0000,
                 })
                 .collect();
@@ -158,6 +162,7 @@ fn the_lift_scenes_draw() {
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,
             speed: b.spin,
+            door: 0xffff,
             tics: 0x8000_0000,
         })
         .collect();
@@ -192,4 +197,170 @@ fn the_lift_scenes_draw() {
         }
     }
     assert!(stages.len() >= 6, "{stages:?}");
+}
+
+fn stations(nav: &Navigator, tics: u32) -> Vec<SystemStation> {
+    nav.bodies
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.kind == Kind::Station)
+        .map(|(index, b)| SystemStation {
+            model: b.model,
+            centre: b.position.map(|v| v as f64 / UNIT),
+            orientation: b.orientation,
+            speed: b.spin,
+            door: nav.door(index),
+            tics,
+        })
+        .collect()
+}
+
+fn lit_view_pixels(screen: &Screen) -> usize {
+    // The 3D view only (rows 20..118), clear of the top bar, the message line
+    // and the port status block (rows 119..157), which is not the original's.
+    screen.logical_pixels()[20 * 320..118 * 320]
+        .iter()
+        .filter(|pixel| **pixel != 0)
+        .count()
+}
+
+/// The launch stays in the station until the outer door is open (LaunchDone):
+/// the waiting lift and the door-opening stage see the station's bay, and the
+/// flight view left at the station's position still has the station around it,
+/// rather than the empty starfield of a ship already put outside the hull.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_launch_ends_in_the_station() {
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut nav = Navigator::new(&cache).unwrap();
+    for model in [69, 72, 73, 74, 75, 76, 77, 78, 79, 80] {
+        let found = viewer.find(model);
+        nav.set_port_geometry(
+            model,
+            found.and_then(|m| m.front()),
+            found.and_then(|m| m.radius()),
+        );
+    }
+    let station = nav.docked.unwrap();
+    let port = nav.port(station).unwrap();
+    let seat = nav
+        .launch_seat(station)
+        .expect("a docked station has a seat");
+    assert_eq!(seat, nav.bodies[station].position);
+    assert_ne!(
+        seat,
+        port.launch_point(),
+        "the launch starts at the station, not outside its hull"
+    );
+
+    let forward = port.axis;
+    let up = [0.0, 1.0, 0.0];
+    let right = [
+        up[1] * forward[2] - up[2] * forward[1],
+        up[2] * forward[0] - up[0] * forward[2],
+        up[0] * forward[1] - up[1] * forward[0],
+    ];
+    let mut inside = Flight {
+        mode: Mode::Flight,
+        ship: 20,
+        system_flight: true,
+        position: seat.map(|v| v as f64 / UNIT),
+        axes: Some([right, up, forward]),
+        ..Flight::default()
+    };
+    let mut screen = Screen::new(&cache).unwrap();
+    nav.begin_launch().unwrap();
+    let mut frames = 0;
+    let (mut waited, mut leaving, mut launch_out, mut launch_done) = (false, false, false, false);
+    while frames < 3000 && nav.sequence.is_some() {
+        let events = nav.tick_traffic(830, 830.0 / 49_700.0);
+        frames += 1;
+        if let Some(sequence) = nav.sequence {
+            let stage = sequence.stages.state;
+            screen.stations = stations(&nav, 0x8000_0000 + frames * 830);
+            screen.lift = nav.lift_scene().map(|(objects, _)| LiftView {
+                objects,
+                seed: 0x2468_ace0,
+                starport: false,
+                world: true,
+                tics: 0x8000_0000 + frames * 830,
+            });
+            // The inside view: the player's docked seat, facing out.
+            inside.position = seat.map(|v| v as f64 / UNIT);
+            inside.axes = Some([right, up, forward]);
+            screen.station_view = true;
+            screen.draw(
+                &inside,
+                ViewState::default(),
+                Some(&viewer),
+                false,
+                true,
+                "",
+            );
+            let lit = lit_view_pixels(&screen);
+            if stage == 0x1e {
+                waited = true;
+                assert!(
+                    lit > 4000,
+                    "the waiting lift left the view empty ({lit} lit pixels)"
+                );
+            }
+            if stage == 0x36 || stage == 0x38 {
+                leaving = true;
+                assert!(
+                    lit > 4000,
+                    "the door-opening stage left the view empty ({lit} lit pixels)"
+                );
+            }
+            if matches!(stage, 0x1c | 0x1e | 0x20 | 0x36 | 0x38) {
+                let pixels = screen.logical_pixels();
+                for row in [119, 157] {
+                    assert!(
+                        (0..320).any(|x| pixels[row * 320 + x] != 0),
+                        "the bottom of the view was cleared to black at row {row}, stage {stage:#04x}"
+                    );
+                }
+            }
+            save(&screen, &format!("lift-end-{frames:04}-{stage:02x}.ppm"));
+        }
+        for event in &events {
+            match event {
+                ffe_rs::navigation::Traffic::LaunchOut(_) => launch_out = true,
+                ffe_rs::navigation::Traffic::LaunchDone(_) => launch_done = true,
+                _ => {}
+            }
+        }
+        // F1088 keeps the ship in the lift until the door is open: nothing sets
+        // the flight mode on LaunchOut here or in main.
+        if launch_out {
+            if let Some(sequence) = nav.sequence {
+                assert!(sequence.launching);
+            }
+        }
+    }
+    assert!(waited, "the launch never reached the waiting stage");
+    assert!(launch_out, "the launch never left the lift");
+    assert!(launch_done, "the launch never cleared the station");
+
+    // The view the flight starts from: the station's seat, facing out, with the
+    // station still drawn around the ship (not an empty starfield).
+    screen.lift = None;
+    screen.station_view = false;
+    screen.stations = stations(&nav, 0x8000_0000 + frames * 830);
+    screen.draw(
+        &inside,
+        ViewState::default(),
+        Some(&viewer),
+        false,
+        true,
+        "",
+    );
+    let lit = lit_view_pixels(&screen);
+    assert!(
+        lit > 4000,
+        "after the launch the station/world is missing ({lit} lit pixels)"
+    );
+    assert!(leaving);
+    save(&screen, "lift-end-flight.ppm");
 }

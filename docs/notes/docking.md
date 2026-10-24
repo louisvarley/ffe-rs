@@ -60,9 +60,9 @@ object sits at view-space `(0, -up*8, depth - along*8)`), turned about the verti
 | 0x2a docked (F1092) | bay, depth 0, word 0 |
 
 In the playable (`Screen::lift`, `LiftView`): a docking draws them over the outside view (the stars, the station and
-the ship are drawn first); a launch draws only the lift, from the cockpit, with the flight view's HUD. The ship is
-held still during a docking. The models are the original's, run by the verified executor; the frames look like the
-original's cage, shaft and bay (`tests/lift_view.rs` saves them with `FFE_SHOT_DIR`). One thing to look at against
+the ship are drawn first); a launch draws them from the cockpit over the station's bay, with the flight view's HUD. The
+ship is held still during a docking. The models are the original's, run by the verified executor; the frames look like
+the original's cage, shaft and bay (`tests/lift_view.rs` saves them with `FFE_SHOT_DIR`). One thing to look at against
 the real game: the interior model with word 0 (the waiting stages) is nearly empty, so those frames are dark.
 
 ## The posters, and the launch's world (2026-10-24)
@@ -71,9 +71,15 @@ the real game: the interior model with word 0 (the waiting stages) is nearly emp
   starport); the posters of the bay and the lift are the child model `0xeb`, which picks its board by the seed, so every
   station has its own ("LITE", "JAGGED BANNER", "DREAM WARE", "RECYCLE OR DIE", "FIRST ENCOUNTERS ..."). They are text
   records of the child, which the viewer now draws (`docs/notes/text.md`).
-- The launching lift scenes are drawn over the world like the docking ones: the ship waits in the slot facing out, so the
-  stars (and the station seen from its slot) show past the cage's open doors; before they were black wherever the lift
-  model has no wall (the waiting stage and the cage door). The original draws the world every frame.
+- **The launch's inside view** is the player's docked seat: the station's own position, facing out along the docking
+  axis (F1088 copies the player's position to the ship). The station is drawn from there (the system station list is
+  filled during a launch, and a station whose centre is behind the eye is still drawn because its radius reaches the
+  view). Its `+0x9e` door word is global 1 (F865), so the bay's door is shown closed or opening rather than the station
+  always being drawn with an open hole. The lift models are then drawn in view space over the bay.
+- **The hand-off to flight is `LaunchDone`**, when the outer door word reaches 0 (F1089), not `LaunchOut` (F1088, which
+  only starts the door). Until then the docked/inside view stays, and the port's own status block is left out. The
+  flight model starts at the same station seat with zero speed, facing out; the station's hull contact is held off
+  until the ship is past the slot, so it can leave through the open door.
 
 ## What the port keeps and leaves out
 

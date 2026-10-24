@@ -853,6 +853,21 @@ impl Navigator {
         .max(0)
     }
 
+    /// The station's door word (`+0x9e`, F865): 0 is open, 0xffff closed.
+    pub fn door(&self, index: usize) -> u16 {
+        self.traffic.get(&index).map_or(0xffff, |port| port.door)
+    }
+
+    /// The position the player occupies while docked at the station: its own
+    /// position. F1088 copies it to the ship when the launch's door opens, so the
+    /// launch starts inside the station at the open slot, not outside its hull.
+    pub fn launch_seat(&self, index: usize) -> Option<[i64; 3]> {
+        self.bodies
+            .get(index)
+            .filter(|body| matches!(body.kind, Kind::Station | Kind::Starport))
+            .map(|body| body.position)
+    }
+
     /// The traffic record of a station, made on first use with its bay count.
     pub fn starport(&mut self, index: usize) -> &mut Starport {
         let bays = self.bodies.get(index).map_or(3, |b| b.bays);
