@@ -726,6 +726,7 @@ fn shot(
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,
             speed: b.spin,
+            door: 0xffff,
             tics,
         })
         .collect();

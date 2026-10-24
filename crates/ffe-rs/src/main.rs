@@ -399,6 +399,9 @@ fn run() -> Result<(), String> {
     // The selected line of the station's market.
     let mut trade_row = 0usize;
     let mut last_mode = state.mode;
+    // The station the ship has just left: its hull is not a wall to the ship
+    // until it is clear of the slot (F1088 leaves the player at the station).
+    let mut launch_grace: Option<usize> = None;
     let mut message = match nav.as_ref().and_then(|nav| {
         nav.docked
             .map(|index| (nav.bodies[index].name.as_str(), nav.bodies[index].kind))
@@ -1419,24 +1422,38 @@ fn run() -> Result<(), String> {
                         // The stations: the slot docks a cleared ship, the hull pushes it clear.
                         if let Some(nav) = nav.as_mut().filter(|_| state.system_flight) {
                             let ship = model.player().motion.position;
-                            if let Some((index, contact)) = nav.contact(ship, state.speed() * 9.7) {
-                                let name = nav.bodies[index].name.clone();
-                                match contact {
-                                    Contact::None => {}
-                                    Contact::Docked => {
-                                        if nav.begin_docking(index) {
-                                            acceleration = 0;
-                                            model.set_time_acceleration(0);
-                                            message =
-                                                format!("{name}: docking, aligning with the lift.");
+                            if let Some(index) = launch_grace {
+                                let body = &nav.bodies[index];
+                                let clear = nav
+                                    .port(index)
+                                    .map_or(body.radius as f64, |port| port.front * 1.1 + 1.0e3);
+                                if distance(ship, body.position) >= clear {
+                                    launch_grace = None;
+                                }
+                            }
+                            if launch_grace.is_none() {
+                                if let Some((index, contact)) =
+                                    nav.contact(ship, state.speed() * 9.7)
+                                {
+                                    let name = nav.bodies[index].name.clone();
+                                    match contact {
+                                        Contact::None => {}
+                                        Contact::Docked => {
+                                            if nav.begin_docking(index) {
+                                                acceleration = 0;
+                                                model.set_time_acceleration(0);
+                                                message = format!(
+                                                    "{name}: docking, aligning with the lift."
+                                                );
+                                            }
                                         }
-                                    }
-                                    Contact::Collision { clear, reason } => {
-                                        model.teleport(clear);
-                                        model.face(nav.bodies[index].position);
-                                        model.apply(&mut state);
-                                        message =
-                                            format!("{name}: {}. Pushed clear.", reason.text());
+                                        Contact::Collision { clear, reason } => {
+                                            model.teleport(clear);
+                                            model.face(nav.bodies[index].position);
+                                            model.apply(&mut state);
+                                            message =
+                                                format!("{name}: {}. Pushed clear.", reason.text());
+                                        }
                                     }
                                 }
                             }
@@ -1531,25 +1548,17 @@ fn run() -> Result<(), String> {
                             );
                         }
                         Traffic::LaunchOut(index) => {
-                            // Leave from the station's slot: the prototype's
-                            // `launch` would teleport the ship to (0, 0, -500) in
-                            // system space, facing empty sky.
-                            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                            // F1088 sets the station's door opening; the ship is
+                            // still in the lift until it is open (LaunchDone). Keep
+                            // the docked/inside view, not the flight view.
+                            message = format!("Launching: leaving {}.", nav.bodies[index].name);
+                        }
+                        Traffic::LaunchDone(index) => {
+                            // F1088/F1089: the door is open and the ship leaves.
                             state.mode = ffe_rs::flight::Mode::Flight;
                             state.docking_requested = false;
                             state.system_flight = true;
-                            if let Some(port) = nav.port(index) {
-                                state.position =
-                                    port.point(port.front * 2.0).map(|v| v as f64 / unit);
-                                // Face out of the slot (the way the lift's view
-                                // faces), not the prototype's zero heading.
-                                let forward = port.axis;
-                                state.yaw = forward[0].atan2(forward[2]);
-                                state.pitch = forward[1].clamp(-1.0, 1.0).asin();
-                                state.axes = None;
-                            }
-                        }
-                        Traffic::LaunchDone(index) => {
+                            launch_grace = Some(index);
                             message = format!("Clear of {}.", nav.bodies[index].name);
                         }
                     }
@@ -1581,7 +1590,14 @@ fn run() -> Result<(), String> {
                 .and_then(|scene| scene.ship_stats(state.ship));
             let mut model = OriginalFlight::from_flight(&state, stats.as_ref())
                 .with_time_acceleration(acceleration);
-            if let Some((_, at)) = nav.as_ref().and_then(|nav| nav.station()) {
+            // F1088 copies the player's docked position (the station) to the ship:
+            // the launch starts inside the station, at the open door.
+            let at = nav.as_ref().and_then(|nav| {
+                nav.docked
+                    .and_then(|index| nav.launch_seat(index))
+                    .or_else(|| nav.station().map(|(_, at)| at))
+            });
+            if let Some(at) = at {
                 model.teleport(at);
                 // Out of the slot along the docking axis, else toward the nearest world.
                 let port = nav
@@ -1592,6 +1608,7 @@ fn run() -> Result<(), String> {
                 } else if let Some(world) = nav.as_ref().and_then(|nav| nav.nearest_world(at)) {
                     model.face(world);
                 }
+                model.apply(&mut state);
                 state.system_flight = true;
             }
             original = Some(model);
@@ -1652,7 +1669,9 @@ fn run() -> Result<(), String> {
                 })
                 .collect()
         });
-        screen.stations = match nav.as_ref().filter(|_| state.system_flight) {
+        // The system's stations are listed for every view: the launch draws them
+        // from inside the station before the ship is in flight.
+        screen.stations = match nav.as_ref() {
             Some(nav) => {
                 let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
                 let tics = ffe_core::model_animation::START_TICS.wrapping_add(
@@ -1660,12 +1679,14 @@ fn run() -> Result<(), String> {
                 );
                 nav.bodies
                     .iter()
-                    .filter(|b| matches!(b.kind, NavKind::Station | NavKind::Starport))
-                    .map(|b| ffe_rs::screen::SystemStation {
+                    .enumerate()
+                    .filter(|(_, b)| matches!(b.kind, NavKind::Station | NavKind::Starport))
+                    .map(|(index, b)| ffe_rs::screen::SystemStation {
                         model: b.model,
                         centre: b.position.map(|v| v as f64 / unit),
                         orientation: b.orientation,
                         speed: b.spin,
+                        door: nav.door(index),
                         tics,
                     })
                     .collect()
@@ -1688,12 +1709,14 @@ fn run() -> Result<(), String> {
         }
         // The lift scenes of the docking and launching stages (the front view).
         screen.lift = None;
-        // Draw the lift view until the launch actually completes (LaunchOut), not
-        // only while the current lift stage has objects.
+        // Draw the inside view until the launch completes (LaunchDone), not
+        // only while the current lift stage has objects: F1088 keeps the ship in
+        // the station while the outer door opens.
         let launching_scene = nav
             .as_ref()
             .is_some_and(|nav| nav.sequence.is_some_and(|s| s.launching))
             && state.mode == ffe_rs::flight::Mode::Docked;
+        screen.station_view = launching_scene;
         if let Some((objects, launching)) = nav.as_ref().and_then(|nav| nav.lift_scene()) {
             views.mode = ViewMode::Front;
             let _ = launching;
@@ -1809,14 +1832,21 @@ fn run() -> Result<(), String> {
             inside.mode = ffe_rs::flight::Mode::Flight;
             inside.system_flight = true;
             inside.axes = None;
-            // The ship waits in the docking slot facing out, so the world (the stars, the
-            // planet and the station seen from its slot) shows past the lift's open doors.
+            // The ship waits in the station's lift, at the station's position (the
+            // player's docked position, F1088 copies it to the ship), facing out
+            // along the docking axis. The station's bay and door are the world seen
+            // past the lift's open doors, not empty sky.
             let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+            if let Some(seat) = nav
+                .as_ref()
+                .and_then(|nav| nav.docked.and_then(|index| nav.launch_seat(index)))
+            {
+                inside.position = seat.map(|v| v as f64 / unit);
+            }
             if let Some(port) = nav
                 .as_ref()
                 .and_then(|nav| nav.docked.and_then(|index| nav.port(index)))
             {
-                inside.position = port.point(port.front * 0.9).map(|v| v as f64 / unit);
                 let forward = port.axis;
                 let up = [0.0, 1.0, 0.0];
                 let right = [
@@ -1829,10 +1859,6 @@ fn run() -> Result<(), String> {
                 .as_ref()
                 .and_then(|nav| nav.docked.and_then(|index| nav.bodies.get(index)))
             {
-                // No port geometry yet (it is made while drawing the station):
-                // sit at the station itself rather than at the prototype's origin,
-                // so the lift is not drawn over empty space.
-                inside.position = body.position.map(|v| v as f64 / unit);
                 if let Some(world) = nav
                     .as_ref()
                     .and_then(|nav| nav.nearest_world(body.position))
@@ -1949,7 +1975,7 @@ fn run() -> Result<(), String> {
         let arrived = options.capture_planet.is_some()
             && nav.as_ref().is_some_and(|nav| nav.target.is_none());
         if options.smoke_frames.is_some_and(|limit| frames >= limit)
-            || (options.capture.is_some() && frames >= 400)
+            || (options.capture.is_some() && frames >= 1000)
             || (options.capture_planet.is_some() && (frames >= 6000 || arrived))
         {
             break;

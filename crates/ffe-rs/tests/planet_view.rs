@@ -816,6 +816,7 @@ fn surface_frame_shows_a_starport() {
             centre: port.position.map(|v| v as f64 / UNIT),
             orientation: port.orientation,
             speed: 0,
+            door: 0xffff,
             tics: 0,
         }];
         screen.draw(
@@ -1026,6 +1027,7 @@ fn level_flight_near_the_surface_shows_the_horizon() {
         centre: port.position.map(|v| v as f64 / UNIT),
         orientation: port.orientation,
         speed: 0,
+        door: 0xffff,
         tics: 0,
     }];
     screen.draw(
