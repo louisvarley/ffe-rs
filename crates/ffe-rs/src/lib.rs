@@ -1,5 +1,6 @@
 //! Experimental mechanics, plus the original flight model (`original_flight`), which
 //! runs the verified free-flight physics from `ffe-core`.
+pub mod audio;
 pub mod camera;
 pub mod console;
 pub mod docking;
