@@ -369,6 +369,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-24",
       remaining: 82,
       note: "v0.52a: the planet surface subdivision (F1876 draw mode, F1868/F1869) verified on 461 patches (207,689 triangles); the emitter F1840, F1877 and the F1806/F1808 handlers remain."
+    },
+    {
+      date: "2026-10-24",
+      remaining: 82,
+      note: "Navigation (not a routine port): system map, galaxy map and an autopilot to planets and stations for testing; see docs/NAVIGATION.md."
     }
   ]
 };

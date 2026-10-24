@@ -5,6 +5,11 @@ status snippets in `README.md`, `CLAUDE.MD` and `docs/PORT_LOG.md` where they
 disagree with it. Read this first, then `docs/MODEL_COMMANDS.md` for the opcode
 coverage and `docs/notes/` for the feature records.
 
+## Navigation aid
+
+`docs/NAVIGATION.md`: system and galaxy maps (Tab, G) and an autopilot to planets
+and stations, for testing the generated systems. Not part of the original game.
+
 ## How to read this repo
 
 - `CLAUDE.MD` — owner decisions, scope, phases/exit gates, and per-milestone narrative.
