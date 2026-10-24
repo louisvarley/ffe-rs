@@ -40,6 +40,14 @@ Wired in `main.rs`:
 
 Planets move on the game clock (days plus a fraction), children relative to their parent. Long legs are transfers (the clock jumps and the ship lands short of the body's future position); the last stretch is flown in the target's frame (`Navigator::follow`) because the autopilot cannot catch a body moving at 30 km/s.
 
+## Planets in the flight view
+
+`Screen::discs` (set each frame in `main.rs` from the navigator's bodies): stars,
+planets and moons as shaded discs, farthest first, sized and placed by the
+camera and lit toward the star. This is a stand-in: the surface renderer
+(F1874 scene set-up, the queue handlers F1805/F1806/F1808, F1877 haze) is not
+wired to the screen yet, so there is no terrain, colour bands or atmosphere.
+
 ## Known limits
 
 - The orientation the physics integrates drifts off orthonormal (rows 0.985 long after a

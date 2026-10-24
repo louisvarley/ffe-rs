@@ -13,6 +13,17 @@ pub const WIDTH: usize = 640;
 pub const HEIGHT: usize = 480;
 const VIEW_HEIGHT: usize = 158;
 
+/// A star, planet or moon seen as a lit disc: flight-space centre and radius, the
+/// unit direction toward the light, and the palette indices (lit, dark).
+#[derive(Debug, Clone, Copy)]
+pub struct Disc {
+    pub centre: [f64; 3],
+    pub radius: f64,
+    pub light: [f64; 3],
+    pub colours: (u8, u8),
+    pub star: bool,
+}
+
 pub struct Screen {
     pub pixels: Vec<u32>,
     frame: Vec<u32>,
@@ -22,6 +33,8 @@ pub struct Screen {
     palette: [u32; 128],
     indexed: Box<[u8; 64000]>,
     stars: Vec<[f64; 3]>,
+    /// The system's bodies as discs (set by the caller each frame).
+    pub discs: Vec<Disc>,
     /// The original console view icons (secondary bitmaps 63..81), when cached.
     icons: Vec<Option<IndexedImage>>,
     jitter: Jitter,
@@ -216,6 +229,7 @@ impl Screen {
             palette,
             indexed: Box::new([0; 64000]),
             stars,
+            discs: Vec::new(),
             icons: Vec::new(),
             jitter: Jitter::default(),
         })
@@ -224,6 +238,56 @@ impl Screen {
     fn pixel(&mut self, x: i32, y: i32, colour: u8) {
         if (0..320).contains(&x) && (0..200).contains(&y) {
             self.frame[y as usize * 320 + x as usize] = self.palette[usize::from(colour)];
+        }
+    }
+
+    /// Planets and moons as shaded discs, the farthest first (a stand-in for the
+    /// surface renderer: size, position and phase are right, the surface is not).
+    fn draw_discs(&mut self, camera: &Camera) {
+        let mut order: Vec<(f64, Disc)> = self
+            .discs
+            .iter()
+            .map(|d| (camera.point(d.centre)[2], *d))
+            .filter(|(z, d)| *z > d.radius.max(2.0))
+            .collect();
+        order.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for (z, disc) in order {
+            let [cx, cy, _] = camera.point(disc.centre);
+            let scale = 256.0 / z;
+            let radius = disc.radius * scale;
+            if radius < 0.6 {
+                self.pixel(
+                    (160.0 + cx * scale) as i32,
+                    (79.0 - cy * scale) as i32,
+                    disc.colours.0,
+                );
+                continue;
+            }
+            let light = camera.direction(disc.light);
+            let (x0, y0) = (160.0 + cx * scale, 79.0 - cy * scale);
+            let top = (y0 - radius).floor().max(0.0) as i32;
+            let bottom = (y0 + radius).ceil().min(157.0) as i32;
+            for y in top..=bottom {
+                let dy = (f64::from(y) + 0.5 - y0) / radius;
+                if dy.abs() > 1.0 {
+                    continue;
+                }
+                let half = (1.0 - dy * dy).sqrt() * radius;
+                let left = (x0 - half).round().max(0.0) as i32;
+                let right = (x0 + half).round().min(319.0) as i32;
+                for x in left..=right {
+                    let dx = (f64::from(x) + 0.5 - x0) / radius;
+                    let depth = (1.0 - dx * dx - dy * dy).max(0.0).sqrt();
+                    // The sphere normal in view space (y is up on screen).
+                    let lit = dx * light[0] - dy * light[1] + depth * light[2];
+                    let colour = if disc.star || lit > 0.0 {
+                        disc.colours.0
+                    } else {
+                        disc.colours.1
+                    };
+                    self.pixel(x, y, colour);
+                }
+            }
         }
     }
 
@@ -424,6 +488,7 @@ impl Screen {
                     }
                 }
             }
+            self.draw_discs(&camera);
             // FUNC_001054 hides the player's own ship only in the front view.
             // Painter's order between the two objects: the farther one first.
             let own_ship = view != ViewMode::Front;

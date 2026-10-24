@@ -227,3 +227,44 @@ fn orbit_rates() {
         previous = Some(earth.position);
     }
 }
+
+/// Earth seen from 40,000 km out fills a disc of the right size, lit toward Sol.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn planet_discs_are_drawn() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::{Disc, Screen};
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    state.position = [0.0; 3];
+    state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    let radius = 6.371e9 / UNIT; // Earth, in flight units (mm / 9,700)
+    let range = 4.0e10 / UNIT;
+    screen.discs = vec![Disc {
+        centre: [0.0, 0.0, range],
+        radius,
+        light: [1.0, 0.0, 0.0],
+        colours: (100, 101),
+        star: false,
+    }];
+    let discs = std::mem::take(&mut screen.discs);
+    screen.draw(&state, ViewState::default(), None, false, false, "");
+    let before = screen.logical_pixels().to_vec();
+    screen.discs = discs;
+    screen.draw(&state, ViewState::default(), None, false, false, "");
+    let changed = screen
+        .logical_pixels()
+        .iter()
+        .zip(&before)
+        .filter(|(a, b)| a != b)
+        .count();
+    // Disc area: pi * (256 * radius / range)^2 pixels.
+    let expected = std::f64::consts::PI * (256.0 * radius / range).powi(2);
+    eprintln!("expected {expected:.0}, changed {changed}");
+    assert!((changed as f64 - expected).abs() < expected * 0.1);
+}

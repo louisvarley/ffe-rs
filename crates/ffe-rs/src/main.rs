@@ -4,7 +4,7 @@ use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
-use ffe_rs::navigation::{describe, distance, Navigator, View as NavView};
+use ffe_rs::navigation::{describe, distance, Kind as NavKind, Navigator, View as NavView};
 use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
 use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
@@ -814,6 +814,28 @@ fn run() -> Result<(), String> {
                 .as_ref()
                 .map(|model| model.set_speed_metres().round() as i32),
         };
+        screen.discs = nav.as_ref().map_or_else(Vec::new, |nav| {
+            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+            nav.bodies
+                .iter()
+                .filter(|b| matches!(b.kind, NavKind::Star | NavKind::Planet | NavKind::Moon))
+                .map(|b| {
+                    let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
+                    let light = b.position.map(|v| -(v as f64) / length.sqrt().max(1.0));
+                    ffe_rs::screen::Disc {
+                        centre: b.position.map(|v| v as f64 / unit),
+                        radius: b.radius as f64 / unit,
+                        light,
+                        colours: match b.kind {
+                            NavKind::Star => (17, 17),
+                            NavKind::Planet => (12, 4),
+                            _ => (10, 3),
+                        },
+                        star: b.kind == NavKind::Star,
+                    }
+                })
+                .collect()
+        });
         screen.draw(&state, views, scene.as_ref(), help, modern, &message);
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);
