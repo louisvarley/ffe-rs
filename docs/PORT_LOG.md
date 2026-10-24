@@ -4,6 +4,19 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-24 — The black band in the lift (v0.48l)
+
+- The lift filled the view correctly; `Screen::draw` then cleared rows 119..157
+  with the port's own status block (speed/range/cargo line and the map/autopilot
+  buttons), which is not the original's. During the door stages that erased the
+  lift's lower 39 rows, so the band appeared exactly as the door closed or
+  opened.
+- The status block is now skipped while a lift scene is drawn (`self.lift` is
+  `Some`). The lift keeps its fixed default light (the interior is not lit by the
+  local star).
+- Regression: `lift_view.rs` asserts row 119 is not cleared on the closing-door
+  stage (0x1c); `--capture` frames confirm the wall reaches the console.
+
 ## 2026-10-24 — Local-star lighting for ships, stations and lifts (v0.48k)
 
 - `Screen::sun` carries the direction toward the system's star (computed each

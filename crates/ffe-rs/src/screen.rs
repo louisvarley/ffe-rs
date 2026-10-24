@@ -955,33 +955,25 @@ impl Screen {
             let lock = self.lock.clone();
             self.text(3, 22, &lock, 17);
         }
-        self.rect(0, 119, 320, 39, 0);
-        self.text(
-            3,
-            120,
-            &format!(
-                "SPD {:5.1}  RNG {:7.1}  CR {}  CARGO {} T",
-                state.speed(),
-                state.distance(),
-                crate::trade::credits(i32::try_from(state.credits).unwrap_or(i32::MAX)),
-                state.cargo + state.hold.iter().map(|t| u32::from(*t)).sum::<u32>()
-            ),
-            15,
-        );
-        // The map buttons (the system list and this system's list), where the old dock
-        // status line was.
-        for (x0, x1, label) in MAP_BUTTONS {
-            self.rect(
-                x0 as usize,
-                MAP_BUTTONS_Y.0 as usize,
-                (x1 - x0) as usize,
-                10,
-                1,
+        // The port's own status block is not the original's, and it would clear
+        // the bottom 39 rows of a lift scene (the door closes over them).
+        if self.lift.is_none() {
+            self.rect(0, 119, 320, 39, 0);
+            self.text(
+                3,
+                120,
+                &format!(
+                    "SPD {:5.1}  RNG {:7.1}  CR {}  CARGO {} T",
+                    state.speed(),
+                    state.distance(),
+                    crate::trade::credits(i32::try_from(state.credits).unwrap_or(i32::MAX)),
+                    state.cargo + state.hold.iter().map(|t| u32::from(*t)).sum::<u32>()
+                ),
+                15,
             );
-            self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, 18);
-        }
-        if state.mode == Mode::Flight {
-            for (index, (x0, x1, label)) in AUTOPILOT_BUTTONS.into_iter().enumerate() {
+            // The map buttons (the system list and this system's list), where the old dock
+            // status line was.
+            for (x0, x1, label) in MAP_BUTTONS {
                 self.rect(
                     x0 as usize,
                     MAP_BUTTONS_Y.0 as usize,
@@ -989,21 +981,33 @@ impl Screen {
                     10,
                     1,
                 );
-                // Dim a button that has nothing to act on.
-                let live = match index {
-                    1 => self.has_lock,
-                    2 => self.target_mark.is_some_and(|mark| mark.engaged),
-                    _ => true,
-                };
-                let engaged = index == 1 && self.target_mark.is_some_and(|mark| mark.engaged);
-                let colour = if engaged {
-                    17
-                } else if live {
-                    18
-                } else {
-                    15
-                };
-                self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, colour);
+                self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, 18);
+            }
+            if state.mode == Mode::Flight {
+                for (index, (x0, x1, label)) in AUTOPILOT_BUTTONS.into_iter().enumerate() {
+                    self.rect(
+                        x0 as usize,
+                        MAP_BUTTONS_Y.0 as usize,
+                        (x1 - x0) as usize,
+                        10,
+                        1,
+                    );
+                    // Dim a button that has nothing to act on.
+                    let live = match index {
+                        1 => self.has_lock,
+                        2 => self.target_mark.is_some_and(|mark| mark.engaged),
+                        _ => true,
+                    };
+                    let engaged = index == 1 && self.target_mark.is_some_and(|mark| mark.engaged);
+                    let colour = if engaged {
+                        17
+                    } else if live {
+                        18
+                    } else {
+                        15
+                    };
+                    self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, colour);
+                }
             }
         }
         let mut lines = Vec::new();

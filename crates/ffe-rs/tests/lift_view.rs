@@ -99,6 +99,17 @@ fn the_lift_scenes_draw() {
                 true,
                 "",
             );
+            // The lift fills the 320x158 view: the port's status block must not
+            // clear its bottom rows while a lift scene is drawn.
+            // Only the closed/opening door stages fill the bottom rows; others
+            // legitimately show dark geometry there.
+            if stage == 0x1c {
+                let pixels = screen.logical_pixels();
+                assert!(
+                    (0..320).any(|x| pixels[119 * 320 + x] != 0),
+                    "lift row 119 was cleared to black at stage {stage:#04x}"
+                );
+            }
             save(&screen, &format!("lift-launch-{frames:04}-{stage:02x}.ppm"));
         }
         if events
