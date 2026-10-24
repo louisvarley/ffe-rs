@@ -1035,7 +1035,7 @@ impl Screen {
                 "X brake  D clearance  L launch  B/N trade  PGUP/DN ship",
                 "VIEWS: F1 cycle F6 front F7 rear F8 turret F9 external",
                 "External: arrows turn, +/- zoom. Turret: arrows aim",
-                "F12 models (Shift+F12 lab). P pause. Esc quit.",
+                "F12 models (Shift+F12 lab). F11 screenshot. P pause. Esc quit.",
                 "F5 save snapshot; Shift+F5 load newest snapshot.",
                 "Dock: D clearance (100 km), in the slot under 250 m/s",
                 "O original flight: Enter/Shift speed, Z/A , . [ ] steer",

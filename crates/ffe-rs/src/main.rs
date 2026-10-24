@@ -361,6 +361,23 @@ fn run() -> Result<(), String> {
             let shift_down =
                 window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
             // F12 is the model viewer (Shift+F12 the model lab).
+            // F11 saves the presented frame for bug reports (a binary PPM).
+            if pressed(Key::F11) {
+                let dir = options.root.join("shots");
+                let _ = fs::create_dir_all(&dir);
+                let mut number = 1;
+                while dir.join(format!("shot-{number:04}.ppm")).exists() {
+                    number += 1;
+                }
+                let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+                for pixel in &screen.pixels {
+                    out.extend([(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]);
+                }
+                message = match fs::write(dir.join(format!("shot-{number:04}.ppm")), out) {
+                    Ok(()) => format!("Saved shots/shot-{number:04}.ppm"),
+                    Err(error) => format!("Screenshot failed: {error}"),
+                };
+            }
             if pressed(Key::F12) && shift_down {
                 held_controls.disarm(&keys_down);
                 if model_lab.is_some() {
