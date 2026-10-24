@@ -182,10 +182,13 @@ try {
     if ($labAfter.ticks - $labBefore.ticks -gt 60) { throw 'Model lab allowed simulation/catch-up ticks.' }
     Key 0x71
     Key 0x31 # Restore docked baseline for full flight loop
+    Key 0x34 # 4: Stockmarket on the services screen
     Key 0x42 # Buy
     Key 0x74 # F5
     $state = Latest
     if ($state.credits -ne 990 -or $state.cargo -ne 1) { throw 'UI trade/save failed.' }
+    Capture 'market.png'
+    Key 0x08 # Backspace: back to the services screen
     Capture 'docked.png'
     Key 0x4c # Launch
     Key 0x57 400 # Default Modern thrust; no F3 toggle
@@ -203,6 +206,7 @@ try {
         Start-Sleep -Seconds 1
     }
     if ((Latest).mode -ne 'Docked') { throw 'UI launched route did not dock.' }
+    Key 0x34 # 4: Stockmarket
     Key 0x4e # Sell
     Key 0x74
     $state = Latest
@@ -266,6 +270,7 @@ try {
     if ((Latest).mode -ne 'Flight' -or (Latest).credits -ne 1000) { throw 'Invalid load mutated live state.' }
     Key 0x71
     Key 0x31 # Docked reset
+    Key 0x34 # 4: Stockmarket
     Key 0x42
     Key 0x4e # One trade cycle costs one credit
     Key 0x74

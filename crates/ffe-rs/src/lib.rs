@@ -16,5 +16,6 @@ pub mod original_flight;
 pub mod saves;
 pub mod screen;
 pub mod ships;
+pub mod station;
 pub mod textures;
 pub mod trade;

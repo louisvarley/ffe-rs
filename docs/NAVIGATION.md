@@ -44,7 +44,7 @@ transfer then about 300 s of flight), Mercury and Daedalus.
 
 ## Keys (the playable)
 
-The game starts docked at the first station of Sol (L launches, which puts the ship out from that station on the original flight model). Wired in `main.rs` (not the original's map screens):
+The game starts docked at the first station of Sol (L launches, which puts the ship out from that station on the original flight model). Docked, the screen is the original's station services root (`docs/notes/station.md`): Launch Request, Shipyard, Bulletin Board and Stockmarket, with the original's title, rows, buttons, hot areas and `1`-`4` keys. Up/Down choose a row, Enter or a click on the row's button activates it, Backspace goes back, and the Stockmarket opens the verified market (B/N still buy and sell the selected line). Wired in `main.rs` (not the original's map screens):
 
 - The console's map icon (or G): the **galaxy map**, the original's 3D scene (`docs/notes/galaxy-map.md`): the stars around the
   centre with their names, the grid, the range sphere of the drive and a marker on the star nearest the centre, whose name,

@@ -42,9 +42,11 @@ at the first visit: water 0.9, grain 38.0, precious metals 1735.6, gem stones 30
 
 ## The playable
 
-- Docked at a station of a system, the screen is the market: station and system, cash, hold, then the
-  legal goods (25 at Sol) with price, stock and the tonnes held; Up/Down choose, B buys a tonne, N sells
-  one (Shift: ten, stopping at the first refusal).
+- Docked at a station of a system, the services root is the original's screen
+  (`docs/notes/station.md`); Stockmarket opens the market: the original's column header, the
+  legal goods (25 at Sol) with price, stock and the tonnes held, the Buy and Sell buttons and the
+  original's cargo/cash/cabins line. Up/Down choose, Enter/`1`-`4` select, B buys a tonne, N sells
+  one (Shift: ten, stopping at the first refusal); the left/right row buttons buy and sell too.
 - The hold is the ship model's `+8` statistics word less the hyperdrive's mass (`Models::cargo_space`,
   the value F1533 stores at `+0x116` and F992 copies): 5 t for the default Eagle long range fighter.
   The original lowers it further for equipment (F911 and the new-game set-up); not modelled.

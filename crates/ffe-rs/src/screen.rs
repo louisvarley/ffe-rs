@@ -3,6 +3,7 @@ use crate::flight::{Flight, Mode};
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
+use crate::station::{self, DockRow, DockView, Screen as StationScreen, Status};
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::JITTER_SEED;
 use ffe_core::model_fill::{fill_polygon, fill_quad, fill_triangle};
@@ -99,14 +100,17 @@ pub struct MarketView {
     pub station: String,
     pub system: String,
     pub rows: Vec<MarketRow>,
+    /// The first visible row (the original's `D9050`).
+    pub scroll: usize,
     pub selected: usize,
     pub cash: i32,
     pub used: i32,
     pub capacity: i32,
 }
 
-/// Rows of the market list shown at once.
-pub const MARKET_ROWS: usize = 8;
+/// Rows of the market list shown at once (the original's 10-pixel rows from
+/// y 15 to before y 148).
+pub const MARKET_ROWS: usize = 13;
 
 /// The controls button in the top bar: left edge and right edge (logical pixels).
 pub const CONTROLS_BUTTON: (i32, i32) = (118, 236);
@@ -160,6 +164,8 @@ pub struct Screen {
     pub sun: Option<[f64; 3]>,
     /// The market the docked screen shows; the prototype's one-item screen without it.
     pub market: Option<MarketView>,
+    /// The docked services/shipyard/BBS screen of this frame.
+    pub dock: Option<DockView>,
     /// The lift scene to draw this frame, in a docking or launching sequence.
     pub lift: Option<LiftView>,
     /// The view is from inside a station (a launch before the ship is in
@@ -182,6 +188,9 @@ pub struct Screen {
     icons: Vec<Option<IndexedImage>>,
     /// The navigation list's marker, primary bitmap 0x31.
     marker: Option<IndexedImage>,
+    /// The docked screen's row button and arrows: primary bitmaps 0x2e, 0x2f
+    /// and 0x30 (F328/F330).
+    dock_icons: [Option<IndexedImage>; 3],
     jitter: Jitter,
 }
 
@@ -301,6 +310,28 @@ impl Screen {
                 .ok(),
                 _ => None,
             });
+        screen.dock_icons = std::array::from_fn(|k| {
+            let asset_id = format!("base:bitmap/primary/{:03}", 0x2e + k);
+            let record = cache.manifest().files.iter().find(|r| r.id == asset_id)?;
+            match record.asset {
+                AssetKind::IndexedBitmap {
+                    width,
+                    height,
+                    offset_x,
+                    offset_y,
+                    masked_zero,
+                    ..
+                } => IndexedImage::new(
+                    width,
+                    height,
+                    [offset_x, offset_y],
+                    masked_zero,
+                    cache.asset(&asset_id)?,
+                )
+                .ok(),
+                _ => None,
+            }
+        });
         Ok(screen)
     }
 
@@ -470,6 +501,7 @@ impl Screen {
             stations: Vec::new(),
             sun: None,
             market: None,
+            dock: None,
             lift: None,
             station_view: false,
             target_mark: None,
@@ -481,6 +513,7 @@ impl Screen {
             lock: String::new(),
             icons: Vec::new(),
             marker: None,
+            dock_icons: [None, None, None],
             jitter: Jitter::default(),
         })
     }
@@ -824,32 +857,13 @@ impl Screen {
             self.present();
             return;
         }
-        if state.mode == Mode::Docked && self.market.is_some() {
+        if state.mode == Mode::Docked {
             self.frame[..320 * 158].copy_from_slice(&self.cabin);
-            self.draw_market();
-        } else if state.mode == Mode::Docked {
-            self.frame[..320 * 158].copy_from_slice(&self.cabin);
-            self.rect(24, 24, 272, 92, 1);
-            self.text(
-                36,
-                30,
-                &format!("{} STATION", self.station.to_ascii_uppercase()),
-                18,
-            );
-            self.text(
-                36,
-                44,
-                &format!("DOCKED IN THE {} SYSTEM", self.system.to_ascii_uppercase()),
-                15,
-            );
-            self.text(
-                36,
-                59,
-                &format!("FOOD: BUY 10  SELL 9  STOCK {}", state.stock),
-                17,
-            );
-            self.text(36, 73, "B BUY ONE     N SELL ONE", 15);
-            self.text(36, 87, "L LAUNCH  F5 SAVE  SHIFT+F5 LOAD", 15);
+            if let Some(dock) = self.dock.take() {
+                self.draw_dock(&dock);
+            } else if self.market.is_some() {
+                self.draw_market();
+            }
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
             let camera = Camera::new(state, &views, stats.as_ref(), scale);
@@ -996,8 +1010,8 @@ impl Screen {
         }
         // The port's top bar and readouts are not the original's; the original
         // navigation list is drawn straight over the view from y 5, so hide them
-        // while it is open.
-        if !views.console.navigation {
+        // while it is open. The docked screens draw their own frame.
+        if state.mode != Mode::Docked && !views.console.navigation {
             self.rect(0, 0, 320, 11, 0);
             self.text(
                 3,
@@ -1013,27 +1027,23 @@ impl Screen {
             };
             self.rect(CONTROLS_BUTTON.0 as usize, 0, 118, 11, 1);
             self.text(CONTROLS_BUTTON.0 as usize + 3, 1, label, 17);
-            if state.mode != Mode::Docked {
-                // ffe-rs readout (not the original's): speed, set speed, time scale.
-                let console = views.console;
-                let mut line = format!("SPEED {} M/S", console.speed);
-                if let Some(set) = console.set_speed {
-                    line.push_str(&format!("  SET {set} M/S"));
-                }
-                line.push_str(&format!(
-                    "  TIME {}",
-                    crate::console::ACCELERATION_NAMES[console.acceleration.min(4)]
-                ));
-                if console.paused {
-                    line.push_str("  PAUSED");
-                }
-                self.text(3, 13, &line, 15);
+            // ffe-rs readout (not the original's): speed, set speed, time scale.
+            let console = views.console;
+            let mut line = format!("SPEED {} M/S", console.speed);
+            if let Some(set) = console.set_speed {
+                line.push_str(&format!("  SET {set} M/S"));
             }
-            if state.mode != Mode::Docked {
-                let name = view.name().to_ascii_uppercase();
-                let width = self.font.width(&name).unwrap_or(0);
-                self.text(317usize.saturating_sub(width), 1, &name, 15);
+            line.push_str(&format!(
+                "  TIME {}",
+                crate::console::ACCELERATION_NAMES[console.acceleration.min(4)]
+            ));
+            if console.paused {
+                line.push_str("  PAUSED");
             }
+            self.text(3, 13, &line, 15);
+            let name = view.name().to_ascii_uppercase();
+            let width = self.font.width(&name).unwrap_or(0);
+            self.text(317usize.saturating_sub(width), 1, &name, 15);
             if !self.lock.is_empty() {
                 let lock = self.lock.clone();
                 self.text(3, 22, &lock, 17);
@@ -1041,8 +1051,13 @@ impl Screen {
         }
         // The port's own status block is not the original's, and it would clear
         // the bottom 39 rows of a lift scene (the door closes over them) or of the
-        // station view while a launch's outer door opens.
-        if self.lift.is_none() && !views.console.navigation && !self.station_view {
+        // station view while a launch's outer door opens. The docked screen's own
+        // cargo/cash line replaces it.
+        if self.lift.is_none()
+            && state.mode != Mode::Docked
+            && !views.console.navigation
+            && !self.station_view
+        {
             self.rect(0, 119, 320, 39, 0);
             self.text(
                 3,
@@ -1095,6 +1110,9 @@ impl Screen {
                 }
             }
         }
+        // The docked screens put the game's console message in the console's
+        // message area at the lower right (F271), not over the menu.
+        let wrap = if state.mode == Mode::Docked { 124 } else { 308 };
         let mut lines = Vec::new();
         let mut line = String::new();
         for ch in message.chars() {
@@ -1104,7 +1122,11 @@ impl Screen {
                 '?'
             };
             line.push(ch);
-            if self.font.width(&line).is_ok_and(|width| width >= 308) {
+            if self
+                .font
+                .width(&line)
+                .is_ok_and(|measured| measured >= wrap)
+            {
                 lines.push(std::mem::take(&mut line));
             }
         }
@@ -1112,7 +1134,12 @@ impl Screen {
             lines.push(line);
         }
         for (index, line) in lines.iter().take(2).enumerate() {
-            self.text(3, 139 + index * 9, line, 18);
+            let (x, y) = if state.mode == Mode::Docked {
+                (195, 176 + index * 10)
+            } else {
+                (3, 139 + index * 9)
+            };
+            self.text(x, y, line, 18);
         }
         if help {
             self.rect(0, 13, 320, 145, 1);
@@ -1391,65 +1418,143 @@ impl Screen {
         }
     }
 
-    /// The market screen: the station, cash and hold, then the commodity list with the
-    /// selected row lit (a window of [`MARKET_ROWS`] around it).
+    /// The market screen as F536/F538 draw it: the stockmarket screen's column
+    /// header at y 2, thirteen ten-pixel rows from y 15 (the Buy and Sell
+    /// buttons at x 124 and 136), and the original's cargo/cash/cabins line.
     fn draw_market(&mut self) {
         let Some(view) = self.market.take() else {
             return;
         };
-        self.rect(6, 13, 308, 106, 1);
-        self.text(
-            12,
-            15,
-            &format!(
-                "{} STATION, {} SYSTEM",
-                view.station.to_ascii_uppercase(),
-                view.system.to_ascii_uppercase()
-            ),
-            18,
-        );
-        self.text(
-            12,
-            25,
-            &format!(
-                "CASH {} CR     HOLD {}/{} T",
-                crate::trade::credits(view.cash),
-                view.used,
-                view.capacity
-            ),
-            17,
-        );
-        self.text(12, 36, "COMMODITY", 12);
-        self.text(150, 36, "PRICE", 12);
-        self.text(208, 36, "STOCK", 12);
-        self.text(262, 36, "HELD", 12);
-        let first = view
-            .selected
-            .saturating_sub(MARKET_ROWS / 2)
-            .min(view.rows.len().saturating_sub(MARKET_ROWS));
-        for (k, row) in view.rows.iter().enumerate().skip(first).take(MARKET_ROWS) {
-            let y = 46 + 9 * (k - first);
-            let lit = k == view.selected;
-            if lit {
-                self.rect(8, y, 304, 9, 4);
-            }
-            let colour = if lit { 18 } else { 15 };
-            self.text(12, y, &row.name.to_ascii_uppercase(), colour);
-            self.text(150, y, &crate::trade::credits(row.price), colour);
-            self.text(208, y, &row.stock.to_string(), colour);
-            if row.held > 0 {
-                self.text(262, y, &row.held.to_string(), 17);
-            }
-        }
-        if view.rows.len() > MARKET_ROWS {
-            self.text(
-                250,
-                15,
-                &format!("{}/{}", view.selected + 1, view.rows.len()),
-                12,
-            );
-        }
+        let rows: Vec<DockRow> = view
+            .rows
+            .iter()
+            .map(|row| DockRow {
+                main: row.name.clone(),
+                detail: None,
+                columns: vec![
+                    (
+                        station::MARKET_PRICE_X,
+                        format!("${}", crate::trade::credits(row.price)),
+                        0x7d,
+                    ),
+                    (station::MARKET_STOCK_X, format!("{}t", row.stock), 0x7d),
+                    (
+                        station::MARKET_CARGO_X,
+                        if row.held > 0 {
+                            format!("{}t", row.held)
+                        } else {
+                            "-".to_owned()
+                        },
+                        0x2b,
+                    ),
+                ],
+            })
+            .collect();
+        let visible = station::layout(StationScreen::Market).visible();
+        let first = view.scroll.min(rows.len().saturating_sub(visible));
+        let dock = DockView {
+            screen: StationScreen::Market,
+            title: format!("{} Stockmarket", view.station),
+            rows: rows[first..].to_vec(),
+            status: Status {
+                cargo_used: view.used,
+                cargo_capacity: view.capacity,
+                cash: view.cash,
+                ..Status::default()
+            },
+            scroll: first,
+            selected: view.selected,
+            total: view.rows.len(),
+        };
+        self.draw_dock(&dock);
         self.market = Some(view);
+    }
+
+    /// The docked services, shipyard and BBS screens (F327/F329/F330/F558).
+    /// The layout constants and hot areas live in [`crate::station`].
+    fn draw_dock(&mut self, view: &DockView) {
+        let layout = station::layout(view.screen);
+        self.text(4, 6, &view.title, 0x7d);
+        for &(x, text) in station::header(view.screen) {
+            self.text(x as usize, 2, text, 0x7e);
+        }
+        let visible = layout.visible();
+        let palette = self.palette;
+        for (index, row) in view.rows.iter().take(visible).enumerate() {
+            let y = station::LIST_TOP + index as i32 * layout.pitch;
+            // F328: an 8x9 button at x 124 (and x 136 for the two-button screens).
+            for button in 0..layout.buttons {
+                let x = 124 + button * 12;
+                if let Some(Some(icon)) = self.dock_icons.first() {
+                    icon.blit_rgb(&mut self.frame, &palette, x, y);
+                }
+            }
+            self.text(layout.entry_x as usize, (y + 1) as usize, &row.main, 0x7d);
+            if let Some(detail) = &row.detail {
+                self.text(layout.entry_x as usize, (y + 11) as usize, detail, 0x7d);
+            }
+            for (x, text, colour) in &row.columns {
+                self.text(*x as usize, (y + 1) as usize, text, *colour);
+            }
+        }
+        // F330: the down arrow at (124, 147) while entries remain, the up arrow
+        // at (136, 147) once the window is scrolled, and "More..." at (148, 148).
+        if view.more() {
+            if let Some(Some(icon)) = self.dock_icons.get(2) {
+                icon.blit_rgb(&mut self.frame, &palette, 124, 147);
+            }
+            self.text(148, 148, "More...", 0x7d);
+        }
+        if view.scroll > 0 {
+            if let Some(Some(icon)) = self.dock_icons.get(1) {
+                icon.blit_rgb(&mut self.frame, &palette, 136, 147);
+            }
+        }
+        // F566: the "Go Back..." button and text.
+        if layout.back {
+            if let Some(Some(icon)) = self.dock_icons.first() {
+                icon.blit_rgb(&mut self.frame, &palette, 200, 147);
+            }
+            self.text(210, 147, "Go Back...", 0x7d);
+        }
+        // F558's cargo/cash/cabins line (0x98e8).
+        let money = format!("${}", crate::trade::credits(view.status.cash));
+        let money_x = (station::STATUS_CASH_RIGHT as usize)
+            .saturating_sub(self.font.width(&money).unwrap_or(0));
+        self.text(
+            station::STATUS_LABEL_X as usize,
+            station::STATUS_ROW_1 as usize,
+            "Cargo",
+            0x43,
+        );
+        self.text(
+            station::STATUS_VALUE_X as usize,
+            station::STATUS_ROW_1 as usize,
+            &format!(
+                "{} : {}",
+                view.status.cargo_used, view.status.cargo_capacity
+            ),
+            0x0f,
+        );
+        self.text(
+            station::STATUS_CASH_LABEL_X as usize,
+            station::STATUS_ROW_1 as usize,
+            "Cash",
+            0x43,
+        );
+        self.text(
+            station::STATUS_LABEL_X as usize,
+            station::STATUS_ROW_2 as usize,
+            "Cabins",
+            0x43,
+        );
+        self.text(
+            station::STATUS_VALUE_X as usize,
+            station::STATUS_ROW_2 as usize,
+            &format!("{} : {}", view.status.cabins_used, view.status.cabins_total),
+            0x0f,
+        );
+        self.text(money_x, station::STATUS_ROW_2 as usize, &money, 0x0f);
     }
 
     /// The station as the original model 74, executed by the verified port and
