@@ -42,8 +42,10 @@ ffe-rs's own (EXP-005).
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
 - `docs/notes/` - per-feature records: polygons, textures, child models,
   thrusters, animation, views, text/labels, curved surfaces, lines, fills,
-  docking, market, hyperspace, navigation, the galaxy map, and the front
-  end/new game (`intro.md`).
+  docking, market, hyperspace, navigation, the galaxy map, the front end/new
+  game (`intro.md`), and the **ship dashboard audit** (`dashboard.md`: the
+  complete original console/HUD gap list, with the byte-validated DATA_005100
+  button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
   in `burndown.js`; 14 milestones, 147 items, 56 done and 91 left on
   2026-10-24). **Update it in the same commit as any progress change**:
