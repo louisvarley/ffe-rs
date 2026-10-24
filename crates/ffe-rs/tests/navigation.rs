@@ -135,7 +135,8 @@ fn navigator_flow() {
     use ffe_rs::navigation::{Navigator, View};
     let cache = cache();
     let mut nav = Navigator::new(&cache).unwrap();
-    assert_eq!(nav.system_name(), "Lave");
+    assert_eq!(nav.system_name(), "Sol");
+    assert!(nav.station().is_some());
     nav.open(View::Galaxy);
     assert_eq!(nav.view, View::Galaxy);
     let lines = nav.lines([0; 3]);

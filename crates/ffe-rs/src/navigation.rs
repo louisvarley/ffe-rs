@@ -504,7 +504,7 @@ pub fn clock_words(seconds: f64) -> [u32; 2] {
 impl Navigator {
     pub fn new(cache: &VerifiedCache) -> Result<Self, String> {
         let entries = galaxy(cache)?;
-        let current = entries.iter().position(|e| e.name == "Lave").unwrap_or(0);
+        let current = entries.iter().position(|e| e.name == "Sol").unwrap_or(0);
         let bodies = bodies(cache, &entries[current], clock_words(0.0))?;
         Ok(Self {
             entries,
@@ -518,6 +518,24 @@ impl Navigator {
             memory: Memory::default(),
             refreshed: 0.0,
         })
+    }
+
+    /// The first station of this system, where the player starts and launches: its
+    /// name and a point a little out from it.
+    pub fn station(&self) -> Option<(&str, [i64; 3])> {
+        self.bodies
+            .iter()
+            .find(|b| matches!(b.kind, Kind::Station))
+            .or_else(|| {
+                self.bodies
+                    .iter()
+                    .find(|b| matches!(b.kind, Kind::Starport))
+            })
+            .map(|b| {
+                let mut at = b.position;
+                at[2] -= 3 * standoff(b) as i64;
+                (b.name.as_str(), at)
+            })
     }
 
     pub fn system_name(&self) -> &str {

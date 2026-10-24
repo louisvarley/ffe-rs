@@ -28,6 +28,9 @@ pub struct Disc {
     pub orientation: [[f64; 3]; 3],
 }
 
+/// The controls button in the top bar: left edge and right edge (logical pixels).
+pub const CONTROLS_BUTTON: (i32, i32) = (118, 236);
+
 pub struct Screen {
     pub pixels: Vec<u32>,
     frame: Vec<u32>,
@@ -39,6 +42,9 @@ pub struct Screen {
     stars: Vec<[f64; 3]>,
     /// The system's bodies as discs (set by the caller each frame).
     pub discs: Vec<Disc>,
+    /// The system and the station the player is at, for the docked screen and the top bar.
+    pub system: String,
+    pub station: String,
     /// The original console view icons (secondary bitmaps 63..81), when cached.
     icons: Vec<Option<IndexedImage>>,
     jitter: Jitter,
@@ -234,6 +240,8 @@ impl Screen {
             indexed: Box::new([0; 64000]),
             stars,
             discs: Vec::new(),
+            system: String::new(),
+            station: String::new(),
             icons: Vec::new(),
             jitter: Jitter::default(),
         })
@@ -548,8 +556,18 @@ impl Screen {
         if state.mode == Mode::Docked {
             self.frame[..320 * 158].copy_from_slice(&self.cabin);
             self.rect(24, 24, 272, 92, 1);
-            self.text(36, 30, "RUST DEVELOPMENT STATION", 18);
-            self.text(36, 44, "DOCKED - EXPERIMENTAL MARKET", 15);
+            self.text(
+                36,
+                30,
+                &format!("{} STATION", self.station.to_ascii_uppercase()),
+                18,
+            );
+            self.text(
+                36,
+                44,
+                &format!("DOCKED IN THE {} SYSTEM", self.system.to_ascii_uppercase()),
+                15,
+            );
             self.text(
                 36,
                 59,
@@ -558,7 +576,6 @@ impl Screen {
             );
             self.text(36, 73, "B BUY ONE     N SELL ONE", 15);
             self.text(36, 87, "L LAUNCH  F5 SAVE  SHIFT+F5 LOAD", 15);
-            self.text(36, 101, "F2 SCENARIOS / RESET", 12);
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
             let camera = Camera::new(state, &views, stats.as_ref(), scale);
@@ -664,7 +681,20 @@ impl Screen {
             self.pixel(sx + 1, sy, 17);
         }
         self.rect(0, 0, 320, 11, 0);
-        self.text(3, 1, "FFE-RS 0.9 EXPERIMENTAL - SYNTHETIC FLIGHT", 18);
+        self.text(
+            3,
+            1,
+            &format!("{} SYSTEM", self.system.to_ascii_uppercase()),
+            18,
+        );
+        // The controls button: modern or classic, clicked to change.
+        let label = if modern {
+            "MODERN CONTROLS"
+        } else {
+            "CLASSIC CONTROLS"
+        };
+        self.rect(CONTROLS_BUTTON.0 as usize, 0, 118, 11, 1);
+        self.text(CONTROLS_BUTTON.0 as usize + 3, 1, label, 17);
         if state.mode != Mode::Docked {
             // ffe-rs readout (not the original's): speed, set speed, time scale.
             let console = views.console;
@@ -703,7 +733,7 @@ impl Screen {
             3,
             130,
             &format!(
-                "DOCK {}  {}  H HELP  F2 RESET  F3 INPUT",
+                "DOCK {}  {}  H HELP",
                 if state.docking_requested { "ON" } else { "OFF" },
                 if modern { "MODERN" } else { "CLASSIC-LIKE" }
             ),
@@ -738,14 +768,13 @@ impl Screen {
                 "X brake  D dock  L launch  B buy  N sell  PGUP/DN ship",
                 "VIEWS: F1 cycle F6 front F7 rear F8 turret F9 external",
                 "External: arrows turn, +/- zoom. Turret: arrows aim",
-                "F3 input. F4 lab. M models. P pause. Esc quit.",
+                "F12 models (Shift+F12 lab). P pause. Esc quit.",
                 "F5 save snapshot; Shift+F5 load newest snapshot.",
-                "F2 scenarios: 1 Docked / 2 Approach / 3 Free Flight",
                 "Dock: range <80, speed <20, aim at station.",
                 "O original flight: Enter/Shift speed, Z/A , . [ ] steer",
                 "O then TAB system map, G galaxy: Up/Down, Enter flies/jumps",
                 "Backspace stops the autopilot (docs/NAVIGATION.md)",
-                "H closes help. F2 scenarios. No audio/combat yet.",
+                "H closes help. Map icon: systems. Nav icon: this system.",
             ]
             .iter()
             .enumerate()
@@ -1011,7 +1040,7 @@ impl Screen {
             3,
             1,
             &format!(
-                "MODEL VIEWER {}/{}  MODEL {}  M BACK",
+                "MODEL VIEWER {}/{}  MODEL {}  F12 BACK",
                 viewer.selected() + 1,
                 viewer.len(),
                 model.index,
@@ -1136,7 +1165,7 @@ impl Screen {
         self.text(3, 115, "NO FULL COMMANDS / SUBMODELS / SHADING", 12);
         self.text(3, 126, &detail, 17);
         self.text(3, 137, "1/2 MODEL  ARROWS ROTATE  0/5/9 TEST INPUT", 15);
-        self.text(3, 148, "F4 RETURN - NO FLIGHT OR SAVE CHANGES", 18);
+        self.text(3, 148, "SHIFT+F12 RETURN - NO FLIGHT OR SAVE CHANGES", 18);
         self.present();
         Ok(())
     }

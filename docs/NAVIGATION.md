@@ -32,11 +32,12 @@ transfer then about 300 s of flight), Mercury and Daedalus.
 
 ## Keys (the playable)
 
-Wired in `main.rs` (not the original's map screens):
+The game starts docked at the first station of Sol (L launches, which puts the ship out from that station on the original flight model). Wired in `main.rs` (not the original's map screens):
 
-- The console's map button (the F3 icon) or G: list the systems. Up/Down or a click chooses; H, the console's H icon or Enter hyperspaces (an instant jump) to the chosen system.
-- The console's navigation-computer icon (N) or Tab: list everything in this system. Clicking a row (or Enter) engages the autopilot to it and closes the list.
-- Backspace: autopilot off. The first jump or autopilot starts the original flight model, as O does.
+- The console's map icon (or G): the systems list. Up/Down or a click chooses; Enter, H or the console's H icon hyperspaces (an instant jump) to the chosen system.
+- The console's navigation-computer icon (or Tab): everything in this system. A click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns it off.
+- The top bar's button changes between modern and classic controls (modern by default; F3 too).
+- F12 is the model viewer, Shift+F12 the model lab. The other console buttons and the playtest scenarios are not in this build.
 
 Planets move on the game clock (days plus a fraction), children relative to their parent. Long legs are transfers (the clock jumps and the ship lands short of the body's future position); the last stretch is flown in the target's frame (`Navigator::follow`) because the autopilot cannot catch a body moving at 30 km/s.
 

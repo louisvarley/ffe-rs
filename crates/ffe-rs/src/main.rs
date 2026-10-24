@@ -159,7 +159,7 @@ fn run() -> Result<(), String> {
     window.set_target_fps(60);
     let mut state = Flight::default();
     let mut modern = true;
-    let mut help = true;
+    let mut help = false;
     let mut scenarios = false;
     let mut model_lab = None;
     let mut views = ViewState::default();
@@ -195,7 +195,17 @@ fn run() -> Result<(), String> {
         }
     };
     let mut paused = false;
-    let mut message = String::from("Welcome. H closes help; F2 selects a playtest.");
+    let mut last_mode = state.mode;
+    let mut message = match nav
+        .as_ref()
+        .and_then(|nav| nav.station().map(|(name, _)| name))
+    {
+        Some(name) => format!(
+            "Docked at {name}, {}. L launches; the map icons list systems and this system.",
+            nav.as_ref().map_or("", |nav| nav.system_name())
+        ),
+        None => "Docked. L launches.".to_owned(),
+    };
     let mut last = Instant::now();
     let mut accumulator = 0.0;
     let mut frames = 0;
@@ -222,6 +232,28 @@ fn run() -> Result<(), String> {
         // the client size: get_mouse_pos divides by the creation scale only, which
         // breaks after a resize).
         let mouse_down = window.get_mouse_down(MouseButton::Left);
+        let edge_point = if active && mouse_down && !mouse_was_down {
+            window
+                .get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+        } else {
+            None
+        };
+        if let Some((x, y)) = edge_point {
+            if y < 11
+                && (ffe_rs::screen::CONTROLS_BUTTON.0..ffe_rs::screen::CONTROLS_BUTTON.1)
+                    .contains(&x)
+            {
+                modern = !modern;
+                held_controls.disarm(&keys_down);
+                message = if modern {
+                    "Modern controls."
+                } else {
+                    "Classic controls."
+                }
+                .to_owned();
+            }
+        }
         let click_point = if active
             && mouse_down
             && !mouse_was_down
@@ -283,18 +315,11 @@ fn run() -> Result<(), String> {
                 );
             }
         }
-        match console_click {
-            Some(Click::Pause) => {
-                paused = !paused;
-                held_controls.disarm(&keys_down);
-                message = if paused { "Paused." } else { "Resumed." }.to_owned();
-            }
-            Some(click) => {
-                if let Some(text) = click.unported() {
-                    message = text.to_owned();
-                }
-            }
-            None => {}
+        // The other console buttons are not in this build.
+        if console_click == Some(Click::Pause) {
+            paused = !paused;
+            held_controls.disarm(&keys_down);
+            message = if paused { "Paused." } else { "Resumed." }.to_owned();
         }
         if active {
             // F1 is the original's view key; help moves to H.
@@ -305,14 +330,10 @@ fn run() -> Result<(), String> {
                 model_viewer = None;
                 held_controls.disarm(&keys_down);
             }
-            if pressed(Key::F2) {
-                scenarios = !scenarios;
-                help = false;
-                model_lab = None;
-                model_viewer = None;
-                held_controls.disarm(&keys_down);
-            }
-            if pressed(Key::F4) {
+            let shift_down =
+                window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
+            // F12 is the model viewer (Shift+F12 the model lab).
+            if pressed(Key::F12) && shift_down {
                 held_controls.disarm(&keys_down);
                 if model_lab.is_some() {
                     model_lab = None;
@@ -329,8 +350,7 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
-            // F6 is the original's front view; the model viewer moves to M.
-            if pressed(Key::M) {
+            if pressed(Key::F12) && !shift_down {
                 held_controls.disarm(&keys_down);
                 if model_viewer.is_some() {
                     model_viewer = None;
@@ -879,6 +899,26 @@ fn run() -> Result<(), String> {
                 .as_ref()
                 .map(|model| model.set_speed_metres().round() as i32),
         };
+        // Launching from the station puts the ship out from it in this system, on the
+        // original flight model (which the navigation moves).
+        if last_mode == ffe_rs::flight::Mode::Docked && state.mode == ffe_rs::flight::Mode::Flight {
+            let stats = scene
+                .as_ref()
+                .and_then(|scene| scene.ship_stats(state.ship));
+            let mut model = OriginalFlight::from_flight(&state, stats.as_ref())
+                .with_time_acceleration(acceleration);
+            if let Some((_, at)) = nav.as_ref().and_then(|nav| nav.station()) {
+                model.teleport(at);
+            }
+            original = Some(model);
+        }
+        last_mode = state.mode;
+        if let Some(nav) = nav.as_ref() {
+            screen.system = nav.system_name().to_owned();
+            screen.station = nav
+                .station()
+                .map_or_else(String::new, |(n, _)| n.to_owned());
+        }
         screen.discs = nav.as_ref().map_or_else(Vec::new, |nav| {
             let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
             nav.bodies
