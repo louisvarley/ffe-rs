@@ -1,5 +1,12 @@
 [workspace]
-members = ["crates/ffe-rs", "crates/ffe-core", "crates/ffe-content", "crates/ffe-convert", "crates/ffe-tools"]
+members = [
+    "crates/ffe-rs",
+    "crates/ffe-core",
+    "crates/ffe-content",
+    "crates/ffe-convert",
+    "crates/ffe-tools",
+    "crates/ffe-audio",
+]
 resolver = "2"
 
 [workspace.package]

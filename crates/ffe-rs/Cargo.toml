@@ -9,6 +9,7 @@ description = "Experimental playable native Rust First Encounters development sl
 [dependencies]
 ffe-core = { path = "../ffe-core" }
 ffe-content = { path = "../ffe-content" }
+ffe-audio = { path = "../ffe-audio" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 minifb = { version = "0.28", default-features = false, features = ["x11"] }
