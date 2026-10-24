@@ -363,9 +363,17 @@ fn run() -> Result<(), String> {
                     if pressed(Key::Enter) {
                         held_controls.disarm(&keys_down);
                         if original.is_none() {
-                            message =
-                                "Navigation needs the original flight model: press O.".to_owned();
-                        } else if nav.view == NavView::Galaxy {
+                            // Navigation moves the original flight model's ship: start it,
+                            // as O does.
+                            let stats = scene
+                                .as_ref()
+                                .and_then(|scene| scene.ship_stats(state.ship));
+                            original = Some(
+                                OriginalFlight::from_flight(&state, stats.as_ref())
+                                    .with_time_acceleration(acceleration),
+                            );
+                        }
+                        if nav.view == NavView::Galaxy {
                             let index = nav.selected;
                             match nav.jump(&cache, index) {
                                 Ok(position) => {
@@ -878,7 +886,11 @@ fn run() -> Result<(), String> {
                 &nav.lines(ship),
                 nav.selected,
                 &nav.points(ship),
-                "TAB SYSTEM  G GALAXY  UP/DOWN  ENTER  BKSP AUTOPILOT OFF",
+                if message.is_empty() {
+                    "TAB SYSTEM  G GALAXY  UP/DOWN  ENTER  BKSP AUTOPILOT OFF"
+                } else {
+                    &message
+                },
             );
         }
         window
