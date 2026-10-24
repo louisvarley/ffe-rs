@@ -767,6 +767,19 @@ impl Screen {
 
     /// The navigation map: a scrolling list at the left and a plot of the bodies
     /// around the ship (log scale, the ship at the centre) at the right.
+    /// The list row of the map under logical pixel (x, y), as `draw_map` lays them out.
+    pub fn map_row(selected: usize, count: usize, x: i32, y: i32) -> Option<usize> {
+        let rows = 11usize;
+        if !(10..=190).contains(&x) || y < 21 {
+            return None;
+        }
+        let row = ((y - 21) / 11) as usize;
+        let first = selected
+            .saturating_sub(rows / 2)
+            .min(count.saturating_sub(rows));
+        (row < rows && first + row < count).then_some(first + row)
+    }
+
     pub fn draw_map(
         &mut self,
         title: &str,

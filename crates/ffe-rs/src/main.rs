@@ -222,6 +222,21 @@ fn run() -> Result<(), String> {
         // the client size: get_mouse_pos divides by the creation scale only, which
         // breaks after a resize).
         let mouse_down = window.get_mouse_down(MouseButton::Left);
+        let click_point = if active
+            && mouse_down
+            && !mouse_was_down
+            && state.mode == ffe_rs::flight::Mode::Flight
+            && !help
+            && !scenarios
+            && model_lab.is_none()
+            && model_viewer.is_none()
+        {
+            window
+                .get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+        } else {
+            None
+        };
         let console_click = if active
             && mouse_down
             && !mouse_was_down
@@ -283,7 +298,7 @@ fn run() -> Result<(), String> {
         }
         if active {
             // F1 is the original's view key; help moves to H.
-            if pressed(Key::H) {
+            if pressed(Key::H) && nav.as_ref().is_none_or(|nav| nav.view != NavView::Galaxy) {
                 help = !help;
                 scenarios = false;
                 model_lab = None;
@@ -345,13 +360,31 @@ fn run() -> Result<(), String> {
                     && model_lab.is_none()
                     && model_viewer.is_none()
             }) {
-                if pressed(Key::Tab) {
-                    nav.open(NavView::System);
+                // The console icons: the map button (F3) lists the systems, the
+                // navigation computer lists this system, the H icon hyperspaces.
+                let toggle = |nav: &mut ffe_rs::navigation::Navigator, view| {
+                    if nav.view == view {
+                        nav.view = NavView::Closed;
+                    } else {
+                        nav.open(view);
+                    }
+                };
+                if pressed(Key::Tab) || console_click == Some(Click::Navigation) {
+                    toggle(nav, NavView::System);
                     held_controls.disarm(&keys_down);
                 }
-                if pressed(Key::G) {
-                    nav.open(NavView::Galaxy);
+                if pressed(Key::G) || console_click == Some(Click::Screen(3)) {
+                    toggle(nav, NavView::Galaxy);
                     held_controls.disarm(&keys_down);
+                }
+                let mut hyperspace = false;
+                if console_click == Some(Click::Hyperspace) {
+                    if nav.view == NavView::Galaxy {
+                        hyperspace = true;
+                    } else {
+                        message =
+                            "Open the map, choose a system, then press H or this icon.".to_owned();
+                    }
                 }
                 if nav.view != NavView::Closed {
                     if pressed(Key::Up) {
@@ -360,7 +393,28 @@ fn run() -> Result<(), String> {
                     if pressed(Key::Down) {
                         nav.step_selection(1);
                     }
-                    if pressed(Key::Enter) {
+                    let mut enter = pressed(Key::Enter);
+                    if let Some((x, y)) = click_point {
+                        let count = nav.lines(ship_position(&original)).len();
+                        if let Some(row) = Screen::map_row(nav.selected, count, x, y) {
+                            nav.selected = row;
+                            // A click on a body of this system engages the autopilot; a
+                            // click on a system selects it (H hyperspaces).
+                            if nav.view == NavView::System {
+                                enter = true;
+                            } else {
+                                message = "H hyperspaces to the selected system.".to_owned();
+                            }
+                        }
+                    }
+                    if pressed(Key::H) && nav.view == NavView::Galaxy {
+                        hyperspace = true;
+                    }
+                    if nav.view == NavView::Galaxy && enter && click_point.is_none() {
+                        hyperspace = true;
+                    }
+                    let engage = enter && nav.view == NavView::System;
+                    if hyperspace || engage {
                         held_controls.disarm(&keys_down);
                         if original.is_none() {
                             // Navigation moves the original flight model's ship: start it,
@@ -373,21 +427,24 @@ fn run() -> Result<(), String> {
                                     .with_time_acceleration(acceleration),
                             );
                         }
-                        if nav.view == NavView::Galaxy {
+                        if hyperspace {
                             let index = nav.selected;
                             match nav.jump(&cache, index) {
                                 Ok(position) => {
                                     if let Some(model) = original.as_mut() {
                                         model.teleport(position);
                                     }
-                                    message =
-                                        format!("Arrived in the {} system.", nav.system_name());
+                                    message = format!(
+                                        "Hyperspace: arrived in the {} system.",
+                                        nav.system_name()
+                                    );
                                     nav.view = NavView::Closed;
                                 }
                                 Err(error) => message = format!("Jump failed: {error}"),
                             }
                         } else if let Some(body) = nav.engage() {
                             message = format!("Autopilot to {}.", body.name);
+                            nav.view = NavView::Closed;
                         }
                     }
                 }
@@ -875,9 +932,9 @@ fn run() -> Result<(), String> {
                 .as_ref()
                 .map_or([0; 3], |model| model.player().motion.position);
             let title = match nav.view {
-                NavView::Galaxy => "GALAXY: ENTER JUMPS".to_owned(),
+                NavView::Galaxy => "SYSTEMS: H HYPERSPACES TO THE SELECTED".to_owned(),
                 _ => format!(
-                    "SYSTEM MAP: {}  ENTER FLIES TO",
+                    "{}: CLICK ONE TO AUTOPILOT",
                     nav.system_name().to_uppercase()
                 ),
             };
@@ -887,7 +944,7 @@ fn run() -> Result<(), String> {
                 nav.selected,
                 &nav.points(ship),
                 if message.is_empty() {
-                    "TAB SYSTEM  G GALAXY  UP/DOWN  ENTER  BKSP AUTOPILOT OFF"
+                    "MAP ICON/G SYSTEMS  N ICON/TAB THIS SYSTEM  H HYPERSPACE  BKSP OFF"
                 } else {
                     &message
                 },
@@ -905,6 +962,12 @@ fn run() -> Result<(), String> {
         println!("PASS: native window presented {frames} frames using verified cabin artwork.");
     }
     Ok(())
+}
+
+fn ship_position(original: &Option<OriginalFlight>) -> [i64; 3] {
+    original
+        .as_ref()
+        .map_or([0; 3], |model| model.player().motion.position)
 }
 
 fn main() {

@@ -44,6 +44,16 @@ fn screen_buttons_and_overlaps_follow_the_list_order() {
     assert!(Screen::view_button(76, 180).is_none());
     assert!(Click::Screen(2).unported().is_some());
     assert!(Click::Front.unported().is_none());
+    // The map button, the navigation computer and the H icon drive the ffe-rs maps.
+    for click in [Click::Screen(3), Click::Navigation, Click::Hyperspace] {
+        assert!(click.unported().is_none());
+    }
+    // The list rows of the map: 11 rows from y 22, the selected one kept in view.
+    assert_eq!(ffe_rs::screen::Screen::map_row(0, 20, 20, 22), Some(0));
+    assert_eq!(ffe_rs::screen::Screen::map_row(0, 20, 20, 33), Some(1));
+    assert_eq!(ffe_rs::screen::Screen::map_row(19, 20, 20, 22), Some(9));
+    assert_eq!(ffe_rs::screen::Screen::map_row(0, 3, 20, 80), None);
+    assert_eq!(ffe_rs::screen::Screen::map_row(0, 20, 250, 22), None);
 }
 
 #[test]

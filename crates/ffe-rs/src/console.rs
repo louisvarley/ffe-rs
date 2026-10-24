@@ -90,14 +90,14 @@ impl Click {
     pub fn unported(self) -> Option<&'static str> {
         match self {
             Click::Screen(2) => Some("F2 (status) is not ported yet."),
-            Click::Screen(3) => Some("F3 (map) is not ported yet."),
+            // The map button lists the systems and the navigation computer lists this
+            // system (ffe-rs navigation, not the original's screens).
+            Click::Screen(3) | Click::Navigation | Click::Hyperspace => None,
             Click::Screen(_) => Some("F4/F5 (comms) are not ported yet."),
             Click::Missile => Some("The missile view needs equipment (not ported)."),
             Click::Combat => Some("The combat computer needs equipment (not ported)."),
             Click::Capsule => Some("The escape capsule is not ported yet."),
             Click::Labels => Some("Text labels are not ported yet."),
-            Click::Navigation => Some("The navigation computer is not ported yet."),
-            Click::Hyperspace => Some("Hyperspace is not ported yet."),
             Click::Target => Some("Targeting is not ported yet."),
             _ => None,
         }
