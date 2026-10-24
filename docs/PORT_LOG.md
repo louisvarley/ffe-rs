@@ -2358,3 +2358,12 @@ on 512 planet patches and records every emitter call: 461 cases complete (51 fil
 field with the arena counts. Next: the emitter F1840 (queue entries via F1837-F1839, the
 colour tables of F1841), F1877 for the textured planets, and the F1806/F1808 handlers.
 Notes: `docs/notes/terrain.md` ("Drawing").
+
+## v0.52b: the planet surface emitter (F1840-F1845)
+
+`ffe_core::terrain_emit`: the four emitters by planet type (F1840 with its sea-level
+crossings F1837 and colour slots F1838/F1839, F1842, F1844, F1845), the colour tables of F1841
+and F1843, and the order queue (F1778, F1326). `--surface-draw` now prints the queue: for the
+102 completing cases without a word-8 parameter every word matches, and the 10 cases that fill
+the 50,000-word queue fill it in the port too. Next: F1877 (the haze and its queue entries) and
+the F1806/F1808 draw routines.

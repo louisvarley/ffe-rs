@@ -122,7 +122,7 @@ struct Pass<'t, 'e> {
     /// The midpoint routines for levels below five and from five on.
     coarse: usize,
     fine: usize,
-    emit: &'e mut dyn FnMut(&Terrain<'_>, Emission),
+    emit: &'e mut dyn FnMut(&Terrain<'_>, Emission) -> Result<(), Fault>,
 }
 
 impl Terrain<'_> {
@@ -133,7 +133,7 @@ impl Terrain<'_> {
         &mut self,
         scene: &Scene,
         stream: &[u8],
-        emit: &mut dyn FnMut(&Terrain<'_>, Emission),
+        emit: &mut dyn FnMut(&Terrain<'_>, Emission) -> Result<(), Fault>,
     ) -> Result<Drawn, Fault> {
         self.projection = Projection::Flat;
         let (tree, consumed) = Tree::build(stream)?;
@@ -210,7 +210,7 @@ impl Terrain<'_> {
         span: usize,
         bound: i32,
         slack: i32,
-        emit: &mut dyn FnMut(&Terrain<'_>, Emission),
+        emit: &mut dyn FnMut(&Terrain<'_>, Emission) -> Result<(), Fault>,
     ) -> Result<(), Stop> {
         let mut edges = [NIL; 30];
         for (k, edge) in edges.iter_mut().enumerate() {
@@ -338,7 +338,8 @@ impl Terrain<'_> {
                         key,
                         level,
                     },
-                );
+                )
+                .map_err(Stop::Fault)?;
                 return Ok(());
             }
             if level < 2 {

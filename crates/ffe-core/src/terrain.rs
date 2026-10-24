@@ -39,6 +39,12 @@ pub mod tables {
     pub const ADJUST: usize = 5995;
     /// `DATA_007844`: the midpoint routine ranks (dwords, 32 slots).
     pub const MIDPOINTS: usize = 1175;
+    /// `DATA_007850`: the 22 colour ramp recipes (four dwords each) F1841 reads.
+    pub const RAMPS: usize = 2651;
+    /// `DATA_007851`: the 21 land colour recipes (seven of four dwords each).
+    pub const BLENDS: usize = 3003;
+    /// `DATA_007853`: the 32 band colour recipes F1843 reads.
+    pub const BANDS: usize = 5483;
     /// `DATA_007892`: the icosahedron's twelve corner directions (12 bytes each).
     pub const CORNERS: usize = 6603;
     /// `DATA_007893`: the twenty faces (24 bytes each: corner and edge indexes).
@@ -714,6 +720,8 @@ pub enum Fault {
     Pool,
     /// The original divides by zero (or overflows the quotient).
     Division,
+    /// The order queue holds more than 50,000 words, where the original exits.
+    QueueFull,
 }
 
 /// Why the search stopped early.

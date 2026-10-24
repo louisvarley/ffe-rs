@@ -1,5 +1,6 @@
-use ffe_core::terrain::Terrain;
+use ffe_core::terrain::{Fault, Terrain};
 use ffe_core::terrain_draw::Scene;
+use ffe_core::terrain_emit::{draw_surface, Queue, Shading};
 use serde::Deserialize;
 
 fn cache_terrain() -> (Vec<u8>, Vec<u8>) {
@@ -48,6 +49,38 @@ struct Case {
     edges: u32,
     #[serde(default)]
     first: Vec<Vec<i64>>,
+    #[serde(default)]
+    word0: i32,
+    #[serde(default)]
+    word8: i32,
+    #[serde(default)]
+    light: [i32; 3],
+    #[serde(default)]
+    shades: Vec<u8>,
+    #[serde(default)]
+    words: usize,
+    #[serde(default)]
+    queue_hash: String,
+    #[serde(default)]
+    queue: Vec<u32>,
+}
+
+fn shading(case: &Case) -> Shading {
+    let mut shades = [[0u8; 3]; 8];
+    for (k, shade) in shades.iter_mut().enumerate() {
+        shade.copy_from_slice(&case.shades[3 * k..3 * k + 3]);
+    }
+    Shading {
+        light: case.light,
+        shades,
+        detail: case.detail,
+        atmosphere: None,
+        material: [
+            ((case.word0 >> 8) & 15) as u8,
+            ((case.word0 >> 4) & 15) as u8,
+            (case.word0 & 15) as u8,
+        ],
+    }
 }
 
 fn mix(hash: &mut u64, value: u32) {
@@ -67,7 +100,7 @@ fn executed_reference_surface_draw() {
     let (table, maps) = cache_terrain();
     let input = std::fs::read_to_string(std::env::var_os("FFE_SURFACE_VECTORS").unwrap()).unwrap();
     assert!(input.len() < 256 << 20);
-    let (mut cases, mut compared, mut emitted) = (0, 0, 0);
+    let (mut cases, mut compared, mut emitted, mut queued, mut overflows) = (0, 0, 0, 0, 0);
     for line in input.lines() {
         let case: Case = serde_json::from_str(line).unwrap();
         cases += 1;
@@ -78,6 +111,32 @@ fn executed_reference_surface_draw() {
                 "case {}: unexpected crash",
                 case.case
             );
+            if case.word8 == 0 {
+                let mut terrain = Terrain::new(&table, &maps);
+                let scene = Scene {
+                    seed: case.seed,
+                    origin: case.origin,
+                    axes: case.vectors,
+                    kind: case.kind,
+                    detail: case.detail,
+                    zoom: case.zoom,
+                };
+                let mut queue = Queue::default();
+                let result = draw_surface(
+                    &mut terrain,
+                    &scene,
+                    &case.stream,
+                    &shading(&case),
+                    &mut queue,
+                );
+                assert_eq!(
+                    result.err(),
+                    Some(Fault::QueueFull),
+                    "case {}: the order queue should overflow",
+                    case.case
+                );
+                overflows += 1;
+            }
             continue;
         }
         let mut terrain = Terrain::new(&table, &maps);
@@ -120,6 +179,7 @@ fn executed_reference_surface_draw() {
                     rows.push(row);
                 }
                 count += 1;
+                Ok(())
             })
             .unwrap_or_else(|fault| panic!("case {}: {fault:?}", case.case));
         let _ = drawn;
@@ -131,9 +191,42 @@ fn executed_reference_surface_draw() {
         assert_eq!(format!("{hash:016x}"), case.hash, "{context}: hash");
         assert_eq!(terrain.nodes_out(), case.nodes, "{context}: nodes");
         assert_eq!(terrain.edges_out(), case.edges, "{context}: edges");
+        if case.word8 == 0 {
+            // The emitter, when F1877 has nothing to set up.
+            let mut terrain = Terrain::new(&table, &maps);
+            let mut queue = Queue::default();
+            draw_surface(
+                &mut terrain,
+                &scene,
+                &case.stream,
+                &shading(&case),
+                &mut queue,
+            )
+            .unwrap_or_else(|fault| panic!("{context}: {fault:?}"));
+            if queue.words.len() != case.words {
+                eprintln!("got  {:x?}", &queue.words[..queue.words.len().min(60)]);
+                eprintln!("want {:x?}", &case.queue[..case.queue.len().min(60)]);
+            }
+            assert_eq!(queue.words.len(), case.words, "{context}: queue words");
+            for (k, (got, want)) in queue.words.iter().zip(&case.queue).enumerate() {
+                assert_eq!(got, want, "{context}: queue word {k}");
+            }
+            let mut hash = 14_695_981_039_346_656_037u64;
+            for word in &queue.words {
+                mix(&mut hash, *word);
+            }
+            assert_eq!(
+                format!("{hash:016x}"),
+                case.queue_hash,
+                "{context}: queue hash"
+            );
+            queued += 1;
+        }
         compared += 1;
         emitted += count;
     }
     assert!(compared > 350, "too few cases: {compared} of {cases}");
-    eprintln!("compared {compared} of {cases} cases ({emitted} triangles)");
+    eprintln!(
+        "compared {compared} of {cases} cases ({emitted} triangles); {queued} queues, {overflows} overflows"
+    );
 }

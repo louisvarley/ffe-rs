@@ -3301,6 +3301,7 @@ static int terrain_vectors(void)
 extern void (*ref_emit)(void *,void *,void *,long *,long);
 extern long ref_emit_level;
 extern unsigned char ref_det_a[],ref_det_b[];
+extern unsigned long ref_order_head;
 static unsigned long draw_emits;
 static uint64_t draw_hash;
 static unsigned long draw_first[48][35];
@@ -3349,7 +3350,8 @@ void trace_surface_emit(unsigned char *a,unsigned char *b,unsigned char *c,long 
     ref_emit(a,b,c,vec,key);
 }
 static const int surface_models[39]={113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,445,447,449};
-static unsigned long draw_handler(unsigned long word)
+static unsigned char draw_link[65536+8];
+static unsigned long draw_handler(unsigned long word,unsigned long position)
 {
     if(word==(unsigned long)ref_flat_draw_triangle) return 0xf1800004UL;
     if(word==(unsigned long)ref_tex_draw_quad) return 0xf1800005UL;
@@ -3357,7 +3359,20 @@ static unsigned long draw_handler(unsigned long word)
     if(word==(unsigned long)ref_tex_draw_triangle) return 0xf1800007UL;
     if(word==(unsigned long)ref_det_b) return 0xf1800008UL;
     if(word==(unsigned long)ref_flat_draw_quad) return 0xf1800009UL;
+    /* A header's link to the previous header: that header's position. */
+    if(position<65536 && draw_link[position] && word) return 0xf2000000UL|((word-(unsigned long)ref_order_base)/4);
     return word;
+}
+static void draw_mark_links(void)
+{
+    unsigned long header=ref_order_head,guard=0;
+    memset(draw_link,0,sizeof(draw_link));
+    while(header && guard++<70000) {
+        unsigned long index=(header-(unsigned long)ref_order_base)/4;
+        if(index>=65536) break;
+        draw_link[index+1]=1;
+        header=ref_order_base[index+1];
+    }
 }
 #endif
 static int surface_draw_vectors(int only)
@@ -3521,8 +3536,17 @@ static int surface_draw_vectors(int only)
             for(j=0;j<35;++j) fprintf(draw_out,"%s%ld",j?",":"",(long)draw_first[i][j]);
             fprintf(draw_out,"]");
         }
-        fprintf(draw_out,"],\"words\":[");
-        for(i=0;i<words && i<20000;++i) fprintf(draw_out,"%s%lu",i?",":"",draw_handler(ref_order_base[i]));
+        {
+            uint64_t queue_hash=UINT64_C(14695981039346656037);
+            draw_mark_links();
+            for(i=0;i<words;++i) {
+                unsigned long w=draw_handler(ref_order_base[i],i);
+                int j;
+                for(j=0;j<4;++j) {queue_hash^=(w>>(8*j))&0xff;queue_hash*=UINT64_C(1099511628211);}
+            }
+            fprintf(draw_out,"],\"words\":%lu,\"queue_hash\":\"%016llx\",\"queue\":[",words,(unsigned long long)queue_hash);
+            for(i=0;i<words && (i<600 || draw_dump);++i) fprintf(draw_out,"%s%lu",i?",":"",draw_handler(ref_order_base[i],i));
+        }
         fprintf(draw_out,"]}\n");
         fclose(draw_out);fwrite(buffer,1,size,stdout);fflush(stdout);_exit(0);
         }

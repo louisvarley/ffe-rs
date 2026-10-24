@@ -136,3 +136,46 @@ orientation and distance (1.02 to 60 radii), the instance's scale, zoom, light a
 colours, and detail -1 to 4. The probe hook on the emitter call records each triangle's
 nodes (screen and view positions, region codes, heights, level), normal, key and level:
 all 461 completing cases match, 207,689 triangles (391 cases drew), with the arena counts.
+
+### The emitter (F1840 and the other planet types)
+
+`crates/ffe-core/src/terrain_emit.rs`, `draw_surface`. F1833 installs the planet type's
+emitter and set-up (`DATA_007843`, first two dwords; the cache holds ranks): rank 1 F1840 and
+F1841 (types 0, 1, 2, 4, 7, 10-13), rank 2 F1842 and F1843 (the polar types 3, 5, 6), rank 3
+F1844 (type 8, a lit flat triangle) and rank 4 F1845 (type 9, flat in the material colour); the
+set-up of 3 and 4 is F1836, which does nothing.
+
+F1841 builds three colour tables from the type's palette (dwords 3 to 11 of its entry, as
+packed nibble colours) with two recipe tables of the exe (`DATA_007850`, `DATA_007851`): 22
+ramp steps (`DATA_007848`), 21 land rows of seven (`DATA_007849`) and four rows of seven sea
+colours (`DATA_007846`; the fourth is `DATA_007847`). Every colour is a sum of two palette
+colours weighted in sixteenths, kept as `0x0b0g0r` dwords and packed to 12 bits (`r << 8 +
+g << 4 + b`) by F1326 where it enters the queue. F1843 builds `DATA_007852`, 32 bands, the
+same way.
+
+F1840 takes the triangle's three nodes ordered by height (highest first), its normal and
+key. The light (the instance's `+0x134`) against the normal picks a base colour out of the
+instance's eight shade colours (`+0x84`), none when the triangle faces away. A haze (F1877,
+for planets with a word-8 parameter) blends the tables toward a colour by how far the
+triangle is. With the detail setting below zero, or a far triangle (key above `0x1fffffff`)
+with all nodes at or below sea level, or a very far one (key above `0x7fffffff`) whose
+heights differ by under `0x1fffffff`, the triangle is one flat F1804 entry. Otherwise it is
+textured by how many of its nodes are at or below sea level (heights of zero or less):
+
+| Below | Entries |
+|---|---|
+| 0 | F1807 (bitmap `0x40`, seven land colours by the lowest node's height) when the heights differ by under `0x400000`; else F1808 with explicit coordinates and the 22 ramp steps |
+| 1 | the part above the sea as a quad F1805 (bitmap `0x40`; F1806 with coordinates when the highest node is `0x400000` or more), the two corners being where the edges to the lowest node cross sea level (F1837), then the part below as F1807 (bitmap `0x121`, the fourth sea row) |
+| 2 | the part below as an F1805 quad (bitmap `0x121`) and the part above as F1807 or F1808 |
+| 3 | one F1807 (bitmap `0x121`) with the sea row picked by the heights' sum |
+
+Each entry is queued by F1778 with a header of the key and the position of the previous
+header; the queue holds 50,000 words, and the original exits when one more is asked for
+(the port reports `Fault::QueueFull`).
+
+`--surface-draw` also prints the queue: its length and a hash, the first 600 words and (for
+a single case, `--surface-draw N`) all of them, with the draw routines' addresses as
+`0xf18000nn` and the header links as `0xf2000000 | position`. The 102 completing cases
+whose record has no word-8 parameter (so F1877 does nothing) match word for word, and the
+10 that overflow the queue overflow in the port. The cases with a haze are compared to the
+triangle level only until F1877 is ported.
