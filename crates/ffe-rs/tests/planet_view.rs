@@ -958,3 +958,117 @@ fn landing_parent_chooses_the_surface_body() {
     );
     assert!(distance(away, planet.position) < planet.radius as f64);
 }
+
+/// Level flight 100 km above a starport: the horizon and the ground under the
+/// eye stay drawn (the same surface path the flight view uses).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn level_flight_near_the_surface_shows_the_horizon() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{bodies, galaxy, Kind};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::{Disc, SystemStation};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let entries = galaxy(&cache).unwrap();
+    let sol = entries.iter().find(|e| e.name == "Sol").unwrap();
+    let list = bodies(&cache, sol, [0x1000, 0]).unwrap();
+    let port = list
+        .iter()
+        .find(|b| b.kind == Kind::Starport && b.name == "London")
+        .unwrap();
+    let planet = &list[port.parent.unwrap()];
+    let up: [f64; 3] = std::array::from_fn(|k| (port.position[k] - planet.position[k]) as f64);
+    let length = up.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let up = up.map(|v| v / length);
+    let mut forward = [up[1], -up[0], 0.0];
+    let l = forward.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+    forward = forward.map(|v| v / l);
+    // Ten degrees nose-down, the attitude a landing approach holds.
+    let (sin, cos) = 10f64.to_radians().sin_cos();
+    let forward = std::array::from_fn(|k| forward[k] * cos - up[k] * sin);
+    let right = [
+        up[1] * forward[2] - up[2] * forward[1],
+        up[2] * forward[0] - up[0] * forward[2],
+        up[0] * forward[1] - up[1] * forward[0],
+    ];
+    let l = right.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+    let right = right.map(|v| v / l);
+    let up_cam = [
+        forward[1] * right[2] - forward[2] * right[1],
+        forward[2] * right[0] - forward[0] * right[2],
+        forward[0] * right[1] - forward[1] * right[0],
+    ];
+    let mut state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        position: std::array::from_fn(|k| {
+            port.position[k] as f64 / UNIT + up[k] * 100_000_000.0 / UNIT
+        }),
+        ..Flight::default()
+    };
+    state.axes = Some([right, up_cam, forward]);
+    screen.discs = vec![Disc {
+        centre: planet.position.map(|v| v as f64 / UNIT),
+        radius: planet.inner_radius as f64 / UNIT,
+        light: [1.0, 0.0, 0.0],
+        colours: (12, 4),
+        star: false,
+        model: Some((planet.model, planet.seed)),
+        orientation: planet.orientation,
+    }];
+    screen.stations = vec![SystemStation {
+        model: port.model,
+        centre: port.position.map(|v| v as f64 / UNIT),
+        orientation: port.orientation,
+        speed: 0,
+        tics: 0,
+    }];
+    screen.draw(
+        &state,
+        ViewState::default(),
+        Some(&viewer),
+        false,
+        false,
+        "",
+    );
+    let with = screen.logical_pixels().to_vec();
+    screen.discs.clear();
+    screen.stations.clear();
+    screen.draw(
+        &state,
+        ViewState::default(),
+        Some(&viewer),
+        false,
+        false,
+        "",
+    );
+    let without = screen.logical_pixels().to_vec();
+    let changed = with.iter().zip(&without).filter(|(a, b)| a != b).count();
+    let lower = with[320 * 79..320 * 158]
+        .iter()
+        .zip(&without[320 * 79..320 * 158])
+        .filter(|(a, b)| a != b)
+        .count();
+    let ground = changed;
+    eprintln!("level at 100 km: {ground} world pixels, {lower} in the lower half");
+    assert!(
+        lower > 2_000,
+        "the ground under the eye must draw ({lower})"
+    );
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        let mut ppm = b"P6\n320 200\n255\n".to_vec();
+        for p in &with {
+            ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+        }
+        std::fs::write(
+            std::path::Path::new(&dir).join("surface-horizon-100km.ppm"),
+            ppm,
+        )
+        .unwrap();
+    }
+}
