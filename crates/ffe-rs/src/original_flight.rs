@@ -16,7 +16,7 @@ pub const UNITS_PER_FLIGHT_UNIT: f64 = 9_700.0;
 /// The original's time units per second (`ms * 0x3e2 / 20` per millisecond).
 pub const TICS_PER_SECOND: f64 = 49_700.0;
 /// Millimetres per second per velocity unit (F1511: `v * t / 512`).
-const MM_PER_SECOND: f64 = TICS_PER_SECOND / 512.0;
+pub const MM_PER_SECOND: f64 = TICS_PER_SECOND / 512.0;
 /// The Eagle's limits, for a cache without ship statistics.
 const FALLBACK_LIMITS: Limits = Limits {
     axes: [[4905, -4905], [4905, -4905], [16350, -4905]],
@@ -107,6 +107,21 @@ impl OriginalFlight {
     /// advances by the real time times it, while key amounts stay in real time.
     pub fn set_time_acceleration(&mut self, step: usize) {
         self.acceleration = crate::console::TIME_ACCELERATION[step.min(4)];
+    }
+
+    /// Put the ship at a position (millimetres) with its velocity cleared and the
+    /// set speed zero: a jump arrival.
+    pub fn teleport(&mut self, position: [i64; 3]) {
+        self.player.motion.position = position;
+        self.player.motion.velocity = [0; 3];
+        self.player.set_speed = 0;
+    }
+
+    pub fn acceleration_step(&self) -> usize {
+        crate::console::TIME_ACCELERATION
+            .iter()
+            .position(|a| *a == self.acceleration)
+            .unwrap_or(0)
     }
 
     pub fn player(&self) -> &Player {

@@ -195,6 +195,11 @@ impl<'a> Generator<'a> {
         }
     }
 
+    /// The NUL-terminated name of an object.
+    pub fn name_of(&self, object: usize) -> Vec<u8> {
+        self.text(object)
+    }
+
     /// Sets the name data (also naming the hand-coded objects the templates hold).
     pub fn set_names(&mut self, names: &'a Names<'a>) {
         self.names = Some(names);

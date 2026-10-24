@@ -4,6 +4,8 @@
 //! truncating control word F2095 sets). Only what the planet atmosphere (F1877)
 //! needs: conversions, `+ - * /` and the integer store.
 
+#![allow(clippy::should_implement_trait)]
+
 use std::cmp::Ordering;
 
 /// An x87 register value: a normalised 64-bit mantissa (top bit set unless the
@@ -83,10 +85,7 @@ impl Ext {
         let fraction = u64::from(bits & 0x7f_ffff);
         if biased == 0 {
             if fraction == 0 {
-                return Ext {
-                    neg,
-                    ..Ext::ZERO
-                };
+                return Ext { neg, ..Ext::ZERO };
             }
             let shift = fraction.leading_zeros();
             return Ext {
@@ -152,7 +151,13 @@ impl Ext {
     pub fn to_f32(self) -> f32 {
         match self.kind {
             Kind::Nan => return f32::NAN,
-            Kind::Inf => return if self.neg { f32::NEG_INFINITY } else { f32::INFINITY },
+            Kind::Inf => {
+                return if self.neg {
+                    f32::NEG_INFINITY
+                } else {
+                    f32::INFINITY
+                }
+            }
             Kind::Finite => {}
         }
         if self.mant == 0 {
@@ -191,7 +196,11 @@ impl Ext {
             }
         }
         if exp > 127 {
-            return if self.neg { f32::NEG_INFINITY } else { f32::INFINITY };
+            return if self.neg {
+                f32::NEG_INFINITY
+            } else {
+                f32::INFINITY
+            };
         }
         let magnitude = f32::from_bits(((exp + 127) as u32) << 23 | (top as u32 & 0x7f_ffff));
         if self.neg {
@@ -310,12 +319,7 @@ impl Ext {
         let denominator = u128::from(other.mant);
         let quotient = numerator / denominator;
         let remainder = numerator % denominator;
-        Ext::pack(
-            neg,
-            quotient,
-            self.exp - other.exp - 64,
-            remainder != 0,
-        )
+        Ext::pack(neg, quotient, self.exp - other.exp - 64, remainder != 0)
     }
 
     /// `fistp qword` with truncation, the low 32 bits (what F2095 returns); the

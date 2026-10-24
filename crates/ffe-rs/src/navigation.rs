@@ -1,0 +1,444 @@
+//! Getting around: the systems the original's generator builds (the hand-coded
+//! neighbourhood and a few generated ones), their bodies with the names F881/F893
+//! give them, the positions F880 places them at for a game clock, and an autopilot
+//! that flies the original flight model to a chosen body with the same keys a
+//! player presses. See `docs/NAVIGATION.md`.
+use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND};
+use ffe_content::VerifiedCache;
+use ffe_core::galaxy::{tables, Tables};
+use ffe_core::model_math::SineTable;
+use ffe_core::names::Names;
+use ffe_core::objects::{Models, PhysList, Placement};
+use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
+use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
+
+/// The reverse thrust's deceleration (metres per second squared, world time).
+const BRAKING: f64 = 90.0;
+
+/// The distance (millimetres) left for the real-time approach after a transfer.
+const APPROACH: f64 = 1.5e9;
+
+/// Millimetres in an astronomical unit.
+pub const AU_MM: f64 = 1.495_978_707e14;
+
+/// What a body is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Star,
+    Planet,
+    Moon,
+    Station,
+    Starport,
+}
+
+impl Kind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Star => "star",
+            Kind::Planet => "planet",
+            Kind::Moon => "moon",
+            Kind::Station => "station",
+            Kind::Starport => "starport",
+        }
+    }
+}
+
+/// One body of a system.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Body {
+    pub name: String,
+    pub kind: Kind,
+    /// Position in the system frame (millimetres).
+    pub position: [i64; 3],
+    /// The body's own radius (millimetres), for the arrival distance.
+    pub radius: i64,
+}
+
+/// A system that can be visited.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Entry {
+    pub name: String,
+    pub params: Params,
+}
+
+/// The models' collision data, for placing starports on planets.
+struct Library<'a>(&'a VerifiedCache);
+
+impl Shapes for Library<'_> {
+    fn shape(&self, model: u32) -> Option<Shape<'_>> {
+        let cache = self.0;
+        let vertices = cache
+            .asset(&format!("base:model-vertices/{model:03}"))
+            .unwrap_or(&[]);
+        let normals = cache
+            .asset(&format!("base:model-normals/{model:03}"))
+            .unwrap_or(&[]);
+        let records = cache.asset("base:model/records")?;
+        let record = &records[20 * model as usize..20 * model as usize + 20];
+        let table = cache.asset("base:model/collision")?;
+        let entry = &table[12 * model as usize..12 * model as usize + 12];
+        let word = |at: usize| u32::from_le_bytes(entry[at..at + 4].try_into().unwrap()) as usize;
+        let (offset, length, back) = (word(0), word(4), word(8));
+        if length == 0 {
+            return None;
+        }
+        let data = &table[12 * 466 + offset..];
+        Some(Shape {
+            mesh: Mesh {
+                vertices,
+                normals,
+                scale: i32::from_le_bytes(record[0..4].try_into().unwrap()),
+                offset: i32::from_le_bytes(record[4..8].try_into().unwrap()),
+            },
+            stream: &data[back..back + length],
+            back: &data[..back],
+        })
+    }
+}
+
+/// The systems on offer: the original's hand-coded neighbourhood, then a few
+/// generated ones.
+pub fn galaxy(cache: &VerifiedCache) -> Result<Vec<Entry>, String> {
+    let blob = cache
+        .asset("base:world/system-tables")
+        .ok_or("no system tables")?;
+    let name_bytes = cache.asset("base:text/names").ok_or("no name text")?;
+    let names = Names::new(name_bytes)?;
+    let tables_view = Tables::new(blob)?;
+    let mut entries = Vec::new();
+    for pair in 0..12 {
+        let code = tables_view.dword(tables::HANDCODED_INDEX + 8 * pair);
+        if code == 0 {
+            break;
+        }
+        let params = Params {
+            seed: 0,
+            mass: 0,
+            stars: 0,
+            code,
+            population: 20,
+            name: [0; 20],
+        };
+        let mut generator = Generator::new(Tables::new(blob)?);
+        generator.set_names(&names);
+        generator.generate(&params)?;
+        let name = String::from_utf8_lossy(&generator.name_of(0))
+            .trim()
+            .to_owned();
+        entries.push(Entry { name, params });
+    }
+    for (n, (seed, mass, stars)) in [
+        (0x1234_5678, 0x0400_0000, 0),
+        (0x2468_ace1, 0x0600_0000, 1),
+        (0x0bad_f00d, 0x0300_0000, 2),
+        (0x7e57_ab1e, 0x0900_0000, 0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut name = [0u8; 20];
+        let text = format!("Test-{}", n + 1);
+        name[..text.len()].copy_from_slice(text.as_bytes());
+        entries.push(Entry {
+            name: text,
+            params: Params {
+                seed,
+                mass,
+                stars,
+                code: entries.first().map_or(0, |e| e.params.code),
+                population: 30,
+                name,
+            },
+        });
+    }
+    Ok(entries)
+}
+
+/// A system's bodies at a game clock.
+pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<Vec<Body>, String> {
+    let blob = cache
+        .asset("base:world/system-tables")
+        .ok_or("no system tables")?;
+    let name_bytes = cache.asset("base:text/names").ok_or("no name text")?;
+    let names = Names::new(name_bytes)?;
+    let mut generator = Generator::new(Tables::new(blob)?);
+    generator.set_names(&names);
+    generator.generate(&entry.params)?;
+    let mut system = generator.list.clone();
+    let tables_view = Tables::new(blob)?;
+    let models = Models {
+        records: cache
+            .asset("base:model/records")
+            .ok_or("no model records")?,
+        stats: cache.asset("base:ship/stats").ok_or("no ship statistics")?,
+        gameplay: cache
+            .asset("base:gameplay/tables")
+            .ok_or("no gameplay tables")?,
+    };
+    let sine = SineTable::from_bytes(cache.asset("base:math/sine").ok_or("no sine table")?)?;
+    let library = Library(cache);
+    let surface = SurfaceTools {
+        shapes: &library,
+        terrain_table: cache
+            .asset("base:terrain/tables")
+            .ok_or("no terrain tables")?,
+        terrain_maps: cache.asset("base:terrain/maps").ok_or("no terrain maps")?,
+        detail: 0,
+    };
+    let placement = Placement {
+        tables: &tables_view,
+        models: &models,
+        sine: &sine,
+        surface: Some(&surface),
+    };
+    let mut list = PhysList {
+        stamp: 1,
+        clock,
+        ..PhysList::default()
+    };
+    placement.create(&mut list, &mut system, clock);
+    let mut out = Vec::new();
+    let count = generator.count as usize;
+    for index in 0..count {
+        let at = index * OBJECT_BYTES;
+        let kind_code = u16::from_le_bytes([system[at + 0xa], system[at + 0xb]]);
+        if kind_code == 0 {
+            continue;
+        }
+        let parent = u16::from_le_bytes([system[at + 8], system[at + 9]]) as usize;
+        let parent_code = (parent != 0).then(|| {
+            let p = (parent - 1) * OBJECT_BYTES;
+            u16::from_le_bytes([system[p + 0xa], system[p + 0xb]])
+        });
+        let kind = match kind_code {
+            0x23 => Kind::Starport,
+            0x20..=0x22 => Kind::Station,
+            0x11..=0x1f => Kind::Star,
+            _ if parent_code.is_some_and(|c| c < 0x11 && c != 0) => Kind::Moon,
+            _ => Kind::Planet,
+        };
+        let slot = u32::from_le_bytes(system[at + 0x18..at + 0x1c].try_into().unwrap()) as usize;
+        let coordinate = |axis: usize| {
+            let low = u64::from(list.dword(slot, 0x3e + 8 * axis));
+            let high = u64::from(list.dword(slot, 0x42 + 8 * axis));
+            (high << 32 | low) as i64
+        };
+        let field = &system[at + 0x26..at + 0x3f];
+        let text = &field[..field.iter().position(|b| *b == 0).unwrap_or(field.len())];
+        let radius = i64::from(list.dword(slot, 0x138) as i32).max(1_000_000);
+        out.push(Body {
+            name: String::from_utf8_lossy(text).into_owned(),
+            kind,
+            position: [coordinate(0), coordinate(1), coordinate(2)],
+            radius,
+        });
+    }
+    Ok(out)
+}
+
+/// Distance in millimetres between a player position and a body.
+pub fn distance(from: [i64; 3], to: [i64; 3]) -> f64 {
+    (0..3)
+        .map(|k| ((to[k] - from[k]) as f64).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// A distance as the map shows it.
+pub fn describe(mm: f64) -> String {
+    if mm >= AU_MM * 0.05 {
+        format!("{:.2} AU", mm / AU_MM)
+    } else if mm >= 1.0e9 {
+        format!("{:.0} Mm", mm / 1.0e9)
+    } else {
+        format!("{:.1} km", mm / 1.0e6)
+    }
+}
+
+/// The standoff the autopilot stops at: just off the body's surface or station.
+pub fn standoff(body: &Body) -> f64 {
+    match body.kind {
+        Kind::Station | Kind::Starport => 20.0e6,
+        _ => body.radius as f64 * 1.5 + 50.0e6,
+    }
+}
+
+/// What the autopilot asks for this frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Command {
+    pub keys: Keys,
+    /// The time acceleration step to run at (0 = 1x .. 4 = 10000x).
+    pub acceleration: usize,
+    pub arrived: bool,
+    /// The cosine of the angle between the nose and the target.
+    pub aligned: f64,
+    /// A leg too long to fly in real time: where the ship is when only the final
+    /// approach is left, and the world seconds the transfer takes at the ship's
+    /// thrust and braking. The caller moves the ship and advances the clock.
+    pub skip: Option<([i64; 3], f64)>,
+}
+
+/// World seconds to cover `metres` from rest to rest: full thrust (about 300 m/s
+/// per second) up to the speed the braking (90 m/s per second) can still stop.
+pub fn transfer_seconds(metres: f64) -> f64 {
+    let (up, down) = (300.0, BRAKING);
+    let limit = f64::from(i32::MAX) * MM_PER_SECOND / 1000.0;
+    let peak = (2.0 * metres * up * down / (up + down)).sqrt();
+    if peak <= limit {
+        peak / up + peak / down
+    } else {
+        let ramp = limit * limit / (2.0 * up) + limit * limit / (2.0 * down);
+        limit / up + limit / down + (metres - ramp) / limit
+    }
+}
+
+/// What the autopilot remembers between frames: the last aim error, to see how
+/// fast the nose drifts at the current time acceleration.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Memory {
+    angle: Option<f64>,
+    /// Frames the steering keys have been held: the amounts grow with the time held,
+    /// so they are let go now and then.
+    held: u32,
+}
+
+/// One frame of the autopilot: turn toward `target` with the steering keys, hold
+/// the set speed the distance allows and the time acceleration it can use.
+pub fn autopilot(
+    flight: &OriginalFlight,
+    target: [i64; 3],
+    stop: f64,
+    memory: &mut Memory,
+) -> Command {
+    let motion = &flight.player().motion;
+    // The integrated orientation drifts off orthonormal; steer by orthonormalised
+    // directions (forward first, then right and up with the forward part removed).
+    let raw = motion
+        .orientation
+        .map(|row| row.map(|v| f64::from(v) / 2_147_483_648.0));
+    let unit = |v: [f64; 3]| {
+        let length = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-9);
+        v.map(|c| c / length)
+    };
+    let dot3 = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let without = |v: [f64; 3], w: [f64; 3]| {
+        let d = dot3(v, w);
+        [v[0] - d * w[0], v[1] - d * w[1], v[2] - d * w[2]]
+    };
+    let forward_axis = unit(raw[2]);
+    let right_axis = unit(without(raw[0], forward_axis));
+    let up_axis = unit(without(without(raw[1], forward_axis), right_axis));
+    let rows = [right_axis, up_axis, forward_axis];
+    let offset: [f64; 3] = std::array::from_fn(|k| (target[k] - motion.position[k]) as f64);
+    let range = offset.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let dir = offset.map(|v| v / range.max(1.0));
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let (right, up, forward) = (dot(dir, rows[0]), dot(dir, rows[1]), dot(dir, rows[2]));
+    let mut keys = Keys::default();
+    if range <= stop {
+        keys.slower = true;
+        return Command {
+            keys,
+            acceleration: 0,
+            arrived: flight.set_speed_metres() < 1.0,
+            aligned: forward,
+            skip: None,
+        };
+    }
+    // Steering at a time acceleration swings the nose by the same factor: steer only
+    // in real time, and fall back to it when the aim slips.
+    let fast = flight.acceleration_step() > 0;
+    if fast && forward < 0.99998 {
+        return Command {
+            keys,
+            acceleration: 0,
+            arrived: false,
+            aligned: forward,
+            skip: None,
+        };
+    }
+    let dead = if fast { 2.0 } else { 0.004 };
+    // Pulsed bang-bang steering: the keys build a turn rate, so they are let go
+    // (below) before the nose is on target and the rate carries it the rest.
+    // Dead astern: turn the same way as if slightly off.
+    if right > dead || (forward < 0.0 && right.abs() <= dead) {
+        keys.right = true;
+    } else if right < -dead {
+        keys.left = true;
+    }
+    if up > dead {
+        keys.pitch_up = true;
+    } else if up < -dead {
+        keys.pitch_down = true;
+    }
+    // Too far to fly in real time: once the nose is on the target, hand back the
+    // transfer for the caller to carry out (the final approach is flown).
+    let cover = range - stop - APPROACH;
+    if cover > APPROACH && (right * right + up * up).sqrt() < 0.01 {
+        let landing: [i64; 3] =
+            std::array::from_fn(|k| target[k] - (dir[k] * (stop + APPROACH)) as i64);
+        return Command {
+            keys: Keys::default(),
+            acceleration: 0,
+            arrived: false,
+            aligned: forward,
+            skip: Some((landing, transfer_seconds(cover / 1000.0))),
+        };
+    }
+    let steering = keys.left || keys.right || keys.pitch_up || keys.pitch_down;
+    if steering {
+        memory.held += 1;
+        if memory.held > 20 {
+            keys.left = false;
+            keys.right = false;
+            keys.pitch_up = false;
+            keys.pitch_down = false;
+            memory.held = 0;
+        }
+    } else {
+        memory.held = 0;
+    }
+    // Speed: the most that can still be stopped within the distance left (the
+    // reverse thrust gives about 90 m/s per second), held while the nose swings.
+    let remaining = range - stop;
+    let metres = remaining / 1000.0;
+    let limit = f64::from(i32::MAX) * MM_PER_SECOND / 1000.0; // the largest set speed
+    let envelope = (2.0 * BRAKING * 0.4 * metres).sqrt().min(limit);
+    let current = flight.set_speed_metres();
+    if forward > 0.9995 {
+        if current < envelope * 0.8 {
+            keys.faster = true;
+        } else if current > envelope {
+            keys.slower = true;
+        }
+    } else if forward < 0.98 && current > envelope {
+        keys.slower = true;
+    }
+    // Time acceleration while the nose is on the target; never so much that one
+    // frame covers more than a twentieth of what is left (or the braking is missed).
+    let velocity = motion
+        .velocity
+        .iter()
+        .map(|v| f64::from(*v).powi(2))
+        .sum::<f64>()
+        .sqrt()
+        * MM_PER_SECOND
+        / 1000.0;
+    let per_frame = velocity.max(current) * 0.05;
+    let factors = [1.0, 10.0, 100.0, 1000.0, 10000.0];
+    let angle = (right * right + up * up).sqrt().atan2(forward);
+    let drift = memory.angle.map_or(0.0, |last| (angle - last).abs());
+    memory.angle = Some(angle);
+    let here = factors[flight.acceleration_step()];
+    // The turn rates still running (they die slowly), in radians per world second.
+    // The transfers cover the long legs; the approach runs in real time.
+    let _ = (per_frame, drift, here);
+    let acceleration = 0;
+    Command {
+        keys,
+        acceleration,
+        arrived: false,
+        aligned: forward,
+        skip: None,
+    }
+}

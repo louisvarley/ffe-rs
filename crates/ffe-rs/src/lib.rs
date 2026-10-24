@@ -7,6 +7,7 @@ pub mod indexed;
 pub mod input;
 pub mod model_lab;
 pub mod model_viewer;
+pub mod navigation;
 pub mod original_flight;
 pub mod saves;
 pub mod screen;

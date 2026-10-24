@@ -30,9 +30,9 @@ pub mod surface;
 pub mod sysgen;
 pub mod terrain;
 pub mod terrain_draw;
-pub mod x87;
 pub mod terrain_emit;
 pub mod thrust;
+pub mod x87;
 
 /// JJFFE's two-word generator. The returned low 16 bits are not the full state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
