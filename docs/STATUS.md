@@ -13,7 +13,7 @@ Hyperspace jumps use the original's drive range, fuel and jump time over real st
 (`docs/notes/hyperspace.md`; both match the executed original; the jump scene is not drawn). Docking and launching show the original's lift scenes (`ffe_core::lift`, verified on 8,192 cases against the
 executed original; `docs/notes/docking.md`). Since 2026-10-24 the docked screen is the original's station services menu and stockmarket
 (`docs/notes/station.md`: the `DATA_005304` screen table, the `0x98xx` strings, the row buttons,
-hot areas and keys; checked against frames of the DOS release; the services and shipyard roots
+hot areas and keys; checked against reference (JJFFE 2.8a7) game frames; the services and shipyard roots
 and the market are ported, the equipment/ship/repair lists and BBS generation are not). The
 market itself is `docs/notes/market.md` (the original's price and stock formulas, daily drift,
 buying and selling, cache v20; F619 and F620 match the executed original). The system's stations are drawn in flight and the player can dock

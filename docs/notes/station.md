@@ -4,8 +4,8 @@ Status (2026-10-24): **the services root, shipyard root and stockmarket are
 ported**; the equipment, ship and repair lists and the bulletin board's
 generated entries are shells (their tables/generators are not imported). The
 screen map, strings, layout, hot areas and keys below are read from
-`jjffe-master/ffe.asm`/`ffedat.asm` and checked against frames of the DOS
-release (see "Evidence").
+`jjffe-master/ffe.asm`/`ffedat.asm` and checked against frames of the reference
+game (JJFFE 2.8a7 built from that asm; see "Evidence").
 
 Rust: `ffe_rs::station` (screen table, layout, hot areas, state),
 `Screen::draw_dock`/`Screen::draw_market`, wired in `main.rs` by `DockState`.
@@ -182,7 +182,10 @@ reaches the real screens: F4 (scan 0x3e) is the comms/services action, then
 Bulletin Board/Upgrades, etc. The smoke adapter cannot decode the station's
 AVI, so a local (ignored) copy of `headless.c` with `DirMakeAVIName` returning
 a missing path was used for the captures; the game then draws the menus
-instead of failing at frame 231. Captures (320x200, palette applied) are in
+instead of failing at frame 231. These are JJFFE 2.8a7 frames (the reference),
+not the DOS executable itself; the recovered asm's tables and strings agree
+with them, and no JJFFE-vs-DOS menu difference was seen, but the DOS binary
+was not run for this comparison. Captures (320x200, palette applied) are in
 `docs/evidence/station/`:
 
 - `services.png` — Sirocco Station Services, four rows at y 15/48/81/114.
