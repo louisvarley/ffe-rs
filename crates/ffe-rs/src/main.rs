@@ -1409,10 +1409,15 @@ fn run() -> Result<(), String> {
         };
         // The lift scenes of the docking and launching stages (the front view).
         screen.lift = None;
-        let mut launching_scene = false;
+        // Draw the lift view until the launch actually completes (LaunchOut), not
+        // only while the current lift stage has objects.
+        let mut launching_scene = nav
+            .as_ref()
+            .is_some_and(|nav| nav.sequence.is_some_and(|s| s.launching))
+            && state.mode == ffe_rs::flight::Mode::Docked;
         if let Some((objects, launching)) = nav.as_ref().and_then(|nav| nav.lift_scene()) {
             views.mode = ViewMode::Front;
-            launching_scene = launching && state.mode == ffe_rs::flight::Mode::Docked;
+            let _ = launching;
             let station = nav
                 .as_ref()
                 .and_then(|nav| nav.sequence.map(|s| s.station).map(|i| &nav.bodies[i]));
