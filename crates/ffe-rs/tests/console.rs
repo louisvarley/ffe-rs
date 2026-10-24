@@ -1,5 +1,6 @@
 use ffe_rs::console::{
-    acceleration_for_digit, click, Click, ConsoleState, ACCELERATION_NAMES, BAR, TIME_ACCELERATION,
+    acceleration_for_digit, click, Click, ConsoleState, ACCELERATION_NAMES, BAR, RIGHT_BUTTONS,
+    TIME_ACCELERATION,
 };
 use ffe_rs::flight::Flight;
 use ffe_rs::original_flight::{Keys, OriginalFlight};
@@ -118,4 +119,51 @@ fn the_autopilot_buttons_sit_beside_the_map_buttons() {
     assert_eq!(Screen::console_click(230, 120), None);
     // The target button is ported now.
     assert_eq!(Click::Target.unported(), None);
+}
+
+#[test]
+fn the_right_hand_buttons_are_the_originals_table_entries() {
+    // DATA_005100 records 0x0f-0x11: the byte at 296,178 is hyperspace's idle
+    // image 0x99 and lit 0xa8; 274,178 is labels' 0x9a/0xa9; 261,177 is the
+    // navigation computer's 0x9b/0xaa.
+    assert_eq!(RIGHT_BUTTONS[0], (296, 178, 0x99, 0xa8, Click::Hyperspace));
+    assert_eq!(RIGHT_BUTTONS[1], (274, 178, 0x9a, 0xa9, Click::Labels));
+    assert_eq!(RIGHT_BUTTONS[2], (261, 177, 0x9b, 0xaa, Click::Navigation));
+    // Their DATA_007684 hot areas are 15 wide: 265-280, 280-295 and 300-315.
+    // The labels and navigation areas share x = 280, where the later area wins.
+    assert_eq!(click(265, 177), Some(Click::Navigation));
+    assert_eq!(click(265, 196), Some(Click::Navigation));
+    assert_eq!(click(280, 185), Some(Click::Labels));
+    assert_eq!(click(280, 196), Some(Click::Labels));
+    assert_eq!(click(295, 197), Some(Click::Labels));
+    assert_eq!(click(300, 178), Some(Click::Hyperspace));
+    assert_eq!(click(315, 197), Some(Click::Hyperspace));
+    assert_eq!(click(264, 185), None);
+    assert_eq!(click(299, 185), None);
+    assert_eq!(click(316, 185), None);
+    assert_eq!(click(280, 198), None);
+    // Both are ported, and the labels flag is the original's off state by default.
+    assert_eq!(Click::Labels.unported(), None);
+    assert_eq!(Click::Navigation.unported(), None);
+    let console = ConsoleState::default();
+    assert!(!console.labels && !console.navigation);
+}
+
+#[test]
+fn the_navigation_list_rows_are_the_originals_marker_hot_areas() {
+    use ffe_rs::screen::Screen;
+    // F1099: markers at (5, 5+15r) and (230, 5+15r), 10 pixels wide and high.
+    assert_eq!(Screen::place_row(5, 5), Some(0));
+    assert_eq!(Screen::place_row(15, 15), Some(0));
+    assert_eq!(Screen::place_row(5, 20), Some(1));
+    assert_eq!(Screen::place_row(230, 5), Some(9));
+    assert_eq!(Screen::place_row(240, 20), Some(10));
+    assert_eq!(Screen::place_row(5, 125), Some(8));
+    assert_eq!(Screen::place_row(230, 140), None);
+    // The name to the right is not a button, unlike the ffe-rs system map.
+    assert_eq!(Screen::place_row(16, 5), None);
+    assert_eq!(Screen::place_row(241, 5), None);
+    assert_eq!(Screen::place_row(100, 5), None);
+    assert_eq!(Screen::place_row(4, 5), None);
+    assert_eq!(Screen::place_row(5, 4), None);
 }

@@ -62,6 +62,7 @@ __pycache__/
 /frames/
 /screenshots/
 /shots/
+/shots-nav/
 *.bmp
 *.tga
 *.dds

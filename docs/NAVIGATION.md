@@ -11,6 +11,8 @@ systems, and an autopilot to planets, stations and other bodies for testing.
 | `navigation::bodies` | done: a system's stars, planets, moons, stations and starports with the original's names, placed by F880 at a game clock (positions in millimetres) |
 | `navigation::autopilot` | done and tested (`tests/navigation.rs`, local cache): steers the original flight model with its own keys (pulsed), holds a braking-curve set speed, hands back a transfer for long legs |
 | Map and jump UI in the playable | in progress (keys below) |
+| Console `n` icon: the system's places list | done 2026-10-24: the original's stations/starports list, marker clicks engage the autopilot (`docs/notes/labels.md`) |
+| Console `l` icon: text labels | done 2026-10-24: the original player flag, F989/F1108 labels over the flight view |
 
 The playable starts docked at a station **in a planet's orbit** — the closest
 such station, else the first station — so the launch puts that world in view
@@ -45,7 +47,13 @@ The game starts docked at the first station of Sol (L launches, which puts the s
   distance and description show in the console and whose jump cost shows under the sector. Arrows scroll, Page Up/Down or
   +/- zoom (Shift slower), dragging turns the view, C returns to your system, H or Enter jumps to the selected star if it is
   one of the systems on offer, G closes. The jump is the hyperdrive's as below; the list of systems is gone from the playable.
-- The console's navigation-computer icon (or Tab): everything in this system. A click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns it off.
+- The console's navigation-computer icon (or N): the original's list of the places in this system — its
+  stations and starports, two columns of nine with the original marker bitmap and names. A click on a marker row
+  (only the marker is a hot area, as in F1099) locks that body and engages the autopilot. Left/Right (or Page
+  Up/Down) page it if a generated system has more than 18 places. Tab remains the ffe-rs system map of every body:
+  a click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns the autopilot off.
+- The labels icon or L toggles the original's text labels: the names of the system's bodies over the flight view
+  (colour 15, at the object's screen position). The console icon lights while they are on.
 - The top bar's button changes between modern and classic controls (modern by default; F3 too). Classic is the original's keys: Enter/Shift set speed, Z/A pitch, comma/period yaw, [ ] roll. Modern adds W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll).
 - **Target and autopilot buttons** (below the view, beside SYSTEMS and THIS SYSTEM): a click on a planet, moon or station in the
   view locks it (green corner brackets and a `TARGET:` line with its range); **TARGET** (or T, Shift+T the previous; the

@@ -3,7 +3,7 @@ use ffe_rs::camera::{
     DEFAULT_DISTANCE,
 };
 use ffe_rs::flight::Flight;
-use ffe_rs::screen::{Screen, ViewButton};
+use ffe_rs::screen::{body_label_positions, BodyLabel, Screen, ViewButton};
 use ffe_rs::ships::{ShipList, ShipStats};
 
 fn views(mode: ViewMode, external: ExternalCamera) -> ViewState {
@@ -252,6 +252,42 @@ fn cameras_sit_on_the_ship_or_behind_it_along_the_turned_axes() {
     );
     assert!((side.position[2] - 30.0).abs() < 1e-9 && (side.position[0] - 10.0).abs() > 9.0);
     assert_eq!(side.project(state.position, true), Some((160, 79)));
+}
+
+#[test]
+fn object_labels_follow_f989_bounds_and_f1108_position() {
+    let camera = Camera {
+        position: [0.0; 3],
+        axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    };
+    let label = |name: &str, centre| BodyLabel {
+        name: name.to_owned(),
+        centre,
+    };
+    // Straight ahead: screen (160, 79), and F1108 draws one pixel to the right.
+    assert_eq!(
+        body_label_positions(&[label("MARS", [0.0, 0.0, 1000.0])], &camera),
+        vec![("MARS".to_owned(), 161, 79)]
+    );
+    assert_eq!(
+        body_label_positions(&[label("OFF", [100.0, 0.0, 1000.0])], &camera),
+        vec![("OFF".to_owned(), 186, 79)]
+    );
+    // Behind the eye, at the near plane, off the left or below F989's limit.
+    for centre in [
+        [0.0, 0.0, -1000.0],
+        [0.0, 0.0, 1.0],
+        [-5000.0, 0.0, 1000.0],
+        [0.0, -1000.0, 100.0],
+    ] {
+        assert!(
+            body_label_positions(&[label("NO", centre)], &camera).is_empty(),
+            "{centre:?}"
+        );
+    }
+    // x + 3 >= 316 is the right-hand limit (F989), even though the point is on
+    // the 320-pixel screen.
+    assert!(body_label_positions(&[label("EDGE", [1245.0, 0.0, 1000.0])], &camera).is_empty());
 }
 
 #[test]

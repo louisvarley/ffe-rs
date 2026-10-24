@@ -308,6 +308,9 @@ fn run() -> Result<(), String> {
         }
     }
     let mut paused = false;
+    // The original's text-label flag: player struct +0xe9 bit 2 (DATA_008871 in
+    // cplayer.txt's older naming), toggled by `l` or the console's labels icon.
+    let mut labels = false;
     // The selected line of the station's market.
     let mut trade_row = 0usize;
     let mut last_mode = state.mode;
@@ -536,8 +539,15 @@ fn run() -> Result<(), String> {
                         nav.open(view);
                     }
                 };
-                if pressed(Key::Tab) || console_click == Some(Click::Navigation) {
+                if pressed(Key::Tab) {
                     toggle(nav, NavView::System);
+                    held_controls.disarm(&keys_down);
+                }
+                // The console's navigation-computer icon (`n`): the original's
+                // list of the system's stations and starports. The key is `n`
+                // (action 0x6e, ffe.asm 78415/78537).
+                if pressed(Key::N) || console_click == Some(Click::Navigation) {
+                    toggle(nav, NavView::Places);
                     held_controls.disarm(&keys_down);
                 }
                 if pressed(Key::G) || console_click == Some(Click::Screen(3)) {
@@ -611,13 +621,18 @@ fn run() -> Result<(), String> {
                     }
                 }
                 if nav.view != NavView::Closed {
-                    if pressed(Key::Up) && galaxy.is_none() {
-                        nav.step_selection(-1);
+                    // The ffe-rs system map and galaxy list take the arrow keys; the
+                    // original navigation computer is a mouse list (its rows are hot
+                    // areas 0xd1..0xe2), so it has no selection keys.
+                    if nav.view != NavView::Places {
+                        if pressed(Key::Up) && galaxy.is_none() {
+                            nav.step_selection(-1);
+                        }
+                        if pressed(Key::Down) && galaxy.is_none() {
+                            nav.step_selection(1);
+                        }
                     }
-                    if pressed(Key::Down) && galaxy.is_none() {
-                        nav.step_selection(1);
-                    }
-                    if nav.view == NavView::System {
+                    if matches!(nav.view, NavView::System | NavView::Places) {
                         if pressed(Key::Right) || pressed(Key::PageDown) {
                             nav.turn_page(1);
                         }
@@ -625,19 +640,19 @@ fn run() -> Result<(), String> {
                             nav.turn_page(-1);
                         }
                     }
-                    let mut enter = pressed(Key::Enter);
+                    let mut enter = pressed(Key::Enter) && nav.view != NavView::Places;
                     if let Some((x, y)) = click_point.filter(|_| galaxy.is_none()) {
                         let count = nav.lines(ship_position(&original)).len();
-                        let row = if nav.view == NavView::System {
-                            Screen::nav_row(x, y).filter(|row| *row < count)
-                        } else {
-                            Screen::map_row(nav.selected, count, x, y)
+                        let row = match nav.view {
+                            NavView::System => Screen::nav_row(x, y).filter(|row| *row < count),
+                            NavView::Places => Screen::place_row(x, y).filter(|row| *row < count),
+                            _ => Screen::map_row(nav.selected, count, x, y),
                         };
                         if let Some(row) = row {
                             nav.selected = row;
                             // A click on a body of this system engages the autopilot; a
                             // click on a system selects it (H hyperspaces).
-                            if nav.view == NavView::System {
+                            if matches!(nav.view, NavView::System | NavView::Places) {
                                 enter = true;
                             } else {
                                 message = "H hyperspaces to the selected system.".to_owned();
@@ -650,7 +665,7 @@ fn run() -> Result<(), String> {
                     if nav.view == NavView::Galaxy && enter && click_point.is_none() {
                         hyperspace = true;
                     }
-                    let engage = enter && nav.view == NavView::System;
+                    let engage = enter && matches!(nav.view, NavView::System | NavView::Places);
                     if hyperspace || engage {
                         held_controls.disarm(&keys_down);
                         if original.is_none() {
@@ -889,6 +904,16 @@ fn run() -> Result<(), String> {
                     }
                 }
                 if state.mode == ffe_rs::flight::Mode::Flight {
+                    // `l` / the console labels icon: toggle the object name labels
+                    // (`DATA_008804+0xe9` bit 2, ffe.asm 78447-78465).
+                    if pressed(Key::L) || console_click == Some(Click::Labels) {
+                        labels = !labels;
+                        message = if labels {
+                            "Text labels on.".to_owned()
+                        } else {
+                            "Text labels off.".to_owned()
+                        };
+                    }
                     let clicked = console_click.and_then(|click| match click {
                         Click::CycleView => Some(ViewButton::Cycle),
                         Click::Front => Some(ViewButton::Select(ViewMode::Front)),
@@ -1008,7 +1033,7 @@ fn run() -> Result<(), String> {
                         None => "No ship list: rebuild data.bin (cache v11).".to_owned(),
                     };
                 }
-                let action = if pressed(Key::L) {
+                let action = if pressed(Key::L) && state.mode == ffe_rs::flight::Mode::Docked {
                     match nav.as_mut() {
                         Some(nav) if state.mode == ffe_rs::flight::Mode::Docked => {
                             match nav.begin_launch() {
@@ -1396,6 +1421,8 @@ fn run() -> Result<(), String> {
             set_speed: original
                 .as_ref()
                 .map(|model| model.set_speed_metres().round() as i32),
+            labels,
+            navigation: nav.as_ref().is_some_and(|nav| nav.view == NavView::Places),
         };
         // Launching from the station puts the ship out from it in this system, on the
         // original flight model (which the navigation moves).
@@ -1489,6 +1516,20 @@ fn run() -> Result<(), String> {
             }
             None => Vec::new(),
         };
+        // The labels toggle's object names (the original's F1108 reads the object's
+        // +0x124 string): every body of the system, at its camera position.
+        screen.labels.clear();
+        if labels {
+            if let Some(nav) = nav.as_ref() {
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                screen
+                    .labels
+                    .extend(nav.bodies.iter().map(|body| ffe_rs::screen::BodyLabel {
+                        name: body.name.clone(),
+                        centre: body.position.map(|v| v as f64 / unit),
+                    }));
+            }
+        }
         // The lift scenes of the docking and launching stages (the front view).
         screen.lift = None;
         // Draw the lift view until the launch actually completes (LaunchOut), not
@@ -1697,6 +1738,7 @@ fn run() -> Result<(), String> {
                 .map_or([0; 3], |model| model.player().motion.position);
             let title = match nav.view {
                 NavView::Galaxy => "SYSTEMS: H HYPERSPACES TO THE SELECTED".to_owned(),
+                NavView::Places => nav.system_name().to_uppercase(),
                 _ => format!(
                     "{}: CLICK ONE TO AUTOPILOT",
                     nav.system_name().to_uppercase()
@@ -1727,6 +1769,9 @@ fn run() -> Result<(), String> {
                     None => String::new(),
                 };
                 screen.draw_nav_list(&rows, &detail);
+            } else if nav.view == NavView::Places {
+                // F1099's own list: markers and names only, over the view.
+                screen.draw_places(&nav.lines(ship));
             } else {
                 screen.draw_map(
                     &title,

@@ -49,6 +49,13 @@ impl Kind {
             Kind::Starport => "starport",
         }
     }
+
+    /// The original navigation computer lists places to dock at: F880 sets object
+    /// flag `+0x14c` bit 0x10 only for type codes 0x20-0x23, its stations and
+    /// starports (ffe.asm 64695-64699), and F1099 walks the same objects.
+    pub fn is_place(self) -> bool {
+        matches!(self, Kind::Station | Kind::Starport)
+    }
 }
 
 /// One body of a system.
@@ -69,6 +76,19 @@ pub struct Body {
     pub spin: i8,
     /// The object's bay count (`+0xce`): F880 gives a station 3 (7 for kind 0x22).
     pub bays: u16,
+}
+
+/// The original navigation computer's entries: stations and starports, in system
+/// order. F927 allocates object slots from 0x72 downwards, so F1099's walk from
+/// 0x72 down (ffe.asm 80518-80527) visits the system list in creation order,
+/// which is the order of [`Navigator::bodies`].
+pub fn place_indices(bodies: &[Body]) -> Vec<usize> {
+    bodies
+        .iter()
+        .enumerate()
+        .filter(|(_, body)| body.kind.is_place())
+        .map(|(index, _)| index)
+        .collect()
 }
 
 /// A system that can be visited.
@@ -541,7 +561,11 @@ pub fn autopilot(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Closed,
+    /// The ffe-rs system map (Tab): every body, as a navigation aid.
     System,
+    /// The original navigation computer (the console's `n` icon): the system's
+    /// stations and starports in the original's two columns of nine.
+    Places,
     Galaxy,
 }
 
@@ -1049,7 +1073,7 @@ impl Navigator {
     pub fn step_selection(&mut self, delta: i32) {
         let length = match self.view {
             View::Galaxy => self.entries.len(),
-            View::System => self.listed().len(),
+            View::System | View::Places => self.listed().len(),
             View::Closed => return,
         };
         if length > 0 {
@@ -1223,7 +1247,9 @@ impl Navigator {
     }
 
     /// The bodies the navigation computer lists: 18 a page (two columns of nine, as the
-    /// original's), the star and planets first, then the ports and stations, then moons.
+    /// original's). The original's list (`View::Places`) is its stations and starports
+    /// in system order; the ffe-rs system map (`View::System`) also shows the star,
+    /// planets and moons, stars and planets first, then the ports and stations.
     pub fn listed(&self) -> Vec<usize> {
         let rank = |k: Kind| match k {
             Kind::Star => 0,
@@ -1232,8 +1258,13 @@ impl Navigator {
             Kind::Station => 3,
             Kind::Moon => 4,
         };
-        let mut all: Vec<usize> = (0..self.bodies.len()).collect();
-        all.sort_by_key(|i| (rank(self.bodies[*i].kind), *i));
+        let mut all: Vec<usize> = match self.view {
+            View::Places => place_indices(&self.bodies),
+            _ => (0..self.bodies.len()).collect(),
+        };
+        if self.view != View::Places {
+            all.sort_by_key(|i| (rank(self.bodies[*i].kind), *i));
+        }
         all.into_iter()
             .skip(18 * self.pages_clamped())
             .take(18)
@@ -1244,8 +1275,14 @@ impl Navigator {
         self.page.min(self.pages().saturating_sub(1))
     }
 
+    /// How many pages the current list has (the original has one page of 18; the
+    /// generated systems can have more stations, so the port pages them).
     pub fn pages(&self) -> usize {
-        self.bodies.len().div_ceil(18).max(1)
+        let length = match self.view {
+            View::Places => place_indices(&self.bodies).len(),
+            _ => self.bodies.len(),
+        };
+        length.div_ceil(18).max(1)
     }
 
     pub fn turn_page(&mut self, delta: i32) {
@@ -1259,10 +1296,13 @@ impl Navigator {
     }
 
     /// The original's row click: lock on to the body and engage the autopilot (it sets
-    /// the player's target and its autopilot mode, then closes the list).
+    /// the player's target and its autopilot mode, then closes the list). F1099's
+    /// action 0xd1+n stores the object's number in the player's target byte `+0xec`
+    /// (ffe.asm 78362-78376); the port's `locked` is that target.
     pub fn engage(&mut self) -> Option<&Body> {
         let index = self.selected_body()?;
         self.target = Some(index);
+        self.locked = Some(index);
         self.final_leg = false;
         self.memory = Memory::default();
         self.skips = 0;
@@ -1472,6 +1512,12 @@ impl Navigator {
                         describe(distance(ship, b.position))
                     )
                 })
+                .collect(),
+            // The original list draws only the marker and the name.
+            View::Places => self
+                .listed()
+                .into_iter()
+                .map(|i| self.bodies[i].name.clone())
                 .collect(),
         }
     }
