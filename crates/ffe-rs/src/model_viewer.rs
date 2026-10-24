@@ -33,6 +33,9 @@ use std::cell::Cell;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shape {
     Fill(Vec<(i32, i32)>, [u8; 3]),
+    /// A triangle shaded from its corners' colours (the planet surface's detail
+    /// entries).
+    Gouraud(Vec<(i32, i32)>, Vec<[u8; 3]>),
     /// An on-view flat triangle or quad (F1804/F1809 entry, points in face
     /// order), drawn by F1604 or F1607.
     Flat(Vec<(i32, i32)>, [u8; 3]),
@@ -650,6 +653,7 @@ impl ModelViewer {
                     .collect(),
                 Shape::Point(p, _) => vec![*p],
                 Shape::Textured(textured) => textured.points.clone(),
+                Shape::Gouraud(points, _) => points.clone(),
                 Shape::Glow(_) => Vec::new(),
                 Shape::Label(_, _) => Vec::new(),
             })
@@ -952,35 +956,51 @@ impl ModelViewer {
                         (i32::from(word as i16), i32::from((word >> 16) as i16))
                     })
                     .collect();
-                // Where the colour sits: the flat colour, the middle of the seven slots,
-                // or the ramp step the vertices' height bands pick (the textures
-                // themselves are not drawn).
-                let band_step = |bands: u32, first: usize, count: usize| -> u32 {
-                    let step = ((bands * 21) >> 9).min(20) as usize;
+                // The detail entries (F1808, F1806) colour each corner from the 22-step
+                // ramp by its height band and blend across the face; the textured
+                // ones (F1807, F1805) take the middle of their seven slots (the bitmap
+                // fills themselves are not drawn), the flat ones their colour.
+                let ramp = |band: u32, first: usize| -> [u8; 3] {
+                    let step = ((band.min(511) * 22) >> 9).min(21) as usize;
                     let word = w[at + 2 + first + step / 2];
-                    let _ = count;
-                    if step % 2 == 0 {
-                        word & 0xfff
-                    } else {
-                        (word >> 16) & 0xfff
-                    }
+                    let value = if step % 2 == 0 { word } else { word >> 16 };
+                    self.textures.rgb((value & 0xfff) as u16)
                 };
-                let colour = match handler & 0xff {
-                    4 => w[at + 6] & 0xfff,
-                    7 => w[at + 10] & 0xfff,
-                    5 => w[at + 11] & 0xfff,
+                match handler & 0xff {
                     8 => {
-                        let bands = (w[at + 6] >> 16) + (w[at + 7] >> 16) + (w[at + 8] >> 16);
-                        band_step(bands / 3, 9, 0x16)
+                        let colours = (0..3)
+                            .map(|k| ramp(w[at + 6 + k] >> 16, 9))
+                            .collect::<Vec<_>>();
+                        frame.shapes.push(Shape::Gouraud(points, colours));
                     }
-                    _ => {
-                        let bands = (w[at + 7] >> 16) + (w[at + 8] >> 16);
-                        band_step(bands / 4, 11, 0x16)
+                    6 => {
+                        // A, B and the two crossings at sea level (band 0).
+                        let colours = [
+                            ramp(w[at + 7] >> 16, 11),
+                            ramp(w[at + 8] >> 16, 11),
+                            ramp(0, 11),
+                            ramp(0, 11),
+                        ];
+                        frame.shapes.push(Shape::Gouraud(
+                            vec![points[0], points[1], points[2]],
+                            vec![colours[0], colours[1], colours[2]],
+                        ));
+                        frame.shapes.push(Shape::Gouraud(
+                            vec![points[0], points[2], points[3]],
+                            vec![colours[0], colours[2], colours[3]],
+                        ));
                     }
-                };
-                frame
-                    .shapes
-                    .push(Shape::Fill(points, self.textures.rgb(colour as u16)));
+                    other => {
+                        let colour = match other {
+                            4 => w[at + 6],
+                            7 => w[at + 10],
+                            _ => w[at + 11],
+                        } & 0xfff;
+                        frame
+                            .shapes
+                            .push(Shape::Fill(points, self.textures.rgb(colour as u16)));
+                    }
+                }
             }
         }
     }

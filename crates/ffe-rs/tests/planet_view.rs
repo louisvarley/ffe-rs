@@ -179,6 +179,7 @@ fn earth_shape_kinds() {
     for shape in &frame.shapes {
         let name = match shape {
             Shape::Fill(..) => "fill",
+            Shape::Gouraud(..) => "gouraud",
             Shape::Flat(..) => "flat",
             Shape::Polygon(..) => "polygon",
             Shape::Line(..) => "line",

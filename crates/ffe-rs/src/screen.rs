@@ -375,6 +375,52 @@ impl Screen {
     }
 
     /// Even-odd scanline fill at pixel centres, clipped to the 320x158 view.
+    /// A triangle with the colour blended from its corners (barycentric), clipped to
+    /// the view.
+    fn gouraud(&mut self, p: [(i32, i32); 3], c: [[u8; 3]; 3]) {
+        let (x0, y0) = (f64::from(p[0].0), f64::from(p[0].1));
+        let area = (f64::from(p[1].0) - x0) * (f64::from(p[2].1) - y0)
+            - (f64::from(p[2].0) - x0) * (f64::from(p[1].1) - y0);
+        if area == 0.0 {
+            return;
+        }
+        let top = p.iter().map(|q| q.1).min().unwrap_or(0).max(0);
+        let bottom = p
+            .iter()
+            .map(|q| q.1)
+            .max()
+            .unwrap_or(0)
+            .min(VIEW_HEIGHT as i32 - 1);
+        let left = p.iter().map(|q| q.0).min().unwrap_or(0).max(0);
+        let right = p.iter().map(|q| q.0).max().unwrap_or(0).min(319);
+        for y in top..=bottom {
+            for x in left..=right {
+                let (px, py) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+                let edge = |a: (i32, i32), b: (i32, i32)| {
+                    (f64::from(b.0) - f64::from(a.0)) * (py - f64::from(a.1))
+                        - (f64::from(b.1) - f64::from(a.1)) * (px - f64::from(a.0))
+                };
+                let w = [
+                    edge(p[1], p[2]) / area,
+                    edge(p[2], p[0]) / area,
+                    edge(p[0], p[1]) / area,
+                ];
+                if w.iter().any(|v| *v < -1e-9) {
+                    continue;
+                }
+                let channel = |k: usize| {
+                    (w[0] * f64::from(c[0][k])
+                        + w[1] * f64::from(c[1][k])
+                        + w[2] * f64::from(c[2][k]))
+                    .round()
+                    .clamp(0.0, 255.0) as u32
+                };
+                self.frame[y as usize * 320 + x as usize] =
+                    channel(0) << 16 | channel(1) << 8 | channel(2);
+            }
+        }
+    }
+
     fn fill_value(&mut self, points: &[(i32, i32)], value: u32) {
         let Some(top) = points.iter().map(|p| p.1).min() else {
             return;
@@ -781,6 +827,11 @@ impl Screen {
         for shape in shapes {
             match shape {
                 Shape::Fill(points, rgb) => self.fill_value(points, value(*rgb)),
+                Shape::Gouraud(points, colours) => {
+                    if let ([a, b, c], [ca, cb, cc]) = (&points[..], &colours[..]) {
+                        self.gouraud([*a, *b, *c], [*ca, *cb, *cc]);
+                    }
+                }
                 Shape::Polygon(edges, rgb) => {
                     // F1560 keeps rows in 0..158 and F1600 clips x when an edge
                     // reaches off the view, so every pixel lands in the view.
