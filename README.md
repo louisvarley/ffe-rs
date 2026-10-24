@@ -5,24 +5,22 @@ using **JJFFE 2.8a7** as the gameplay reference and FFED3D as rendering research
 The goal is original-style graphics by default with optional Enhanced graphics;
 the current experimental example is not that faithful renderer.
 
-> **Status: experimental Windows x64 playable example, plus verified asset/core tools.**
-> Launch, fly, dock, trade and save/reload now work in a native Rust window.
-> This is **not yet faithful First Encounters**: flight mechanics, the starfield
-> and one-item economy are synthetic development scaffolding.
-> Original cabin, proportional bitmap font and console artwork are imported.
-> Version 0.4 extends the **F4 station model lab** with original declared
-> triangle/quad outlines and individual-face inspection, not finished models.
-> The **F6 model viewer** (cache v14) runs every imported ship, station and object
-> program through the verified model executor and draws its faces, textured faces
-> (original bitmaps), complex polygons, lines, points and curves in the original
-> render order, including child models (station rings, ship parts). Curved
-> surfaces, text and labels are not drawn yet.
-> In flight, the station is the original **model 74**, executed by the verified
-> model port with its textures; flight mechanics remain synthetic. No legacy runtime is linked.
-> **449 of the 466 original model programs** now execute natively and match the
-> original command for command; the rest are the slots the original itself
-> cannot run.
-> Complete content, JJFFE-equivalent gameplay and graphics packs remain unfinished.
+> **Status: experimental Windows x64 playable, plus verified asset, core and reference tools.**
+> The playable generates a real system: the original flight model, stations and
+> the station market, the lift scenes, hyperspace over real star positions, an
+> autopilot, and the galaxy map drawn the original's way (its dots match the
+> executed original pixel for pixel). Labels, 3D text, lines, curves, flat faces
+> and polygon spans use the original's rasterisers.
+> The **F12 model viewer** (cache v25) runs every imported ship, station and
+> object program through the verified executor and draws its faces, textured
+> faces, complex polygons, lines, points, curves, text, labels and child models
+> in the original render order.
+> **449 of the 466 original model programs** execute natively and match the
+> original command for command; the rest are slots the original itself cannot run.
+> Still unfinished: curved surfaces (F1876) and therefore a planet in the flight
+> scene, the runtime upper palette, combat, missions, starport services, planet
+> surfaces and landing, local-star lighting, legacy save import, audio and
+> graphics packs. `dashboard/` tracks the whole port to completion.
 > [CLAUDE.MD](CLAUDE.MD) records the owner's answers and current plan.
 
 ## Play the experimental example
@@ -37,10 +35,10 @@ The Windows executable is built in this checkout. From the repository root:
 
 **Easiest on Windows:** double-click `play.bat`. It builds the release game and
 tools, creates or updates `data.bin` from your files in `.\game` when it is
-missing or older than this build needs (currently cache v14), and launches the
+missing or older than this build needs (currently cache v25), and launches the
 game; on any error the window stays open with the message. Rebuilding by hand:
 `cargo build --release --locked -p ffe-rs -p ffe-tools`.
-The root directory must contain your locally generated **v14** `data.bin` (build command
+The root directory must contain your locally generated **v25** `data.bin` (build command
 below, or let `play.bat` make it). The game verifies it before opening a window.
 Without `--root`, it looks beside its own executable and then up to four parent
 folders, so `target\release\ffe-rs.exe` finds the checkout's `data.bin`. If
@@ -80,8 +78,8 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | Original flight: pitch, yaw, roll | Z A, `,` `.`, `[` `]` |
 | Time acceleration 1x / 10x / 100x / 1000x / 10000x (original model) | 6 7 8 9 0, or click the meter at the lower left |
 | Pause mark on the meter | click it (or P) |
-| Station model lab (pauses gameplay) / return | F4 |
-| Model viewer, every imported model (pauses gameplay) / return | M |
+| Station model lab (pauses gameplay) / return | Shift+F12 |
+| Model viewer, every imported model (pauses gameplay) / return | F12 |
 | Viewer: previous / next model; turn; zoom; test input | Page Up / Page Down; arrows; + / -; 0 / 5 / 9 |
 | Viewer: original animation clock / landing gear or door / time rate / engines off, half, full | C / G / T / E |
 | Launch / request or cancel docking | L / D |
@@ -319,7 +317,7 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v14** imports every model that decodes (462 of 466 on floppy 1.02) with
+**Cache v25** imports every model that decodes (462 of 466 on floppy 1.02) with
 its descriptor fields for child models, the original texture descriptor table and
 fixed-colour map, the original lighting tables (default light, shade tables), the
 original ship statistics, the full original string table (219 entries: model
@@ -329,8 +327,8 @@ font models' per-character glyph programs the 3D text runs.
 then replace your old `data.bin` with it:
 
 ```powershell
-.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v14.bin
-Move-Item -Force .\data-v14.bin .\data.bin
+.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v25.bin
+Move-Item -Force .\data-v25.bin .\data.bin
 ```
 
 The local cache has been generated on this checkout. It is ignored and must

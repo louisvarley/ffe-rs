@@ -24,7 +24,7 @@ ffe-rs's own (EXP-005).
 
 - `CLAUDE.MD` — owner decisions, scope, phases/exit gates, and per-milestone narrative.
 - `docs/PORT_LOG.md` — append-only record of decisions, discrepancies, trace hashes, newest first.
-- `docs/FORMATS.md` — the implemented partial `data.bin` cache contract (v1..v10) and the model/command/vertex/normal/depth helper semantics.
+- `docs/FORMATS.md` - the implemented partial `data.bin` cache contract (v1..v25) and the model/command/vertex/normal/depth helper semantics.
 - `docs/ARCHITECTURE.md` — proposed workspace, crate responsibilities, determinism rules.
 - `docs/INVENTORY.md` — reference-source inventory: formats, numeric model, timing, gotchas.
 - `docs/KNOWN_ISSUES.md` — FFED3D-vs-JJFFE differences and port gaps.
@@ -33,12 +33,14 @@ ffe-rs's own (EXP-005).
 - `docs/REFERENCE_HARNESS.md` — how to add a differential test against the executed JJFFE reference.
 - `docs/MODEL_EXECUTION_PLAN.md` — design record for the v0.11 depth/point/line work and its follow-ups.
 - `docs/MODEL_COMMANDS.md` — full F1772 opcode map and current Rust coverage.
-- `docs/notes/` — per-feature records: polygons, textures, child models,
-  thrusters, animation, views, text/labels and curved surfaces.
-- `dashboard/` — the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 6 milestones, 38 items, 34 left on 2026-10-23). **Update it
-  in the same commit as any progress change**: statuses plus a new dated history
-  point. Its last point is checked against the task lists.
+- `docs/notes/` - per-feature records: polygons, textures, child models,
+  thrusters, animation, views, text/labels, curved surfaces, lines, fills,
+  docking, market, hyperspace, navigation and the galaxy map.
+- `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
+  in `burndown.js`; 14 milestones, 132 items, 50 done and 82 left on
+  2026-10-24). **Update it in the same commit as any progress change**:
+  statuses plus a new dated history point. Its last point is checked against the
+  task lists.
 
 ## Verdict on handoff readiness
 
@@ -57,17 +59,23 @@ Since v0.43 the flight view uses that port for real: the original ships
 buttons, cockpit eyes and turrets, verified thruster glows with flickering
 plumes, animated parts and the station spinning at its original rate.
 
+Since 2026-10-24 the playable is a generated system rather than a prototype:
+system flight with the original flight model, autopilot, docking at stations,
+the station market, lift scenes, hyperspace over real star positions, and the
+galaxy map drawn the original's way (dots verified pixel for pixel, map frame
+8,249 of 8,270 overlay pixels).
+
 What is *not* done is presentation and gameplay, in this order of readiness:
 
-1. Drawing features the executor already queues but the viewer does not draw:
-   text (opcode 10) and labels (18) need the message-string handlers and the
-   font models; curved surfaces (31) need F1874/F1876. **This is the next
-   milestone (below).**
-2. Rasterisation fidelity: flat polygon fills use a diagnostic scanline fill
-   (the original's F1795/F1796/F1797 spans), lines use a stand-in (F1616), and
-   curves draw a stand-in cubic (F1811). These need a pixel-level oracle, not
-   the current command/queue one. Also part of the next milestone.
-3. The gameplay slice itself: flight physics, economy, missions, saves and
+1. Curved surfaces (opcode 31): F1874's geometry is ported and verified, and the
+   flat, line and curve rasterisers are now the original's; F1876's patch
+   emission (quads) is the remaining piece, before a planet can appear in the
+   flight scenario. **This is the current milestone step.**
+2. The whole-frame pixel oracle (a framebuffer mode in the reference) and the
+   runtime upper palette; sprites, particles beyond the dot path, and circles.
+3. The gameplay slice itself: combat, missions, starport services, planet
+   surfaces and landing, lighting, saves, audio and the remaining systems work
+   (see `dashboard/`).
    audio are still the synthetic scaffolding described in `CLAUDE.MD`; the
    model port is not a substitute for that port.
 
@@ -207,15 +215,17 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 ## Next milestone: v0.48 "Every model fully drawn"
 
-**Progress.** Tracked in `dashboard/`: the burndown now covers the whole
-project from the first commit to a finished like-for-like port (130 items, 42
-done on 2026-10-23). Keep it current with every progress commit.
+**Progress.** Tracked in `dashboard/`: the burndown covers the whole project
+from the first commit to a finished like-for-like port (132 items, 50 done,
+82 left on 2026-10-24; v0.48 itself is 10 of 18). Keep it current with every
+progress commit.
 
 **Goal.** The F6 viewer and the flight view draw every primitive the executor
-queues, with the original's own rasterisers, verified at the pixel level. Today
-the viewer still reports "NOT DRAWN YET" for labels, skips text and curved
-surfaces, and fills/lines/curves with diagnostic stand-ins. Gameplay is out of
-scope (see "After this milestone").
+queues, with the original's own rasterisers, verified at the pixel level.
+Labels, 3D text, lines, curves, flat faces and polygon spans now draw with the
+original's rasterisers; curved surfaces (F1876) and the runtime upper palette
+remain, then the whole-frame pixel oracle. Gameplay work beyond the current
+system slice is tracked in `dashboard/`.
 
 **Work, in order.** Each step lands separately with its notes file, synthetic
 tests and an oracle, as the earlier milestones did.
@@ -274,11 +284,9 @@ tests and an oracle, as the earlier milestones did.
      verified by the texture-queue oracle (5,666 outlines, 0 mismatched).
      Polygons and every queued flat face now draw with the original
      rasterisers; faces crossing the near plane are no longer skipped.
-   - **Left:** the whole-frame framebuffer mode below.
- Add a framebuffer mode to the reference adapter that
-   draws one queued scene with the original's F1795/F1796/F1797 spans, F1647
-   textures, F1616 lines and F1811 curves. Then replace the viewer's diagnostic
-   scanline fill and compare whole frames byte for byte.
+   - **Left:** add a framebuffer mode to the reference adapter that draws one
+     queued scene with the original's F1795/F1796/F1797 spans, F1647 textures,
+     F1616 lines and F1811 curves, then compare whole frames byte for byte.
 
 **Exit criteria.**
 - The viewer draws all 449 executable models with no "NOT DRAWN YET" count and
@@ -326,6 +334,10 @@ values.
   v0.48b were repaired: `verify-assets.py` now expects cache v14 with 1,781
   files, and the child-model oracle masks the surface events 50-54 and 60/61,
   which the whole-table oracle covers).
+- `README.md`'s playtest/controls sections still describe the prototype slice
+  (food trading, F2 scenarios, M for the viewer, Modern/Classic presets); the
+  system slice, the market and the current keys are in `docs/NAVIGATION.md` and
+  the executable's help.
 - `README.md` and the executable title still say "0.9" because the product
   version label has not been bumped (cosmetic).
 - `README.md` still describes cache v11 and "26 oracles" in places; the figures
