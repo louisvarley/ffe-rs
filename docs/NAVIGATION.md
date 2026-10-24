@@ -55,8 +55,10 @@ textured ones (the texture fills themselves are not drawn).
 Known gaps: at close range (about 3 radii or less) the larger planet models show
 oversized slivers (the original's draw routines clip edges; this does not, and
 the queue's coordinates wrap in 16 bits), so slivers wider than the planet are
-left out; F1877's haze is not ported; the planet is not oriented by its object's
-matrix. Looks checked by eye only (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
+left out; F1877's haze is not ported (it is about 1,200 instructions and needs F1521, F1878,
+F1879, F1780 and F1479 first; the oracle already prints its inputs and the queue).
+The planet is oriented by its object's rows (the spin is `clock[0] >> 17`, so they
+are identity until the clock passes 2^17 days). Looks checked by eye only (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
 
 ## Known limits
 
