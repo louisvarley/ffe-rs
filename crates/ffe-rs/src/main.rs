@@ -1411,7 +1411,7 @@ fn run() -> Result<(), String> {
         screen.lift = None;
         // Draw the lift view until the launch actually completes (LaunchOut), not
         // only while the current lift stage has objects.
-        let mut launching_scene = nav
+        let launching_scene = nav
             .as_ref()
             .is_some_and(|nav| nav.sequence.is_some_and(|s| s.launching))
             && state.mode == ffe_rs::flight::Mode::Docked;
