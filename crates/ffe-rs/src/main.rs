@@ -832,7 +832,7 @@ fn run() -> Result<(), String> {
                             _ => (10, 3),
                         },
                         star: b.kind == NavKind::Star,
-                        model: (b.kind != NavKind::Star).then_some((b.model, b.seed)),
+                        model: Some((b.model, b.seed)),
                         orientation: b.orientation,
                     }
                 })

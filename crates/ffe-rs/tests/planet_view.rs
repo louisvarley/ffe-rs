@@ -251,3 +251,119 @@ fn earth_shape_kinds() {
         }
     }
 }
+
+/// Which models the stars of each system use, and what drawing them yields.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn star_models() {
+    use ffe_rs::model_viewer::Shape;
+    use ffe_rs::navigation::{bodies, galaxy, Kind};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let unit = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in galaxy(&cache).unwrap() {
+        for body in bodies(&cache, &entry, [0x1000, 0]).unwrap() {
+            if body.kind == Kind::Star && seen.insert(body.model) {
+                eprintln!(
+                    "{}: star {} model {} radius {} seed {:#x}",
+                    entry.name, body.name, body.model, body.radius, body.seed
+                );
+                let _ = viewer.render_scene(body.model, unit, [0.0, 0.0, 1.0e6], [0.0, 0.0, 1.0]);
+                let r = viewer.surface_extent.get();
+                match viewer.render_scene(
+                    body.model,
+                    unit,
+                    [0.0, 0.0, 4.0 * r.max(1.0)],
+                    [1.0, 0.0, 0.0],
+                ) {
+                    Ok(frame) => {
+                        let mut kinds = std::collections::BTreeMap::new();
+                        for shape in &frame.shapes {
+                            let name = match shape {
+                                Shape::Fill(..) => "fill",
+                                Shape::Gouraud(..) => "gouraud",
+                                Shape::Flat(..) => "flat",
+                                Shape::Polygon(..) => "polygon",
+                                Shape::Line(..) => "line",
+                                Shape::Curve(..) => "curve",
+                                Shape::Point(..) => "point",
+                                Shape::Textured(..) => "textured",
+                                Shape::Glow(..) => "glow",
+                                Shape::Label(..) => "label",
+                            };
+                            *kinds.entry(name).or_insert(0) += 1;
+                        }
+                        eprintln!("   extent {r}: {kinds:?} skipped {}", frame.skipped);
+                    }
+                    Err(e) => eprintln!("   render failed: {e}"),
+                }
+            }
+        }
+    }
+}
+
+/// Stars through the same surface path as the planets.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn flight_view_shows_stars() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{bodies, galaxy, Kind};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::Disc;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    for entry in galaxy(&cache).unwrap() {
+        if !["Sol", "Sirius, Sirius B", "Zaonce"].contains(&entry.name.as_str()) {
+            continue;
+        }
+        for body in bodies(&cache, &entry, [0x1000, 0]).unwrap() {
+            if body.kind != Kind::Star {
+                continue;
+            }
+            let mut state = Flight {
+                mode: Mode::Flight,
+                ..Flight::default()
+            };
+            state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+            let radius = body.radius as f64 / UNIT;
+            let centre = body.position.map(|v| v as f64 / UNIT);
+            state.position = [centre[0], centre[1], centre[2] - 8.0 * radius];
+            screen.discs = vec![Disc {
+                centre,
+                radius,
+                light: [1.0, 0.0, 0.0],
+                colours: (17, 17),
+                star: true,
+                model: Some((body.model, body.seed)),
+                orientation: body.orientation,
+            }];
+            screen.draw(
+                &state,
+                ViewState::default(),
+                Some(&viewer),
+                false,
+                false,
+                "",
+            );
+            if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+                let mut ppm = b"P6\n320 200\n255\n".to_vec();
+                for p in screen.logical_pixels() {
+                    ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+                }
+                let name = body.name.replace(' ', "_");
+                std::fs::write(
+                    std::path::Path::new(&dir).join(format!("star_{name}.ppm")),
+                    ppm,
+                )
+                .unwrap();
+            }
+        }
+    }
+}

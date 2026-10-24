@@ -48,7 +48,7 @@ with a model is drawn as its real surface: the planet model runs through
 F1876 and emitter (`ModelViewer::draw_surfaces`; the body's `+0xa0` is the seed).
 The viewer's view space is 32-bit, so a distant planet is drawn through a model
 matrix shrunk by a power of two with its position (the picture is unchanged); the
-body is a shaded disc only when the model cannot be drawn, and for stars. Height
+body is a shaded disc only when the model cannot be drawn. Stars are drawn the same way (their models 137-148 are surfaces of the emitting types, with a haze ring as the glow). Height
 bands pick the ramp colour of the detail entries and the middle slot colour of the
 textured ones (the texture fills themselves are not drawn).
 
