@@ -590,8 +590,9 @@ impl Screen {
                 "F2 scenarios: 1 Docked / 2 Approach / 3 Free Flight",
                 "Dock: range <80, speed <20, aim at station.",
                 "O original flight: Enter/Shift speed, Z/A , . [ ] steer",
-                "No audio/combat/hyperspace/old saves/HD packs yet.",
-                "H closes help. F2 opens playtest scenarios.",
+                "O then TAB system map, G galaxy: Up/Down, Enter flies/jumps",
+                "Backspace stops the autopilot (docs/NAVIGATION.md)",
+                "H closes help. F2 scenarios. No audio/combat yet.",
             ]
             .iter()
             .enumerate()
@@ -608,6 +609,61 @@ impl Screen {
         for (index, line) in lines.iter().enumerate() {
             self.text(20, 47 + index * 13, line, 15);
         }
+        self.present();
+    }
+
+    /// The navigation map: a scrolling list at the left and a plot of the bodies
+    /// around the ship (log scale, the ship at the centre) at the right.
+    pub fn draw_map(
+        &mut self,
+        title: &str,
+        lines: &[String],
+        selected: usize,
+        points: &[(f32, f32, crate::navigation::Kind, bool)],
+        status: &str,
+    ) {
+        use crate::navigation::Kind;
+        self.rect(4, 4, 312, 152, 1);
+        self.text(10, 8, title, 18);
+        let rows = 11usize;
+        let first = selected
+            .saturating_sub(rows / 2)
+            .min(lines.len().saturating_sub(rows));
+        for (row, line) in lines.iter().skip(first).take(rows).enumerate() {
+            let colour = if first + row == selected { 18 } else { 15 };
+            let clipped: String = line.chars().take(30).collect();
+            self.text(10, 22 + row * 11, &clipped, colour);
+        }
+        // The plot: a frame, the ship at the centre and a dot per body.
+        let (cx, cy, half) = (244usize, 80usize, 66.0f32);
+        self.rect(cx - 68, cy - 68, 136, 1, 15);
+        self.rect(cx - 68, cy + 67, 136, 1, 15);
+        self.rect(cx - 68, cy - 68, 1, 136, 15);
+        self.rect(cx + 67, cy - 68, 1, 136, 15);
+        self.rect(cx - 1, cy - 1, 3, 3, 12);
+        for (x, y, kind, chosen) in points {
+            let colour = if *chosen {
+                18
+            } else {
+                match kind {
+                    Kind::Star => 14,
+                    Kind::Planet => 10,
+                    Kind::Moon => 9,
+                    Kind::Station | Kind::Starport => 13,
+                }
+            };
+            let size = if matches!(kind, Kind::Star) { 3 } else { 2 };
+            let px = (cx as f32 + x * half).round() as usize;
+            let py = (cy as f32 + y * half).round() as usize;
+            self.rect(
+                px.saturating_sub(1),
+                py.saturating_sub(1),
+                size,
+                size,
+                colour,
+            );
+        }
+        self.text(10, 146, status, 15);
         self.present();
     }
 

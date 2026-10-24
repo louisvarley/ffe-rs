@@ -117,6 +117,11 @@ impl OriginalFlight {
         self.player.set_speed = 0;
     }
 
+    /// Move the ship without touching its velocity or set speed (a change of frame).
+    pub fn shift(&mut self, position: [i64; 3]) {
+        self.player.motion.position = position;
+    }
+
     pub fn acceleration_step(&self) -> usize {
         crate::console::TIME_ACCELERATION
             .iter()

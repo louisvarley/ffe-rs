@@ -4,6 +4,7 @@ use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
+use ffe_rs::navigation::{describe, distance, Navigator, View as NavView};
 use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
 use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
@@ -185,6 +186,14 @@ fn run() -> Result<(), String> {
         .as_ref()
         .map(|scene| ShipList::from_cache(&cache, scene))
         .unwrap_or_default();
+    // The systems, their bodies and the autopilot (Tab, G, Backspace).
+    let mut nav = match Navigator::new(&cache) {
+        Ok(nav) => Some(nav),
+        Err(error) => {
+            eprintln!("Navigation unavailable: {error}");
+            None
+        }
+    };
     let mut paused = false;
     let mut message = String::from("Welcome. H closes help; F2 selects a playtest.");
     let mut last = Instant::now();
@@ -205,7 +214,8 @@ fn run() -> Result<(), String> {
                 && !scenarios
                 && !paused
                 && model_lab.is_none()
-                && model_viewer.is_none(),
+                && model_viewer.is_none()
+                && nav.as_ref().is_none_or(|nav| nav.view == NavView::Closed),
         );
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
         // A console click on the mouse-down edge, in flight (client pixels against
@@ -325,6 +335,57 @@ fn run() -> Result<(), String> {
             if pressed(Key::F3) {
                 modern = !modern;
                 held_controls.disarm(&keys_down);
+            }
+            // Navigation: Tab the system map, G the galaxy, Up/Down choose, Enter
+            // flies to the body (or jumps to the system), Backspace stops the autopilot.
+            if let Some(nav) = nav.as_mut().filter(|_| {
+                state.mode == ffe_rs::flight::Mode::Flight
+                    && !help
+                    && !scenarios
+                    && model_lab.is_none()
+                    && model_viewer.is_none()
+            }) {
+                if pressed(Key::Tab) {
+                    nav.open(NavView::System);
+                    held_controls.disarm(&keys_down);
+                }
+                if pressed(Key::G) {
+                    nav.open(NavView::Galaxy);
+                    held_controls.disarm(&keys_down);
+                }
+                if nav.view != NavView::Closed {
+                    if pressed(Key::Up) {
+                        nav.step_selection(-1);
+                    }
+                    if pressed(Key::Down) {
+                        nav.step_selection(1);
+                    }
+                    if pressed(Key::Enter) {
+                        held_controls.disarm(&keys_down);
+                        if original.is_none() {
+                            message =
+                                "Navigation needs the original flight model: press O.".to_owned();
+                        } else if nav.view == NavView::Galaxy {
+                            let index = nav.selected;
+                            match nav.jump(&cache, index) {
+                                Ok(position) => {
+                                    if let Some(model) = original.as_mut() {
+                                        model.teleport(position);
+                                    }
+                                    message =
+                                        format!("Arrived in the {} system.", nav.system_name());
+                                    nav.view = NavView::Closed;
+                                }
+                                Err(error) => message = format!("Jump failed: {error}"),
+                            }
+                        } else if let Some(body) = nav.engage() {
+                            message = format!("Autopilot to {}.", body.name);
+                        }
+                    }
+                }
+                if pressed(Key::Backspace) && nav.target.take().is_some() {
+                    message = "Autopilot off.".to_owned();
+                }
             }
             if pressed(Key::P) && model_lab.is_none() && model_viewer.is_none() {
                 paused = !paused;
@@ -637,7 +698,7 @@ fn run() -> Result<(), String> {
             };
             if let Some(model) = original.as_mut() {
                 let down = |keys: &[Key]| keys.iter().any(|key| held_controls.contains(key));
-                let keys = OriginalKeys {
+                let mut keys = OriginalKeys {
                     faster: down(&[Key::Enter]),
                     slower: down(&[Key::LeftShift, Key::RightShift]),
                     pitch_down: down(&[Key::Z]),
@@ -647,6 +708,28 @@ fn run() -> Result<(), String> {
                     roll_left: down(&[Key::LeftBracket]),
                     roll_right: down(&[Key::RightBracket]),
                 };
+                if let Some(nav) = nav.as_mut() {
+                    if let Some((command, body)) = nav.command(&cache, model) {
+                        keys = command.keys;
+                        if let Some((landing, seconds)) = command.skip {
+                            model.teleport(landing);
+                            nav.transfer(&cache, seconds);
+                            message = format!("Transfer to {}: {:.0} s.", body.name, seconds);
+                        } else if command.arrived {
+                            message = format!("Arrived at {}.", body.name);
+                            nav.target = None;
+                        } else {
+                            let range = distance(model.player().motion.position, body.position);
+                            message = format!("Autopilot: {} {}.", body.name, describe(range));
+                        }
+                    }
+                    let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
+                        / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
+                    nav.advance(&cache, elapsed * factor);
+                    if let Some(moved) = nav.follow(model.player().motion.position) {
+                        model.shift(moved);
+                    }
+                }
                 let view = match views.mode {
                     ViewMode::TopTurret => 2,
                     ViewMode::BottomTurret => 3,
@@ -753,6 +836,25 @@ fn run() -> Result<(), String> {
                     "P RESUMES. H HELP. F2 SCENARIOS.",
                     "FOCUS LOSS PAUSES WITHOUT CATCH-UP.",
                 ],
+            );
+        }
+        if let Some(nav) = nav.as_ref().filter(|nav| nav.view != NavView::Closed) {
+            let ship = original
+                .as_ref()
+                .map_or([0; 3], |model| model.player().motion.position);
+            let title = match nav.view {
+                NavView::Galaxy => "GALAXY: ENTER JUMPS".to_owned(),
+                _ => format!(
+                    "SYSTEM MAP: {}  ENTER FLIES TO",
+                    nav.system_name().to_uppercase()
+                ),
+            };
+            screen.draw_map(
+                &title,
+                &nav.lines(ship),
+                nav.selected,
+                &nav.points(ship),
+                "TAB SYSTEM  G GALAXY  UP/DOWN  ENTER  BKSP AUTOPILOT OFF",
             );
         }
         window

@@ -197,14 +197,12 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
         ..PhysList::default()
     };
     placement.create(&mut list, &mut system, clock);
-    let mut out = Vec::new();
+    let mut out: Vec<Body> = Vec::new();
+    let mut offsets: Vec<[i64; 3]> = Vec::new();
     let count = generator.count as usize;
     for index in 0..count {
         let at = index * OBJECT_BYTES;
         let kind_code = u16::from_le_bytes([system[at + 0xa], system[at + 0xb]]);
-        if kind_code == 0 {
-            continue;
-        }
         let parent = u16::from_le_bytes([system[at + 8], system[at + 9]]) as usize;
         let parent_code = (parent != 0).then(|| {
             let p = (parent - 1) * OBJECT_BYTES;
@@ -226,10 +224,22 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
         let field = &system[at + 0x26..at + 0x3f];
         let text = &field[..field.iter().position(|b| *b == 0).unwrap_or(field.len())];
         let radius = i64::from(list.dword(slot, 0x138) as i32).max(1_000_000);
+        // Positions are relative to the parent body (the system is a tree).
+        let mut position = [coordinate(0), coordinate(1), coordinate(2)];
+        if parent != 0 {
+            let base = offsets.get(parent - 1).copied().unwrap_or([0; 3]);
+            for k in 0..3 {
+                position[k] += base[k];
+            }
+        }
+        offsets.push(position);
+        if kind_code == 0 {
+            continue;
+        }
         out.push(Body {
             name: String::from_utf8_lossy(text).into_owned(),
             kind,
-            position: [coordinate(0), coordinate(1), coordinate(2)],
+            position,
             radius,
         });
     }
@@ -374,7 +384,7 @@ pub fn autopilot(
     // Too far to fly in real time: once the nose is on the target, hand back the
     // transfer for the caller to carry out (the final approach is flown).
     let cover = range - stop - APPROACH;
-    if cover > APPROACH && (right * right + up * up).sqrt() < 0.01 {
+    if cover > 4.0 * APPROACH && (right * right + up * up).sqrt() < 0.01 {
         let landing: [i64; 3] =
             std::array::from_fn(|k| target[k] - (dir[k] * (stop + APPROACH)) as i64);
         return Command {
@@ -440,5 +450,269 @@ pub fn autopilot(
         arrived: false,
         aligned: forward,
         skip: None,
+    }
+}
+
+/// Which map is showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    Closed,
+    System,
+    Galaxy,
+}
+
+/// The playable's navigation state: the systems on offer, where the player is, the
+/// bodies of that system at the game clock, the map showing and the autopilot.
+pub struct Navigator {
+    entries: Vec<Entry>,
+    pub current: usize,
+    pub bodies: Vec<Body>,
+    /// The game clock in world seconds (it moves the planets).
+    pub clock: f64,
+    /// How far the engaged target has moved since the ship last followed it.
+    drift: [i64; 3],
+    pub view: View,
+    pub selected: usize,
+    /// The body the autopilot is flying to.
+    pub target: Option<usize>,
+    memory: Memory,
+    refreshed: f64,
+}
+
+/// World seconds to the original's clock words: whole days, then the fraction of a
+/// day in 2^-32ths (the orbits turn once in 365 days).
+pub fn clock_words(seconds: f64) -> [u32; 2] {
+    let days = seconds.max(0.0) / 86_400.0;
+    let whole = days.floor();
+    [whole as u32, ((days - whole) * 4_294_967_296.0) as u32]
+}
+
+impl Navigator {
+    pub fn new(cache: &VerifiedCache) -> Result<Self, String> {
+        let entries = galaxy(cache)?;
+        let current = entries.iter().position(|e| e.name == "Lave").unwrap_or(0);
+        let bodies = bodies(cache, &entries[current], clock_words(0.0))?;
+        Ok(Self {
+            entries,
+            current,
+            bodies,
+            clock: 0.0,
+            drift: [0; 3],
+            view: View::Closed,
+            selected: 0,
+            target: None,
+            memory: Memory::default(),
+            refreshed: 0.0,
+        })
+    }
+
+    pub fn system_name(&self) -> &str {
+        &self.entries[self.current].name
+    }
+
+    pub fn open(&mut self, view: View) {
+        self.view = if self.view == view {
+            View::Closed
+        } else {
+            view
+        };
+        self.selected = match self.view {
+            View::Galaxy => self.current,
+            _ => self.target.unwrap_or(0),
+        };
+    }
+
+    /// Move the selection within the list showing.
+    pub fn step_selection(&mut self, delta: i32) {
+        let length = match self.view {
+            View::Galaxy => self.entries.len(),
+            View::System => self.bodies.len(),
+            View::Closed => return,
+        };
+        if length > 0 {
+            self.selected = (self.selected as i32 + delta).rem_euclid(length as i32) as usize;
+        }
+    }
+
+    /// Move the planets: the game clock advances `seconds` of world time.
+    pub fn advance(&mut self, cache: &VerifiedCache, seconds: f64) {
+        self.clock += seconds;
+        // Placing a system is cheap but not free: once a second of world time, and
+        // on every real second the autopilot flies.
+        if self.clock - self.refreshed >= 1.0 || self.clock < self.refreshed {
+            self.refresh(cache);
+        }
+    }
+
+    /// A transfer: the clock jumps and the ship is placed to match, so the target's
+    /// drift over it is not carried along.
+    pub fn transfer(&mut self, cache: &VerifiedCache, seconds: f64) {
+        self.clock += seconds;
+        self.refresh(cache);
+        self.drift = [0; 3];
+    }
+
+    pub fn refresh(&mut self, cache: &VerifiedCache) {
+        if let Ok(list) = bodies(cache, &self.entries[self.current], clock_words(self.clock)) {
+            if list.len() == self.bodies.len() {
+                if let Some(t) = self.target {
+                    for k in 0..3 {
+                        self.drift[k] += list[t].position[k] - self.bodies[t].position[k];
+                    }
+                }
+                self.bodies = list;
+            }
+        }
+        self.refreshed = self.clock;
+    }
+
+    /// Jump to the selected system: the bodies are rebuilt and the arrival point
+    /// (just off the first planet, or the star) returned.
+    pub fn jump(&mut self, cache: &VerifiedCache, index: usize) -> Result<[i64; 3], String> {
+        if index >= self.entries.len() {
+            return Err("no such system".to_owned());
+        }
+        self.current = index;
+        self.bodies = bodies(cache, &self.entries[index], clock_words(self.clock))?;
+        self.refreshed = self.clock;
+        self.target = None;
+        self.memory = Memory::default();
+        let anchor = self
+            .bodies
+            .iter()
+            .find(|b| b.kind == Kind::Planet)
+            .or_else(|| self.bodies.first())
+            .ok_or("empty system")?;
+        let off = (standoff(anchor) * 4.0) as i64;
+        Ok([
+            anchor.position[0],
+            anchor.position[1],
+            anchor.position[2] - off,
+        ])
+    }
+
+    /// Engage the autopilot on the selected body.
+    pub fn engage(&mut self) -> Option<&Body> {
+        if self.selected < self.bodies.len() {
+            self.target = Some(self.selected);
+            self.memory = Memory::default();
+            self.view = View::Closed;
+            self.bodies.get(self.selected)
+        } else {
+            None
+        }
+    }
+
+    /// The ship's position carried along with the engaged target, once it is on the
+    /// final approach: the autopilot cannot catch a body moving at 30 km/s, so the
+    /// last stretch is flown in the target's frame.
+    pub fn follow(&mut self, ship: [i64; 3]) -> Option<[i64; 3]> {
+        let drift = std::mem::take(&mut self.drift);
+        let target = self.bodies.get(self.target?)?;
+        if distance(ship, target.position) > 10.0 * APPROACH + standoff(target) {
+            return None;
+        }
+        Some(std::array::from_fn(|k| ship[k] + drift[k]))
+    }
+
+    pub fn disengage(&mut self) {
+        self.target = None;
+    }
+
+    /// The autopilot's command for this frame, when engaged.
+    pub fn command(
+        &mut self,
+        cache: &VerifiedCache,
+        flight: &OriginalFlight,
+    ) -> Option<(Command, Body)> {
+        let index = self.target?;
+        let body = self.bodies.get(index)?.clone();
+        let stop = standoff(&body);
+        let mut command = autopilot(flight, body.position, stop, &mut self.memory);
+        if let Some((_, seconds)) = command.skip {
+            // The body moves while the ship travels: aim for where it will be.
+            let ship = flight.player().motion.position;
+            let mut seconds = seconds;
+            let mut future = body.position;
+            for _ in 0..6 {
+                let Ok(list) = bodies(
+                    cache,
+                    &self.entries[self.current],
+                    clock_words(self.clock + seconds),
+                ) else {
+                    break;
+                };
+                let Some(there) = list.get(index) else { break };
+                future = there.position;
+                let range = distance(ship, future);
+                seconds = transfer_seconds((range - stop - APPROACH).max(0.0) / 1000.0);
+            }
+            let range = distance(ship, future);
+            let landing: [i64; 3] = std::array::from_fn(|k| {
+                let unit = (future[k] - ship[k]) as f64 / range.max(1.0);
+                future[k] - (unit * (stop + APPROACH)) as i64
+            });
+            command.skip = Some((landing, seconds));
+        }
+        Some((command, body))
+    }
+
+    /// The lines of the map showing, the selected one marked.
+    pub fn lines(&self, ship: [i64; 3]) -> Vec<String> {
+        let mark = |i: usize| if i == self.selected { ">" } else { " " };
+        match self.view {
+            View::Closed => Vec::new(),
+            View::Galaxy => self
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    let here = if i == self.current { "*" } else { " " };
+                    format!("{}{} {}", mark(i), here, e.name)
+                })
+                .collect(),
+            View::System => self
+                .bodies
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    let flag = if self.target == Some(i) { "=>" } else { "  " };
+                    format!(
+                        "{}{} {} ({}) {}",
+                        mark(i),
+                        flag,
+                        b.name,
+                        b.kind.label(),
+                        describe(distance(ship, b.position))
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// The bodies as map points (x, y in -1..1 on a log scale from the ship, kind).
+    pub fn points(&self, ship: [i64; 3]) -> Vec<(f32, f32, Kind, bool)> {
+        let reach = self
+            .bodies
+            .iter()
+            .map(|b| distance(ship, b.position))
+            .fold(1.0e9, f64::max);
+        self.bodies
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let dx = (b.position[0] - ship[0]) as f64;
+                let dz = (b.position[2] - ship[2]) as f64;
+                let range = (dx * dx + dz * dz).sqrt().max(1.0);
+                // Log radius so the moons and the outer planets both show.
+                let radius = ((range / 1.0e8).ln_1p() / (reach / 1.0e8).ln_1p()).clamp(0.0, 1.0);
+                (
+                    (dx / range * radius) as f32,
+                    (dz / range * radius) as f32,
+                    b.kind,
+                    self.selected == i,
+                )
+            })
+            .collect()
     }
 }

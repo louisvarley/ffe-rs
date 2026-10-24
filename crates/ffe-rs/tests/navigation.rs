@@ -127,3 +127,103 @@ fn systems_and_autopilot() {
         );
     }
 }
+
+/// The map state the keys drive: open, choose, jump, fly.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn navigator_flow() {
+    use ffe_rs::navigation::{Navigator, View};
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    assert_eq!(nav.system_name(), "Lave");
+    nav.open(View::Galaxy);
+    assert_eq!(nav.view, View::Galaxy);
+    let lines = nav.lines([0; 3]);
+    assert!(lines.iter().any(|l| l.contains("Sol")), "{lines:?}");
+    // Jump to Sol.
+    nav.selected = lines.iter().position(|l| l.contains("Sol")).unwrap();
+    let arrival = nav.jump(&cache, nav.selected).unwrap();
+    assert_eq!(nav.system_name(), "Sol");
+    nav.open(View::System);
+    let lines = nav.lines(arrival);
+    assert!(lines.iter().any(|l| l.contains("Earth")), "{lines:?}");
+    nav.selected = lines.iter().position(|l| l.contains("Earth")).unwrap();
+    assert_eq!(nav.engage().map(|b| b.name.as_str()), Some("Earth"));
+    let mut flight = OriginalFlight::from_flight(
+        &Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        },
+        None,
+    );
+    flight.teleport(arrival);
+    let mut arrived = false;
+    for _ in 0..100_000 {
+        let (command, _) = nav.command(&cache, &flight).expect("engaged");
+        if let Some((landing, seconds)) = command.skip {
+            assert!(seconds > 0.0);
+            flight.teleport(landing);
+            nav.transfer(&cache, seconds);
+            continue;
+        }
+        flight.step(0.05, &command.keys).unwrap();
+        nav.advance(&cache, 0.05);
+        if let Some(moved) = nav.follow(flight.player().motion.position) {
+            flight.shift(moved);
+        }
+        if command.arrived {
+            arrived = true;
+            break;
+        }
+    }
+    let (last, body) = nav.command(&cache, &flight).unwrap();
+    eprintln!(
+        "stop {} set speed {} m/s aligned {} accel {} step {}",
+        describe(standoff(&body)),
+        flight.set_speed_metres(),
+        last.aligned,
+        last.acceleration,
+        flight.acceleration_step()
+    );
+    assert!(
+        arrived,
+        "Earth not reached; range {} clock {:.0}",
+        describe(distance(
+            flight.player().motion.position,
+            nav.bodies[nav.target.unwrap()].position
+        )),
+        nav.clock
+    );
+    assert!(nav.clock > 0.0);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn orbit_rates() {
+    use ffe_rs::navigation::clock_words;
+    let cache = cache();
+    let entries = galaxy(&cache).unwrap();
+    let sol = entries.iter().find(|e| e.name == "Sol").unwrap();
+    let mut previous: Option<[i64; 3]> = None;
+    for seconds in [
+        0.0,
+        3600.0,
+        86_400.0,
+        30.0 * 86_400.0,
+        182.6 * 86_400.0,
+        365.25 * 86_400.0,
+    ] {
+        let list = bodies(&cache, sol, clock_words(seconds)).unwrap();
+        let earth = list.iter().find(|b| b.name == "Earth").unwrap();
+        let moon = list.iter().find(|b| b.name == "Moon").unwrap();
+        eprintln!(
+            "t={seconds:.0} s Earth {} from Sol, Moon {} from Earth",
+            describe(distance([0; 3], earth.position)),
+            describe(distance(earth.position, moon.position))
+        );
+        if let Some(last) = previous {
+            eprintln!("   moved {}", describe(distance(last, earth.position)));
+        }
+        previous = Some(earth.position);
+    }
+}

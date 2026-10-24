@@ -32,7 +32,13 @@ transfer then about 300 s of flight), Mercury and Daedalus.
 
 ## Keys (the playable)
 
-(see the help overlay; wired in `main.rs`)
+Wired in `main.rs`:
+
+- Tab: system map (planets, moons, stations of the current system, with ranges); G: galaxy map (the systems on offer).
+- Up/Down: choose; Enter: fly to the chosen body (autopilot) or jump to the chosen system.
+- Backspace: autopilot off. O: the original flight model.
+
+Planets move on the game clock (days plus a fraction), children relative to their parent. Long legs are transfers (the clock jumps and the ship lands short of the body's future position); the last stretch is flown in the target's frame (`Navigator::follow`) because the autopilot cannot catch a body moving at 30 km/s.
 
 ## Known limits
 
