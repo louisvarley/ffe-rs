@@ -149,7 +149,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.62" },
         { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "done", version: "v0.57" },
         { id: "gameplay-5", title: "Missiles and countermeasures", status: "in-progress", version: "v0.67" },
-        { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "in-progress", version: "v0.63" },
+        { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "done", version: "v0.72" },
         { id: "gameplay-7", title: "Police, pirates and other encounters", status: "in-progress", version: "v0.63" },
         { id: "gameplay-8", title: "Combat scenario replay against the reference", status: "todo" },
         { id: "gameplay-9", title: "Bulletin board and missions (cbbs)", status: "todo" },
@@ -565,6 +565,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 67,
       note: "Runtime palette merged (v0.71): ffe_rs::palette implements F1326/F1327/F1328/F1329/F1330/F1331 (median-cut 64 boxes, odd representatives, two banks, fixed 128-entry low palette and map, bank toggle), textures/model_viewer register and resolve the entries, and the intro uses F1575's (0,0,0)/(0,0,4) starts (the executed switch frame's single (1,1,17) entry is reproduced). EXP-013 is preserved: drawn space stays #0c0c4c, Black #000000. palette_reference (5) and the intro/scanner/galaxy-map/planet suites pass on v28. One item completed (v0.48-15); ui-10 stays in progress. Remaining: terrain queue colours are not pre-registered, one build per model render, and the intro backdrop's slower ramp."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 66,
+      note: "NPC docking cycle merged (v0.72): the corrected DATA_006255 AI table and the Approach/Docked/Launch/Depart rows, DockRequest and tick_with_station, bay occupancy through the station record, F747's door-close wait and F733/F734/F735/F736/F761/F762; docked ships are hidden, traders get destinations and the npc_docking evidence frames cover approach/docked/launch. The AI item (gameplay-6) is done. Remaining owner decisions: the 2-3 day docked interval vs the shortened observation, the 30 s give-up/next-station vs endless retry, the cruise-speed floor and the despawn range."
     }
   ]
 };

@@ -4,6 +4,27 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - NPC docking cycle merged (v0.72)
+
+- Merged `npc-dock` (f42b9b2): the `DATA_006255` AI table rows were offset and
+  are now correct; NPCs fly Approach, Docked, Launch and Depart, with
+  `DockRequest`, `tick_with_station`, bay occupancy through the station's
+  traffic record, F747's door-close wait and F733/F734/F735/F736/F761/F762.
+  Docked ships are hidden, traders receive destinations, and the cycle is
+  covered by `npc_docking` and its `docs/evidence/npc-docking/` frames.
+- Merge was conflict-free (`ort`); the palette/npc.rs/navigation.rs changes
+  auto-merged and the playable still passes.
+- **Owner decisions/remaining:** the original's 2-3 day docked interval is
+  shortened for observation; a ship that cannot dock gives up after 30 s and
+  tries the next station rather than retrying endlessly; the cruise-speed
+  floor and the despawn range are the port's. Missiles, police
+  spawns/fines/HUD badge and Thargoids remain outside this cycle.
+- Tests: workspace, clippy, fmt; `npc_docking` (1 ignored), `npc_ai` (3),
+  `npc_view` (1), `missile_view` (1) and `effects_view` (2) cached suites pass
+  against the v28 cache.
+
+---
+
 ## 2026-10-25 - Faithful runtime palette merged (v0.71)
 
 - Merged `palette` (fe4aa1d): `ffe_rs::palette` implements the original's

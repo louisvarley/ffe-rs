@@ -1,4 +1,4 @@
-# NPC ships in generated systems (F688, F635, DATA_006258, F931, F942)
+# NPC ships in generated systems (F688, F635, DATA_006255, F931, F942)
 
 Implemented 2026-10-25 in `crates/ffe-core/src/npc.rs`, with the playable
 wiring in `ffe_rs::navigation` (`Navigator::ships`, `spawn_traffic`,
@@ -13,6 +13,10 @@ model-0x9d shield flash and F1099's target readout are reachable in a generated
 system. Since the AI slice (2026-10-25) they also fly the original's
 approach/attack/hold states, fire the ported lasers at the player and make the
 police respond to a wanted player, so F953's player damage is reachable too.
+Since the docking slice they also run F689/F745/F746/F747/F733/F734/F735/
+F651/F736/F761/F762's station cycle: traders request a bay, dock, wait out the
+original's two-to-three day object time, launch through the station's door and
+resume transit, instead of orbiting for ever.
 
 ## 1. The original's objects and where ships came from
 
@@ -59,14 +63,15 @@ police respond to a wanted player, so F953's player damage is reachable too.
   restores those and then F688 spawns the new system's traffic. **F927**
   (`ffe.asm:69170`) allocates a slot from 0x72 down, never below 0x14, and
   recycles the highest explosion/debris slot when full.
-- **AI states** are `DATA_006258` (`ffedat.asm:9862`): 0x25 states with four
-  routine slots each, dispatched by F706/F704/F778/F780 on object `+0xff`.
-  F752/F725/F727 are the common movement and physics steps; F585 applies a
-  per-frame turn limited by model size (halved from model 0x35, quartered from
-  0x3b); F587 computes the rates and F1512 aims with the target's velocity;
-  F753's arrival test picks state 3 under 5 units or F749's reposition (4) over
-  10; F694/F695 set the pirate states 5/0xb; F737/F787 are the jump-out states.
-  F724 (state 1) is the only AI fire call: it moves and calls **F931**.
+- **AI states** are `DATA_006255` (`ffedat.asm:9854`): 0x25 states with four
+  routine slots each (control, movement, death notification, damage response),
+  dispatched by F706/F704/F780/F778 on object `+0xff`. F752/F725/F727 are the
+  common movement and physics steps; F585 applies a per-frame turn limited by
+  model size (halved from model 0x35, quartered from 0x3b); F587 computes the
+  rates and F1512 aims with the target's velocity; F753's arrival test picks
+  state 3 under 5 units or F749's reposition (5) over 10; F694/F695 set the
+  pirate states 5/0xb; F737/F787 are the jump-out states. F724 (state 2's
+  movement routine) is the only AI fire call: it moves and calls **F931**.
 - **JJFFE difference:** JJFFE replaced that F931 call with
   `or byte [ship+0x151], 2` ("FIX: Laser invulnerability", `ffe.asm:47856`), so
   JJFFE's AI ships only show the fired flag and do no damage. This port follows
@@ -128,28 +133,44 @@ police respond to a wanted player, so F953's player damage is reachable too.
 
 ### The AI state table (`AI_STATES`)
 
-`DATA_006258` is in `ffe_core::npc` as `AI_STATES: [AiState; 0x25]`, one row
-per `object+0xff` value with the original's four routine numbers. The rows
-name the approach/docking cycle (0x00-0x04), the pirate states (0x05, 0x0a,
-0x0b), station holding (0x06/0x09/0x0d/0x0e/0x11), depart/jump
-(0x07/0x0f/0x10/0x1f/0x20/0x21), missiles (0x12-0x1b), the explosion/debris
-objects (0x1c/0x1d), dock/launch (0x1e/0x22/0x23) and F786's spawn-in
-(0x24). `ai_state(code)` looks a row up and a unit test checks the whole table
-against the disassembly.
+`DATA_006255` (`ffedat.asm:9854-10006`) is in `ffe_core::npc` as
+`AI_STATES: [AiState; 0x25]`. The table is four routine slots per state:
+`(control, movement, notify, damage)`. F706 (event 6, the per-frame controller)
+indexes `DATA_006255`, F704 (event 5, the physics step) `DATA_006256`, F780 (a
+target's death) `DATA_006257` and F778 (this ship taking a hit) `DATA_006258`.
+The labels between 6255 and 6258 are the first row's remaining slots, not four
+separate arrays: state 0's row is `F742, F727, 0, F789`. The earlier port table
+started at `DATA_006258` and read the slots in the wrong order, so every row was
+shifted and F724 looked like a "combat" slot; this slice corrects it and a unit
+test checks the table against the disassembly (`the_ai_table_is_data_006255`).
+
+The rows name the flight cycle (0x00 F742 navigation, 0x01/0x02 F752/F753 attack
+and F724 firing, 0x03 F755/F756 evasion, 0x04 F750 interception, 0x05 F749
+reposition, 0x06 F759 static, 0x07 F736 departure, 0x08 F741 new target, 0x09
+F770 trading approach, 0x0a F743 patrol station-keeping, 0x0b F751 formation),
+the jump timers (0x10 F760, 0x11 F737, 0x12 F740), the hyperspace clouds
+(0x1d/0x1e), the docked cycle (0x1f F734 request launch, 0x20 F747 docked
+record, 0x21 F735 launch, 0x23 F746 docking, 0x24 F733 docked countdown) and
+the missiles (0x13-0x1b). 0x22 F748 is the player autopilot's launch check, not
+an NPC state.
 
 The port's `State` names the subset it runs and lists its original codes in
 `State::original`:
 
 | Port state | Behaviour | Original rows |
 |---|---|---|
-| `Transit` | fly to the anchor, arrive test, then `Hold` | 0x00/0x01/0x07/0x08/0x12 |
-| `Hold` | orbit the anchor | 0x06/0x0d/0x0e/0x11 |
-| `Escort` | station-keep in the leader's frame; engage the player when near | 0x09/0x0b |
-| `Attack` | turn and close on the player, fire, brake at the standoff | 0x05/0x0a |
-| `Pass` | F597's "cannot stop in time" run-through | 0x03/0x04 |
-| `Flee` | run and jump out | 0x10/0x1f/0x21 |
-| `Dead` | F942's death marker counts down | 0x1c/0x1d |
-| `Escaped` | the slot is free after the jump | 0x1f |
+| `Transit` | fly to the station/waypoint, then hold | 0x00/0x08/0x09 |
+| `Approach` | final leg to F650's bay, F745/F746 | 0x23 |
+| `Docked` | in the bay, F747's 2-3 day countdown (F733) | 0x20/0x24 |
+| `Launch` | F734's F654 request, F735 waiting for the door | 0x1f/0x21 |
+| `Depart` | F736 flies out, F651 releases, F761/F762 choose | 0x07 |
+| `Hold` | static/parked | 0x06/0x0d/0x0e/0x0f |
+| `Escort` | station-keep in the leader's frame (F743/F751) | 0x0a/0x0b |
+| `Attack` | close/fire/intercept | 0x01/0x02/0x04/0x05 |
+| `Pass` | F755/F756's evasion/overshoot | 0x03 |
+| `Flee` | F761/F738's jump-out cloud | 0x1d |
+| `Dead` | F942's explosion object | 0x1c |
+| `Escaped` | the cloud is gone and F927 frees the slot | — |
 
 ### Flight rules (`NpcShip::tick`)
 
@@ -175,6 +196,39 @@ The port's `State` names the subset it runs and lists its original codes in
   no hull test that reaches them.
 - Positions and the player target are in the system frame (millimetres);
   `Navigator::tick_ships` passes the frame's tics for F730/F938.
+
+### The station traffic cycle (F689, F745/F746, F733/F747, F734/F735, F651/F736, F761/F762)
+
+Traders and shuttles no longer orbit for ever. F689 gives a trader `+0x100` (its
+starport destination) and state 0x11; the source then runs the cycle below, and
+the port runs the same states over its `npc::Station` snapshot and the station's
+`traffic::Starport` record:
+
+| Step | Original | Port |
+|---|---|---|
+| destination | F689/F700 sets `+0x100`; F741/F742 fly to `+0xfe` | `NpcShip::station` (a body index); `Transit` targets `Station::bay_point` |
+| request | F736/F742 at distance 6 call F745; F655 = F654 + F650 | `DockRequest::Request`; `tick_ships` calls `Starport::request_docking(traffic_id, false, 0)` |
+| bay | F650 scans `+0xce` down, returns the ship's own bay or the first free one; the 0x98b8 reply resets the record | `Reply::Granted(Bay)` → `begin_approach(bay, pad)`; `Busy`/`Full` retry every second |
+| final approach | state 0x23, F746: F596/F589/F599 to the pad, F744's F652 on contact | `Approach` targets F650's pad (open-air) or the slot; `DockRequest::Touch` on arrival |
+| docked record | F744 sets state 0x20; F747 waits for mode 3 to end, F653 clears the record, marks the object docked, state 0x24 | `Touch` → `Starport::touch` then `reset` (F653); the bay stays occupied |
+| countdown | F733 compares the object time; F747 sets `[+0xac] += 2` days and `[+0xa8] += [D8818]` | `DockRequest` waits `DOCKED_DAYS` (2) plus a random day fraction in `dock_timer` |
+| launch | F733 → F734's F654; F735 waits for the station mode 0xfe/0 | `DockRequest::Launch` → `Starport::request`; `Launch` waits for `door == 0` |
+| departure | F651 frees the bay; F736 flies out; F761/F762 pick a station, or F738/F925 remove the ship | `DockRequest::Release` → `Starport::release`; `Depart` for `DEPART_SECONDS`, then `DockRequest::ChooseStation` |
+| next station | F762's F700 draws a random starport; none → F925 | `Navigator::next_place` walks the system's places (the same station in a one-station system), or `escape()` when there is none |
+
+The bay is held from F650's grant until F651 at departure, so a full station
+replies `Busy`/`Full` exactly as `Starport::request_docking` already did. If the
+clearance times out (F867, 0x7080 game seconds), `tick_traffic` calls
+`touch_failed` on the NPC that held it and the ship asks again. A destroyed
+ship's bay is released too (F788). Docked ships are kept in the traffic list but
+are not drawn, labelled, locked or hit (`NpcShip::visible`).
+
+The port's deviations: the source retries a full station for ever, the port
+gives up after `DOCK_WAIT_SECONDS` and asks F762 for another station; the source
+picks a random starport, the port walks them in order; F747's two-to-three days
+are counted in game seconds, so the console's time acceleration shortens them;
+and FFE's thrust units do not scale to the port's millimetre frame, so traders
+and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 
 ### Firing at the player (F931/F930/F953)
 
@@ -260,12 +314,16 @@ The port's `State` names the subset it runs and lists its original codes in
 
 ## 3. Tests and frames
 
-- `cargo test -p ffe-core npc`: sixteen tests for the F635 table/counts, the
-  allegiance shift, F922's determinism, F688 counts/cap, placement, the
-  `DATA_006258` rows, F585's turn divisor, F601's thrust/mass speeds, the
-  F697 bounty table, F931's gates and F930's damage, the braking standoff, the
-  transit arrival, F694/F695 escorts, F675/F680 persistence, F953/F942 damage
-  and the hold/attack motion.
+- `cargo test -p ffe-core npc`: twenty-one tests. The original sixteen cover the
+  F635 table/counts, the allegiance shift, F922's determinism, F688 counts/cap,
+  placement, the `DATA_006255` rows, F585's turn divisor, F601's thrust/mass
+  speeds, the F697 bounty table, F931's gates and F930's damage, the braking
+  standoff, the transit arrival, F694/F695 escorts, F675/F680 persistence,
+  F953/F942 damage and the hold/attack motion. This slice adds the traffic
+  cycle: the bay request/approach/dock with the bay occupied, F747's 2-3 day
+  interval, the door-open launch and F651 release with the next station, the
+  full-station give-up (F655's Full and F762), and the F867 clearance timeout
+  recycling the ship.
 - `cargo test -p ffe-rs combat`: adds the player's F953 words
   (`Flight::take_damage`) and their save defaults.
 - `cargo test -p ffe-rs --test npc_ai -- --ignored` with
@@ -277,6 +335,18 @@ The port's `State` names the subset it runs and lists its original codes in
   `Navigator::jump`/`spawn_traffic` round trip. Set `FFE_SHOT_DIR` to keep
   `npc-ai-before.ppm`, `npc-ai-hit.ppm` (the pirate labelled, `Hull: 50.0%`),
   `npc-ai-police.ppm` and `npc-ai-restored.ppm`.
+- `cargo test -p ffe-rs --test npc_docking -- --ignored` with the same cache:
+  the station cycle in the real system (Ross 154). It waits for the spawned
+  trader's final approach, asserts F655 granted a bay, the pad contact leaves
+  the bay occupied and starts a 2.40-day interval, fast-forwards the interval,
+  and runs the launch through F654, F865 and F651 until the ship is back in
+  transit to the next station. Set `FFE_SHOT_DIR` to keep
+  `npc-dock-approach.ppm`, `npc-dock-docked.ppm` and `npc-dock-launch.ppm`; the
+  ignored run prints the source steps
+  (`F745 ... F655 granted`, `F652 touch ... F747 waits 57.6 h`, `F734/F654`,
+  `F735/F865 ... F651 frees bay 0`, `F761/F762`). The logged approach is
+  128.7 s at `STATION_CRUISE_SPEED` (40,000 mm/s). The PNGs and the full log are
+  in `docs/evidence/npc-docking/` (README.md).
 - **Live frames:** `ffe-rs.exe --root <repo> --skip-intro --capture-traffic
   <dir>` shows the traffic, the locked `Moray Starboat 3` label and readout, the
   shield-bubble flash and the death frame from the earlier slice. Since the AI
@@ -288,18 +358,22 @@ The port's `State` names the subset it runs and lists its original codes in
 
 ## 4. What remains
 
-- **The full per-state AI.** The port names all 0x25 rows but runs a subset.
-  F752/F753's complete approach/docking cycle (including F750/F756's final
-  approach and F597's frame matching), station launch/departure (0x1e-0x23),
-  F740's docked countdown and F762's new-station choice are not ported, so
-  traders hold an orbit rather than docking.
+- **The full per-state AI.** The port runs the flight cycle, the pirate states,
+  the station cycle above and the jump states; the missile control rows
+  (0x13-0x1b), F770's trading approach's own motion and the per-state exact
+  F597/F1512 frame matching are not transcribed. F745/F746's orientation
+  matching (F589) and F671's settle onto the pad are approximated by the port's
+  approach; the station traffic uses the pad point, not the original's
+  orientation lock.
 - **Missiles.** F941/F1096 and states 0x12-0x1b are not ported; the Eagle's
   two 0x82 missiles are inert.
 - **Police response/spawns.** The wanted state turns existing police hostile;
   it does not spawn patrols, apply fines or show the wanted status outside the
   message line. F1035/F1036 are surface spawns and are absent with the rest of
   the surface traffic.
-- **Station-bay ships (F691).** The cache's ship-data table is not loaded.
+- **Station-bay ships (F691).** The cache's ship-data table is not loaded, so
+  the initial docked traders are not spawned; the traffic cycle starts from
+  F689's arriving traders instead.
 - **Exact F702 placement.** The raw ffp orbit is not used; see the deviation.
 - **F942's effects.** Ported 2026-10-25: the model-0x9b destruction object and
   F926's debris pods are in `ffe_core::effects` and drawn by `Screen`; F939's
@@ -334,8 +408,14 @@ The port's `State` names the subset it runs and lists its original codes in
   original's position-based F737 condition.
 - **Traffic cap.** Keep `MAX_SHIPS = 5`, or let F688's counts and F927's slot
   rules produce the original's many more ships.
-- **Full docking AI.** Whether to port F752/F753/F750/F756/F740/F762 (so
-  traffic really arrives and departs) or keep the orbit stand-in.
+- **Full docking AI.** Now ported at the state level (F745/F746, F747/F733,
+  F734/F735, F651/F736, F761/F762). The open decisions are the port's
+  trade-offs: a 2-3 day docked interval counted in game seconds (so time
+  acceleration is needed to see a launch), a 30 s give-up at a full station,
+  stations chosen in order rather than at random, and the
+  `STATION_CRUISE_SPEED` floor. Keep these, or use the original's for-ever
+  retry/random choice and accept that a heavy freighter's approach takes tens of
+  minutes at 1x.
 - **Effect lifetimes.** The port gives each effect its own seconds; decide
   whether to follow the original's AI timers (F764/F769/F927).
 - **Explosion fragments.** Model 155 is gated on the object's global word 4

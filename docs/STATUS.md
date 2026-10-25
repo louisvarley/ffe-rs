@@ -52,8 +52,10 @@ flee/dead/escaped) with F585's turn limits and statistics-based speeds; pirates
 fire through F931/F930 and F953's damage reaches the player through
 `Flight::take_damage`, police/wanted and F674/F675/F680 jump persistence are in,
 and the port follows DOS FFE in letting AI lasers damage the player where JJFFE
-disables it. Full docking AI, missiles, police spawns/fines/HUD badge and
-Thargoids remain (`docs/notes/npc.md`). Since
+disables it. Since 2026-10-25 traffic also flies the Approach/Docked/Launch/
+Depart docking cycle (the corrected `DATA_006255` rows, bay occupancy and
+F747's door wait; `docs/notes/npc.md`), with docked ships hidden. Missiles,
+police spawns/fines/HUD badge and Thargoids remain (`docs/notes/npc.md`). Since
 2026-10-25 the game also posts the original's sound cues and scene music
 (`docs/notes/sound-cues.md`): F1906/F1907/F1908 dispatch and gates, F1902's
 song rules and the live event sites, with the Sound Effects page applied at
@@ -110,7 +112,7 @@ ECM.
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 142 items, 75 done and 67 left on
+  in `burndown.js`; 14 milestones, 142 items, 76 done and 66 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -269,14 +271,15 @@ capture produced by two repeat runs of the local reference.
 | v0.69 deterministic reference gate and new oracles | `verify-world.py` name masking, `world`/`world-linux` split, `verify-all.py` PASS/FAIL/SKIP + `--list`/`--only`/timeouts, new `verify-{combat,ship-types,npc,dashboard,takeoff,prefs}.py`, `npc_reference.rs`, F635 slot-0x3 fix, `tools/reference/README.md` | `npc_reference.rs` (1, ignored), 55-entry oracle suite | **54 PASS, 1 SKIP, 0 FAIL** (Windows; `world-linux` skips `--sysgen`/`--surface-draw`); `ship-types` trace `ae421da6…` | — | the Windows `--worldgen` repeatability failure is fixed by masking only the object-name ranges F877/F878 build from an uninitialised byte; every other byte is still compared. New stream oracles cover combat's executed loadout/hitscan/pixels, F635's table (slot 0x3 fix), NPC, dashboard, takeoff and prefs. Remaining gaps: F688's spawn sequence, F635 `population < 4`, pinned (not frame) HUD/NPC/takeoff/prefs, and `galaxy-map` as the only frame-level comparison; `tools/reference/README.md` |
 | v0.70 software mixer, WinMM sink, intro theme, cache v28 | `ffe-audio::mixer` (WAV decode, 40 samples, 16 voices, F1908 reuse/fixed/laser1 steal, baked loops, pitch, F1907 centibels), `sink`/`waveout`, `GameAudio::from_cache`/`system_with_effects`, intro song 0 (`music_on`), cache v28 `base:music/qqfront` | `ffe-audio` (3), `sound_mixer.rs` (3), `sound_cues` (2), `front_end` (9); 1,797 assets / 1,798 ZIP entries | 55-entry suite: **54 PASS, 1 SKIP, 0 FAIL** against v28 | — | every wired cue is audible through the WinMM `waveOut` sink with a headless fallback; the intro plays F919/F1904's song 0 and stops on `leave_front_end`; v27 remains loadable and v28 is preferred. Continuous beds (F1910/F1908), positional audio (F1759 unused by DOS), `.mid` overrides, caching the other 16 songs and a device picker remain; `docs/notes/sound.md`/`sound-cues.md` |
 | v0.71 faithful runtime palette | `ffe_rs::palette` (F1326/F1327/F1328/F1329/F1330/F1331: median-cut 64 boxes, odd representatives, two banks, fixed 128 low palette/map, bank toggle), `textures`/`model_viewer` registration/resolve, intro F1575 colours, `palette_reference.rs` | `palette_reference.rs` (5, ignored), palette unit tests; intro/scanner/galaxy-map/planet cached suites | `--palette` probe: intro switch frame upper entry (1,1,17); frame comparison in the cached test | — | the original's dynamic upper palette now builds the 64 median-cut boxes and resolves textured/model colours through it; the intro reproduces its single upper entry at the model switch. EXP-013 preserved: the drawn space colour is still the captured `#0c0c4c` (Black `#000000`). Terrain queue colours are not pre-registered, one build per model render, and the intro backdrop ramps more slowly than the original's; `docs/notes/palette.md` |
+| v0.72 NPC docking cycle | `ffe_core::npc` corrected `DATA_006255` rows (Approach/Docked/Launch/Depart), `DockRequest`, `tick_with_station`, bay occupancy, F747 door wait, F733-F736/F761/F762; `Navigator` station records; hidden docked ships; `npc_docking.rs` | `npc_docking.rs` (1, ignored), npc unit tests, evidence in `docs/evidence/npc-docking/` | none (the state rows are from `ffe.asm`/`DATA_006255`; approach/docked/launch frames) | — | traffic now flies approach/dock/launch/depart cycles, takes the station's bay slot and waits for F747's door; docked ships are not drawn and traders get destinations. Remaining owner decisions: the 2-3 day docked interval vs the shortened observation, the 30 s give-up/next-station vs endless retry, the cruise-speed floor and the despawn range. `docs/notes/npc.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 609 `#[test]` functions total; 142 are `#[ignore]`
+  `cargo clippy -D warnings`. 615 `#[test]` functions total; 143 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **466 runnable synthetic tests** (467 on Linux).
+  **470 runnable synthetic tests** (471 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

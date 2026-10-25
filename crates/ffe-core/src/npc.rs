@@ -134,336 +134,347 @@ pub const SHIP_TYPES: [&[u32]; 19] = [
     &[0x11],
 ];
 
-/// One row of the original's AI state table, `DATA_006258`
-/// (`ffedat.asm:9862`): four routine slots per state.
+/// One row of the original's AI state table, `DATA_006255` (`ffedat.asm:9854`):
+/// four routine slots per state, `0x25` rows.
 ///
-/// The slots are the routines F706 (control/arrival), F704 (movement),
-/// F778 (combat, AI ships only) and F780 (notification/collision) dispatch:
-/// a row's `None` slot is a `dd 0` in the table. The routine numbers are the
-/// original's, so a row can be checked against the disassembly; the port models
-/// the states named below.
+/// The slots are `(control, movement, notify, damage)`: `F706` (event 6, the
+/// per-frame controller) indexes `DATA_006255`, `F704` (event 5, the physics
+/// step) indexes `DATA_006256`, `F780` (another object's death) indexes
+/// `DATA_006257` and `F778` (this object taking a hit) indexes `DATA_006258`.
+/// The three labels between `DATA_006255` and `DATA_006258` are the first row's
+/// remaining slots, not separate tables: the row data is
+/// `F742, F727, 0, F789` for state 0. A `None` slot is a `dd 0`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AiState {
     /// `object+0xff`.
     pub code: u8,
     /// What the original uses the state for.
     pub name: &'static str,
-    /// F706's routine.
+    /// F706's event-6 controller.
     pub control: Option<u16>,
-    /// F704's routine.
+    /// F704's event-5 physics step.
     pub movement: Option<u16>,
-    /// F778's routine.
-    pub combat: Option<u16>,
-    /// F780's routine.
+    /// F780's death notification for the target this ship wants dead.
     pub notify: Option<u16>,
+    /// F778's response to a hit on this ship (F785-F790).
+    pub damage: Option<u16>,
 }
 
-/// `DATA_006258`: the AI states, in `object+0xff` order.
+/// `DATA_006255`: the AI states, in `object+0xff` order.
 ///
-/// The first ten rows are the approach/docking and dogfight cycle: F752/F753
-/// fly to the target, F753's arrival test picks state 3 (close) under 5 units or
-/// state 4 (F749's random reposition) over 10; F724 (state 1) is the original's
-/// only AI fire call. Rows 5/0xa/0xb are the pirate states F694/F695 set.
+/// The first rows are the flight cycle: F742's navigation (0x00), F752/F753's
+/// attack turns (0x01/0x02), F755/F756's evasion (0x03), F750's interception
+/// (0x04), F749's reposition (0x05), F759's static hold (0x06), F736's departure
+/// (0x07) and F741's new target after a jump (0x08). F770 (0x09) is the trading
+/// approach, F743 (0x0a) the patrol/station-keeping offset and F751 (0x0b) the
+/// pirate formation. Rows 0x10-0x12 are F760's trading timer, F737's jump
+/// countdown and F740's jump exit; rows 0x1d/0x1e are the hyperspace clouds.
+///
+/// The station cycle is 0x1f F734 (request launch), 0x20 F747 (docked: mark the
+/// object and wait for traffic control), 0x21 F735 (launching: wait for the
+/// station's door, then state 7), 0x23 F746 (final approach and pad contact,
+/// with F745's F655 request) and 0x24 F733 (docked: wait out the object time,
+/// then request launch). 0x22 F748 is the player autopilot's launch check.
 pub const AI_STATES: [AiState; 0x25] = [
     AiState {
         code: 0x00,
-        name: "approach",
-        control: Some(789),
-        movement: Some(752),
-        combat: Some(725),
-        notify: Some(782),
+        name: "navigation",
+        control: Some(742),
+        movement: Some(727),
+        notify: None,
+        damage: Some(789),
     },
     AiState {
         code: 0x01,
-        name: "attack",
-        control: Some(785),
-        movement: Some(752),
-        combat: Some(724),
+        name: "attack turn",
+        control: Some(752),
+        movement: Some(725),
         notify: Some(782),
+        damage: Some(785),
     },
     AiState {
         code: 0x02,
-        name: "line up",
-        control: Some(785),
-        movement: Some(755),
-        combat: Some(725),
+        name: "firing",
+        control: Some(752),
+        movement: Some(724),
         notify: Some(782),
+        damage: Some(785),
     },
     AiState {
         code: 0x03,
-        name: "close",
-        control: Some(785),
-        movement: Some(750),
-        combat: Some(727),
+        name: "evade",
+        control: Some(755),
+        movement: Some(725),
         notify: Some(782),
+        damage: Some(785),
     },
     AiState {
         code: 0x04,
-        name: "reposition",
-        control: Some(785),
-        movement: Some(749),
-        combat: Some(727),
+        name: "intercept",
+        control: Some(750),
+        movement: Some(727),
         notify: Some(782),
+        damage: Some(785),
     },
     AiState {
         code: 0x05,
-        name: "pirate attack",
-        control: Some(785),
-        movement: Some(759),
-        combat: Some(725),
-        notify: None,
+        name: "reposition",
+        control: Some(749),
+        movement: Some(727),
+        notify: Some(782),
+        damage: Some(785),
     },
     AiState {
         code: 0x06,
-        name: "hold station",
-        control: Some(790),
-        movement: Some(736),
-        combat: Some(727),
+        name: "static",
+        control: Some(759),
+        movement: Some(725),
         notify: None,
+        damage: Some(790),
     },
     AiState {
         code: 0x07,
-        name: "depart",
-        control: Some(788),
-        movement: Some(741),
-        combat: Some(727),
+        name: "depart station",
+        control: Some(736),
+        movement: Some(727),
         notify: None,
+        damage: Some(788),
     },
     AiState {
         code: 0x08,
-        name: "new destination",
-        control: Some(789),
-        movement: Some(770),
-        combat: Some(727),
+        name: "new target",
+        control: Some(741),
+        movement: Some(727),
         notify: None,
+        damage: Some(789),
     },
     AiState {
         code: 0x09,
-        name: "formation",
-        control: Some(785),
-        movement: Some(743),
-        combat: Some(727),
+        name: "trading approach",
+        control: Some(770),
+        movement: Some(727),
         notify: None,
+        damage: Some(785),
     },
     AiState {
         code: 0x0a,
-        name: "attack run",
-        control: Some(789),
-        movement: Some(751),
-        combat: Some(729),
-        notify: Some(782),
+        name: "patrol",
+        control: Some(743),
+        movement: Some(727),
+        notify: None,
+        damage: Some(789),
     },
     AiState {
         code: 0x0b,
-        name: "escort",
-        control: Some(785),
-        movement: Some(757),
-        combat: Some(725),
-        notify: Some(781),
+        name: "formation",
+        control: Some(751),
+        movement: Some(729),
+        notify: Some(782),
+        damage: Some(785),
     },
     AiState {
         code: 0x0c,
-        name: "none",
-        control: None,
-        movement: None,
-        combat: None,
-        notify: None,
+        name: "missile evasion",
+        control: Some(757),
+        movement: Some(725),
+        notify: Some(781),
+        damage: None,
     },
     AiState {
         code: 0x0d,
-        name: "parked shuttle",
-        control: Some(790),
+        name: "none",
+        control: None,
         movement: None,
-        combat: None,
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x0e,
-        name: "parked police",
-        control: Some(790),
+        name: "parked shuttle",
+        control: None,
         movement: None,
-        combat: None,
         notify: None,
+        damage: Some(790),
     },
     AiState {
         code: 0x0f,
-        name: "jump arrival",
-        control: Some(790),
-        movement: Some(760),
-        combat: None,
+        name: "parked police",
+        control: None,
+        movement: None,
         notify: None,
+        damage: Some(790),
     },
     AiState {
         code: 0x10,
-        name: "jump out",
-        control: Some(737),
+        name: "trading timer",
+        control: Some(760),
         movement: None,
-        combat: None,
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x11,
-        name: "docked",
-        control: Some(740),
+        name: "jump countdown",
+        control: Some(737),
         movement: None,
-        combat: None,
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x12,
-        name: "after jump",
-        control: Some(758),
-        movement: Some(717),
-        combat: Some(784),
+        name: "jump exit",
+        control: Some(740),
+        movement: None,
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x13,
-        name: "match frame",
-        control: None,
-        movement: Some(716),
-        combat: Some(784),
-        notify: None,
+        name: "missile",
+        control: Some(758),
+        movement: Some(717),
+        notify: Some(784),
+        damage: None,
     },
     AiState {
         code: 0x14,
-        name: "missile",
-        control: Some(768),
-        movement: Some(712),
-        combat: None,
-        notify: None,
+        name: "mine",
+        control: None,
+        movement: Some(716),
+        notify: Some(784),
+        damage: None,
     },
     AiState {
         code: 0x15,
         name: "missile",
-        control: Some(767),
-        movement: Some(713),
-        combat: None,
+        control: Some(768),
+        movement: Some(712),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x16,
         name: "missile",
-        control: Some(732),
-        movement: Some(714),
-        combat: None,
+        control: Some(767),
+        movement: Some(713),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x17,
         name: "missile",
-        control: Some(766),
-        movement: Some(710),
-        combat: None,
+        control: Some(732),
+        movement: Some(714),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x18,
-        name: "missile",
-        control: Some(765),
-        movement: Some(711),
-        combat: None,
+        name: "cargo",
+        control: Some(766),
+        movement: Some(710),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x19,
-        name: "missile",
-        control: None,
-        movement: Some(709),
-        combat: None,
+        name: "asteroid",
+        control: Some(765),
+        movement: Some(711),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x1a,
         name: "missile",
-        control: Some(769),
-        movement: Some(715),
-        combat: None,
+        control: None,
+        movement: Some(709),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x1b,
-        name: "missile",
-        control: None,
-        movement: Some(708),
-        combat: None,
+        name: "space dust",
+        control: Some(769),
+        movement: Some(715),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x1c,
         name: "explosion",
-        control: Some(764),
-        movement: None,
-        combat: None,
+        control: None,
+        movement: Some(708),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x1d,
-        name: "debris",
-        control: Some(763),
+        name: "hyperspace cloud",
+        control: Some(764),
         movement: None,
-        combat: None,
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x1e,
-        name: "undock check",
-        control: Some(734),
-        movement: Some(727),
-        combat: None,
+        name: "cloud remnant",
+        control: Some(763),
+        movement: None,
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x1f,
-        name: "hyperspace",
-        control: Some(787),
-        movement: Some(747),
-        combat: Some(723),
+        name: "request launch",
+        control: Some(734),
+        movement: Some(727),
         notify: None,
+        damage: Some(787),
     },
     AiState {
         code: 0x20,
-        name: "leave station",
-        control: Some(735),
-        movement: None,
-        combat: None,
+        name: "docked",
+        control: Some(747),
+        movement: Some(723),
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x21,
-        name: "wait clearance",
-        control: Some(748),
+        name: "launching",
+        control: Some(735),
         movement: None,
-        combat: None,
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x22,
-        name: "dock",
-        control: Some(746),
-        movement: Some(727),
-        combat: None,
+        name: "launch check",
+        control: Some(748),
+        movement: None,
         notify: None,
+        damage: None,
     },
     AiState {
         code: 0x23,
-        name: "launch",
-        control: Some(790),
-        movement: Some(733),
-        combat: None,
+        name: "docking",
+        control: Some(746),
+        movement: Some(727),
         notify: None,
+        damage: Some(790),
     },
     AiState {
         code: 0x24,
-        name: "spawn near player",
-        control: Some(786),
+        name: "docked countdown",
+        control: Some(733),
         movement: None,
-        combat: None,
         notify: None,
+        damage: Some(786),
     },
 ];
 
-/// `DATA_006258`'s row for a state byte, when the byte is in the table.
+/// `DATA_006255`'s row for a state byte, when the byte is in the table.
 pub fn ai_state(code: u8) -> Option<&'static AiState> {
     AI_STATES.get(usize::from(code))
 }
@@ -622,6 +633,10 @@ impl Spec {
 pub struct Anchor {
     pub position: [i64; 3],
     pub radius: i64,
+    /// The system body's index when the anchor is a place to dock (F689's
+    /// `+0x100` destination in `Navigator::bodies` order), so a trader can ask
+    /// for a bay there. `None` for a star or a plain orbit.
+    pub station: Option<usize>,
 }
 
 /// The radius of the orbit a trader or shuttle holds around its anchor. The
@@ -640,6 +655,15 @@ pub const FLASH_SECONDS: f64 = 0.25;
 pub const DEATH_SECONDS: f64 = 0.6;
 /// The port caps the original's traffic count so a system stays legible.
 pub const MAX_SHIPS: usize = 5;
+/// Station traffic's cruise floor. [`Spec::top_speed`]'s thrust/mass ratio
+/// clamps a heavy freighter to 2,000 mm/s, which would put F745's five-kilometre
+/// approach half an hour away; FFE's own units do not scale to the port's
+/// millimetre frame, so traders and shuttles get this floor for the docking
+/// cycle. It is a port decision, not a source constant.
+pub const STATION_CRUISE_SPEED: f64 = 4.0e4;
+/// The acceleration that goes with [`STATION_CRUISE_SPEED`]: a stop from it in
+/// 40 m, so the final approach can still brake at the pad.
+pub const STATION_ACCEL: f64 = 2.0e4;
 
 /// The original's tics per second at 1x (`DATA_009155` is 994 per 20 ms).
 pub const TICS_PER_SECOND: f64 = TICS_PER_FRAME as f64 * 50.0;
@@ -670,6 +694,104 @@ const FLEE_HULL: f64 = 0.25;
 /// same "close enough to follow you" intent in its scaled frame.
 pub const PERSIST_RANGE: f64 = 2.0e6;
 
+/// F747's docked interval: `[+0xac] = [D8807] + 2` days and
+/// `[+0xa8] = [D8804] + [D8818]`, a random fraction of a day in tics. The
+/// object time is the original's absolute game clock; the port counts the
+/// interval down in game seconds so time acceleration (`Navigator::clock`)
+/// shortens the wait exactly as it does in the original.
+pub const DOCKED_DAYS: f64 = 2.0;
+/// The day fraction F747 adds from `[D8818]` (tics in a day, 49,700 a second).
+pub const DOCKED_JITTER_SECONDS: f64 = 86_400.0;
+/// How long a trader waits at a station for a bay before F762 picks another
+/// station: the source retries F745 every frame for ever, so this give-up is
+/// the port's (see `docs/notes/npc.md`, "Owner decisions").
+pub const DOCK_WAIT_SECONDS: f64 = 30.0;
+/// F745/F734's retry after traffic control refused a request.
+pub const DOCK_RETRY_SECONDS: f64 = 1.0;
+/// How long F736 flies out of the slot before F761/F762 pick the next station.
+/// The original decides in the same frame (it is already at the station); the
+/// port gives the departure a short visible run first.
+const DEPART_SECONDS: f64 = 1.0;
+
+/// A station as the station-traffic cycle needs it: its centre, docking axis
+/// and face (F745's `+0x102..+0x106` target), the bay F650 gave this ship, and
+/// the traffic record's clearance and door words. The caller owns the record
+/// (`ffe_core::traffic::Starport`) and supplies a snapshot for the frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Station {
+    /// The system body's index (`Navigator::bodies`).
+    pub index: usize,
+    pub position: [i64; 3],
+    /// The outward docking axis (the object's +z row, F650's frame).
+    pub axis: [f64; 3],
+    /// Distance from the centre to the docking face (millimetres).
+    pub front: f64,
+    /// The model's bounding radius (millimetres).
+    pub radius: f64,
+    /// F650's pad point in the system frame for an open-air starport; indoor
+    /// stations have no visible pad, so the port uses the slot instead.
+    pub pad: Option<[i64; 3]>,
+    /// The bay F650 allocated to this ship (`+0xd0..`), if any.
+    pub bay: Option<u16>,
+    /// F657: this ship is the record's current one.
+    pub cleared: bool,
+    /// F652's mode 3: the door is closing behind the ship.
+    pub closing: bool,
+    /// F865: the door word has reached 0.
+    pub door_open: bool,
+}
+
+impl Station {
+    /// The point F745 aims at: the allocated pad, or just inside the slot of an
+    /// indoor station.
+    pub fn bay_point(&self) -> [i64; 3] {
+        match self.pad {
+            Some(pad) => pad,
+            None => self.point(self.front * 0.9),
+        }
+    }
+
+    /// The point `along` from the centre on the docking axis.
+    pub fn point(&self, along: f64) -> [i64; 3] {
+        std::array::from_fn(|k| self.position[k] + (self.axis[k] * along).round() as i64)
+    }
+
+    /// F745/F736's "distance 6" test: the ship asks for a bay at the station's
+    /// interaction reach, not at the pad.
+    pub fn request_range(&self) -> f64 {
+        self.front + self.radius
+    }
+
+    /// F1088/F735: where a launch puts the ship, outside the face and hull.
+    pub fn launch_point(&self) -> [i64; 3] {
+        self.point(self.front + 2.0 * self.radius + 2.0e6)
+    }
+}
+
+/// A request the station-traffic record must answer for a ship. The caller owns
+/// the `Starport` (F649-F657) and applies these; the ship only flies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DockRequest {
+    /// F655/F654/F650: ask for clearance and a bay.
+    Request { ship: u32, station: usize },
+    /// F652: the ship has touched the pad (only the current ship may).
+    Touch { ship: u32, station: usize },
+    /// F747/F653: the door has closed and the handling record is cleared.
+    Settle { ship: u32, station: usize },
+    /// F654 again: ask traffic control to open the door (F734).
+    Launch { ship: u32, station: usize },
+    /// F651/F788: free the bay.
+    Release { ship: u32, station: usize },
+    /// F761/F762: pick the next station, or leave the system when there is none.
+    ChooseStation { ship: u32, station: usize },
+}
+
+/// The traffic record's ship byte for an NPC id: 0 is an empty bay and 1 is the
+/// player (`traffic::PLAYER`), so NPCs start at 2.
+pub fn traffic_id(id: u32) -> u8 {
+    (id % 250) as u8 + 2
+}
+
 /// `DATA_006268` (`ffedat.asm`): the pirate bounty table, in credits. F697 picks
 /// an entry with `DATA_006268[(random & 0xf) + offset]`, offset 4 for F694's
 /// lone pirate and 2 for F695's group, so a lone pirate can carry 50..150 CR
@@ -681,20 +803,37 @@ pub const PIRATE_BOUNTIES: [u32; 22] = [
 /// A ship's AI state in this port. Each variant names the original states it
 /// stands in for, so [`State::original`] can be checked against [`AI_STATES`]:
 ///
-/// - `Transit` = 0x00/0x01/0x07/0x08/0x12 (fly to the target, F752/F753).
-/// - `Hold` = 0x06/0x09/0x11/0x0d/0x0e (station keeping, F736/F743/F740).
-/// - `Attack` = 0x05/0x0a/0x0b (the pirate states, F759/F751/F757).
-/// - `Pass` = 0x03/0x04 (F753's close and F749's reposition).
-/// - `Flee` = 0x10/0x1f/0x21 (F737/F787's jump-out).
-/// - `Dead` = 0x1c/0x1d (F942's explosion object).
-/// - `Escaped` = 0x1f after the jump (F738 hides the model and F927 frees it).
+/// - `Transit` = 0x00/0x08/0x09 (F742/F741/F770's navigation to the target).
+/// - `Approach` = 0x23 (F746's final approach; F745 asks F655 for the bay).
+/// - `Docked` = 0x20/0x24 (F747 marks the docked object, F733 waits out F747's
+///   two-to-three day object time and requests launch).
+/// - `Launch` = 0x1f/0x21 (F734's F654 request, F735 waiting for the door).
+/// - `Depart` = 0x07 (F736 flies out, F651 releases the bay, F761/F762 choose
+///   the next station or jump out).
+/// - `Hold` = 0x06/0x0d/0x0e/0x0f (static holding, F759; the parked shuttle and
+///   police states have only their F790 damage response).
+/// - `Escort` = 0x0a/0x0b (F743's station-keeping and F751's formation join).
+/// - `Attack` = 0x01/0x02/0x04/0x05 (F752/F753 attack, F724 firing, F750
+///   interception, F749's transition).
+/// - `Pass` = 0x03 (F755/F756's evasion/overshoot).
+/// - `Flee` = 0x1d (F761 hides the ship as F738's hyperspace cloud).
+/// - `Dead` = 0x1c (F708/F942's explosion object).
+/// - `Escaped`: the cloud is gone and F927 frees the slot; no live row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
-    /// Fly to the anchor or waypoint, then hold.
+    /// Fly to the station or waypoint, then hold.
     Transit,
+    /// Fly the final leg to F650's bay and touch the pad (F745/F746).
+    Approach,
+    /// In the bay, waiting out F747's docked interval (F733).
+    Docked,
+    /// Clearance given, waiting for the door to open (F734/F735).
+    Launch,
+    /// Fly out of the slot and choose the next station (F736/F761).
+    Depart,
     /// Circle the spawn anchor (F689/F699's station traffic).
     Hold,
-    /// Station-keep in a leader's frame (F695's escorts, F757/F743).
+    /// Station-keep in a leader's frame (F695's escorts, F743).
     Escort,
     /// Close on the player (F694/F695's pirates, type 0xa/0xb).
     Attack,
@@ -712,15 +851,27 @@ impl State {
     /// The original `+0xff` values this state stands in for.
     pub fn original(self) -> &'static [u8] {
         match self {
-            State::Transit => &[0x00, 0x01, 0x07, 0x08, 0x12],
-            State::Hold => &[0x06, 0x0d, 0x0e, 0x11],
-            State::Escort => &[0x09, 0x0b],
-            State::Attack => &[0x05, 0x0a],
-            State::Pass => &[0x03, 0x04],
-            State::Flee => &[0x10, 0x1f, 0x21],
-            State::Dead => &[0x1c, 0x1d],
-            State::Escaped => &[0x1f],
+            State::Transit => &[0x00, 0x08, 0x09],
+            State::Approach => &[0x23],
+            State::Docked => &[0x20, 0x24],
+            State::Launch => &[0x1f, 0x21],
+            State::Depart => &[0x07],
+            State::Hold => &[0x06, 0x0d, 0x0e, 0x0f],
+            State::Escort => &[0x0a, 0x0b],
+            State::Attack => &[0x01, 0x02, 0x04, 0x05],
+            State::Pass => &[0x03],
+            State::Flee => &[0x1d],
+            State::Dead => &[0x1c],
+            State::Escaped => &[],
         }
+    }
+
+    /// Whether the ship is in the station's docking cycle.
+    pub fn docking(self) -> bool {
+        matches!(
+            self,
+            State::Approach | State::Docked | State::Launch | State::Depart
+        )
     }
 }
 
@@ -783,6 +934,20 @@ pub struct NpcShip {
     pub flash: f64,
     /// Seconds of the death marker left.
     pub death: f64,
+    /// The station body this ship is trading with (F689's `+0x100`, F762's
+    /// choice), when it has one.
+    pub station: Option<usize>,
+    /// F650's bay (`+0xd0..`), held from the request until the departure's F651.
+    pub bay: Option<u16>,
+    /// The bay's point in the system frame (F650's offset), when the station
+    /// supplied one; indoor stations use their slot instead.
+    pub pad: Option<[i64; 3]>,
+    /// F747's remaining docked object time in game seconds.
+    pub dock_timer: f64,
+    /// F745/F734's retry delay after traffic control said no.
+    pub dock_retry: f64,
+    /// Seconds spent waiting for a bay or clearance.
+    pub dock_wait: f64,
 }
 
 impl NpcShip {
@@ -841,11 +1006,91 @@ impl NpcShip {
             flee: 0.0,
             flash: 0.0,
             death: 0.0,
+            station: None,
+            bay: None,
+            pad: None,
+            dock_timer: 0.0,
+            dock_retry: 0.0,
+            dock_wait: 0.0,
         }
     }
 
     pub fn alive(&self) -> bool {
         !matches!(self.state, State::Dead | State::Escaped)
+    }
+
+    /// Whether the ship should be drawn, locked or hit this frame. A docked or
+    /// just-launched ship is inside the station (F747 hides the object and the
+    /// bay is not in the outside view).
+    pub fn visible(&self) -> bool {
+        self.alive() && !matches!(self.state, State::Docked | State::Launch)
+    }
+
+    /// F650/F745: the station gave this ship a bay; fly the final leg to it.
+    pub fn begin_approach(&mut self, bay: u16, pad: Option<[i64; 3]>) {
+        if matches!(self.state, State::Transit | State::Approach) {
+            self.state = State::Approach;
+            self.bay = Some(bay);
+            self.pad = pad;
+            self.dock_retry = 0.0;
+            self.dock_wait = 0.0;
+        }
+    }
+
+    /// F652 refused the touch (another ship is current, or the clearance ran
+    /// out): go back to transit and ask again.
+    pub fn touch_failed(&mut self) {
+        if matches!(self.state, State::Approach | State::Docked) {
+            self.state = State::Transit;
+            self.bay = None;
+            self.pad = None;
+            self.dock_timer = 0.0;
+            self.dock_retry = DOCK_RETRY_SECONDS;
+        }
+    }
+
+    /// F747/F733: the ship is in its bay. Hold it at the pad and start the
+    /// two-to-three day object time (F747's `+2` days and `[D8818]` fraction).
+    /// The `phase` is the ship's spawn-time random draw, so the wait is stable.
+    pub fn begin_docked(&mut self, seat: [i64; 3]) {
+        self.state = State::Docked;
+        self.position = seat;
+        self.velocity = [0.0; 3];
+        self.speed = 0.0;
+        let fraction = self.phase / std::f64::consts::TAU;
+        self.dock_timer = DOCKED_DAYS * 86_400.0 + fraction * DOCKED_JITTER_SECONDS;
+        self.dock_retry = 0.0;
+        self.dock_wait = 0.0;
+    }
+
+    /// F735: the door is open and the bay is free; fly out.
+    pub fn begin_departure(&mut self, seat: [i64; 3]) {
+        self.state = State::Depart;
+        self.position = seat;
+        self.velocity = [0.0; 3];
+        self.speed = 0.0;
+        self.bay = None;
+        self.pad = None;
+        self.dock_timer = 0.0;
+    }
+
+    /// F761/F762: head for station `station` and ask for a bay there.
+    pub fn begin_transit(&mut self, station: usize, anchor: [i64; 3]) {
+        self.state = State::Transit;
+        self.station = Some(station);
+        self.anchor = anchor;
+        self.bay = None;
+        self.pad = None;
+        self.dock_timer = 0.0;
+        self.dock_retry = 0.0;
+        self.dock_wait = 0.0;
+    }
+
+    /// F925: no station to trade with; leave the system (the HS cloud is the
+    /// port's `Escaped` marker).
+    pub fn escape(&mut self) {
+        self.state = State::Escaped;
+        self.velocity = [0.0; 3];
     }
 
     /// Whether the ship attacks the player. Pirates and Thargoids start true;
@@ -917,6 +1162,23 @@ impl NpcShip {
     /// player's position in the system frame and `escort` an escort's station in
     /// its leader's frame (F695's `+0x102..+0x106`), when it has one.
     pub fn tick(&mut self, dt: f64, tics: u32, player: [i64; 3], escort: Option<[i64; 3]>) {
+        let mut requests = Vec::new();
+        self.tick_with_station(dt, tics, player, escort, None, &mut requests);
+    }
+
+    /// [`Self::tick`] with the station-traffic cycle. `station` is the current
+    /// station's snapshot (its face, the bay F650 gave this ship, F657's
+    /// clearance and F865's door); requests are appended for the caller to apply
+    /// to its `traffic::Starport`.
+    pub fn tick_with_station(
+        &mut self,
+        dt: f64,
+        tics: u32,
+        player: [i64; 3],
+        escort: Option<[i64; 3]>,
+        station: Option<&Station>,
+        requests: &mut Vec<DockRequest>,
+    ) {
         if !self.alive() {
             self.death = (self.death - dt).max(0.0);
             return;
@@ -924,8 +1186,9 @@ impl NpcShip {
         self.flash = (self.flash - dt).max(0.0);
         laser::tick_refire(&mut self.guns, tics);
         laser::cool(&mut self.guns, dt, false);
-        // The original's jump-out states (0x10/0x1f/0x21) hide the model and
-        // move it out (F738/F787). The low-hull trigger is the port's.
+        self.dock_retry = (self.dock_retry - dt).max(0.0);
+        // The original's jump-out states hide the model and move it out
+        // (F738/F787). The low-hull trigger is the port's.
         if self.hostile
             && matches!(self.state, State::Attack | State::Pass)
             && self.hull_fraction() <= FLEE_HULL
@@ -947,13 +1210,150 @@ impl NpcShip {
                 self.state = State::Attack;
             }
         }
+        // F747/F733: in the bay. The object stays on its pad while the station's
+        // own motion carries it (the pad snapshot is in the system frame), and
+        // F733's object time counts down. At zero F734 asks F654 for the door.
+        if self.state == State::Docked {
+            self.speed = 0.0;
+            self.velocity = [0.0; 3];
+            let Some(station) = station else {
+                self.touch_failed();
+                requests.push(DockRequest::ChooseStation {
+                    ship: self.id,
+                    station: self.station.unwrap_or(0),
+                });
+                return;
+            };
+            self.position = station
+                .pad
+                .or(self.pad)
+                .unwrap_or_else(|| station.bay_point());
+            // F747 waits for F652's mode 3 to end (the door closed) and then
+            // calls F653; only then does F733's object time run.
+            if station.closing {
+                return;
+            }
+            if station.cleared && self.bay.is_some() {
+                requests.push(DockRequest::Settle {
+                    ship: self.id,
+                    station: station.index,
+                });
+                return;
+            }
+            self.dock_timer = (self.dock_timer - dt).max(0.0);
+            if self.dock_timer <= 0.0 {
+                self.dock_wait += dt;
+                if self.dock_retry <= 0.0 {
+                    requests.push(DockRequest::Launch {
+                        ship: self.id,
+                        station: station.index,
+                    });
+                    self.dock_retry = DOCK_RETRY_SECONDS;
+                }
+                // The source retries F654 for ever; after the port's give-up the
+                // bay is freed (F651) and F762 picks another station.
+                if self.dock_wait >= DOCK_WAIT_SECONDS {
+                    requests.push(DockRequest::Release {
+                        ship: self.id,
+                        station: station.index,
+                    });
+                    requests.push(DockRequest::ChooseStation {
+                        ship: self.id,
+                        station: station.index,
+                    });
+                    self.state = State::Transit;
+                    self.bay = None;
+                    self.pad = None;
+                    self.dock_wait = 0.0;
+                }
+            }
+            return;
+        }
+        // F734/F735: launch clearance is in the record; wait for the door word
+        // (F865) to reach zero, then F651 frees the bay and F736 flies out.
+        if self.state == State::Launch {
+            self.speed = 0.0;
+            self.velocity = [0.0; 3];
+            let Some(station) = station else {
+                self.touch_failed();
+                return;
+            };
+            self.dock_wait += dt;
+            self.position = station
+                .pad
+                .or(self.pad)
+                .unwrap_or_else(|| station.bay_point());
+            if station.door_open {
+                let seat = station
+                    .pad
+                    .or(self.pad)
+                    .unwrap_or_else(|| station.bay_point());
+                requests.push(DockRequest::Release {
+                    ship: self.id,
+                    station: station.index,
+                });
+                self.begin_departure(seat);
+                self.dock_wait = DEPART_SECONDS;
+            } else if self.dock_wait >= DOCK_WAIT_SECONDS {
+                // The door never opened: free the bay and pick a new station.
+                requests.push(DockRequest::Release {
+                    ship: self.id,
+                    station: station.index,
+                });
+                requests.push(DockRequest::ChooseStation {
+                    ship: self.id,
+                    station: station.index,
+                });
+                self.state = State::Transit;
+                self.bay = None;
+                self.pad = None;
+                self.dock_wait = 0.0;
+            }
+            return;
+        }
+        // F745/F746: the final leg to the pad. A lost clearance sends the ship
+        // back to transit (the traffic record timed out in F867).
+        if self.state == State::Approach && station.is_some_and(|s| !s.cleared || s.bay.is_none()) {
+            self.touch_failed();
+        }
+        if self.state == State::Transit {
+            if let Some(station) = station {
+                let range = distance_between(self.position, station.position);
+                if range <= station.request_range() {
+                    self.dock_wait += dt;
+                    if self.dock_retry <= 0.0 {
+                        requests.push(DockRequest::Request {
+                            ship: self.id,
+                            station: station.index,
+                        });
+                        self.dock_retry = DOCK_RETRY_SECONDS;
+                    }
+                    if self.dock_wait >= DOCK_WAIT_SECONDS {
+                        requests.push(DockRequest::ChooseStation {
+                            ship: self.id,
+                            station: station.index,
+                        });
+                        self.dock_wait = 0.0;
+                    }
+                } else {
+                    self.dock_wait = 0.0;
+                }
+            }
+        }
         // The leader's frame gives F695's escorts their station.
         let target = match self.state {
             State::Hold => {
                 self.phase += (self.max_speed * 0.35 / self.orbit_radius.max(1.0)) * dt;
                 offset(self.anchor, self.phase, self.orbit_radius)
             }
-            State::Transit => self.anchor,
+            State::Transit => station.map_or(self.anchor, Station::bay_point),
+            State::Approach => station.map_or(self.anchor, |station| {
+                station
+                    .pad
+                    .or(self.pad)
+                    .unwrap_or_else(|| station.bay_point())
+            }),
+            State::Depart => station.map_or(self.anchor, Station::launch_point),
             State::Escort => escort.map_or(player, |point| {
                 if distance_between(player, self.position) > 4.0 * STANDOFF {
                     point
@@ -966,7 +1366,7 @@ impl NpcShip {
                 let direction = away(self.position, player);
                 add(self.position, direction.map(|value| (value * 4.0e6) as i64))
             }
-            State::Dead | State::Escaped => self.position,
+            State::Docked | State::Launch | State::Dead | State::Escaped => self.position,
         };
         let to = sub(target, self.position);
         let distance = length(to);
@@ -979,7 +1379,7 @@ impl NpcShip {
         self.up = upright(self.forward);
         let wanted = match self.state {
             State::Hold => (self.max_speed * 0.5).min(0.7 * (2.0 * self.accel * distance).sqrt()),
-            State::Transit => {
+            State::Transit | State::Depart => {
                 if distance <= ARRIVE {
                     0.0
                 } else {
@@ -987,6 +1387,9 @@ impl NpcShip {
                         .min(0.7 * (2.0 * self.accel * (distance - ARRIVE)).sqrt())
                 }
             }
+            State::Approach => self
+                .max_speed
+                .min(0.7 * (2.0 * self.accel * distance).sqrt()),
             State::Attack => {
                 let room = (distance - STANDOFF).max(0.0);
                 self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt())
@@ -996,7 +1399,7 @@ impl NpcShip {
                 self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt())
             }
             State::Pass | State::Flee => self.max_speed,
-            State::Dead | State::Escaped => 0.0,
+            State::Docked | State::Launch | State::Dead | State::Escaped => 0.0,
         };
         // F597: if the ship cannot stop before the standoff, it commits to the
         // pass (the original's overshoot branch) instead of braking.
@@ -1014,10 +1417,42 @@ impl NpcShip {
         for axis in 0..3 {
             self.position[axis] += (self.velocity[axis] * dt).round() as i64;
         }
-        if self.state == State::Transit && distance <= ARRIVE {
+        if self.state == State::Transit && distance <= ARRIVE && station.is_none() {
             self.state = State::Hold;
             self.speed = 0.0;
             self.velocity = [0.0; 3];
+        }
+        // F652: the pad contact. The caller's F652 decides whether this ship is
+        // the record's current one, then F747 starts the docked object time.
+        if self.state == State::Approach && distance <= ARRIVE {
+            if let Some(station) = station {
+                requests.push(DockRequest::Touch {
+                    ship: self.id,
+                    station: station.index,
+                });
+                self.speed = 0.0;
+                self.velocity = [0.0; 3];
+            }
+        }
+        // F736/F761: the departure run is over, so pick the next station or jump
+        // out. The original's state 7 is already at the slot and calls F761 at
+        // once; the port gives it `DEPART_SECONDS` (or the hull clearance).
+        if self.state == State::Depart {
+            self.dock_wait -= dt;
+            if let Some(station) = station {
+                if self.dock_wait <= 0.0
+                    || distance_between(self.position, station.position) > station.radius + 2.0e6
+                {
+                    requests.push(DockRequest::ChooseStation {
+                        ship: self.id,
+                        station: station.index,
+                    });
+                    self.station = None;
+                    self.state = State::Hold;
+                    self.speed = 0.0;
+                    self.velocity = [0.0; 3];
+                }
+            }
         }
     }
 
@@ -1199,6 +1634,12 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             flee: 0.0,
             flash: 0.0,
             death: 0.0,
+            station: None,
+            bay: None,
+            pad: None,
+            dock_timer: 0.0,
+            dock_retry: 0.0,
+            dock_wait: 0.0,
         })
         .collect()
 }
@@ -1293,6 +1734,7 @@ pub fn spawn(
     let anchor = anchors.first().copied().unwrap_or(Anchor {
         position: player,
         radius: 1_000_000,
+        station: None,
     });
     // The original can roll zero traffic; the port keeps one trader so a fresh
     // system has something to label and shoot, and one pirate group so the
@@ -1341,6 +1783,10 @@ pub fn spawn(
             // Hold the radius the station spawn used, not the default.
             ship.orbit_radius = orbit;
         }
+        if matches!(role, Role::Trader | Role::Shuttle) {
+            ship.max_speed = ship.max_speed.max(STATION_CRUISE_SPEED);
+            ship.accel = ship.accel.max(STATION_ACCEL);
+        }
         Some(ship)
     };
 
@@ -1357,13 +1803,22 @@ pub fn spawn(
 
     for i in 0..counts.traders {
         let position = spread(rng, i as f64 * 2.1, orbit);
-        if let Some(ship) = add(Role::Trader, 1, position, anchor.position, rng) {
+        if let Some(mut ship) = add(Role::Trader, 1, position, anchor.position, rng) {
+            // F689: a trader appears with `+0x100` set to a station and flies to
+            // it; the port starts it on that station's docking cycle instead of
+            // an endless orbit.
+            if let Some(station) = anchor.station {
+                ship.begin_transit(station, anchor.position);
+            }
             ships.push(ship);
         }
     }
     for i in 0..counts.shuttles {
         let position = spread(rng, 1.0 + i as f64 * 2.1, orbit * 0.8);
-        if let Some(ship) = add(Role::Shuttle, 0xd, position, anchor.position, rng) {
+        if let Some(mut ship) = add(Role::Shuttle, 0xd, position, anchor.position, rng) {
+            if let Some(station) = anchor.station {
+                ship.begin_transit(station, anchor.position);
+            }
             ships.push(ship);
         }
     }
@@ -1508,6 +1963,7 @@ fn distance_between(a: [i64; 3], b: [i64; 3]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traffic::{Reply, Starport, CLEARANCE_SECONDS};
 
     fn details() -> Details {
         // Ross 154's F869 report: bytes [128, 1, 2, 3, 0].
@@ -1540,46 +1996,69 @@ mod tests {
     }
 
     #[test]
-    fn the_ai_table_is_data_006258() {
+    fn the_ai_table_is_data_006255() {
         assert_eq!(AI_STATES.len(), 0x25);
         for (index, row) in AI_STATES.iter().enumerate() {
             assert_eq!(usize::from(row.code), index);
         }
-        // F789/F752/F725/F782: the approach row.
+        // State 0 is the plain-navigation row: F742 (event 6), F727 (event 5),
+        // no death notification and F789's damage response.
         let row = ai_state(0x00).unwrap();
         assert_eq!(
-            (row.control, row.movement, row.combat, row.notify),
-            (Some(789), Some(752), Some(725), Some(782))
+            (row.control, row.movement, row.notify, row.damage),
+            (Some(742), Some(727), None, Some(789))
         );
-        // F785/F759/F725: F694's lone pirate state 5 has no notification slot.
+        // F752/F725/F782/F785: attack turn; F724 is the firing state's event-5
+        // routine, not a third "combat" slot.
+        let row = ai_state(0x01).unwrap();
+        assert_eq!(
+            (row.control, row.movement, row.notify, row.damage),
+            (Some(752), Some(725), Some(782), Some(785))
+        );
+        assert_eq!(ai_state(0x02).unwrap().movement, Some(724));
+        // F749/F727/F782/F785: F694's pirate state 5 (the transition to F750).
         let row = ai_state(0x05).unwrap();
         assert_eq!(
-            (row.control, row.movement, row.combat, row.notify),
-            (Some(785), Some(759), Some(725), None)
+            (row.control, row.movement, row.notify, row.damage),
+            (Some(749), Some(727), Some(782), Some(785))
         );
-        // F785/F757/F725/F781: F695's escort state.
+        // F751/F729/F782/F785: F695's formation state 0xb.
         let row = ai_state(0x0b).unwrap();
         assert_eq!(
-            (row.control, row.movement, row.combat, row.notify),
-            (Some(785), Some(757), Some(725), Some(781))
+            (row.control, row.movement, row.notify, row.damage),
+            (Some(751), Some(729), Some(782), Some(785))
         );
-        // 0xc is all zero; F740 alone is the docked state 0x11.
+        // 0xd is all zero; 0xe/0xf are the parked ships with only F790's
+        // damage response; 0x11 is F737's jump countdown and 0x12 F740's exit.
         assert_eq!(
-            ai_state(0x0c).unwrap(),
+            ai_state(0x0d).unwrap(),
             &AiState {
-                code: 0x0c,
+                code: 0x0d,
                 name: "none",
                 control: None,
                 movement: None,
-                combat: None,
                 notify: None,
+                damage: None,
             }
         );
-        assert_eq!(ai_state(0x11).unwrap().control, Some(740));
+        assert_eq!(ai_state(0x0e).unwrap().damage, Some(790));
+        assert_eq!(ai_state(0x11).unwrap().control, Some(737));
+        assert_eq!(ai_state(0x12).unwrap().control, Some(740));
+        // The station cycle: F734 request, F747 docked, F735 launch, F746
+        // final approach, F733's docked object time.
+        assert_eq!(ai_state(0x1f).unwrap().control, Some(734));
+        assert_eq!(ai_state(0x20).unwrap().control, Some(747));
+        assert_eq!(ai_state(0x21).unwrap().control, Some(735));
+        assert_eq!(ai_state(0x23).unwrap().control, Some(746));
+        assert_eq!(ai_state(0x24).unwrap().control, Some(733));
         assert!(ai_state(0x25).is_none());
         // Every port state names only real rows.
         for state in [
             State::Transit,
+            State::Approach,
+            State::Docked,
+            State::Launch,
+            State::Depart,
             State::Hold,
             State::Escort,
             State::Attack,
@@ -1764,6 +2243,7 @@ mod tests {
             &[Anchor {
                 position: [0, 0, 0],
                 radius: 2_000_000,
+                station: None,
             }],
             &details(),
             0,
@@ -1806,6 +2286,7 @@ mod tests {
             &[Anchor {
                 position: [1_000_000, 0, 0],
                 radius: 4_500_000,
+                station: None,
             }],
             &details(),
             2,
@@ -1894,6 +2375,7 @@ mod tests {
             &[Anchor {
                 position: [0, 0, 0],
                 radius: 2_000_000,
+                station: None,
             }],
             &details(),
             0,
@@ -1920,6 +2402,265 @@ mod tests {
             tick(&mut pirate, 0.02, [0, 0, 0]);
         }
         assert!(distance_between(pirate.position, [0, 0, 0]) < start);
+    }
+
+    /// A station with its face at +1 km and a pad 1 km out on +z, for the
+    /// docking-cycle tests. The traffic record is the caller's.
+    fn test_station(port: &Starport, id: u8) -> Station {
+        Station {
+            index: 0,
+            position: [0; 3],
+            axis: [0.0, 0.0, 1.0],
+            front: 1_000_000.0,
+            radius: 4_000_000.0,
+            pad: Some([0, 0, 1_000_000]),
+            bay: port.bay_of(id),
+            cleared: port.is_docking(id),
+            closing: port.mode == crate::traffic::DOCKING_DONE,
+            door_open: port.door == 0,
+        }
+    }
+
+    /// Apply a ship's requests to the traffic record exactly as
+    /// `Navigator::apply_dock_request` does, for one ship. Returns how many times
+    /// F762 picked a station.
+    fn service(
+        ship: &mut NpcShip,
+        port: &mut Starport,
+        requests: &[DockRequest],
+        next_station: Option<usize>,
+    ) -> usize {
+        let id = traffic_id(ship.id);
+        let mut chosen = 0;
+        for request in requests {
+            match *request {
+                DockRequest::Request { .. } => {
+                    if let Reply::Granted(bay) = port.request_docking(id, false, 0) {
+                        ship.begin_approach(bay.index, None);
+                    }
+                }
+                DockRequest::Touch { .. } => {
+                    if port.touch(id) {
+                        let seat = ship.pad.unwrap_or([0, 0, 1_000_000]);
+                        ship.begin_docked(seat);
+                    } else {
+                        ship.touch_failed();
+                    }
+                }
+                DockRequest::Settle { .. } => port.reset(),
+                DockRequest::Launch { .. } => {
+                    if port.request(id) {
+                        ship.state = State::Launch;
+                        ship.dock_wait = 0.0;
+                    }
+                }
+                DockRequest::Release { .. } => port.release(id),
+                DockRequest::ChooseStation { .. } => {
+                    chosen += 1;
+                    match next_station {
+                        Some(index) => ship.begin_transit(index, [0; 3]),
+                        None => {
+                            ship.station = None;
+                            ship.state = State::Transit;
+                            ship.bay = None;
+                            ship.pad = None;
+                        }
+                    }
+                }
+            }
+        }
+        chosen
+    }
+
+    /// Drive one ship's station cycle; `stop` ends the run at a state.
+    fn run_cycle(
+        ship: &mut NpcShip,
+        port: &mut Starport,
+        frames: usize,
+        stop: impl Fn(State) -> bool,
+        next_station: Option<usize>,
+    ) -> (Vec<State>, usize) {
+        let mut states = vec![ship.state];
+        let mut chosen = 0;
+        for _ in 0..frames {
+            // The real frame time is the tick's; the test's 0.5 s frames give the
+            // door the matching tics so it opens in the original 1.3 s.
+            port.move_door(24_850);
+            let station = ship
+                .station
+                .map(|_| test_station(port, traffic_id(ship.id)));
+            let mut requests = Vec::new();
+            ship.tick_with_station(0.5, 24_850, [0; 3], None, station.as_ref(), &mut requests);
+            chosen += service(ship, port, &requests, next_station);
+            if states.last() != Some(&ship.state) {
+                states.push(ship.state);
+            }
+            if stop(ship.state) {
+                break;
+            }
+        }
+        (states, chosen)
+    }
+
+    #[test]
+    fn a_trader_requests_a_bay_approaches_and_docks() {
+        let mut port = Starport::new(3);
+        let mut ship = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Trader,
+            [0, 0, 4_900_000],
+            [0; 3],
+            &mut Random::new(3, 4),
+        );
+        ship.begin_transit(0, [0; 3]);
+        // The source's speeds make a 4 km approach minutes long; the test keeps
+        // the model's turn and bay arithmetic but accelerates the frame motion.
+        ship.max_speed = 400_000.0;
+        ship.accel = 2_000_000.0;
+        let id = traffic_id(ship.id);
+        assert!(
+            id > 1,
+            "an NPC uses the record's bytes above the player's 1"
+        );
+        let (states, _) = run_cycle(
+            &mut ship,
+            &mut port,
+            4000,
+            |state| state == State::Docked,
+            Some(0),
+        );
+        assert_eq!(states, [State::Transit, State::Approach, State::Docked]);
+        // F650's bay is occupied from the request until the departure's F651.
+        assert!(port.pads.contains(&id));
+        assert_eq!(port.bay_of(id), Some(3));
+        // F652 set mode 3 (the door closing). F747 runs F653 once it is over;
+        // the bay itself stays allocated.
+        assert_eq!(port.mode, crate::traffic::DOCKING_DONE);
+        run_cycle(&mut ship, &mut port, 16, |_| false, Some(0));
+        assert_eq!((port.mode, port.current, port.timeout), (0, 0, 0));
+        assert_eq!(port.bay_of(id), Some(3));
+        assert!((ship.position[2] - 1_000_000).abs() < 1);
+        assert!(!ship.visible(), "a docked ship is inside the station");
+    }
+
+    #[test]
+    fn the_docked_interval_is_f747s_two_to_three_days() {
+        let mut ship = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Trader,
+            [0; 3],
+            [0; 3],
+            &mut Random::new(5, 6),
+        );
+        ship.begin_docked([0, 0, 1_000_000]);
+        assert_eq!(ship.state, State::Docked);
+        assert!((2.0 * 86_400.0..3.0 * 86_400.0).contains(&ship.dock_timer));
+        // F733's object time: the ship asks F654 only after it has run out.
+        let mut port = Starport::new(3);
+        let id = traffic_id(ship.id);
+        port.request_docking(id, false, 0);
+        ship.dock_timer = 0.0;
+        let station = test_station(&port, id);
+        let mut requests = Vec::new();
+        ship.tick_with_station(0.5, 24_850, [0; 3], None, Some(&station), &mut requests);
+        assert_eq!(
+            requests,
+            [DockRequest::Launch {
+                ship: ship.id,
+                station: 0
+            }]
+        );
+    }
+
+    #[test]
+    fn a_docked_ship_launches_when_the_door_opens_and_resumes_transit() {
+        let mut port = Starport::new(3);
+        let mut ship = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Trader,
+            [0, 0, 4_900_000],
+            [0; 3],
+            &mut Random::new(7, 8),
+        );
+        ship.begin_transit(0, [0; 3]);
+        ship.max_speed = 400_000.0;
+        ship.accel = 2_000_000.0;
+        let id = traffic_id(ship.id);
+        run_cycle(
+            &mut ship,
+            &mut port,
+            4000,
+            |state| state == State::Docked,
+            Some(0),
+        );
+        assert!(port.pads.contains(&id));
+        // Run the two-to-three day interval down; F654 opens the door and F735
+        // waits for F865's word to reach 0 before F651 releases the bay.
+        ship.dock_timer = 0.01;
+        let (states, chosen) = run_cycle(
+            &mut ship,
+            &mut port,
+            4000,
+            |state| state == State::Transit,
+            Some(0),
+        );
+        assert_eq!(
+            states,
+            [State::Docked, State::Launch, State::Depart, State::Transit]
+        );
+        assert_eq!(chosen, 1, "F761/F762 picked the next station");
+        assert!(port.pads.iter().all(|pad| *pad == 0), "F651 freed the bay");
+        assert_eq!(port.bay_of(id), None);
+        assert!(ship.visible(), "the launched ship is outside the station");
+        assert_eq!(ship.station, Some(0), "it resumed transit to a station");
+    }
+
+    #[test]
+    fn a_full_station_makes_the_trader_try_another() {
+        let mut port = Starport::new(1);
+        // Two bays, both taken by other ships.
+        port.pads[0] = 20;
+        port.pads[1] = 21;
+        let mut ship = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Trader,
+            [0, 0, 4_900_000],
+            [0; 3],
+            &mut Random::new(9, 10),
+        );
+        ship.begin_transit(0, [0; 3]);
+        ship.max_speed = 400_000.0;
+        ship.accel = 2_000_000.0;
+        let (_, chosen) = run_cycle(&mut ship, &mut port, 400, |_| false, None);
+        assert_eq!(chosen, 1, "F761/F762 was asked to pick another station");
+        assert_eq!(ship.station, None, "the ship gave up on this station");
+        // F655's Full branch resets the handling record but not the occupants.
+        assert_eq!((port.mode, port.current, port.timeout), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_clearance_timeout_frees_the_bay_and_recycles_the_ship() {
+        let mut port = Starport::new(3);
+        let mut ship = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Trader,
+            [0, 0, 4_900_000],
+            [0; 3],
+            &mut Random::new(11, 12),
+        );
+        ship.begin_transit(0, [0; 3]);
+        let id = traffic_id(ship.id);
+        let reply = port.request_docking(id, false, 0);
+        assert!(matches!(reply, Reply::Granted(_)));
+        ship.begin_approach(3, None);
+        // F867: the clearance runs out while the ship is still on its way.
+        assert_eq!(port.elapse(u32::from(CLEARANCE_SECONDS)), Some(id));
+        ship.touch_failed();
+        assert_eq!(ship.state, State::Transit);
+        assert_eq!(ship.bay, None);
+        assert!(port.pads.iter().all(|pad| *pad == 0));
+        // The ship asks again after the retry delay.
+        assert!(ship.dock_retry > 0.0);
     }
 
     #[test]
