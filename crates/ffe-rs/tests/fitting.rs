@@ -11,6 +11,7 @@
 
 use ffe_core::equipment::{self, Loadout, MINING_SLOTS};
 use ffe_rs::combat::Combat;
+use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::outfitting::{self, Limits};
 
 const TECH: u16 = 0xfd;
@@ -182,6 +183,23 @@ fn the_ten_machine_cap_and_occupied_cabin_rules_are_the_sources() {
     loadout.occupied_cabins = 0;
     outfitting::remove(25, TECH, &mut loadout, &mut combat, &mut credits, roomy()).unwrap();
     assert_eq!(loadout.cabins, 0);
+}
+
+#[test]
+fn old_saves_adopt_the_combat_drive_into_the_loadout() {
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    state.combat = Combat::new_game();
+    let bytes = ffe_rs::saves::encode(&state).unwrap();
+    let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    // A save from before Loadout::drive: the loadout has no drive field.
+    json["state"].as_object_mut().unwrap().remove("loadout");
+    let loaded = ffe_rs::saves::decode(&serde_json::to_vec(&json).unwrap()).unwrap();
+    assert_eq!(loaded.loadout.drive, 2);
+    assert_eq!(loaded.combat.drive, 2);
+    assert!(loaded.loadout.validate());
 }
 
 #[test]

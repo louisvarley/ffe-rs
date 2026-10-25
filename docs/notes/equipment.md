@@ -323,6 +323,12 @@ already cached in v20; the cache is **v28** and the equipment table adds no asse
   deployment state (F243/F244, the 52-byte records) and passenger missions that
   raise `DATA_008892` remain out of scope; the fitting, removal, refund and mass
   effects are in.
+- Saves from before `Loadout::drive` adopt `Combat::drive` on load (the drive
+  was not removable through the Upgrades screen then, so the combat byte is the
+  only source). Missile pylons are **not** adopted: the previous `remove` could
+  clear `Loadout.missiles` while `Combat.missiles` kept the pylon word, and an
+  automatic adoption would resurrect a deliberately removed missile. A save
+  version bump or an explicit migration is an owner decision.
 
 
 ## Tests
