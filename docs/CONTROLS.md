@@ -43,6 +43,8 @@ right button is the steering hold. The left button remains the console pointer
 | Brake | **X** |
 | Fire the current view's laser | **Space** (hold; F931's refire/heat gates apply) |
 | Launch a missile at the missile target | **M** |
+| Fire the E.C.M. (standard or Naval) | **E**, **;** or **Insert** (needs the fitted system) |
+| Deploy chaff | **C** (needs the Chaff Dispenser and Chaff in the hold) |
 | Lock next / previous body or ship | **T** / **Shift+T** (or click a body; Shift+T also toggles the combat/missile lock) |
 | Autopilot to the locked body (docks at a station) | **K** (or the AUTOPILOT button) |
 | Stop the autopilot | **Backspace** |

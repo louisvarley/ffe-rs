@@ -817,6 +817,10 @@ pub struct Navigator {
     pub missile_view: Option<u32>,
     /// The missiles in flight (F941 objects, model 4..13).
     pub missiles: crate::missile::MissileField,
+    /// F1054's chaff objects (`DATA_007253`). F1057 points missiles at them.
+    pub decoys: Vec<crate::missile::Decoy>,
+    /// The next [`ffe_core::missile::DECOY_BASE`] id.
+    next_decoy: u32,
     /// The system index the traffic was spawned for: a killed ship is not
     /// restored until the system is entered again.
     spawned: Option<usize>,
@@ -1122,6 +1126,21 @@ pub enum ShipEvent {
     AlertCleared,
     /// F787/F738/F927: a ship jumped out and its slot was freed.
     Escaped { name: String },
+    /// F754/F941: an NPC launched a pylon at the player. The caller resolves the
+    /// code to a `Spec` (the core has no cache) and calls F941's launch.
+    MissileLaunch {
+        owner: u32,
+        name: String,
+        code: u8,
+        pylon: usize,
+        target: u32,
+        position: [i64; 3],
+        axes: [[f64; 3]; 3],
+        launcher_radius: i64,
+    },
+    /// F757/F935: an evading NPC fired an ECM burst. `naval` is the system's
+    /// extra `DATA_008835` bit.
+    Ecm { name: String, naval: bool },
 }
 
 /// F931/F941's unlawful-discharge report: F236's message plus whether a police
@@ -1373,6 +1392,8 @@ impl Navigator {
             missile_lock: None,
             missile_view: None,
             missiles: crate::missile::MissileField::default(),
+            decoys: Vec::new(),
+            next_decoy: 0,
             spawned: None,
             sequence: None,
             takeoff: None,
@@ -2481,6 +2502,7 @@ impl Navigator {
         self.missile_lock = None;
         self.missile_view = None;
         self.missiles.clear();
+        self.decoys.clear();
         self.spawned = Some(self.current);
         !self.ships.is_empty()
     }
@@ -2626,6 +2648,24 @@ impl Navigator {
                 station.as_ref(),
                 &mut requests,
             );
+            if let Some(launch) = ship.take_launch() {
+                events.push(ShipEvent::MissileLaunch {
+                    owner: launch.owner,
+                    name: ship.name.clone(),
+                    code: launch.code,
+                    pylon: launch.pylon,
+                    target: launch.target,
+                    position: launch.position,
+                    axes: launch.axes,
+                    launcher_radius: launch.launcher_radius,
+                });
+            }
+            if let Some(naval) = ship.take_ecm() {
+                events.push(ShipEvent::Ecm {
+                    name: ship.name.clone(),
+                    naval,
+                });
+            }
         }
         for request in requests {
             self.apply_dock_request(request);
@@ -2971,10 +3011,59 @@ impl Navigator {
         })
     }
 
-    /// F941: put a missile in flight at the combat target. The caller has
-    /// already taken the pylon word from `Combat`.
+    /// F941: put the player's missile in flight at the combat target. The
+    /// caller has already taken the pylon word from `Combat`. F941 also puts
+    /// the target ship into state 0x0c (`F757`'s missile evasion).
     #[allow(clippy::too_many_arguments)]
     pub fn launch_missile(
+        &mut self,
+        spec: ffe_core::missile::Spec,
+        code: u8,
+        owner: u32,
+        target: u32,
+        position: [i64; 3],
+        axes: [[f64; 3]; 3],
+        pylon: usize,
+        launcher_radius: i64,
+    ) {
+        // `owner == 0` is the player in the callers. Store the reserved player
+        // target id instead so F569's owner test cannot contact the player's own
+        // missile with the player (the two ids would otherwise differ).
+        let stored_owner = if owner == 0 {
+            ffe_core::missile::PLAYER_TARGET
+        } else {
+            owner
+        };
+        self.missiles.launch(
+            spec,
+            code,
+            stored_owner,
+            Some(target),
+            position,
+            axes,
+            pylon,
+            launcher_radius,
+        );
+        let id = self.missiles.missiles.last().map(|missile| missile.id);
+        // F941 stores the new object's id at `DATA_008877` when the launcher is
+        // the player (`+0x100 == DATA_008857`). The callers pass 0 for the
+        // player; the field stores `PLAYER_TARGET` so F569's owner test matches.
+        if owner == 0 {
+            self.missile_view = id;
+        }
+        // F941's `+0xff = 0x0c` branch: a live AI ship the missile is aimed at
+        // goes evasive and keeps the missile id in `+0xfe`.
+        if let Some(id) = id {
+            if let Some(ship) = self.ships.iter_mut().find(|ship| ship.id == target) {
+                ship.evade_missile(id);
+            }
+        }
+    }
+
+    /// F941 for an NPC launcher: no `DATA_008877` and no evasion side effect on
+    /// the player (there is no player AI state).
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_npc_missile(
         &mut self,
         spec: ffe_core::missile::Spec,
         code: u8,
@@ -2995,20 +3084,42 @@ impl Navigator {
             pylon,
             launcher_radius,
         );
-        // F941 stores the new object's id at `DATA_008877` when the launcher is
-        // the player (`+0x100 == DATA_008857`). The port's player owner is 0.
-        if owner == 0 {
-            self.missile_view = self.missiles.missiles.last().map(|missile| missile.id);
-        }
     }
 
     /// One frame of missiles: F758/F717's tracking, the fuse and F953's damage.
     /// The combat target is cleared when its ship is gone, and F1102 forces the
-    /// missile view's object to zero when that missile dies.
+    /// missile view's object to zero when that missile dies. This legacy entry
+    /// point has no player target; `main` uses [`Self::tick_missiles_at`].
     pub fn tick_missiles(
         &mut self,
         seconds: f64,
         _player: [i64; 3],
+    ) -> Vec<crate::missile::MissileEvent> {
+        self.tick_missiles_inner(seconds, None)
+    }
+
+    /// [`Self::tick_missiles`] with the player's interaction target, so an NPC's
+    /// missile can reach the player through F718/F721.
+    pub fn tick_missiles_at(
+        &mut self,
+        seconds: f64,
+        player: [i64; 3],
+        velocity: [f64; 3],
+        radius: i64,
+    ) -> Vec<crate::missile::MissileEvent> {
+        let target = ffe_core::missile::Target {
+            id: ffe_core::missile::PLAYER_TARGET,
+            position: player,
+            velocity,
+            radius,
+        };
+        self.tick_missiles_inner(seconds, Some(target))
+    }
+
+    fn tick_missiles_inner(
+        &mut self,
+        seconds: f64,
+        player: Option<ffe_core::missile::Target>,
     ) -> Vec<crate::missile::MissileEvent> {
         if self
             .missile_lock
@@ -3016,7 +3127,17 @@ impl Navigator {
         {
             self.missile_lock = None;
         }
-        let events = self.missiles.tick(seconds, &mut self.ships);
+        let events = self
+            .missiles
+            .tick_with(seconds, &mut self.ships, player, &self.decoys);
+        // F780 notifies the ship an evading missile belonged to: it drops the
+        // 0x0c state and returns to the attack.
+        for event in &events {
+            let id = event.id();
+            for ship in &mut self.ships {
+                ship.missile_gone(id);
+            }
+        }
         if self
             .missile_view
             .is_some_and(|id| self.missiles.get(id).is_none())
@@ -3024,6 +3145,25 @@ impl Navigator {
             self.missile_view = None;
         }
         events
+    }
+
+    /// F1054's chaff object: spawn one model-0xa4 decoy at `position` and return
+    /// its [`ffe_core::missile::DECOY_BASE`] id. The source keeps the object in
+    /// the object list (F927 recycles slots); the port caps the list so a long
+    /// fight cannot grow it without bound.
+    pub fn deploy_chaff(&mut self, position: [i64; 3], radius: i64) -> u32 {
+        const MAX_DECOYS: usize = 16;
+        let id = ffe_core::missile::DECOY_BASE + self.next_decoy;
+        self.next_decoy = self.next_decoy.wrapping_add(1);
+        if self.decoys.len() >= MAX_DECOYS {
+            self.decoys.remove(0);
+        }
+        self.decoys.push(crate::missile::Decoy {
+            id,
+            position,
+            radius,
+        });
+        id
     }
 
     /// The missile the F10 view rides (`DATA_008877`), when it is still alive.
@@ -3056,13 +3196,20 @@ impl Navigator {
         {
             self.missile_view = None;
         }
+        // F780/F781: the missiles' deaths notify the ships that were evading
+        // them, just as a normal hit or timeout does.
+        for loss in &losses {
+            for ship in &mut self.ships {
+                ship.missile_gone(loss.id);
+            }
+        }
         losses
     }
 
-    /// F1057's chaff retarget: pull missiles aimed at `from` (the player) to
-    /// the chaff object `to`. `allow` is the per-missile `F1530() & 0x1000`
-    /// roll. The chaff launch itself (`F1054`'s `c`) has no ammo writer in the
-    /// recovered build, so no playable caller yet (`docs/notes/combat.md`).
+    /// F1057's chaff retarget: pull missiles aimed at `from` (the player,
+    /// [`ffe_core::missile::PLAYER_TARGET`]) to the chaff object `to`. `allow`
+    /// is the per-missile `F1530() & 0x1000` roll. `main`'s `c` handler supplies
+    /// both after `deploy_chaff`.
     pub fn retarget_missiles(
         &mut self,
         from: u32,
@@ -3533,6 +3680,7 @@ impl Navigator {
         // explosions and debris belong to the system that was left.
         self.effects.clear();
         self.missiles.clear();
+        self.decoys.clear();
         self.notice = None;
         self.carry = 0.0;
         self.skips = 0;

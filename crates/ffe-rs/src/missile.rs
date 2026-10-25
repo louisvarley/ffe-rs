@@ -21,6 +21,28 @@ pub struct MissileField {
     next_id: u32,
 }
 
+/// F1054's chaff object: an inert point a F1057-retargeted missile chases.
+/// The source gives the object model 0xa4 and no movement of its own beyond
+/// F1514's initial separation, so the port keeps a position and the model's
+/// collision radius. `id` is in [`missile::DECOY_BASE`]'s range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Decoy {
+    pub id: u32,
+    pub position: [i64; 3],
+    pub radius: i64,
+}
+
+impl Decoy {
+    pub fn target(&self) -> Target {
+        Target {
+            id: self.id,
+            position: self.position,
+            velocity: [0.0; 3],
+            radius: self.radius,
+        }
+    }
+}
+
 /// A missile F718's ECM destroyed, for F719's explosion and the message log.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EcmLoss {
@@ -39,13 +61,33 @@ pub struct EcmLoss {
 pub enum MissileEvent {
     /// F720/F721/F953: the hit ship and the outcome.
     Hit {
+        /// F941's missile object id, for F780's notification to an evading ship.
+        id: u32,
         target: u32,
         name: String,
         damage: u32,
         outcome: Damage,
     },
+    /// F720/F721/F953 on the player. The caller applies the player's shields and
+    /// hull (`Flight::take_damage`).
+    HitPlayer { id: u32, damage: u32 },
+    /// F718/F721: the missile reached a chaff object. No ship takes damage.
+    HitDecoy { id: u32, decoy: u32 },
     /// F758's timeout, F719's explosion without damage.
-    Expired { target: Option<u32> },
+    Expired { id: u32, target: Option<u32> },
+}
+
+impl MissileEvent {
+    /// F941's object id of the missile this event consumed, for F780's
+    /// notification to an evading ship.
+    pub fn id(&self) -> u32 {
+        match self {
+            MissileEvent::Hit { id, .. }
+            | MissileEvent::HitPlayer { id, .. }
+            | MissileEvent::HitDecoy { id, .. }
+            | MissileEvent::Expired { id, .. } => *id,
+        }
+    }
 }
 
 impl MissileField {
@@ -148,10 +190,23 @@ impl MissileField {
     /// Tick every missile over `seconds` of world time, then apply F953 to any
     /// ship a missile reached. F758's explosion on timeout does no damage.
     pub fn tick(&mut self, seconds: f64, ships: &mut [NpcShip]) -> Vec<MissileEvent> {
+        self.tick_with(seconds, ships, None, &[])
+    }
+
+    /// [`Self::tick`] with the player and the live chaff objects as targets.
+    /// `player` is [`missile::PLAYER_TARGET`]'s object; a hit on it is reported
+    /// as [`MissileEvent::HitPlayer`] so the caller can run F953 on the player.
+    pub fn tick_with(
+        &mut self,
+        seconds: f64,
+        ships: &mut [NpcShip],
+        player: Option<Target>,
+        decoys: &[Decoy],
+    ) -> Vec<MissileEvent> {
         if self.missiles.is_empty() {
             return Vec::new();
         }
-        let targets: Vec<Target> = ships
+        let mut targets: Vec<Target> = ships
             .iter()
             .filter(|ship| ship.visible())
             .map(|ship| Target {
@@ -161,14 +216,29 @@ impl MissileField {
                 radius: ship.radius,
             })
             .collect();
+        if let Some(player) = player {
+            targets.push(player);
+        }
+        targets.extend(decoys.iter().map(Decoy::target));
         let mut events = Vec::new();
         for missile in &mut self.missiles {
             match missile.tick(seconds, &targets) {
                 Some(Event::Hit { target, damage }) => {
-                    if let Some(ship) = ships.iter_mut().find(|ship| ship.id == target) {
+                    if target == missile::PLAYER_TARGET {
+                        events.push(MissileEvent::HitPlayer {
+                            id: missile.id,
+                            damage,
+                        });
+                    } else if missile::is_decoy(target) {
+                        events.push(MissileEvent::HitDecoy {
+                            id: missile.id,
+                            decoy: target,
+                        });
+                    } else if let Some(ship) = ships.iter_mut().find(|ship| ship.id == target) {
                         let name = ship.name.clone();
                         let outcome = ship.hit(damage);
                         events.push(MissileEvent::Hit {
+                            id: missile.id,
                             target,
                             name,
                             damage,
@@ -177,7 +247,10 @@ impl MissileField {
                     }
                 }
                 Some(Event::Expired { target }) => {
-                    events.push(MissileEvent::Expired { target });
+                    events.push(MissileEvent::Expired {
+                        id: missile.id,
+                        target,
+                    });
                 }
                 None => {}
             }
@@ -237,6 +310,14 @@ mod tests {
             hostile: true,
             laser: None,
             guns: ffe_core::laser::State::default(),
+            general: 0,
+            pylons: [0; ffe_core::missile::PYLONS],
+            missile_rng: ffe_core::RandomState::new(1, 2),
+            control_clock: 0.0,
+            missile_target: None,
+            ecm_attempted: false,
+            launch: None,
+            ecm_burst: None,
             bounty: 0,
             leader: None,
             formation: [0; 3],
@@ -325,6 +406,86 @@ mod tests {
     }
 
     #[test]
+    fn a_player_missile_does_not_contact_the_player_it_launched_from() {
+        let mut field = MissileField::default();
+        let spec = MissileField::spec(0x82, Some(stats()), 2100).unwrap();
+        let player = Target {
+            id: ffe_core::missile::PLAYER_TARGET,
+            position: [0; 3],
+            velocity: [0.0; 3],
+            radius: 10_000,
+        };
+        // The player's missile is owned by PLAYER_TARGET in the field, so F569's
+        // owner test skips the player's own object.
+        field.launch(
+            spec,
+            0x82,
+            ffe_core::missile::PLAYER_TARGET,
+            Some(9),
+            [0; 3],
+            axes(),
+            1,
+            5200,
+        );
+        let mut ships = vec![ship(9, [0, 0, 10_000_000])];
+        let events = field.tick_with(0.02, &mut ships, Some(player), &[]);
+        assert!(events.is_empty(), "{events:?}");
+        assert_eq!(field.missiles.len(), 1);
+    }
+
+    #[test]
+    fn an_npc_missile_reaches_the_player_target_and_a_chaff_decoy() {
+        let mut field = MissileField::default();
+        let spec = MissileField::spec(0x82, Some(stats()), 2100).unwrap();
+        let player = Target {
+            id: ffe_core::missile::PLAYER_TARGET,
+            position: [0, 0, 100_000],
+            velocity: [0.0; 3],
+            radius: 10_000,
+        };
+        field.launch(
+            spec,
+            0x82,
+            3,
+            Some(ffe_core::missile::PLAYER_TARGET),
+            [0; 3],
+            axes(),
+            2,
+            5200,
+        );
+        let events = field.tick_with(0.4, &mut [], Some(player), &[]);
+        assert!(matches!(
+            events.as_slice(),
+            [MissileEvent::HitPlayer { damage: 200, .. }]
+        ));
+
+        let decoy = Decoy {
+            id: ffe_core::missile::DECOY_BASE,
+            position: [0, 0, 100_000],
+            radius: 2_000,
+        };
+        field.launch(
+            spec,
+            0x82,
+            3,
+            Some(ffe_core::missile::PLAYER_TARGET),
+            [0; 3],
+            axes(),
+            2,
+            5200,
+        );
+        assert_eq!(
+            field.retarget(ffe_core::missile::PLAYER_TARGET, decoy.id, |_| true),
+            1
+        );
+        let events = field.tick_with(0.4, &mut [], None, &[decoy]);
+        assert!(matches!(
+            events.as_slice(),
+            [MissileEvent::HitDecoy { decoy: id, .. }] if *id == decoy.id
+        ));
+    }
+
+    #[test]
     fn f1057_retargets_only_the_models_it_names_and_only_from_the_chosen_target() {
         let mut field = MissileField::default();
         field.launch(spec_for(6), 0x82, 0, Some(1), [0; 3], axes(), 1, 5200);
@@ -362,6 +523,7 @@ mod tests {
                 name,
                 damage,
                 outcome,
+                ..
             } => {
                 assert_eq!((*target, name.as_str(), *damage), (3, "Pirate 1", 200));
                 assert_eq!(*outcome, Damage::Shields);

@@ -38,6 +38,22 @@
 
 /// The number of pylon words (`ship+0xd6..+0xdf`).
 pub const PYLONS: usize = 10;
+/// The player's object id in the missile target space. `NpcShip` ids are small
+/// and the F941 object ids are 0-based, so a reserved high word keeps the
+/// player's target distinct from every ship (`DATA_008857` in the source).
+pub const PLAYER_TARGET: u32 = u32::MAX;
+/// The first chaff/decoy object id (`DATA_007253`). F1057 stores the chaff
+/// object's id in the missile's `+0xfe`; the port puts decoys above every ship
+/// and the player so a target id says which list to look in.
+pub const DECOY_BASE: u32 = 0x8000_0000;
+/// F1054's chaff object model (`0xa4`, 164), the invisible decoy the source
+/// spawns before F1057 retargets missiles to it.
+pub const DECOY_MODEL: u32 = 0xa4;
+
+/// True when `id` is a chaff/decoy target.
+pub fn is_decoy(id: u32) -> bool {
+    id >= DECOY_BASE
+}
 /// The original's type-to-model table `DATA_007220`.
 pub const MODELS: [u32; 10] = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 /// A mine code's flag (`0x40`); F941's targeted branch.
@@ -300,7 +316,11 @@ impl Missile {
         self.age += dt;
         self.guidance += dt;
         // F718/F721: the contact test runs every physics step, before the fuse.
+        // F569 does not test the launcher's own object.
         for target in targets {
+            if target.id == self.owner {
+                continue;
+            }
             if distance(self.position, target.position) <= contact(target.radius, self.spec.radius)
             {
                 return Some(self.hit(target.id));
@@ -308,6 +328,7 @@ impl Missile {
         }
         let target = self
             .target
+            .filter(|id| *id != self.owner)
             .and_then(|id| targets.iter().find(|candidate| candidate.id == id));
         if self.guidance >= GUIDANCE_INTERVAL {
             self.guidance -= GUIDANCE_INTERVAL;

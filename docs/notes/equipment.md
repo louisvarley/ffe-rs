@@ -218,7 +218,7 @@ load with `Loadout::default()` (nothing fitted).
 | `player+0xc6` word | `ShipSystems::status` | F1116's 0x45 condition: low byte 0x40, high byte bit 0 |
 | `player+0xe8/e9/ec/f0` | `ShipSystems` | engine/autopilot/target/GUI bytes |
 | `player+0xef` | `ShipSystems::ef` | missile-view byte (0x14 also needs general bit 9) |
-| `player+0x174` word | `ShipSystems::p174` | chaff count (`F1120`'s 0x51 and the F1056 launch) |
+| `player+0x174` word | `ShipSystems::p174` | Chaff count: the hold's commodity 32 (`market::CHAFF`, `DATA_006248`), read by F1120's 0x51 and the F1054 `c` launch |
 | `player+0x268` | `ShipSystems::p268` | GUI/docked state byte (0x45 and the station redraw) |
 | `player+0x511e` | `ShipSystems::p511e` | missiles in flight (F1120's 0x4e) |
 | `player+0x3fb6` bit 1 | `ShipSystems::b6` | the labels/0x48 image condition in F1116 |
@@ -234,7 +234,7 @@ base; `[ebx+0x3fb6]` is the field the older notes call `DATA_003fb6`.
 |---|---|---|
 | 7 | Auto targetter (`0x17`) | F1054's `T`/`Shift+T` arm `DATA_007246`/`7247`; F1010 acquires under the crosshair |
 | 9 | Missile Viewer (`0x19`) | `F10` (view 5) needs it and `player+0xef` |
-| 11 | Chaff Dispenser (`0x1b`) | F1054's `c` needs it and `player+0x174` (no writer in the recovered build) |
+| 11 | Chaff Dispenser (`0x1b`) | F1054's `c` needs it and `player+0x174`, which is the hold's Chaff word (commodity 32) |
 | 19 | E.C.M. System (`0x03`) | F935 sets `DATA_008835 |= 4` |
 | 23 | Naval E.C.M. System (`0x07`) | F935 sets `DATA_008835 |= 0xc` (also bit 3) |
 

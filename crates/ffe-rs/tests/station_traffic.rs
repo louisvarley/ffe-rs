@@ -262,6 +262,11 @@ fn station_bay_ships_are_docked_and_launch_through_f691s_cycle() {
         .find(|ship| ship.id == id)
         .unwrap()
         .dock_timer = 0.01;
+    // The station has one docking record; other F688 traffic may hold it. This
+    // test times the F691 ship only, so drop the rest and clear the record (the
+    // bay allocation and pads stay).
+    nav.ships.retain(|ship| ship.id == id);
+    nav.starport(station).reset();
     let player = body.position;
     let radius = i64::from(viewer.model_radius(NEW_GAME_SHIP).unwrap());
     let mut launched = false;
@@ -329,10 +334,18 @@ fn station_bay_ships_are_docked_and_launch_through_f691s_cycle() {
     assert!(next_station.is_some());
     assert!(nav.ships.iter().any(|ship| ship.id == id && ship.visible()));
 
-    // The station-bay branch is the source's type-1 trader, not F699's Lynx.
+    // The station-bay branch is the source's trader role; the model comes from
+    // F635's tables (model_for applies the allegiance shift), so accept any
+    // listed hull rather than only the unshifted type-1 list.
     let ship = nav.ships.iter().find(|s| s.id == id).unwrap();
     assert_eq!(ship.role, Role::Trader);
-    assert!(ffe_core::npc::SHIP_TYPES[1].contains(&ship.model));
+    assert!(
+        ffe_core::npc::SHIP_TYPES
+            .iter()
+            .any(|table| table.contains(&ship.model)),
+        "model {:#x} is not in F635's tables",
+        ship.model
+    );
     println!(
         "visible traffic: {} ship(s), {} at the station",
         nav.ships.iter().filter(|ship| ship.visible()).count(),

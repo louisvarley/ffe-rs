@@ -345,6 +345,37 @@ there), and launch straight into F733's countdown.
   call F931, so JJFFE's AI ships do not damage the player (its "Laser
   invulnerability" fix). The port follows DOS FFE.
 
+### NPC missiles, E.C.M. and evasion (F773/F754/F757/F935)
+
+- **Pylons and equipment (`F773`, `ffe.asm:50526`).** `fit_equipment` gives each
+  spawned ship the source's missile branch: a cargo-tonnage budget (`+0x116`
+  less the F774 laser's tonnage), `RND(0..=stats+0x12)` missiles, the code from
+  `DATA_006260` (`MISSILE_CODES`) and the pylon words `ship+0xd6..+0xdf`. The
+  same pass rolls F773's E.C.M. branch (`>= 0x4000` standard, `>= 0xc000`
+  Naval, two tonnes) and the rare energy-bomb bit (`>= 0xfc00`, four tonnes,
+  not police). The port does not model F773's shield spending or the one-tonne
+  scanner/fuel-scoop branches, so the equipment budget is an approximation; the
+  tables, gates and bits are the source's.
+- **Launch (`F754`, `ffe.asm:49779`).** `NpcShip::tick` rolls once per 20 ms of
+  event-6 time while the ship is in `Attack`/`Pass`. F753's attack band is F610
+  exponent 5..8 (262 m..4.2 km); F756's state-3 call is wider (0..8.4 km). The
+  roll is `F1530 < 0x2000`, pylon `(F1530 & 7) + 1`, target `player+0xfe`.
+  `ShipEvent::MissileLaunch` carries the code, pylon,
+  position, axes and launcher radius; `Navigator::launch_npc_missile` resolves
+  the code through the cache's statistics and adds it to the same
+  `MissileField`. F941's `+0xff = 0x0c` side effect is applied when the player
+  launches, and F941's failure branch (F937's energy bomb) is reported but not
+  modelled.
+- **Evasion and E.C.M. (`F757`, `ffe.asm:49988`; `F935`, `ffe.asm:69987`).** A ship
+  whose `+0xfe` is a missile goes to `State::Evade`: it turns across the
+  missile's line (the port's right-hand jink stands in for F588's random
+  roll/pitch words) and rolls `F1530 > 0xa000` for F935 once per evasion. The
+  naval bit is tested first; `Navigator::ecm` applies F718's `DATA_000029`
+  table system-wide, spawns F719's explosions and notifies the evading ships
+  through F780/F781. No range, ammo or energy cost exists in F935.
+- **Do not confuse with the player's key.** F1054's `e` still fires the
+  player's E.C.M.; the NPC path is the same F935/F718 code, not a second table.
+
 ### Police and wanted (the reconstruction)
 
 - `Navigator::legal` is `npc::Legal`, the port's counterpart of `DATA_008646`
@@ -435,6 +466,12 @@ there), and launch straight into F733's countdown.
   equipment record (0xd5, 50 t, tech 255).
 - `cargo test -p ffe-rs combat`: adds the player's F953 words
   (`Flight::take_damage`) and their save defaults.
+- `cargo test -p ffe-core npc`: adds F754's band/pylon/owner/target test, the
+  outside-band and empty-pylon negatives, F773's pylon/E.C.M. fit and F757's
+  burst/F781 return.
+- `cargo test -p ffe-rs --test npc_missiles -- --ignored` with
+  `FFE_WORLD_CACHE`: the scripted NPC launch -> player chaff -> F953 damage ->
+  NPC E.C.M. encounter, with `docs/evidence/npc-missiles/` frames.
 - `cargo test -p ffe-rs --test npc_ai -- --ignored` with
   `FFE_WORLD_CACHE=<data.bin>`: the scripted sequence. It puts the player in
   front of a pirate, ticks until a real `ShipEvent::Hit` arrives, applies it to
@@ -498,8 +535,11 @@ there), and launch straight into F733's countdown.
   matching (F589) and F671's settle onto the pad are approximated by the port's
   approach; the station traffic uses the pad point, not the original's
   orientation lock.
-- **Missiles.** F941/F1096 and states 0x12-0x1b are not ported; the Eagle's
-  two 0x82 missiles are inert.
+- **Missiles.** F773's pylon fit, F754's launch, F757's evasion/F935 and the
+  0x13 missile rows are now wired to the shared `MissileField`
+  (`docs/notes/combat.md` §8). F937's energy-bomb blast is not modelled; the
+  fitted bit is kept. The full per-state control rows 0x13-0x1b are still not
+  transcribed (the missile object itself is `ffe_core::missile`).
 - **Police response/spawns.** The wanted state turns existing police hostile;
   it does not spawn patrols, apply fines or show the wanted status outside the
   message line. F1035/F1036 are surface spawns and are absent with the rest of
