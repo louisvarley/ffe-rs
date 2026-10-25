@@ -6,6 +6,7 @@
 use crate::docking::{Contact, Port, CLEARANCE_RANGE};
 use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND};
 use ffe_content::VerifiedCache;
+use ffe_core::effects::{self, Effect};
 use ffe_core::galaxy::{tables, Tables};
 use ffe_core::hyperspace::{plan as jump_plan, Report};
 use ffe_core::market::{Conditions, Market, Tables as MarketTables};
@@ -684,6 +685,10 @@ pub struct Navigator {
     traffic: HashMap<usize, Starport>,
     /// The NPC traffic of the current system (F688/F635), ticked in flight.
     pub ships: Vec<NpcShip>,
+    /// The system's short-lived visuals: F939 hit particles, F942 destruction
+    /// objects and F926 debris (see `ffe_core::effects`). They outlive the ship
+    /// that spawned them and are not saved.
+    pub effects: Vec<Effect>,
     /// The id of the ship locked as the target (F1020's target byte for ships;
     /// the port keeps bodies in `locked` and ships here).
     pub ship_lock: Option<u32>,
@@ -900,6 +905,7 @@ impl Navigator {
             docked: None,
             traffic: HashMap::new(),
             ships: Vec::new(),
+            effects: Vec::new(),
             ship_lock: None,
             spawned: None,
             sequence: None,
@@ -1385,13 +1391,32 @@ impl Navigator {
             |model| crate::ships::npc_spec(cache, model),
         );
         self.ship_lock = None;
+        self.effects.clear();
         self.spawned = Some(self.current);
         !self.ships.is_empty()
     }
 
+    /// Force the F688 spawner to run again for the current system, even when
+    /// traffic was already spawned: the scripted traffic capture needs ships
+    /// beside the camera rather than around a station pad.
+    pub fn respawn_traffic(
+        &mut self,
+        cache: &VerifiedCache,
+        player: [i64; 3],
+        forward: [f64; 3],
+    ) -> bool {
+        self.spawned = None;
+        self.spawn_traffic(cache, player, forward)
+    }
+
     /// One frame of NPC traffic: the reduced AI state machine, then F927's
-    /// recycle of ships that are dead or too far from the player.
+    /// recycle of ships that are dead or too far from the player. The effects
+    /// (F939/F942/F926) are ticked even when there is no traffic left.
     pub fn tick_ships(&mut self, seconds: f64, player: [i64; 3]) {
+        for effect in &mut self.effects {
+            effect.tick(seconds);
+        }
+        self.effects.retain(Effect::alive);
         if self.ships.is_empty() {
             return;
         }
@@ -1443,8 +1468,43 @@ impl Navigator {
 
     /// F953/F942 on an NPC ship. `None` when the id is not live.
     pub fn damage_ship(&mut self, id: u32, damage: u32) -> Option<ffe_core::laser::Damage> {
+        self.damage_ship_at(id, damage, None)
+    }
+
+    /// F953/F942 on an NPC ship with the hit point F817 found. The hit spawns
+    /// F939's particle at `at` (the ship's centre when the caller has no point)
+    /// and, on destruction, F942's explosion and F926's debris at the ship.
+    pub fn damage_ship_at(
+        &mut self,
+        id: u32,
+        damage: u32,
+        at: Option<[i64; 3]>,
+    ) -> Option<ffe_core::laser::Damage> {
         let ship = self.ships.iter_mut().find(|ship| ship.id == id)?;
-        Some(ship.hit(damage))
+        let position = ship.position;
+        let axes = ship.axes();
+        let velocity = ship.velocity;
+        let cargo = ship.cargo;
+        let speed = velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let result = ship.hit(damage);
+        let seed = (self.clock * 1000.0) as u32
+            ^ id.rotate_left(7)
+            ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9);
+        let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
+        // F931 calls F939 once per hit, whether the shields or the hull took it.
+        self.effects.push(effects::hit(
+            at.unwrap_or(position),
+            velocity,
+            axes,
+            speed,
+            &mut rng,
+        ));
+        if result == ffe_core::laser::Damage::Destroyed {
+            self.effects.extend(effects::explosion(
+                position, velocity, cargo, axes, &mut rng,
+            ));
+        }
+        Some(result)
     }
 
     /// One frame of traffic: every station's door and clearance countdown, and the

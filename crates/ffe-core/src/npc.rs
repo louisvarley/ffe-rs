@@ -201,6 +201,9 @@ pub struct Spec {
     pub radius: i64,
     pub mass: u16,
     pub shield_strength: u16,
+    /// The cargo space (`+0x116`): F942 uses `min(4, cargo >> 1)` extra debris
+    /// pods.
+    pub cargo: u16,
 }
 
 impl Spec {
@@ -283,6 +286,8 @@ pub struct NpcShip {
     /// The statistics' shield word (`+0xe`), which F1099 shows as
     /// "Shield Strength d".
     pub shield_strength: i16,
+    /// The ship's cargo space (`+0x116`), which F942 turns into debris pods.
+    pub cargo: u16,
     pub state: State,
     pub anchor: [i64; 3],
     pub orbit_radius: f64,
@@ -322,6 +327,7 @@ impl NpcShip {
                 mass: spec.mass,
             },
             shield_strength: spec.shield_strength as i16,
+            cargo: spec.cargo,
             state: if role.hostile() {
                 State::Attack
             } else {
@@ -665,6 +671,7 @@ mod tests {
             radius: 10_000,
             mass: 25,
             shield_strength: 0x4014,
+            cargo: 8,
         })
     }
 

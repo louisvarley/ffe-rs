@@ -123,6 +123,7 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
         radius: info.radii().0,
         mass: stats.mass,
         shield_strength: stats.shield_strength as u16,
+        cargo: u16::try_from(stats.cargo.max(0)).unwrap_or(0),
     })
 }
 
