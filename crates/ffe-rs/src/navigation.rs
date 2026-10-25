@@ -11,6 +11,7 @@ use ffe_core::hyperspace::{plan as jump_plan, Report};
 use ffe_core::market::{Conditions, Market, Tables as MarketTables};
 use ffe_core::model_math::SineTable;
 use ffe_core::names::Names;
+use ffe_core::npc::{self, Anchor, NpcShip};
 use ffe_core::objects::Models as ShipModels;
 use ffe_core::objects::{Models, PhysList, Placement};
 use ffe_core::pads::Pads;
@@ -681,6 +682,14 @@ pub struct Navigator {
     pub docked: Option<usize>,
     /// Each station's traffic record (F654 and friends), made when first needed.
     traffic: HashMap<usize, Starport>,
+    /// The NPC traffic of the current system (F688/F635), ticked in flight.
+    pub ships: Vec<NpcShip>,
+    /// The id of the ship locked as the target (F1020's target byte for ships;
+    /// the port keeps bodies in `locked` and ships here).
+    pub ship_lock: Option<u32>,
+    /// The system index the traffic was spawned for: a killed ship is not
+    /// restored until the system is entered again.
+    spawned: Option<usize>,
     /// The docking or launching stages the player is in, when it is.
     pub sequence: Option<Sequence>,
     /// The open-air starport takeoff (`0x30`/`0x24`/`0x26`/`0x00`), when the
@@ -890,6 +899,9 @@ impl Navigator {
             locked: None,
             docked: None,
             traffic: HashMap::new(),
+            ships: Vec::new(),
+            ship_lock: None,
+            spawned: None,
             sequence: None,
             takeoff: None,
             pads: cache
@@ -960,6 +972,8 @@ impl Navigator {
                 .asset("base:gameplay/tables")
                 .ok_or("no gameplay tables")?,
         };
+        // The traffic spawner places ships on the starport's launch axis.
+        let launch_axis = body.orientation[2];
         // F994 copies the station's orientation to the ship and puts it on the
         // pad: F650's offset plus the ship's collision radius along its up row.
         let up = [body.rows[3], body.rows[4], body.rows[5]];
@@ -991,6 +1005,7 @@ impl Navigator {
             bay: bay.index,
             seat,
         });
+        nav.spawn_traffic(cache, seat, launch_axis);
         Ok(nav)
     }
 
@@ -1326,6 +1341,112 @@ impl Navigator {
         self.sequence.is_some_and(|s| !s.launching)
     }
 
+    /// F688/F635: spawn the current system's NPC traffic once. The original
+    /// spawns on entering a system and restores the ships from the save; the
+    /// port keeps a killed ship killed until the system is entered again.
+    /// Returns whether traffic was spawned.
+    pub fn spawn_traffic(
+        &mut self,
+        cache: &VerifiedCache,
+        player: [i64; 3],
+        forward: [f64; 3],
+    ) -> bool {
+        if self.spawned == Some(self.current) {
+            return false;
+        }
+        let Some(blob) = cache.asset("base:world/system-tables") else {
+            return false;
+        };
+        let Ok(tables) = Tables::new(blob) else {
+            return false;
+        };
+        let code = self.entries[self.current].params.code;
+        let details = tables.details(code);
+        let allegiance = details.allegiance >> 6;
+        let anchors: Vec<Anchor> = self
+            .bodies
+            .iter()
+            .filter(|body| body.kind.is_place())
+            .map(|body| Anchor {
+                position: body.position,
+                radius: body.radius,
+            })
+            .collect();
+        let clock = clock_words(self.clock);
+        let seed = code ^ clock[0] ^ (player[0] as u32) ^ (player[2] as u32).rotate_left(11);
+        let mut rng = npc::Random::new(seed, clock[1] ^ 0x4567_89ab);
+        self.ships = npc::spawn(
+            player,
+            forward,
+            &anchors,
+            &details,
+            allegiance,
+            &mut rng,
+            |model| crate::ships::npc_spec(cache, model),
+        );
+        self.ship_lock = None;
+        self.spawned = Some(self.current);
+        !self.ships.is_empty()
+    }
+
+    /// One frame of NPC traffic: the reduced AI state machine, then F927's
+    /// recycle of ships that are dead or too far from the player.
+    pub fn tick_ships(&mut self, seconds: f64, player: [i64; 3]) {
+        if self.ships.is_empty() {
+            return;
+        }
+        for ship in &mut self.ships {
+            ship.tick(seconds, player);
+        }
+        self.ships.retain(|ship| !ship.finished(player));
+        if self
+            .ship_lock
+            .is_some_and(|id| !self.ships.iter().any(|ship| ship.id == id))
+        {
+            self.ship_lock = None;
+        }
+    }
+
+    /// The locked NPC ship, if one is.
+    pub fn locked_ship(&self) -> Option<&NpcShip> {
+        let id = self.ship_lock?;
+        self.ships.iter().find(|ship| ship.id == id)
+    }
+
+    /// Lock an NPC ship by id (a click or a laser hit). Returns it.
+    pub fn lock_ship(&mut self, id: u32) -> Option<&NpcShip> {
+        self.ship_lock = Some(id);
+        self.ships.iter().find(|ship| ship.id == id)
+    }
+
+    /// The next live ship after the locked one, wrapping; `None` when there is
+    /// no live traffic. `step` is +1 or -1.
+    pub fn cycle_ship_lock(&mut self, step: i32) -> Option<&NpcShip> {
+        let ids: Vec<u32> = self
+            .ships
+            .iter()
+            .filter(|ship| ship.alive())
+            .map(|ship| ship.id)
+            .collect();
+        if ids.is_empty() {
+            self.ship_lock = None;
+            return None;
+        }
+        let at = self
+            .ship_lock
+            .and_then(|id| ids.iter().position(|candidate| *candidate == id))
+            .unwrap_or(0);
+        let next = (at as i32 + step).rem_euclid(ids.len() as i32) as usize;
+        self.ship_lock = Some(ids[next]);
+        self.ships.iter().find(|ship| ship.id == ids[next])
+    }
+
+    /// F953/F942 on an NPC ship. `None` when the id is not live.
+    pub fn damage_ship(&mut self, id: u32, damage: u32) -> Option<ffe_core::laser::Damage> {
+        let ship = self.ships.iter_mut().find(|ship| ship.id == id)?;
+        Some(ship.hit(damage))
+    }
+
     /// One frame of traffic: every station's door and clearance countdown, and the
     /// player's stages. `tics` are the game tics of the frame, `seconds` game seconds.
     pub fn tick_traffic(&mut self, tics: u32, seconds: f64) -> Vec<Traffic> {
@@ -1582,6 +1703,9 @@ impl Navigator {
         self.refreshed = self.clock;
         self.target = None;
         self.locked = None;
+        self.ship_lock = None;
+        self.ships.clear();
+        self.spawned = None;
         self.docked = None;
         self.traffic.clear();
         self.markets.clear();

@@ -147,8 +147,8 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "todo" },
         { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "done", version: "v0.57" },
         { id: "gameplay-5", title: "Missiles and countermeasures", status: "todo" },
-        { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "todo" },
-        { id: "gameplay-7", title: "Police, pirates and other encounters", status: "todo" },
+        { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "in-progress", version: "v0.60" },
+        { id: "gameplay-7", title: "Police, pirates and other encounters", status: "in-progress", version: "v0.60" },
         { id: "gameplay-8", title: "Combat scenario replay against the reference", status: "todo" },
         { id: "gameplay-9", title: "Bulletin board and missions (cbbs)", status: "todo" },
         { id: "gameplay-10", title: "Journal and mission state", status: "todo" },
@@ -156,7 +156,8 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-12", title: "Communications and messages", status: "todo" },
         { id: "gameplay-13", title: "Player death and the escape capsule", status: "todo" },
         { id: "gameplay-14", title: "Rank, reputation and legal status", status: "todo" },
-        { id: "gameplay-15", title: "Time-driven events over a long run", status: "todo" }
+        { id: "gameplay-15", title: "Time-driven events over a long run", status: "todo" },
+        { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" }
       ]
     },
     {
@@ -497,6 +498,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 73,
       note: "Open-air starport takeoff merged (v0.59): F994/F650's pad seat (with the ship's +0x140 radius along the up row), F381/F654 clearance, F1013's 0x24 climb, F1031's 0x20 region test and hand-off to 0x26, F1032/F651's bay release and F573/F1677's return to the system frame; the pad contact runs F575/F576 in a persistent two-body world, so the old 20 km teleport and the takeoff refusal are gone (EXP-010 keeps only the DATA_008867 climb fallback). The default new game now starts landed at Ross 154's Sirocco Station and takes off with L. One item added and completed (flight-13), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 73,
+      note: "NPC traffic merged (v0.60): F688/F635 spawns traders, shuttles, police and a pirate group on a station/player-based placement (the deliberate F702 deviation), with F922's bounded RNG, a three-state flight AI, F953/F942 damage, F1536's model-157 shield flash, F942's death marker, ship labels, click/lock/T cycling, F1100 range and F1099 hull/shield readout. The port's combat readout is now reachable in a real system; `--capture-traffic` saves the traffic, hit and kill frames. Full AI, police response, ship fire, missiles, F942's own explosion and persistence remain. One item added and completed (gameplay-16), so the remaining count is unchanged."
     }
   ]
 };

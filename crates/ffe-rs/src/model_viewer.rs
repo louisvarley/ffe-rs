@@ -86,6 +86,7 @@ pub struct Frame {
     pub jitter: [u32; 2],
 }
 
+#[derive(Clone)]
 pub struct ViewerModel {
     pub index: u32,
     pub vertex_count: u32,
@@ -779,12 +780,35 @@ impl ModelViewer {
         light_view: [f64; 3],
         inputs: &AnimationInputs,
     ) -> Result<Frame, String> {
+        self.render_scene_with_scale(index, None, rows, position, light_view, inputs)
+    }
+
+    /// [`render_scene_with`] with F1536's object scale override: the original
+    /// draws model 0x9d at the *hit ship's* scale (`+0x7e` from the ship
+    /// statistics' `+0x14`), not the flash model's own zero scale.
+    pub fn render_scene_with_scale(
+        &self,
+        index: u32,
+        scale: Option<u32>,
+        rows: [[f64; 3]; 3],
+        position: [f64; 3],
+        light_view: [f64; 3],
+        inputs: &AnimationInputs,
+    ) -> Result<Frame, String> {
         let model = self
             .find(index)
             .ok_or_else(|| format!("Model {index} is not in the cache."))?;
         if position.iter().any(|v| v.abs() > 1.5e9) {
             return Err("Model too far for the 32-bit view space.".to_owned());
         }
+        let scaled;
+        let model = match scale {
+            Some(scale) => {
+                scaled = model.with_scale(scale);
+                &scaled
+            }
+            None => model,
+        };
         self.render_with(model, rows, position.map(|v| v as i32), light_view, inputs)
     }
 
@@ -1752,6 +1776,22 @@ fn pen_vertex(program: &[u8]) -> Option<u8> {
 }
 
 impl ViewerModel {
+    /// The model with a different F1683 render scale (`+0x7e`). F1536 draws
+    /// model 0x9d through the hit ship's scale, not the flash model's own.
+    pub fn with_scale(&self, scale: u32) -> Self {
+        Self {
+            index: self.index,
+            vertex_count: self.vertex_count,
+            scale,
+            vertices: self.vertices.clone(),
+            commands: self.commands.clone(),
+            normals: self.normals.clone(),
+            normal_count: self.normal_count,
+            radius: self.radius.clone(),
+            front: self.front,
+        }
+    }
+
     /// Largest object-space vertex distance at input 0, when evaluable alone.
     pub fn radius(&self) -> Option<f64> {
         self.radius.as_ref().ok().copied()

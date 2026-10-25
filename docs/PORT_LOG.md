@@ -4,6 +4,37 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - NPC traffic, ship damage and targeting merged (v0.60)
+
+- Merged `npcs` (81569a2): `ffe_core::npc` (F635's nineteen-record model table
+  with the allegiance shift, F922's bounded RNG, F688's counts and cap,
+  placement around the station/player, the three-state flight AI, F953/F942
+  damage and the F1536 shield flash), `Navigator::{ships, spawn_traffic,
+  tick_ships, lock_ship, damage_ship}`, `Screen::{SystemShip,
+  draw_system_ships}` (ship models, labels, F1100 range and F1099 hull/shield
+  readout), click/lock/`T` cycling and `--capture-traffic`.
+- Conflicts: `navigation.rs` (the new-game seat block — kept the takeoff
+  branch's `models`/`pads.seat` computation and added the spawner's
+  `launch_axis`, dropping the older duplicate seat/cargo code) and `screen.rs`
+  (kept the retired `MAP_BUTTONS` comment and added `SystemShip`). No stream's
+  work was dropped.
+- The target hull/shield readout and the model-157 shield flash are now
+  reachable in a generated system; the notes' "unreachable" wording is
+  corrected in `docs/notes/dashboard.md`. Full AI, police response, ship fire,
+  missiles, F942's own explosion, station-bay ships and persistence remain
+  (`docs/notes/npc.md` §4).
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `cargo test -p ffe-core --lib npc` (6);
+  `cargo test -p ffe-rs --test npc_view -- --ignored` with the cache (1); the
+  cached `dashboard_view`, `combat_view`, `console_view`, `station_view` and
+  navigation takeoff suites still pass.
+- Deviation: the spawn placement is the port's station/player-based rule, not
+  F702's raw system-wide orbit; F691's station-bay ships are not spawned
+  because the ship-data table is not loaded. To be recorded as its own
+  deviation entry if the owner keeps this placement.
+
+---
+
 ## 2026-10-25 - Open-air starport takeoff merged (v0.59)
 
 - Merged `takeoff` (74da8d8): F994/F650's seat (the pad offset plus the ship's
