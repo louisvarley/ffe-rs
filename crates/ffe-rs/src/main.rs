@@ -17,6 +17,7 @@ use ffe_rs::navigation::{
     describe, distance, refusal, Kind as NavKind, Navigator, Traffic, View as NavView,
 };
 use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
+use ffe_rs::outfitting::{self, Limits};
 use ffe_rs::prefs::{
     self, Activate, Key as PrefsKey, Prefs, GRAPHIC, MAIN, MAPS, OTHERS, PORT, SOUND,
 };
@@ -1595,7 +1596,32 @@ fn run() -> Result<(), String> {
                     } else {
                         0
                     };
-                    let rows = station::row_count(dock.screen, 0, market_rows);
+                    // F383's list for this starport: F869/F622's tech level
+                    // (DATA_008995) and the current fitted loadout. It is rebuilt
+                    // every frame, so a Fit/Remove updates the fitted flags.
+                    let tech_level = nav
+                        .as_ref()
+                        .and_then(|nav| nav.tech_level(&cache))
+                        .unwrap_or(0);
+                    let upgrade_rows = if dock.screen == StationScreen::Upgrades {
+                        station::upgrades(tech_level, &state.loadout, &state.combat.lasers)
+                    } else {
+                        Vec::new()
+                    };
+                    let upgrade_fitted: Vec<bool> =
+                        upgrade_rows.iter().map(|row| row.fitted).collect();
+                    let repair_rows = if dock.screen == StationScreen::Repairs {
+                        station_repairs(&state, scene.as_ref())
+                    } else {
+                        Vec::new()
+                    };
+                    let rows = station::row_count(
+                        dock.screen,
+                        0,
+                        market_rows,
+                        upgrade_rows.len(),
+                        repair_rows.len(),
+                    );
                     let step = i32::from(pressed(Key::Down)) - i32::from(pressed(Key::Up));
                     if step != 0 {
                         dock.step(step, rows);
@@ -1613,6 +1639,13 @@ fn run() -> Result<(), String> {
                                 dock.selected = index;
                                 if dock.screen == StationScreen::Market {
                                     // A number selects the market line; B/N trade it.
+                                } else if dock.screen == StationScreen::Upgrades {
+                                    // F354's digit action is the left (Fit) button.
+                                    dock_action = Some(StationAction::Fit { row: index });
+                                } else if dock.screen == StationScreen::Repairs {
+                                    dock_action = Some(StationAction::NotPorted(
+                                        "Repairs and servicing actions are not ported.",
+                                    ));
                                 } else if let Some(entry) =
                                     station::menu_entry(dock.screen, index, 0)
                                 {
@@ -1625,7 +1658,15 @@ fn run() -> Result<(), String> {
                         && dock.screen != StationScreen::Market
                         && dock.selected < rows
                     {
-                        if let Some(entry) = station::menu_entry(dock.screen, dock.selected, 0) {
+                        if dock.screen == StationScreen::Upgrades {
+                            dock_action = Some(StationAction::Fit { row: dock.selected });
+                        } else if dock.screen == StationScreen::Repairs {
+                            dock_action = Some(StationAction::NotPorted(
+                                "Repairs and servicing actions are not ported.",
+                            ));
+                        } else if let Some(entry) =
+                            station::menu_entry(dock.screen, dock.selected, 0)
+                        {
                             dock_action = Some(entry.action);
                         }
                     }
@@ -1633,10 +1674,22 @@ fn run() -> Result<(), String> {
                         dock_action = Some(StationAction::Back);
                     }
                     if let Some((x, y)) = dock_click {
-                        if let Some(hot) = station::click(dock.screen, dock.scroll, rows, x, y) {
+                        if let Some(hot) = station::click_with_fitted(
+                            dock.screen,
+                            dock.scroll,
+                            rows,
+                            Some(&upgrade_fitted),
+                            x,
+                            y,
+                        ) {
                             match hot {
                                 station::Hot::Row(index) => {
-                                    if let Some(entry) = station::menu_entry(dock.screen, index, 0)
+                                    if dock.screen == StationScreen::Repairs {
+                                        dock_action = Some(StationAction::NotPorted(
+                                            "Repairs and servicing actions are not ported.",
+                                        ));
+                                    } else if let Some(entry) =
+                                        station::menu_entry(dock.screen, index, 0)
                                     {
                                         dock_action = Some(entry.action);
                                     }
@@ -1644,6 +1697,14 @@ fn run() -> Result<(), String> {
                                 station::Hot::Market { buy, row } => {
                                     dock.selected = row;
                                     dock_action = Some(StationAction::Trade { buy, row });
+                                }
+                                station::Hot::Outfit { remove, row } => {
+                                    dock.selected = row;
+                                    dock_action = Some(if remove {
+                                        StationAction::Remove { row }
+                                    } else {
+                                        StationAction::Fit { row }
+                                    });
                                 }
                                 station::Hot::More => {
                                     let visible = station::layout(dock.screen).visible();
@@ -1749,6 +1810,30 @@ fn run() -> Result<(), String> {
                         StationAction::Back => {
                             dock.back();
                             message = station::hint(dock.screen, 0).to_owned();
+                        }
+                        StationAction::Fit { row } => {
+                            if let Some(nav) = nav.as_ref() {
+                                message = fit_or_remove(
+                                    nav,
+                                    &cache,
+                                    &mut state,
+                                    scene.as_ref(),
+                                    row,
+                                    false,
+                                );
+                            }
+                        }
+                        StationAction::Remove { row } => {
+                            if let Some(nav) = nav.as_ref() {
+                                message = fit_or_remove(
+                                    nav,
+                                    &cache,
+                                    &mut state,
+                                    scene.as_ref(),
+                                    row,
+                                    true,
+                                );
+                            }
                         }
                         StationAction::Trade { buy, row } => {
                             let station = nav.as_ref().and_then(|nav| nav.docked);
@@ -3074,6 +3159,64 @@ fn run() -> Result<(), String> {
                                 capacity: status.cargo_capacity,
                             });
                         }
+                    } else if dock.screen == StationScreen::Upgrades {
+                        let tech_level = nav.tech_level(&cache).unwrap_or(0);
+                        let upgrades =
+                            station::upgrades(tech_level, &state.loadout, &state.combat.lasers);
+                        let visible = station::layout(StationScreen::Upgrades).visible();
+                        dock.selected = dock.selected.min(upgrades.len().saturating_sub(1));
+                        dock.scroll = dock.scroll.min(upgrades.len().saturating_sub(visible));
+                        let rows = upgrades
+                            .iter()
+                            .skip(dock.scroll)
+                            .map(|row| ffe_rs::station::DockRow {
+                                main: row.name.to_owned(),
+                                detail: None,
+                                columns: vec![
+                                    (station::UPGRADE_PRICE_X, format!("{}", row.price), 0x7d),
+                                    (station::UPGRADE_REMOVAL_X, format!("{}", row.removal), 0x7d),
+                                    (station::UPGRADE_MASS_X, format!("{}t", row.mass), 0x7d),
+                                ],
+                                fitted: row.fitted,
+                            })
+                            .collect();
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title: station::title(dock.screen, &station_name),
+                            rows,
+                            status,
+                            scroll: dock.scroll,
+                            selected: dock.selected,
+                            total: upgrades.len(),
+                        });
+                    } else if dock.screen == StationScreen::Repairs {
+                        let repairs = station_repairs(&state, scene.as_ref());
+                        let visible = station::layout(StationScreen::Repairs).visible();
+                        dock.selected = dock.selected.min(repairs.len().saturating_sub(1));
+                        dock.scroll = dock.scroll.min(repairs.len().saturating_sub(visible));
+                        let rows = repairs
+                            .iter()
+                            .skip(dock.scroll)
+                            .map(|row| ffe_rs::station::DockRow {
+                                main: row.title.clone(),
+                                detail: None,
+                                columns: vec![(
+                                    station::REPAIR_COST_X,
+                                    format!("${}", row.cost),
+                                    0x7d,
+                                )],
+                                fitted: false,
+                            })
+                            .collect();
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title: station::title(dock.screen, &station_name),
+                            rows,
+                            status,
+                            scroll: dock.scroll,
+                            selected: dock.selected,
+                            total: repairs.len(),
+                        });
                     } else {
                         let entries: &[station::Entry] = match dock.screen {
                             StationScreen::Services => &station::SERVICES,
@@ -3087,6 +3230,7 @@ fn run() -> Result<(), String> {
                                 main: entry.title.to_owned(),
                                 detail: entry.detail.map(str::to_owned),
                                 columns: Vec::new(),
+                                fitted: false,
                             })
                             .collect();
                         screen.dock = Some(ffe_rs::station::DockView {
@@ -3650,6 +3794,74 @@ fn axes_looking_at(from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
         forward[0] * right[1] - forward[1] * right[0],
     ];
     [right, up, forward]
+}
+
+/// F386's Fit/Remove on the Upgrades row `row`, against the current starport
+/// tech level (`DATA_008995`), the ship's gun/missile mounts and its free hold.
+/// Returns the console line F387/F388/F389 (or the refusal) would print.
+fn fit_or_remove(
+    nav: &Navigator,
+    cache: &ffe_content::VerifiedCache,
+    state: &mut Flight,
+    scene: Option<&ModelViewer>,
+    row: usize,
+    remove: bool,
+) -> String {
+    let tech_level = nav.tech_level(cache).unwrap_or(0);
+    let rows = station::upgrades(tech_level, &state.loadout, &state.combat.lasers);
+    let Some(entry) = rows.get(row).copied() else {
+        return "No such equipment.".to_owned();
+    };
+    let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
+    let used: i32 = state.hold.iter().map(|tonnes| i32::from(*tonnes)).sum();
+    let limits = Limits {
+        mounts: stats.map_or(4, |stats| {
+            usize::try_from(stats.gun_mounts.max(0)).unwrap_or(0)
+        }),
+        pylons: stats.map_or(10, |stats| usize::from(stats.missiles)),
+        free_space: nav.cargo_space(cache, state.ship) - used,
+    };
+    let result = if remove {
+        outfitting::remove(
+            entry.index,
+            tech_level,
+            &mut state.loadout,
+            &mut state.combat,
+            &mut state.credits,
+        )
+    } else {
+        outfitting::fit(
+            entry.index,
+            tech_level,
+            &mut state.loadout,
+            &mut state.combat,
+            &mut state.credits,
+            limits,
+        )
+    };
+    result.unwrap_or_else(|why| why)
+}
+
+/// F444's three service rows for the player's ship: the statistics' mass, the
+/// drive byte (`ship+0xd0`) and the stored service days. The date-only form is
+/// what the 0x9816/0x9817 templates print.
+fn station_repairs(state: &Flight, scene: Option<&ModelViewer>) -> Vec<station::RepairRow> {
+    let mass = scene
+        .and_then(|scene| scene.ship_stats(state.ship))
+        .map_or(0, |stats| u32::from(stats.mass));
+    let date = |day: u32| {
+        ffe_rs::galaxy_map::date_text(f64::from(day) * 86_400.0)
+            .split(' ')
+            .next()
+            .unwrap_or("")
+            .to_owned()
+    };
+    station::repairs(
+        mass,
+        state.combat.drive != 0,
+        &date(state.service_days[0]),
+        &date(state.service_days[1]),
+    )
 }
 
 fn main() {

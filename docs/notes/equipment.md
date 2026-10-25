@@ -3,9 +3,12 @@
 Status (2026-10-25): the equipment table and the fitted-loadout words are ported
 to `ffe-core`/`ffe-rs`; the HUD, the F991 view row, the F1116/F1120 lamps and
 the engines-off equipment page now read real state. The starport Upgrades list
-still has no rows (its screen shell exists, but the station's tech level and the
-`F392` Fit/Remove actions are not wired), so `equipment::outfitting` is the
-data/availability API for that follow-up.
+is wired: `galaxy::Tables::tech_level` supplies F869's `DATA_008995`,
+`station::upgrades` builds F383's rows through `equipment::outfitting`, and
+`ffe-rs::outfitting::fit`/`remove` implement F386's Fit/Remove actions for
+general equipment, cabins, lasers, shield generators and missiles. Drives and
+mining machines are listed (F383 offers them) but have no port state, so their
+buttons report that rather than inventing a drive word.
 
 Source: `jjffe-master/ffe.asm` / `ffedat.asm` (DOS-era recovered asm; JJFFE 2.8a7
 is the reference build). No cache change: the table is static game data with no
@@ -71,11 +74,13 @@ so bits 0..13 and 17..24/26..31 are used; bits 14, 15 and 16 have no record
   Wt`); the fitted flag is `F392`/`F393`.
 - Rust: `equipment::{outfitting, fit_price, removal_price, tech_multiplier}`.
 
-The missing station piece is the station's tech level: `DATA_008995` comes from
-`F869`/the starport data, which the port does not generate. Only when that (or a
-placeholder the owner approves) exists can `station::Screen::Upgrades` build
-`DockRow`s from `outfitting`; the screen today correctly draws its empty shell
-rather than inventing rows.
+The station piece is now wired: `F869` returns the system record's byte `+5`,
+`F622` stores it in `DATA_008995`, and `galaxy::Details::tech_level()` /
+`galaxy::Tables::tech_level()` expose it. `station::upgrades` maps
+`equipment::outfitting` rows to the 0x98f5 list, and `outfitting::fit`/`remove`
+apply F386's cash (`F387`/`F388`) and space checks plus the category handlers
+(F390/F393, F399/F400, F428, F413/F415, F418/F421). Drives and mining machines
+are shown but not modelled.
 
 ## The flags the console reads
 
@@ -175,8 +180,19 @@ already cached in v20; the cache stays **v26** and no asset count changes.
 - `crates/ffe-rs/tests/combat.rs`: new/old save round-trips, F953 damage order,
   destruction, the no-generator new-game state, and a fitted generator keeping
   existing damage.
+- `crates/ffe-core/tests/galaxy.rs`: the record's `+5` is `DATA_008995` and the
+  procedural classes read the records before `DATA_007110`.
+- `crates/ffe-rs/src/outfitting.rs`: F387/F388's ten-times price and refund,
+  the general/cabin/laser/shield/missile handlers, cash/space refusals, mount
+  and pylon limits, missing-item messages and the unmodelled drive/mining
+  categories.
+- `crates/ffe-rs/src/station.rs`: F383's available rows at tech 0xfd/0x16,
+  fitted flags and the Upgrades Fit/Remove hot areas.
 - `crates/ffe-rs/tests/console_table.rs`: F991 equipment icons, F1120 lamps from
   the dword bits, and F998's two real missile icons.
+- `crates/ffe-rs/tests/station_view.rs` (ignored, needs `FFE_WORLD_CACHE`):
+  the Upgrades, buy-a-laser, empty-ships and repairs frames and the current
+  system's tech level.
 - `crates/ffe-rs/tests/dashboard_view.rs` (ignored, needs
   `FFE_WORLD_CACHE`): `dashboard-equipment-empty.ppm` vs
   `dashboard-equipment-newgame.ppm` checks the two icon rectangles at

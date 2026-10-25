@@ -66,6 +66,11 @@ pub struct Flight {
     /// loadout in `main`.
     #[serde(default)]
     pub loadout: ffe_core::equipment::Loadout,
+    /// The drive and equipment service dates (`DATA_008926`/`DATA_008925`) as
+    /// game days, shown by F444's "last:" rows. Saves from before the repairs
+    /// screen load with day 0, the new game's 1-Jan-3250.
+    #[serde(default)]
+    pub service_days: [u32; 2],
 }
 
 fn default_ship() -> u32 {
@@ -102,6 +107,7 @@ impl Default for Flight {
             shields: [0; 2],
             hull: [0; 2],
             loadout: ffe_core::equipment::Loadout::default(),
+            service_days: [0; 2],
         }
     }
 }

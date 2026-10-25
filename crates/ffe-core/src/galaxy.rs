@@ -45,10 +45,21 @@ pub struct Tables<'a> {
 pub struct Details {
     /// The dwords at `+46` and `+50`.
     pub words: [u32; 2],
-    /// The bytes at `+5..+9`.
+    /// The bytes at `+5..+9`, which `F622` copies to `DATA_008995`, `+0x1b6`,
+    /// `+0x1b7`, `+0x1b8` and the byte before the allegiance. `bytes[0]` is the
+    /// starport tech level (`DATA_008995`) `F383` compares with each equipment
+    /// record's `+0x13`.
     pub bytes: [u32; 5],
     /// The word at `+10` (the allegiance in its upper ten bits).
     pub allegiance: u32,
+}
+
+impl Details {
+    /// `DATA_008995`: the starport's technology level, as `F869` copies it from
+    /// the system record's `+5` and `F622` stores for `F383`.
+    pub fn tech_level(&self) -> u16 {
+        self.bytes[0] as u16
+    }
 }
 
 /// What F870 reports: the population and danger bytes, the allegiance word and
@@ -152,6 +163,11 @@ impl<'a> Tables<'a> {
             bytes: std::array::from_fn(|i| u32::from(r[5 + i])),
             allegiance: u32::from(u16::from_le_bytes([r[10], r[11]])),
         }
+    }
+
+    /// `DATA_008995`: the tech level F383 reads for the starport of `code`.
+    pub fn tech_level(&self, code: u32) -> u16 {
+        self.details(code).tech_level()
     }
 
     /// F870: the market parameters of a system.
