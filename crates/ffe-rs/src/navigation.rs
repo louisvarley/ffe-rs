@@ -406,6 +406,16 @@ pub fn distance(from: [i64; 3], to: [i64; 3]) -> f64 {
         .sqrt()
 }
 
+/// A unit vector, for the docking axis.
+fn unit(v: [f64; 3]) -> [f64; 3] {
+    let length = v.iter().map(|c| c * c).sum::<f64>().sqrt();
+    if length < 1e-12 {
+        [0.0, 0.0, 1.0]
+    } else {
+        v.map(|c| c / length)
+    }
+}
+
 /// A body as the collision scan's [`ffe_core::frames::Body`]: `+0x138`/`+0x140`
 /// radii, the Q31 orientation, the class byte and the terrain seed. Its position
 /// is the body's absolute position (the caller passes it as the scan's parent,
@@ -1506,10 +1516,12 @@ impl Navigator {
         let anchors: Vec<Anchor> = self
             .bodies
             .iter()
-            .filter(|body| body.kind.is_place())
-            .map(|body| Anchor {
+            .enumerate()
+            .filter(|(_, body)| body.kind.is_place())
+            .map(|(index, body)| Anchor {
                 position: body.position,
                 radius: body.radius,
+                station: Some(index),
             })
             .collect();
         let clock = clock_words(self.clock);
@@ -1584,7 +1596,15 @@ impl Navigator {
             .filter(|ship| ship.alive())
             .map(|ship| (ship.id, ship.position, ship.axes()))
             .collect();
-        for ship in &mut self.ships {
+        // The station-traffic snapshot of every ship's destination, taken before
+        // the mutable AI pass (the traffic record and the bodies are read here).
+        let stations: Vec<Option<npc::Station>> = self
+            .ships
+            .iter()
+            .map(|ship| self.station_snapshot(ship))
+            .collect();
+        let mut requests = Vec::new();
+        for (ship, station) in self.ships.iter_mut().zip(stations.iter()) {
             let escort = ship.leader.and_then(|id| {
                 let (_, position, axes) = leaders.iter().find(|(leader, _, _)| *leader == id)?;
                 let [right, up, forward] = ship.formation;
@@ -1595,7 +1615,17 @@ impl Navigator {
                             + axes[2][axis] * forward as f64) as i64
                 }))
             });
-            ship.tick(seconds, tics, player, escort);
+            ship.tick_with_station(
+                seconds,
+                tics,
+                player,
+                escort,
+                station.as_ref(),
+                &mut requests,
+            );
+        }
+        for request in requests {
+            self.apply_dock_request(request);
         }
         // The police respond to a wanted player (the port's reconstruction of
         // DATA_008647; F783 clears the alert when the chase ends).
@@ -1627,14 +1657,173 @@ impl Navigator {
                 });
             }
         }
+        // F927's recycle also frees a bay the leaving ship still held.
+        let leaving: Vec<(usize, u32)> = self
+            .ships
+            .iter()
+            .filter(|ship| ship.finished(player) && ship.bay.is_some())
+            .filter_map(|ship| Some((ship.station?, ship.id)))
+            .collect();
+        for (station, ship) in leaving {
+            self.starport(station).release(npc::traffic_id(ship));
+        }
         self.ships.retain(|ship| !ship.finished(player));
-        if self
-            .ship_lock
-            .is_some_and(|id| !self.ships.iter().any(|ship| ship.id == id))
-        {
+        if self.ship_lock.is_some_and(|id| {
+            !self
+                .ships
+                .iter()
+                .any(|ship| ship.id == id && ship.visible())
+        }) {
             self.ship_lock = None;
         }
+        if self.missile_lock.is_some_and(|id| {
+            !self
+                .ships
+                .iter()
+                .any(|ship| ship.id == id && ship.visible())
+        }) {
+            self.missile_lock = None;
+        }
         events
+    }
+
+    /// The station-traffic snapshot for a ship's destination (F745's target, F650's
+    /// bay, F657's clearance and F865's door). `None` when the ship has no station
+    /// or the destination is not a place to dock.
+    fn station_snapshot(&self, ship: &NpcShip) -> Option<npc::Station> {
+        let index = ship.station?;
+        let body = self.bodies.get(index)?;
+        if !body.kind.is_place() {
+            return None;
+        }
+        let id = npc::traffic_id(ship.id);
+        let record = self.traffic.get(&index);
+        let bay = record.and_then(|port| port.bay_of(id));
+        let pad = bay.and_then(|bay| self.pad_point(index, bay));
+        let (front, radius, axis) = match self.port(index) {
+            Some(port) => (port.front, port.radius, port.axis),
+            None => {
+                let radius = body.radius as f64;
+                (0.25 * radius, radius, unit(body.orientation[2]))
+            }
+        };
+        Some(npc::Station {
+            index,
+            position: body.position,
+            axis,
+            front,
+            radius,
+            pad,
+            bay,
+            cleared: record.is_some_and(|port| port.is_docking(id)),
+            closing: record.is_some_and(|port| port.mode == ffe_core::traffic::DOCKING_DONE),
+            door_open: record.is_some_and(|port| port.door == 0),
+        })
+    }
+
+    /// F650's pad point for an open-air starport (`ffe_core::pads`); indoor
+    /// stations have no visible pad, so the traffic uses the slot instead.
+    fn pad_point(&self, index: usize, bay: u16) -> Option<[i64; 3]> {
+        let body = self.bodies.get(index)?;
+        if !body.open_air {
+            return None;
+        }
+        let offset = self
+            .pads
+            .as_ref()?
+            .position(body.model, bay, body.rows, true)
+            .ok()?;
+        Some(std::array::from_fn(|axis| {
+            body.position[axis].wrapping_add(offset[axis])
+        }))
+    }
+
+    /// Apply a ship's station-traffic request to F649-F657's record and tell the
+    /// ship what happened.
+    fn apply_dock_request(&mut self, request: npc::DockRequest) {
+        match request {
+            npc::DockRequest::Request { ship, station } => {
+                let id = npc::traffic_id(ship);
+                let reply = self.starport(station).request_docking(id, false, 0);
+                let pad = match reply {
+                    Reply::Granted(bay) => self.pad_point(station, bay.index),
+                    _ => None,
+                };
+                if let Some(record) = self.ships.iter_mut().find(|record| record.id == ship) {
+                    match reply {
+                        Reply::Granted(bay) => record.begin_approach(bay.index, pad),
+                        Reply::Busy | Reply::Full => record.dock_retry = npc::DOCK_RETRY_SECONDS,
+                        Reply::Fined => {}
+                    }
+                }
+            }
+            npc::DockRequest::Touch { ship, station } => {
+                let id = npc::traffic_id(ship);
+                let touched = self.starport(station).touch(id);
+                let seat = self
+                    .bodies
+                    .get(station)
+                    .map_or([0; 3], |body| body.position);
+                if let Some(record) = self.ships.iter_mut().find(|record| record.id == ship) {
+                    if touched {
+                        record.begin_docked(record.pad.unwrap_or(seat));
+                    } else {
+                        record.touch_failed();
+                    }
+                }
+            }
+            npc::DockRequest::Settle { station, .. } => {
+                // F747 (state 0x20) runs F653 once the docking mode is over;
+                // the bay itself stays allocated.
+                self.starport(station).reset();
+            }
+            npc::DockRequest::Launch { ship, station } => {
+                let id = npc::traffic_id(ship);
+                let granted = self.starport(station).request(id);
+                if let Some(record) = self.ships.iter_mut().find(|record| record.id == ship) {
+                    if granted {
+                        record.state = npc::State::Launch;
+                        record.dock_wait = 0.0;
+                    } else {
+                        record.dock_retry = npc::DOCK_RETRY_SECONDS;
+                    }
+                }
+            }
+            npc::DockRequest::Release { ship, station } => {
+                self.starport(station).release(npc::traffic_id(ship));
+            }
+            npc::DockRequest::ChooseStation { ship, station } => {
+                let next = self.next_place(station);
+                if let Some(record) = self.ships.iter_mut().find(|record| record.id == ship) {
+                    match next {
+                        Some(index) => {
+                            let anchor = self
+                                .bodies
+                                .get(index)
+                                .map_or(record.position, |body| body.position);
+                            record.begin_transit(index, anchor);
+                        }
+                        // F762's F700 returned no starport: F925 removes it.
+                        None => record.escape(),
+                    }
+                }
+            }
+        }
+    }
+
+    /// F761/F762: the next station to trade with. The original draws a random
+    /// one; the port walks the system's places so a trader visits them in turn
+    /// (a single-station system sends it back to the same one).
+    fn next_place(&self, current: usize) -> Option<usize> {
+        let places = place_indices(&self.bodies);
+        if places.is_empty() {
+            return None;
+        }
+        let at = places
+            .iter()
+            .position(|index| *index == current)
+            .unwrap_or(0);
+        Some(places[(at + 1) % places.len()])
     }
 
     /// The player's laser hit on an NPC ship: F953/F942 plus the legal
@@ -1646,6 +1835,8 @@ impl Navigator {
         let was_alive = ship.alive();
         let crime = ship.role.clean() && was_alive;
         let bounty = ship.bounty;
+        let station = ship.station;
+        let held_bay = ship.bay.is_some();
         let result = ship.hit(damage);
         let destroyed = was_alive && !ship.alive();
         if crime {
@@ -1656,6 +1847,12 @@ impl Navigator {
         if self.legal.wanted {
             for ship in &mut self.ships {
                 police |= ship.provoke();
+            }
+        }
+        if destroyed {
+            if let (Some(station), true) = (station, held_bay) {
+                // F788: a destroyed ship releases its bay.
+                self.starport(station).release(npc::traffic_id(id));
             }
         }
         Some(Attack {
@@ -1798,7 +1995,19 @@ impl Navigator {
         for port in self.traffic.values_mut() {
             port.move_door(tics);
             if whole >= 1.0 {
-                port.elapse(whole as u32);
+                // F867: the clearance timed out and F651 freed the bay. An NPC
+                // that was still on its way goes back to transit and asks again.
+                if let Some(released) = port.elapse(whole as u32) {
+                    if released != PLAYER {
+                        if let Some(ship) = self
+                            .ships
+                            .iter_mut()
+                            .find(|ship| npc::traffic_id(ship.id) == released)
+                        {
+                            ship.touch_failed();
+                        }
+                    }
+                }
             }
         }
         let Some(mut sequence) = self.sequence else {

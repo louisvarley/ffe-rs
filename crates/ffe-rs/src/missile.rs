@@ -83,7 +83,7 @@ impl MissileField {
         }
         let targets: Vec<Target> = ships
             .iter()
-            .filter(|ship| ship.alive())
+            .filter(|ship| ship.visible())
             .map(|ship| Target {
                 id: ship.id,
                 position: ship.position,
@@ -173,6 +173,12 @@ mod tests {
             flee: 0.0,
             flash: 0.0,
             death: 0.0,
+            station: None,
+            bay: None,
+            pad: None,
+            dock_timer: 0.0,
+            dock_retry: 0.0,
+            dock_wait: 0.0,
         }
     }
 

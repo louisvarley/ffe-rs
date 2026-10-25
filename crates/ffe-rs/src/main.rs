@@ -1231,7 +1231,7 @@ fn run() -> Result<(), String> {
                             .collect();
                         candidates.extend(nav.ships.iter().enumerate().filter_map(
                             |(index, ship)| {
-                                ship.alive().then_some((
+                                ship.visible().then_some((
                                     body_count + index,
                                     ship.position.map(|v| v as f64 / unit),
                                     ship.radius as f64 / unit,
@@ -2694,7 +2694,7 @@ fn run() -> Result<(), String> {
                                     nav.ships
                                         .iter()
                                         .enumerate()
-                                        .filter(|(_, ship)| ship.alive())
+                                        .filter(|(_, ship)| ship.visible())
                                         .map(|(index, ship)| ship.target(body_count + index)),
                                 );
                                 targets
@@ -2909,6 +2909,7 @@ fn run() -> Result<(), String> {
                 let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
                 nav.ships
                     .iter()
+                    .filter(|ship| ship.visible() || !ship.alive())
                     .map(|ship| ffe_rs::screen::SystemShip {
                         model: ship.model,
                         centre: ship.position.map(|v| v as f64 / unit),
@@ -2976,7 +2977,7 @@ fn run() -> Result<(), String> {
                     }));
                 screen
                     .labels
-                    .extend(nav.ships.iter().filter(|ship| ship.alive()).map(|ship| {
+                    .extend(nav.ships.iter().filter(|ship| ship.visible()).map(|ship| {
                         ffe_rs::screen::BodyLabel {
                             name: ship.name.clone(),
                             centre: ship.position.map(|v| v as f64 / unit),
@@ -3201,7 +3202,7 @@ fn run() -> Result<(), String> {
                         mass: mass(body.model),
                     })
                     .collect();
-                contacts.extend(nav.ships.iter().filter(|ship| ship.alive()).map(|ship| {
+                contacts.extend(nav.ships.iter().filter(|ship| ship.visible()).map(|ship| {
                     ffe_rs::scanner::Contact {
                         position: ship.position,
                         frame: nav.frame(),
