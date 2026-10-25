@@ -2,8 +2,9 @@
 //! `FFE_INTRO_CACHE=<data.bin> cargo test -p ffe-rs --test intro_view -- --ignored`.
 //!
 //! This is a smoke test of the assembled screen, not a pixel oracle: the DOS
-//! executable is not runnable here, and the dynamic upper palette is not ported
-//! (see `docs/notes/intro.md`).
+//! executable is not runnable here. The dynamic upper palette is built by the
+//! model path (`crate::palette`); `palette_reference.rs` compares its intro
+//! entries with the executed original's captured ones.
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::screen::Screen;
 
@@ -37,7 +38,18 @@ fn the_intro_draws_the_model_bitmap_and_credits() {
     screen
         .draw_intro(Some(&scene), ffe_rs::front_end::MODEL_SWITCH, false)
         .unwrap();
-    let first = non_black(&screen);
+    // F961's model-176 background is no longer black, so count what the frame
+    // draws over its clear colour rather than non-black pixels.
+    let background = screen.logical_pixels()[0];
+    let drawn = |screen: &Screen| {
+        screen
+            .logical_pixels()
+            .iter()
+            .take(320 * 200)
+            .filter(|pixel| **pixel != background)
+            .count()
+    };
+    let first = drawn(&screen);
     assert!(
         first > 2_000,
         "first credit/bitmap frame is nearly empty: {first}"
@@ -45,13 +57,13 @@ fn the_intro_draws_the_model_bitmap_and_credits() {
     // The bitmap occupies the bottom rows.
     let bottom = screen.logical_pixels()[320 * 170..320 * 200]
         .iter()
-        .filter(|pixel| **pixel != 0)
+        .filter(|pixel| **pixel != background)
         .count();
     assert!(bottom > 1_000, "the 0x42 strip is missing: {bottom}");
 
     // A mid-credit fly-past renders the ship/model above the strip.
     screen.draw_intro(Some(&scene), 0x181534, false).unwrap();
-    let middle = non_black(&screen);
+    let middle = drawn(&screen);
     assert!(middle > first, "the fly-past did not add pixels");
 
     // The DOS version line appears only when V latched it.

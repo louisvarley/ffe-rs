@@ -159,9 +159,13 @@ do not draw the tunnel.
 - **Starports.** `F275` skips `+0x14c & 0x20`; the port's `Body::kind ==
   Starport` is the same F880 type 0x23. The port does not model a separate
   class flag.
-- **Scanner art vs palette.** The globe/rings are the cached DOS art and the
-  runtime upper palette is not reproduced, so the port's scanner is brighter
-  than the JJFFE frame (the same is true of the HUD text).
+- **Scanner art vs palette.** The globe/rings are the cached DOS art; the
+  contact colours and the art are low-palette indices (all below 128), so the
+  runtime upper palette does not affect the scanner itself. It does affect the
+  view's models/FX: the port builds the same upper palette as the original
+  (`docs/notes/palette.md`) and resolves their 12-bit colours through it. The
+  earlier note that the port's scanner/HUD was brighter than JJFFE described
+  the pre-palette model approximation, not the scanner contacts.
 - **Reference bitmap difference (JJFFE vs DOS).** A `jjffe-smoke --game-frame`
   capture of the original's console differs from the cache's primary 43 by
   small index shifts (e.g. 9 vs 8, 15 vs 9) across the panel, so a pixel-exact

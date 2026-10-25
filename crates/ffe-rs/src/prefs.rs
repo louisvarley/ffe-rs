@@ -107,15 +107,16 @@ pub const MUSIC: [&str; 16] = [
 /// clear colour (`DATA_009222`), and the terrain code mixes the three bytes
 /// into the sky. The five settings only change the blue component.
 ///
-/// The original quantises the request to its runtime 256-colour palette; the
-/// captured reference frame's default ("Light Blue", requested index 4) is
-/// palette entry 182, six-bit `(3, 3, 19)` = `#0c0c4c`. The port has no runtime
-/// upper palette, so it uses that captured entry for the default and scales its
-/// six-bit components linearly with the requested index for the other four
-/// settings: each component is rounded to the nearest six-bit value and then
-/// expanded with `v * 255 / 63`, which reproduces the capture's `#0c0c4c` and
-/// makes index 0 exactly `#000000`. This is the quantisation recorded in
-/// `docs/DEVIATIONS.md` EXP-013.
+/// The original quantises the request to its runtime 256-colour palette (the
+/// upper half is rebuilt by `F1330`; see [`crate::palette`]). The captured
+/// reference frame's default ("Light Blue", requested index 4) is palette entry
+/// 182, six-bit `(3, 3, 19)` = `#0c0c4c`. The owner decision (EXP-013) keeps
+/// that captured entry for the default and derives the other four settings
+/// linearly from it rather than from the port's own scene-dependent build:
+/// each component is rounded to the nearest six-bit value and then expanded with
+/// `v * 255 / 63`, which reproduces the capture's `#0c0c4c` and makes index 0
+/// exactly `#000000`. The intro's own `F1575` value is resolved through the
+/// runtime palette separately (`MODEL_SECOND_BACKGROUND`).
 pub fn space_colour_rgb(index: usize) -> u32 {
     /// The captured default: palette entry 182, six-bit `(3, 3, 19)`.
     const LIGHT_BLUE: [u32; 3] = [3, 3, 19];

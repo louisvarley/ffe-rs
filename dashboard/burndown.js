@@ -93,7 +93,7 @@ window.FFE_BURNDOWN = {
         { id: "v0.48-12", title: "Polygon spans (F1560/F1613) and F1714 off-view outlines", status: "done", version: "v0.48i" },
         { id: "v0.48-13", title: "Fix the verify-assets and child-model oracles broken since v0.48b", status: "done", version: "v0.48j" },
         { id: "v0.48-14", title: "Pixel-level whole-frame oracle (framebuffer mode, station and three ships)", status: "todo" },
-        { id: "v0.48-15", title: "Upper runtime palette", status: "todo" },
+        { id: "v0.48-15", title: "Upper runtime palette", status: "done", version: "v0.71" },
         { id: "v0.48-16", title: "Sprites, particles and circles (F1609-F1612)", status: "todo" },
         { id: "v0.48-17", title: "Remaining 17 of 466 model slots and the CD 1.01 census", status: "todo" },
         { id: "v0.48-18", title: "A planet in the flight scenario", status: "done", version: "v0.48j" },
@@ -180,7 +180,7 @@ window.FFE_BURNDOWN = {
         { id: "ui-7", title: "Intro and new-game flow", status: "done", version: "v0.64" },
         { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
         { id: "ui-9", title: "Options, key bindings screen", status: "done", version: "v0.48p" },
-        { id: "ui-10", title: "Original palette effects and screen transitions", status: "todo" },
+        { id: "ui-10", title: "Original palette effects and screen transitions", status: "in-progress", version: "v0.71" },
         { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "in-progress", version: "v0.68" },
         { id: "ui-12", title: "Hit particles, explosions and debris (F939/F942/F926)", status: "done", version: "v0.66" }
       ]
@@ -560,6 +560,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 68,
       note: "Software mixer merged (v0.70): ffe-audio decodes the cached WAVs, keeps the 40-entry sample table and 16 voices with F1908's reuse/fixed-voice/laser1-steal rules, bakes loops, pitch-resamples and applies F1907's centibel curve; a WinMM waveOut sink with a headless fallback makes every wired cue audible, and GameAudio::from_cache/system_with_effects connect it to the playable. The intro now plays song 0 (F919/F1904/leave_front_end, music_on respected) and cache v28 adds base:music/qqfront (1,797 assets / 1,798 ZIP entries) with a v27 fallback. One item added and completed (audio-5); audio-1 is done and audio-4 stays in progress. Remaining: continuous station/engine beds (F1910/F1908), positional audio (F1759 is unused by DOS), .mid overrides, caching the other 16 songs (owner decision) and a device picker."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 67,
+      note: "Runtime palette merged (v0.71): ffe_rs::palette implements F1326/F1327/F1328/F1329/F1330/F1331 (median-cut 64 boxes, odd representatives, two banks, fixed 128-entry low palette and map, bank toggle), textures/model_viewer register and resolve the entries, and the intro uses F1575's (0,0,0)/(0,0,4) starts (the executed switch frame's single (1,1,17) entry is reproduced). EXP-013 is preserved: drawn space stays #0c0c4c, Black #000000. palette_reference (5) and the intro/scanner/galaxy-map/planet suites pass on v28. One item completed (v0.48-15); ui-10 stays in progress. Remaining: terrain queue colours are not pre-registered, one build per model render, and the intro backdrop's slower ramp."
     }
   ]
 };

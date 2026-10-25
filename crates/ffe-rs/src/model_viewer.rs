@@ -209,6 +209,10 @@ pub struct ModelViewer {
     /// The small-dot size tables (cache v25) and the ambient colour their halos mix with.
     dots: Option<DotTables>,
     sky: [u8; 3],
+    /// The background colour word registered with the runtime palette before a
+    /// scene (F1330's first `F1326` call on `DATA_009217`). `Screen` sets it
+    /// from the space/haze colour; the intro from F961's F1575 argument.
+    background: Cell<u16>,
     /// The galaxy tables and system strings (cache v21, v22) that name a star's label.
     names: Option<(Vec<u8>, Vec<u8>)>,
 }
@@ -521,6 +525,7 @@ impl ModelViewer {
             stars: None,
             dots: None,
             sky: [0; 3],
+            background: Cell::new(0),
             names: None,
         })
     }
@@ -850,6 +855,40 @@ impl ModelViewer {
         self.sky = colour;
     }
 
+    /// The background colour word `F1330` registers before building
+    /// (`F1575`/`F1326` on `DATA_009217`).
+    pub fn set_background(&self, colour: u16) {
+        self.background.set(colour & 0xfff);
+    }
+
+    /// The background word last set.
+    pub fn background(&self) -> u16 {
+        self.background.get()
+    }
+
+    /// Register the background and build the palette; for a frame with no
+    /// model (the intro's cleared loop point).
+    pub fn prepare_palette(&self) {
+        self.textures.register_colour(self.background.get());
+        self.textures.build_palette();
+    }
+
+    /// The resolved RGB of a colour word through the runtime upper palette
+    /// (or the low palette when the fixed map names it).
+    pub fn palette_rgb(&self, colour: u16) -> Option<[u8; 3]> {
+        self.textures.palette_rgb(colour)
+    }
+
+    /// One palette entry by video index (0..255), expanded by four.
+    pub fn palette_entry(&self, index: u8) -> Option<[u8; 3]> {
+        self.textures.palette_entry(index)
+    }
+
+    /// The current 128 upper entries as six-bit RGB (bank order).
+    pub fn palette_upper6(&self) -> Option<Vec<[u8; 3]>> {
+        self.textures.palette_upper6()
+    }
+
     /// Begin a frame's scene: F1052 sets `DATA_008814` to 0 before F1536 draws
     /// the objects, and F1877 sets it again for a planet whose haze holds the eye.
     pub fn clear_haze_sky(&self) {
@@ -1104,6 +1143,11 @@ impl ModelViewer {
                 4096,
             )?,
         };
+        // F1330 runs after the scene has registered its colours and before it
+        // draws. Every model render receives its own build; the cube and the
+        // two banks persist on the viewer, as in the original.
+        self.register_execution_colours(&result);
+        self.prepare_palette();
         let mut frame = Frame {
             children_error,
             jitter: vertices.jitter(),
@@ -1321,6 +1365,93 @@ impl ModelViewer {
                 }
             }
         }
+    }
+
+    /// Register every colour the executed primitives resolve to, before the
+    /// build. The original calls F1326 while queueing its fills, i.e. after
+    /// executing the model and before F1330 draws with the palette.
+    fn register_execution_colours(&self, result: &Execution) {
+        let descriptors = self.textures.descriptors();
+        for primitive in &result.ordered {
+            match primitive {
+                Primitive::Face(emission) => {
+                    let textured = material(emission.face.material).texture != 0;
+                    let colour = emission.context.colour;
+                    let rgb = match (textured, descriptors) {
+                        (true, Some(table)) => {
+                            flat_colour(emission.face.material, colour, emission.shade, table).ok()
+                        }
+                        (true, None) => Some(std::array::from_fn(|i| 5 + emission.shade[i])),
+                        (false, _) => Some(resolve_colour(
+                            emission.face.material,
+                            colour,
+                            emission.shade,
+                        )),
+                    };
+                    if let Some(rgb) = rgb {
+                        self.register_frame_colour(rgb);
+                    }
+                    if textured {
+                        if let Some(table) = descriptors {
+                            if let Ok(entry) = textured_colours(
+                                emission.face.material,
+                                colour,
+                                emission.shade,
+                                table,
+                            ) {
+                                for slot in entry.colours {
+                                    self.textures.register_colour(slot);
+                                }
+                            }
+                        }
+                    }
+                }
+                Primitive::Line(line) => {
+                    self.register_frame_colour(resolve_colour(
+                        line.material,
+                        line.context.colour,
+                        [0; 3],
+                    ));
+                }
+                Primitive::Point(point) => {
+                    self.register_frame_colour(resolve_colour(
+                        point.material,
+                        point.context.colour,
+                        [0; 3],
+                    ));
+                }
+                Primitive::Spline(spline) => self.register_frame_colour(spline.colour),
+                Primitive::Polygon(polygon) => {
+                    let colour = if material(polygon.polygon.material).texture != 0 {
+                        [5; 3]
+                    } else {
+                        polygon.colour
+                    };
+                    self.register_frame_colour(colour);
+                }
+                Primitive::Thruster(entry) => match &entry.shape {
+                    ThrusterShape::Glow { colours, .. } => {
+                        for colour in colours {
+                            self.register_frame_colour(*colour);
+                        }
+                    }
+                    ThrusterShape::Line { colour, .. } => {
+                        let colour = match descriptors {
+                            Some(table) => {
+                                line_colour(entry.material, *colour, table).unwrap_or(*colour)
+                            }
+                            None => *colour,
+                        };
+                        self.register_frame_colour(colour);
+                    }
+                },
+                Primitive::Label(_) | Primitive::SystemLabel(_) => {}
+            }
+        }
+    }
+
+    fn register_frame_colour(&self, colour: [u8; 3]) {
+        self.textures.register_colour(pack(colour) & 0xfff);
     }
 
     /// Turn one executed stream's render-ordered primitives into shapes.

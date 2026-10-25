@@ -485,6 +485,7 @@ static int state_combat_mode;
 static int missile_probe_mode;
 /* --game-frame <frames> <key> [<key>...]: the real game from the new game on, keys sent by scan code every 40 frames after frame 200, the 320x200 frame and palette written to game-frame.bin at the end. */
 static int game_frame_mode;
+static int no_intro_start;
 static unsigned long game_keys[16], game_key_count, game_key_next, game_key_frame = 200;
 
 static unsigned long state_u32(size_t offset)
@@ -596,7 +597,7 @@ long InputKeybGetLastKey(void)
         sent_accept = 1;
         return 0x15;
     }
-    if ((state_mode || game_frame_mode) && !sent_start && frames >= 160) {
+    if ((state_mode || game_frame_mode) && !sent_start && !no_intro_start && frames >= 160) {
         sent_start = 1;
         return 0x02; /* Intro choice 1, after the 100-tick splash lockout. */
     }
@@ -619,7 +620,10 @@ void TimerFrameUpdate(void)
     if (vector_mode) return;
     if (game_frame_mode) {
         /* a frame hash only: the trace stays small */
-        printf("{\"frame\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+        if (no_intro_start)
+            printf("{\"frame\":%lu,\"tics\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, state_u32(0), (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+        else
+            printf("{\"frame\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, (unsigned long long)fingerprint(pixels, sizeof(pixels)));
     } else if (missile_probe_mode) {
         /* F1096/F941 from the executed game: set the pylon word and the combat
            target, call the launch, then print the object slots' model/control/
@@ -4962,6 +4966,11 @@ static int intro_vectors(void)
     return 0;
 }
 
+/* Intro live oracle (--intro-live <frames>): the real boot and intro loop
+   (F961/F962/F1330/F1331) with no start key. The final 320x200 buffer and the
+   256-entry palette are written to game-frame.bin; each frame line carries the
+   game tics. */
+
 
 /* Galaxy sector oracle (--sectors): the original F841 (a sector's stars, with the F861 generator
    and the hand-made sectors), F853 (the star count at several detail levels), F856 (a star's
@@ -5628,6 +5637,12 @@ int main(int argc, char **argv)
         game_frame_mode = 1; limit = strtoul(argv[2], 0, 0);
         for (k = 3; k < argc && game_key_count < 16; ++k) game_keys[game_key_count++] = strtoul(argv[k], 0, 0);
         fprintf(stderr, "JJFFE game-frame-v1: the real game from the new game, scripted keys, final 320x200 frame and palette in game-frame.bin.\n");
+        asmmain(0, NULL);
+        return 2;
+    }
+    if (argc == 3 && !strcmp(argv[1], "--intro-live")) {
+        game_frame_mode = 1; no_intro_start = 1; limit = strtoul(argv[2], 0, 0);
+        fprintf(stderr, "JJFFE intro-live-v1: the real boot and intro loop (F961/F962/F1330), no start key, final 320x200 frame and palette in game-frame.bin.\n");
         asmmain(0, NULL);
         return 2;
     }

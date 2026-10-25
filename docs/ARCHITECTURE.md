@@ -15,8 +15,10 @@ presentation in `screen`, and minifb window/input/fixed-step scheduling in `main
 V0.2 adds `indexed` with original proportional glyph masks/advances and
 bounds-safe indexed blits. `screen` reads cabin0, main font, low palette and
 console panel via `ffe-content`, composes a 320x200 logical frame and presents
-nearest-scaled 4:3 output. Cabin RGB and low-palette content still compose in RGB;
-this is not the complete original dynamic-palette pipeline.
+nearest-scaled 4:3 output. Cabin RGB and low-palette content compose in RGB;
+the original runtime upper palette (`F1326`/`F1327`/`F1330`/`F1331`) is built
+by `palette` and resolves the model/scene colours to RGB
+(`docs/notes/palette.md`).
 No reference runtime is linked.
 V0.3 adds `model_lab`: two imported station vertex programs are evaluated by
 the pure integer `ffe-core::model`, then shown as points by a separate diagnostic

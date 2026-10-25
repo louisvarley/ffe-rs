@@ -110,7 +110,7 @@ ECM.
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 142 items, 74 done and 68 left on
+  in `burndown.js`; 14 milestones, 142 items, 75 done and 67 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -144,8 +144,8 @@ What is *not* done is presentation and gameplay, in this order of readiness:
    flat, line and curve rasterisers are now the original's; F1876's patch
    emission (quads) is the remaining piece, before a planet can appear in the
    flight scenario. **This is the current milestone step.**
-2. The whole-frame pixel oracle (a framebuffer mode in the reference) and the
-   runtime upper palette; sprites, particles beyond the dot path, and circles.
+2. The whole-frame pixel oracle (a framebuffer mode in the reference); sprites,
+   particles beyond the dot path, and circles.
 3. The gameplay slice itself: combat, missions, starport services, planet
    surfaces and landing, lighting, saves, audio and the remaining systems work
    (see `dashboard/`).
@@ -268,14 +268,15 @@ capture produced by two repeat runs of the local reference.
 | v0.68 surface landing and landed view | `ffe_core::traffic` (0x32/0x34, `Takeoff::from_landed`), `Navigator::{land, landed_state, landing_frame, begin_surface_launch}`, `OriginalFlight::settle_landing`, `Screen` surface sky/landed view, `verify-surface.py` | `takeoff.rs` (6), `planet_view.rs` (19, ignored), `verify-surface.py` in `verify-all.py` | `verify-surface.py`: `sky_matches: true`, header_close 0.9934, view coverage 0.589 | — | F1021's rough touch drives 0x32 → F1047's 0x34; the starport 0x2e/0x30 states, F1050/F1054 landed view and F1877's haze sky (stars suppressed) draw, and `L` climbs again through 0x24 → 0x26 → 0x00. The `+0x138` collision vs `+0x140` drawn radius can show space where the original shows ground; pad landing from flight is not routed to 0x2e/0x30; 0x30 shows services (EXP-014); the landed state is not saved; surface depth/fills remain; `docs/NAVIGATION.md` |
 | v0.69 deterministic reference gate and new oracles | `verify-world.py` name masking, `world`/`world-linux` split, `verify-all.py` PASS/FAIL/SKIP + `--list`/`--only`/timeouts, new `verify-{combat,ship-types,npc,dashboard,takeoff,prefs}.py`, `npc_reference.rs`, F635 slot-0x3 fix, `tools/reference/README.md` | `npc_reference.rs` (1, ignored), 55-entry oracle suite | **54 PASS, 1 SKIP, 0 FAIL** (Windows; `world-linux` skips `--sysgen`/`--surface-draw`); `ship-types` trace `ae421da6…` | — | the Windows `--worldgen` repeatability failure is fixed by masking only the object-name ranges F877/F878 build from an uninitialised byte; every other byte is still compared. New stream oracles cover combat's executed loadout/hitscan/pixels, F635's table (slot 0x3 fix), NPC, dashboard, takeoff and prefs. Remaining gaps: F688's spawn sequence, F635 `population < 4`, pinned (not frame) HUD/NPC/takeoff/prefs, and `galaxy-map` as the only frame-level comparison; `tools/reference/README.md` |
 | v0.70 software mixer, WinMM sink, intro theme, cache v28 | `ffe-audio::mixer` (WAV decode, 40 samples, 16 voices, F1908 reuse/fixed/laser1 steal, baked loops, pitch, F1907 centibels), `sink`/`waveout`, `GameAudio::from_cache`/`system_with_effects`, intro song 0 (`music_on`), cache v28 `base:music/qqfront` | `ffe-audio` (3), `sound_mixer.rs` (3), `sound_cues` (2), `front_end` (9); 1,797 assets / 1,798 ZIP entries | 55-entry suite: **54 PASS, 1 SKIP, 0 FAIL** against v28 | — | every wired cue is audible through the WinMM `waveOut` sink with a headless fallback; the intro plays F919/F1904's song 0 and stops on `leave_front_end`; v27 remains loadable and v28 is preferred. Continuous beds (F1910/F1908), positional audio (F1759 unused by DOS), `.mid` overrides, caching the other 16 songs and a device picker remain; `docs/notes/sound.md`/`sound-cues.md` |
+| v0.71 faithful runtime palette | `ffe_rs::palette` (F1326/F1327/F1328/F1329/F1330/F1331: median-cut 64 boxes, odd representatives, two banks, fixed 128 low palette/map, bank toggle), `textures`/`model_viewer` registration/resolve, intro F1575 colours, `palette_reference.rs` | `palette_reference.rs` (5, ignored), palette unit tests; intro/scanner/galaxy-map/planet cached suites | `--palette` probe: intro switch frame upper entry (1,1,17); frame comparison in the cached test | — | the original's dynamic upper palette now builds the 64 median-cut boxes and resolves textured/model colours through it; the intro reproduces its single upper entry at the model switch. EXP-013 preserved: the drawn space colour is still the captured `#0c0c4c` (Black `#000000`). Terrain queue colours are not pre-registered, one build per model render, and the intro backdrop ramps more slowly than the original's; `docs/notes/palette.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 599 `#[test]` functions total; 137 are `#[ignore]`
+  `cargo clippy -D warnings`. 609 `#[test]` functions total; 142 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **461 runnable synthetic tests** (462 on Linux).
+  **466 runnable synthetic tests** (467 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
@@ -344,9 +345,9 @@ progress commit.
 **Goal.** The F6 viewer and the flight view draw every primitive the executor
 queues, with the original's own rasterisers, verified at the pixel level.
 Labels, 3D text, lines, curves, flat faces and polygon spans now draw with the
-original's rasterisers; curved surfaces (F1876) and the runtime upper palette
-remain, then the whole-frame pixel oracle. Gameplay work beyond the current
-system slice is tracked in `dashboard/`.
+original's rasterisers; curved surfaces (F1876) remain, then the whole-frame
+pixel oracle. The runtime upper palette is ported (`docs/notes/palette.md`).
+Gameplay work beyond the current system slice is tracked in `dashboard/`.
 
 **Work, in order.** Each step lands separately with its notes file, synthetic
 tests and an oracle, as the earlier milestones did.

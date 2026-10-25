@@ -4,6 +4,32 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Faithful runtime palette merged (v0.71)
+
+- Merged `palette` (fe4aa1d): `ffe_rs::palette` implements the original's
+  runtime upper palette (F1326/F1327/F1328/F1329/F1330/F1331): the 64-box
+  median cut with odd representatives, the two banks, the fixed 128-entry low
+  palette and its fixed map, and the bank toggle. `textures.rs` and
+  `model_viewer.rs` register and resolve upper-palette entries, so textured and
+  model colours now go through it; the intro uses its own F1575 start colours
+  (`(0,0,0)` for model 177, `(0,0,4)` for model 176) and reproduces the
+  executed switch frame's single upper entry (six-bit `(1,1,17)`, `#040444`).
+- **EXP-013 preserved:** the drawn space colour stays the captured `#0c0c4c`
+  and the Black option `#000000`; the palette path does not override the
+  prefs sky.
+- Conflict: `docs/notes/intro.md` (the old "dynamic upper palette not ported"
+  text vs the new section); combined, keeping the music/model-176 notes.
+- Tests: `palette_reference --ignored` (5), intro (2), scanner (2),
+  galaxy-map (2) and `planet_view` (19) cached suites, plus the workspace,
+  clippy and fmt. Cache v28 unchanged.
+- **Owner decisions/remaining:** terrain queue colours are not pre-registered
+  (the queue's colours resolve at draw time), one palette build per model
+  render, and the intro backdrop's missing planet/asteroid scene makes the
+  upper palette ramp more slowly than the original's (`docs/notes/palette.md`
+  §4).
+
+---
+
 ## 2026-10-25 - Software mixer, WinMM sink, intro theme and cache v28 (v0.70)
 
 - Merged `audiomix` (638f32a): `ffe-audio::mixer` decodes the cached WAVs,

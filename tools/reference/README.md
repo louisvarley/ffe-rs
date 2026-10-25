@@ -99,6 +99,7 @@ checkout.
 | `market` (`verify-market.py`) | F619/F620's price and stock formulas | PASS |
 | `lift` (`verify-lift.py`) | the docking/launch lift scenes | PASS |
 | `intro` (`verify-intro.py`) | F961/F962, the F829/F998/F994 start and the new game | PASS |
+| `intro-palette` (`--intro-live <frames>`) | the real boot/intro loop (F961/F962/F1330/F1331) with no start key: each frame's tics, the upper palette it builds, and the final 320x200 frame + palette (`game-frame.bin`) | local evidence, no verifier |
 | `collide` (`verify-collide.py`) | F569/F570/F575/F578's contacts (4,096 cases) | PASS |
 | `world-tick` (`verify-world-tick.py`) | a whole F1041 player tick in a seven-body world (4,096 cases, 584 contacts) | PASS |
 | `sectors` (`verify-sectors.py`) | F868's sector lookup and grid | PASS |

@@ -406,9 +406,9 @@ The main font bytes are identical in both releases and match concatenated
 JJFFE `DATA_007750`/`DATA_007751`. Rust glyph pixels/advances match executed
 F1598/F1597 in 696 cases; masked/opaque clipping matches F1623 in 28 cases.
 The low palette expands by left shift 2 (max 252), not by normalizing to 255.
-Cabin palettes are separate 8-bit colours. No guessed runtime upper palette is
-used. RGB composition is still a development presentation boundary, not a
-complete original dynamic-palette implementation.
+Cabin palettes are separate 8-bit colours. The runtime upper palette is built
+from the fixed request map and the executed scene (`ffe_rs::palette`), not
+guessed; RGB composition remains the presentation boundary.
 
 The bounded vertex interpreter lives in `ffe-core::model`; no I/O or floats.
 Supported operations include literal/reflected pairs, negation, midpoint,
