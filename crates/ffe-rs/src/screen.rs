@@ -2134,6 +2134,31 @@ impl Screen {
         }
     }
 
+    /// Greedy word wrap at `width` logical pixels, using the same font metrics
+    /// F1398 uses. A word longer than the line is kept whole (the original's
+    /// wrap does the same).
+    fn wrap_text(&self, message: &str, width: i32) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut current = String::new();
+        for word in message.split_whitespace() {
+            if current.is_empty() {
+                current.push_str(word);
+            } else {
+                let candidate = format!("{current} {word}");
+                if self.font.width(&candidate).unwrap_or(0) <= usize::try_from(width).unwrap_or(0) {
+                    current = candidate;
+                } else {
+                    lines.push(std::mem::take(&mut current));
+                    current.push_str(word);
+                }
+            }
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+        lines
+    }
+
     /// The market screen as F536/F538 draw it: the stockmarket screen's column
     /// header at y 2, thirteen ten-pixel rows from y 15 (the Buy and Sell
     /// buttons at x 124 and 136), and the original's cargo/cash/cabins line.
@@ -2211,12 +2236,25 @@ impl Screen {
                     icon.blit_rgb(&mut self.frame, &palette, x, y);
                 }
             }
-            self.text(layout.entry_x as usize, (y + 1) as usize, &row.main, 0x7d);
-            if let Some(detail) = &row.detail {
-                self.text(layout.entry_x as usize, (y + 11) as usize, detail, 0x7d);
-            }
-            for (x, text, colour) in &row.columns {
-                self.text(*x as usize, (y + 1) as usize, text, *colour);
+            if view.screen == StationScreen::Bulletin {
+                // F1399 wraps the entry at the screen table's text x: 320 -
+                // 140 - 3 = 177 pixels. A 33-pixel row holds three lines.
+                for (line, text) in self.wrap_text(&row.main, 177).iter().take(3).enumerate() {
+                    self.text(
+                        layout.entry_x as usize,
+                        (y + 1 + 10 * line as i32) as usize,
+                        text,
+                        0x7d,
+                    );
+                }
+            } else {
+                self.text(layout.entry_x as usize, (y + 1) as usize, &row.main, 0x7d);
+                if let Some(detail) = &row.detail {
+                    self.text(layout.entry_x as usize, (y + 11) as usize, detail, 0x7d);
+                }
+                for (x, text, colour) in &row.columns {
+                    self.text(*x as usize, (y + 1) as usize, text, *colour);
+                }
             }
         }
         // F330: the down arrow at (124, 147) while entries remain, the up arrow

@@ -1,5 +1,6 @@
 //! Native simulation primitives: no I/O, wall clock, GPU, or legacy runtime.
 
+pub mod bulletin;
 pub mod collision;
 pub mod effects;
 pub mod equipment;
@@ -39,6 +40,8 @@ pub mod pads;
 pub mod physics;
 pub mod player;
 pub mod sector;
+pub mod shipyard;
+mod shipyard_table;
 pub mod star_points;
 pub mod surface;
 pub mod sysgen;

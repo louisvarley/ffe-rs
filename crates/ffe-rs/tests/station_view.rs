@@ -77,12 +77,16 @@ fn upgrade_view(
 fn docked_screens_draw_at_the_original_layout() {
     let cache = cache();
     let mut nav = Navigator::new(&cache).unwrap();
+    // The reference list's Pt.Exchg column is the new game's Eagle (model 23,
+    // +0xa 38, so 950 * 38 = 36100); the sandbox station's own stock may hold
+    // cheaper hulls, which is why the row values can be negative here.
+    let player_ship = 23;
     let station = nav.docked.expect("docked at the start");
     let mut screen = Screen::new(&cache).unwrap();
     screen.system = nav.system_name().to_owned();
     let name = nav.bodies[station].name.clone();
     let rows = trade::listing(&mut nav, &cache, station, &Flight::default()).unwrap();
-    let hold = nav.cargo_space(&cache, Flight::default().ship);
+    let hold = nav.cargo_space(&cache, player_ship);
     let status = station::Status {
         cargo_used: 0,
         cargo_capacity: hold,
@@ -98,10 +102,6 @@ fn docked_screens_draw_at_the_original_layout() {
         (
             StationScreen::Shipyard,
             station::title(StationScreen::Shipyard, &name),
-        ),
-        (
-            StationScreen::Bulletin,
-            station::title(StationScreen::Bulletin, &name),
         ),
     ] {
         let entries: &[station::Entry] = match id {
@@ -128,7 +128,7 @@ fn docked_screens_draw_at_the_original_layout() {
             total: entries.len(),
         };
         let before = screen.logical_pixels().to_vec();
-        draw(&mut screen, Some(view), None, station::hint(id, 0));
+        draw(&mut screen, Some(view), None, station::hint(id, 0, 0));
         // The title and entry text differ from the untouched cabin at the same
         // coordinates (x 4..140, y 15..148).
         assert_ne!(
@@ -187,22 +187,96 @@ fn docked_screens_draw_at_the_original_layout() {
     );
     save(&screen, "Market-ours.ppm");
 
-    // The BBS with no generated entries draws the original empty state's title
-    // and no rows; the console line is the original's 0x98de.
+    // F622/F633's BBS: posts generated from DATA_006170 and the 0x981a..0x982d
+    // templates, four 33-pixel rows a page and the original "More..." arrow.
+    let (posts, hulls) = {
+        let offers = nav
+            .station_offers(&cache, station)
+            .expect("F622's BBS and hull stock");
+        (offers.posts.clone(), offers.rows(player_ship, None))
+    };
+    assert!(
+        posts.len() > 1,
+        "the generated BBS is populated ({} posts)",
+        posts.len()
+    );
+    assert!(
+        posts.iter().all(|post| !post.text.is_empty()),
+        "every post has the original template's text"
+    );
+    assert!(
+        posts.iter().all(|post| !post.text.contains('[')),
+        "every 0xff code in the templates expanded (no [0x....] fallbacks)"
+    );
+    assert!(
+        posts.iter().any(|post| post.code == 0x9829
+            || post.code == 0x9827
+            || post.code == 0x981a
+            || post.code == 0x981b),
+        "the reference frame's goods, military and ship-job notices"
+    );
+    let bulletin_rows: Vec<DockRow> = posts
+        .iter()
+        .map(|post| DockRow {
+            main: post.text.clone(),
+            detail: None,
+            columns: Vec::new(),
+            fitted: false,
+        })
+        .collect();
     let bulletin = DockView {
         screen: StationScreen::Bulletin,
         title: station::title(StationScreen::Bulletin, &name),
-        rows: Vec::new(),
+        rows: bulletin_rows.clone(),
         status,
         scroll: 0,
         selected: 0,
-        total: 0,
+        total: bulletin_rows.len(),
     };
-    draw(&mut screen, Some(bulletin), None, station::BULLETIN_EMPTY);
+    draw(
+        &mut screen,
+        Some(bulletin),
+        None,
+        station::hint(StationScreen::Bulletin, posts.len(), hulls.len()),
+    );
     assert_eq!(
-        station::hint(StationScreen::Bulletin, 0),
+        station::hint(StationScreen::Bulletin, 0, 0),
         "Sorry, no advertisements have been placed."
     );
+    assert_ne!(
+        screen.logical_pixels()[16 * 320 + 140],
+        screen.logical_pixels()[2 * 320 + 120],
+        "BBS post text differs from the header"
+    );
+    // Force the goods/company path with the real name table: DATA_006171's
+    // companion post is "GOODS BOUGHT AND SOLD: At <company>..." and the
+    // company is F791's name generator, not invented text.
+    {
+        use ffe_core::bulletin::{self, World};
+        use ffe_core::names::Names;
+        use ffe_core::npc::Random;
+        let names = Names::new(cache.asset("base:text/names").unwrap()).unwrap();
+        let world = World {
+            code: 1,
+            name: nav.system_name(),
+            population: 9,
+            danger: 0,
+            allegiance: 2,
+            station_name: &name,
+            destinations: &[],
+            names: Some(&names),
+        };
+        let mut rng = Random::new(0x9876, 0x5432);
+        let generated = bulletin::generate(&mut rng, &world, 0);
+        assert!(
+            generated.iter().any(|post| post.code == 0x9829),
+            "the goods generator runs over a Federal board"
+        );
+        assert!(
+            generated.iter().all(|post| !post.text.contains('[')),
+            "the company/passage expansion handles every code"
+        );
+    }
     save(&screen, "Bulletin-ours.ppm");
 
     // F869/F622's starport tech level: Ross 154's record byte +5 is 0xfd, the
@@ -286,26 +360,129 @@ fn docked_screens_draw_at_the_original_layout() {
     );
     save(&screen, "Upgrades-buy-laser.ppm");
 
-    // The shipyard list has no importable generator in this cache: F437's
-    // empty-state message (0x98ed) is the original text for no hulls.
+    // F437's New and Reconditioned Ships list: the generated hull stock with
+    // Cost, Pt.Exchg and Cap. The reference Sirocco frame's Federal shipyard
+    // hulls (Spar 71000/34900/37t, Hawk 48000/11900/7t, ...) come from the same
+    // table; the port's random stock names differ but the prices/capacities do
+    // not.
+    assert!(
+        !hulls.is_empty(),
+        "F622's hull stock is populated ({} hulls)",
+        hulls.len()
+    );
+    assert!(
+        hulls.len() <= ffe_core::shipyard::MAX_HULLS,
+        "F634's thirteen-hull cap"
+    );
+    let ships_rows: Vec<DockRow> = hulls
+        .iter()
+        .map(|hull| DockRow {
+            main: hull.name.to_owned(),
+            detail: None,
+            columns: vec![
+                (station::SHIP_COST_X, format!("${}", hull.price), 0x7d),
+                (
+                    station::SHIP_EXCHANGE_X,
+                    if hull.net < 0 {
+                        format!("-${}", -hull.net)
+                    } else {
+                        format!("${}", hull.net)
+                    },
+                    0x7d,
+                ),
+                (station::SHIP_CAPACITY_X, format!("{}t", hull.cargo), 0x7d),
+            ],
+            fitted: false,
+        })
+        .collect();
     let ships = DockView {
         screen: StationScreen::Ships,
         title: station::title(StationScreen::Ships, &name),
-        rows: Vec::new(),
+        rows: ships_rows.clone(),
         status,
         scroll: 0,
         selected: 0,
-        total: 0,
+        total: ships_rows.len(),
     };
     let before = screen.logical_pixels().to_vec();
-    draw(&mut screen, Some(ships), None, station::SHIPS_EMPTY);
+    draw(
+        &mut screen,
+        Some(ships),
+        None,
+        station::hint(StationScreen::Ships, posts.len(), hulls.len()),
+    );
     assert_ne!(
         &before[2 * 320 + 120..2 * 320 + 200],
         &screen.logical_pixels()[2 * 320 + 120..2 * 320 + 200],
         "ships header"
     );
-    assert_eq!(station::hint(StationScreen::Ships, 0), station::SHIPS_EMPTY);
+    assert_ne!(
+        screen.logical_pixels()[16 * 320 + 228],
+        screen.logical_pixels()[2 * 320 + 120],
+        "the cost column differs from the header"
+    );
+    assert_eq!(
+        station::hint(StationScreen::Ships, 0, 0),
+        station::SHIPS_EMPTY
+    );
     save(&screen, "Ships-ours.ppm");
+
+    // F438/F442: buy the first hull with the new game's Eagle part-exchanged.
+    // The purchase charges ten times the whole-credit net price, installs the
+    // model, clears the fitted items and replaces the row with the old hull.
+    let target = hulls[0];
+    let cash_before = 1_000_000i64;
+    let purchase = {
+        let offers = nav.station_offers(&cache, station).unwrap();
+        offers.buy(0, player_ship, cash_before).unwrap()
+    };
+    assert_eq!(purchase.old_model, player_ship);
+    assert_eq!(purchase.model, target.model);
+    assert_eq!(
+        purchase.cash_tenths,
+        cash_before - target.net * 10,
+        "ten times the net whole-credit price"
+    );
+    let after_hulls = nav
+        .station_offers(&cache, station)
+        .unwrap()
+        .rows(player_ship, None);
+    assert_eq!(
+        after_hulls[0].model, player_ship,
+        "the bought row now holds the player's old hull"
+    );
+    let after_rows: Vec<DockRow> = after_hulls
+        .iter()
+        .map(|hull| DockRow {
+            main: hull.name.to_owned(),
+            detail: None,
+            columns: vec![
+                (station::SHIP_COST_X, format!("${}", hull.price), 0x7d),
+                (station::SHIP_EXCHANGE_X, format!("${}", hull.net), 0x7d),
+                (station::SHIP_CAPACITY_X, format!("{}t", hull.cargo), 0x7d),
+            ],
+            fitted: false,
+        })
+        .collect();
+    let after = DockView {
+        screen: StationScreen::Ships,
+        title: station::title(StationScreen::Ships, &name),
+        rows: after_rows,
+        status: station::Status {
+            cash: i32::try_from(purchase.cash_tenths).unwrap(),
+            ..status
+        },
+        scroll: 0,
+        selected: 0,
+        total: after_hulls.len(),
+    };
+    draw(
+        &mut screen,
+        Some(after),
+        None,
+        "Congratulations on your purchase. Call our upgrade department for the latest in additional equipment.",
+    );
+    save(&screen, "Ships-buy.ppm");
 
     // F444's three service rows for an undamaged, drive-fitted ship: the
     // reference frame's Sirocco costs (mass 38 -> 3040/1900/1900) and dates.
@@ -344,7 +521,7 @@ fn docked_screens_draw_at_the_original_layout() {
         "repairs cost column"
     );
     assert_eq!(
-        station::hint(StationScreen::Repairs, 0),
+        station::hint(StationScreen::Repairs, 0, 0),
         station::REPAIRS_HINT
     );
     save(&screen, "Repairs-ours.ppm");
