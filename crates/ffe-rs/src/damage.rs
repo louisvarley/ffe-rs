@@ -230,6 +230,7 @@ mod tests {
             reverse_thrust: -0x80,
             gun_mounts: 1,
             mass: 25,
+            price_mass: 38,
             cargo: 20,
             shield_strength: 1,
             missiles: 2,

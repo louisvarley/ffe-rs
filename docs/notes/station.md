@@ -204,7 +204,8 @@ anywhere while docked. These are called out as port conveniences in
   shield generators and missiles apply to `Loadout`/`Combat`; drives and
   mining machines have no port state and report that instead of inventing one.
 - **Repairs and Servicing** (`F443`/`F444`): the three service rows
-  (Deluxe 80*mass, Drive Only 50*mass, Equipment Only 50*mass) with the
+  (Deluxe 80*mass, Drive Only 50*mass, Equipment Only 50*mass, where `mass` is
+  the statistics' `+0xa` price mass, 38 for the reference Eagle) with the
   0x9815-0x9817 strings, the stored service dates (`Flight::service_days`,
   `DATA_008926`/`DATA_008925`) and the reference frame's `$` cost column at
   x 292. F444's damage rows are built from real state: `0x9813` (250 kg for

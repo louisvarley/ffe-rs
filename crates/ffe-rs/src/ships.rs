@@ -24,6 +24,10 @@ pub struct ShipStats {
     pub gun_mounts: i8,
     /// +0x6, hull mass in tonnes (object +0xe4 holds it times 4).
     pub mass: u16,
+    /// +0xa, the second mass word: F437's Cost is this times 1000 and F444's
+    /// service rows charge 80/50 times it (the reference Eagle's 38 gives
+    /// 3040/1900/1900).
+    pub price_mass: u16,
     /// +0x8, the cargo space (tonnes, signed word) before the hyperdrive's mass.
     pub cargo: i16,
     /// +0xe, the shield-strength word F1099's target readout shows.
@@ -54,6 +58,7 @@ impl ShipStats {
             reverse_thrust: word(2) as i16,
             gun_mounts: block[4] as i8,
             mass: word(6),
+            price_mass: word(0xa),
             cargo: word(8) as i16,
             shield_strength: word(0xe) as i16,
             missiles: word(0x12),

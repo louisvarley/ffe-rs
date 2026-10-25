@@ -77,6 +77,7 @@ fn ship_stats_decode_the_original_block() {
         (16350, -4905, 1)
     );
     assert_eq!((eagle.mass, eagle.missiles), (16, 2));
+    assert_eq!(eagle.price_mass, 46);
     assert_eq!(eagle.eye, [1870, 127]);
     assert_eq!((eagle.top_turret, eagle.bottom_turret), ([192, 42], [4, 7]));
     // Object set-up (0x125c0): z [reverse, forward], x and y +-|reverse|.

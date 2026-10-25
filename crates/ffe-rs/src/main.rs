@@ -5306,7 +5306,7 @@ fn view_ship(
 fn station_repairs(state: &Flight, scene: Option<&ModelViewer>) -> Vec<station::RepairRow> {
     let mass = scene
         .and_then(|scene| scene.ship_stats(state.ship))
-        .map_or(0, |stats| u32::from(stats.mass));
+        .map_or(0, |stats| u32::from(stats.price_mass));
     let date = |day: u32| {
         ffe_rs::galaxy_map::date_text(f64::from(day) * 86_400.0)
             .split(' ')
