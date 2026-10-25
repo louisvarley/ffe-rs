@@ -2328,6 +2328,11 @@ fn run() -> Result<(), String> {
             screen.messages.push(message.clone(), screen.clock.clone());
             logged.clone_from(&message);
         }
+        // F273's auto-scroll timer runs on the world tics.
+        let log_tics =
+            (elapsed * 50.0 * f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])).max(0.0)
+                as u32;
+        screen.messages.tick(log_tics);
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();
