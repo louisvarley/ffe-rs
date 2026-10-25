@@ -11,6 +11,7 @@ use ffe_core::effects::{self, Effect};
 use ffe_core::galaxy::{tables, Tables};
 use ffe_core::hyperspace::{plan as jump_plan, Report};
 use ffe_core::market::{Conditions, Market, Tables as MarketTables};
+use ffe_core::missions;
 use ffe_core::model_math::SineTable;
 use ffe_core::names::Names;
 use ffe_core::npc::{self, Anchor, NpcShip};
@@ -1657,6 +1658,117 @@ impl Navigator {
         Ok(offers)
     }
 
+    /// Read the contract out of a BBS row (F453's StrVars). `None` for the
+    /// advertisements that are not offers (goods, crew, charity, military
+    /// recruitment).
+    pub fn mission_offer(
+        &mut self,
+        cache: &VerifiedCache,
+        index: usize,
+        row: usize,
+    ) -> Result<Option<missions::Offer>, String> {
+        let post = {
+            let offers = self.station_offers(cache, index)?;
+            offers.posts.get(row).cloned()
+        };
+        let Some(post) = post else {
+            return Ok(None);
+        };
+        let code = self.entries[self.current].params.code;
+        let blob = cache
+            .asset("base:world/system-tables")
+            .ok_or("this cache has no system tables (cache v15)")?;
+        let tables = Tables::new(blob)?;
+        let details = tables.details(code);
+        let market = tables.market(code);
+        let name = self.system_name().to_owned();
+        let station_name = self
+            .bodies
+            .get(index)
+            .map(|body| body.name.clone())
+            .unwrap_or_default();
+        let destinations = self.offers_destinations(cache);
+        let names_bytes = cache.asset("base:text/names");
+        let names = names_bytes.and_then(|bytes| Names::new(bytes).ok());
+        let world = bulletin::World {
+            code,
+            name: &name,
+            population: market.population,
+            danger: market.danger,
+            allegiance: (details.allegiance >> 6) as u16,
+            station_name: &station_name,
+            destinations: &destinations,
+            names: names.as_ref(),
+        };
+        Ok(missions::offer(&post, &world))
+    }
+
+    /// F493/F494/F623/F629-F632's military package list for a station. The
+    /// source stores `DATA_009004`; the port regenerates it deterministically
+    /// from the station, system and game day, so the same day shows the same
+    /// offers and a later day refreshes them.
+    pub fn military_offers(
+        &self,
+        cache: &VerifiedCache,
+        index: usize,
+        rank_points: u32,
+    ) -> Result<Vec<missions::Offer>, String> {
+        let code = self.entries[self.current].params.code;
+        let blob = cache
+            .asset("base:world/system-tables")
+            .ok_or("this cache has no system tables (cache v15)")?;
+        let tables = Tables::new(blob)?;
+        let details = tables.details(code);
+        let market = tables.market(code);
+        let name = self.system_name().to_owned();
+        let station_name = self
+            .bodies
+            .get(index)
+            .map(|body| body.name.clone())
+            .unwrap_or_default();
+        let destinations = self.offers_destinations(cache);
+        let names_bytes = cache.asset("base:text/names");
+        let names = names_bytes.and_then(|bytes| Names::new(bytes).ok());
+        let world = bulletin::World {
+            code,
+            name: &name,
+            population: market.population,
+            danger: market.danger,
+            allegiance: (details.allegiance >> 6) as u16,
+            station_name: &station_name,
+            destinations: &destinations,
+            names: names.as_ref(),
+        };
+        let day = self.day();
+        let mut rng = npc::Random::new(
+            code ^ 0x4d49_4c49,
+            (index as u32 + 1)
+                .wrapping_mul(0x9e37_79b9)
+                .wrapping_add(day),
+        );
+        Ok(missions::military_offers(
+            &mut rng,
+            &world,
+            day,
+            rank_points,
+        ))
+    }
+
+    /// F535: remove the accepted advertisement from the board (the original
+    /// clears the 24-byte slot, leaving an empty entry; the port removes it).
+    pub fn clear_post(
+        &mut self,
+        cache: &VerifiedCache,
+        index: usize,
+        row: usize,
+    ) -> Result<(), String> {
+        let offers = self.station_offers(cache, index)?;
+        if row < offers.posts.len() {
+            offers.posts.remove(row);
+        }
+        Ok(())
+    }
+
     /// The player's hold in tonnes: the new game's F998 value when this navigator
     /// started one, else the ship model's cargo statistic.
     pub fn hold(&self, cache: &VerifiedCache, ship: u32) -> i32 {
@@ -2746,6 +2858,12 @@ impl Navigator {
 
     pub fn system_name(&self) -> &str {
         &self.entries[self.current].name
+    }
+
+    /// The current system's 32-bit code (the galaxy record's key; F885's
+    /// `DATA_008885`). It is what a contract's destination field stores.
+    pub fn current_system_code(&self) -> u32 {
+        self.entries[self.current].params.code
     }
 
     /// How many systems the galaxy list holds.

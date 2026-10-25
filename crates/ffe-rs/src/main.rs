@@ -2472,6 +2472,30 @@ fn run() -> Result<(), String> {
                         },
                         None => (0, 0),
                     };
+                    let journal_rows = state.missions.journal.len();
+                    let comms_rows = state.missions.pages.len();
+                    let military_rows = if dock.screen == StationScreen::Military {
+                        match nav
+                            .as_ref()
+                            .and_then(|nav| nav.docked.map(|station| (nav, station)))
+                        {
+                            Some((nav, station)) => {
+                                let day = nav.day();
+                                nav.military_offers(&cache, station, state.missions.military_points)
+                                    .map_or(0, |offers| {
+                                        offers
+                                            .iter()
+                                            .filter(|offer| {
+                                                !state.missions.is_offer_known(offer, day)
+                                            })
+                                            .count()
+                                    })
+                            }
+                            None => 0,
+                        }
+                    } else {
+                        0
+                    };
                     let rows = station::row_count(
                         dock.screen,
                         bulletin_rows,
@@ -2479,7 +2503,22 @@ fn run() -> Result<(), String> {
                         upgrade_rows.len(),
                         repair_rows.len(),
                         ship_rows,
+                        journal_rows,
+                        comms_rows,
+                        military_rows,
                     );
+                    // The port's journal/comms pages. The original journal is
+                    // the ship library's viewer (F76/F78/F81); F4's comms list
+                    // is the source of the messages. J/C are the port's keys
+                    // while the station board has focus.
+                    if pressed(Key::J) {
+                        dock.open(StationScreen::Journal);
+                        message = station::hint(StationScreen::Journal, 0, 0).to_owned();
+                    }
+                    if pressed(Key::C) {
+                        dock.open(StationScreen::Comms);
+                        message = station::hint(StationScreen::Comms, 0, 0).to_owned();
+                    }
                     let step = i32::from(pressed(Key::Down)) - i32::from(pressed(Key::Up));
                     if step != 0 {
                         dock.step(step, rows);
@@ -2507,6 +2546,12 @@ fn run() -> Result<(), String> {
                                 } else if dock.screen == StationScreen::Ships {
                                     // F354's digit action is the left (Buy) button.
                                     dock_action = Some(StationAction::BuyShip { row: index });
+                                } else if dock.screen == StationScreen::Bulletin {
+                                    dock_action = Some(StationAction::Post { row: index });
+                                } else if dock.screen == StationScreen::Comms {
+                                    dock_action = Some(StationAction::ReadPage { row: index });
+                                } else if dock.screen == StationScreen::Military {
+                                    dock_action = Some(StationAction::MilitaryPost { row: index });
                                 } else if let Some(entry) =
                                     station::menu_entry(dock.screen, index, 0)
                                 {
@@ -2527,6 +2572,12 @@ fn run() -> Result<(), String> {
                             ));
                         } else if dock.screen == StationScreen::Ships {
                             dock_action = Some(StationAction::BuyShip { row: dock.selected });
+                        } else if dock.screen == StationScreen::Bulletin {
+                            dock_action = Some(StationAction::Post { row: dock.selected });
+                        } else if dock.screen == StationScreen::Comms {
+                            dock_action = Some(StationAction::ReadPage { row: dock.selected });
+                        } else if dock.screen == StationScreen::Military {
+                            dock_action = Some(StationAction::MilitaryPost { row: dock.selected });
                         } else if let Some(entry) =
                             station::menu_entry(dock.screen, dock.selected, 0)
                         {
@@ -2552,20 +2603,12 @@ fn run() -> Result<(), String> {
                                             "Repairs and servicing actions are not ported.",
                                         ));
                                     } else if dock.screen == StationScreen::Bulletin {
-                                        // F453/F523: selecting an advertisement
-                                        // shows it in full; the mission reply
-                                        // actions are not ported.
-                                        let station = nav.as_ref().and_then(|nav| nav.docked);
-                                        if let (Some(nav), Some(station)) = (nav.as_mut(), station)
-                                        {
-                                            if let Ok(offers) = nav.station_offers(&cache, station)
-                                            {
-                                                if let Some(post) = offers.posts.get(index) {
-                                                    dock.selected = index;
-                                                    message = post.text.clone();
-                                                }
-                                            }
-                                        }
+                                        dock.selected = index;
+                                        dock_action = Some(StationAction::Post { row: index });
+                                    } else if dock.screen == StationScreen::Military {
+                                        dock.selected = index;
+                                        dock_action =
+                                            Some(StationAction::MilitaryPost { row: index });
                                     } else if let Some(entry) =
                                         station::menu_entry(dock.screen, index, 0)
                                     {
@@ -2737,6 +2780,67 @@ fn run() -> Result<(), String> {
                                 message = view_ship(nav, &cache, &state, row);
                             }
                         }
+                        StationAction::Post { row } => {
+                            // F453/F523/F534/F535: a contract offer is accepted,
+                            // the advertisement is cleared and F290/F349's page
+                            // is written; any other advertisement is shown.
+                            let station = nav.as_ref().and_then(|nav| nav.docked);
+                            if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
+                                let day = nav.day();
+                                let code = nav.current_system_code();
+                                let system = nav.system_name().to_owned();
+                                match nav.mission_offer(&cache, station, row) {
+                                    Ok(Some(offer)) => {
+                                        match state.missions.accept(&offer, day, code, &system) {
+                                            Ok(accepted) => {
+                                                let _ = nav.clear_post(&cache, station, row);
+                                                message = accepted.text.clone();
+                                                pending_log.add(Source::Mission, accepted.text);
+                                                // F349/F351's message bell.
+                                                sound.play(Cue::Message);
+                                            }
+                                            Err(error) => message = error,
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        let post = nav
+                                            .station_offers(&cache, station)
+                                            .ok()
+                                            .and_then(|offers| offers.posts.get(row).cloned());
+                                        if let Some(post) = post {
+                                            if matches!(post.code, 0x9827 | 0x9828) {
+                                                // F490/F491/F493: the military
+                                                // recruitment notice opens the
+                                                // mercenary mission list.
+                                                let rows = nav
+                                                    .military_offers(
+                                                        &cache,
+                                                        station,
+                                                        state.missions.military_points,
+                                                    )
+                                                    .map_or(0, |offers| {
+                                                        offers
+                                                            .iter()
+                                                            .filter(|offer| {
+                                                                !state
+                                                                    .missions
+                                                                    .is_offer_known(offer, day)
+                                                            })
+                                                            .count()
+                                                    });
+                                                dock.open(StationScreen::Military);
+                                                message =
+                                                    station::hint(StationScreen::Military, rows, 0)
+                                                        .to_owned();
+                                            } else {
+                                                message = post.text;
+                                            }
+                                        }
+                                    }
+                                    Err(error) => message = error,
+                                }
+                            }
+                        }
                         StationAction::Trade { buy, row } => {
                             let station = nav.as_ref().and_then(|nav| nav.docked);
                             let shift = window.is_key_down(Key::LeftShift)
@@ -2758,6 +2862,51 @@ fn run() -> Result<(), String> {
                                         Ok(text) => pending_log.add(Source::Trade, text),
                                         Err(error) => message = format!("Trade failed: {error}"),
                                     }
+                                }
+                            }
+                        }
+                        StationAction::MilitaryPost { row } => {
+                            // F509: accept a military package offer. The list
+                            // is regenerated for the day; the offer already
+                            // active is filtered from the rows.
+                            let station = nav.as_ref().and_then(|nav| nav.docked);
+                            if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
+                                let day = nav.day();
+                                let code = nav.current_system_code();
+                                let system = nav.system_name().to_owned();
+                                let offers = nav
+                                    .military_offers(
+                                        &cache,
+                                        station,
+                                        state.missions.military_points,
+                                    )
+                                    .unwrap_or_default();
+                                let offer = offers
+                                    .into_iter()
+                                    .filter(|offer| !state.missions.is_offer_known(offer, day))
+                                    .nth(row);
+                                if let Some(offer) = offer {
+                                    match state.missions.accept(&offer, day, code, &system) {
+                                        Ok(accepted) => {
+                                            message = accepted.text.clone();
+                                            pending_log.add(Source::Mission, accepted.text);
+                                            sound.play(Cue::Message);
+                                        }
+                                        Err(error) => message = error,
+                                    }
+                                }
+                            }
+                        }
+                        StationAction::ReadPage { row } => {
+                            // F306/F307: the page's own song (7 or 10). The
+                            // list is newest first, matching the comms view.
+                            if let Some(page) = state.missions.pages.iter_mut().rev().nth(row) {
+                                page.unread = false;
+                                message = page.text.clone();
+                                match page.kind.song() {
+                                    Some(7) => sound.message_page_music(),
+                                    Some(10) => sound.message_video_music(),
+                                    _ => {}
                                 }
                             }
                         }
@@ -4205,6 +4354,37 @@ fn run() -> Result<(), String> {
         }
         screen.dock = None;
         screen.market = None;
+        // F301/F302: settle contracts due at this system and mark overdue
+        // ones. The original checks `DATA_008885` (the current system) each
+        // event tick, not the docking state, so this runs in flight too. The
+        // reward is whole credits and `DATA_008888` is in tenths, so it is
+        // multiplied by ten (see `docs/notes/missions.md`).
+        if let Some(nav) = nav.as_ref() {
+            let day = nav.day();
+            let code = nav.current_system_code();
+            for outcome in state.missions.tick(day, code) {
+                if outcome.reward > 0 {
+                    state.credits = state
+                        .credits
+                        .saturating_add(outcome.reward.saturating_mul(10));
+                }
+                pending_log.add(Source::Mission, outcome.journal.text.clone());
+                message = outcome.journal.text.clone();
+                let military = state.missions.missions.iter().any(|mission| {
+                    mission.id == outcome.id
+                        && mission.kind == ffe_core::missions::Kind::MilitaryDelivery
+                });
+                if military {
+                    // F304/F305/F306: the rank page's song 7. A package
+                    // delivery has no medal code, so F307 (song 10) is
+                    // skipped; `ReadPage` still plays it for a medal page.
+                    sound.message_page_music();
+                } else {
+                    // F349/F351's bell.
+                    sound.play(Cue::Message);
+                }
+            }
+        }
         if state.mode == ffe_rs::flight::Mode::Docked {
             if let Some(nav) = nav.as_mut() {
                 if let Some(station) = nav.docked {
@@ -4325,6 +4505,84 @@ fn run() -> Result<(), String> {
                             scroll: dock.scroll,
                             selected: dock.selected,
                             total: posts.len(),
+                        });
+                    } else if dock.screen == StationScreen::Military {
+                        let day = nav.day();
+                        let offers: Vec<ffe_core::missions::Offer> = nav
+                            .military_offers(&cache, station, state.missions.military_points)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|offer| !state.missions.is_offer_known(offer, day))
+                            .collect();
+                        let visible = station::layout(StationScreen::Military).visible();
+                        dock.selected = dock.selected.min(offers.len().saturating_sub(1));
+                        dock.scroll = dock.scroll.min(offers.len().saturating_sub(visible));
+                        let rows = offers
+                            .iter()
+                            .skip(dock.scroll)
+                            .map(|offer| ffe_rs::station::DockRow {
+                                main: offer.text.clone(),
+                                detail: None,
+                                columns: Vec::new(),
+                                fitted: false,
+                            })
+                            .collect();
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title: station::title(dock.screen, &station_name),
+                            rows,
+                            status,
+                            scroll: dock.scroll,
+                            selected: dock.selected,
+                            total: offers.len(),
+                        });
+                    } else if matches!(dock.screen, StationScreen::Journal | StationScreen::Comms) {
+                        // F76/F78/F81's journal text and F349's message pages.
+                        // The date line is the port's calendar for the entry's
+                        // game day (the original shows the MISSION.DAT issue's
+                        // date).
+                        let lines: Vec<(u32, String)> = if dock.screen == StationScreen::Journal {
+                            state
+                                .missions
+                                .journal
+                                .iter()
+                                .rev()
+                                .map(|entry| (entry.day, entry.text.clone()))
+                                .collect()
+                        } else {
+                            state
+                                .missions
+                                .pages
+                                .iter()
+                                .rev()
+                                .map(|page| (page.day, page.text.clone()))
+                                .collect()
+                        };
+                        let visible = station::layout(dock.screen).visible();
+                        dock.selected = dock.selected.min(lines.len().saturating_sub(1));
+                        dock.scroll = dock.scroll.min(lines.len().saturating_sub(visible));
+                        let rows = lines
+                            .iter()
+                            .skip(dock.scroll)
+                            .map(|(day, text)| ffe_rs::station::DockRow {
+                                main: format!(
+                                    "{}: {}",
+                                    ffe_rs::galaxy_map::date_short_text(f64::from(*day) * 86_400.0),
+                                    text
+                                ),
+                                detail: None,
+                                columns: Vec::new(),
+                                fitted: false,
+                            })
+                            .collect();
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title: station::title(dock.screen, &station_name),
+                            rows,
+                            status,
+                            scroll: dock.scroll,
+                            selected: dock.selected,
+                            total: lines.len(),
                         });
                     } else if dock.screen == StationScreen::Ships {
                         let hulls = nav

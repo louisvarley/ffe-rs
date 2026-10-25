@@ -85,10 +85,12 @@ pub enum Source {
     Trade,
     /// F1104/F1098 death and escape craft (`ffe.asm:81458`).
     Death,
+    /// F290/F303/F349: an accepted or settled BBS contract's page.
+    Mission,
 }
 
 impl Source {
-    pub const ALL: [Source; 12] = [
+    pub const ALL: [Source; 13] = [
         Source::Start,
         Source::Autopilot,
         Source::Target,
@@ -101,6 +103,7 @@ impl Source {
         Source::Legal,
         Source::Trade,
         Source::Death,
+        Source::Mission,
     ];
 
     /// The DOS FFE label/line that writes the entry.
@@ -118,6 +121,7 @@ impl Source {
             Source::Legal => "F234/F236/F783 fines and police (docs/notes/legal.md)",
             Source::Trade => "F323/F328 market (ffe.asm station stream)",
             Source::Death => "F1104/F1098 death and escape (ffe.asm:81458)",
+            Source::Mission => "F290 contract, F303 settle, F349/F350 page (ffe.asm:22592-27185)",
         }
     }
 }
@@ -670,7 +674,7 @@ mod tests {
 
     #[test]
     fn every_source_has_a_dos_citation() {
-        assert_eq!(Source::ALL.len(), 12);
+        assert_eq!(Source::ALL.len(), 13);
         for source in Source::ALL {
             let citation = source.citation();
             assert!(!citation.is_empty(), "{source:?} has no citation");

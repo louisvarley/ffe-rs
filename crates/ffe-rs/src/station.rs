@@ -33,6 +33,16 @@ pub enum Screen {
     Repairs,
     Ships,
     Bulletin,
+    /// The port's journal page: the accepted contracts and their source
+    /// completion pages (F303/F306/F307), after the original's ship-library
+    /// journal viewer (F76/F78/F81). Opened with `J` while docked.
+    Journal,
+    /// The port's comms page: the mission reply/completion messages (F349),
+    /// with F306's rank page and F307's medal page. Opened with `C`.
+    Comms,
+    /// F490/F491/F493's military mission list: the package offers from
+    /// F623/F629-F632. Reachable from the 0x9827/0x9828 recruitment ads.
+    Military,
 }
 
 /// What activating a row does.
@@ -59,6 +69,20 @@ pub enum Action {
     },
     /// F438/F439's right button: view the offered hull.
     ViewShip {
+        row: usize,
+    },
+    /// F453/F523: select a bulletin-board row. A contract offer is accepted
+    /// (F534/F535); any other advertisement is shown in full.
+    Post {
+        row: usize,
+    },
+    /// F306/F307: read one of the comms pages (the rank page starts song 7,
+    /// the medal page song 10).
+    ReadPage {
+        row: usize,
+    },
+    /// F493/F509: accept a military package offer.
+    MilitaryPost {
         row: usize,
     },
     /// The service exists but its data or routine is not ported. The text is
@@ -233,11 +257,11 @@ impl Layout {
 
 pub fn layout(screen: Screen) -> Layout {
     match screen {
-        Screen::Services | Screen::Shipyard | Screen::Bulletin => Layout {
+        Screen::Services | Screen::Shipyard | Screen::Bulletin | Screen::Military => Layout {
             pitch: 33,
             entry_x: 140,
             buttons: 1,
-            back: screen == Screen::Bulletin,
+            back: matches!(screen, Screen::Bulletin | Screen::Military),
         },
         Screen::Market => Layout {
             pitch: 10,
@@ -263,6 +287,14 @@ pub fn layout(screen: Screen) -> Layout {
             buttons: 1,
             back: true,
         },
+        // The journal/comms pages are text pages: three wrapped lines in each
+        // 33-pixel paragraph, no row button, the Go Back arrow (F566).
+        Screen::Journal | Screen::Comms => Layout {
+            pitch: 33,
+            entry_x: 4,
+            buttons: 0,
+            back: true,
+        },
     }
 }
 
@@ -274,8 +306,17 @@ pub fn title(screen: Screen, station: &str) -> String {
         Screen::Shipyard | Screen::Upgrades | Screen::Repairs | Screen::Ships => "Shipyard",
         Screen::Market => "Stockmarket",
         Screen::Bulletin => "Bulletin Board",
+        // The original journal viewer's own titles (DATA_002304/5): the ship
+        // library, not a station service.
+        Screen::Journal => "Ship Library Archives",
+        Screen::Comms => "Communications",
+        // F493's list page follows the 0x9908/0x9909 HQ page.
+        Screen::Military => "Military Missions",
     };
-    format!("{station} {name}")
+    match screen {
+        Screen::Journal | Screen::Comms | Screen::Military => name.to_owned(),
+        _ => format!("{station} {name}"),
+    }
 }
 
 /// The column header drawn at y 2 (`0x98e0`, `0x98f5`, `0x98f6`, `0x98f4`).
@@ -404,6 +445,7 @@ impl DockState {
     pub fn back(&mut self) {
         self.open(match self.screen {
             Screen::Upgrades | Screen::Repairs | Screen::Ships => Screen::Shipyard,
+            Screen::Military => Screen::Bulletin,
             Screen::Services => Screen::Services,
             _ => Screen::Services,
         });
@@ -492,19 +534,21 @@ pub fn hot_areas_with_fitted(
     for row in scroll..last {
         let y = LIST_TOP + (row - scroll) as i32 * layout.pitch;
         let x0 = 124;
-        let hot = match screen {
-            Screen::Market => Hot::Market { buy: true, row },
-            Screen::Upgrades => Hot::Outfit { remove: false, row },
-            Screen::Ships => Hot::Ship { view: false, row },
-            _ => Hot::Row(row),
-        };
-        areas.push(HotArea {
-            x0,
-            y0: y,
-            x1: x0 + 7,
-            y1: y + 8,
-            hot,
-        });
+        if layout.buttons > 0 {
+            let hot = match screen {
+                Screen::Market => Hot::Market { buy: true, row },
+                Screen::Upgrades => Hot::Outfit { remove: false, row },
+                Screen::Ships => Hot::Ship { view: false, row },
+                _ => Hot::Row(row),
+            };
+            areas.push(HotArea {
+                x0,
+                y0: y,
+                x1: x0 + 7,
+                y1: y + 8,
+                hot,
+            });
+        }
         if layout.buttons >= 2 {
             if screen == Screen::Upgrades
                 && fitted.is_some_and(|fitted| !fitted.get(row).copied().unwrap_or(false))
@@ -591,6 +635,7 @@ pub fn menu_entry(screen: Screen, index: usize, bulletin_rows: usize) -> Option<
 
 /// The number of rows a screen shows, given the dynamic BBS/market/upgrade,
 /// repair and hull sizes.
+#[allow(clippy::too_many_arguments)]
 pub fn row_count(
     screen: Screen,
     bulletin_rows: usize,
@@ -598,6 +643,9 @@ pub fn row_count(
     upgrade_rows: usize,
     repair_rows: usize,
     ship_rows: usize,
+    journal_rows: usize,
+    comms_rows: usize,
+    military_rows: usize,
 ) -> usize {
     match screen {
         Screen::Services => SERVICES.len(),
@@ -607,6 +655,9 @@ pub fn row_count(
         Screen::Upgrades => upgrade_rows,
         Screen::Repairs => repair_rows,
         Screen::Ships => ship_rows,
+        Screen::Journal => journal_rows,
+        Screen::Comms => comms_rows,
+        Screen::Military => military_rows,
     }
 }
 
@@ -631,6 +682,15 @@ pub fn hint(screen: Screen, bulletin_rows: usize, ship_rows: usize) -> &'static 
                 "Please choose advertisement. Direct link will be made with advertiser."
             }
         }
+        Screen::Journal => "Journal Entries. Contract details and their completion messages.",
+        Screen::Comms => "Messages received. Select one to read it.",
+        Screen::Military => {
+            if bulletin_rows == 0 {
+                "There are no missions currently available for someone with your security and combat ratings."
+            } else {
+                "Listed above are mercenary missions on offer appropriate to your current security and combat ratings with us."
+            }
+        }
     }
 }
 
@@ -648,6 +708,7 @@ mod tests {
             (Screen::Upgrades, 10, 152, 2, true),
             (Screen::Ships, 10, 152, 2, true),
             (Screen::Repairs, 10, 140, 1, true),
+            (Screen::Military, 33, 140, 1, true),
         ] {
             let layout = layout(screen);
             assert_eq!(layout.pitch, pitch, "{screen:?}");
@@ -809,7 +870,7 @@ mod tests {
     #[test]
     fn every_menu_row_has_an_action() {
         for screen in [Screen::Services, Screen::Shipyard] {
-            for index in 0..row_count(screen, 0, 0, 0, 0, 0) {
+            for index in 0..row_count(screen, 0, 0, 0, 0, 0, 0, 0, 0) {
                 assert!(menu_entry(screen, index, 0).is_some(), "{screen:?} {index}");
             }
         }
@@ -902,13 +963,47 @@ mod tests {
             Some(Hot::Ship { view: true, row: 0 })
         );
         assert!(areas.iter().any(|area| area.hot == Hot::Back));
-        assert_eq!(row_count(Screen::Ships, 0, 0, 0, 0, 13), 13);
+        assert_eq!(row_count(Screen::Ships, 0, 0, 0, 0, 13, 0, 0, 0), 13);
         assert_eq!(hint(Screen::Ships, 0, 13), SHIPS_HINT);
         assert_eq!(hint(Screen::Ships, 0, 0), SHIPS_EMPTY);
-        assert_eq!(row_count(Screen::Bulletin, 18, 0, 0, 0, 0), 18);
+        assert_eq!(row_count(Screen::Bulletin, 18, 0, 0, 0, 0, 0, 0, 0), 18);
         assert_eq!(
             hint(Screen::Bulletin, 1, 0),
             "Please choose advertisement. Direct link will be made with advertiser."
+        );
+    }
+
+    #[test]
+    fn the_journal_and_comms_pages_are_text_pages_with_a_back_arrow() {
+        for screen in [Screen::Journal, Screen::Comms] {
+            let layout = layout(screen);
+            assert_eq!(layout.pitch, 33);
+            assert_eq!(layout.entry_x, 4);
+            assert_eq!(layout.buttons, 0, "no row button");
+            assert!(layout.back, "Go Back arrow");
+            assert_eq!(layout.visible(), 4);
+            // No row hot area, but the back arrow is there.
+            let areas = hot_areas(screen, 0, 8);
+            assert!(!areas.iter().any(|area| matches!(area.hot, Hot::Row(_))));
+            assert!(areas.iter().any(|area| area.hot == Hot::Back));
+        }
+        assert_eq!(
+            title(Screen::Journal, "Sirocco Station"),
+            "Ship Library Archives"
+        );
+        assert_eq!(title(Screen::Comms, "Sirocco Station"), "Communications");
+        assert_eq!(
+            title(Screen::Military, "Sirocco Station"),
+            "Military Missions"
+        );
+        assert_eq!(layout(Screen::Military).pitch, 33);
+        assert_eq!(layout(Screen::Military).buttons, 1);
+        assert!(layout(Screen::Military).back);
+        assert!(hint(Screen::Military, 1, 0).contains("mercenary missions"));
+        assert!(hint(Screen::Military, 0, 0).contains("no missions currently"));
+        assert_eq!(
+            hint(Screen::Journal, 0, 0),
+            "Journal Entries. Contract details and their completion messages."
         );
     }
 

@@ -67,6 +67,7 @@ right button is the steering hold. The left button remains the console pointer
 | Screenshot / model viewer / model lab | **F11** / **F12** / **Shift+F12** |
 | Change ship | **Page Up / Page Down** |
 | Docked rows / actions | **Up/Down**, **Enter**, **1**..**4**, **Backspace**, **B**/**N** trade |
+| Journal / communications pages (docked) | **J** / **C** (port pages; the original journal is the ship library's viewer and the comms list is `F343`'s; see `docs/notes/missions.md`) |
 | Quit from the preference pages | click `Quit`, or select it and press Enter |
 
 An open-air takeoff is flown, not automatic: the launch action starts F1013's

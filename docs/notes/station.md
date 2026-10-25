@@ -189,8 +189,12 @@ anywhere while docked. These are called out as port conveniences in
   stored) and the 0x981a..0x982d templates. F622 makes `population * 4 + 1`
   attempts; F633's daily roll replaces one entry when `random(7) < population`.
   The four 33-pixel rows wrap at 177 pixels and the up/down/More arrows page
-  them; selecting a post shows its full text on the console (F523's mission
-  reply actions are not ported). The goods, military, passenger/parcel,
+  them; selecting a post shows its full text on the console. A
+  passenger/parcel or removal offer is accepted with F521/F534's contract
+  page, is cleared from the board (F535) and becomes a tracked mission (see
+  `docs/notes/missions.md`); the military ads open the package mission list,
+  and the goods, crew and charity ads are informational.
+  The goods, military, passenger/parcel,
   removal, crew and charity generators are ported; the recent-systems wanted
   board (F636), missing-person (F637) and special-offer commodity (F641)
   generators need state the port does not keep and return no entry.
@@ -279,10 +283,13 @@ owner wants it, the next step is to follow the F2 console action
    update, the `+0x132` 18 x 24-byte array, `DATA_006170`, the templates
    0x981a..0x982d and the embedded 0x99xx name/passage strings. Remaining:
    F636's recent-systems wanted board, F637's missing-person destination picker
-   (F857's grid perturbation) and F641's special-offer commodity table, plus the
-   mission reply actions F524-F532 (accept/decline, permits, advance) and the
-   BBS entry's service flags. Those generators return no entry rather than
-   inventing one.
+   (F857's grid perturbation) and F641's special-offer commodity table, plus
+   the BBS entry's service flags. Those generators return no entry rather than
+   inventing one. The passenger/parcel and removal reply actions (F521/F534,
+   the contract and 0x992a page) are the separate mission slice; the
+   F524-F532 negotiation pages (permits, advance) are not ported, so the port
+   accepts the offer directly rather than drawing the suggested-response
+   conversation. See `docs/notes/missions.md`.
 5. **Commander/options**: F2 status screen, outside the station module.
 
 ## Differences and uncertainties

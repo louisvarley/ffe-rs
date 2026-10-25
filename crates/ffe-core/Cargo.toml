@@ -8,3 +8,6 @@ description = "Pure deterministic simulation primitives for the First Encounters
 
 [dependencies]
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
