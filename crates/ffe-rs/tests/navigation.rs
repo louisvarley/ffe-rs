@@ -831,7 +831,8 @@ fn autopilot_after_every_jump() {
             picks
         };
         for index in kinds {
-            nav.target = Some(index);
+            nav.lock(index);
+            nav.engage_locked();
             let target_name = nav.bodies[index].name.clone();
             let mut flight = OriginalFlight::from_flight(
                 &Flight {
@@ -844,6 +845,7 @@ fn autopilot_after_every_jump() {
             let mut arrived = false;
             let mut steps = 0;
             let mut last_aligned = 0.0;
+            let mut pushes = 0;
             for _ in 0..200_000 {
                 let Some((command, _)) = nav.command(&cache, &flight) else {
                     break;
@@ -863,6 +865,55 @@ fn autopilot_after_every_jump() {
                 if let Some(moved) = nav.follow(flight.player().motion.position) {
                     flight.shift(moved);
                 }
+                let velocity = flight.player().motion.velocity;
+                let speed = velocity
+                    .iter()
+                    .map(|v| {
+                        (f64::from(*v) * ffe_rs::original_flight::MM_PER_SECOND / 1000.0).powi(2)
+                    })
+                    .sum::<f64>()
+                    .sqrt();
+                if let Some((dock, contact)) = nav.contact(flight.player().motion.position, speed) {
+                    match contact {
+                        ffe_rs::docking::Contact::Docked => {
+                            assert!(nav.begin_docking(dock));
+                            arrived = true;
+                            break;
+                        }
+                        ffe_rs::docking::Contact::Collision { clear, reason } => {
+                            pushes += 1;
+                            let port = nav.port(dock);
+                            let at = flight.player().motion.position;
+                            if let Some(port) = port {
+                                let r: [f64; 3] =
+                                    std::array::from_fn(|k| (at[k] - port.centre[k]) as f64);
+                                let axial: f64 = (0..3).map(|k| r[k] * port.axis[k]).sum();
+                                let range = r.iter().map(|v| v * v).sum::<f64>().sqrt();
+                                let lateral = (range * range - axial * axial).max(0.0).sqrt();
+                                let station = &nav.bodies[dock].name;
+                                let corridor = port.corridor();
+                                let front = port.front;
+                                let final_leg = nav.final_leg;
+                                eprintln!(
+                                    "{name} -> {target_name}: push {pushes} by {station} ({reason:?}) step {steps} range {range:.0} axial {axial:.0} lateral {lateral:.0} corridor {corridor:.0} front {front:.0} final {final_leg} speed {speed:.0}"
+                                );
+                            } else {
+                                eprintln!(
+                                    "{name} -> {target_name}: push {pushes} by {} ({reason:?}) step {steps}",
+                                    nav.bodies[dock].name
+                                );
+                            }
+                            flight.teleport(clear);
+                        }
+                        ffe_rs::docking::Contact::None => {}
+                    }
+                }
+                // An open-air starport's F745 hand-off: the target stays engaged
+                // with the cleared pad for the descent (the autoland stream).
+                if nav.bodies[index].kind == Kind::Starport && nav.final_leg && nav.cleared(index) {
+                    arrived = true;
+                    break;
+                }
                 if command.arrived {
                     arrived = true;
                     break;
@@ -870,13 +921,19 @@ fn autopilot_after_every_jump() {
             }
             let range = distance(flight.player().motion.position, nav.bodies[index].position);
             eprintln!(
-                "{name} -> {target_name} ({:?}): arrived {arrived} in {steps} steps, range {} stop {} set {} m/s aligned {last_aligned:.4} clock {:.0}",
+                "{name} -> {target_name} ({:?}): arrived {arrived} in {steps} steps, range {} stop {} set {} m/s aligned {last_aligned:.4} pushes {pushes} clock {:.0}",
                 nav.bodies[index].kind,
                 describe(range),
                 describe(standoff(&nav.bodies[index])),
                 flight.set_speed_metres(),
                 nav.clock
             );
+            assert!(
+                arrived,
+                "{name} -> {target_name} not reached: {} away after {steps} steps",
+                describe(range)
+            );
+            assert_eq!(pushes, 0, "{name} -> {target_name}: {pushes} hull pushes");
         }
         nav.target = None;
     }
@@ -996,7 +1053,10 @@ fn starport_autopilot_hands_off_at_the_approach_and_the_pad_reaches_0x30() {
     nav.lock(index);
     nav.engage_locked().expect("the starport is listed");
     let command = nav.command(&cache, &flight).expect("an engaged target");
-    assert!(command.0.arrived, "the approach point is reached");
+    // F745's grant starts the cleared pad leg (state 0x23); the target stays
+    // engaged so the descent can be cancelled or handed on.
+    assert!(nav.final_leg && nav.cleared(index));
+    assert!(!command.0.arrived, "the clearance starts the descent leg");
     let notice = nav.notice.clone().expect("F655 ran at the approach");
     assert!(notice.contains("clearance granted"), "{notice}");
     assert!(
@@ -1177,6 +1237,211 @@ fn autopilot_docks_at_stations() {
         assert!(out && done && nav.sequence.is_none());
         assert!(nav.starport(index).pads.iter().all(|p| *p == 0));
     }
+}
+
+/// The autopilot docks at orbital stations of several systems from arbitrary
+/// bearings, where the straight line to the approach point can cut the hull and
+/// the slot axis turns while the ship closes. Aiming at the centre used to be
+/// pushed clear (a spinning station's hull) or stop off the axis; the final leg
+/// now follows F745/F746's current slot.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn autopilot_docks_at_stations_from_every_bearing() {
+    use ffe_rs::docking::Contact;
+    use ffe_rs::model_viewer::ModelViewer;
+    use ffe_rs::navigation::Navigator;
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    for system in 0..8 {
+        let mut nav = Navigator::new(&cache).unwrap();
+        for model in [69, 72, 73, 74, 75, 76, 77, 78, 79, 80] {
+            let found = viewer.find(model);
+            nav.set_port_geometry(
+                model,
+                found.and_then(|m| m.front()),
+                found.and_then(|m| m.radius()),
+            );
+        }
+        nav.jump(&cache, system).unwrap();
+        let name = nav.system_name().to_owned();
+        let stations: Vec<usize> = nav
+            .bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.kind == Kind::Station)
+            .map(|(i, _)| i)
+            .collect();
+        for index in stations {
+            let centre = nav.bodies[index].position;
+            for (label, dir) in [
+                ("x", [1.0_f64, 0.0, 0.0]),
+                ("z", [0.0_f64, 0.0, 1.0]),
+                ("diagonal", [0.5_f64, 0.5, 0.707]),
+            ] {
+                let start: [i64; 3] =
+                    std::array::from_fn(|k| centre[k] + (dir[k] * 40.0e6).round() as i64);
+                nav.lock(index);
+                nav.engage_locked();
+                let mut flight = OriginalFlight::from_flight(
+                    &Flight {
+                        mode: Mode::Flight,
+                        ..Flight::default()
+                    },
+                    None,
+                );
+                flight.teleport(start);
+                let mut docked = false;
+                let mut pushes = 0;
+                let mut steps = 0;
+                while steps < 30_000 {
+                    steps += 1;
+                    let Some((command, _)) = nav.command(&cache, &flight) else {
+                        break;
+                    };
+                    if let Some((landing, seconds)) = command.skip {
+                        flight.teleport(landing);
+                        nav.transfer(&cache, seconds);
+                        continue;
+                    }
+                    if let Some(face) = command.face {
+                        flight.turn_toward(face, 0.05, 1.0);
+                    }
+                    flight.step(0.05, &command.keys).unwrap();
+                    nav.advance(&cache, 0.05);
+                    if let Some(moved) = nav.follow(flight.player().motion.position) {
+                        flight.shift(moved);
+                    }
+                    let velocity = flight.player().motion.velocity;
+                    let speed = velocity
+                        .iter()
+                        .map(|v| {
+                            (f64::from(*v) * ffe_rs::original_flight::MM_PER_SECOND / 1000.0)
+                                .powi(2)
+                        })
+                        .sum::<f64>()
+                        .sqrt();
+                    match nav.contact(flight.player().motion.position, speed) {
+                        Some((dock, Contact::Docked)) => {
+                            assert!(nav.begin_docking(dock));
+                            docked = true;
+                            break;
+                        }
+                        Some((_, Contact::Collision { clear, .. })) => {
+                            pushes += 1;
+                            flight.teleport(clear);
+                        }
+                        _ => {}
+                    }
+                }
+                if docked {
+                    eprintln!(
+                        "{name} / {} / {label}: docked after {steps} steps ({pushes} pushes, clock {:.0})",
+                        nav.bodies[index].name,
+                        nav.clock
+                    );
+                }
+                assert!(
+                    docked,
+                    "{name} / {} / {label}: not docked after {steps} steps ({} away, {pushes} pushes)",
+                    nav.bodies[index].name,
+                    describe(distance(
+                        flight.player().motion.position,
+                        nav.bodies[index].position
+                    )),
+                );
+                assert_eq!(
+                    pushes, 0,
+                    "{name} / {} / {label}: hull pushes",
+                    nav.bodies[index].name
+                );
+            }
+        }
+    }
+}
+
+/// F1018's cancel (Backspace / the autopilot action): the leg is dropped and the
+/// set speed falls to 0 so the ship brakes. The old cancel only cleared the
+/// target, leaving the ship coasting at the autopilot's speed.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn cancelling_the_autopilot_stops_the_ship_and_clears_the_leg() {
+    use ffe_rs::navigation::Navigator;
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let (_, at) = nav.station().map(|(n, at)| (n.to_owned(), at)).unwrap();
+    let target = nav
+        .bodies
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| matches!(b.kind, Kind::Planet | Kind::Moon))
+        .max_by(|a, b| distance(at, a.1.position).total_cmp(&distance(at, b.1.position)))
+        .map(|(i, _)| i)
+        .expect("a planet");
+    nav.lock(target);
+    nav.engage_locked().expect("engaged");
+    let mut flight = OriginalFlight::from_flight(
+        &Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        },
+        None,
+    );
+    // Close enough that the short leg flies in real time (no transfer).
+    let reach = standoff(&nav.bodies[target]) + 1.0e9;
+    let start = [
+        nav.bodies[target].position[0] + reach as i64,
+        nav.bodies[target].position[1],
+        nav.bodies[target].position[2],
+    ];
+    flight.teleport(start);
+    for _ in 0..40 {
+        let (command, _) = nav.command(&cache, &flight).expect("engaged");
+        if let Some(face) = command.face {
+            flight.turn_toward(face, 0.05, 1.0);
+        }
+        flight.step(0.05, &command.keys).unwrap();
+    }
+    assert!(nav.target.is_some() && flight.set_speed_metres() > 1.0);
+    eprintln!(
+        "engaged: target {} set {:.0} m/s",
+        nav.bodies[target].name,
+        flight.set_speed_metres()
+    );
+    assert!(nav.cancel(), "there was an engaged leg to cancel");
+    flight.halt();
+    assert_eq!(
+        (nav.target, nav.final_leg, nav.docking()),
+        (None, false, false)
+    );
+    assert_eq!(flight.set_speed_metres(), 0.0);
+    eprintln!("cancelled: target/leg cleared, set 0 m/s");
+    assert!(nav.command(&cache, &flight).is_none());
+    let before = flight
+        .player()
+        .motion
+        .velocity
+        .iter()
+        .map(|v| f64::from(*v).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    for _ in 0..1_000 {
+        flight
+            .step(0.05, &ffe_rs::original_flight::Keys::default())
+            .unwrap();
+    }
+    let after = flight
+        .player()
+        .motion
+        .velocity
+        .iter()
+        .map(|v| f64::from(*v).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    eprintln!(
+        "braked from {:.0} to {:.0} velocity units after 50 s",
+        before, after
+    );
+    assert!(after < before * 0.2, "still moving: {after} of {before}");
 }
 
 /// The flight view as the playable draws it, with the system's stations.

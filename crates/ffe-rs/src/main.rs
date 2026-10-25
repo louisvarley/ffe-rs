@@ -1730,13 +1730,21 @@ fn run() -> Result<(), String> {
                         }
                     }
                 }
-                if (pressed(Key::Backspace) || console_click == Some(Click::AutopilotOff))
-                    && nav.target.take().is_some()
-                {
-                    nav.disengage();
-                    // F864 clears the current replace-mode message when the
-                    // autopilot ends instead of printing another line.
-                    pending_log.clear(Source::Autopilot);
+                if pressed(Key::Backspace) || console_click == Some(Click::AutopilotOff) {
+                    // F1018: leave the autopilot and drop the set speed to
+                    // DATA_008866 (0), so the ship brakes instead of coasting on
+                    // at the speed the autopilot had set. The source also leaves
+                    // any clearance to time out (F867), so it is not released here.
+                    if nav.cancel() {
+                        if let Some(model) = original.as_mut() {
+                            model.halt();
+                        }
+                        message = "Autopilot off.".to_owned();
+                        sound.play(Cue::UiBeep);
+                        // F864 clears the current replace-mode message when the
+                        // autopilot ends instead of printing another line.
+                        pending_log.clear(Source::Autopilot);
+                    }
                 }
                 // Targets: a click on a body in the view, T (Shift+T the previous) or the
                 // target buttons lock on to it; K or the AUTOPILOT button flies there, and
@@ -2959,6 +2967,13 @@ fn run() -> Result<(), String> {
                         if let Some((command, body)) = nav.command(&cache, model) {
                             keys = command.keys;
                             command_face = command.face;
+                            // F597's near-target capture and F746's pad touch
+                            // run at 1x (`DATA_007706 == 0x3e2`); the autopilot's
+                            // command carries that step.
+                            if command.acceleration != acceleration {
+                                acceleration = command.acceleration;
+                                model.set_time_acceleration(acceleration);
+                            }
                             if let Some((landing, seconds)) = command.skip {
                                 model.teleport(landing);
                                 nav.transfer(&cache, seconds);

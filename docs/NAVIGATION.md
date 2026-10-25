@@ -195,13 +195,33 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   (about 20 s) before the ship is put out on the docking axis, facing away; the door then opens, and
   the bay is released. The lift scenes are the original's (`ffe_core::lift`): the cage, shaft and bay models in the
   front view, over the outside view when docking and alone when launching; the status line also names each stage.
-- **Autopilot.** A station target is flown in two legs: to F741's point 4,096,000 mm
-  out on the docking axis (stopping within 1 km), then, with clearance taken there, toward the
-  centre braking for a stop just inside the face, which the contact turns into docking. Sol's
-  Daedalus, Abraham Lincoln and Galileo dock from the start (`tests/navigation.rs`,
-  `autopilot_docks_at_stations`; `FFE_SHOT_DIR` saves frames on the way in). An open-air
-  starport target is flown to F741's point 6,144,000 mm above the port and asks F655 there; the
-  final pad descent is not ported (see the limits below).
+- **Autopilot.** The source map is F1020 (engage: target byte and AI state 8), F741
+  (state 8's set-up: the target's approach offset), F742/F610/F597/F599/F587 (distance,
+  steering rates and thrust), F745 (F655 clearance and the pad vector), F746 (state
+  `0x23`'s final approach) and F1018 (cancel: mode 0 and set speed `DATA_008866` = 0).
+  A station target is flown in two legs: to F741's point 4,096,000 mm out on the current
+  docking axis, then, with clearance taken there, into the slot. F742's arrival test is
+  the distance exponent (F610's `+0x10e`, `dist_cam`), so the 1,024,000 mm standoff
+  (`distance_byte` 6) is the port's 1 km `APPROACH_STOP`. The final leg re-aims at
+  F650's slot on the **current** axis every frame (F745/F746): off the axis it lines up
+  on a gate outside the face, then enters along the axis braking for the 250 m/s slot
+  limit. A straight line to the approach point that would cut the hull (a jump arrival
+  on the station's far side) is routed around a safety sphere first. Sol's Daedalus,
+  Abraham Lincoln and Galileo dock from the start (`tests/navigation.rs`,
+  `autopilot_docks_at_stations`; `FFE_SHOT_DIR` saves frames on the way in), and the
+  eight-system, three-bearing run `autopilot_docks_at_stations_from_every_bearing`
+  docks at every orbital station without a hull push. An open-air starport target is
+  flown to F741's point 6,144,000 mm above the port and asks F655 there; F745's grant
+  keeps the target and marks `final_leg`, the hand-off the autoland stream's final pad
+  descent consumes (see the limits below).
+- **Long legs and cancel.** The long leg is the port's own convenience (the source has
+  no transfer). Its destination is the body's position at the advanced clock, solved by
+  bracketing the transfer-time equation (`Navigator::intercept_time`), not by iterating
+  from the current position: the old fixed-point loop diverged for fast planets (Sirius'
+  Lucifer, Test-4 1) and teleported in circles. After `MAX_SKIPS` transfers in a row the
+  remaining leg is flown, so a target the transfers cannot catch cannot strand the ship
+  in the loop. Backspace cancels: F1018's leg state is dropped and `OriginalFlight::halt`
+  sets the set speed to 0, so the ship brakes instead of coasting on.
 - **Frames.** Bodies move between the navigator's refreshes; the ship is carried with the
   body it is near (the engaged target on its final approach, else a station within 200 km,
   else a planet or moon within 50 radii), so a station stays where the ship left it.
@@ -277,9 +297,11 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
 
 - The orientation the physics integrates drifts off orthonormal (rows 0.985 long after a
   while); the autopilot orthonormalises before steering.
-- Docking entry speeds through the autopilot are 35-110 m/s: the set speed steps down at the
-  keys' fixed rate, so the real speed is braked against the curve (the test's three stations
-  enter at 35, 107 and 37 m/s) and stays under the 250 m/s slot limit.
+- Docking entry speeds through the autopilot are about 22-23 m/s: the set speed steps down
+  at the keys' fixed rate, so the real speed is braked against the curve; the final leg's
+  standoff keeps the face crossing under the 250 m/s slot limit. The off-axis and
+  far-side runs in `autopilot_docks_at_stations_from_every_bearing` record zero hull
+  pushes.
 - Planet surfaces draw their triangles, but the textured fills are flat colours or
   blends (see above), so the detail is blockier than the original's; the night side is
   drawn with the shade table and has no atmospheric glow except the ported haze ring.
@@ -294,9 +316,10 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   the landed ground.
 - **Starport landings from flight.** The F1019/F1021 open-air `0x2e` -> `0x30` pair is now
   routed (`Navigator::land_at_starport`, F1048's frame, F654's launch request), and F1047/F1048
-  follow the source's music rules. Two pieces remain: the autopilot only flies to F741's
-  approach point and asks F655; the original's final pad descent is its thruster-level AI
-  (F741/F745/F746 with F599/F600), which is not ported; and the F569/F576 scan at the exact pad
+  follow the source's music rules. The autopilot flies to F741's approach point and asks
+  F655; F745's grant keeps the target and `final_leg` for the autoland stream's descent
+  (`starport_descent`, `starport_pad_point`, `land_at_starport`), so this branch is the
+  hand-off point rather than the port's own pad descent. The F569/F576 scan at the exact pad
   returns "needs the models' records" for the tested starport models (its stream references a
   surface the decoded model lacks), so the pad touch is not reachable from ordinary flight there.
   The new game's `0x30` and its F381 launch are the working path (`docs/notes/intro.md`).
@@ -332,6 +355,9 @@ list builder before `JUMP_004516`):
 What ffe-rs does: the list has the original's layout (two columns of nine, marker
 squares), page by page (Left/Right) because the systems have far more bodies than 18;
 a click locks on and engages the autopilot, and the lock shows under the top bar.
-The autopilot controller itself is ffe-rs's own (a direct turn toward the target, set
-speed from the braking distance, time transfers for the long legs), tested on every
-system after a jump (50 of 52 bodies arrive).
+The autopilot controller is ffe-rs's own implementation of the F742/F610/F597 law (a
+direct turn toward the target, set speed from the braking curve) with the port's long-leg
+transfer; the F741/F745 approach distances and the F746 final leg are the source's. It
+is tested on every body of every system after a jump (`autopilot_after_every_jump`), at
+every orbital station from three bearings (`autopilot_docks_at_stations_from_every_bearing`)
+and with the F1018 cancel (`cancelling_the_autopilot_stops_the_ship_and_clears_the_leg`).
