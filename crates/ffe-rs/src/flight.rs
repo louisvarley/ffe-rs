@@ -77,7 +77,7 @@ fn default_ship() -> u32 {
     crate::ships::DEFAULT_SHIP
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Controls {
     pub thrust: f64,
     pub yaw: f64,

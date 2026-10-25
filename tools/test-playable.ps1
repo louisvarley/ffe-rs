@@ -250,15 +250,15 @@ try {
         throw "Default Modern reverse axes failed: z velocity=$($reverse.velocity[2]), yaw=$($reverse.yaw), pitch=$($reverse.pitch)."
     }
     Key 0x71
-    Key 0x33 # Reset before checking optional Classic-like preset
-    Key 0x72 # F3: Modern -> Classic-like
+    Key 0x33 # Reset before checking Classic preset
+    Key 0x72 # F3: Modern -> Classic
     Key 0x0d 200 # Enter thrust
     Key 0xbe 200 # Period yaw
     Key 0x41 200 # A pitch
     Key 0x74
     $classic = Latest
     if ($classic.velocity[2] -le 0 -or $classic.yaw -le 0 -or $classic.pitch -le 0) {
-        throw 'Optional Classic-like thrust/yaw/pitch failed.'
+        throw 'Optional Classic thrust/yaw/pitch failed.'
     }
     Key 0x72 # Restore Modern
     $path = @(Get-ChildItem -LiteralPath (Join-Path $testRoot 'saves') -Filter 'prototype-*.json' | Sort-Object Name)[-1].FullName
@@ -287,7 +287,7 @@ try {
     Key 0x78
     Key 0x74
     if ((Latest).credits -ne 999) { throw 'Cross-process persistence failed.' }
-    Write-Host 'PASS: station model lab isolation -> trade -> launch -> default Modern thrust -> dock -> sell -> save/reset/load -> steering/braking/held-pause isolation -> optional Classic-like controls -> corrupt-load rejection -> relaunch/load.'
+    Write-Host 'PASS: station model lab isolation -> trade -> launch -> default Modern thrust -> dock -> sell -> save/reset/load -> steering/braking/held-pause isolation -> optional Classic controls -> corrupt-load rejection -> relaunch/load.'
 } finally {
     if ($process -and !$process.HasExited) {
         [void][PlayableWindowTest]::SendMessage($window, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)

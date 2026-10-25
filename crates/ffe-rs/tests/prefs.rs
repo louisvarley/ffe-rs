@@ -127,6 +127,27 @@ fn port_page_switches_modern_and_classic_controls() {
 }
 
 #[test]
+fn the_f3_switch_flips_the_preset_and_the_page_shows_it() {
+    use ffe_rs::input::Preset;
+    use ffe_rs::prefs::Mark;
+
+    let mut prefs = Prefs::default();
+    assert_eq!(Preset::from_modern(prefs.modern), Preset::Modern);
+    prefs.toggle_modern();
+    assert_eq!(Preset::from_modern(prefs.modern), Preset::Classic);
+    prefs.escape();
+    prefs.page = PORT;
+    let rows = prefs.rows();
+    let modern = rows.iter().find(|row| row.label == "Modern").unwrap();
+    let classic = rows.iter().find(|row| row.label == "Classic").unwrap();
+    assert_eq!(modern.mark, Mark::Radio(false));
+    assert_eq!(classic.mark, Mark::Radio(true));
+    // The page switches the same value back immediately.
+    assert_eq!(prefs.click(34, 38), Activate::None);
+    assert!(prefs.modern);
+}
+
+#[test]
 fn keyboard_navigation_activates_rows_and_escape_closes() {
     let mut prefs = Prefs::default();
     assert_eq!(prefs.escape(), Activate::None);

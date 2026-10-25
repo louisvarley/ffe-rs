@@ -91,3 +91,46 @@ fn the_model_starts_from_the_flight_state_and_round_trips_its_position() {
     assert!((state.velocity[2] - 5.0).abs() < 0.01);
     assert_eq!(state.mode, Mode::Flight);
 }
+#[test]
+fn the_classic_mouse_word_steers_and_a_disabled_mouse_never_does() {
+    let stats = ShipStats::from_block(&EAGLE).unwrap();
+    let mut state = Flight::free_flight();
+    let mut model = OriginalFlight::from_flight(&state, Some(&stats));
+    let before = ship_axes_yaw(&state);
+    // One pixel of mouse x is one count in the low word; F1038 shifts it by 6.
+    run(
+        &mut model,
+        &mut state,
+        Keys {
+            mouse: 64,
+            mouse_enabled: true,
+            ..Keys::default()
+        },
+        0.5,
+    );
+    let turned = ship_axes_yaw(&state);
+    assert!((turned - before).abs() > 0.01, "{before} -> {turned}");
+
+    // The word is ignored while the button is not held: the previous value is
+    // cleared instead of applied, so releasing or switching presets cannot snap
+    // the ship round.
+    let mut untouched = Flight::free_flight();
+    let mut model = OriginalFlight::from_flight(&untouched, Some(&stats));
+    let before = ship_axes_yaw(&untouched);
+    run(
+        &mut model,
+        &mut untouched,
+        Keys {
+            mouse: u32::MAX,
+            mouse_enabled: false,
+            ..Keys::default()
+        },
+        0.5,
+    );
+    assert!((ship_axes_yaw(&untouched) - before).abs() < 1e-9);
+}
+
+fn ship_axes_yaw(state: &Flight) -> f64 {
+    let forward = ffe_rs::camera::ship_axes(state)[2];
+    forward[0].atan2(forward[2])
+}

@@ -39,6 +39,14 @@ pub struct Keys {
     pub right: bool,
     pub roll_left: bool,
     pub roll_right: bool,
+    /// The mouse accumulator (`DATA_009188`) while [`Keys::mouse_enabled`] is
+    /// set: x in the low word, y in the high word.
+    pub mouse: u32,
+    /// The Classic preset's right button is held. When false the accumulator is
+    /// ignored and its previous value cleared, so a later press cannot jump.
+    pub mouse_enabled: bool,
+    /// Invert the mouse x and y axes (the original's Reverse controls options).
+    pub mouse_flip: [bool; 2],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -531,8 +539,17 @@ impl OriginalFlight {
                 self.held[index] = 0.0;
             }
         }
+        // The mouse is the Classic preset's right-button hold. With it up the
+        // accumulator is cleared rather than merely ignored, so pressing the
+        // button again starts from a zero delta instead of snapping the ship.
+        let (mouse, mouse_flip) = if keys.mouse_enabled {
+            (keys.mouse, keys.mouse_flip)
+        } else {
+            self.player.mouse_previous = 0;
+            (0, [false; 2])
+        };
         let controls = Controls {
-            mouse: 0,
+            mouse,
             faster: keys.faster,
             slower: keys.slower,
             steer: SteerKeys {
@@ -544,6 +561,7 @@ impl OriginalFlight {
                 roll_right: ticks[5],
             },
         };
+        self.player.mouse_flip = mouse_flip;
         self.player.input_time = tics;
         self.player.frame_tics = world_tics;
         self.player.update_set_speed(&controls);

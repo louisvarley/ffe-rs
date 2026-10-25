@@ -259,6 +259,12 @@ impl Prefs {
         }
     }
 
+    /// The F3 switch between the two flight presets; the Port Options rows set
+    /// the same value through [`Prefs::apply`].
+    pub fn toggle_modern(&mut self) {
+        self.modern = !self.modern;
+    }
+
     /// The rows of the current page, in the original's order.
     pub fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::new();
@@ -578,13 +584,19 @@ impl Prefs {
                 texts.push(Text {
                     x: 48,
                     y: 72,
-                    text: "Classic: Enter/Shift thrust, ,/. yaw, A/Z pitch.",
+                    text: "Classic: hold right mouse and move to steer.",
                     colour: 15,
                 });
                 texts.push(Text {
                     x: 48,
                     y: 82,
-                    text: "Classic roll: bracket keys. F3 toggles.",
+                    text: "Enter/Shift thrust; ,/. yaw; A/Z pitch; [ ] roll.",
+                    colour: 15,
+                });
+                texts.push(Text {
+                    x: 48,
+                    y: 92,
+                    text: "F3 or these rows switch preset; docs/CONTROLS.md.",
                     colour: 15,
                 });
                 texts.push(Text {
