@@ -288,6 +288,18 @@ fn a_free_commodity_ignores_the_cash_check() {
 }
 
 #[test]
+fn chaff_is_the_last_market_good_before_the_mission_items() {
+    // DATA_006248 is the thirty-third pointer, so its cargo word is
+    // player+0x174 (0x134 + 2*32). The five names after it are mission items.
+    assert_eq!(ffe_core::market::CHAFF, 32);
+    assert_eq!(GOODS, 33);
+    assert_eq!(NAMES - ffe_core::market::CHAFF, 6);
+    let bytes = block();
+    let tables = Tables::new(&bytes).unwrap();
+    assert_eq!(tables.name(ffe_core::market::CHAFF), Some("g32"));
+}
+
+#[test]
 fn selling_pays_the_price_and_returns_the_tonne() {
     let mut market = market_with(40, 1);
     let mut hold = Hold::new(5);

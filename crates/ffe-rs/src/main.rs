@@ -1827,6 +1827,56 @@ fn run() -> Result<(), String> {
                             None => message = "No E.C.M. system fitted.".to_owned(),
                         }
                     }
+                    // F1054's 'c' (0x63): F1054 tests the Chaff Dispenser
+                    // (general bit 11) and the chaff cargo word (`player+0x174`,
+                    // the cargo array's commodity 32), spawns the model-0xa4
+                    // object (`DATA_007253`) and calls F1057 once for every
+                    // missile. The source never decrements the cargo word, so
+                    // the port keeps the same free-launch behaviour (reported).
+                    if pressed(Key::C) {
+                        let fitted = state.loadout.chaff_dispenser();
+                        let chaff = state
+                            .hold
+                            .get(ffe_core::market::CHAFF)
+                            .copied()
+                            .unwrap_or(0);
+                        if !fitted {
+                            message = "No chaff dispenser fitted.".to_owned();
+                        } else if chaff == 0 {
+                            message = "No chaff in the hold.".to_owned();
+                        } else if nav.sequence.is_some() {
+                            message = "Chaff is only for flight.".to_owned();
+                        } else {
+                            let position = ship_position(&original, &state);
+                            let radius = ffe_core::objects::ModelInfo::read(
+                                model_records,
+                                model_stats,
+                                ffe_core::missile::DECOY_MODEL,
+                            )
+                            .map_or(0, |info| info.radii().1);
+                            let decoy = nav.deploy_chaff(position, radius);
+                            let seed = (nav.clock * 1000.0) as u32
+                                ^ (nav.decoys.len() as u32).wrapping_mul(0x9e37_79b9);
+                            let mut rng = ffe_core::RandomState::new(
+                                seed,
+                                seed.rotate_left(13) ^ 0x4567_89ab,
+                            );
+                            let pulled = nav.retarget_missiles(
+                                ffe_core::missile::PLAYER_TARGET,
+                                decoy,
+                                |_| rng.next_u16() & 0x1000 != 0,
+                            );
+                            sound.play(Cue::Chaff);
+                            message = if pulled == 0 {
+                                "Chaff deployed.".to_owned()
+                            } else {
+                                format!(
+                                    "Chaff deployed: {pulled} missile{} decoyed.",
+                                    if pulled == 1 { "" } else { "s" }
+                                )
+                            };
+                        }
+                    }
                     if let Some(point) = click_point
                         .filter(|(_, y)| console_click.is_none() && (12..118).contains(y))
                     {
@@ -2017,6 +2067,7 @@ fn run() -> Result<(), String> {
                                                     pylon,
                                                     launcher_radius,
                                                 );
+                                                sound.play(Cue::MissileLaunch);
                                                 // F941 repeats F931's F237(ship, 3)
                                                 // for the player's missile.
                                                 match nav.player_fired(position) {
@@ -3517,6 +3568,67 @@ fn run() -> Result<(), String> {
                                 }
                             }
                         }
+                        ffe_rs::navigation::ShipEvent::MissileLaunch {
+                            owner,
+                            name,
+                            code,
+                            pylon,
+                            target,
+                            position,
+                            axes,
+                            launcher_radius,
+                        } => {
+                            // F941: resolve the pylon code through the missile
+                            // model table and the cache's statistics, then add
+                            // the object to the same field the player's missiles
+                            // use.
+                            let model = ffe_core::missile::model(code).unwrap_or(0);
+                            let stats = scene.as_ref().and_then(|scene| scene.ship_stats(model));
+                            let missile_radius = ffe_core::objects::ModelInfo::read(
+                                model_records,
+                                model_stats,
+                                model,
+                            )
+                            .map_or(0, |info| info.radii().1);
+                            if let Some(spec) =
+                                ffe_rs::missile::MissileField::spec(code, stats, missile_radius)
+                            {
+                                nav.launch_npc_missile(
+                                    spec,
+                                    code,
+                                    owner,
+                                    target,
+                                    position,
+                                    axes,
+                                    pylon,
+                                    launcher_radius,
+                                );
+                                sound.play(Cue::MissileLaunch);
+                                pending_log.add(
+                                    Source::Combat,
+                                    format!("{name} launches a missile at you."),
+                                );
+                            }
+                        }
+                        ffe_rs::navigation::ShipEvent::Ecm { name, naval } => {
+                            // F757's F935: the NPC's burst is the same global
+                            // DATA_008835 flag the player's key sets, so F718
+                            // destroys the models in DATA_000029 system-wide.
+                            let losses = nav.ecm(naval);
+                            sound.play(if naval { Cue::NavalEcm } else { Cue::Ecm });
+                            if losses.is_empty() {
+                                pending_log.add(Source::Combat, format!("{name} fires E.C.M."));
+                            } else {
+                                pending_log.add(
+                                    Source::Combat,
+                                    format!(
+                                        "{name}'s E.C.M. destroys {} missile{}.",
+                                        losses.len(),
+                                        if losses.len() == 1 { "" } else { "s" }
+                                    ),
+                                );
+                            }
+                        }
                         ffe_rs::navigation::ShipEvent::PoliceHostile { name } => {
                             pending_log.add(
                                 Source::Legal,
@@ -3531,7 +3643,11 @@ fn run() -> Result<(), String> {
                         }
                     }
                 }
-                for event in nav.tick_missiles(elapsed * factor, player) {
+                let player_velocity = state
+                    .velocity
+                    .map(|value| value * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
+                for event in nav.tick_missiles_at(elapsed * factor, player, player_velocity, radius)
+                {
                     match event {
                         ffe_rs::missile::MissileEvent::Hit { name, outcome, .. } => {
                             pending_log.add(
@@ -3560,6 +3676,72 @@ fn run() -> Result<(), String> {
                                     }
                                 },
                             );
+                        }
+                        ffe_rs::missile::MissileEvent::HitPlayer { damage, .. } => {
+                            // F720/F721/F953 on the player: the same shield ->
+                            // hull path as a laser hit, with the missile's
+                            // `DATA_006269` damage.
+                            let outcome = state.take_damage(damage, mass);
+                            match outcome {
+                                ffe_core::laser::Damage::Shields => {
+                                    let percent = if state.shields[1] == 0 {
+                                        0
+                                    } else {
+                                        state.shields[0] as i32 * 100 / i32::from(state.shields[1])
+                                    };
+                                    pending_log.add(
+                                        Source::Combat,
+                                        format!(
+                                            "A missile is absorbed by your shields ({percent}% left)."
+                                        ),
+                                    );
+                                    sound.play(Cue::ShieldHit);
+                                }
+                                ffe_core::laser::Damage::Hull => {
+                                    let per_mille =
+                                        state.hull[0] as i32 * 1000 / i32::from(mass.max(1) * 4);
+                                    pending_log.add(
+                                        Source::Combat,
+                                        format!(
+                                            "A missile hits your hull: {}.{}%.",
+                                            per_mille / 10,
+                                            per_mille % 10
+                                        ),
+                                    );
+                                    sound.play(Cue::HullDamage);
+                                }
+                                ffe_core::laser::Damage::Destroyed => {
+                                    if state.death.is_none() {
+                                        let outcome = playership_destroyed(
+                                            &mut state,
+                                            &mut original,
+                                            nav,
+                                            scene.as_ref(),
+                                            &mut views,
+                                            acceleration,
+                                        );
+                                        match outcome {
+                                            Outcome::Escaped(craft) => {
+                                                death::play_destroyed_escape_audio(&mut sound);
+                                                pending_log.add(
+                                                    Source::Death,
+                                                    death::escaped_message("A missile", craft),
+                                                );
+                                            }
+                                            Outcome::Destroyed => {
+                                                death::play_destroyed_audio(&mut sound);
+                                                pending_log.add(
+                                                    Source::Death,
+                                                    death::destroyed_message("A missile"),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ffe_rs::missile::MissileEvent::HitDecoy { .. } => {
+                            pending_log.add(Source::Combat, "A missile detonates on the chaff.");
                         }
                         ffe_rs::missile::MissileEvent::Expired { .. } => {}
                     }
@@ -4086,7 +4268,8 @@ fn run() -> Result<(), String> {
         screen.effects = match nav.as_ref() {
             Some(nav) => {
                 let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
-                nav.effects
+                let mut effects: Vec<ffe_rs::screen::SystemEffect> = nav
+                    .effects
                     .iter()
                     .map(|effect| ffe_rs::screen::SystemEffect {
                         model: effect.model,
@@ -4098,7 +4281,16 @@ fn run() -> Result<(), String> {
                             0
                         },
                     })
-                    .collect()
+                    .collect();
+                // F1054's chaff object (model 0xa4) is an ordinary object in
+                // the source's list; the port draws it through the effect path.
+                effects.extend(nav.decoys.iter().map(|decoy| ffe_rs::screen::SystemEffect {
+                    model: ffe_core::missile::DECOY_MODEL,
+                    centre: decoy.position.map(|v| v as f64 / unit),
+                    axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    mass: 0,
+                }));
+                effects
             }
             None => Vec::new(),
         };
@@ -4744,6 +4936,13 @@ fn run() -> Result<(), String> {
             data_247: targeter.combat,
             ef: u8::from(nav.as_ref().is_some_and(|nav| nav.missile_view.is_some())),
             general: state.loadout.general,
+            // `player+0x174` is the cargo array's Chaff word (0x134 + 2*32);
+            // F1120's 0x51 lamp and F1054's `c` read the same count.
+            p174: state
+                .hold
+                .get(ffe_core::market::CHAFF)
+                .copied()
+                .unwrap_or(0),
             ..screen.systems
         };
         screen.clock = nav.as_ref().map(|nav| nav.date_text()).unwrap_or_default();

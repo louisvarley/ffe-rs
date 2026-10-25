@@ -19,6 +19,10 @@ use crate::RandomState;
 pub const TABLE_BYTES: usize = 704;
 /// Commodities with a market (`0x21`); the next five names are mission items.
 pub const GOODS: usize = 33;
+/// `DATA_006248`'s "Chaff", the last market commodity (index 32). The player's
+/// cargo word for it is `player+0x174` (`0x134 + 2 * 32`), the count F1054's
+/// `c` and F1120's `0x51` lamp read.
+pub const CHAFF: usize = 32;
 /// Names in the block (`DATA_006216..6253`).
 pub const NAMES: usize = 38;
 

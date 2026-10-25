@@ -115,6 +115,8 @@ pub enum Cue {
     NavalEcm,
     /// A missile/object launch (`F291`).
     MissileLaunch,
+    /// F1054's chaff dispenser (`0x14`, the `bip` sample).
+    Chaff,
     /// A missile/mine explosion (`F719`, `F720`, `F953`).
     MissileExplosion,
     /// A ship destroyed by hull damage (`F937`, `F942`).
@@ -183,6 +185,7 @@ impl Cue {
             Self::Ecm => (sample::ECM, -1),
             Self::NavalEcm => (sample::NAVAL_ECM, -1),
             Self::MissileLaunch | Self::Launch => (sample::LAUNCH, -1),
+            Self::Chaff => (sample::BIP, -1),
             Self::MissileExplosion => (sample::MISSILE_EXPLOSION, -1),
             Self::ShipExplosion => (sample::SHIP_EXPLOSION, -1),
             Self::LargeExplosion => (sample::BOOM, -1),

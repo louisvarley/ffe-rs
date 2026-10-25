@@ -602,8 +602,10 @@ pub struct Spec {
     pub drive: u8,
     /// The statistics' gun mounts (`+0x4`).
     pub gun_mounts: i8,
+    /// The statistics' missile mounts (`+0x12`), F773's count ceiling.
+    pub missiles: u16,
     /// The cargo space (`+0x116`): F942 uses `min(4, cargo >> 1)` extra debris
-    /// pods.
+    /// pods. F773 also spends it on the ship's fitted equipment.
     pub cargo: u16,
 }
 
@@ -812,6 +814,54 @@ pub const PIRATE_BOUNTIES: [u32; 22] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 50, 100, 125, 150, 175, 200,
 ];
 
+/// `DATA_006260` (`ffedat.asm:10051`), the sixteen missile codes F773 fits,
+/// indexed by the top nibble of its random word. The low end is the two mine
+/// codes, the middle is the KL760 (`0x82`, model 6) and the top entries are the
+/// LV111 (`0x83`, model 7) and MV1 (`0x84`, model 8).
+pub const MISSILE_CODES: [u8; 16] = [
+    0xc0, 0xc1, 0xc1, 0x82, 0x82, 0x82, 0x82, 0x82, 0x82, 0x82, 0x82, 0x82, 0x83, 0x83, 0x83, 0x84,
+];
+
+/// F754's launch band. F753 calls it only for F610 distance exponents 5..8;
+/// with F758's `2^(13+e)` convention that is 2^18..2^22 mm (262 m to 4.2 km).
+pub const MISSILE_LAUNCH_MIN: f64 = 262_144.0;
+pub const MISSILE_LAUNCH_MAX: f64 = 4_194_304.0;
+/// F756 (state 3) calls F754 for any distance exponent up to 10, so its band is
+/// wider than F753's: 0..2^23 mm (8.4 km).
+pub const MISSILE_LAUNCH_PASS_MAX: f64 = 8_388_608.0;
+/// F754's random gate: `F1530() < 0x2000` (one in eight event-6 calls).
+pub const LAUNCH_GATE: u16 = 0x2000;
+/// F757's ECM gate: `F1530() > 0xa000` (0.375 of the evasion updates).
+pub const ECM_GATE: u16 = 0xa000;
+/// The original's event-6 interval (`DATA_009155` is 994 tics per 20 ms frame).
+/// F754/F757 are controllers, so their rolls run once per 20 ms of game time.
+pub const CONTROL_SECONDS: f64 = 0.02;
+/// The lateral distance the port's F757 evasion aims across the missile's line.
+pub const EVADE_OFFSET: f64 = 2.0e6;
+/// F773's general-equipment bit for the energy bomb (`+0xc8` bit 26). F754
+/// calls F937 when F941 found no pylon; the port does not model F937's blast
+/// (reported in `docs/notes/npc.md`).
+pub const ENERGY_BOMB_BIT: u32 = 1 << 26;
+
+/// F941's launch request for an NPC. The core has no cache, so `ffe-rs` turns
+/// the code into a missile [`crate::missile::Spec`] and calls F941's launch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MissileLaunch {
+    /// The launcher's [`NpcShip::id`] (`+0x100`).
+    pub owner: u32,
+    /// The target (`+0xfe`): the player, in the port's traffic AI.
+    pub target: u32,
+    /// The pylon word's missile code (`ship+0xd6..+0xdf`).
+    pub code: u8,
+    /// F941's 1-based pylon index.
+    pub pylon: usize,
+    pub position: [i64; 3],
+    /// Right, up, forward.
+    pub axes: [[f64; 3]; 3],
+    /// F1533's launcher radius, which F941 uses for the separation impulse.
+    pub launcher_radius: i64,
+}
+
 /// A ship's AI state in this port. Each variant names the original states it
 /// stands in for, so [`State::original`] can be checked against [`AI_STATES`]:
 ///
@@ -828,6 +878,8 @@ pub const PIRATE_BOUNTIES: [u32; 22] = [
 /// - `Attack` = 0x01/0x02/0x04/0x05 (F752/F753 attack, F724 firing, F750
 ///   interception, F749's transition).
 /// - `Pass` = 0x03 (F755/F756's evasion/overshoot).
+/// - `Evade` = 0x0c (F757: F941 puts a ship a missile is aimed at into this
+///   state; F757 jinks and may call F935's ECM burst).
 /// - `Flee` = 0x1d (F761 hides the ship as F738's hyperspace cloud).
 /// - `Dead` = 0x1c (F708/F942's explosion object).
 /// - `Escaped`: the cloud is gone and F927 frees the slot; no live row.
@@ -851,6 +903,8 @@ pub enum State {
     Attack,
     /// A fast pass through the target: F597's "cannot stop in time" overshoot.
     Pass,
+    /// A missile is locked on this ship: F757's evasive turn and F935's ECM.
+    Evade,
     /// Run from the player and jump out (F787/F738).
     Flee,
     /// Destroyed; the death marker counts down (F942).
@@ -872,6 +926,7 @@ impl State {
             State::Escort => &[0x0a, 0x0b],
             State::Attack => &[0x01, 0x02, 0x04, 0x05],
             State::Pass => &[0x03],
+            State::Evade => &[0x0c],
             State::Flee => &[0x1d],
             State::Dead => &[0x1c],
             State::Escaped => &[],
@@ -932,6 +987,24 @@ pub struct NpcShip {
     /// F931's mutable words for that laser (`+0xe8` refire, `+0xea` heat,
     /// `+0x11e` energy).
     pub guns: laser::State,
+    /// F773's general-equipment dword (`ship+0xc8`): the E.C.M./Naval E.C.M.
+    /// and energy-bomb bits the source's random outfitting can set.
+    pub general: u32,
+    /// F773's ten pylon words (`ship+0xd6..+0xdf`), with the code `DATA_006260`
+    /// chose. F941 clears the one it launches.
+    pub pylons: [u8; crate::missile::PYLONS],
+    /// F1530's per-ship stream, for F754/F757's rolls and F773's outfitting.
+    pub missile_rng: crate::RandomState,
+    /// Seconds of event-6 time not yet rolled for a launch/ECM attempt.
+    pub control_clock: f64,
+    /// The missile this ship is evading (`+0xfe` while state 0x0c), from F941.
+    pub missile_target: Option<u32>,
+    /// F757's F935 burst has already been tried this evasion.
+    pub ecm_attempted: bool,
+    /// A launch F941 made this tick, drained by `tick_ships`.
+    pub launch: Option<MissileLaunch>,
+    /// F935's naval flag for a burst made this tick, drained by `tick_ships`.
+    pub ecm_burst: Option<bool>,
     /// `+0x11a`, the bounty F942 pays when the player kills it.
     pub bounty: u32,
     /// The leader this ship escorts (F695's `+0xfe` points at it) and the offset
@@ -974,6 +1047,11 @@ impl NpcShip {
         let phase = (rng.bounded(65_536) as f64) / 65_536.0 * std::f64::consts::TAU;
         let orbit_radius = ANCHOR_ORBIT + f64::from(rng.bounded(1_000_000));
         let hostile = role.hostile();
+        let laser = role.laser_code(spec, rng);
+        // F773's equipment pass runs after the model's laser choice; the ship's
+        // own F1530 stream starts from the spawn draw.
+        let (general, pylons) = fit_equipment(spec, role, laser, rng);
+        let seed = rng.bounded(0x1_0000);
         Self {
             id: 0,
             model: spec.model,
@@ -1001,12 +1079,20 @@ impl NpcShip {
             turn_rate: TURN_RATE / f64::from(turn_divisor(spec.model)),
             speed: 0.0,
             hostile,
-            laser: role.laser_code(spec, rng),
+            laser,
             guns: laser::State {
                 refire: 0,
                 heat: 0,
                 energy: drive_energy(spec.drive),
             },
+            general,
+            pylons,
+            missile_rng: crate::RandomState::new(seed, seed.rotate_left(13) ^ 0x4567_89ab),
+            control_clock: 0.0,
+            missile_target: None,
+            ecm_attempted: false,
+            launch: None,
+            ecm_burst: None,
             bounty: if role == Role::Pirate {
                 pirate_bounty(rng, false)
             } else {
@@ -1036,6 +1122,78 @@ impl NpcShip {
     /// bay is not in the outside view).
     pub fn visible(&self) -> bool {
         self.alive() && !matches!(self.state, State::Docked | State::Launch)
+    }
+
+    /// F935's equipment test for an AI ship, in the source's order: Naval
+    /// E.C.M. (`+0xca` bit 7) first, then the standard system (bit 3).
+    pub fn fitted_ecm(&self) -> Option<crate::equipment::Ecm> {
+        if self.general & crate::equipment::NAVAL_ECM_BIT != 0 {
+            Some(crate::equipment::Ecm::Naval)
+        } else if self.general & crate::equipment::ECM_BIT != 0 {
+            Some(crate::equipment::Ecm::Standard)
+        } else {
+            None
+        }
+    }
+
+    /// F941's `+0xff = 0x0c` side effect: a missile is now aimed at this ship.
+    /// Only a live, non-docked target goes evasive.
+    pub fn evade_missile(&mut self, missile: u32) {
+        if self.alive() && !self.state.docking() && self.state != State::Evade {
+            self.state = State::Evade;
+            self.missile_target = Some(missile);
+            self.ecm_attempted = false;
+        }
+    }
+
+    /// F780/F781: the missile this ship was evading died. The source retargets
+    /// its `+0xfe` to the missile's owner (the player) and returns to state 5;
+    /// the port returns to [`State::Attack`].
+    pub fn missile_gone(&mut self, missile: u32) {
+        if self.missile_target == Some(missile) {
+            self.missile_target = None;
+            self.ecm_attempted = false;
+            if self.state == State::Evade {
+                self.state = State::Attack;
+            }
+        }
+    }
+
+    /// Take this tick's F941 launch, if any.
+    pub fn take_launch(&mut self) -> Option<MissileLaunch> {
+        self.launch.take()
+    }
+
+    /// Take this tick's F935 bust, if any; `true` is the Naval system.
+    pub fn take_ecm(&mut self) -> Option<bool> {
+        self.ecm_burst.take()
+    }
+
+    /// F754: roll for a launch at `target` and, on success, F941's pylon clear.
+    /// `state` 1/2's distance band is checked by the caller. Returns the launch
+    /// for `ffe-rs` to turn into a `Spec`.
+    fn attempt_launch(&mut self, target: u32) {
+        let roll = self.missile_rng.next_u16();
+        if roll >= LAUNCH_GATE {
+            return;
+        }
+        let pylon = (roll as usize & 7) + 1;
+        let code = self.pylons[pylon - 1];
+        if code == 0 {
+            // F941 returned 0, so F754 calls F937. The energy-bomb blast is not
+            // modelled; the rare fitted bit is still set and reported.
+            return;
+        }
+        self.pylons[pylon - 1] = 0;
+        self.launch = Some(MissileLaunch {
+            owner: self.id,
+            target,
+            code,
+            pylon,
+            position: self.position,
+            axes: self.axes(),
+            launcher_radius: self.radius,
+        });
     }
 
     /// F650/F745: the station gave this ship a bay; fly the final leg to it.
@@ -1222,6 +1380,41 @@ impl NpcShip {
                 self.state = State::Attack;
             }
         }
+        // F754/F757 are event-6 controllers: their random rolls run once per
+        // 20 ms of game time, not once per rendered frame.
+        self.control_clock += dt;
+        while self.control_clock >= CONTROL_SECONDS {
+            self.control_clock -= CONTROL_SECONDS;
+            match self.state {
+                State::Attack | State::Pass => {
+                    let range = distance_between(self.position, player);
+                    let (min, max) = if self.state == State::Pass {
+                        (0.0, MISSILE_LAUNCH_PASS_MAX)
+                    } else {
+                        (MISSILE_LAUNCH_MIN, MISSILE_LAUNCH_MAX)
+                    };
+                    if self.is_hostile() && (min..max).contains(&range) {
+                        self.attempt_launch(crate::missile::PLAYER_TARGET);
+                    }
+                }
+                State::Evade => {
+                    // F757: `F1530() > 0xa000` calls F935 when the ship has an
+                    // E.C.M. system. One burst is enough to end the evasive
+                    // state for the models the table defeats; the source may
+                    // repeat the roll while the missile survives.
+                    let burst = if !self.ecm_attempted && self.missile_rng.next_u16() > ECM_GATE {
+                        self.fitted_ecm()
+                    } else {
+                        None
+                    };
+                    if let Some(ecm) = burst {
+                        self.ecm_burst = Some(ecm == crate::equipment::Ecm::Naval);
+                        self.ecm_attempted = true;
+                    }
+                }
+                _ => {}
+            }
+        }
         // F747/F733: in the bay. The object stays on its pad while the station's
         // own motion carries it (the pad snapshot is in the system frame), and
         // F733's object time counts down. At zero F734 asks F654 for the door.
@@ -1374,6 +1567,13 @@ impl NpcShip {
                 }
             }),
             State::Attack | State::Pass => player,
+            // F757's evasive turn: aim across the missile's line rather than at
+            // the player. The source adds random roll/pitch words (F588); the
+            // port turns toward a point one `EVADE_OFFSET` to the ship's right.
+            State::Evade => {
+                let right = self.axes()[0];
+                add(player, right.map(|value| (value * EVADE_OFFSET) as i64))
+            }
             State::Flee => {
                 let direction = away(self.position, player);
                 add(self.position, direction.map(|value| (value * 4.0e6) as i64))
@@ -1410,7 +1610,7 @@ impl NpcShip {
                 let room = (distance - STANDOFF).max(0.0);
                 self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt())
             }
-            State::Pass | State::Flee => self.max_speed,
+            State::Pass | State::Flee | State::Evade => self.max_speed,
             State::Docked | State::Launch | State::Dead | State::Escaped => 0.0,
         };
         // F597: if the ship cannot stop before the standoff, it commits to the
@@ -1473,7 +1673,7 @@ impl NpcShip {
     /// spent) even when the ray misses, as the original's F931 does. `None` when
     /// the ship has no laser, is not hostile, or F931's gates refuse.
     pub fn fire(&mut self, tics: u32, player: [i64; 3], player_radius: i64) -> Option<Shot> {
-        if !self.alive() || !self.is_hostile() {
+        if !self.alive() || !self.is_hostile() || self.state == State::Evade {
             return None;
         }
         let code = self.laser?;
@@ -1749,6 +1949,10 @@ pub struct Persisted {
     pub hostile: bool,
     pub laser: Option<u8>,
     pub guns: laser::State,
+    /// F773's general-equipment dword and pylon words, so a carried ship keeps
+    /// its E.C.M. and remaining missiles across the jump.
+    pub general: u32,
+    pub pylons: [u8; crate::missile::PYLONS],
     pub bounty: u32,
     /// The model-derived limits, so a restored ship flies and turns like itself.
     pub max_speed: f64,
@@ -1784,6 +1988,8 @@ pub fn persist(ships: &[NpcShip], player: [i64; 3]) -> Vec<Persisted> {
             hostile: true,
             laser: ship.laser,
             guns: ship.guns,
+            general: ship.general,
+            pylons: ship.pylons,
             bounty: ship.bounty,
             max_speed: ship.max_speed,
             accel: ship.accel,
@@ -1827,6 +2033,17 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             hostile: record.hostile,
             laser: record.laser,
             guns: record.guns,
+            general: record.general,
+            pylons: record.pylons,
+            missile_rng: crate::RandomState::new(
+                first_id ^ index as u32 ^ 0x5eed_1234,
+                (first_id + index as u32).rotate_left(13) ^ 0x2468_ace0,
+            ),
+            control_clock: 0.0,
+            missile_target: None,
+            ecm_attempted: false,
+            launch: None,
+            ecm_burst: None,
             bounty: record.bounty,
             leader: None,
             formation: [0; 3],
@@ -1915,6 +2132,63 @@ pub fn f774_laser(class: u8, budget: u32, rng: &mut Random) -> Option<(u8, u32)>
     // The original decrements after the loop, so a capacity below the first
     // tonnage returns entry 0 (no laser).
     Some(LASER_TONNAGE[index - 1])
+}
+
+/// The tonnage of a laser byte in F774's `DATA_006265` table.
+fn laser_mass(code: u8) -> u32 {
+    LASER_TONNAGE
+        .iter()
+        .find(|(entry, _)| *entry == code)
+        .map_or(0, |(_, mass)| *mass)
+}
+
+/// F773's equipment fit for an AI ship: the E.C.M./Naval E.C.M. and energy-bomb
+/// branch and the missile branch of its cargo-tonnage budget (`+0x116`).
+///
+/// The port has no shield-spending loop (the shield maximum is the model's
+/// shield word, see [`Spec::shield_max`]), so the budget here is the cargo word
+/// less the laser's [`LASER_TONNAGE`] mass. F773 draws the E.C.M. gate before
+/// the missiles; the missile count is `RND(0..=mounts)` (zero means none) and the code comes from
+/// [`MISSILE_CODES`]. The pylon fill is capped at eight because F754's pylon
+/// roll is `(F1530 & 7) + 1` and never reaches pylons 9/10.
+pub fn fit_equipment(
+    spec: &Spec,
+    role: Role,
+    laser: Option<u8>,
+    rng: &mut Random,
+) -> (u32, [u8; crate::missile::PYLONS]) {
+    let mut budget = i32::from(spec.cargo) - laser.map_or(0, |code| laser_mass(code) as i32);
+    // F773's `or edi,0x4000` gives every AI ship atmospheric shielding (bit 30).
+    let mut general = 1 << 30;
+    if budget >= 2 {
+        let roll = rng.bounded(0x1_0000) as u16;
+        if roll >= 0xc000 {
+            general |= crate::equipment::NAVAL_ECM_BIT;
+            budget -= 2;
+        } else if roll >= 0x4000 {
+            general |= crate::equipment::ECM_BIT;
+            budget -= 2;
+        }
+    }
+    let mounts = spec.missiles.min(8) as u32;
+    let mut pylons = [0; crate::missile::PYLONS];
+    let count = if mounts == 0 {
+        0
+    } else {
+        rng.bounded(mounts + 1)
+    };
+    let code = MISSILE_CODES[(rng.bounded(0x1_0000) >> 12) as usize];
+    let mut filled = 0u32;
+    while filled < count && budget > 0 && filled < 8 {
+        pylons[filled as usize] = code;
+        budget -= 1;
+        filled += 1;
+    }
+    // F773's rare energy-bomb branch: `F1530 >= 0xfc00`, four tonnes, not police.
+    if budget >= 4 && role != Role::Police && rng.bounded(0x1_0000) >= 0xfc00 {
+        general |= ENERGY_BOMB_BIT;
+    }
+    (general, pylons)
 }
 
 impl Role {
@@ -2324,6 +2598,7 @@ mod tests {
             thrust: if model >= 0x35 { 3_270 } else { 13_625 },
             drive: 2,
             gun_mounts: 1,
+            missiles: 2,
             cargo: 8,
         })
     }
@@ -2402,6 +2677,7 @@ mod tests {
             State::Escort,
             State::Attack,
             State::Pass,
+            State::Evade,
             State::Flee,
             State::Dead,
             State::Escaped,
@@ -2718,6 +2994,7 @@ mod tests {
             thrust: 14_715,
             drive: 14,
             gun_mounts: guns,
+            missiles: 10,
             cargo,
         }
     }
@@ -3198,6 +3475,171 @@ mod tests {
         assert!(port.pads.iter().all(|pad| *pad == 0));
         // The ship asks again after the retry delay.
         assert!(ship.dock_retry > 0.0);
+    }
+
+    #[test]
+    fn f754_launches_a_fitted_pylon_in_the_five_to_eight_distance_band() {
+        let mut ship = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Pirate,
+            [0, 0, 0],
+            [0; 3],
+            &mut Random::new(7, 9),
+        );
+        ship.pylons = [0x82; crate::missile::PYLONS];
+        ship.general = 0;
+        // 1,000 km: F610 exponent 5..8.
+        let player = [0, 0, 1_000_000];
+        let mut launch = None;
+        for _ in 0..400 {
+            tick(&mut ship, 0.02, player);
+            if let Some(found) = ship.take_launch() {
+                launch = Some(found);
+                break;
+            }
+        }
+        let launch = launch.expect("F754 should roll a launch");
+        assert_eq!(launch.owner, ship.id);
+        assert_eq!(launch.target, crate::missile::PLAYER_TARGET);
+        assert_eq!(launch.code, 0x82);
+        assert!((1..=8).contains(&launch.pylon));
+        assert_eq!(ship.pylons[launch.pylon - 1], 0, "F941 clears the pylon");
+        assert_eq!(ship.pylons.iter().filter(|code| **code == 0x82).count(), 9);
+        assert_eq!(launch.launcher_radius, ship.radius);
+    }
+
+    #[test]
+    fn f754_does_not_launch_outside_the_band_or_with_empty_pylons() {
+        for player in [[0, 0, 10_000], [0, 0, 10_000_000]] {
+            let mut ship = NpcShip::new(
+                &spec(0x1c).unwrap(),
+                Role::Pirate,
+                [0, 0, 0],
+                [0; 3],
+                &mut Random::new(11, 12),
+            );
+            ship.pylons = [0x82; crate::missile::PYLONS];
+            for _ in 0..400 {
+                tick(&mut ship, 0.02, player);
+            }
+            assert!(ship.take_launch().is_none(), "range {player:?}");
+            assert_eq!(
+                ship.pylons.iter().filter(|code| **code == 0x82).count(),
+                crate::missile::PYLONS
+            );
+        }
+        let mut empty = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Pirate,
+            [0, 0, 0],
+            [0; 3],
+            &mut Random::new(13, 14),
+        );
+        for _ in 0..400 {
+            tick(&mut empty, 0.02, [0, 0, 1_000_000]);
+        }
+        assert!(empty.take_launch().is_none());
+    }
+
+    #[test]
+    fn f773_fits_pylons_from_the_mount_word_and_the_cargo_budget() {
+        let mut spec = spec(0x1c).unwrap();
+        spec.missiles = 4;
+        spec.cargo = 2;
+        let mut fitted_any = false;
+        for seed in 0..64u32 {
+            let (general, pylons) = fit_equipment(
+                &spec,
+                Role::Pirate,
+                Some(laser::PULSE_1MW),
+                &mut Random::new(
+                    0x1234_5678u32.wrapping_add(seed.wrapping_mul(0x9e37_79b9)),
+                    0x4567_89ab ^ seed.rotate_left(7),
+                ),
+            );
+            let fitted: Vec<u8> = pylons.iter().copied().filter(|code| *code != 0).collect();
+            assert!(fitted.len() <= 2, "{fitted:?}");
+            assert!(fitted.iter().all(|code| MISSILE_CODES.contains(code)));
+            if fitted.is_empty() {
+                continue;
+            }
+            fitted_any = true;
+            assert_eq!(
+                fitted.len(),
+                fitted.iter().filter(|code| **code == fitted[0]).count()
+            );
+            assert_eq!(
+                general & (1 << 30),
+                1 << 30,
+                "F773 always fits atmospheric shielding"
+            );
+            // The E.C.M. gate needs two tonnes and only sets one of its two bits.
+            let ecm = general & (crate::equipment::ECM_BIT | crate::equipment::NAVAL_ECM_BIT);
+            assert!(matches!(
+                ecm,
+                0 | crate::equipment::ECM_BIT | crate::equipment::NAVAL_ECM_BIT
+            ));
+        }
+        assert!(fitted_any, "the fit should fill a pylon at some seed");
+        // No cargo (after the laser) means no pylons at all.
+        let mut empty = spec;
+        empty.cargo = 1;
+        let (_, pylons) = fit_equipment(
+            &empty,
+            Role::Pirate,
+            Some(laser::PULSE_1MW),
+            &mut Random::new(23, 24),
+        );
+        assert!(pylons.iter().all(|code| *code == 0));
+    }
+
+    #[test]
+    fn f757_ecm_needs_a_fitted_system_and_f781_ends_the_evasion() {
+        let mut ship = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Pirate,
+            [0, 0, 0],
+            [0; 3],
+            &mut Random::new(31, 32),
+        );
+        ship.pylons = [0; crate::missile::PYLONS];
+        ship.general = crate::equipment::ECM_BIT;
+        ship.evade_missile(7);
+        assert_eq!(ship.state, State::Evade);
+        assert_eq!(ship.missile_target, Some(7));
+        assert_eq!(ship.fitted_ecm(), Some(crate::equipment::Ecm::Standard));
+        ship.general |= crate::equipment::NAVAL_ECM_BIT;
+        assert_eq!(ship.fitted_ecm(), Some(crate::equipment::Ecm::Naval));
+        ship.general = crate::equipment::ECM_BIT;
+        let player = [0, 0, 1_000_000];
+        let mut burst = None;
+        for _ in 0..400 {
+            tick(&mut ship, 0.02, player);
+            if let Some(naval) = ship.take_ecm() {
+                burst = Some(naval);
+                break;
+            }
+        }
+        assert_eq!(burst, Some(false), "the standard E.C.M. bit");
+        ship.missile_gone(7);
+        assert_eq!(ship.state, State::Attack);
+        assert_eq!(ship.missile_target, None);
+
+        // No E.C.M. bit: F935 is a no-op, so no burst is ever reported.
+        let mut bare = NpcShip::new(
+            &spec(0x1c).unwrap(),
+            Role::Pirate,
+            [0, 0, 0],
+            [0; 3],
+            &mut Random::new(33, 34),
+        );
+        bare.general = 0;
+        bare.evade_missile(9);
+        for _ in 0..400 {
+            tick(&mut bare, 0.02, player);
+        }
+        assert!(bare.take_ecm().is_none());
+        assert_eq!(bare.state, State::Evade, "only the missile's death ends it");
     }
 
     #[test]

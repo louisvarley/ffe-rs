@@ -515,9 +515,9 @@ is the single F942 test.
   missile object, guidance, fuse, damage and the F1120 pylon lamps. The combat
   target `player+0xed` (`DATA_008875`) is set by clicking a ship, by the
   equipment-gated auto-targetter, or by the port's older `Shift+T` fallback.
-  NPC ships do not launch missiles (F754's AI path), so F1057's decoy retarget
-  has no playable chaff source yet. The missile view (F10) and ECM are wired
-  (see §8.2).
+  NPC ships now launch through F773/F754 and evade through F757/F935; the
+  player's F1054 chaff uses the Chaff cargo word and F1057's retarget. The
+  missile view (F10) and ECM are wired (see §8.2).
 - **Hit effects/explosions.** `F939`'s particle, `F942`'s explosion and the
   `F926` debris are ported in `ffe_core::effects` and drawn by `screen`; see §7.
   `F952` is subsystem damage, not a visual effect.
@@ -659,11 +659,31 @@ effects are framed by `effects_view`.
   F1113's navigation box while the navigation targetter is armed, and feeds
   the pylon words to `ShipSystems.slots` so F1120's ten lamps show the
   remaining ammo on the F2 page.
+- `cargo test -p ffe-rs --test npc_missiles -- --ignored` with
+  `FFE_WORLD_CACHE`: the scripted NPC encounter. A pirate launches F754's
+  KL760 at the player (owner/target/pylon checked), the player's chaff
+  (`player+0x174` = hold[32], F1120's lamp) pulls it to the model-0xa4 decoy,
+  a second NPC missile hits the player through F953 (200 shields), and the
+  pirate's F757/F935 E.C.M. destroys the player's missile and returns the ship
+  to Attack. `docs/evidence/npc-missiles/` holds the launch, chaff and damage
+  frames plus a README.
+- `cargo test -p ffe-core npc`: adds F754's band/pylon/owner/target test, the
+  outside-band and empty-pylon negative cases, F773's pylon/E.C.M. fit and
+  F757's burst/notification.
+- `cargo test -p ffe-rs --lib missile`: adds the player's own-missile owner
+  exclusion, the NPC missile's `HitPlayer`, and the chaff `HitDecoy` events.
+- `cargo test -p ffe-core --test market chaff`: the Chaff good is the last
+  market commodity (index 32), the word `player+0x174` points at in the hold.
+- `cargo test -p ffe-rs --test npc_ai -- --ignored` still passes: the new
+  launch path does not disturb F931's laser sequence.
 - **Timing from the executed original.** `--missile-probe` (see 8.3) shows a
   model-6 missile gaining 4 velocity units a frame, so the AI's event-5 `tics`
   is 0x20 (not the frame's 994); F758's age increments once per 20 frames, so
   guidance runs at 0.4 s and the 60-update lifetime is 24 s. The port carries
   F717's thrust vector every frame and updates F758's aim/fuse every 0.4 s.
+  F754/F757's rolls are taken once per 20 ms of game time, matching the
+  controller's event-6 period; the executed original was not probed for an NPC
+  launch (the existing probe only drives F1096's player launch).
 - **ECM.** `Loadout::ecm()` reads the Naval E.C.M. bit (23) first and the
   standard bit (19); `MissileField::ecm(naval)` applies F718's
   `ffe_core::missile::ecm_destroys` table and returns the losses;
@@ -690,10 +710,35 @@ effects are framed by `effects_view`.
   player HUD while the combat range uses colour 0x5f and measures from the
   missile.
 - **Chaff/decoy.** `MissileField::retarget` implements F1057's model 6..11
-  range and per-missile `F1530() & 0x1000` gate. `F1054`'s `c` would need
-  `player+0x174`'s chaff count, but the recovered listing has **no writer** for
-  that word (the F1120 lamp reads it and the `c` handler compares it to zero),
-  so the port has no playable chaff source and does not invent an ammo count.
+  range and per-missile `F1530() & 0x1000` gate. `Navigator::deploy_chaff`
+  spawns F1054's model-0xa4 object (`DATA_007253`) and `main`'s `c` key applies
+  the dispenser bit (11) and the ammo gate. The ammo is not a separate counter:
+  `player+0x174` is the cargo array's word for commodity 32, the source's
+  `DATA_006248` "Chaff" good (`+0x134 + 2*32`; F555/F556's hold). A market
+  therefore stocks it and the player buys tonnes at a station. F1054 only
+  *tests* the word and never decrements it, so the port also treats any held
+  tonne as a free launch until it is sold; the owner may prefer to spend one
+  tonne per launch (see 8.4). The decoy list is capped at 16 and has no source
+  lifetime: F927's object-slot recycle is not modelled.
+- **NPC launches.** `NpcShip` carries F773's ten pylon words
+  (`ship+0xd6..+0xdf`) and general-equipment dword. `fit_equipment` follows
+  F773's missile branch: a cargo-tonnage budget (less the F774 laser mass),
+  `RND(0..=statistics word +0x12)` missiles, the code from `DATA_006260`
+  (MISSILE_CODES: `0xc0/0xc1`, `0x82`, `0x83`, `0x84`) and F773's E.C.M. /
+  Naval E.C.M. / energy-bomb draws. `NpcShip::tick` rolls F754 once per 20 ms
+  of event-6 time while the ship is in Attack (262 m..4.2 km) or Pass
+  (0..8.4 km): `F1530 < 0x2000`, pylon `(F1530 & 7) + 1`, target
+  `player+0xfe`. `Navigator::launch_npc_missile` puts the object in the
+  same `MissileField` as the player's, and F941's evasion branch is applied on
+  the player's launches. F941's failed-pylon branch calls F937; the energy-bomb
+  blast itself is not modelled (reported).
+- **NPC E.C.M. and evasion.** F941 puts a missile's live AI target into state
+  0x0c. The port's `State::Evade` is F757: the ship turns across the incoming
+  line (F588's random roll is approximated by a right-hand offset) and rolls
+  `F1530 > 0xa000` for F935. F935 checks the naval bit first and the standard
+  bit second; `Navigator::ecm` destroys the `DATA_000029` models system-wide,
+  spawns F719's explosions and ends the evading ships' state through F780/F781.
+  A ship with neither bit never bursts.
 - **Deliberate floating-point simplification:** the original's Q15 thrust
   words become mm/s2 with the AI's 0x20 tics (0.59 mm/s2 per word), F585's
   quantised turn words become a continuous maximum rate (turn =
@@ -740,13 +785,17 @@ effects are framed by `effects_view`.
 
 ### 8.4 What remains
 
-- **NPC launches.** F754 lets an AI ship launch at `+0xfe`; the port's ships do
-  not fire or launch, so their missiles are absent. The core `Missile` and
-  `MissileField` are owner-agnostic and can take that later.
-- **Chaff.** F1057's retarget is implemented and unit-tested, but the chaff
-  count `player+0x174` has no writer in the recovered listing, so F1054's `c`
-  key has no ammo source. Do not add one by invention; a save-format or
-  outfitting owner decision is needed.
+- **NPC launches** are implemented for F753's exponent 5..8 path and F756's
+  state-3 path. F754's state-1/2 alignment update (whether the nose is within
+  the source's `0x20000000` dot) is not modelled: the port's Attack covers both
+  source rows. F937's energy-bomb blast (the empty-pylon branch) is not
+  implemented; the fitted bit is still derived and kept.
+- **Chaff.** F1057's retarget, F1054's key/equipment gate and the
+  `player+0x174` ammo source are implemented. The source word is the cargo
+  array's Chaff word, so it is stocked by buying the good at a market; F1054
+  never decrements it. The port follows that (any held tonne is a free launch)
+  rather than inventing a consumption rule. **Owner decision:** spend one tonne
+  per chaff launch? The source's missing consumer looks like an omission.
 - **ECM visuals.** F935's `ship+0x14f = 2` / `ship+0x151 |= 0x20` draws model
   0xa1 at the ship for the activation frame (F1536). The port plays the sample
   and destroys the missiles but does not draw that one-frame ring. F719's
@@ -762,18 +811,16 @@ effects are framed by `effects_view`.
   `Shift+T` toggling the missile target) when the item is not fitted, so the
   sandbox autopilot/missiles still work before a starport visit. The original
   returns without doing anything.
-- **Sound cues.** The lock (0x15) and ECM (0x19/0x1a) samples are now posted
-  (`Cue::UiBeep2`/`Cue::Ecm`/`Cue::NavalEcm`); F719's 0x06 and F941's 0x20 are
-  not, as the launch path predates this slice.
+- **Sound cues.** The lock (0x15), ECM (0x19/0x1a), chaff (0x14) and launches
+  (0x20) are posted; F719's 0x06 is not.
 - **The original's exact F597 lead and F585 quantisation** are approximated in
   floating point; the tables and gross behaviour match.
-- **Player missile damage** would use the existing `Flight::take_damage`;
-  NPC launches are the missing source.
-- **Owner decisions:** the missile view (F10), ECM and the auto-targetter are
-  now ported (2026-10-25). Decide whether `T` should do nothing without the
-  Auto targetter (the source) or keep the port's cycle-lock fallback; whether
-  to give the chaff dispenser an ammo source (the source's count has no writer
-  here); whether `E` should stay shared with Modern roll; and whether the
-  approximated F597 lead/F585 turn quantisation is close enough. The
-  `--missile-probe` reference run calibrates the 0.4 s guidance interval, the
-  24 s (60-update) lifetime and the per-thrust acceleration.
+- **NPC launch cadence** is source-derived (one F754 roll per 20 ms) but was
+  not measured in the executed original. The F757 evasion turn is the port's
+  right-hand jink, not F588's exact random roll/pitch words.
+- **Owner decisions:** whether to spend one Chaff tonne per launch; whether
+  `T` should do nothing without the Auto targetter; whether `E` should stay
+  shared with Modern roll; and whether the approximated F597 lead/F585 turn
+  quantisation is close enough. The `--missile-probe` reference run calibrates
+  the 0.4 s guidance interval, the 24 s (60-update) lifetime and the per-thrust
+  acceleration.
