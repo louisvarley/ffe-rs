@@ -7,10 +7,16 @@ four-row lift made labels hang below the object, and the top edge had no signed
 clipping. The glyph size was already the original's main font (verified against
 the executed F1584/F1598; see `docs/notes/labels.md`).
 
+- `single-before.png`, `single-after.png` — F694's pirate from the NPC AI
+  sequence (`crates/ffe-rs/tests/npc_ai.rs`, `npc-ai-before.ppm`, 80 km), the
+  locked `Moray Starboat 3`. The before frame's pen is the ship's projected
+  centre + (1, 0); the after frame's is + (4, -4), so the name is vertically
+  centred on the hull. `single-before.png` is the committed
+  `docs/evidence/npc-ai/before.png`.
 - `live-before.png`, `live-after.png` — the real game
   (`ffe-rs.exe --root . --skip-intro --capture-traffic <dir>`, frame 79):
-  the locked target's label and range text on the starport. Rebuild with the
-  same command; `traffic-79.ppm` is the source frame.
+  the starport's label and the locked target's range text at the launch point.
+  Rebuild with the same command; `traffic-79.ppm` is the source frame.
 - `several-before.png`, `several-after.png` — three traffic ships, a locked
   target, and two labels at the view edges in one frame
   (`crates/ffe-rs/tests/npc_view.rs::several_ship_labels_and_a_label_at_the_view_edge`,
