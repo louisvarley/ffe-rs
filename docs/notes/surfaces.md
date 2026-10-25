@@ -20,7 +20,17 @@ Gouraud quad. Seed 0, detail 2, zoom 0. Checked by eye on models 113 and 445
 build; its colour words are registered and F1877's haze word is kept) and
 `draw_surface_batches` (after the build). Child executions keep their surfaces in their
 own `Execution`, so `all_surfaces` walks the child tree: model 176's planet is model
-449 under 349. The palette cube is cleared per frame (`docs/notes/palette.md` §3).
+449 under 349. The palette cube is cleared per frame (`F1786`;
+`docs/notes/palette.md` §3).
+
+**Update (intro-fix):** the patch detail is `ModelViewer::surface_detail`, i.e.
+`DATA_008812` (the Graphic Detail Shape Detail row less one; the executed boot is 1).
+It was hard-coded 2, which subdivided the intro's banded planet finer than the source
+and aliased texture block 95 into speckle; 1 reproduces the original's bands. The
+palette builder's heap now uses F1330's longest-extent key, so the 64-box cut no longer
+leaves empty `31,31,31` boxes. F959's intro surface seed is `0x789a3456`
+(`INTRO_SURFACE_SEED`), set on the viewer before the intro render (the polar F1842 type
+ignores it).
 
 Rust: `ffe_core::model_commands::Surface` (decoded, cache independent),
 `model_execute::SurfaceEmission::{origin, axes}` (F1874). The viewer does not

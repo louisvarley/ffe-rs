@@ -22,6 +22,130 @@ fn non_black(screen: &Screen) -> usize {
         .count()
 }
 
+/// FNV-1a over the logical 320x200 frame, for the orientation pin below.
+fn frame_hash(screen: &Screen) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for pixel in &screen.logical_pixels()[..320 * 200] {
+        for byte in pixel.to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    hash
+}
+
+/// Mean length of horizontal same-colour runs in a region: a stable texture
+/// has runs of several pixels; a per-texel speckle has nearly one per pixel.
+fn mean_run(screen: &Screen, x0: usize, y0: usize, x1: usize, y1: usize) -> f64 {
+    let pixels = screen.logical_pixels();
+    let mut runs = 0usize;
+    for y in y0..y1 {
+        let mut previous = pixels[y * 320 + x0];
+        runs += 1;
+        for x in x0 + 1..x1 {
+            let pixel = pixels[y * 320 + x];
+            if pixel != previous {
+                runs += 1;
+                previous = pixel;
+            }
+        }
+    }
+    let pixels = (y1 - y0) * (x1 - x0);
+    pixels as f64 / runs as f64
+}
+
+/// The GAME!TEK logo text must read the same way round as the original's.
+/// F1747 negates the text frame's first row when the frame is left-handed
+/// (`ffe.asm:5f64b`); without it every glyph was mirrored (`GAME` read `ƎMAפ`).
+/// The hash pins the assembled frame at animation 64, where the letters are
+/// large and unclipped.
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn the_game_tek_logo_text_is_not_mirrored() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    screen.draw_intro(Some(&viewer), 0x10000, false).unwrap();
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        let mut out = b"P6\n320 200\n255\n".to_vec();
+        for pixel in &screen.logical_pixels()[..320 * 200] {
+            out.extend([(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]);
+        }
+        std::fs::write(std::path::Path::new(&dir).join("game-tek.ppm"), out).unwrap();
+    }
+    assert_eq!(
+        frame_hash(&screen),
+        1_567_273_124_356_204_709,
+        "the GAME!TEK frame changed; re-check the text orientation before pinning"
+    );
+}
+
+/// Consecutive intro frames build the same upper palette: the executed
+/// original's frames 1514 and 1515 have identical upper halves. F1786 clears
+/// the cube before each frame and F1330 rebuilds from that frame's registered
+/// colours, so two tics in the same animation produce the same 128 entries.
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn consecutive_intro_frames_build_the_same_upper_palette() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    // Two builds fill both banks; a third rebuild leaves the same pair. The
+    // tics stay inside one animation (`(tic - MODEL_SWITCH) >> 10`).
+    screen.draw_intro(Some(&viewer), 0x181533, false).unwrap();
+    screen.draw_intro(Some(&viewer), 0x181534, false).unwrap();
+    let first = viewer.palette_upper6().unwrap();
+    screen.draw_intro(Some(&viewer), 0x181535, false).unwrap();
+    let second = viewer.palette_upper6().unwrap();
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        let text = first
+            .iter()
+            .enumerate()
+            .map(|(i, colour)| format!("{i:02x} {} {} {}", colour[0], colour[1], colour[2]))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(std::path::Path::new(&dir).join("intro-palette.txt"), text).unwrap();
+    }
+    assert_eq!(
+        first, second,
+        "the upper palette changed between frames in one animation"
+    );
+}
+
+/// The banded planet is generated at `DATA_008812 = 1`, the executed boot's
+/// Shape Detail. Building it at 2 (the old hard-coded value) subdivided the
+/// patch finer than the source and aliased the band texture into per-texel
+/// speckle. The region's horizontal run length distinguishes the two.
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn the_intro_planet_uses_the_runtime_shape_detail() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    assert_eq!(
+        viewer.surface_detail(),
+        1,
+        "the boot's Shape Detail is High"
+    );
+    screen.draw_intro(Some(&viewer), 0x181534, false).unwrap();
+    let coherent = mean_run(&screen, 100, 0, 320, 150);
+    assert!(
+        coherent > 2.0,
+        "the planet's band texture is still speckled: mean run {coherent:.2}"
+    );
+
+    screen.surface_detail = 2;
+    screen.draw_intro(Some(&viewer), 0x181534, false).unwrap();
+    let finer = mean_run(&screen, 100, 0, 320, 150);
+    assert!(
+        finer < coherent,
+        "detail 2 should over-subdivide: {finer:.2} vs {coherent:.2}"
+    );
+    // `F917` clamps a negative preference to 0.
+    viewer.set_surface_detail(-3);
+    assert_eq!(viewer.surface_detail(), 0);
+}
+
 /// The GAME!TEK logo model 177 -> 361 draws one slab and its own text: the
 /// port has no second (substituted) logo and no label path for it. At animation
 /// 64 the letters are the fixed light grey `(192, 192, 192)`.

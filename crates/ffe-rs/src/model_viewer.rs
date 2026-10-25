@@ -247,6 +247,9 @@ pub struct ModelViewer {
     terrain: Option<(Vec<u8>, Vec<u8>)>,
     /// The seed (`+0xa0`) of the surface being drawn, set by the caller.
     pub surface_seed: std::cell::Cell<u32>,
+    /// `DATA_008812`, the "Level of Shape Detail" value F1876 reads (the
+    /// executed boot's default is 1; see [`Self::set_surface_detail`]).
+    surface_detail: std::cell::Cell<i32>,
     /// F1877's `DATA_008814..8817` from the last planet surface drawn: the
     /// background flag and colour the original clears the next upper view to.
     /// [`ModelViewer::clear_haze_sky`] begins a frame's scene.
@@ -604,6 +607,7 @@ impl ModelViewer {
             lighting: FALLBACK_LIGHTING,
             terrain: None,
             surface_seed: std::cell::Cell::new(0),
+            surface_detail: std::cell::Cell::new(1),
             haze_sky: std::cell::Cell::new(None),
             surface_extent: std::cell::Cell::new(0.0),
             descriptors: Vec::new(),
@@ -746,6 +750,19 @@ impl ModelViewer {
     /// The shades every instance copies (locals 12..17).
     pub fn shades(&self) -> [[u8; 3]; 8] {
         self.lighting.shades
+    }
+
+    /// Set `DATA_008812`, the "Level of Shape Detail" F1876 reads. The original
+    /// stores the chosen row less one: the executed boot's default "High" is 1,
+    /// and the game clamps a negative value to 0 (`F917`). The viewer starts at
+    /// 1, the intro's value; callers with a preference update it.
+    pub fn set_surface_detail(&self, detail: i32) {
+        self.surface_detail.set(detail.max(0));
+    }
+
+    /// The current `DATA_008812` value.
+    pub fn surface_detail(&self) -> i32 {
+        self.surface_detail.get()
     }
 
     /// Set the forward thrust ships read from global word 15 ([`THRUST_GLOBAL`],
@@ -1422,7 +1439,7 @@ impl ModelViewer {
                 origin,
                 axes: std::array::from_fn(|k| vectors[k / 3][k % 3]),
                 kind: surface.parameters[0].max(0) as usize,
-                detail: 2,
+                detail: self.surface_detail.get(),
                 zoom: 0,
             };
             // A scaled-down matrix (distant planets) shortens the light vector.
@@ -2082,8 +2099,8 @@ impl ModelViewer {
             // F1740: frame mode 6 copies the parent basis; otherwise the record's
             // word permutes it through F1739.
             let word = u32::from(text.frame);
-            let matrix = if word >> 8 & 7 == 6 {
-                emission.context.basis
+            let (mut matrix, handedness) = if word >> 8 & 7 == 6 {
+                (emission.context.basis, emission.context.handedness)
             } else {
                 ffe_core::model_math::frame_rows(
                     &emission.context.matrix,
@@ -2091,8 +2108,15 @@ impl ModelViewer {
                     word,
                 )
                 .map_err(|error| format!("{error} (text at {:#x})", text.offset))?
-                .0
             };
+            // F1747 negates the text frame's first row when F1740's handedness
+            // word is negative (`cmp [..+0xf8],0; jnl`, 5f64b-5f658). Without
+            // this the glyph geometry is seen mirrored through the frame.
+            if handedness != 0 {
+                for value in &mut matrix[0..3] {
+                    *value = value.wrapping_neg();
+                }
+            }
             let mut pen = position.view;
             let mut line = pen;
             // F1747 runs the glyphs in a nested instance whose operand scale (+0x148) is the
