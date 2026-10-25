@@ -71,6 +71,10 @@ pub struct Flight {
     /// screen load with day 0, the new game's 1-Jan-3250.
     #[serde(default)]
     pub service_days: [u32; 2],
+    /// F1104's death sequence, when the hull has been used up and no escape
+    /// craft launched. Saves from before the sequence load alive.
+    #[serde(default)]
+    pub death: Option<crate::death::Death>,
 }
 
 fn default_ship() -> u32 {
@@ -108,6 +112,7 @@ impl Default for Flight {
             hull: [0; 2],
             loadout: ffe_core::equipment::Loadout::default(),
             service_days: [0; 2],
+            death: None,
         }
     }
 }
@@ -171,6 +176,10 @@ impl Flight {
                 .any(|code| *code != 0 && ffe_core::missile::model(*code).is_none())
         {
             return Err("save contains out-of-range prototype state".to_owned());
+        }
+        // F1104's sequence ends the game; there is no save after death.
+        if self.death.is_some() {
+            return Err("save was made after the ship's destruction".to_owned());
         }
         if self.mode == Mode::Docked
             && (self.velocity != [0.0; 3]

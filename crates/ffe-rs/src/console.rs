@@ -179,7 +179,9 @@ impl Click {
             Click::Screen(_) => Some("F4/F5 (comms) are not ported yet."),
             Click::Missile => Some("The missile view needs equipment (not ported)."),
             Click::Combat => Some("The combat computer needs equipment (not ported)."),
-            Click::Capsule => Some("The escape capsule is not ported yet."),
+            // F1056 (78528) calls F1098; `main` runs the launch or reports that
+            // no escape craft is fitted.
+            Click::Capsule => None,
             // The labels toggle is the original's player flag +0xe9 bit 2.
             Click::Labels => None,
             _ => None,

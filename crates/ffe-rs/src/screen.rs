@@ -1818,6 +1818,33 @@ impl Screen {
         self.present();
     }
 
+    /// The status page's game-over headings (`DATA_005129`/`DATA_005130`):
+    /// `\rGAME\rOVER` and the commander block, followed by the port's two
+    /// options. The source reaches this page through the status screen's
+    /// `ff9c` expansion (F277/F286); the port has no status-page renderer, so
+    /// the same strings are drawn on the cleared 320x200 view.
+    pub fn draw_game_over(&mut self, commander: &str, hint: &str) {
+        self.frame.fill(self.palette[0]);
+        self.centered_text(28, "GAME", 15);
+        self.centered_text(40, "OVER", 15);
+        for (index, line) in crate::death::died_lines(commander).iter().enumerate() {
+            self.centered_text(88 + 12 * index as i32, line.trim(), 15);
+        }
+        self.centered_text(152, hint, 18);
+        self.present();
+    }
+
+    /// Centre a line on the 320-pixel logical view from its glyph advances.
+    fn centered_text(&mut self, y: i32, message: &str, colour: u8) {
+        let width: i32 = message
+            .bytes()
+            .filter_map(|code| self.font.glyph(code))
+            .map(|glyph| glyph.advance as i32)
+            .sum();
+        let x = ((320 - width) / 2).max(0);
+        self.text_screen(x as usize, y, message, colour);
+    }
+
     /// The Escape preference pages: `FUNC_000225_SysMenuDisplayNonFile`'s
     /// 320x158 upper view over the console. Background palette index 3 is the
     /// original's clear colour for (3,3,3) (`DATA_009222`), the icons are
