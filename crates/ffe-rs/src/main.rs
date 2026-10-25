@@ -2059,10 +2059,17 @@ fn run() -> Result<(), String> {
                     / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
                 let player = ship_position(&original, &state);
                 let tics = (elapsed * ffe_rs::original_flight::TICS_PER_SECOND * factor) as u32;
-                let radius = scene
-                    .as_ref()
-                    .and_then(|scene| scene.model_radius(state.ship))
-                    .map_or(10_000, i64::from);
+                // Inside a docking or launch sequence the player's object is at
+                // the station: no NPC shot can reach it (F817's box would have
+                // nothing to test).
+                let radius = if nav.sequence.is_some() {
+                    0
+                } else {
+                    scene
+                        .as_ref()
+                        .and_then(|scene| scene.model_radius(state.ship))
+                        .map_or(10_000, i64::from)
+                };
                 let events = nav.tick_ships(elapsed * factor, tics, player, radius);
                 let mass = scene
                     .as_ref()
