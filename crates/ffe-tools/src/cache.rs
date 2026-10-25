@@ -201,6 +201,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     let (model_table_rva, sine_table_rva) = model_layout(profile.id)?;
     let mut assets = Vec::new();
     let mut models = 0;
+    let mut geometry = 0;
     let mut descriptor_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * 8];
     let mut record_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * 20];
     let stats_bytes = ffe_convert::embedded::SHIP_STATS_BYTES;
@@ -252,19 +253,33 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             });
             // Every table slot whose normals, commands and vertices all decode (v7).
             // Stations 74/75 must decode; other slots that cannot are skipped.
+            // A model's collision geometry is imported even when its command
+            // program does not decode: F576/F580 read the vertex records and
+            // normals directly, and model 0x59's command block ends in a record
+            // that spills into the next block while its 24 vertices are sound.
             for index in 0..ffe_convert::model_extents::MODEL_COUNT as u32 {
-                let decoded =
-                    decode_model_normals(&bytes, model_table_rva, index).and_then(|normals| {
-                        let commands = decode_model_commands(&bytes, model_table_rva, index)?;
-                        let model = decode_model_vertices(&bytes, model_table_rva, index)?;
-                        Ok((normals, commands, model))
-                    });
-                let (normals, commands, model) = match decoded {
-                    Ok(decoded) => decoded,
+                let vertices = match decode_model_vertices(&bytes, model_table_rva, index) {
+                    Ok(vertices) => Some(vertices),
                     Err(error) if matches!(index, 74 | 75) => return Err(error),
-                    Err(_) => continue,
+                    Err(_) => None,
                 };
-                models += 1;
+                let normals = match decode_model_normals(&bytes, model_table_rva, index) {
+                    Ok(normals) => Some(normals),
+                    Err(error) if matches!(index, 74 | 75) => return Err(error),
+                    Err(_) => None,
+                };
+                let commands = match decode_model_commands(&bytes, model_table_rva, index) {
+                    Ok(commands) => Some(commands),
+                    Err(error) if matches!(index, 74 | 75) => return Err(error),
+                    Err(_) => None,
+                };
+                let (Some(normals), Some(model)) = (normals, vertices) else {
+                    continue;
+                };
+                geometry += 1;
+                if commands.is_some() {
+                    models += 1;
+                }
                 // F1750 reads +0x18 (scale offset) and +0x1c (cull radius) for child calls.
                 let descriptor = decode_model_descriptor(&bytes, model_table_rva, index)?;
                 let entry = index as usize * 8;
@@ -289,17 +304,19 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     },
                     bytes: normals.bytes,
                 });
-                assets.push(Asset {
-                    id: format!("base:model-commands/{index:03}"),
-                    path: format!("models/{index:03}.cmd"),
-                    kind: AssetKind::ModelCommands {
-                        index,
-                        vertex_count: commands.vertex_count,
-                        descriptor_offset: commands.descriptor_offset as u64,
-                        source_offset: commands.source_offset as u64,
-                    },
-                    bytes: commands.bytes,
-                });
+                if let Some(commands) = commands {
+                    assets.push(Asset {
+                        id: format!("base:model-commands/{index:03}"),
+                        path: format!("models/{index:03}.cmd"),
+                        kind: AssetKind::ModelCommands {
+                            index,
+                            vertex_count: commands.vertex_count,
+                            descriptor_offset: commands.descriptor_offset as u64,
+                            source_offset: commands.source_offset as u64,
+                        },
+                        bytes: commands.bytes,
+                    });
+                }
                 assets.push(Asset {
                     id: format!("base:model-vertices/{index:03}"),
                     path: format!("models/{index:03}.vtx"),
@@ -691,9 +708,9 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             crate::SONGS.len()
         ));
     }
-    if models < 2 || assets.len() != 382 + tables + 3 * models + music_songs {
+    if geometry < 2 || assets.len() != 382 + tables + 2 * geometry + models + music_songs {
         return Err(format!(
-            "unexpected imported asset count {} ({models} models); no cache written",
+            "unexpected imported asset count {} ({geometry} geometries, {models} command programs); no cache written",
             assets.len()
         ));
     }
@@ -705,7 +722,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         }).collect(),
         complete_game_assets: false,
         unresolved: vec![
-            format!("{models} of {} model vertex/command/normal programs (those that decode), the two bitmap tables, main bitmap font, fixed low palette, external cabins and PCM effects are imported.", ffe_convert::model_extents::MODEL_COUNT),
+            format!("{geometry} of {} model collision geometries and {models} model command programs (those that decode), the two bitmap tables, main bitmap font, fixed low palette, external cabins and PCM effects are imported.", ffe_convert::model_extents::MODEL_COUNT),
             "Upper 128 palette colours are runtime state; bitmap RGBA previews and upscale eligibility are not inferred.".to_owned(),
             if tables == 0 {
                 "Texture descriptors and the 12-bit colour map are not imported: their RVAs are verified for floppy 1.02 only.".to_owned()

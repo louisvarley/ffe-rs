@@ -197,8 +197,12 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   centre braking for a stop just inside the face, which the contact turns into docking. Sol's
   Daedalus, Abraham Lincoln and Galileo dock from the start (`tests/navigation.rs`,
   `autopilot_docks_at_stations`; `FFE_SHOT_DIR` saves frames on the way in). An open-air
-  starport target is flown to F741's point 6,144,000 mm above the port and asks F655 there; the
-  final pad descent is not ported (see the limits below).
+  starport target is flown to F741's point 6,144,000 mm above the port and asks F655 there;
+  on a grant the autopilot takes F650's pad, flies F746's descent (F599's body-axes request)
+  and F746/F744/F652's touch, then F1048's `0x30`
+  (`starport_autopilot_lands_on_the_pad`; `docs/notes/autoland.md`). The port's `0x59`
+  collision geometry now imports and the pad scan runs F576/F580 in F994's three-body
+  frame (`step_starport_landing`), so manual pad touches use F575's flags too.
 - **Frames.** Bodies move between the navigator's refreshes; the ship is carried with the
   body it is near (the engaged target on its final approach, else a station within 200 km,
   else a planet or moon within 50 radii), so a station stays where the ship left it.
@@ -289,14 +293,17 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   `surface_and_landing_use_one_radius` checks both radii and `landing_body`'s outer
   radius. F1877's haze is left out for an eye inside the base so it cannot paint over
   the landed ground.
-- **Starport landings from flight.** The F1019/F1021 open-air `0x2e` -> `0x30` pair is now
+- **Starport landings from flight.** The F1019/F1021 open-air `0x2e` -> `0x30` pair is
   routed (`Navigator::land_at_starport`, F1048's frame, F654's launch request), and F1047/F1048
-  follow the source's music rules. Two pieces remain: the autopilot only flies to F741's
-  approach point and asks F655; the original's final pad descent is its thruster-level AI
-  (F741/F745/F746 with F599/F600), which is not ported; and the F569/F576 scan at the exact pad
-  returns "needs the models' records" for the tested starport models (its stream references a
-  surface the decoded model lacks), so the pad touch is not reachable from ordinary flight there.
-  The new game's `0x30` and its F381 launch are the working path (`docs/notes/intro.md`).
+  follow the source's music rules. The F569/F576 scan now runs in F994's three-body frame
+  (`OriginalFlight::step_starport_landing`); the cache's model-data gap is fixed (model
+  `0x59`'s geometry imports even though its command program does not, so F580's child anchor
+  resolves for 0x51-0x60). Manual pad touches and the F746/F744/F652 touch are tested. What
+  remains is the automatic **lateral capture**: the port's controller (F599's request plus
+  the navigator's one-second `follow` drift) can pass the pad ~100 m to the side and clip a
+  building, so the end-to-end test places the ship at F650's seat for the touch. F596/F597's
+  exact distance law and the rotating frame's velocity are the next step
+  (`docs/notes/autoland.md`).
 - **Landed dressing.** F253's undercarriage word (`+0x9e`) animation, the sounds and the
   player's AI mode byte (`player+0xff = 0x24`) are not modelled; the console is the flight one
   F1116 selects, as the original's is.

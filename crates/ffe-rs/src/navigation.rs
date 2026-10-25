@@ -590,6 +590,13 @@ pub struct Command {
     /// approach is left, and the world seconds the transfer takes at the ship's
     /// thrust and braking. The caller moves the ship and advances the clock.
     pub skip: Option<([i64; 3], f64)>,
+    /// F746/F599's thrust request in body axes for this frame (the starport's
+    /// final descent), overriding the set speed.
+    pub thrust: Option<[i32; 3]>,
+    /// F746's copy of the target's orientation onto the ship, for the last
+    /// metres of a starport descent (the source copies the port's rows when its
+    /// distance reaches zero).
+    pub align: Option<[[f64; 3]; 3]>,
 }
 
 /// World seconds to cover `metres` from rest to rest: full thrust (about 300 m/s
@@ -611,6 +618,48 @@ pub fn transfer_seconds(metres: f64) -> f64 {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Memory {
     angle: Option<f64>,
+}
+
+/// F746/F599's final descent to an open-air pad: the thrust request in the
+/// ship's body axes that drives the ship's velocity onto the braking curve
+/// towards `pad`. The source's F596/F597 compute the vector and F599 clamps it;
+/// the same request is clamped by `ffe_core::thrust::clamp` when it is applied.
+/// The curve is deliberately below the 0x258-unit (about 58 m/s) F575 landing
+/// limit at the last metres, so the touch is a landing rather than a bounce.
+pub fn starport_descent(flight: &OriginalFlight, pad: [i64; 3], integral: [f64; 3]) -> [i32; 3] {
+    let motion = &flight.player().motion;
+    let offset: [f64; 3] = std::array::from_fn(|k| (pad[k] - motion.position[k]) as f64);
+    let range = offset.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let dir = if range > 1.0 {
+        offset.map(|v| v / range)
+    } else {
+        [0.0; 3]
+    };
+    let metres = range / 1000.0;
+    let speed = if range <= 1.0 {
+        0.0
+    } else {
+        (2.0 * 3.0 * metres).sqrt().max(metres * 0.2).min(15.0)
+    };
+    let velocity = motion
+        .velocity
+        .map(|v| f64::from(v) * MM_PER_SECOND / 1000.0);
+    let change: [f64; 3] = std::array::from_fn(|k| dir[k] * speed - velocity[k]);
+    let acceleration: [f64; 3] =
+        std::array::from_fn(|k| (change[k] * 5.0 + integral[k]).clamp(-120.0, 120.0));
+    let rows: [[f64; 3]; 3] = motion.orientation.map(|row| {
+        let values = row.map(|v| f64::from(v) / 2_147_483_648.0);
+        let length = values.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+        values.map(|v| v / length)
+    });
+    // The original's thrust words saturate at the ship's limits, roughly a few
+    // hundred m/s²; 0x7fff stands for that full deflection.
+    std::array::from_fn(|k| {
+        let component = (0..3)
+            .map(|axis| acceleration[axis] * rows[k][axis])
+            .sum::<f64>();
+        (component / 300.0 * 32767.0).round() as i32
+    })
 }
 
 /// One frame of the autopilot: turn toward `target` with the steering keys, hold
@@ -663,6 +712,8 @@ pub fn autopilot(
             aligned: forward,
             face: None,
             skip: None,
+            thrust: None,
+            align: None,
         };
     }
     // Steering at a time acceleration swings the nose by the same factor: steer only
@@ -676,6 +727,8 @@ pub fn autopilot(
             aligned: forward,
             face: Some(target),
             skip: None,
+            thrust: None,
+            align: None,
         };
     }
     // Too far to fly in real time: once the nose is on the target, hand back the
@@ -691,6 +744,8 @@ pub fn autopilot(
             aligned: forward,
             face: Some(target),
             skip: Some((landing, transfer_seconds(cover / 1000.0))),
+            thrust: None,
+            align: None,
         };
     }
     // Speed: the most that can still be stopped within the distance left (the
@@ -728,6 +783,8 @@ pub fn autopilot(
         aligned: forward,
         face: Some(target),
         skip: None,
+        thrust: None,
+        align: None,
     }
 }
 
@@ -835,6 +892,9 @@ pub struct Navigator {
     /// The autopilot has reached a station's approach point and is flying into
     /// the slot.
     pub final_leg: bool,
+    /// The game clock of the last F655 request at an open-air starport, so a
+    /// refusal is retried at a readable rate rather than every frame.
+    clearance_at: Option<f64>,
     /// The body whose motion carries the ship between refreshes (the original's
     /// frame of reference, chosen here by distance): the target on its final
     /// approach, a nearby station, or the planet or moon the ship is near.
@@ -1273,6 +1333,7 @@ impl Navigator {
                 .unwrap_or_default(),
             drive: None,
             final_leg: false,
+            clearance_at: None,
             frame: None,
             ports: HashMap::new(),
             memory: Memory::default(),
@@ -2733,6 +2794,7 @@ impl Navigator {
         self.docked = Some(index);
         self.target = None;
         self.final_leg = false;
+        self.clearance_at = None;
     }
 
     /// The nearest planet or moon to a point (what the ship faces on launch).
@@ -3131,6 +3193,7 @@ impl Navigator {
         let index = self.locked?;
         self.target = Some(index);
         self.final_leg = false;
+        self.clearance_at = None;
         self.memory = Memory::default();
         self.skips = 0;
         self.view = View::Closed;
@@ -3183,6 +3246,7 @@ impl Navigator {
     pub fn disengage(&mut self) {
         self.target = None;
         self.final_leg = false;
+        self.clearance_at = None;
     }
 
     /// The autopilot's command for this frame, when engaged.
@@ -3195,11 +3259,22 @@ impl Navigator {
         let body = self.bodies.get(index)?.clone();
         // A station is flown to in two legs, as the original's autopilot docks: to
         // a point out on the docking axis, then (with clearance) into the slot.
-        // An open-air starport is F741's approach: above the port. The pad touch
-        // is the original's thruster-level AI (F741/F745/F746 with F599/F600),
-        // which is not ported, so the autopilot hands off there with clearance.
+        // An open-air starport is F741/F745/F746's approach: above the port, then
+        // F650's pad point with the clearance F655 gave there.
         let port = self.port(index);
         let starport = body.kind == Kind::Starport;
+        let final_starport = starport && self.final_leg;
+        // F867: a clearance that ran out releases the bay; go back to the
+        // approach and ask again (F745/F655).
+        if final_starport {
+            let held = self.starport(index).bay_of(PLAYER);
+            if held.is_none() || !self.starport(index).is_docking(PLAYER) {
+                self.final_leg = false;
+                self.memory = Memory::default();
+                self.notice = Some(format!("{}: clearance lost; asking again.", body.name));
+            }
+        }
+        let final_starport = starport && self.final_leg;
         let (offset, stop) = if starport {
             let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
             (up.map(|v| v * STARPORT_APPROACH), APPROACH_STOP)
@@ -3216,21 +3291,100 @@ impl Navigator {
         let aim = |at: [i64; 3]| -> [i64; 3] {
             std::array::from_fn(|k| at[k] + offset[k].round() as i64)
         };
-        let mut command = autopilot(flight, aim(body.position), stop, &mut self.memory);
-        if starport && command.arrived {
-            // F745: at the approach the autopilot runs F655 and gets a pad.
-            self.memory = Memory::default();
-            self.notice = Some(
-                match self.starport(index).request_docking(PLAYER, true, 0) {
-                    Reply::Granted(bay) => format!(
-                        "{}: clearance granted (bay {}). The pad approach is manual: \
-                     the original's thruster autopilot (F745/F746) is not ported.",
-                        body.name,
-                        bay.index + 1
-                    ),
-                    other => format!("{}: {}.", body.name, refusal(other)),
-                },
-            );
+        // F745's target: the pad F650 allocated (`+0x102..+0x106`, the model's
+        // pad table turned into the port's frame). No standoff: the contact scan
+        // decides where the ship stops.
+        let pad = final_starport
+            .then(|| {
+                let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
+                self.starport(index)
+                    .bay_of(PLAYER)
+                    .and_then(|bay| self.starport_pad_point(index, bay))
+                    .map(|point| {
+                        // F994/F612: the seat is the pad surface raised by the
+                        // ship's collision radius along the port's up row.
+                        let lift = flight.collision_radius() as f64;
+                        std::array::from_fn(|k| point[k] + (up[k] * lift).round() as i64)
+                    })
+            })
+            .flatten();
+        if final_starport && pad.is_none() {
+            self.final_leg = false;
+            self.notice = Some(format!("{}: the pad could not be found.", body.name));
+        }
+        let final_starport = starport && self.final_leg;
+        let ship = flight.player().motion.position;
+        let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
+        let mut final_height = 0.0;
+        let (target, stop, descend) = if final_starport {
+            let seat = pad.unwrap_or_else(|| aim(body.position));
+            let offset: [f64; 3] = std::array::from_fn(|k| (ship[k] - seat[k]) as f64);
+            final_height = offset.iter().zip(up).map(|(v, u)| v * u).sum::<f64>();
+            (seat, 0.0, true)
+        } else {
+            (aim(body.position), stop, false)
+        };
+        let mut command = autopilot(flight, target, stop, &mut self.memory);
+        if starport && command.arrived && !self.final_leg {
+            // F742/F745: at the approach the autopilot runs F655 and gets a pad.
+            // The source holds here and asks again when traffic control refuses;
+            // the request is throttled so the log is not spammed.
+            let owed = self.fine_at(index);
+            let wait = self.clearance_at.is_some_and(|at| self.clock - at < 2.0);
+            if wait {
+                command.arrived = false;
+                command.keys.slower = true;
+            } else {
+                self.memory = Memory::default();
+                self.clearance_at = Some(self.clock);
+                match self.starport(index).request_docking(PLAYER, true, owed) {
+                    Reply::Granted(bay) => {
+                        self.final_leg = true;
+                        self.notice = Some(format!(
+                            "{}: clearance granted (bay {}). Descending to the pad.",
+                            body.name,
+                            bay.index + 1
+                        ));
+                        command.arrived = false;
+                    }
+                    other => {
+                        self.notice = Some(format!("{}: {}.", body.name, refusal(other)));
+                        command.arrived = false;
+                        command.keys.slower = true;
+                    }
+                }
+            }
+        }
+        if final_starport {
+            // The touch (F575/F652) ends the leg; `arrived` would drop the target
+            // before the pad contact can happen.
+            command.arrived = false;
+            command.keys = Keys::default();
+            command.thrust = Some(starport_descent(flight, target, [0.0; 3]));
+            if descend && final_height <= 250_000.0 {
+                command.face = None;
+                command.align = Some(body.orientation);
+            }
+            // F746/F744/F652: when F596's distance to the pad reaches zero (the
+            // ship's collision sphere at the pad surface), the touch is taken and
+            // the port's record marks the pad. The port's controller flies to
+            // the seat; a capture of the ship's radius plus a few metres stands
+            // in for F596's exact zero (the source's own controller gets there).
+            let speed = flight
+                .player()
+                .motion
+                .velocity
+                .iter()
+                .fold(0i32, |sum, v| sum.wrapping_add(v.wrapping_abs()));
+            if distance(ship, target) <= (flight.collision_radius() * 3).max(3_000) as f64
+                && speed <= 0x258
+            {
+                self.starport(index).touch(PLAYER);
+                if self.land_at_starport(index) {
+                    self.landing_frame();
+                    self.notice = Some(format!("{}: touched down on the pad.", body.name));
+                }
+            }
         }
         if port.is_some() && command.arrived && !self.final_leg {
             // The approach point: ask for clearance and fly in.

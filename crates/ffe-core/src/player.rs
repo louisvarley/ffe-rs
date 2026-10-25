@@ -86,6 +86,10 @@ pub struct Player {
     pub gravity_vector: [i32; 3],
     /// The collision flags F1033 keeps at `+0x212` (`DATA_008934`).
     pub contact_flags: u8,
+    /// F746/F599's thrust request while the autopilot flies a starport's final
+    /// descent (body axes, F599's units): replaces the set-speed request for the
+    /// tick. `None` in ordinary flight.
+    pub thrust_override: Option<[i32; 3]>,
 }
 
 /// How long each steering key has been held, in 50 Hz ticks (zero: not held):
@@ -350,7 +354,9 @@ impl Player {
             world.body[index].give_motion(&mut self.motion);
             self.reference_counter = 0xd;
         }
-        let request = if self.mode == 0x24 {
+        let request = if let Some(request) = self.thrust_override {
+            request
+        } else if self.mode == 0x24 {
             [0, 0xcc6, 0]
         } else if self.flags & 1 != 0 {
             self.engines_off_request(keys)
