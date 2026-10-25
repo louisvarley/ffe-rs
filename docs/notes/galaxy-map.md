@@ -93,8 +93,82 @@ after the map closes, when the original's console button is still live.
   the original shows in a light peach and we in grey.
 - Synthetic tests: `crates/ffe-core/tests/{star_points,model_dot}.rs`.
 
+## The map's console page (F834, F840, F969) — ported 2026-10-25
+
+The map is a separate console page, not the flight page with a map on top:
+
+- **Entry (F834, `ffe.asm:56856-56896`)** shows the F3 map screen button `0x0c`
+  (image 1) and the map row `DATA_005100` records **0x1c..0x24**, lighting the
+  map icon **0x24**. It does not hide the flight console: the four screen
+  buttons, the time-acceleration meter, the scanner globe and the three ship
+  lamps (0x37-0x39) stay visible, exactly as the executed original's F3 frame
+  shows (captured with `jjffe-smoke --game-frame 400 0x3d`). The map row sits
+  at the view row's positions (0x12..0x19) and draws after it in `F261`'s index
+  order, so its 25x25 icons cover the flight view icons.
+- **F840's keys (`ffe.asm:57197-57478`)** re-image that row:
+
+  | Record | Position | Image 0/1 | Original key and meaning |
+  |---|---|---|---|
+  | 0x1c | 261,177 | 192/203 | row |
+  | 0x1d | 237,174 | 193/204 | row |
+  | 0x1e | 224,169 | 194/205 | row |
+  | **0x1f** | 211,168 | 195/206 | **F10** details + previous (radio 10) |
+  | **0x20** | 198,165 | 196/207 | **F9** details + next (radio 10) |
+  | **0x21** | 181,163 | 197/208 | **F8** picture mode |
+  | **0x22** | 162,163 | 198/209 | **F7** details |
+  | **0x23** | 142,163 | 199/210 | **F6** select/reset the row |
+  | **0x24** | 125,163 | 200/211 | the map icon, lit by F834 |
+
+  `F262`'s radio reset makes 0x21/0x22/0x23/0x24 (group 1) mutually exclusive;
+  `0x1f`/`0x20` are group 10, so F9/F10 can light details and a direction
+  together. `Console::apply_map` replays the original's call order to keep that
+  state. The reference states (F3 then F6/F7/F8/F9/F10/F5) were captured and
+  compared; each changes exactly the records in the table above.
+
+- **Map-local keys**: the original's map page owns **F5-F12** while it is
+  showing (`ffe_rs::map_keys`, `crates/ffe-rs/src/map_keys.rs`):
+
+  | Key | Action | Console image |
+  |---|---|---|
+  | **F5** | re-show the map controls page (F834; also leaves details/picture) | 0x24 |
+  | **F6** | select/reset the controls row | 0x23 |
+  | **F7** | details page | 0x22 |
+  | **F8** | picture mode | 0x21 |
+  | **F9** | details with next | 0x22 + 0x20 |
+  | **F10** | details with previous | 0x22 + 0x1f |
+  | **F11** | zoom in (`sub` of the zoom word) | — |
+  | **F12** | zoom out (`add` of the zoom word) | — |
+
+  The preservation branch's note that F5 jumps and F11/F12 toggle stalks/grid
+  is not what F840 does: F834 is the page/controls entry, `H` is the hyperspace
+  key, and F11/F12 are the first branch's zoom. Only inside details/picture
+  (the unported `ebx+0x299` branch) do F11/F12 toggle stalks (0x24e bit 5) and
+  grid (bit 0); that second branch is not implemented yet.
+
+- **Global keys are not stolen**: F5-F12 are map-local **only** while the
+  F834 page is actually showing (`NavView::Galaxy` and the 3D map available).
+  Outside the map F5/Shift+F5 still save/load, F6-F10 still change views, F11
+  still writes a screenshot and F12/Shift+F12 still open the model viewer/lab.
+  The port's Tab system map and `n` places list keep those global keys; they
+  are not the original's map page. Clicks on the map row do not change the
+  flight view while the page is open.
+
+- **Hot areas**: F969 adds `DATA_007241`'s one extra area,
+  `(268,156)-(319,177)`, action `0x80`; F840 itself ignores action `0x80`, so
+  the port records the area (`MAP_EXTRA_HOT_AREA`) but does not route it.
+- **Not yet**: the details page (F842) and picture mode (F844-F849) are still
+  later slices. The port lights their original buttons and reports
+  "not ported yet" instead of inventing a screen.
+
+The port's arrow scrolling, Page Up/Down and +/- zoom, mouse drag, `C`
+recentre, `G`/F3-icon entry and `H`/Enter jump are retained alongside the
+original keys and are recorded in `docs/DEVIATIONS.md` (EXP-008). The frames
+`map-page-*.ppm` and `map-script-f*.ppm` come from `the_map_console_page_states`
+and `the_map_key_script_selects_reimages_and_jumps` in
+`crates/ffe-rs/tests/galaxy_map_view.rs`.
+
 ## Not done
 
 The drawn hyperspace jump scene (F908's mode 4/F909's F148/F912; the destination, gates and arrival are ported), the details
-page (F842) and picture mode (F844-F849), the string engine's templates (the fuel line's number is plain), the textured text
+page (F842), picture mode (F844-F849), the string engine's templates (the fuel line's number is plain), the textured text
 colour, the mouse's hover pick of a star, and the lit-sphere branch of F1700.

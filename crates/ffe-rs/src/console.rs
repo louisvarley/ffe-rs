@@ -91,6 +91,28 @@ pub const SCREEN_BUTTONS: [(i32, i32, u16, u16, u8); 4] = [
     (60, 172, 130, 167, 1),
 ];
 
+/// The galaxy map's own console row (`DATA_005100` records 0x1c..0x24). F834
+/// shows them when it enters the map (`ffe.asm:56885-56896`); F840 then
+/// re-images 0x1f/0x20/0x21/0x22/0x23 as the map's controls change
+/// (`ffe.asm:57197-57478`). The records sit exactly where the flight view row
+/// 0x12..0x19 was; F261's index order draws the map row over it.
+pub const MAP_BUTTONS: [usize; 9] = [0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24];
+/// F834's screen button that stays on the map (`0x0c`, lit).
+pub const MAP_SCREEN_BUTTON: usize = 0x0c;
+/// The map-record images F840 selects. 0x21/0x22/0x23/0x24 are radio group 1,
+/// so only one is lit; 0x1f/0x20 are group 10, so details plus a direction can
+/// both be lit (F9/F10).
+pub const MAP_PREVIOUS: usize = 0x1f;
+pub const MAP_NEXT: usize = 0x20;
+pub const MAP_PICTURE: usize = 0x21;
+pub const MAP_DETAILS: usize = 0x22;
+pub const MAP_SELECT: usize = 0x23;
+pub const MAP_ICON: usize = 0x24;
+/// `DATA_007241`: the extra hot area F969 registers for the map,
+/// `(268,156)-(319,177)`, action `0x80`. F840 ignores action `0x80`, so the
+/// port records the area but does not route it to a console click.
+pub const MAP_EXTRA_HOT_AREA: (i32, i32, i32, i32) = (268, 156, 319, 177);
+
 /// The right-hand console buttons (`DATA_005100` records 0x0f-0x11): position,
 /// idle and lit secondary bitmap ids, and the click. The table gives
 /// hyperspace 0x99/0xa8 at 296,178, text labels 0x9a/0xa9 at 274,178 and the
@@ -134,6 +156,28 @@ impl ConsoleState {
             1 + self.acceleration.min(4)
         }
     }
+}
+
+/// The galaxy map's console selection (`F834`'s `DATA_008627` page, re-imaged
+/// by `F840`).
+///
+/// F834 enters the map and lights 0x24; F840's keys re-image the row: F6
+/// selects (0x23), F7 details (0x22), F8 picture (0x21), F9 details+next
+/// (0x20) and F10 details+previous (0x1f). The records' radio groups make the
+/// group-1 images mutually exclusive, exactly as `F262` resets them; 0x1f/0x20
+/// are group 10, so details+next/previous can show two images at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MapConsole {
+    /// 0x23: F6's select/reset image.
+    pub select: bool,
+    /// 0x22: F7/F9/F10's details page image.
+    pub details: bool,
+    /// 0x21: F8's picture-mode image.
+    pub picture: bool,
+    /// 0x20: F9's next image (radio group 10).
+    pub next: bool,
+    /// 0x1f: F10's previous image (radio group 10).
+    pub previous: bool,
 }
 
 /// What a console click asks for (the action codes of `DATA_007684`).
@@ -594,6 +638,34 @@ impl Console {
             self.apply_normal_page(systems);
         }
     }
+
+    /// The galaxy map's console page, applied **on top of the flight page**.
+    ///
+    /// F834 (`ffe.asm:56856-56896`) shows the F3 map screen button and the
+    /// 0x1c..0x24 map row, lighting the map icon 0x24; F840 then re-images the
+    /// row for the selected control. It does **not** hide the flight page: the
+    /// screen buttons, time-acceleration meter, scanner and the three ship
+    /// lamps stay visible (the executed original's F3 frame shows them), while
+    /// the map row draws over the view row because 0x1c..0x24 come later in
+    /// `F261`'s index order. `Screen::draw` derives the flight page first and
+    /// calls this overlay afterwards.
+    pub fn apply_map(&mut self, page: &MapConsole) {
+        // F834: the F3 map screen button (lit) and the map row.
+        self.show(MAP_SCREEN_BUTTON);
+        self.set_image(MAP_SCREEN_BUTTON, 1);
+        for id in MAP_BUTTONS {
+            self.show(id);
+        }
+        // F834 lights the map icon. F840's images then follow; setting an
+        // image to 0 does not reset the radio siblings, so this reproduces the
+        // original's group-1 replacement and group-10 next/previous pair.
+        self.set_image(MAP_ICON, 1);
+        self.set_image(MAP_SELECT, u8::from(page.select));
+        self.set_image(MAP_DETAILS, u8::from(page.details));
+        self.set_image(MAP_PICTURE, u8::from(page.picture));
+        self.set_image(MAP_NEXT, u8::from(page.next));
+        self.set_image(MAP_PREVIOUS, u8::from(page.previous));
+    }
 }
 
 /// The acceleration step for a key (6, 7, 8, 9, 0), as `FUNC_000208` maps them.
@@ -632,5 +704,89 @@ mod tests {
         systems.data_247 = true;
         console.apply_engines_off_page(&systems);
         assert!(!console.is_visible(0x4f));
+    }
+
+    #[test]
+    fn the_map_page_overlays_f834s_row_on_the_flight_page() {
+        let mut console = Console::new();
+        console.apply_flight(
+            crate::camera::ViewMode::Front,
+            &ConsoleState::default(),
+            &ShipSystems::default(),
+        );
+        // The flight page before the map: F1 lit, the meter and the three lamps.
+        assert_eq!(console.image(0x0e), Some(167));
+        assert!(console.is_visible(0x26));
+        assert!(console.is_visible(0x37));
+        console.apply_map(&MapConsole::default());
+        // F834: the F3 map screen button (lit) and the 0x1c..0x24 row, map icon lit.
+        assert!(console.is_visible(MAP_SCREEN_BUTTON));
+        assert_eq!(console.image(MAP_SCREEN_BUTTON), Some(165));
+        for id in MAP_BUTTONS {
+            assert!(console.is_visible(id), "map record {id:#x} is hidden");
+        }
+        assert_eq!(console.image(MAP_ICON), Some(211));
+        // The flight page is not hidden by F834: the screen buttons, meter and
+        // lamps remain (the reference map frame shows them), while the view
+        // row's selected image is reset by the map icon's radio group.
+        for id in [0x0b, 0x0d, 0x0e, 0x26, 0x2b, 0x37, 0x38, 0x39] {
+            assert!(console.is_visible(id), "flight record {id:#x} is hidden");
+        }
+        assert!(console.is_visible(0x18));
+        assert_eq!(console.image(0x18), Some(162), "view row image 0");
+        assert_eq!(console.image(0x0e), Some(130), "F1 image 0");
+        // F969's extra area is recorded but is not one of the console's clicks.
+        let (x0, y0, x1, y1) = MAP_EXTRA_HOT_AREA;
+        assert_eq!(super::click((x0 + x1) / 2, (y0 + y1) / 2), None);
+    }
+
+    #[test]
+    fn the_map_page_images_follow_f840s_call_order_and_radio_groups() {
+        let mut console = Console::new();
+        // F6: select (0x23) replaces the map icon in radio group 1.
+        console.apply_map(&MapConsole {
+            select: true,
+            ..MapConsole::default()
+        });
+        assert_eq!(console.image(MAP_SELECT), Some(210));
+        assert_eq!(console.image(MAP_ICON), Some(200), "0x24 image 0");
+        assert_eq!(console.image(MAP_DETAILS), Some(198));
+
+        // F7: details (0x22) alone.
+        console.apply_map(&MapConsole {
+            details: true,
+            ..MapConsole::default()
+        });
+        assert_eq!(console.image(MAP_DETAILS), Some(209));
+        assert_eq!(console.image(MAP_ICON), Some(200));
+        assert_eq!(console.image(MAP_PICTURE), Some(197));
+
+        // F8: picture (0x21) alone.
+        console.apply_map(&MapConsole {
+            picture: true,
+            ..MapConsole::default()
+        });
+        assert_eq!(console.image(MAP_PICTURE), Some(208));
+        assert_eq!(console.image(MAP_DETAILS), Some(198));
+
+        // F9: details + next. 0x22 is group 1, 0x20 is group 10: both stay lit.
+        console.apply_map(&MapConsole {
+            details: true,
+            next: true,
+            ..MapConsole::default()
+        });
+        assert_eq!(console.image(MAP_DETAILS), Some(209));
+        assert_eq!(console.image(MAP_NEXT), Some(207));
+        assert_eq!(console.image(MAP_PREVIOUS), Some(195));
+
+        // F10: details + previous.
+        console.apply_map(&MapConsole {
+            details: true,
+            previous: true,
+            ..MapConsole::default()
+        });
+        assert_eq!(console.image(MAP_DETAILS), Some(209));
+        assert_eq!(console.image(MAP_PREVIOUS), Some(206));
+        assert_eq!(console.image(MAP_NEXT), Some(196));
     }
 }

@@ -14,6 +14,7 @@ use ffe_rs::galaxy_map::GalaxyMap;
 use ffe_rs::gameover::GameOver;
 use ffe_rs::hud::PlayerHud;
 use ffe_rs::input;
+use ffe_rs::map_keys::{self, MapAction};
 use ffe_rs::messages::{Channel, Event as LogEvent, Post, Source};
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
@@ -856,6 +857,8 @@ fn run() -> Result<(), String> {
     // The galaxy map's state and the tables it reads (cache v21 to v25).
     let mut galaxy: Option<GalaxyMap> = None;
     let mut map_drag: Option<(i32, i32)> = None;
+    // The map's `DATA_005100` page selection (F834/F840). Reset when the map opens.
+    let mut map_console = ffe_rs::console::MapConsole::default();
     let sector_tables = cache
         .asset("base:world/galaxy-tables")
         .and_then(|bytes| ffe_core::sector::Tables::new(bytes).ok());
@@ -1661,8 +1664,25 @@ fn run() -> Result<(), String> {
         if console_click.is_some() {
             sound.play(Cue::UiBeep);
         }
-        if let Some(note) = console_click.and_then(Click::unported) {
-            message = note.to_owned();
+        // The original galaxy map page owns F5-F12 (F840). While it is
+        // showing, those keys and the overlapping console hot areas are
+        // map-local and the port's global save, view, screenshot and viewer
+        // keys are not run; everywhere else they are unchanged. See `map_keys`
+        // and docs/notes/galaxy-map.md.
+        let map_page_open = nav
+            .as_ref()
+            .is_some_and(|nav| map_keys::owns_keys(nav.view, galaxy.is_some()))
+            && model_lab.is_none()
+            && model_viewer.is_none();
+        if let Some(click) = console_click {
+            if let Some(note) = click.unported() {
+                // The map row's hot areas are the original's function-key
+                // actions (F5-F12), not the flight screens; the map block
+                // handles them.
+                if !map_page_open || map_keys::click(click).is_none() {
+                    message = note.to_owned();
+                }
+            }
         }
         // F4 is the original's station/comms action (F1056's action 0xf4,
         // F343): from state 0x2a (docked) or 0x30 (landed at an open-air
@@ -1708,6 +1728,7 @@ fn run() -> Result<(), String> {
                 .find(|key| pressed(*key));
             if let Some(command) = debug_key
                 .and_then(|key| input::dev_command(options.dev, key, ctrl_down, shift_down))
+                .filter(|_| !map_page_open)
             {
                 match command {
                     input::DevCommand::Screenshot => {
@@ -1817,11 +1838,14 @@ fn run() -> Result<(), String> {
                     if galaxy.is_none() && sector_tables.is_some() {
                         if let Some(home) = nav.current_position() {
                             galaxy = Some(GalaxyMap::new(home, nav.reach().unwrap_or(0)));
+                            // F834: a fresh map page with the map icon lit.
+                            map_console = ffe_rs::console::MapConsole::default();
                         }
                     }
                 } else {
                     galaxy = None;
                 }
+                let mut hyperspace = false;
                 if let Some(map) = galaxy.as_mut() {
                     let held = |key| window.is_key_down(key);
                     let slow = held(Key::LeftShift) || held(Key::RightShift);
@@ -1852,6 +1876,68 @@ fn run() -> Result<(), String> {
                     }
                     if held(Key::PageDown) || held(Key::Minus) || held(Key::NumPadMinus) {
                         map.zoom_by(zoom);
+                    }
+                    // F840 owns F5-F12 while this page is showing (map_keys):
+                    // F5 the controls page, F6 select, F7 details, F8 picture,
+                    // F9/F10 details with next/previous, F11/F12 zoom. The
+                    // details and picture screens are later slices; their keys
+                    // light the original button and report that state. F969's
+                    // console hot areas send the same function-key actions, so
+                    // a click on the map row is routed the same way.
+                    let mut actions = Vec::new();
+                    if let Some(action) = console_click.and_then(map_keys::click) {
+                        actions.push(action);
+                    }
+                    let mut map_key = false;
+                    for (offset, key) in [
+                        Key::F5,
+                        Key::F6,
+                        Key::F7,
+                        Key::F8,
+                        Key::F9,
+                        Key::F10,
+                        Key::F11,
+                        Key::F12,
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        if pressed(key) {
+                            map_key = true;
+                            if let Some(action) = map_keys::action(5 + offset as u8) {
+                                actions.push(action);
+                            }
+                        }
+                    }
+                    for action in actions {
+                        match action {
+                            MapAction::ZoomIn => map.zoom_by(-zoom),
+                            MapAction::ZoomOut => map.zoom_by(zoom),
+                            MapAction::Page => {
+                                map_console = ffe_rs::console::MapConsole::default();
+                                message = "Map controls: F6 select, F7 details, F8 picture, \
+                                           F9/F10 next/previous, F11/F12 zoom."
+                                    .to_owned();
+                            }
+                            action => {
+                                if let Some(page) = map_keys::page(action) {
+                                    map_console = page;
+                                }
+                                message = match action {
+                                    MapAction::Select => "Map controls selected.".to_owned(),
+                                    MapAction::Picture => {
+                                        "The map picture mode (F844-F849) is not ported yet."
+                                            .to_owned()
+                                    }
+                                    _ => {
+                                        "The map details page (F842) is not ported yet.".to_owned()
+                                    }
+                                };
+                            }
+                        }
+                    }
+                    if map_key {
+                        held_controls.disarm(&keys_down);
                     }
                     map.zoom = map.zoom.max(0x2000);
                     if pressed(Key::C) {
@@ -1893,7 +1979,6 @@ fn run() -> Result<(), String> {
                         _ => nav.clear_destination(),
                     }
                 }
-                let mut hyperspace = false;
                 if console_click == Some(Click::Hyperspace) {
                     if nav.destination.is_some() {
                         hyperspace = true;
@@ -2566,10 +2651,13 @@ fn run() -> Result<(), String> {
                     // escape capsule or Stowmaster launches when fitted, and
                     // nothing happens (F1098 returns 0) when it is not. The key
                     // is the source's F12 (action 0xfc), as the console icon is;
-                    // Ctrl+F12 is the developer model viewer instead.
+                    // Ctrl+F12 is the developer model viewer instead, and F840
+                    // owns F12 as zoom-out while the map page is open.
                     let ctrl_down =
                         window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
-                    if pressed(Key::F12) && !ctrl_down || console_click == Some(Click::Capsule) {
+                    if (pressed(Key::F12) && !ctrl_down && !map_page_open)
+                        || (console_click == Some(Click::Capsule) && !map_page_open)
+                    {
                         match death::escape_craft(&state.loadout) {
                             Some(craft) => {
                                 let stats = scene
@@ -2602,6 +2690,7 @@ fn run() -> Result<(), String> {
                         _ => None,
                     });
                     let turret = ViewMode::turret(gun_mounts, views.turret.pitch);
+                    let clicked = if map_page_open { None } else { clicked };
                     // F1054's F10 (action 0xfb): the missile view needs the
                     // Missile Viewer (general bit 9) and a missile in flight
                     // (`player+0xef`); otherwise the key does nothing.
@@ -3453,7 +3542,7 @@ fn run() -> Result<(), String> {
                 // Shift+F5 loads the quick save (or the newest numbered save when
                 // there is none). A load never falls back silently: a corrupt file
                 // leaves the live state alone and reports why.
-                if pressed(Key::F5) && shift {
+                if pressed(Key::F5) && shift && !map_page_open {
                     match saves::load_quick_or_latest(&save_dir).and_then(|(path, loaded)| {
                         apply_save(
                             &cache,
@@ -3489,7 +3578,7 @@ fn run() -> Result<(), String> {
                             message = format!("LOAD ERROR: {error}");
                         }
                     }
-                } else if pressed(Key::F5) {
+                } else if pressed(Key::F5) && !map_page_open {
                     // F5 quick-saves; Ctrl+F5 writes a new numbered save. The
                     // source refuses no in-flight save, so only death and the
                     // post-death tombstone are invalid states here.
@@ -5015,6 +5104,7 @@ fn run() -> Result<(), String> {
             });
         }
         screen.galaxy = None;
+        screen.map_console = map_console;
         if let (Some(map), Some(tables), Some(viewer), Some(nav)) = (
             galaxy.as_mut(),
             sector_tables.as_ref(),
