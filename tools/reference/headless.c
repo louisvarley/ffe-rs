@@ -494,6 +494,9 @@ static int state_combat_mode;
 static int missile_probe_mode;
 static int laser_probe_mode;
 static int legal_probe_mode;
+/* The legal probe's intro start key: 0x02 is DOS "1" (start type 1, Ross 154);
+   0x39 is "any other key" -> F147(0), the default start (Gateway/Hope). */
+static unsigned long probe_start_key = 0x02;
 /* --game-frame <frames> <key> [<key>...]: the real game from the new game on, keys sent by scan code every 40 frames after frame 200, the 320x200 frame and palette written to game-frame.bin at the end. */
 static int game_frame_mode;
 static int no_intro_start;
@@ -610,7 +613,8 @@ long InputKeybGetLastKey(void)
     }
     if ((state_mode || game_frame_mode) && !sent_start && !no_intro_start && frames >= 160) {
         sent_start = 1;
-        return 0x02; /* Intro choice 1, after the 100-tick splash lockout. */
+        /* DOS 1 is start type 1; 0x39 ("any other key") is the default arm. */
+        return (long)probe_start_key;
     }
     if (game_frame_mode && game_key_next < game_key_count && frames >= game_key_frame) {
         game_key_frame = frames + 40;
@@ -741,11 +745,15 @@ void TimerFrameUpdate(void)
                 if ((unsigned char)msg[k] < 0x20 || (unsigned char)msg[k] > 0x7e)
                     msg[k] = (msg[k] == 0x0d) ? '|' : '.';
             }
-            printf("{\"frame\":%lu,\"system\":%u,\"starport\":%lu,"
+            printf("{\"frame\":%lu,\"start_type\":%lu,\"player_state\":%u,"
+                   "\"player_index\":%lu,\"ship\":%lu,\"system\":%u,\"starport\":%lu,"
                    "\"danger\":%lu,\"illegal\":%u,\"wanted\":%u,\"alert\":%d,"
                    "\"fines\":[%lu,%lu,%lu,%lu,%lu,%lu],\"cash\":%lu,"
                    "\"msg_index\":%lu,\"msg\":\"%s\"}\n",
-                   frames, (unsigned)p[0x86], ref_starport, ref_danger,
+                   frames, state_u32(0xfa), (unsigned)ref_state[0xe8],
+                   state_u32(0xc0), (unsigned long)(p[0x82] | p[0x83] << 8 |
+                                                     p[0x84] << 16 | p[0x85] << 24),
+                   (unsigned)p[0x86], ref_starport, ref_danger,
                    (unsigned)ref_illegal_fire, (unsigned)ref_wanted,
                    (int)(signed char)ref_alert,
                    ref_fines[0], ref_fines[1], ref_fines[2], ref_fines[3],
@@ -5804,10 +5812,11 @@ int main(int argc, char **argv)
     state_combat_mode = argc == 3 && !strcmp(argv[1], "--state-combat");
     missile_probe_mode = argc == 3 && !strcmp(argv[1], "--missile-probe");
     laser_probe_mode = argc == 3 && !strcmp(argv[1], "--laser-probe");
-    legal_probe_mode = argc == 3 && !strcmp(argv[1], "--legal-probe");
-    state_mode = argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode || laser_probe_mode || legal_probe_mode);
+    legal_probe_mode = (argc == 3 || argc == 4) && !strcmp(argv[1], "--legal-probe");
+    if (legal_probe_mode && argc == 4) probe_start_key = strtoul(argv[3], 0, 0);
+    state_mode = (argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode || laser_probe_mode)) || legal_probe_mode;
     if (argc != 2 && !state_mode)
-        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --laser-probe <frames> | --legal-probe <frames> | --vectors | --font | --blit | --models");
+        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --laser-probe <frames> | --legal-probe <frames> [start-key] | --vectors | --font | --blit | --models");
     count = argv[state_mode ? 2 : 1];
     {
         char *end;

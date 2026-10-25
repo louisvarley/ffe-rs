@@ -90,25 +90,59 @@ offence is recorded, so the port also leaves `Flight::credits` alone.
   `0x12/0x13`, and the starport witness accepting only a starport inside
   `0x13`.
 - `crates/ffe-rs/tests/npc_ai.rs::firing_at_hope_is_fined_and_shows_f236s_message`
-  (ignored/local cache): the new game's Hope pad is a witness, the message and
-  6000 fine, `wanted`, police hostility, F783 clear and the frame
-  `docs/evidence/legal/legal-hope.png`.
-- `docs/evidence/legal/original-legal-probe.jsonl`: the executed JJFFE 2.8a7
-  `--legal-probe` at the new game's Ross 154 pad. Frame 164/165:
-  `illegal 0→4`, `wanted 2→3`, `fines [0,0,0,0,0,0]→[0,0,6000,0,0,0]`,
-  `cash 1000`, and the message **"Unlawful discharge of weapon is not permitted
-  here. Pay a $600 fine."** (`DATA_008996=2` is the source's starport index; the
-  port uses the ordinal among its starports, 0 at Hope.)
+  (ignored/local cache): the **default start** (start type 0, Gateway, Hope,
+  Old Blackelk, state `0x30`, Saker `0x1f`, 10,000 CR) is a starport witness;
+  the message and 6000 fine, `wanted`, police hostility, F783 clear and the
+  frame `docs/evidence/legal/legal-hope.png`.
+- `docs/evidence/legal/original-legal-probe-default.jsonl`: the executed
+  JJFFE 2.8a7 `--legal-probe 166 0x39` (key `0x39` = DOS "any other key" =
+  F829/F998 record 0). Frame 164/165: `start_type 0`, `player_state 48`,
+  `player_index 87`, `ship 31`, `cash 10000`, `illegal 0→4`, `wanted 2→3`,
+  `fines [0,0,0,0,0,0]→[0,0,0,6000,0,0]`, and the message **"Unlawful discharge
+  of weapon is not permitted here. Pay a $600 fine."** (`DATA_008996=3` is
+  Old Blackelk's source starport index; the port uses the ordinal among the
+  system's starports.)
+- `docs/evidence/legal/original-legal-probe.jsonl`: the older probe at start
+  type 1 (Ross 154, Eagle, 1000 CR); same message and 6000, at
+  `DATA_008996=2`. It is kept to show the value does not depend on the start.
 
 ## 4. The 4500 discrepancy
 
-`4500` appears nowhere in `DATA_005039`, in `FIRSTENC.EXE` (all four supplied
-DOS variants), or in FFED3D's table; the nearest values are 6000 (the charge) and
-600 (the printed amount). The executed original prints `$600` and owes `6000`.
-The owner's memory/screenshot may be from a different version or may have
-combined the message with another fine. The port follows the source; if the
-owner wants the 4500 variant, it is a deliberate table/format change, not a port
-bug, and should be recorded as such.
+The different start does not change the fine. The executed original's **actual
+default start** (Gateway/Hope/Old Blackelk, state `0x30`, Saker, 10,000 CR)
+still prints `$600` and records `6000`; the Ross 154 start does the same
+(`original-legal-probe-default.jsonl`, `original-legal-probe.jsonl`).
+
+`4500` appears nowhere in `DATA_005039` (any row), in the supplied DOS
+`FIRSTENC.EXE` variants, or in FFED3D's fine table. The only `4500` in the
+original data path is `DATA_008804[4749] = 4500` (`ffed3d-master/doc/ffed3ddb.c`
+26652, the same `0x4a34` F559 sets with `0x1194`): the **Saker Mk III's
+shipyard value**, not a fine. That is an important false lead: a message that
+inserted the ship value (`+0x4a34`) instead of the offence record's fine word
+would print exactly `4500` on the default start. The DOS F236 path inserts
+`DATA_005039[3]+4` (600), which the default-start probe confirms.
+
+`DATA_005039`'s printed fines are
+`1000, 500, 2000, 600, 200, 0, 0, 2500, 3000, 4000, 10000`, so `4500` is not
+reachable from any row, nor from an accumulation of `fine*10` ledger entries,
+nor from the 25% bribe window. F236 applies no danger, starport, wanted or
+ledger multiplier to the message field. The message template is
+`DATA_005040`/`41`; the owner's "of a weapon" and capital "Fine" are also not
+the DOS bytes. The Elite Wiki's FFE criminal-offence table independently lists
+600 for unlawful discharge, and an Atari-Forum report describes the same
+offence while landed on a planet.
+
+The supplied executables are byte-identical where comparable:
+`game/FIRSTENC.EXE` and the floppy 1.02 copy both have SHA-256
+`D9195661…BCA1E72`, with the offence-3 record at `0xbdd46 + 3*14`
+(`14 00 00 00 58 02 00 00 08 00 00 00 07 00`); the CD image contains the same
+bytes at `0x250621b2`. FFED3D's decoded table has the same row. If the owner's
+frame is from an Amiga/Atari or localized release, it is not any build in this
+repository; that would be a different-data change, not a port bug. Keeping the
+DOS values is the verified choice.
+
+The owner must decide whether to override the table to the remembered
+`4500`/wording; if so it should be an explicit data option, not a source change.
 
 ## 5. Remaining / owner decisions
 
