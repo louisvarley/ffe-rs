@@ -305,6 +305,42 @@ impl RuntimePalette {
         axis
     }
 
+    /// `F1329`'s longest-axis extent (`box + 0xc`), the value the original's
+    /// heap compares. An empty box is -16 (`hi = 0`, `lo = 16`), so it sinks
+    /// below every real box.
+    fn extent(cut: Cut) -> i32 {
+        (0..3)
+            .map(|axis| cut.hi[axis] - cut.lo[axis])
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The original's heap removal (83025-83159): the root's saved pointer is
+    /// replaced by the larger child until a leaf is reached, and the shrunken
+    /// root is written into that hole. It does not stop early or sift the root
+    /// back up, so this is a literal port rather than a general sift-down.
+    fn sink_root(heap: &mut [usize], boxes: &[Cut]) {
+        let size = heap.len() - 1;
+        let root = heap[1];
+        let mut at = 1;
+        loop {
+            let left = at * 2;
+            if left > size {
+                break;
+            }
+            let child = if left < size
+                && Self::extent(boxes[heap[left]]) < Self::extent(boxes[heap[left + 1]])
+            {
+                left + 1
+            } else {
+                left
+            };
+            heap[at] = heap[child];
+            at = child;
+        }
+        heap[at] = root;
+    }
+
     /// The boxes `F1330` builds: 64 median-cut boxes when the occupied cube has
     /// more than 64 cells, otherwise one per occupied cell.
     fn make_boxes(&self) -> Vec<Cut> {
@@ -327,31 +363,35 @@ impl RuntimePalette {
                 .collect();
         }
         let mut boxes = vec![initial];
-        // A max-heap of box indices, 1-based as in the original.
+        // A max-heap of box indices, 1-based as in the original. The key is
+        // `F1329`'s longest-axis extent (`box + 0xc`), not the cell count.
         let mut heap = vec![usize::MAX, 0];
         while boxes.len() < BOXES {
             let root = heap[1];
             let axis = Self::longest(boxes[root]);
+            let old_lo = boxes[root].lo;
             let old_hi = boxes[root].hi;
-            let mid = (boxes[root].lo[axis] + old_hi[axis]) / 2;
+            let mid = (old_lo[axis] + old_hi[axis]) / 2;
             // The left box keeps the root's slot; the right box is new.
             boxes[root].hi[axis] = mid;
-            boxes[root] = self.tighten(boxes[root].lo, boxes[root].hi);
+            boxes[root] = self.tighten(old_lo, boxes[root].hi);
             let mut right = Cut {
-                lo: boxes[root].lo,
+                lo: old_lo,
                 hi: old_hi,
                 count: 0,
             };
             right.lo[axis] = mid;
+            // Drop the shrunken root down the larger-child path (the original
+            // does this unconditionally, 83025-83159).
+            Self::sink_root(&mut heap, &boxes);
             let index = boxes.len();
             boxes.push(self.tighten(right.lo, right.hi));
+            // Append the right box and sift it up by extent.
             heap.push(index);
-            // Only the new box sifts up; the root is left where it was, as in
-            // the original (83025-83159).
             let mut at = heap.len() - 1;
             while at > 1 {
                 let parent = at / 2;
-                if boxes[heap[parent]].count < boxes[heap[at]].count {
+                if Self::extent(boxes[heap[parent]]) < Self::extent(boxes[heap[at]]) {
                     heap.swap(parent, at);
                     at = parent;
                 } else {
@@ -444,6 +484,39 @@ mod tests {
         assert_eq!(first, 0x80 + 63);
         assert_eq!(second, 0xc0 + 63);
         assert_eq!(palette.resolve(0x004), Some([4, 4, 17 << 2]));
+    }
+
+    #[test]
+    fn a_uniform_cube_cuts_into_sixty_four_non_empty_boxes() {
+        // The heap must take the largest-extent box and re-sift the shrunken
+        // root (F1330 83025-83159). Splitting one box repeatedly instead left
+        // most of the 64 boxes empty and wrote their 31,31,31 representative
+        // into the bank, which the intro and the surfaces showed as speckle.
+        let mut palette = palette();
+        for r in 0..8u16 {
+            for g in 0..8u16 {
+                for b in 0..8u16 {
+                    palette.register(r << 8 | g << 4 | b);
+                }
+            }
+        }
+        let boxes = palette.make_boxes();
+        assert_eq!(boxes.len(), BOXES);
+        assert!(
+            boxes.iter().all(|cut| cut.count > 0),
+            "empty boxes: {:?}",
+            boxes
+                .iter()
+                .filter(|cut| cut.count == 0)
+                .collect::<Vec<_>>()
+        );
+        palette.build();
+        let grey = palette
+            .upper6()
+            .iter()
+            .filter(|colour| **colour == [31, 31, 31])
+            .count();
+        assert_eq!(grey, 0, "empty-box representatives reached the bank");
     }
 
     #[test]

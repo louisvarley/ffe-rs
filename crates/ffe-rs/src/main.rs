@@ -3417,6 +3417,10 @@ fn run() -> Result<(), String> {
         screen.sky = prefs::space_colour_rgb(prefs.space_colour);
         screen.stars_visible = prefs.others[1];
         screen.lock_external = prefs.others[2];
+        // The Graphic Detail page's "Level of Shape Detail" row is stored one
+        // less than the original's `DATA_008812` (High, the default, is 1);
+        // F917 clamps its negative values to 0.
+        screen.surface_detail = (prefs.shape_detail as i32 - 1).max(0);
         // F1100's range readout for the locked target, in the original's km/AU
         // conversion. A target that does not project is behind or off the view
         // and takes the fixed (50,50) text, as F1100 does.
