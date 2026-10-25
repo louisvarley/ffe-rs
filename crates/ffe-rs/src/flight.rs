@@ -458,7 +458,10 @@ impl Flight {
                 .min(self.shields[1]);
         }
         if hull_full != 0 && self.hull[1] == 0 {
-            self.hull = [0, hull_full];
+            // An uninitialised new ship is intact. F938 runs before the
+            // HUD's ensure_damage on the first frame; setting only the maximum
+            // would make that later call preserve a zero hull and trigger death.
+            self.hull = [hull_full, hull_full];
         }
         if self.loadout.hull_auto_repair() && self.hull[0] < hull_full {
             let added = u16::try_from(tics).unwrap_or(u16::MAX);

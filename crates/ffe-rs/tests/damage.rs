@@ -349,3 +349,24 @@ fn damage_dock_repair_then_fly_restores_the_thruster_limit() {
     let model = OriginalFlight::from_flight(&flight, Some(&stats));
     assert_eq!(model.player().limits.axes[2][0], 0x100);
 }
+
+#[test]
+fn first_frame_recharge_does_not_destroy_a_new_ship() {
+    let mut flight = Flight::default();
+    // main runs F938 before its HUD-side ensure_damage call.
+    flight.recharge(994, 100);
+    flight.ensure_damage(100);
+    assert_eq!(flight.hull, [100, 100]);
+    assert!(!flight.destroyed());
+}
+
+#[test]
+fn recharge_does_not_revive_a_destroyed_ship_or_erase_damage() {
+    let mut flight = flight();
+    flight.hull = [40, 100];
+    flight.recharge(994, 100);
+    assert_eq!(flight.hull, [40, 100]);
+    flight.hull = [0, 100];
+    flight.recharge(994, 100);
+    assert!(flight.destroyed());
+}

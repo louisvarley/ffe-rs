@@ -1,6 +1,83 @@
 # Port log
 
+## 2026-10-25 — services return-to-ship icon
+
+Docked rendering skipped all console buttons and the input collector rejected
+all docked console clicks. Restore F1439's common screen buttons/time meter on
+station pages with F331's station selection, and route the F1 console click to
+the pad board's existing return action. The Old Blackelk regression failed
+before the fix and now passes with all four local station-view tests.
+
+
+## 2026-10-25 — fix immediate first-frame death
+
+F938 recharge ran before ensure_damage and changed an uninitialised hull from
+[0,0] to [0,full], which the late initialiser preserved as destroyed. Initialise
+both words to full; leave existing damage intact. Regression reproduced red
+before the fix, green after it; 13 damage and 8 death tests pass. Earlier boot
+safety checks skipped this live-loop call order. See TAKEOVER_ISSUES.md.
+
+
+## 2026-10-25 — takeover issue audit
+
+Laser input now uses HeldControls, disarmed at entry; release then press fires
+normally. Object text no longer substitutes a catalogue name for an empty
+registration. Removed the invented destruction sentence and PAUSED overlay.
+Existing intro/boot/planet/death checks pass. Dust remains missing and game-over
+pixel fidelity remains partial. See [TAKEOVER_ISSUES.md](TAKEOVER_ISSUES.md).
+
+
 Running record of decisions, discrepancies and open questions. Newest entries at the top; append rather than rewrite, unless a decision supersedes an earlier one (mark it).
+
+---
+
+## 2026-10-25 - Batch 3b: station shuttles, NPC missiles, saves, galaxy console and intro stars
+
+- Merged, one at a time, each green and pushed: `shuttles` (4108683),
+  `npcmissiles` (09bb3cb), `saves` (eb10f78), `galaxy-console` (6db3224) and the
+  newer `intro-fix2` (e43b45e).
+- **shuttles (v1.06).** F691's station-bay ships (`DATA_008997/8999`,
+  `RND(4 * places)`, F650 bay, state 0x24 countdown), bay release, F699's Lynx
+  hold, F751's escort hand-off and the F1530 split, with `MAX_SHIPS=9` and
+  `MAX_BAY_SHIPS=3`. The `station_traffic` fixture now isolates its F691 ship
+  from other F688 traffic sharing the station's single docking record. Owner
+  decisions: caps, F699, F686/F687, closed-bay tables, surface traffic.
+- **npcmissiles (v1.07).** F754 launches, F773 pylon fit, F757/F935 ECM and
+  evasion, the player's chaff (cargo 32), F1057 decoy retargeting, C chaff and
+  the HUD lamp; `npc_missiles` frames. Conflicts: `Spec` gained both the
+  status `rating` and the missile `missiles` word; kept both. The `station_traffic`
+  fixture's model-table expectation was widened to any F635 table (the F691
+  model now comes through the allegiance shift). Owner decisions: chaff
+  consumption, F937/F935 visual, cadence, F773 budget.
+- **saves (v1.08).** Native versioned JSON v2, F5 quick / Ctrl+F5 numbered /
+  Shift+F5 load, intro L, `--load` and `--capture-save`, full
+  Flight+Navigator+legal+rank+missions state, atomic bounded writes, legacy
+  read-only recognition and `saves/config.cfg` migration. Conflicts: README
+  player-build wording (kept cleanup's), `Legal` (kept the jurisdiction doc and
+  added serde), `main.rs` options/usage (combined dev with load/capture), and
+  `DEVIATIONS` EXP-002/003. Added in-memory drive migration for v1 and
+  pre-`Loadout::drive` saves. Owner decisions: legacy specimen, RNG, object
+  array, mission/rank model, remap UI/dialog.
+- **galaxy-console (v1.09).** F834/F840's map console page rebuilt against the
+  current main: F5 controls, F6 select, F7 details, F8 picture, F9/F10
+  next/previous, F11/F12 zoom; map-local ownership only for the 3D map; row
+  clicks routed. Conflicts: `main.rs` dev block (kept cleanup's `--dev` chords
+  and gated them off while the map owns keys), F12 capsule (map owns F12), view
+  commands (suppressed while the map is open) and F5 save/load (native saves
+  kept; map suppresses them while open). Owner decisions: map-local keys,
+  details/picture still unported.
+- **intro-fix2 (v1.10).** The newer head adds the nebula-behind-planet key fix
+  and F1766/F1814 star chains; the earlier text/ship/ring fixes are retained
+  (the merge brought only the new commit's diff). Conflicts: none. Two
+  global key-sort assertions were relaxed to landmark ordering because the
+  port's F1840 surface merge is not part of `verify-order`'s queue; the
+  ship/planet and nebula ordering checks remain. Owner decisions: remaining
+  chain-star density/cull branches.
+- Checks: every merge ran workspace tests, clippy `-D warnings`, fmt, its
+  cached/ignored suites and the affected oracles; `verify-intro`, `order`,
+  `fills`, `textures`, `surface`, `combat`, `npc`, `station`, `prefs`,
+  `galaxy-map` and `hyperspace` were exercised across the batch. Cache stays v29
+  (1,813 assets).
 
 ---
 

@@ -73,7 +73,8 @@ window.FFE_BURNDOWN = {
         { id: "visible-9", title: "Ship statistics, cockpit eyes and turret views", status: "done", version: "v0.46" },
         { id: "visible-10", title: "Clickable console view icons and flickering plumes", status: "done", version: "v0.47" },
         { id: "visible-11", title: "Intro handedness, shape detail and median-cut palette fixes", status: "done", version: "v0.88" },
-        { id: "visible-12", title: "Intro text frames, merged surface depth and atmosphere ring", status: "done", version: "v0.89" }
+        { id: "visible-12", title: "Intro text frames, merged surface depth and atmosphere ring", status: "done", version: "v0.89" },
+        { id: "visible-13", title: "Intro nebula behind the planet and F1766/F1814 star chains", status: "done", version: "v1.10" }
       ]
     },
     {
@@ -147,6 +148,7 @@ window.FFE_BURNDOWN = {
       title: "Gameplay systems (phase 4)",
       status: "planned",
       tasks: [
+        { id: "gameplay-dust", title: "Source space-dust spawning, lifetime and moving flight rendering", status: "todo" },
         { id: "gameplay-1", title: "Market and economy tables, pricing and cargo", status: "in-progress", version: "market-v20" },
         { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "in-progress", version: "v0.73" },
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.73" },
@@ -181,7 +183,9 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-32", title: "Seven-category fitting, capacity/drive sync and old-save drive migration", status: "done", version: "v1.01" },
         { id: "gameplay-33", title: "Black market, F640 trap, F233 smuggling scan and F236 recording", status: "done", version: "v1.02" },
         { id: "gameplay-34", title: "Subsystem damage, F938/F929 repair rows and crash damage", status: "done", version: "v1.03" },
-        { id: "gameplay-35", title: "Mission state, BBS accept/complete/expire, journal/comms/military pages", status: "done", version: "v1.05" }
+        { id: "gameplay-35", title: "Mission state, BBS accept/complete/expire, journal/comms/military pages", status: "done", version: "v1.05" },
+        { id: "gameplay-36", title: "F691 station-bay shuttles, bay release and MAX_SHIPS=9/MAX_BAY_SHIPS=3", status: "done", version: "v1.06" },
+        { id: "gameplay-37", title: "NPC missile launches, chaff/ECM evasion and NPC pylon fit", status: "done", version: "v1.07" }
       ]
     },
     {
@@ -210,7 +214,9 @@ window.FFE_BURNDOWN = {
         { id: "ui-18", title: "Presentation display scaling, Display Options and Alt+Enter fullscreen", status: "done", version: "v0.87" },
         { id: "ui-19", title: "F917 tombstone screen, obituary and timed return to the front end", status: "done", version: "v0.96" },
         { id: "ui-20", title: "Source-tagged event log, F271 replace/NULL-clear/ring semantics", status: "done", version: "v0.97" },
-        { id: "ui-21", title: "Remove port-only help/scenarios/debug keys; dev-gated tools and source F1/F11/F12", status: "done", version: "v0.98" }
+        { id: "ui-21", title: "Remove port-only help/scenarios/debug keys; dev-gated tools and source F1/F11/F12", status: "done", version: "v0.98" },
+        { id: "ui-22", title: "Native versioned save/load, quick/numbered files and intro L", status: "done", version: "v1.08" },
+        { id: "ui-23", title: "F834/F840 galaxy map console page and map-local F5-F12 keys", status: "done", version: "v1.09" }
       ]
     },
     {
@@ -694,7 +700,7 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 64,
       note: "Start flow merged (v0.91): Escape runs F224's Pause->Open->Close order (closing leaves paused), F4 opens services over the 0x30 pad and F1/Backspace return, the pad world has the ship, planet (F880 mass) and starport sibling so F603 gravity/F1033 altitude/fall-back work, with a 120-frame pad grace and Tab/L launch; --capture-start and the prefs/takeoff updates are in. Owner decisions: the manual pad takeoff, elevation-vs-AGL, the grace, Escape UX, Tab launch and altitude HUD remain. One item added and completed (gameplay-27), so the remaining count is unchanged."
-    },,
+    },
     {
       date: "2026-10-25",
       remaining: 64,
@@ -724,17 +730,17 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 64,
       note: "Events merged (v0.97): one source-tagged log writer (12 Source variants), port-only entries removed or rerouted (unported clicks, view names, pause/accel/HUD/save/takeoff notices), F271's replace/NULL-clear/ring/scroll semantics, message_log scan and messages_view evidence. Escape/pause messages stay off the log and the places list still wins. Owner decisions: the DOS start-line string inference, target-lock wording, unported-click feedback and DATA_008810/scroll actions remain. One item added and completed (ui-20), so the remaining count is unchanged."
-    },,
+    },
     {
       date: "2026-10-25",
       remaining: 64,
       note: "Cleanup merged (v0.98): the port-only full-screen help page and scenario selector/debug labels are gone, F11/F12/O moved behind --dev/FFE_DEV=1 (Ctrl+F11 screenshot, Ctrl+F12 viewer, Ctrl+Shift+F12 lab), and F1/F11/F12 are back to the source view cycle/combat-computer note/escape capsule. input::view_command/dev_command tests, views/playable coverage and cleanup evidence are in. Owner decisions: F3 still toggles Modern/Classic although source F3 is the map (candidate for Port Options), F5 snapshots remain, --start sol stays CLI-only, and tools/test-playable.ps1 still carries help/scenario assumptions. One item added and completed (ui-21), so the remaining count is unchanged."
-    },,
+    },
     {
       date: "2026-10-25",
       remaining: 63,
       note: "Timed events merged (v0.99): ffe_core::calendar::Calendar tracks DATA_008808's day marker; Navigator::tick_days runs F633's market drift, BBS replacement and shipyard stock once per crossed day through advance/transfer/hyperspace (direct jump adds no time), with per-station day markers and schedule_deadline/cancel_deadline/take_expired for the missions stream. Owner decisions: the clock/navigator are not in Flight (a save-format version bump is needed), the news buffer/script VM is missing, paused/docked time does not advance, and service reminders await the repairs actions. One existing item completed (gameplay-15), so the remaining count falls by one."
-    },,
+    },
     {
       date: "2026-10-25",
       remaining: 62,
@@ -764,6 +770,46 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 62,
       note: "Missions merged (v1.05): mission state/kinds, BBS accept/complete/expire/abandon, passenger/parcel/removal/military packages, journal/comms/military pages, F306 song 7 and save round-trip. Reconciled with timed-events' schedule_deadline/take_expired and status's rank/reputation API. Owner decisions: F625-F628, removal combat, cabins, rank and journal archive. One item added and completed (gameplay-35), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Shuttles merged (v1.06): F691's station-bay ships (DATA_008997/8999, RND(4x places), F650 bay, state 0x24 countdown), bay release fixes, F699 Lynx hold, F751 escort hand-off and the F1530 timer split; MAX_SHIPS 9 and MAX_BAY_SHIPS 3. The station-traffic fixture now isolates its F691 ship from other F688 traffic holding the station's single docking record. Owner decisions: caps, F699, F686/F687, closed-bay tables and surface traffic. One item added and completed (gameplay-36), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "NPC missiles merged (v1.07): F754 launches with F773 pylon fit, F757/F935 ECM/evasion, player chaff (cargo 32), F1057 decoy retargeting, C chaff, HUD lamp and frames. Reconciled with shuttles/npc AI and ECM. Owner decisions: chaff consumption, F937/F935 visual, cadence, F773 budget. One item added and completed (gameplay-37), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Saves merged (v1.08): native versioned JSON v2, F5 quick/Ctrl+F5 numbered/Shift+F5 load, intro L, --load and --capture-save, full Flight+Navigator+legal+rank+missions state, atomic bounded writes and legacy read-only recognition; config migration. Old v1 documents and pre-drive-loadout saves migrate in memory. Owner decisions: legacy specimen, RNG, object array, mission/rank model, remap UI/dialog. One item added and completed (ui-22), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Galaxy console merged (v1.09): F834/F840 map page rebuilt against current main (F5 controls, F6 select, F7 details, F8 picture, F9 next, F10 previous, F11/F12 zoom), map-local key ownership only for the 3D map, row clicks routed to actions. Reconciled with cleanup dev keys, hyperspace H and places. Owner decisions: map-local keys, details/picture still unported. One item added and completed (ui-23), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Intro nebula/star chains merged (v1.10, newer head than the earlier intro-fix2): all primitive keys preserved so the nebula draws behind the planet, F1766/F1814 star chains reach the frame/screen. The prior text/ship/ring fixes remain. The two global key-sort assertions were relaxed to landmark ordering because the port's F1840 surface merge is not part of verify-order's queue. Owner decisions: remaining chain-star density/cull branches. One item added and completed (visible-13), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 63,
+      note: "Takeover audit: fixed intro Space rearm, empty object-registration text, invented death log and PAUSED overlay; existing intro/boot/takeoff regressions pass. Added explicit missing space-dust lifecycle item; game-over fidelity remains partial. See docs/TAKEOVER_ISSUES.md."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 63,
+      note: "Immediate boot death reproduced: recharge set uninitialised hull to [0,full] before ensure_damage. Fixed to [full,full]; new first-frame regression plus existing damaged/dead preservation test; 13 damage and 8 death tests pass. Regression fix, no milestone completion change."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 63,
+      note: "Fixed missing services console: common screen icons/time meter now draw in Docked mode and the F1 icon returns from the pad services board. Old Blackelk regression reproduced before fix; four station-view tests pass. No milestone completion change."
     },
   ]
 };

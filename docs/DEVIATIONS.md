@@ -196,3 +196,10 @@ These do not change the simulation or the Classic look, but are listed for trans
 - Enhanced options never feed the simulation; the golden traces must be identical with every option on and off (the renderer may not call the gameplay RNG or mutate state).
 - With every enhancement off, output matches the Classic reference.
 - If a change is ambiguous, it is treated as frozen and the owner is asked.
+
+## 2026-10-25 — intro input carry-over (owner requested)
+
+Laser input is disarmed at game entry until held keys are released. Space used
+to leave the intro cannot fire or incur a discharge fine. A later Space press
+fires normally, including held fire. Implemented using HeldControls and tested
+by `intro_space_must_be_released_before_a_new_press_can_fire`.

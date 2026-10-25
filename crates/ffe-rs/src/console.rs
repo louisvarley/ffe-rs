@@ -639,6 +639,22 @@ impl Console {
         }
     }
 
+    /// F1439's common screen buttons and time meter remain on station pages.
+    /// F331 selects the station/comms button (0x0b), rather than F1 (0x0e).
+    pub fn apply_station(&mut self, console: &ConsoleState) {
+        *self = Self::new();
+        for id in 0x0b..=0x0e {
+            self.show(id);
+        }
+        self.set_image(0x0e, 0);
+        self.set_image(0x0b, 1);
+        for id in 0x26..=0x2b {
+            self.show(id);
+            self.set_image(id, 0);
+        }
+        self.set_image(0x26 + console.lit_step(), 1);
+    }
+
     /// The galaxy map's console page, applied **on top of the flight page**.
     ///
     /// F834 (`ffe.asm:56856-56896`) shows the F3 map screen button and the

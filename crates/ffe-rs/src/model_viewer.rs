@@ -271,8 +271,7 @@ pub struct ModelViewer {
     /// Font model slots 0..2's glyph programs (cache v14).
     glyphs: Vec<Option<GlyphSet>>,
     /// The object string F1747's `0x3016`/`0x3022` expand (the drawn object's
-    /// word at +0x124, its registration). Empty falls back to the model's own
-    /// name, so the viewer shows something instead of nothing.
+    /// word at +0x124, its registration). Empty object strings remain empty.
     registration: Vec<u8>,
     /// The tombstone's F1344 expansion for FF9C00..`03`: the commander name and
     /// game date FFE's game-over models engrave on model 172/175.
@@ -800,7 +799,7 @@ impl ModelViewer {
     }
 
     /// The drawn object's registration string (object +0x124), which F1747's
-    /// `0x3016`/`0x3022` expand. Empty uses the model's own name.
+    /// `0x3016`/`0x3022` expand. Empty object strings remain empty.
     pub fn set_registration(&mut self, text: &[u8]) {
         self.registration = text.to_vec();
     }
@@ -835,23 +834,6 @@ impl ModelViewer {
             .get(usize::from(code & 0x3fff))
             .map(Vec::as_slice)
             .ok_or_else(|| format!("Model string {code:#06x} is not in the cache."))
-    }
-
-    /// The model's own name for F1747's `0x3016`/`0x3022` fallback: the
-    /// statistics block's `+0xe` ship-name ffcode expanded through
-    /// `DATA_004682` (F282's mapping), not the table slot. Models without
-    /// statistics keep the old slot lookup so text still draws.
-    fn model_name(&self, model: u32) -> Option<&[u8]> {
-        let code = self
-            .ship_stats
-            .get(model as usize)
-            .and_then(|stats| stats.as_ref())
-            .map(|stats| stats.name_code);
-        if let Some(name) = code.and_then(|code| self.model_strings.get(usize::from(code & 0x3fff)))
-        {
-            return Some(name);
-        }
-        self.model_strings.get(model as usize).map(Vec::as_slice)
     }
 
     /// Step the engines through off, half and full thrust ([`THRUST_STEPS`]).
@@ -2389,15 +2371,12 @@ impl ModelViewer {
     /// string table (`0x4000..0x8000`), the drawn object's own string
     /// (`0x3016`, and `0x3022` unwrapped — F1398's width table is not imported),
     /// and FFE's game-over templates `0x9c00..0x9c03` (models 172/175).
-    fn expanded_text(&self, code: u16, model: u32) -> Result<Vec<u8>, String> {
+    fn expanded_text(&self, code: u16, _model: u32) -> Result<Vec<u8>, String> {
         match code {
             0x3016 | 0x3022 => {
-                if !self.registration.is_empty() {
-                    return Ok(self.registration.clone());
-                }
-                self.model_name(model)
-                    .map(<[u8]>::to_vec)
-                    .ok_or_else(|| format!("Model {model} has no name string."))
+                // F1344 reads the object's +0x124 string, not the model's
+                // catalogue name. Intro objects have no supplied registration.
+                Ok(self.registration.clone())
             }
             0x4000..=0x7fff => self.model_string(code).map(<[u8]>::to_vec),
             // DATA_005129..005132, the tombstone's four strings. 0x0d is the
@@ -2507,6 +2486,26 @@ impl ViewerModel {
             normal_count,
             radius,
             front,
+        }
+    }
+}
+
+#[cfg(test)]
+mod object_text_tests {
+    use super::*;
+
+    #[test]
+    fn object_text_does_not_substitute_the_catalogue_name() {
+        let table = SineTable::from_bytes(&vec![0; 16384 * 4]).unwrap();
+        let model = ViewerModel::new(0, 0, 0, &[], &[0, 0], &[], 0);
+        let mut viewer = ModelViewer::from_models(vec![model], table).unwrap();
+        viewer.set_model_strings(vec![b"LONG SHIP CATALOGUE NAME".to_vec()]);
+        for code in [0x3016, 0x3022] {
+            assert!(viewer.expanded_text(code, 0).unwrap().is_empty());
+        }
+        viewer.set_registration(b"AB-123");
+        for code in [0x3016, 0x3022] {
+            assert_eq!(viewer.expanded_text(code, 0).unwrap(), b"AB-123");
         }
     }
 }

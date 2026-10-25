@@ -1017,5 +1017,18 @@ fn default_start_services_board_is_old_blackelk() {
     let mut screen = Screen::new(&cache).unwrap();
     screen.system = nav.system_name().to_owned();
     draw(&mut screen, Some(view), None, station::SERVICES_HINT);
+    assert!(
+        screen.console.is_visible(0x0e),
+        "services must retain the F1 return-to-ship icon"
+    );
+    assert_eq!(
+        screen.console.image(0x0b),
+        Some(164),
+        "station/comms screen is selected"
+    );
+    assert_eq!(
+        Screen::console_click(68, 180),
+        Some(ffe_rs::console::Click::CycleView)
+    );
     save(&screen, "start-services-ours.ppm");
 }

@@ -1681,14 +1681,19 @@ impl Screen {
                 // screen buttons, meter, scanner and lamps stay visible.
                 self.console.apply_map(&self.map_console);
             }
-            for (_, button) in self.console.drawable() {
-                let Some(id) = button.image() else {
-                    continue;
-                };
-                if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
-                    icon.blit(&mut self.indexed, button.x, button.y);
-                }
+        } else {
+            self.console.apply_station(&views.console);
+        }
+        // Common screen controls are present on station pages as well as flight.
+        for (_, button) in self.console.drawable() {
+            let Some(id) = button.image() else {
+                continue;
+            };
+            if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
+                icon.blit(&mut self.indexed, button.x, button.y);
             }
+        }
+        if state.mode != Mode::Docked {
             self.draw_gauges();
         }
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {

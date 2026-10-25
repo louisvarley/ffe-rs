@@ -1218,6 +1218,8 @@ fn run() -> Result<(), String> {
     // The default-start capture stops a moment after F1031 clears the pad.
     let mut start_clear_at: Option<usize> = None;
     let mut held_controls = input::HeldControls::default();
+    // Consume the intro/start key until it has been released.
+    held_controls.disarm(&window.get_keys());
     while window.is_open() {
         let now = Instant::now();
         let measured = now.duration_since(last).as_secs_f64().min(0.1);
@@ -1561,7 +1563,6 @@ fn run() -> Result<(), String> {
             && !death_control
             && mouse_down
             && !mouse_was_down
-            && state.mode == ffe_rs::flight::Mode::Flight
             && model_lab.is_none()
             && model_viewer.is_none()
         {
@@ -2822,6 +2823,7 @@ fn run() -> Result<(), String> {
                 if pad_board
                     && state.mode == ffe_rs::flight::Mode::Docked
                     && (pressed(Key::F1)
+                        || console_click == Some(Click::CycleView)
                         || (pressed(Key::Backspace) && dock.screen == StationScreen::Services)
                         || (capture_start && frames == 60))
                 {
@@ -4707,7 +4709,7 @@ fn run() -> Result<(), String> {
         // F236's unlawful-discharge message is the frame's report when the
         // shot is the system's first; keep it over the hit text below.
         let mut legal_message: Option<String> = None;
-        if can_fire && window.is_key_down(Key::Space) {
+        if can_fire && held_controls.contains(&Key::Space) {
             if let Some(mount) = combat::mount(views.mode) {
                 match state.combat.fire(mount, frame_tics) {
                     Ok(shot) => {
@@ -5765,7 +5767,6 @@ fn run() -> Result<(), String> {
                     }
                     Outcome::Destroyed => {
                         death::play_destroyed_audio(&mut sound);
-                        pending_log.add(Source::Death, "Your ship is destroyed. GAME OVER.");
                     }
                 }
             }
@@ -5937,14 +5938,6 @@ fn run() -> Result<(), String> {
             screen.draw_model_viewer(viewer);
         } else if let Some(lab) = &model_lab {
             screen.draw_model_lab(lab)?;
-        } else if (paused || !active) && !death_control {
-            screen.overlay(
-                "PAUSED",
-                &[
-                    "P RESUMES. F2 STATUS PAGE.",
-                    "FOCUS LOSS PAUSES WITHOUT CATCH-UP.",
-                ],
-            );
         }
         if let Some(nav) = nav.as_ref().filter(|nav| {
             !death_control

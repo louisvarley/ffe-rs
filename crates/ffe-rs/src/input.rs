@@ -374,6 +374,19 @@ mod tests {
     }
 
     #[test]
+    fn intro_space_must_be_released_before_a_new_press_can_fire() {
+        let mut held = HeldControls::default();
+        held.disarm(&[Key::Space]);
+        held.update(&[Key::Space], &[Key::Space], true);
+        assert!(!held.contains(&Key::Space));
+        held.update(&[], &[], true);
+        held.update(&[Key::Space], &[Key::Space], true);
+        assert!(held.contains(&Key::Space));
+        held.update(&[Key::Space], &[], true);
+        assert!(held.contains(&Key::Space));
+    }
+
+    #[test]
     fn held_control_requires_a_real_press_and_clears_on_release() {
         let mut input = HeldControls::default();
         input.update(&[Key::W], &[], true);

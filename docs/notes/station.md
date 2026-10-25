@@ -398,3 +398,13 @@ What was not captured: the commander/F2 status screen (not part of the
 station menu) and a Thargoid system's services (the port has none). The
 default start's starport services at Old Blackelk are captured in
 `docs/evidence/start-flow/` (`default_start_services_board_is_old_blackelk`).
+
+## Services console fix (2026-10-25)
+
+The station page now retains F1439's common buttons 0x0b..0x0e and meter
+0x26..0x2b; F331 selects 0x0b. Previously Mode::Docked skipped both button
+painting and mouse routing, leaving F1 as an invisible keyboard-only exit.
+Clicking the F1/view icon now leaves the open-air pad board through the same
+path as F1, without launching. Old Blackelk's local-cache test checks the
+return icon and station selection. Station-specific shortcuts 0x32..0x36
+remain separate unfinished work.
