@@ -389,6 +389,12 @@ pub struct DockState {
     pub screen: Screen,
     pub selected: usize,
     pub scroll: usize,
+    /// F454's illegal-goods market mask (the screen is still F536's market).
+    pub black_market: bool,
+    /// F640's fake advertisement: a row action is F542's police trap.
+    pub fake_market: bool,
+    /// The `0x98d7` company-name seed from the advertisement.
+    pub company_seed: Option<u32>,
 }
 
 impl DockState {
@@ -396,6 +402,17 @@ impl DockState {
         self.screen = screen;
         self.selected = 0;
         self.scroll = 0;
+        self.black_market = false;
+        self.fake_market = false;
+        self.company_seed = None;
+    }
+
+    /// F454: the stockmarket screen with F538's `0x80` illegal-goods mask.
+    pub fn open_black_market(&mut self, fake: bool, seed: Option<u32>) {
+        self.open(Screen::Market);
+        self.black_market = true;
+        self.fake_market = fake;
+        self.company_seed = seed;
     }
 
     /// Go back one level, as the "Go Back..." arrow does. Screens without the
@@ -786,6 +803,25 @@ mod tests {
             })
         );
         assert_eq!(click(Screen::Upgrades, 0, 42, 150, 17), None);
+    }
+
+    #[test]
+    fn the_black_market_is_the_market_screen_with_the_advertisement_title() {
+        let mut dock = DockState::default();
+        dock.open(Screen::Market);
+        assert!(!dock.black_market);
+        dock.open_black_market(false, Some(0x1234));
+        assert_eq!(dock.screen, Screen::Market);
+        assert!(dock.black_market);
+        assert!(!dock.fake_market);
+        assert_eq!(dock.company_seed, Some(0x1234));
+        dock.open_black_market(true, None);
+        assert!(dock.fake_market);
+        assert_eq!(dock.company_seed, None);
+        // Any other screen clears F454's mask.
+        dock.open(Screen::Services);
+        assert!(!dock.black_market && !dock.fake_market);
+        assert_eq!(dock.company_seed, None);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use ffe_core::market::{
-    Conditions, Entry, Hold, Market, Refusal, Tables, GOODS, ILLEGAL, NAMES, NEGATIVE, TABLE_BYTES,
+    illegal_tonnes, Conditions, Entry, Hold, Market, Refusal, Tables, GOODS, ILLEGAL, NAMES,
+    NEGATIVE, TABLE_BYTES,
 };
 use ffe_core::RandomState;
 
@@ -251,6 +252,64 @@ fn market_with(price: i32, stock: i32) -> Market {
     Market {
         entries: [Entry { stock, price }; GOODS],
     }
+}
+
+#[test]
+fn the_refusals_are_the_originals_messages() {
+    assert_eq!(
+        Refusal::HoldFull.message("Water"),
+        "Your cargo hold is full."
+    );
+    assert_eq!(
+        Refusal::OutOfStock.message("Water"),
+        "We have no Water in stock."
+    );
+    assert_eq!(Refusal::NoCash.message("Water"), "You cannot afford Water.");
+    assert_eq!(
+        Refusal::NothingToSell.message("Water"),
+        "You have no Water to sell."
+    );
+    assert_eq!(
+        Refusal::CannotPayToSell.message("Radioactives"),
+        "You cannot afford the charge to \"sell\" (ie remove) Radioactives."
+    );
+}
+
+#[test]
+fn illegal_tonnes_count_only_the_stock_strings_bit_seven_goods() {
+    let flags = [0x00, 0x81, 0x11, 0x89, 0x7f, 0x80, 0x08, 0x0d];
+    let cargo = [1, 2, 0, 5, 9, 1, 4, 3];
+    assert_eq!(illegal_tonnes(&cargo, &flags), 2 + 5 + 1);
+    assert_eq!(illegal_tonnes(&[], &[]), 0);
+    // A short hold or a short flag string counts the pairs it has, never a guess.
+    assert_eq!(illegal_tonnes(&cargo[..2], &flags), 2);
+    assert_eq!(illegal_tonnes(&cargo, &flags[..1]), 0);
+}
+
+#[test]
+fn a_buy_then_sell_script_profits_or_loses_against_the_market_price() {
+    // The cash and the hold are the same two objects through a buy/sell
+    // sequence, as F555/F556 mutate DATA_008888 and DATA_008896.
+    let mut market = market_with(30, 10);
+    let mut hold = Hold::new(10);
+    let mut cash = 100;
+    market.buy(0, &mut cash, &mut hold).unwrap();
+    market.buy(0, &mut cash, &mut hold).unwrap();
+    assert_eq!((cash, hold.used), (40, 2));
+    // The next day's price is 40: two tonnes return 80, a 20 profit.
+    market.entries[0].price = 40;
+    market.sell(0, &mut cash, &mut hold).unwrap();
+    market.sell(0, &mut cash, &mut hold).unwrap();
+    assert_eq!((cash, hold.used), (120, 0));
+    // Buy two at 50 and sell at 20: a 60 loss.
+    market.entries[0].price = 50;
+    market.buy(0, &mut cash, &mut hold).unwrap();
+    market.buy(0, &mut cash, &mut hold).unwrap();
+    assert_eq!(cash, 20);
+    market.entries[0].price = 20;
+    market.sell(0, &mut cash, &mut hold).unwrap();
+    market.sell(0, &mut cash, &mut hold).unwrap();
+    assert_eq!((cash, hold.used), (60, 0));
 }
 
 #[test]

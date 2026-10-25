@@ -1554,6 +1554,51 @@ impl Navigator {
         Ok(station)
     }
 
+    /// The name F454 puts at the black market's title (`0x98d7`'s `0x920d`
+    /// name code). F639/F640 store the company seed in the advertisement's
+    /// StrVars[3]; the name generator's kind 0x0d is the company form.
+    pub fn company_name(&self, cache: &VerifiedCache, seed: u32) -> Option<String> {
+        let names = Names::new(cache.asset("base:text/names")?).ok()?;
+        let bytes = names.generate(0x0d, seed)?;
+        Some(String::from_utf8_lossy(&bytes).trim().to_owned())
+    }
+
+    /// F233's event-5 smuggling scan: `random & 7 < DATA_009010` (the system
+    /// record's byte `+7`, `Details::bytes[2]`), and then, when the hold has
+    /// any commodity whose stock flag is bit 7, `F237(7)` records "Smuggling
+    /// illegal goods" against the current starport (2500 printed, 25000 in
+    /// the ledger, no wanted bit: `DATA_005039[7]`'s flags are 2).
+    ///
+    /// The original runs this from its special-slot event whenever F931/F941
+    /// or F291 write slot 5; the port gives it a station docked and a stable
+    /// stream instead, and the caller runs it at a customs checkpoint.
+    pub fn smuggling_scan(
+        &mut self,
+        cache: &VerifiedCache,
+        hold: &[u16],
+    ) -> Option<npc::OffenceReport> {
+        let flags = self.stock_flags(cache).ok()?;
+        if ffe_core::market::illegal_tonnes(hold, &flags) == 0 {
+            return None;
+        }
+        let blob = cache.asset("base:world/system-tables")?;
+        let tables = Tables::new(blob).ok()?;
+        let details = tables.details(self.entries[self.current].params.code);
+        let danger = details.bytes[2];
+        let mut rng = RandomState::new(
+            self.entries[self.current].params.code ^ 0x534d_5547,
+            (self.clock as u32)
+                ^ self.legal.offences.wrapping_mul(0x9e37_79b9)
+                ^ (hold.iter().map(|t| u32::from(*t)).sum::<u32>() << 16),
+        );
+        if u32::from(rng.next_u16() & 7) >= danger {
+            return None;
+        }
+        let station = self.docked.or_else(|| self.landed_body())?;
+        let ordinal = self.starport_ordinal(station);
+        self.legal.record(npc::SMUGGLING, Some(ordinal))
+    }
+
     /// The system list as the bulletin's destination picker sees it: the
     /// original F857 neighbourhood, with each entry's population and danger.
     fn offers_destinations(&self, cache: &VerifiedCache) -> Vec<bulletin::Destination> {
@@ -2388,10 +2433,10 @@ impl Navigator {
         starport_witness(&self.bodies, at)
     }
 
-    /// The fine ledger for the starport at `body`: F655's `owes` argument, read
-    /// from F236's per-starport `DATA_009095` array. A station uses the nearest
-    /// starport's ledger, as `DATA_008996` is the system's starport index.
-    pub fn fine_at(&self, body: usize) -> u32 {
+    /// The ordinal of the starport nearest `body` among the system's starports
+    /// (`DATA_008996` is F236's ledger index; a station uses its nearest
+    /// starport).
+    pub fn starport_ordinal(&self, body: usize) -> usize {
         let Some(target) = self.bodies.get(body) else {
             return 0;
         };
@@ -2406,7 +2451,14 @@ impl Navigator {
                 ordinal += 1;
             }
         }
-        nearest.map_or(0, |(_, index)| self.legal.owed(Some(index)))
+        nearest.map_or(0, |(_, index)| index)
+    }
+
+    /// The fine ledger for the starport at `body`: F655's `owes` argument, read
+    /// from F236's per-starport `DATA_009095` array. A station uses the nearest
+    /// starport's ledger, as `DATA_008996` is the system's starport index.
+    pub fn fine_at(&self, body: usize) -> u32 {
+        self.legal.owed(Some(self.starport_ordinal(body)))
     }
 
     /// F931/F941's player branch: the first shot in a system reports the
