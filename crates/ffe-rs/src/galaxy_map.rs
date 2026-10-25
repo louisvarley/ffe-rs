@@ -356,12 +356,16 @@ impl GalaxyMap {
             return None;
         }
         let report = report?;
+        // F828's three strings (DATA_007004..7006): the distance is fine and
+        // needs so much fuel, the drive cannot reach it, or the hold is short.
         Some(if report.result < 0 {
-            "Out of Range".to_owned()
-        } else if report.range_now > 0 {
-            format!("Fuel Required: {}", report.fuel_needed)
+            if report.fuel_needed < 0 {
+                "Out of Range".to_owned()
+            } else {
+                format!("Insufficient Fuel ({} required)", report.fuel_needed)
+            }
         } else {
-            format!("Insufficient Fuel ({} required)", report.fuel_needed)
+            format!("Fuel Required: {}", report.fuel_needed)
         })
     }
 }

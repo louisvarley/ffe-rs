@@ -1820,7 +1820,7 @@ impl Screen {
                 "TAB system map. G galaxy map: arrows, PgUp/Dn, C, H jumps",
                 "N icon: station list. L: object labels on/off.",
                 "Click a body/T: lock. K: autopilot (docks). Bksp: stop.",
-                "H closes help. Esc: preference pages. Map icon: systems.",
+                "? closes help. Esc: preference pages. Map icon: systems.",
             ]
             .iter()
             .enumerate()

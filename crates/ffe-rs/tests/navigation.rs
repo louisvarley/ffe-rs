@@ -1289,7 +1289,7 @@ fn hyperspace_uses_range_fuel_and_time() {
     };
     nav.drive = Some(drive(0));
     let error = nav.hyperspace(&cache, centauri).unwrap_err();
-    assert!(error.contains("Not enough fuel"), "{error}");
+    assert!(error.contains("Insufficient Fuel"), "{error}");
     assert_eq!(nav.system_name(), "Sol");
     nav.drive = Some(drive(3));
     let (distance, report) = nav.jump_report(centauri).unwrap();
@@ -1313,7 +1313,7 @@ fn hyperspace_uses_range_fuel_and_time() {
         .unwrap();
     nav.drive = Some(drive(50));
     let error = nav.hyperspace(&cache, lave).unwrap_err();
-    assert!(error.contains("Out of range"), "{error}");
+    assert!(error.contains("Out of Range"), "{error}");
     assert!(nav.hyperspace(&cache, nav.current).is_err());
     // The list shows each system's distance and fuel (or why not).
     nav.open(ffe_rs::navigation::View::Galaxy);
@@ -1323,6 +1323,179 @@ fn hyperspace_uses_range_fuel_and_time() {
         "{lines:?}"
     );
     assert!(lines.iter().any(|l| l.contains("TOO FAR")), "{lines:?}");
+}
+
+/// F901's fuel burn: hydrogen for a civil drive, military fuel leaving the same
+/// tonnes of radioactive waste for class 10 and up.
+#[test]
+fn f901_burns_the_hold_and_leaves_military_waste() {
+    use ffe_core::hyperspace::{HYDROGEN, MILITARY_FUEL, RADIOACTIVES};
+    use ffe_rs::navigation::{burn_fuel, DriveState};
+    let mut hold = vec![0u16; ffe_core::market::NAMES];
+    hold[HYDROGEN] = 5;
+    burn_fuel(
+        &mut hold,
+        Some(DriveState {
+            mass: 16,
+            class: 2,
+            fuel: 5,
+        }),
+        3,
+    );
+    assert_eq!((hold[HYDROGEN], hold[MILITARY_FUEL]), (2, 0));
+    let mut hold = vec![0u16; ffe_core::market::NAMES];
+    hold[MILITARY_FUEL] = 5;
+    burn_fuel(
+        &mut hold,
+        Some(DriveState {
+            mass: 16,
+            class: 10,
+            fuel: 5,
+        }),
+        2,
+    );
+    assert_eq!(
+        (hold[MILITARY_FUEL], hold[RADIOACTIVES], hold[HYDROGEN]),
+        (3, 2, 0)
+    );
+    // A short hold is grown to the cargo array and cannot underflow.
+    let mut hold = vec![0u16; 1];
+    burn_fuel(
+        &mut hold,
+        Some(DriveState {
+            mass: 16,
+            class: 2,
+            fuel: 0,
+        }),
+        4,
+    );
+    assert_eq!(hold.len(), ffe_core::market::NAMES);
+    assert_eq!(hold[HYDROGEN], 0);
+}
+
+/// F832/F908: the star the galaxy map selects becomes the stored hyperspace
+/// destination, survives closing the map, is gated by altitude/range/fuel and
+/// resets the system's locks and effects on arrival.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_map_destination_survives_the_map_and_jumps() {
+    use ffe_core::effects::{Effect, Kind as EffectKind, HIT_MODEL};
+    use ffe_rs::galaxy_map::GalaxyMap;
+    use ffe_rs::navigation::{DriveState, Navigator, View, HYPERSPACE_ALTITUDE};
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let target = (1..15)
+        .find(|i| nav.range_to(*i) == Some(435))
+        .expect("Alpha Centauri");
+    let position = nav.system_position(target).unwrap();
+    let code = galaxy(&cache).unwrap()[target].params.code;
+    let tables =
+        ffe_core::sector::Tables::new(cache.asset("base:world/galaxy-tables").unwrap()).unwrap();
+    let mut map = GalaxyMap::new(nav.current_position().unwrap(), nav.reach().unwrap_or(0));
+    map.centre = [position[0], position[1]];
+    map.update_selection(&tables);
+    let selected = map.selected.clone().expect("the target star");
+    assert_eq!(selected.code, code);
+    // Choosing a star is a destination, not a body lock.
+    assert_eq!((nav.locked, nav.target), (None, None));
+    nav.set_destination(selected.code, selected.position);
+    assert_eq!((nav.locked, nav.target), (None, None));
+    assert_eq!(nav.destination_entry(), Some(target));
+    assert_eq!(nav.destination_distance(), Some(435));
+    // F828's fuel line: the map shows the cost, the shortfall or the range.
+    nav.drive = Some(DriveState {
+        mass: 16,
+        class: 10,
+        fuel: 0,
+    });
+    let report = nav.destination_report().unwrap();
+    assert_eq!(
+        map.fuel_text(Some(&report)).as_deref(),
+        Some("Insufficient Fuel (1 required)")
+    );
+    nav.drive = Some(DriveState {
+        mass: 16,
+        class: 10,
+        fuel: 3,
+    });
+    let report = nav.destination_report().unwrap();
+    assert_eq!(
+        map.fuel_text(Some(&report)).as_deref(),
+        Some("Fuel Required: 1")
+    );
+    // Closing the map does not clear the destination; H can still jump.
+    nav.view = View::Closed;
+    assert!(nav.destination.is_some());
+    let drive = |fuel| DriveState {
+        mass: 16,
+        class: 10,
+        fuel,
+    };
+    // F908's altitude floor.
+    nav.drive = Some(drive(10));
+    nav.altitude = HYPERSPACE_ALTITUDE - 1;
+    let error = nav.hyperspace_to_destination(&cache).unwrap_err();
+    assert!(error.contains("Too low"), "{error}");
+    nav.altitude = HYPERSPACE_ALTITUDE;
+    // F903's fuel gate uses the map's own message.
+    nav.drive = Some(drive(0));
+    let error = nav.hyperspace_to_destination(&cache).unwrap_err();
+    assert!(error.contains("Insufficient Fuel"), "{error}");
+    assert_eq!(nav.system_name(), "Sol");
+    // A destination beyond the drive's range.
+    let lave = (0..11)
+        .find(|i| nav.range_to(*i).is_some_and(|d| d > 4000))
+        .unwrap();
+    let position = nav.system_position(lave).unwrap();
+    nav.set_destination(galaxy(&cache).unwrap()[lave].params.code, position);
+    nav.drive = Some(drive(50));
+    let error = nav.hyperspace_to_destination(&cache).unwrap_err();
+    assert!(error.contains("Out of Range"), "{error}");
+    map.centre = [position[0], position[1]];
+    map.dirty = true;
+    map.update_selection(&tables);
+    assert_eq!(
+        map.selected.as_ref().map(|s| s.code),
+        Some(galaxy(&cache).unwrap()[lave].params.code)
+    );
+    let report = nav.destination_report().unwrap();
+    assert_eq!(
+        map.fuel_text(Some(&report)).as_deref(),
+        Some("Out of Range")
+    );
+    // Back to the reachable star; stale locks, effects and system objects go.
+    let position = nav.system_position(target).unwrap();
+    nav.set_destination(code, position);
+    nav.drive = Some(drive(3));
+    nav.altitude = HYPERSPACE_ALTITUDE;
+    nav.locked = Some(0);
+    nav.ship_lock = Some(99);
+    nav.missile_lock = Some(99);
+    nav.target = Some(0);
+    nav.effects.push(Effect {
+        kind: EffectKind::Hit,
+        model: HIT_MODEL,
+        position: [0; 3],
+        velocity: [0.0; 3],
+        forward: [0.0, 0.0, 1.0],
+        up: [0.0, 1.0, 0.0],
+        age: 0.0,
+        life: 1.0,
+    });
+    let before = nav.clock;
+    let jumped = nav.hyperspace_to_destination(&cache).unwrap();
+    assert_eq!((jumped.distance, jumped.fuel), (435, 1));
+    assert_eq!(nav.current, target);
+    assert!(nav.system_name().starts_with("Alpha Centauri"));
+    assert!(!nav.bodies.is_empty());
+    assert_eq!(nav.system_position(nav.current), Some(position));
+    assert!((nav.clock - before - jumped.days * 86_400.0).abs() < 1e-6);
+    assert_eq!(
+        (nav.locked, nav.ship_lock, nav.missile_lock, nav.target),
+        (None, None, None, None)
+    );
+    assert!(nav.effects.is_empty());
+    assert!(nav.destination.is_none());
 }
 
 /// A click on a body in the view locks it, the target button cycles the bodies by range, and

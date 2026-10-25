@@ -61,9 +61,11 @@ line). Docked at a station the same board is the state `0x2a` screen. Wired in
 
 - The console's map icon (or G): the **galaxy map**, the original's 3D scene (`docs/notes/galaxy-map.md`): the stars around the
   centre with their names, the grid, the range sphere of the drive and a marker on the star nearest the centre, whose name,
-  distance and description show in the console and whose jump cost shows under the sector. Arrows scroll, Page Up/Down or
-  +/- zoom (Shift slower), dragging turns the view, C returns to your system, H or Enter jumps to the selected star if it is
-  one of the systems on offer, G closes. The jump is the hyperdrive's as below; the list of systems is gone from the playable.
+  distance and description show in the console and whose jump cost shows under the sector. The marker is the hyperspace
+  destination (the original's `+0x268`/`+0x27c`), not a body lock: it is stored when the centre picks a star and survives
+  closing the map, so H (or the console's hyperspace icon) jumps after G closes too. Arrows scroll, Page Up/Down or +/- zoom
+  (Shift slower), dragging turns the view, C returns to your system, H or Enter jumps to the selected star if it is one of the
+  systems on offer, G closes. The jump is the hyperdrive's as below; the list of systems is gone from the playable.
 - The console's navigation-computer icon (or N): the original's list of the places in this system — its
   stations and starports, two columns of nine (markers at x 10 and 230, names at x 25 and 245, 15-pixel rows
   from y 5) with the original marker bitmap and green colour 17, over the view and with no panel. A click on
