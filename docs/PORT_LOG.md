@@ -4,6 +4,72 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Music, display, intro depth, Saker and start-flow round
+
+- Merged, one at a time, each green and pushed: `music-all` (5b7c986),
+  `resolution` (3e9759d), `intro-fix` (28c1a7e), `intro-fix2` (bf7c997),
+  `saker` (bf645be) and `start-flow` (952f729).
+- **music-all (v0.86, cache v29).** All 17 `MUSIC/*.HMP` songs are catalogued
+  and cached (1,813 assets / 1,814 ZIP entries); F1902's contexts are wired and
+  `music_sequence` logs each call. Conflict: `main.rs`'s death branch (kept the
+  F1104 death path and discarded the old starport recovery). After the merge the
+  live `data.bin` was rebuilt from scratch with the merged `ffe-tools`
+  (`build-data --game .\game --out data.bin`); the previous v28 file is kept
+  as the ignored `data-v28.bin`, and v28 remains loadable. `verify-assets` and
+  the full 56-entry suite pass. Owner decisions: timbre/system synthesis and
+  F306/F307 are exposed but unwired; `docs/notes/music.md`.
+- **resolution (v0.87).** Presentation-only `display::compose` (1x-6x
+  pixel-perfect/fill, nearest/linear, 4:3/square, fullscreen), Display Options,
+  Alt+Enter, `saves/display.cfg` and `--capture-display`; captures are
+  byte-identical across runs. Conflicts: `README.md` (kept the current test
+  count), `lib.rs` (kept both `death` and `display`), `main.rs` (kept the F1104
+  block and added Alt+Enter, plus both usage strings). `verify-prefs` needed its
+  test count 7 -> 8 for the new Display page test. Owner decisions: 640x480
+  capture format, Windows-first fullscreen, reopen-on-scale and the page are
+  port-only; `docs/evidence/display/`.
+- **intro-fix (v0.88).** F1740/F1747's text-frame row negation removes mirrored
+  GAME!TEK/PRESENTS/DAVID BRABEN'S text, the shape-detail patch follows
+  `DATA_008812`, and the F1330/F1329 median-cut heap plus per-frame
+  registration stops the 31,31,31 speckle. Conflict: the visuals evidence README
+  (kept the branch's handedness wording and the child-model oracle note). Owner
+  decisions: model 456->321 and the asteroid cluster stay skipped; 16 palette
+  representatives remain the port's.
+- **intro-fix2 (v0.89).** `model_math::text_frame` for all intro texts,
+  F1840/F1841 surfaces merged into F1778's keyed depth list (ship in front of
+  the planet), and F1879's atmosphere ring through the F1805 texture path
+  (71 distinct colours, was 330). Conflict: the evidence README (kept the new
+  depth/ring sections and the oracle note). `intro/fills/textures/surface`
+  oracles pass.
+- **saker (v0.90).** F998 type 0 is the Saker Mk III (`0x1f`, hull 112, 0/0
+  shields, front `0x88`, two `0x82`, drive 2, 10,000 CR, 1 t hold, general
+  `0x40240020`, index 87); `--start 0..5` and the Hope parent name are kept.
+  Conflicts: `front_end.rs` (start docs/default constant), `main.rs` (boot,
+  usage, HUD registration/source-speed), `navigation.rs` (start constants,
+  `new_game`, cargo), `tests/front_end.rs`, `tests/navigation.rs` (added the
+  Saker test, kept the Ross start-record-1 wording) and `docs/notes/intro.md`.
+  The saker branch's pre-landed-view float HUD fixtures were converted back to
+  integer speed words; `planet_view` now allows F1879's ring bitmap `0x43`.
+  `verify-combat/takeoff/prefs/intro` and the exhaustive navigation test pass.
+  Owner decisions: type-1 hold 1 t vs 7 t, model-name table shift, start types
+  2-5; `docs/evidence/saker/`.
+- **start-flow (v0.91).** F224 Pause->Open->Close (closing leaves paused), F4
+  opens services over the 0x30 pad with F1/Backspace return, the pad world is
+  ship + planet (F880 mass) + starport sibling so F603 gravity/F1033
+  altitude/fall-back work, with a 120-frame pad grace and Tab/L launch;
+  `--capture-start` and the prefs/takeoff updates. Conflicts: `main.rs`
+  (capture-start plus resolution's presenter; combined capture options and
+  usage), `tests/prefs.rs` imports, and `DEVIATIONS.md` EXP-010 (took the
+  three-body/grace revision). `verify-prefs/takeoff/intro/surface/fills/textures`
+  and the exhaustive navigation test pass. Owner decisions: manual pad takeoff,
+  elevation-vs-AGL, the grace, Escape UX, Tab launch, altitude HUD;
+  `docs/evidence/start-flow/`.
+- Checks: each merge ran workspace tests, clippy `-D warnings`, fmt, its
+  cached/ignored suites and the affected oracles; the exhaustive
+  `autopilot_after_every_jump` used the release build (~60-105 s). The final
+  full suite stays 56 entries (55 PASS / 1 SKIP / 0 FAIL on Windows).
+
+---
+
 ## 2026-10-25 - Visual, start, landing, spawn, legal and death round
 
 - Merged, one at a time, each green and pushed: `visuals` (33d00a9),

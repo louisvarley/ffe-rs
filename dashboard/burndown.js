@@ -71,7 +71,9 @@ window.FFE_BURNDOWN = {
         { id: "visible-7", title: "Thruster glows (F1738/F1704/F1805)", status: "done", version: "v0.45" },
         { id: "visible-8", title: "Animation inputs, station spin and rotating parts", status: "done", version: "v0.45" },
         { id: "visible-9", title: "Ship statistics, cockpit eyes and turret views", status: "done", version: "v0.46" },
-        { id: "visible-10", title: "Clickable console view icons and flickering plumes", status: "done", version: "v0.47" }
+        { id: "visible-10", title: "Clickable console view icons and flickering plumes", status: "done", version: "v0.47" },
+        { id: "visible-11", title: "Intro handedness, shape detail and median-cut palette fixes", status: "done", version: "v0.88" },
+        { id: "visible-12", title: "Intro text frames, merged surface depth and atmosphere ring", status: "done", version: "v0.89" }
       ]
     },
     {
@@ -169,7 +171,9 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-22", title: "F1100 fixed-point ranges, 4,096/6,144 km hand-offs and starport land_at_starport", status: "done", version: "v0.82" },
         { id: "gameplay-23", title: "New-game pad spawn safety: SpawnOptions, no forced near-player pirate, landed freeze", status: "done", version: "v0.83" },
         { id: "gameplay-24", title: "Unlawful-fire fines, witness jurisdiction, wanted/alert and F655 debt refusal", status: "done", version: "v0.84" },
-        { id: "gameplay-25", title: "F1104 death hold, F1098 escape craft, capsule launch and GAME OVER strings", status: "done", version: "v0.85" }
+        { id: "gameplay-25", title: "F1104 death hold, F1098 escape craft, capsule launch and GAME OVER strings", status: "done", version: "v0.85" },
+        { id: "gameplay-26", title: "Saker Mk III default arm, F2 loadout and start records", status: "done", version: "v0.90" },
+        { id: "gameplay-27", title: "Escape F224 order, F4 pad services, three-body pad and 120-frame grace", status: "done", version: "v0.91" }
       ]
     },
     {
@@ -194,7 +198,8 @@ window.FFE_BURNDOWN = {
         { id: "ui-14", title: "Navigation list geometry, markers, names and autopilot input", status: "done", version: "v0.77" },
         { id: "ui-15", title: "Message log layout, dated entries, scroll and km/h speed lines", status: "done", version: "v0.78" },
         { id: "ui-16", title: "Target range colours, two-decimal formats, arrows and cursor", status: "done", version: "v0.79" },
-        { id: "ui-17", title: "Classic/Modern presets, RMB steer and controls.cfg persistence", status: "done", version: "v0.81" }
+        { id: "ui-17", title: "Classic/Modern presets, RMB steer and controls.cfg persistence", status: "done", version: "v0.81" },
+        { id: "ui-18", title: "Presentation display scaling, Display Options and Alt+Enter fullscreen", status: "done", version: "v0.87" }
       ]
     },
     {
@@ -228,7 +233,7 @@ window.FFE_BURNDOWN = {
       tasks: [
         { id: "content-1", title: "Gameplay tables (ships, equipment, economy)", status: "in-progress", version: "market-v20" },
         { id: "content-2", title: "Message strings, journal and remaining fonts", status: "todo" },
-        { id: "content-3", title: "Music data (HMP) cached losslessly", status: "todo" },
+        { id: "content-3", title: "Music data (HMP) cached losslessly (17 songs, cache v29)", status: "done", version: "v0.86" },
         { id: "content-4", title: "Optional CD media inventory (videos and stills)", status: "todo" },
         { id: "content-5", title: "Import verification on CD 1.01 as well as floppy 1.02", status: "todo" }
       ]
@@ -647,6 +652,36 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 65,
       note: "Death merged (v0.85): the starport-recovery substitute is gone. A lethal hit runs F1104's external view and 5.001 s hold, F1098's escape craft when fitted (capsule/Stowmaster, exact loadout reset, F12/F381 launch), the death cues and song stop, save rejection, and the status page's GAME OVER / COMMANDER DIED strings (the gameover stream later supplies the full screen). The landed guard still suppresses NPC fire, and the legal police path still works. Owner decisions: the commander name is a fixed placeholder, the derelict AI is not ported, and the 5 s timer's consumer/advance remains open. One item added and completed (gameplay-25), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Music catalogue merged (v0.86, cache v29): all 17 MUSIC/*.HMP songs are catalogued and cached (1,813 assets / 1,814 ZIP entries), F1902's contexts are wired (front-end F919 loop, combat 14/stop, hyperspace 15, docking/launch random and sequence stops, continuous F232, death stop), HMP parsing is validated and music_sequence logs each event. v28 caches still load. Owner decisions: the timbre/system synthesis and F306/F307 remain exposed but unwired. One existing item completed (content-3), so the remaining count falls by one."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Presentation resolution merged (v0.87): display::compose does the presentation-only 1x-6x pixel-perfect/fill scaling with nearest/linear, 4:3/square and fullscreen; the Display Options page, Alt+Enter, saves/display.cfg and --capture-display are wired; captures are byte-identical across runs. Owner decisions: the 640x480 capture format, Windows-first fullscreen, reopen-on-scale and the page itself are port-only. One item added and completed (ui-18), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Intro fixes merged (v0.88): F1740/F1747's first-row negation removes the mirrored GAME!TEK/PRESENTS/DAVID BRABEN'S text, the shape-detail patch uses DATA_008812's level and F1330/F1329's median-cut heap no longer leaves 31,31,31 boxes that speckle the planet. Owner decisions: model 456->321 and the asteroid cluster remain skipped, and the 16 palette representatives are still the port's. One item added and completed (visible-11), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Intro depth and atmosphere merged (v0.89): model_math::text_frame serves all intro texts, F1840/F1841 surface shapes merge into F1778's keyed depth list so the ship draws in front of the planet, and the F1879 atmosphere ring uses the F1805 texture path with registered slot colours (71 distinct colours, was 330). Owner decisions: the skipped subtrees and the remaining palette approximation are documented. One item added and completed (visible-12), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Saker default arm merged (v0.90): F998 type 0 is the Saker Mk III (0x1f), hull 112, 0/0 shields, front 0x88, two 0x82, drive 2, 10,000 CR, 1 t hold, general 0x40240020, player index 87; --start 0..5 and the Hope HUD parent are kept. Owner decisions: the type-1 hold is still 1 t vs the executed F2 page's 7 t, the model-name table shift and start types 2-5 remain. One item added and completed (gameplay-26), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Start flow merged (v0.91): Escape runs F224's Pause->Open->Close order (closing leaves paused), F4 opens services over the 0x30 pad and F1/Backspace return, the pad world has the ship, planet (F880 mass) and starport sibling so F603 gravity/F1033 altitude/fall-back work, with a 120-frame pad grace and Tab/L launch; --capture-start and the prefs/takeoff updates are in. Owner decisions: the manual pad takeoff, elevation-vs-AGL, the grace, Escape UX, Tab launch and altitude HUD remain. One item added and completed (gameplay-27), so the remaining count is unchanged."
     },
   ]
 };

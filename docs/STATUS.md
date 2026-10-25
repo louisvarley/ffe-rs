@@ -112,12 +112,12 @@ ECM.
   traffic (`npc.md`), sound cues (`sound-cues.md`), equipment (`equipment.md`),
   scanner and targeter (`scanner.md`), the message log (`message-log.md`),
   palette (`palette.md`), legal status and fines (`legal.md`), the death
-  sequence (`death.md`), and the **ship dashboard audit** (`dashboard.md`: the
-  complete original console/HUD gap list, with the byte-validated DATA_005100
-  button and DATA_007684 hot-area tables). The port's own key bindings are in
-  `docs/CONTROLS.md`.
+  sequence (`death.md`), music (`music.md`), and the **ship dashboard audit**
+  (`dashboard.md`: the complete original console/HUD gap list, with the
+  byte-validated DATA_005100 button and DATA_007684 hot-area tables). The port's
+  own key bindings are in `docs/CONTROLS.md`.
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 154 items, 89 done and 65 left on
+  in `burndown.js`; 14 milestones, 159 items, 95 done and 64 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -292,14 +292,20 @@ capture produced by two repeat runs of the local reference.
 | v0.83 new-game pad spawn safety | `npc::SpawnOptions` (capture-only guarantee/near-player), normal anchor-orbit spawns, `Navigator::on_pad`/`landed_view`, main's landed NPC/fire/missile freeze, `boot_safety` (5 ignored) and evidence | `boot_safety` (5), `npc_ai` (4), `npc_docking` (1), `npc_view` (3), `planet_view` (22); `verify-npc.py` PASS | `verify-npc.py` PASS | - | the default Gateway/Hope pad no longer spawns a pirate beside it; owner decisions: the anchor-orbit stand-in vs F702's system-wide point, the port's per-kind count caps, and the landed freeze (source traffic still moves); `docs/evidence/boot-safety/` |
 | v0.84 unlawful fire and fines | DOS F236 row 3 ($600 printed / 6000 ledger), starport witness F234/F235 with the 0x13 distance byte, wanted/alert, F783 clear, per-starport fines, F655 >=10,000 refusal; legal core tests and the Hope probe | `ffe-core` legal tests, `npc_ai` (4, ignored); `verify-combat.py`/`verify-npc.py` PASS | `verify-combat.py`, `verify-npc.py` PASS | - | the executed default-start probe prints $600 and records 6000, so the port keeps the DOS table; the remembered 4500 is the Saker ship value. Owner decisions: 4500 override as explicit data, fines office/payment window and police spawns not ported, F2 LEGAL STATUS screen absent; `docs/notes/legal.md`, `docs/evidence/legal/` |
 | v0.85 death sequence and escape craft | F1104 external view + 5.001 s hold, F1098 capsule/Stowmaster and loadout reset, F12 capsule launch, death cues/song stop, save rejection, GAME OVER/COMMANDER DIED strings; the starport-recovery substitute is gone | `death` unit tests, `death_view` (2, ignored); `npc_ai` (4), `boot_safety` (5) | none (the full gameover screen is the later `gameover` stream) | - | death still works with spawn-safety's landed guard and legal's police path. Owner decisions: commander name placeholder, derelict AI not ported, 5 s timer consumer open; `docs/notes/death.md`, `docs/evidence/death/` |
+| v0.86 music catalogue and v29 | all 17 `MUSIC/*.HMP` songs catalogued/cached, F1902 contexts (front end F919 loop, combat 14/stop, hyperspace 15, sequence random/stops, F232 continuous, death stop), HMP validation, `music_sequence`, cache v29 | `music_sequence` (3), `hmp_assets` (4), `sound_cues` (2), `sound_mixer` (3), `intro_view` (7 ignored); `verify-assets.py` PASS; full 56-entry suite PASS | `verify-assets.py` PASS (1813 assets / 1814 entries); full suite 55 PASS / 1 SKIP | - | v28 caches still load; owner decisions: timbre/system synthesis and F306/F307 exposed but unwired; `docs/notes/music.md` |
+| v0.87 presentation display scaling | `display::compose` 1x-6x pixel-perfect/fill, nearest/linear, 4:3/square, fullscreen; Display Options page, Alt+Enter, `saves/display.cfg`, `--capture-display`, EXP-017 | `prefs` (13), display unit tests; `verify-prefs.py` PASS (8 tests); deterministic captures | `verify-prefs.py` PASS; `--capture-display` byte-identical across runs | - | presentation-only; owner decisions: 640x480 capture format, Windows-first fullscreen, reopen-on-scale and the page are port-only; `docs/evidence/display/` |
+| v0.88 intro handedness and detail | F1740/F1747 text-frame row negation, `DATA_008812` shape-detail patch, F1330/F1329 median-cut heap and per-frame palette registration | `intro_view` (7 ignored), workspace tests; `verify-intro/fills/textures/surface` PASS | `verify-intro`, `verify-fills`, `verify-textures`, `verify-surface` PASS | - | model 456->321 and the asteroid cluster stay skipped; 16 palette representatives remain the port's; `docs/evidence/visuals/` |
+| v0.89 intro depth and atmosphere | `model_math::text_frame` for all intro texts, F1840/F1841 surface shapes merged into F1778's keyed depth list, F1879 ring through the F1805 texture path (71 colours, was 330) | `intro_view` (10 ignored), `model_math` tests; `verify-intro/fills/textures/surface` PASS | same four oracles PASS | - | ship now draws in front of the planet; atmosphere slot colours registered per frame; remaining skipped subtrees/palette approximation documented; `docs/notes/intro.md`, `docs/notes/palette.md` |
+| v0.90 Saker default arm | F998 type 0 Saker Mk III (0x1f), hull 112, 0/0 shields, front 0x88, two 0x82, drive 2, 10,000 CR, 1 t hold, general 0x40240020, index 87; `--start 0..5`, Hope HUD parent | `front_end` (9), `navigation` (19 ignored), `combat_view` (8), `dashboard_view` (5), `planet_view` (22), `boot_safety` (5); `verify-combat/takeoff/prefs/intro` PASS; exhaustive navigation PASS | four affected oracles PASS; exhaustive PASS (76.8 s) | - | owner decisions: type-1 hold remains 1 t vs the F2 page's 7 t, model-name table shift, start types 2-5; `docs/evidence/saker/` |
+| v0.91 start flow and pad services | F224 Pause->Open->Close, F4 services over 0x30 with F1/Backspace, three-body pad world (ship/planet/starport) for F603/F1033/fall-back, 120-frame grace, Tab/L launch, `--capture-start` | `prefs` (13), `navigation` (19 ignored), `station_view` (2), `planet_view` (22), `boot_safety` (5); `verify-prefs/takeoff/intro/surface/fills/textures` PASS; exhaustive navigation PASS | six affected oracles PASS; exhaustive PASS (71.7 s) | - | owner decisions: manual pad takeoff, elevation-vs-AGL, 120-frame grace, Escape UX, Tab launch, altitude HUD; `docs/evidence/start-flow/` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 708 `#[test]` functions total; 170 are `#[ignore]`
+  `cargo clippy -D warnings`. 746 `#[test]` functions total; 182 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **537 runnable synthetic tests** (538 on Linux).
+  **563 runnable synthetic tests** (564 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
@@ -339,7 +345,7 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v28 (1797 assets, 462 of 466 models, 219 model strings,
+  `data.bin` is cache v29 (1813 assets, 462 of 466 models, 219 model strings,
   3 glyph sets, the F650 pad tables and the intro credits/char widths); `.cache/data-v1..v5-backup.bin`,
   `data-v10-backup.bin`, `data-v12-backup.bin` and `data-v13-backup.bin` are
   retained.
