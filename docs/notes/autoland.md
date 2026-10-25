@@ -62,8 +62,12 @@ scan sees F576/F580.
   F381/F654's launch. Frames (`FFE_SHOT_DIR`): `autoland-0000-approach`,
   `autoland-9999-pad`.
 - `manual_pad_contact_reaches_0x30`: the F994 three-body world and the F569/F576
-  scan at the pad, then `0x2e` -> `0x30`. Frames: `manual-0000-above`,
-  `manual-9999-pad`.
+  scan at the pad (no model-data fault), then `0x2e` -> `0x30`. Frames:
+  `manual-0000-above`, `manual-9999-pad`. The F575 `0x40` pad flags are **not**
+  yet observed through this path: the starport's F576 stream reports the `0x20`
+  region but no landing surface at the seat/height probed, so the touch's state
+  path is exercised directly. This is the same remaining item as the lateral
+  capture below.
 - `starport_model_0x59_collision_geometry_is_imported`: `0x59`'s vertex/normal
   records and a scan through its child model (the old gap).
 

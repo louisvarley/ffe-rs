@@ -976,7 +976,6 @@ fn starport_autopilot_lands_on_the_pad() {
     let index = nav.docked.expect("the starting starport");
     assert_eq!(nav.bodies[index].kind, Kind::Starport);
     let body = nav.bodies[index].clone();
-    let planet_index = body.parent.expect("the starport's planet");
     let approach = nav.starport_approach_point(index).expect("F741's approach");
     let start = nav.new_game.unwrap();
     let records = cache.asset("base:model/records").unwrap();
@@ -1026,9 +1025,6 @@ fn starport_autopilot_lands_on_the_pad() {
         if nav.final_leg {
             break;
         }
-        let at = model.absolute_position();
-        let frame_planet = nav.bodies[planet_index].position;
-        let frame_port = nav.bodies[index].position;
         let _ = model.step(0.05, &command.keys);
         model.apply(&mut state);
         if let (Some(dir), Some(viewer)) = (&shots, &viewer) {
@@ -1037,7 +1033,6 @@ fn starport_autopilot_lands_on_the_pad() {
                 shot(&cache, viewer, &nav, &mut model, &path);
             }
         }
-        let _ = (at, frame_planet, frame_port);
     }
     assert!(nav.final_leg, "F745 handed the leg to the pad");
     assert!(
@@ -1123,7 +1118,7 @@ fn manual_pad_contact_reaches_0x30() {
     let up = body.orientation[1];
     let seat: [i64; 3] =
         std::array::from_fn(|k| pad[k] + (up[k] * info.radii().1 as f64).round() as i64);
-    let start: [i64; 3] = std::array::from_fn(|k| seat[k] + (up[k] * 50_000.0) as i64);
+    let start: [i64; 3] = std::array::from_fn(|k| seat[k] + (up[k] * 15_000.0) as i64);
     let mut state = Flight {
         mode: Mode::Flight,
         system_flight: true,
