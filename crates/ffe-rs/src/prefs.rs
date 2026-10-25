@@ -392,8 +392,8 @@ impl Prefs {
                         label,
                         Action::Sound(index),
                         Mark::Toggle(self.sound[index]),
-                        // No audio device in this port.
-                        false,
+                        // The port applies all ten switches to its audio player.
+                        true,
                         15,
                     ));
                 }
@@ -523,7 +523,7 @@ impl Prefs {
                 texts.push(Text {
                     x: 32,
                     y: 146,
-                    text: "This port has no audio device.",
+                    text: "Sound and music use the system MIDI device.",
                     colour: 18,
                 });
             }
@@ -616,6 +616,10 @@ impl Prefs {
             }
             Action::Other(index) if index < OTHER_LABELS.len() && other_applied(index) => {
                 self.others[index] = !self.others[index];
+                Activate::None
+            }
+            Action::Sound(index) if index < SOUND_LABELS.len() => {
+                self.sound[index] = !self.sound[index];
                 Activate::None
             }
             Action::Modern(modern) => {
@@ -786,5 +790,20 @@ mod tests {
         assert_eq!(prefs.apply(Action::Close), Activate::Close);
         assert!(!prefs.open);
         assert_eq!(prefs.apply(Action::Quit), Activate::Quit);
+    }
+
+    #[test]
+    fn the_sound_rows_toggle_their_switches() {
+        let mut prefs = Prefs::default();
+        prefs.escape();
+        prefs.apply(Action::Page(SOUND));
+        assert!(prefs.rows().iter().all(|row| row.applied));
+        assert_eq!(prefs.apply(Action::Sound(0)), Activate::None);
+        assert!(!prefs.sound[0]);
+        prefs.apply(Action::Sound(0));
+        assert!(prefs.sound[0]);
+        // An out-of-range row does nothing.
+        prefs.apply(Action::Sound(99));
+        assert_eq!(prefs.sound, [true; 10]);
     }
 }

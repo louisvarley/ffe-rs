@@ -4,7 +4,15 @@ Status: reference note for the `sound` stream. It documents the original
 DOS/JJFFE sound effects and music, the HMP format, the player that now exists in
 `ffe-core`/`ffe-audio`, and the exact interface the ESC/preferences page should
 use. It does not claim that effects are mixed in the game yet: the 23 cached
-effect WAVs are still unplayed; section 1.4 lists what needs wiring.
+effect WAVs are still unplayed; section 1.4 lists the call sites and the cue
+layer now posts them.
+
+**Cue wiring update:** `crates/ffe-rs/src/sound.rs` now posts the original's
+effect cues and scene music from the game events, and the ESC Sound Effects
+page drives `AudioSettings`/`SoundFlags`. The sample table, call sites, music
+rules, tests and the remaining mixer work are recorded in
+`docs/notes/sound-cues.md`. Effects still have no device path (the system engine
+uses a `NullSampleSink`); music is audible through the WinMM player.
 
 Sources read for this note:
 
@@ -707,10 +715,11 @@ recording tests assert the startup CC7 volume, note on/off, loop restart, stop
 
 Remaining work, in order:
 
-1. **Effect mixer.** Decode the cached WAVs (or RAW directly), mix 16 voices at
-   22,050 Hz mono, implement the fixed-voice/loop-count rules and the
-   `2217*log10(level)` curve, and wire the `play_sample` calls listed in 1.4.
-   `play_sample` currently records/no-ops; no device path exists for effects.
+1. **Effect mixer.** The `play_sample` calls listed in 1.4 are now wired from
+   the game events (`docs/notes/sound-cues.md`), but they still record/no-op:
+   no device path exists for effects. Decode the cached WAVs (or RAW directly),
+   mix 16 voices at 22,050 Hz mono, implement the fixed-voice/loop-count rules
+   and the `2217*log10(level)` curve.
 2. **Device support.** WinMM system MIDI is in; test on a machine without the
    GS Wavetable Synth (a MIDI port that only exposes external hardware). Add a
    device picker if needed. A bundled SoundFont/software synth is a separate

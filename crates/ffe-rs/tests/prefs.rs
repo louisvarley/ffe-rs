@@ -89,7 +89,7 @@ fn others_page_applies_stars_and_reverse_and_keeps_the_rest_inert() {
 }
 
 #[test]
-fn maps_and_sound_pages_show_the_originals_defaults_without_applying_them() {
+fn maps_stay_inert_and_the_sound_rows_apply_the_originals_switches() {
     let mut prefs = Prefs::default();
     prefs.escape();
     prefs.page = MAPS;
@@ -103,10 +103,14 @@ fn maps_and_sound_pages_show_the_originals_defaults_without_applying_them() {
     prefs.page = SOUND;
     for (index, label) in prefs::SOUND_LABELS.iter().enumerate() {
         assert_eq!(prefs.rows()[index].label, *label);
-        assert!(!prefs.rows()[index].applied);
+        // The port now applies all ten Sound Effects switches.
+        assert!(prefs.rows()[index].applied);
     }
     prefs.click(34, 28);
-    assert_eq!(prefs.sound, [true; 10]);
+    assert_eq!(
+        prefs.sound,
+        [false, true, true, true, true, true, true, true, true, true]
+    );
     assert_eq!(prefs.texts().iter().filter(|t| t.x == 160).count(), 16);
 }
 
