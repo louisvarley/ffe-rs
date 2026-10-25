@@ -4,6 +4,59 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Batch 3a: ship names, fitting, market, repairs, status and missions
+
+- Merged, one at a time, each green and pushed: `shipnames` (cbc6837),
+  `fitting` (a573f71), `market` (30a762e), `repair` (debf94d), `status`
+  (ea58545) and `missions` (c5edb37).
+- **shipnames (v1.00).** `ShipStats` carries `+0xc` shield and `+0xe` name code;
+  names resolve through `DATA_004682` (58 hulls, Saker `0x1f`, Eagle `0x17`,
+  `LAST_SHIP 0x47`). Conflict-free; `ship_names` covers 466 slots/58 hulls.
+  Owner decisions: DEFAULT_SHIP/Eagle comment, cache v12, Unknown names.
+- **fitting (v1.01).** All seven equipment categories fit/remove with the
+  F409/F410/F413/F415/F423-F427/F394 rules, trade capacity, `Combat.drive` sync
+  and old-save drive migration. Conflict-free. Owner decisions: drive-service
+  date, mining deployment, passenger cabins, bought-hull drive, shield clamp.
+- **market (v1.02).** Black market/illegal mask, F640's fake-ad trap (offence 5,
+  500 CR), F233's scan, exact F555/F556 strings, generic F236 recording and the
+  black-market keyboard/Enter path. Conflicts: `docs/notes/market.md` (kept the
+  timed-events daily path and added the black-market cases) and the market_view
+  draw signature after the cleanup. Owner decisions: smuggling trigger, fine
+  screen, RNG stream, mission cargo.
+- **repair (v1.03).** +0xcc/six thruster words, F950/F952/F953 subsystem rolls,
+  F938 recharge/auto-repair, F929 energy/fuel, F1033 scoop, F444-F452 repair
+  rows/costs and crash damage. Conflicts: `views.rs` (kept shipnames' shield/name
+  asserts) and `docs/notes/equipment.md` (kept fitting's decisions and the
+  DATA_005303 note). The auto-merged `ships.rs` duplicated `price_mass`; removed
+  the duplicate, then added the new `fuel_scoop_mounting`/`name_code` fields to
+  the repair fixtures. A stale `ffe-core` incremental made verify-prefs falsely
+  fail; `cargo clean -p ffe-core` cleared it. Owner decisions: cargo split,
+  afford wording, 500-day roll, scoop heat.
+- **status (v1.04).** Rank/reputation/Elite/medals, F2 F6/F7 profile, legal
+  bands, the DATA_008996 jurisdiction correction, the police fines office and
+  F942 rating. Conflicts: `npc.rs` (kept legal's generic `record`), `station.rs`
+  (kept Repair and added PayFine), `main.rs` (view commands now respect the
+  status page's F6/F7; kept Bulletin + Police; combined PayFine and Post; added
+  Repair back), and `status_view`/damage fixtures. Renamed the status accessor to
+  `offence_bits` to avoid colliding with the generic `record`, and made `record`
+  set `DATA_009093` bits. Owner decisions: police spawns, mission rewards,
+  page-0 text, officer name.
+- **missions (v1.05).** Mission state/kinds, BBS accept/complete/expire/abandon,
+  passenger/parcel/removal/military packages, journal/comms/military pages,
+  F306 song 7 and save round-trip. Conflicts: `navigation.rs` (kept the
+  timed-events deadline API and added the offer/clear methods), `station.rs`
+  (combined Screen/Action/Layout/title/row variants), `main.rs` (Post/ReadPage/
+  MilitaryPost plus Police and Repair; Post falls back through
+  `open_bulletin_post` so 0x9829 still opens the black market), `station_view.rs`
+  (combined the repair and mission frames), and `station.md`. Owner decisions:
+  F625-F628, removal combat, cabins, rank and journal archive.
+- Checks: every merge ran workspace tests, clippy `-D warnings`, fmt, its
+  cached/ignored suites and the affected oracles; the exhaustive navigation test
+  was rebuilt in release for the navigation-touching merges (96 s after the
+  missions merge). Cache stays v29 (1,813 assets).
+
+---
+
 ## 2026-10-25 - Once-a-day time tick
 
 - Merged `timed-events` (`b011b9d`) as `0594f0e`, conflict-free. The branch was

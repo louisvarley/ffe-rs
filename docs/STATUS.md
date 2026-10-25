@@ -113,13 +113,14 @@ ECM.
   scanner and targeter (`scanner.md`), the message log (`message-log.md`),
   palette (`palette.md`), legal status and fines (`legal.md`), the death
   sequence (`death.md`), music (`music.md`), the game-over tombstone
-  (`gameover.md`), time and deadlines (`time.md`), and the **ship dashboard
-  audit**
+  (`gameover.md`), time and deadlines (`time.md`), ship names
+  (`ship-names.md`), rank/reputation (`status.md`), missions
+  (`missions.md`), and the **ship dashboard audit**
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables). The port's
   own key bindings are in `docs/CONTROLS.md`.
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 166 items, 103 done and 63 left on
+  in `burndown.js`; 14 milestones, 171 items, 109 done and 62 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -308,14 +309,20 @@ capture produced by two repeat runs of the local reference.
 | v0.97 source-tagged event log | one `Source`-tagged writer (12 variants), port-only entries removed/rerouted, F271 replace/NULL-clear/ring/scroll semantics, `message_log` scan, `messages_view` evidence | `message_log` (4), `messages_view` (4), `console_view` (7), `dashboard_view` (5), `boot_safety` (5); `verify-prefs/surface/takeoff/intro` PASS | four affected oracles PASS | - | DOS start-line inference, target-lock wording, unported-click feedback and DATA_008810/scroll actions remain; `docs/notes/message-log.md` |
 | v0.98 cleanup of port-only help and debug keys | removed the help page, scenario selector/debug labels; `--dev`/`FFE_DEV=1` gates Ctrl+F11 screenshot, Ctrl+F12 viewer/lab and O; F1/F11/F12 return to the source view/combat-computer/escape-capsule bindings; `input::view_command`/`dev_command` tests | `views` (13), `playable` (13), input unit (11), workspace; `--smoke-frames 30`, `--dev --smoke-frames 10`, `--capture-start`, `--capture-prefs`; `verify-prefs/takeoff/surface/galaxy-map` PASS | four affected oracles PASS | - | owner decisions: F3 still toggles Modern/Classic though source F3 is the map (Port Options candidate), F5 snapshots remain, `--start sol` is CLI-only, and `tools/test-playable.ps1` still has help/scenario assumptions; `docs/evidence/cleanup/` |
 | v0.99 once-a-day time tick | `ffe_core::calendar::Calendar` (DATA_008808), `Navigator::tick_days` running F633's market drift/BBS replacement/shipyard stock once per crossed day, wired through `advance`/`transfer`/hyperspace (direct jump adds no time), per-station day markers, `schedule_deadline`/`cancel_deadline`/`take_expired`; `timed_events` (6 ignored) and evidence JSONL | `timed_events` (6, ignored), `market_view` (2), `station_view` (2), `npc_docking` (1), `npc_ai` (4), navigation (20 + exhaustive release); `verify-market/station/galaxy-map` PASS | three affected oracles PASS; exhaustive nav PASS (244 s) | - | owner decisions: clock/navigator are not in `Flight` (save-format bump needed), news buffer/script VM missing, paused/docked time does not advance, service reminders await repairs; `docs/notes/time.md` |
+| v1.00 statistics-table ship names | `ShipStats::name_code` (+0xe) resolved through `DATA_004682`, 58 hulls, `LAST_SHIP` 0x47; `+0xc` shield vs `+0xe` name code; `tests/ship_names` (466 slots/58 hulls) | `ship_names` (2, ignored), `thargoid_view` (1), views; `verify-combat/npc/prefs` PASS | three affected oracles PASS | - | owner decisions: DEFAULT_SHIP/Eagle comment, cache v12, Unknown names; `docs/notes/ship-names.md` |
+| v1.01 seven-category fitting | fit/remove drive, cabins, mining, shields, lasers, missiles and general; F409/F410/F413/F415/F423-F427/F394; mass/capacity via `trade::capacity`, `Combat.drive`, old-save drive migration; `fitting` tests and frames | `fitting` (5), `station_view` (2), `death`/`ship_names`; `verify-combat/station/market/prefs` PASS | six affected oracles PASS | - | owner decisions: drive-service date, mining deployment, passenger cabins, bought-hull drive, shield clamp; `docs/notes/equipment.md` |
+| v1.02 black market and trade traps | illegal mask/black market, F640 fake-ad trap (offence 5, 500 CR), F233 scan, F555/F556 strings, generic F236 recording, black-market keyboard/Enter; one daily-update path with F633 | `market_view` (4), `station_view` (2), `npc_ai`/`npc_docking`; `verify-market/station/combat/prefs` PASS | six affected oracles PASS | - | owner decisions: smuggling trigger, fine screen, RNG stream, mission cargo; `docs/notes/market.md` |
+| v1.03 subsystem damage and repairs | +0xcc/six thruster words, F950/F952/F953 subsystem rolls, F938 recharge/auto-repair, F929 energy/fuel, F1033 scoop, F444-F452 repair rows/costs, crash damage; `damage` tests and frames | `damage` (11), `station_view` (3), views/npc_ai; `verify-combat/station/surface/prefs` PASS | six affected oracles PASS (stale ffe-core incremental cleared) | - | owner decisions: cargo split, afford wording, 500-day roll, scoop heat; `docs/notes/equipment.md` |
+| v1.04 rank, reputation and fines office | Elite/medals/rank, F2 F6/F7 profile page, legal-status bands, DATA_008996 jurisdiction correction, `Contact Local Police` pay/refuse and F942 rating; `status_view` frames | `status_view` (1), core status tests, `npc_ai` (4), `market_view`/`station_view`; `verify-combat/npc/market/station/prefs/surface` PASS | eight affected oracles PASS | - | owner decisions: police spawns, mission rewards, page-0 text, officer name; `docs/notes/status.md` |
+| v1.05 missions and boards | mission state/kinds, BBS accept/complete/expire/abandon, passenger/parcel/removal/military packages, journal/comms/military pages, F306 song 7, save round-trip; `missions`/`station_view` frames | `missions` (2, ignored), `station_view` (4), `market_view`/`timed_events`; navigation (20 + exhaustive release); `verify-market/station/combat/npc/surface/prefs` PASS | eight affected oracles PASS; exhaustive nav PASS (96 s) | - | owner decisions: F625-F628, removal combat, cabins, rank and journal archive; `docs/notes/missions.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 810 `#[test]` functions total; 195 are `#[ignore]`
+  `cargo clippy -D warnings`. 889 `#[test]` functions total; 204 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **614 runnable synthetic tests** (615 on Linux).
+  **684 runnable synthetic tests** (685 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

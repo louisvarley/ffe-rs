@@ -160,7 +160,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-11", title: "Shuttles and station traffic (shuttle)", status: "todo" },
         { id: "gameplay-12", title: "Communications and messages", status: "todo" },
         { id: "gameplay-13", title: "Player death and the escape capsule", status: "todo" },
-        { id: "gameplay-14", title: "Rank, reputation and legal status", status: "todo" },
+        { id: "gameplay-14", title: "Rank, reputation, legal status and the fines office", status: "done", version: "v1.04" },
         { id: "gameplay-15", title: "Time-driven events over a long run (daily market/BBS/shipyard/deadline tick)", status: "done", version: "v0.99" },
         { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" },
         { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" },
@@ -177,7 +177,11 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-28", title: "Mission-gated Thargoid traffic, DATA_006197 models and F774 lasers", status: "done", version: "v0.92" },
         { id: "gameplay-29", title: "Persistent hyperspace destination, H jump and F908/F909 gates", status: "done", version: "v0.93" },
         { id: "gameplay-30", title: "Shipyard stock, part-exchange and the 20-template bulletin board", status: "done", version: "v0.94" },
-        { id: "gameplay-31", title: "ECM/naval ECM, F719 effect, decoys and the F10 missile view", status: "done", version: "v0.95" }
+        { id: "gameplay-31", title: "ECM/naval ECM, F719 effect, decoys and the F10 missile view", status: "done", version: "v0.95" },
+        { id: "gameplay-32", title: "Seven-category fitting, capacity/drive sync and old-save drive migration", status: "done", version: "v1.01" },
+        { id: "gameplay-33", title: "Black market, F640 trap, F233 smuggling scan and F236 recording", status: "done", version: "v1.02" },
+        { id: "gameplay-34", title: "Subsystem damage, F938/F929 repair rows and crash damage", status: "done", version: "v1.03" },
+        { id: "gameplay-35", title: "Mission state, BBS accept/complete/expire, journal/comms/military pages", status: "done", version: "v1.05" }
       ]
     },
     {
@@ -242,7 +246,8 @@ window.FFE_BURNDOWN = {
         { id: "content-2", title: "Message strings, journal and remaining fonts", status: "todo" },
         { id: "content-3", title: "Music data (HMP) cached losslessly (17 songs, cache v29)", status: "done", version: "v0.86" },
         { id: "content-4", title: "Optional CD media inventory (videos and stills)", status: "todo" },
-        { id: "content-5", title: "Import verification on CD 1.01 as well as floppy 1.02", status: "todo" }
+        { id: "content-5", title: "Import verification on CD 1.01 as well as floppy 1.02", status: "todo" },
+        { id: "content-6", title: "Statistics +0xe name codes resolved through DATA_004682 (58 hulls, LAST_SHIP)", status: "done", version: "v1.00" }
       ]
     },
     {
@@ -729,6 +734,36 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 63,
       note: "Timed events merged (v0.99): ffe_core::calendar::Calendar tracks DATA_008808's day marker; Navigator::tick_days runs F633's market drift, BBS replacement and shipyard stock once per crossed day through advance/transfer/hyperspace (direct jump adds no time), with per-station day markers and schedule_deadline/cancel_deadline/take_expired for the missions stream. Owner decisions: the clock/navigator are not in Flight (a save-format version bump is needed), the news buffer/script VM is missing, paused/docked time does not advance, and service reminders await the repairs actions. One existing item completed (gameplay-15), so the remaining count falls by one."
+    },,
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Ship names merged (v1.00): names resolve through the statistics +0xe name code into DATA_004682 (Saker 0x1f, Eagle 0x17, 58 hulls, LAST_SHIP 0x47); +0xc is the shield word and +0xe the name code. `tests/ship_names` covers 466 slots/58 hulls. Owner decisions: DEFAULT_SHIP/Eagle comment, cache v12 and Unknown names. One item added and completed (content-6), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Fitting merged (v1.01): all seven equipment categories fit/remove with the F409/F410/F413/F415/F423-F427/F394 rules, mass/capacity through trade::capacity, Combat.drive sync and old-save drive migration. Reconciled with shipnames' +0xc/+0xe and ShipStats::price_mass. Owner decisions: drive-service date, mining deployment, passenger cabins, bought-hull drive and shield clamp. One item added and completed (gameplay-32), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Market merged (v1.02): illegal-goods mask/black market, F640's fake-ad trap (offence 5, 500 CR), F233's smuggling scan, exact F555/F556 strings, generic F236 recording and the black-market keyboard/Enter path. Reconciled with the timed-events day tick (one daily-update path). Owner decisions: smuggling trigger/fine screen/RNG/mission cargo. One item added and completed (gameplay-33), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Repair merged (v1.03): damage +0xcc/six thruster words, F950/F952/F953 subsystem rolls, F938 recharge/auto-repair, F929 energy/fuel, F1033 fuel scoop, F444-F452 repair rows/actions/costs and crash damage. Reconciled with fitting's mass/capacity and the death/legal paths. Owner decisions: cargo split/afford wording/500-day roll/scoop heat. One item added and completed (gameplay-34), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Status merged (v1.04): rank/reputation/Elite/medals, F2 F6/F7 profile page, legal status bands and the DATA_008996 jurisdiction correction, the fines office (Contact Local Police, pay/refuse) and F942's rating. Reconciled with legal's fines and the F2 page. Owner decisions: police spawns/mission rewards/page-0 text/officer name. One existing item completed (gameplay-14), so the remaining count falls by one."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 62,
+      note: "Missions merged (v1.05): mission state/kinds, BBS accept/complete/expire/abandon, passenger/parcel/removal/military packages, journal/comms/military pages, F306 song 7 and save round-trip. Reconciled with timed-events' schedule_deadline/take_expired and status's rank/reputation API. Owner decisions: F625-F628, removal combat, cabins, rank and journal archive. One item added and completed (gameplay-35), so the remaining count is unchanged."
     },
   ]
 };
