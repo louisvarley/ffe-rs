@@ -1,6 +1,11 @@
 # The console's buttons (DATA_005100, DATA_007684)
 
-Ported in `crates/ffe-rs/src/console.rs` and `screen.rs` (v0.49i).
+Ported in `crates/ffe-rs/src/console.rs`, `crates/ffe-rs/src/console_table.rs`
+and `screen.rs`. The `hud` branch (2026-10-25) imports all 82 records
+byte-exactly with `tools/gen-console-table.py` and implements `F261`'s draw
+order, `F262`'s image/radio reset, `F263/264`'s visibility, `F991`'s view row,
+`F1116`'s lamps and `F1120`'s engines-off equipment page. `tests/console_table.rs`
+checks the data and state machine.
 
 ## Buttons
 
@@ -16,6 +21,9 @@ index order (`FUNC_000261`). The flight console shows:
 | 0x26-0x2b | 40,192 / 41,187 / 43,180 / 44,173 / 45,165 / 48,158 | the **time acceleration meter**: a pause mark and five steps, grey with a red lit twin, one lit at a time |
 | 0x15-0x19 | 198,165 .. 125,163 | the view buttons (front, rear, turret, external, missile, combat), see `views.md` |
 | 0x0f-0x11 | 296,178 / 274,178 / 261,177 | the right-hand buttons: hyperspace (0x99/0xa8), text labels (0x9a/0xa9) and navigation computer (0x9b/0xaa); see `labels.md` |
+| 0x37-0x39 | 52,185 / 71,189 / 87,188 | the three ship lamps; 0x38/0x46 images follow `player+0xe9` bit 1, 0x39 lights with `e8 == 2` |
+| 0x45-0x49 | 17,174 / 3,170 / 5,175 / 0,186 / 24,158 | `F1116`'s status lamps, derived from the equipment bytes |
+| 0x3a-0x51 | 0,157 .. 17,179 | `F1120`'s engines-off/equipment page: 60x45 ship diagram, ten 10-image equipment icons, system lamps |
 
 The meter is not a throttle. `FUNC_000208` turns a click (actions 0xc1-0xc5) or a
 key (6, 7, 8, 9 and 0, the latter remapped from `0x30` to `0x3a`) into the frame

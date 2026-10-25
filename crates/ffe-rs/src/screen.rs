@@ -1,6 +1,12 @@
 use crate::camera::{ship_axes, Camera, ViewMode, ViewState};
+use crate::console::{Console, ShipSystems};
 use crate::flight::{Flight, Mode};
+use crate::hud::{
+    PlayerHud, AUTOPILOT_POS, HUD_COLOUR, HULL_POS, SHIELDS_POS, SPEED_POS, TURRET_COLOUR,
+    TURRET_POS,
+};
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
+use crate::messages::MessageLog;
 use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
 use crate::prefs::{self, Mark, Prefs};
@@ -171,9 +177,10 @@ pub struct BodyLabel {
     pub centre: [f64; 3],
 }
 
-/// The map buttons along the bottom of the view: left edge, right edge and label.
+/// The retired port-only map buttons. Kept as constants so the integrator's
+/// layout tests can see where the non-original UI used to be; nothing draws or
+/// clicks them now (the original's navigation is the `n` console icon).
 pub const MAP_BUTTONS: [(i32, i32, &str); 2] = [(2, 62, "SYSTEMS"), (66, 150, "THIS SYSTEM")];
-const MAP_BUTTONS_Y: (i32, i32) = (128, 138);
 
 pub struct Screen {
     pub pixels: Vec<u32>,
@@ -234,6 +241,19 @@ pub struct Screen {
     pub target_hud: Option<TargetHud>,
     /// F1099's target shields/hull text, when the target is a ship with that state.
     pub target_damage: Option<TargetDamage>,
+    /// F1099's player text: shields, hull, Autopilot, Set/Act/Alt and the turret
+    /// angles. The caller sets it each frame.
+    pub hud: PlayerHud,
+    /// The ship's equipment/status bytes the console lamps and equipment page
+    /// read (`ship+0xc6..`, `player+0xe8..`).
+    pub systems: ShipSystems,
+    /// The message log the console's text window shows (`F271/F272/F273`).
+    pub messages: MessageLog,
+    /// The game date and time header `F272` writes before the entries.
+    pub clock: String,
+    /// The console's mutable `DATA_005100` state, derived from the view and ship
+    /// each frame and drawn in table order.
+    pub console: Console,
     /// F270's three bar bitmaps (primary 275, 274, 273), when cached.
     gauges: [Option<IndexedImage>; 3],
     /// The original console view icons (secondary bitmaps 63..81), when cached.
@@ -273,17 +293,6 @@ impl Default for Jitter {
     }
 }
 
-/// Console view buttons (`DATA_005100`): position, off and on bitmap ids, and the
-/// button. The turret button (0x16) shows only for ships with more than two gun
-/// mounts (as the original shows and hides it); missile (0x14) and combat (0x13)
-/// need equipment that is not modelled, so they stay hidden.
-const VIEW_BUTTONS: [(i32, i32, u8, u8, ViewButton); 4] = [
-    (142, 163, 0xa2, 0xb1, ViewButton::Select(ViewMode::Front)),
-    (162, 163, 0xa1, 0xb0, ViewButton::Select(ViewMode::Rear)),
-    (181, 163, 0xa0, 0xaf, ViewButton::Turret),
-    (198, 165, 0x9f, 0xae, ViewButton::Select(ViewMode::External)),
-];
-
 impl Screen {
     pub fn new(cache: &VerifiedCache) -> Result<Self, String> {
         let asset = |id| {
@@ -314,8 +323,10 @@ impl Screen {
             panel,
             palette_rgb6(asset("base:palette/low")?)?,
         )?;
-        // Console bitmap ids 96 and up are the secondary table.
-        screen.icons = (0..=0xfdu32)
+        // Console bitmap ids 96 and up are the secondary table; the table has 251
+        // entries, so the equipment page's 0x3a (268) and the lamps (up to 287)
+        // are loaded too.
+        screen.icons = (0..=0x15au32)
             .map(|id| {
                 let index = id.checked_sub(96)?;
                 let asset_id = format!("base:bitmap/secondary/{index:03}");
@@ -455,29 +466,9 @@ impl Screen {
         }
     }
 
-    /// Any console click under logical pixel (x, y): the views, the time
-    /// acceleration meter and the buttons whose screens are not ported.
+    /// Any console click under logical pixel (x, y): `DATA_007684`'s hot areas.
+    /// The port's map/autopilot buttons are retired for the original HUD.
     pub fn console_click(x: i32, y: i32) -> Option<crate::console::Click> {
-        use crate::console::Click;
-        if (MAP_BUTTONS_Y.0..=MAP_BUTTONS_Y.1).contains(&y) {
-            if (MAP_BUTTONS[0].0..=MAP_BUTTONS[0].1).contains(&x) {
-                return Some(Click::Screen(3));
-            }
-            if (MAP_BUTTONS[1].0..=MAP_BUTTONS[1].1).contains(&x) {
-                return Some(Click::Navigation);
-            }
-        }
-        if (MAP_BUTTONS_Y.0..=MAP_BUTTONS_Y.1).contains(&y) {
-            for ((x0, x1, _), click) in AUTOPILOT_BUTTONS.into_iter().zip([
-                Click::Target,
-                Click::Autopilot,
-                Click::AutopilotOff,
-            ]) {
-                if (x0..=x1).contains(&x) {
-                    return Some(click);
-                }
-            }
-        }
         crate::console::click(x, y)
     }
 
@@ -627,6 +618,11 @@ impl Screen {
             drive: 0,
             target_hud: None,
             target_damage: None,
+            hud: PlayerHud::default(),
+            systems: ShipSystems::default(),
+            messages: MessageLog::new(),
+            clock: String::new(),
+            console: Console::new(),
             gauges: [None, None, None],
             system: String::new(),
             station: String::new(),
@@ -1038,13 +1034,118 @@ impl Screen {
         }
     }
 
+    /// `text`, but only the glyph rows inside `top..bottom` (F1586's clip). Used
+    /// by the message window, whose text is clipped to the console (ymin 158).
+    fn text_clipped(&mut self, x: usize, y: i32, message: &str, colour: u8, top: i32, bottom: i32) {
+        let bytes: Vec<u8> = message
+            .chars()
+            .map(|character| {
+                if character.is_ascii() && !character.is_ascii_control() {
+                    character as u8
+                } else {
+                    b'?'
+                }
+            })
+            .collect();
+        let mut cursor = x;
+        for &code in &bytes {
+            if let Some(glyph) = self.font.glyph(code) {
+                for (col, row) in glyph.pixels() {
+                    let py = y + row as i32;
+                    if cursor + col < 320 && (0..200).contains(&py) && (top..bottom).contains(&py) {
+                        self.frame[py as usize * 320 + cursor + col] =
+                            self.palette[usize::from(colour)];
+                    }
+                }
+                cursor += glyph.advance;
+            }
+            if cursor >= 320 {
+                break;
+            }
+        }
+    }
+
+    /// `F272`'s message window at x 196, y 159: the date/time header and up to ten
+    /// stored entries, 8-pixel lines, a colour-4 shadow one pixel left and up,
+    /// clipped to the console (y 158..199). The scroll (`F273`) moves the text up
+    /// from the newest entry.
+    fn draw_messages(&mut self) {
+        let lines = self.messages.lines(&self.font, &self.clock);
+        if lines.is_empty() {
+            return;
+        }
+        let rows = (200 - crate::messages::TEXT_Y) / crate::messages::LINE_HEIGHT;
+        let (start, offset) = self.messages.window_start(lines.len(), rows);
+        for (index, line) in lines.iter().enumerate().skip(start) {
+            let y = crate::messages::TEXT_Y as i32 - offset
+                + ((index - start) * crate::messages::LINE_HEIGHT) as i32;
+            if y >= 200 {
+                break;
+            }
+            let colour = if index == 0 { 17 } else { HUD_COLOUR };
+            self.text_clipped(
+                crate::messages::SHADOW_X,
+                y - 1,
+                line,
+                4,
+                crate::messages::CLIP_TOP as i32,
+                crate::messages::CLIP_BOTTOM as i32,
+            );
+            self.text_clipped(
+                crate::messages::TEXT_X,
+                y,
+                line,
+                colour,
+                crate::messages::CLIP_TOP as i32,
+                crate::messages::CLIP_BOTTOM as i32,
+            );
+        }
+    }
+
+    /// The player's `F1099` text at its original spots. Shields and hull are only
+    /// drawn under the original's conditions; the Autopilot line only while the
+    /// autopilot flies; the Set/Act/Alt block at (2,148) and the turret angles at
+    /// (5,76) in turret views.
+    fn draw_player_hud(&mut self, view: ViewMode) {
+        let hud = self.hud.clone();
+        if let Some(text) = hud.shield_text() {
+            self.text(SHIELDS_POS.0, SHIELDS_POS.1, &text, HUD_COLOUR);
+        }
+        if let Some(text) = hud.hull_text() {
+            self.text(HULL_POS.0, HULL_POS.1, &text, HUD_COLOUR);
+        }
+        if hud.autopilot {
+            self.text(AUTOPILOT_POS.0, AUTOPILOT_POS.1, "Autopilot", HUD_COLOUR);
+        }
+        for (index, line) in hud.speed_lines(&self.font).iter().enumerate() {
+            self.text(
+                SPEED_POS.0,
+                SPEED_POS.1 + index * crate::messages::LINE_HEIGHT,
+                line,
+                HUD_COLOUR,
+            );
+        }
+        if view.is_turret() {
+            if let Some(lines) = hud.turret_lines() {
+                for (index, line) in lines.iter().enumerate() {
+                    self.text(
+                        TURRET_POS.0,
+                        TURRET_POS.1 + index * crate::messages::LINE_HEIGHT,
+                        line,
+                        TURRET_COLOUR,
+                    );
+                }
+            }
+        }
+    }
+
     pub fn draw(
         &mut self,
         state: &Flight,
         views: ViewState,
         scene: Option<&ModelViewer>,
         help: bool,
-        modern: bool,
+        _modern: bool,
         message: &str,
     ) {
         self.indexed.fill(0);
@@ -1058,46 +1159,20 @@ impl Screen {
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
         if state.mode != Mode::Docked {
-            // The screen buttons (0x0b-0x0e): the views button is lit (F1).
-            for (x, y, off, on, key) in crate::console::SCREEN_BUTTONS {
-                let id = if key == 1 { on } else { off };
-                if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
-                    icon.blit(&mut self.indexed, x, y);
-                }
+            // F261: the visible `DATA_005100` records in index order. The page
+            // (screen buttons, meter, view row, lamps or the F1120 equipment
+            // page) is derived first; nothing outside the table is drawn.
+            let mut systems = self.systems;
+            if turrets {
+                systems.mounts = systems.mounts.max(3);
             }
-            // The time acceleration meter (0x26-0x2b): one lit step, a radio group.
-            let lit = views.console.lit_step();
-            for (step, (x, y, grey, red)) in crate::console::BAR.into_iter().enumerate() {
-                let id = if step == lit { red } else { grey };
-                if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
-                    icon.blit(&mut self.indexed, x, y);
-                }
-            }
-            // Only the current view's icon is lit (radio group 1).
-            for (x, y, off, on, button) in VIEW_BUTTONS {
-                let lit = match button {
-                    ViewButton::Select(mode) => mode == view,
-                    ViewButton::Turret if !turrets => continue,
-                    ViewButton::Turret => view.is_turret(),
-                    ViewButton::Cycle => false,
+            self.console.apply_flight(view, &views.console, &systems);
+            for (_, button) in self.console.drawable() {
+                let Some(id) = button.image() else {
+                    continue;
                 };
-                let id = if lit { on } else { off };
                 if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
-                    icon.blit(&mut self.indexed, x, y);
-                }
-            }
-            // The right-hand console buttons (the labels and navigation computer
-            // are the owner's two). The hyperspace icon has no lit state in the
-            // original's own code, so it is always its idle image.
-            for (x, y, off, on, click) in crate::console::RIGHT_BUTTONS {
-                let lit = match click {
-                    crate::console::Click::Labels => views.console.labels,
-                    crate::console::Click::Navigation => views.console.navigation,
-                    _ => false,
-                };
-                let id = if lit { on } else { off };
-                if let Some(Some(icon)) = self.icons.get(usize::from(id)) {
-                    icon.blit(&mut self.indexed, x, y);
+                    icon.blit(&mut self.indexed, button.x, button.y);
                 }
             }
         }
@@ -1234,8 +1309,10 @@ impl Screen {
             if world && views.console.labels {
                 self.draw_body_labels(&camera);
             }
-            // F1100's range and F1099's target shields/hull.
+            // F1100's range and F1099's target shields/hull, then the player's own
+            // shields, hull, Autopilot and Set/Act/Alt at their original spots.
             self.draw_target_hud();
+            self.draw_player_hud(view);
             if state.system_flight {
             } else if let Some((x, y)) = camera.project([0.0; 3], true) {
                 if x > 8 && x < 260 && y > 12 && y < 115 {
@@ -1273,138 +1350,36 @@ impl Screen {
                 self.pixel(sx + 1, sy, 17);
             }
         }
-        // The port's top bar and readouts are not the original's; the original
-        // navigation list is drawn straight over the view from y 5, so hide them
-        // while it is open. The docked screens draw their own frame.
-        if state.mode != Mode::Docked && !views.console.navigation {
-            self.rect(0, 0, 320, 11, 0);
-            self.text(
-                3,
-                1,
-                &format!("{} SYSTEM", self.system.to_ascii_uppercase()),
-                18,
-            );
-            // The controls button: modern or classic, clicked to change.
-            let label = if modern {
-                "MODERN CONTROLS"
-            } else {
-                "CLASSIC CONTROLS"
-            };
-            self.rect(CONTROLS_BUTTON.0 as usize, 0, 118, 11, 1);
-            self.text(CONTROLS_BUTTON.0 as usize + 3, 1, label, 17);
-            // ffe-rs readout (not the original's): speed, set speed, time scale.
-            let console = views.console;
-            let mut line = format!("SPEED {} M/S", console.speed);
-            if let Some(set) = console.set_speed {
-                line.push_str(&format!("  SET {set} M/S"));
-            }
-            line.push_str(&format!(
-                "  TIME {}",
-                crate::console::ACCELERATION_NAMES[console.acceleration.min(4)]
-            ));
-            if console.paused {
-                line.push_str("  PAUSED");
-            }
-            self.text(3, 13, &line, 15);
-            let name = view.name().to_ascii_uppercase();
-            let width = self.font.width(&name).unwrap_or(0);
-            self.text(317usize.saturating_sub(width), 1, &name, 15);
-            if !self.lock.is_empty() {
-                let lock = self.lock.clone();
-                self.text(3, 22, &lock, 17);
-            }
-        }
-        // The port's own status block is not the original's, and it would clear
-        // the bottom 39 rows of a lift scene (the door closes over them) or of the
-        // station view while a launch's outer door opens. The docked screen's own
-        // cargo/cash line replaces it.
-        if self.lift.is_none()
-            && state.mode != Mode::Docked
-            && !views.console.navigation
-            && !self.station_view
-        {
-            self.rect(0, 119, 320, 39, 0);
-            self.text(
-                3,
-                120,
-                &format!(
-                    "SPD {:5.1}  RNG {:7.1}  CR {}  CARGO {} T",
-                    state.speed(),
-                    state.distance(),
-                    crate::trade::credits(i32::try_from(state.credits).unwrap_or(i32::MAX)),
-                    state.cargo + state.hold.iter().map(|t| u32::from(*t)).sum::<u32>()
-                ),
-                15,
-            );
-            // The map buttons (the system list and this system's list), where the old dock
-            // status line was.
-            for (x0, x1, label) in MAP_BUTTONS {
-                self.rect(
-                    x0 as usize,
-                    MAP_BUTTONS_Y.0 as usize,
-                    (x1 - x0) as usize,
-                    10,
-                    1,
-                );
-                self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, 18);
-            }
-            if state.mode == Mode::Flight {
-                for (index, (x0, x1, label)) in AUTOPILOT_BUTTONS.into_iter().enumerate() {
-                    self.rect(
-                        x0 as usize,
-                        MAP_BUTTONS_Y.0 as usize,
-                        (x1 - x0) as usize,
-                        10,
-                        1,
-                    );
-                    // Dim a button that has nothing to act on.
-                    let live = match index {
-                        1 => self.has_lock,
-                        2 => self.target_mark.is_some_and(|mark| mark.engaged),
-                        _ => true,
-                    };
-                    let engaged = index == 1 && self.target_mark.is_some_and(|mark| mark.engaged);
-                    let colour = if engaged {
-                        17
-                    } else if live {
-                        18
-                    } else {
-                        15
-                    };
-                    self.text(x0 as usize + 3, MAP_BUTTONS_Y.0 as usize + 1, label, colour);
+        // The original HUD now owns the top rows and the lower left: the port's
+        // top bar, controls button, SPEED line and status/map/autopilot block are
+        // gone (they covered the shields/hull rows, the Autopilot and Set/Act
+        // lines, and the lift's lower rows).
+        if state.mode == Mode::Docked {
+            // The docked screens put the game's console message in the console's
+            // message area at the lower right, not over the menu.
+            let mut lines = Vec::new();
+            let mut line = String::new();
+            for ch in message.chars() {
+                let ch = if ch.is_ascii() && !ch.is_ascii_control() {
+                    ch
+                } else {
+                    '?'
+                };
+                line.push(ch);
+                if self.font.width(&line).is_ok_and(|measured| measured >= 124) {
+                    lines.push(std::mem::take(&mut line));
                 }
             }
-        }
-        // The docked screens put the game's console message in the console's
-        // message area at the lower right (F271), not over the menu.
-        let wrap = if state.mode == Mode::Docked { 124 } else { 308 };
-        let mut lines = Vec::new();
-        let mut line = String::new();
-        for ch in message.chars() {
-            let ch = if ch.is_ascii() && !ch.is_ascii_control() {
-                ch
-            } else {
-                '?'
-            };
-            line.push(ch);
-            if self
-                .font
-                .width(&line)
-                .is_ok_and(|measured| measured >= wrap)
-            {
-                lines.push(std::mem::take(&mut line));
+            if !line.is_empty() {
+                lines.push(line);
             }
-        }
-        if !line.is_empty() {
-            lines.push(line);
-        }
-        for (index, line) in lines.iter().take(2).enumerate() {
-            let (x, y) = if state.mode == Mode::Docked {
-                (195, 176 + index * 10)
-            } else {
-                (3, 139 + index * 9)
-            };
-            self.text(x, y, line, 18);
+            for (index, line) in lines.iter().take(2).enumerate() {
+                self.text(195, 176 + index * 10, line, 18);
+            }
+        } else {
+            // F272's text window: date/time header, ten entries, 124-pixel wrap,
+            // shadow at (195, y-1) and text at (196, y), clipped to y 158..199.
+            self.draw_messages();
         }
         if help {
             self.rect(0, 13, 320, 145, 1);
@@ -1415,6 +1390,7 @@ impl Screen {
                 "CLASSIC-LIKE: Enter/Shift thrust; ,/. yaw; A/Z pitch",
                 "X brake  D clearance  L launch  B/N trade  PGUP/DN ship",
                 "VIEWS: F1 cycle F6 front F7 rear F8 turret F9 external",
+                "F2 ship systems page. Original HUD: shields/hull/speed/log.",
                 "External: arrows turn, +/- zoom. Turret: arrows aim",
                 "F12 models (Shift+F12 lab). F11 screenshot. P pause. Esc prefs.",
                 "F5 save snapshot; Shift+F5 load newest snapshot.",

@@ -43,7 +43,8 @@ fn screen_buttons_and_overlaps_follow_the_list_order() {
     // The wrapper the views use still answers for the view buttons only.
     assert!(Screen::view_button(150, 170).is_some());
     assert!(Screen::view_button(76, 180).is_none());
-    assert!(Click::Screen(2).unported().is_some());
+    // F2 is ported now: the status/equipment page (`F1120`).
+    assert!(Click::Screen(2).unported().is_none());
     assert!(Click::Front.unported().is_none());
     // The map button, the navigation computer and the H icon drive the ffe-rs maps.
     for click in [Click::Screen(3), Click::Navigation, Click::Hyperspace] {
@@ -105,19 +106,17 @@ fn acceleration_scales_the_world_but_not_the_controls() {
 }
 
 #[test]
-fn the_autopilot_buttons_sit_beside_the_map_buttons() {
+fn the_retired_port_buttons_no_longer_intercept_clicks() {
     use ffe_rs::screen::{AUTOPILOT_BUTTONS, MAP_BUTTONS};
-    // The map buttons keep their places and the autopilot buttons follow them.
-    assert_eq!(Screen::console_click(10, 130), Some(Click::Screen(3)));
-    assert_eq!(Screen::console_click(100, 130), Some(Click::Navigation));
+    // The port-only map and autopilot buttons are not drawn with the original
+    // HUD, so their old row no longer answers (the original console icons do).
+    for (x, y) in [(10, 130), (100, 130), (160, 130), (230, 133), (290, 130)] {
+        assert_eq!(Screen::console_click(x, y), None, "{x},{y} is port-only");
+    }
+    // The constants stay for the integrator's layout audit.
     assert!(AUTOPILOT_BUTTONS[0].0 > MAP_BUTTONS[1].1);
-    assert_eq!(Screen::console_click(160, 130), Some(Click::Target));
-    assert_eq!(Screen::console_click(230, 133), Some(Click::Autopilot));
-    assert_eq!(Screen::console_click(290, 130), Some(Click::AutopilotOff));
-    // The gaps between them, and the row above, are not buttons.
-    assert_eq!(Screen::console_click(206, 130), None);
-    assert_eq!(Screen::console_click(230, 120), None);
-    // The target button is ported now.
+    // The original target hot area (24,158-41,166) still works.
+    assert_eq!(Screen::console_click(30, 160), Some(Click::Target));
     assert_eq!(Click::Target.unported(), None);
 }
 

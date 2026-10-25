@@ -50,6 +50,16 @@ pub struct Flight {
     /// before combat load no lasers.
     #[serde(default)]
     pub combat: crate::combat::Combat,
+    /// The player's shield words (`ship+0xe0` current, `+0xe2` maximum). `[0, 0]`
+    /// means the port has no shield state; a save with a damaged shield keeps
+    /// the original's `Shields: n%` line visible. `F1099` does not draw the line
+    /// when the two words are equal (a pristine ship).
+    #[serde(default)]
+    pub shields: [u16; 2],
+    /// The hull word (`ship+0xe4`, mass * 4) and its full value. `[0, 0]` means
+    /// untracked; the HUD then shows a full hull from the ship statistics.
+    #[serde(default)]
+    pub hull: [u16; 2],
 }
 
 fn default_ship() -> u32 {
@@ -83,6 +93,8 @@ impl Default for Flight {
             system_flight: false,
             hold: Vec::new(),
             combat: crate::combat::Combat::default(),
+            shields: [0; 2],
+            hull: [0; 2],
         }
     }
 }
@@ -129,6 +141,8 @@ impl Flight {
             || !(self.thrust.is_finite() && self.thrust.abs() <= 1.0)
             || !(self.hold.is_empty() || self.hold.len() == ffe_core::market::NAMES)
             || self.hold.iter().map(|t| u32::from(*t)).sum::<u32>() > 100_000
+            || self.shields[0] > self.shields[1]
+            || self.hull[0] > self.hull[1]
             || self.combat.drive > 0x0e
             || !(self.combat.cool_carry.is_finite() && (0.0..1.0).contains(&self.combat.cool_carry))
             || self

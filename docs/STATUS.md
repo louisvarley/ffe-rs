@@ -34,7 +34,13 @@ crosshair, velocity marker and the three F270 gauges, and Space fires the
 new-game Eagle's front 1MW pulse laser with the original's heat, energy, refire
 and damage rules (`docs/notes/combat.md`; hitscan, no laser projectile). The
 generated systems have no NPC ships yet, so the target hull/shield readout and
-the shield-hit flash are ported but unreachable.
+the shield-hit flash are ported but unreachable. Since 2026-10-25 the console is
+the original's: a ten-entry dated message log and clock, the shields/hull,
+Set/Act/Alt and turret readouts, the F1116 status lamps and F1120's engines-off
+page (F2), and the 82-record `DATA_005100` button table driving the flight page;
+the port's own top bar, speed line and status block are retired
+(`docs/notes/dashboard.md`). Player damage, equipment words beyond the lasers,
+scanner contacts and altitude units remain.
 
 ## How to read this repo
 
@@ -56,7 +62,7 @@ the shield-hit flash are ported but unreachable.
   audit** (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 133 items, 59 done and 74 left on
+  in `burndown.js`; 14 milestones, 133 items, 60 done and 73 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -183,14 +189,15 @@ capture produced by two repeat runs of the local reference.
 | v0.49j right-hand console buttons | `console::RIGHT_BUTTONS`, `navigation::{View::Places, place_indices}`, `Screen::{draw_places, place_row, label_positions}`, `ConsoleState::{labels, navigation}`; main `l`/`n` | `console.rs` (+2), `navigation.rs` (+1), `console_view.rs` (3, ignored) | DOS `FIRSTENC.EXE` hot-area table 0xea68c and button records 0xbe912/0xbe950/0xbe98e byte-identical; no new oracle | — | labels F989/F1108 (player `+0xe9` bit 2); places F1099/F1020 (stations/starports, 18 rows, action 0xd1+n); `docs/notes/labels.md` |
 | v0.48p Escape preference pages, space colour | `ffe_rs::prefs`, `Screen::draw_prefs`, `Screen::{sky, stars_visible}`, `IndexedImage::blit_rgb` | `prefs.rs` (8 + unit tests), `prefs.rs` test (8) | none (layout/strings from `ffedat.asm`; the original Escape frame is a manual capture) | — | pages 0-4 are `DATA_004963`..`DATA_004967` with `DATA_004903`..`DATA_004905` hot areas and primary icon bitmaps 44/45; space colour is `DATA_008815..817` (default Light Blue, six-bit `#0c0c4c`); port page 5 (Modern/Classic) and `Quit`; grey unimplemented rows; see `docs/notes/prefs.md`, EXP-012/013 |
 | v0.57 crosshair, lasers, combat HUD | `ffe_core::laser`, `ffe_rs::combat::Combat` (on `Flight`), `Screen::{draw_gunsight, draw_velocity_marker, draw_gauges, draw_target_hud}`, `IndexedImage::blit_clipped`, main Space fire | `laser.rs` (8), `combat.rs` (4), `combat_view.rs` (6, ignored), local frames | `--state-combat` prints F998's loadout from the executed original (model 23, one `0x88` mount, two `0x82` missiles, 1 t energy); no new verify-all entry | — | bitmap 97 gunsight at (129,48) per mount (not views 4/6), bitmap 98 velocity marker (front only), F270 bars, F1100 range; F930/F931/F929/F730/F938 firing, F953/F942 damage; no NPC ships yet, so the target readout and model-157 flash are unreachable; `docs/notes/combat.md` |
+| v0.58 original HUD, message log, console table | `ffe_rs::{messages, hud, console, console_table}`, `Screen::{draw_messages, draw_console, draw_gauges}`, `ShipSystems`, `PlayerHud` | `dashboard_view.rs` (3, ignored), `console_table.rs` (13 + unit tests), `console.rs` (F261/262/263/264/991/1116/1117/1120) | none (the layout/strings are from `ffe.asm`; `tools/gen-console-table.py` imports the 82 records byte-exactly) | — | ten-entry dated log and clock, shields/hull/Set/Act/Alt and turret text, lamps and the engines-off page (F2/record 0x0c), the table-driven console and the retired port top bar/status block; player damage/equipment state, scanner contacts, F991 0x11-0x14, altitude/F1393 units and the F2/F3 key mappings remain; `docs/notes/dashboard.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 467 `#[test]` functions total; 118 are `#[ignore]`
+  `cargo clippy -D warnings`. 486 `#[test]` functions total; 121 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **348 runnable synthetic tests** (349 on Linux).
+  **364 runnable synthetic tests** (365 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

@@ -2,10 +2,13 @@ use ffe_core::laser;
 use ffe_core::traffic::Reply;
 use ffe_rs::camera::{key_amount, ship_axes, ExternalKeys, ViewMode, ViewState};
 use ffe_rs::combat::{self, Combat};
-use ffe_rs::console::{acceleration_for_digit, Click, ConsoleState, ACCELERATION_NAMES};
+use ffe_rs::console::{
+    acceleration_for_digit, Click, ConsoleState, ShipSystems, ACCELERATION_NAMES,
+};
 use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Controls, Flight, STEP};
 use ffe_rs::galaxy_map::GalaxyMap;
+use ffe_rs::hud::PlayerHud;
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
@@ -313,6 +316,10 @@ fn run() -> Result<(), String> {
     let mut mouse_was_down = false;
     // The console's time acceleration step (0 = 1x .. 4 = 10000x).
     let mut acceleration = 0usize;
+    // F2's status/equipment page (`F1120`, `DATA_008871 & 8`).
+    let mut status_page = false;
+    // The last message pushed into the original's ten-entry log.
+    let mut logged = String::new();
     let mut model_viewer: Option<ModelViewer> = None;
     // The flight view's station is the original model 74 when the cache has it;
     // otherwise the placeholder wireframe stays.
@@ -566,21 +573,6 @@ fn run() -> Result<(), String> {
             last = Instant::now();
             continue;
         }
-        if let Some((x, y)) = edge_point.filter(|_| state.mode != ffe_rs::flight::Mode::Docked) {
-            if y < 11
-                && (ffe_rs::screen::CONTROLS_BUTTON.0..ffe_rs::screen::CONTROLS_BUTTON.1)
-                    .contains(&x)
-            {
-                prefs.modern = !prefs.modern;
-                held_controls.disarm(&keys_down);
-                message = if prefs.modern {
-                    "Modern controls."
-                } else {
-                    "Classic controls."
-                }
-                .to_owned();
-            }
-        }
         let click_point = if active
             && mouse_down
             && !mouse_was_down
@@ -658,11 +650,34 @@ fn run() -> Result<(), String> {
                 );
             }
         }
-        // The other console buttons are not in this build.
         if console_click == Some(Click::Pause) {
             paused = !paused;
             held_controls.disarm(&keys_down);
             message = if paused { "Paused." } else { "Resumed." }.to_owned();
+        }
+        // F2 is the original's status screen: F1120's ship diagram and equipment
+        // page on the console. The key and its console button both toggle it.
+        if active
+            && state.mode == ffe_rs::flight::Mode::Flight
+            && !help
+            && !scenarios
+            && model_lab.is_none()
+            && model_viewer.is_none()
+            && (pressed(Key::F2) || console_click == Some(Click::Screen(2)))
+        {
+            status_page = !status_page;
+            held_controls.disarm(&keys_down);
+            message = if status_page {
+                "Status: ship systems (F2 returns)."
+            } else {
+                "Flight console."
+            }
+            .to_owned();
+        }
+        // Every console button the port has no screen for says so in the message
+        // log instead of doing nothing.
+        if let Some(note) = console_click.and_then(Click::unported) {
+            message = note.to_owned();
         }
         if active {
             // F1 is the original's view key; help moves to H.
@@ -1846,6 +1861,7 @@ fn run() -> Result<(), String> {
                 .map(|model| model.set_speed_metres().round() as i32),
             labels,
             navigation: nav.as_ref().is_some_and(|nav| nav.view == NavView::Places),
+            status_page,
         };
         // Launching from the station puts the ship out from it in this system, on the
         // original flight model (which the navigation moves).
@@ -2268,6 +2284,55 @@ fn run() -> Result<(), String> {
                 }
             }
         }
+        // F1099's player text and the console's lamp/equipment inputs. The
+        // equipment bytes have no model yet (they stay zero); the hull falls back
+        // to the ship's full mass word and the altitude is the port's explicit
+        // placeholder zero (the original's `player+0xdc` is not modelled).
+        let stats = scene
+            .as_ref()
+            .and_then(|scene| scene.ship_stats(state.ship));
+        let hull_full = stats.map_or(0, |stats| stats.mass.wrapping_mul(4));
+        let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
+        screen.hud = PlayerHud {
+            shields: state.shields,
+            hull: if state.hull[1] != 0 {
+                state.hull
+            } else {
+                [hull_full, hull_full]
+            },
+            set_speed: views.console.set_speed,
+            actual_speed: state.speed().round() as i32,
+            altitude: Some(0),
+            registration: ships.name(state.ship).unwrap_or("").to_owned(),
+            autopilot,
+            turret: views.mode.is_turret().then(|| {
+                (
+                    PlayerHud::angle(views.turret.yaw),
+                    -PlayerHud::angle(views.turret.pitch),
+                )
+            }),
+        };
+        screen.systems = ShipSystems {
+            // `player+0xe8 == 2` is the autopilot/engine state F1099 and F1116
+            // test; 2 lights 0x39 and draws the Autopilot line.
+            e8: if autopilot { 2 } else { 0 },
+            e9: if labels { 4 } else { 0 },
+            mounts: stats.map_or(1, |stats| stats.gun_mounts),
+            data_246: screen.target_mark.is_some(),
+            data_247: screen.target_mark.is_some_and(|mark| mark.engaged),
+            ..screen.systems
+        };
+        screen.clock = nav.as_ref().map(|nav| nav.date_text()).unwrap_or_default();
+        // F271: a changed console message becomes a dated log entry.
+        if message != logged && !message.is_empty() {
+            screen.messages.push(message.clone(), screen.clock.clone());
+            logged.clone_from(&message);
+        }
+        // F273's auto-scroll timer runs on the world tics.
+        let log_tics =
+            (elapsed * 50.0 * f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])).max(0.0)
+                as u32;
+        screen.messages.tick(log_tics);
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();
@@ -2348,7 +2413,7 @@ fn run() -> Result<(), String> {
             screen.overlay(
                 "PAUSED",
                 &[
-                    "P RESUMES. H HELP. F2 SCENARIOS.",
+                    "P RESUMES. H HELP. F2 STATUS PAGE.",
                     "FOCUS LOSS PAUSES WITHOUT CATCH-UP.",
                 ],
             );

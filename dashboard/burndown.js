@@ -164,11 +164,11 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "ui-0", title: "Console buttons: time acceleration meter and screen buttons", status: "done", version: "v0.49i" },
-        { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "in-progress", version: "v0.57" },
-        { id: "ui-2", title: "Crosshair, targeting and the HUD overlay", status: "in-progress", version: "v0.57" },
+        { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "in-progress", version: "v0.58" },
+        { id: "ui-2", title: "Crosshair, targeting and the HUD overlay", status: "done", version: "v0.58" },
         { id: "ui-3", title: "Missile, combat and external camera views", status: "todo" },
         { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "done", version: "v0.56" },
-        { id: "ui-5", title: "Menu and text rendering for every screen", status: "todo" },
+        { id: "ui-5", title: "Menu and text rendering for every screen", status: "in-progress", version: "v0.58" },
         { id: "ui-6", title: "Galaxy and system map screens", status: "done", version: "v0.48n" },
         { id: "ui-7", title: "Intro and new-game flow", status: "in-progress", version: "v0.48p" },
         { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
@@ -486,6 +486,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 74,
       note: "Crosshair and lasers merged (v0.57): the original bitmap 97 gunsight at (129,48) in the views whose mount has a laser, bitmap 98's velocity marker (corrected: not a target X), F270's three gauges, F1100's target range and F1111/F1100's view rules; Space fires the new-game Eagle's front 1MW pulse with F930/F931/F929/F730/F938 and F953's shields-then-hull damage (gameplay-4 done). ui-1 and ui-2 start: scanner contacts, player shields/hull, the message log and the combat targeter remain; no NPC ships, so the target readout and model-157 flash are implemented but unreachable."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 73,
+      note: "Original HUD merged (v0.58): ten-entry dated message log and clock, shields/hull/Set/Act/Alt and turret readouts, F1116 lamps and F1120's engines-off page (F2/record 0x0c), and the 82-record DATA_005100 console table with F261 draw order, F262 radio reset and F263/264 visibility. The port's top bar, SPEED line and 119..157 status/autopilot block are retired (ui-2 done). Still open: player damage and equipment words (so shields/hull read defaults and F991 0x10-0x14 stay hidden), scanner contacts, altitude/F1393 speed units, F3 key still on Modern/Classic, and the DOS F2 mapping is unverified."
     }
   ]
 };

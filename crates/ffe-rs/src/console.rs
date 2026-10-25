@@ -1,5 +1,13 @@
-//! The original console's time-acceleration meter and screen buttons
-//! (`DATA_005100` buttons 0x0b-0x0e and 0x26-0x2b, hot areas `DATA_007684`).
+//! The original console: `DATA_005100`'s 82 buttons, their visibility and
+//! current image (`F261`-`F264`), the time-acceleration meter, the screen and
+//! view buttons, the status lamps and the engines-off equipment page.
+//!
+//! `Button` is one `ConButton` record; [`BUTTONS`] is the whole table decoded
+//! byte-exactly from `ffedat.asm:4601` (`crate::console_table`). `Console` keeps
+//! the mutable `visible`/`cur` state the original keeps in the table, including
+//! `F262`'s radio reset, and [`Console::apply_flight`] derives the original's
+//! page from the view, meter, labels and ship systems. The hot areas
+//! (`DATA_007684`) stay in this module as the original's 22-row list.
 //!
 //! The bar at the lower left is the time-acceleration meter, not a throttle: six
 //! steps rising from a pause mark, each a grey icon with a red lit twin, of
@@ -9,6 +17,55 @@
 //! four icons beside it open other screens (F1 views, F2 status, F3 map, F4
 //! comms), which are not ported. Bitmap ids from 96 are the secondary table.
 //! See `docs/notes/console.md`.
+
+/// The original `DATA_005100` table, for tests and the integrator's audits.
+pub fn buttons() -> &'static [Button; 82] {
+    &crate::console_table::BUTTONS
+}
+
+/// One `ConButton` record of `DATA_005100`: position, ten image ids, the
+/// visibility byte, the current image index and the radio group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Button {
+    pub x: i32,
+    pub y: i32,
+    pub bitmaps: [u16; 10],
+    pub visible: bool,
+    pub cur: u8,
+    pub radio: u16,
+}
+
+impl Button {
+    /// A record with the table's unused `+0x38` word omitted (it is 1 in every
+    /// record and read by no code in this build).
+    pub const fn new(x: i32, y: i32, bitmaps: [u16; 10], visible: u8, cur: u8, radio: u16) -> Self {
+        Self {
+            x,
+            y,
+            bitmaps,
+            visible: visible & 1 != 0,
+            cur,
+            radio,
+        }
+    }
+
+    /// The bitmap id of the current image (`bmpindex[curindex]`), or `None` for
+    /// an image the record does not have.
+    pub fn image(&self) -> Option<u16> {
+        self.bitmaps
+            .get(usize::from(self.cur))
+            .copied()
+            .filter(|id| *id != 0 || self.cur != 0)
+    }
+
+    /// The record's bitmap for image `index`.
+    pub fn bitmap(&self, index: u8) -> Option<u16> {
+        self.bitmaps
+            .get(usize::from(index))
+            .copied()
+            .filter(|id| *id != 0)
+    }
+}
 
 /// Time acceleration (`DATA_009012`) for 1x, 10x, 100x, 1000x and 10000x.
 pub const TIME_ACCELERATION: [u32; 5] = [0x3e2, 0x26d6, 0x1_845c, 0xf_2b98, 0x97_b3f0];
@@ -63,6 +120,9 @@ pub struct ConsoleState {
     pub set_speed: Option<i32>,
     pub labels: bool,
     pub navigation: bool,
+    /// The `F2` status screen's engines-off/equipment page (`F1120`,
+    /// `DATA_008871 & 8`).
+    pub status_page: bool,
 }
 
 impl ConsoleState {
@@ -114,10 +174,8 @@ impl Click {
     /// The note for a click whose behaviour is not ported, or `None` when it is.
     pub fn unported(self) -> Option<&'static str> {
         match self {
-            Click::Screen(2) => Some("F2 (status) is not ported yet."),
-            // The map button lists the systems and the navigation computer lists this
-            // system (ffe-rs navigation, not the original's screens).
-            Click::Screen(3) | Click::Navigation | Click::Hyperspace => None,
+            // F2 is the status/equipment page (F1120), F3 the map and F1 the views.
+            Click::Screen(2) | Click::Screen(3) | Click::Navigation | Click::Hyperspace => None,
             Click::Screen(_) => Some("F4/F5 (comms) are not ported yet."),
             Click::Missile => Some("The missile view needs equipment (not ported)."),
             Click::Combat => Some("The combat computer needs equipment (not ported)."),
@@ -164,6 +222,324 @@ pub fn click(x: i32, y: i32) -> Option<Click> {
         .rev()
         .find(|((x0, y0, x1, y1), _)| (*x0..=*x1).contains(&x) && (*y0..=*y1).contains(&y))
         .map(|(_, click)| *click)
+}
+
+/// The player ship's equipment/status bytes the console routines read. The port
+/// has no equipment or engine model yet, so these are explicit inputs with
+/// new-game defaults; `docs/notes/dashboard.md` §6.10 lists every bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShipSystems {
+    /// `player+0xe8`: the engine/autopilot status byte (F1116 compares it with
+    /// 0x2e, 0x28, 0x34, 6 and 2).
+    pub e8: u8,
+    /// `player+0xe9`: bit 0 the labels flag, bit 1 the 0x38/0x46 image, bit 3
+    /// the engines-off page (`DATA_008871`).
+    pub e9: u8,
+    /// `player+0xec`: the target-present byte for the 0x49 lamp.
+    pub ec: u8,
+    /// `player+0xf0`: the dword that suppresses the 0x47 lamp.
+    pub f0: u32,
+    /// `ship+0xc6`..`+0xcb`, the equipment/status bits.
+    pub c6: u8,
+    pub c7: u8,
+    /// `ship+0xc8` is read as a dword by F991 (bit 27) and a byte elsewhere.
+    pub c8: u32,
+    pub c9: u8,
+    pub ca: u8,
+    pub cb: u8,
+    /// `player+0xef`: the missile-view equipment byte.
+    pub ef: u8,
+    /// `ship+0xd6..+0xdf`: ten equipment slots; the low nibble selects the icon
+    /// image (F1120).
+    pub slots: [u8; 10],
+    /// `player+0x174`: the dword F1120's 0x51 condition tests.
+    pub p174: u16,
+    /// `player+0x511e`.
+    pub p511e: u32,
+    /// `player+0x268`.
+    pub p268: u8,
+    /// `DATA_007246`/`DATA_007247`: the targeters' state.
+    pub data_246: bool,
+    pub data_247: bool,
+    /// `DATA_003fb6`: bit 1 in the 0x48 image condition.
+    pub b6: u8,
+    /// `ship+0xd1`, gun mounts (the turret button and view).
+    pub mounts: i8,
+}
+
+impl Default for ShipSystems {
+    fn default() -> Self {
+        // The new-game Eagle long range fighter: one gun mount, no equipment
+        // bits set (the port does not model equipment yet). The lamp page is
+        // still the original's for those values.
+        Self {
+            e8: 0,
+            e9: 0,
+            ec: 0,
+            f0: 0,
+            c6: 0,
+            c7: 0,
+            c8: 0,
+            c9: 0,
+            ca: 0,
+            cb: 0,
+            ef: 0,
+            slots: [0; 10],
+            p174: 0,
+            p511e: 0,
+            p268: 0,
+            data_246: false,
+            data_247: false,
+            b6: 0,
+            mounts: 1,
+        }
+    }
+}
+
+/// The console's mutable `DATA_005100` state. Each record keeps the original's
+/// `visible` and `curindex`; `F261` draws the visible records in index order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Console {
+    pub buttons: [Button; 82],
+}
+
+impl Default for Console {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Console {
+    /// The table at its initial state (every record hidden; the two records the
+    /// data gives a non-zero image keep it).
+    pub fn new() -> Self {
+        Self {
+            buttons: crate::console_table::BUTTONS,
+        }
+    }
+
+    /// `F263`: make a record visible.
+    pub fn show(&mut self, id: usize) {
+        if let Some(button) = self.buttons.get_mut(id) {
+            button.visible = true;
+        }
+    }
+
+    /// `F264`: hide a record.
+    pub fn hide(&mut self, id: usize) {
+        if let Some(button) = self.buttons.get_mut(id) {
+            button.visible = false;
+        }
+    }
+
+    pub fn is_visible(&self, id: usize) -> bool {
+        self.buttons.get(id).is_some_and(|button| button.visible)
+    }
+
+    pub fn image(&self, id: usize) -> Option<u16> {
+        self.buttons.get(id).and_then(Button::image)
+    }
+
+    /// `F262_ConsoleSetButtonImage`: set a record's image and, when the new image
+    /// is non-zero, reset every record in the same radio group to image 0 first.
+    /// Setting the image a record already has is a no-op.
+    pub fn set_image(&mut self, id: usize, image: u8) {
+        let Some(button) = self.buttons.get(id) else {
+            return;
+        };
+        if button.cur == image {
+            return;
+        }
+        let radio = button.radio;
+        if image != 0 {
+            for other in &mut self.buttons {
+                if other.radio == radio {
+                    other.cur = 0;
+                }
+            }
+        }
+        self.buttons[id].cur = image;
+    }
+
+    /// The visible records in table order, with their current bitmap ids.
+    pub fn drawable(&self) -> impl Iterator<Item = (usize, &Button)> {
+        self.buttons
+            .iter()
+            .enumerate()
+            .filter(|(_, button)| button.visible)
+    }
+
+    /// `F991`: the view-row buttons 0x15-0x19. 0x10's icon is the labels toggle
+    /// and 0x11-0x14 the equipment icons, which this build leaves to `F1120` and
+    /// the labels state.
+    pub fn apply_view_row(
+        &mut self,
+        view: crate::camera::ViewMode,
+        mounts: i8,
+        console: &ConsoleState,
+    ) {
+        use crate::camera::ViewMode;
+        for id in [0x15usize, 0x17, 0x18, 0x19] {
+            self.show(id);
+        }
+        if mounts > 2 {
+            self.show(0x16);
+        } else {
+            self.hide(0x16);
+        }
+        // The views are radio group 1: one image 1, the rest 0.
+        for id in [0x15usize, 0x16, 0x17, 0x18] {
+            self.set_image(id, 0);
+        }
+        let selected = match view {
+            ViewMode::Front => 0x18,
+            ViewMode::Rear => 0x17,
+            ViewMode::TopTurret | ViewMode::BottomTurret => 0x16,
+            ViewMode::External => 0x15,
+        };
+        if self.is_visible(selected) {
+            self.set_image(selected, 1);
+        }
+        // F1117 clears the 0x19 image; F1120 lights it on the equipment page.
+        self.set_image(0x19, u8::from(console.status_page));
+    }
+
+    /// `F1117`'s normal page: F1116's five lamps plus the three ship lamps.
+    pub fn apply_normal_page(&mut self, systems: &ShipSystems) {
+        for id in [0x37usize, 0x38, 0x39] {
+            self.show(id);
+        }
+        if systems.e8 >= 0x2e && systems.f0 == 0 {
+            self.show(0x47);
+        } else {
+            self.hide(0x47);
+        }
+        if systems.p268 != 0 && systems.e8 <= 6 && systems.c6 & 0x40 != 0 && systems.c7 & 1 != 0 {
+            self.show(0x45);
+        } else {
+            self.hide(0x45);
+        }
+        self.show(0x46);
+        let image = if systems.e9 & 2 != 0 { 0 } else { 1 };
+        self.set_image(0x38, image);
+        self.set_image(0x46, image);
+        self.show(0x48);
+        if !systems.data_246 {
+            self.show(0x49);
+        } else {
+            self.hide(0x49);
+        }
+        if systems.e8 == 2 {
+            self.set_image(0x39, 1);
+        } else {
+            self.set_image(0x39, 0);
+            let image = u8::from(systems.ec != 0 && systems.ca & 0x20 != 0);
+            self.set_image(0x49, image);
+        }
+        let image = if systems.e8 < 0x28 && (systems.e9 & 1 == 0 || systems.b6 & 2 != 0) {
+            1
+        } else {
+            0
+        };
+        self.set_image(0x48, image);
+    }
+
+    /// `F1120`: the engines-off/equipment page. Hides the five F1116 lamps,
+    /// shows the 60x45 ship diagram (0x3a), ten equipment icons (0x3b-0x44), the
+    /// system lamps (0x4a-0x4e, 0x4f, 0x51) and lights 0x19.
+    pub fn apply_engines_off_page(&mut self, systems: &ShipSystems) {
+        for id in [0x45usize, 0x46, 0x47, 0x48, 0x49] {
+            self.hide(id);
+        }
+        self.show(0x3a);
+        if systems.data_247 {
+            self.hide(0x4f);
+        } else {
+            self.show(0x4f);
+        }
+        for (index, value) in systems.slots.iter().enumerate() {
+            let id = 0x3b + index;
+            if *value == 0 {
+                self.hide(id);
+            } else {
+                self.show(id);
+                self.set_image(id, value & 0xf);
+            }
+        }
+        if systems.c9 & 8 != 0 && systems.p174 != 0 {
+            self.show(0x51);
+        } else {
+            self.hide(0x51);
+        }
+        if systems.ca & 0x80 != 0 {
+            self.set_image(0x4a, 1);
+            self.show(0x4a);
+        } else if systems.ca & 8 != 0 {
+            self.set_image(0x4a, 0);
+            self.show(0x4a);
+        } else {
+            self.hide(0x4a);
+        }
+        self.show_if(0x4b, systems.cb & 4 != 0);
+        self.show_if(0x4c, systems.cb & 1 != 0);
+        self.show_if(0x4d, systems.c8 & 4 != 0);
+        self.show_if(
+            0x4e,
+            (systems.p511e != 0 && systems.e8 == 0x34) || systems.c6 & 0x10 != 0,
+        );
+        // The three ship lamps are not hidden by F1120.
+        for id in [0x37usize, 0x38, 0x39] {
+            self.show(id);
+        }
+        self.set_image(0x19, 1);
+    }
+
+    fn show_if(&mut self, id: usize, condition: bool) {
+        if condition {
+            self.show(id);
+        } else {
+            self.hide(id);
+        }
+    }
+
+    /// The flight console's whole page: the screen buttons, the meter, the
+    /// right-hand buttons, `F991`'s view row and either `F1116`'s lamps or
+    /// `F1120`'s equipment page. This is the state `F261` then draws in index
+    /// order; nothing outside the table is needed.
+    pub fn apply_flight(
+        &mut self,
+        view: crate::camera::ViewMode,
+        console: &ConsoleState,
+        systems: &ShipSystems,
+    ) {
+        *self = Self::new();
+        // F1439/F1003: the four screen buttons, with F1's image lit.
+        for id in 0x0bu8..=0x0e {
+            self.show(usize::from(id));
+        }
+        self.set_image(0x0e, 1);
+        // The time-acceleration meter (0x26-0x2b), radio group 3.
+        for id in 0x26u8..=0x2b {
+            self.show(usize::from(id));
+        }
+        for id in 0x26usize..=0x2b {
+            self.set_image(id, 0);
+        }
+        self.set_image(0x26 + console.lit_step(), 1);
+        // The right-hand buttons 0x0f-0x11 (their images are the original's
+        // labels/navigation on states; hyperspace has no lit twin).
+        for id in 0x0fusize..=0x11 {
+            self.show(id);
+        }
+        self.set_image(0x10, u8::from(console.labels));
+        self.set_image(0x11, u8::from(console.navigation));
+        self.apply_view_row(view, systems.mounts, console);
+        if console.status_page {
+            self.apply_engines_off_page(systems);
+        } else {
+            self.apply_normal_page(systems);
+        }
+    }
 }
 
 /// The acceleration step for a key (6, 7, 8, 9, 0), as `FUNC_000208` maps them.
