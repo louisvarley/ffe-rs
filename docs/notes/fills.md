@@ -127,8 +127,17 @@ The curved-surface queue is generated before the frame's palette build (the
 emitters' F1838/F1839 call F1326 while queueing), its colour words are
 registered, and the queue is drawn after the build
 (`ModelViewer::{collect_surfaces, register_surface_colours,
-draw_surface_batches}`). Child executions keep their own `surfaces` list, so
+surface_shapes}`). Child executions keep their own `surfaces` list, so
 `all_surfaces` walks the child tree: the intro's big planet is model 449, a
 surface under model 349, not a face model. Clearing the palette cube before
 each frame's registration is what keeps the surface representatives stable
 (`docs/notes/palette.md` §3).
+
+The queue entries keep their F1777 keys (`SurfaceBatch::order`), and
+`ModelViewer::merge_surface_shapes` inserts them into the frame's primitive
+order (`Frame::keys`, descending F1788 order). They are therefore *not* all
+drawn after the model: at the intro's `0x181534` the far planet is queued
+before the nearer ship, which draws over it. F1879's atmosphere-ring
+`TEXTURE_QUAD` (handler 5 inside the F1780 group, bitmap `0x43`) also takes
+`terrain_texture`/`texture_shape` rather than the old Gouraud stand-in; only a
+cache without the bitmap falls back.

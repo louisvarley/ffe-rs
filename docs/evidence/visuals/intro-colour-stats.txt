@@ -1,0 +1,22 @@
+Intro model 176 at GameTics 0x181534 (planet, ship, galaxy, credits)
+logical 320x200 view rows 0..157, cache v28
+
+                         distinct RGB   mean horizontal run (px)
+port before                     330            2.51
+port after                       71            2.69
+executed original (ref-1516)     71            2.72
+
+The before frame drew F1879's atmosphere ring as two Gouraud triangles; the
+software Gouraud fill invented 268 RGB values on the planet's limb that no
+palette entry held. The after frame draws the same ring entry through F1805 /
+F1647 with bitmap 0x43 and its seven slot colours, so every pixel is a palette
+entry. The port now matches the executed original's colour count and run length.
+
+Ship/planet order: the same tic put the ship's F1738 glows and textured faces
+in front of the curved-surface entries. On this branch no `Shape::TexturedUv`
+(the planet) is indexed after the first `Shape::Glow` (the ship); the old path
+drew every surface after every primitive. See intro-ship-order-before/after.png.
+
+Text frames: the GAME!TEK (animation 200), PRESENTS (248) and DAVID BRABEN'S
+(328) frames are in intro-game-tek/presents/david-before/after.png. "Before"
+removes F1747's first-row negation only; every other input is identical.

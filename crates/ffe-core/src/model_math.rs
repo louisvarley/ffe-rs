@@ -260,6 +260,33 @@ pub fn frame_rows(
     Ok((rows, handedness))
 }
 
+/// F1740 and F1747's text-frame fixup. F1740 copies the parent basis and its
+/// handedness for frame mode 6, otherwise it permutes the frame through
+/// [`frame_rows`]. F1747 then negates the resulting frame's first row when the
+/// handedness word is negative (`cmp [..+0xf8],0; jnl`, `ffe.asm:5f64b-5f658`).
+/// The original applies this to every text instance (the GAME!TEK logo,
+/// PRESENTS and DAVID BRABEN'S); without it the glyph geometry is mirrored.
+pub fn text_frame(
+    matrix: &[i32; 9],
+    base_handedness: u32,
+    basis: &[i32; 9],
+    basis_handedness: u32,
+    word: u32,
+) -> Result<([i32; 9], u32), String> {
+    let (mut rows, handedness) = if word >> 8 & 7 == 6 {
+        (*basis, basis_handedness)
+    } else {
+        frame_rows(matrix, base_handedness, word)?
+    };
+    // F1747's `jnl` is a signed test; F1739/F1740 write 0 or 0xffff_ffff.
+    if (handedness as i32) < 0 {
+        for value in &mut rows[0..3] {
+            *value = value.wrapping_neg();
+        }
+    }
+    Ok((rows, handedness))
+}
+
 /// F1475: shift a vector right (arithmetically) until the OR of its component
 /// magnitudes is below 0x4000; returns the shifted vector and the shift.
 pub fn shift_down(vector: [i32; 3]) -> ([i32; 3], u32) {
