@@ -6,7 +6,8 @@
 //!
 //! The frame pins model 0x31 (the first DATA_006197 warship) so the evidence is
 //! stable; the spawn itself goes through `spawn_thargoid_traffic`, which is
-//! F690 with `F35(0x16) = 1`.
+//! F690 with F35(0x16) = 12 (F688 draws RND(12), so the system gets one or
+//! more of the twelve possible).
 
 use ffe_core::laser;
 use ffe_core::npc::{self, Role};
@@ -122,9 +123,9 @@ fn a_thargoid_spawns_from_f690_and_dies_to_the_players_laser() {
     let viewer = ModelViewer::new(&cache).unwrap();
     let mut screen = Screen::new(&cache).unwrap();
 
-    // F690's count comes from F35(0x16); the mission scripts that set it are not
-    // ported, so this hook is the only way an ordinary system gets one.
-    assert!(nav.spawn_thargoid_traffic(&cache, [0, 0, 0], [0.0, 0.0, 1.0], 1));
+    // F690's count is RND(F35(0x16)); the mission scripts that set the limit are
+    // not ported, so this hook is the only way an ordinary system gets one.
+    assert!(nav.spawn_thargoid_traffic(&cache, [0, 0, 0], [0.0, 0.0, 1.0], 12));
     let index = nav
         .ships
         .iter()

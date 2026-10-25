@@ -1532,10 +1532,11 @@ impl Navigator {
         self.spawn_traffic_with(cache, player, forward, 0)
     }
 
-    /// F690's Thargoid branch with an explicit `F35(0x16)` count: the hook a
-    /// ported mission script would use. The count is not a rate and is not set
-    /// by any system record; zero spawns nothing. Forces the F688 spawner to run
-    /// even when this system already has traffic.
+    /// F690's Thargoid branch with an explicit `F35(0x16)` limit: the hook a
+    /// ported mission script would use. The value is not a rate or an exact
+    /// count: F688 draws `RND(limit)` before F690, and no system record sets it,
+    /// so zero spawns nothing. Forces the F688 spawner to run even when this
+    /// system already has traffic.
     pub fn spawn_thargoid_traffic(
         &mut self,
         cache: &VerifiedCache,

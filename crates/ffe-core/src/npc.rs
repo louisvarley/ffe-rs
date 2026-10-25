@@ -16,14 +16,16 @@
 //!   0x11), ships in station bays (F691), shuttles (F699, type 0xf) and patrol
 //!   groups (F698). `DATA_008997` (ships in the cache's ship-data table) is
 //!   zero in this port, so the bay branch is absent.
-//! - **The Thargoid count is `F35(0x16)`** (`ffe.asm:45858`, a global-variable
-//!   read; F34/F35 are `ffe.asm:3507`/`3524`). It is not a system field: the
-//!   only setter is the mission-script bytecode's variable assignment (F37,
-//!   `ffe.asm:3646`, calling F34), and the 71-dword block is saved with the
-//!   commander (`F65`, `ffe.asm:6898`). No ported system loads a mission script,
-//!   so the normal count is zero; [`System::thargoids`] carries it when a
-//!   mission hook supplies one. F690 itself is F689 with the type byte 0x11 and
-//!   the model list `DATA_006197`; it has no military, system or random gate.
+//! - **The Thargoid count is `RND(F35(0x16))`** (`ffe.asm:45858`, a
+//!   global-variable read; F34/F35 are `ffe.asm:3507`/`3524`). `F35` is a
+//!   limit, not the exact count: F688 passes it to F922 like the trader counts.
+//!   It is not a system field: the only setter is the mission-script bytecode's
+//!   variable assignment (F37, `ffe.asm:3646`, calling F34), and the 71-dword
+//!   block is saved with the commander (`F65`, `ffe.asm:6898`). No ported system
+//!   loads a mission script, so the normal limit is zero; [`System::thargoids`]
+//!   carries it when a mission hook supplies one. F690 itself is F689 with the
+//!   type byte 0x11 and the model list `DATA_006197`; it has no military, system
+//!   or random (beyond the count draw) gate.
 //! - **F694/F695/F696/F693** (F698's four patrol choices) are the pirate
 //!   spawns: a lone type-0xa ship in state 5, a type-0xb leader with two
 //!   formation escorts in state 0xb (+0x102..+0x106 hold their offsets from the
@@ -1747,13 +1749,15 @@ impl Role {
     }
 }
 
-/// The F869 system report plus `F35(0x16)`, the mission-script Thargoid count
-/// F690 loops over. A normal system has `thargoids == 0`: the port has no
-/// mission scripts, so nothing writes that global variable.
+/// The F869 system report plus `F35(0x16)`, the mission-script Thargoid limit
+/// F688 passes to F922 before F690. A normal system has `thargoids == 0`: the
+/// port has no mission scripts, so nothing writes that global variable, and
+/// `RND(0)` spawns none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct System {
     pub details: Details,
-    /// `F35(0x16)` (`ffe.asm:45858`): how many Thargoids F690 spawns.
+    /// `F35(0x16)` (`ffe.asm:45858`): the exclusive limit of F688's Thargoid
+    /// draw, not the number of ships.
     pub thargoids: usize,
 }
 
@@ -1769,7 +1773,7 @@ impl System {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Counts {
     pub traders: usize,
-    /// `F35(0x16)`; F690's count, before [`MAX_SHIPS`].
+    /// `RND(F35(0x16))`; F690's spawned count, before [`MAX_SHIPS`].
     pub thargoids: usize,
     pub shuttles: usize,
     pub pirates: usize,
@@ -1778,15 +1782,16 @@ pub struct Counts {
 
 /// The counts F688 draws from a system record, before [`MAX_SHIPS`]. `details`
 /// is F869's report: `bytes[3]` is `+8`, `bytes[1]` is `+6` and `bytes[2]` is
-/// `+7`. The Thargoid count is the separate `F35(0x16)` global, not a system
-/// field.
+/// `+7`. The Thargoid limit is the separate `F35(0x16)` global, not a system
+/// field, and F688 draws `RND(limit)` for it just as it does for traders.
 pub fn counts(system: &System, rng: &mut Random) -> Counts {
-    // F688: RND(byte +8) traders, F35(0x16) Thargoids (F690), RND(byte +8)
-    // shuttles, byte +6 patrol groups, byte +7 police.
+    // F688: RND(byte +8) traders, RND(F35(0x16)) Thargoids (F690), RND(byte
+    // +8) shuttles, byte +6 patrol groups, byte +7 police.
     let details = &system.details;
+    let thargoid_limit = u32::try_from(system.thargoids).unwrap_or(u32::MAX);
     Counts {
         traders: rng.bounded(details.bytes[3]) as usize,
-        thargoids: system.thargoids,
+        thargoids: rng.bounded(thargoid_limit) as usize,
         shuttles: rng.bounded(details.bytes[3]) as usize,
         pirates: details.bytes[1] as usize,
         police: (details.bytes[2] > 0) as usize,
@@ -1797,8 +1802,8 @@ pub fn counts(system: &System, rng: &mut Random) -> Counts {
 /// models without a statistics block are skipped. The result is capped at
 /// [`MAX_SHIPS`], always has at least one trader when there is an anchor and at
 /// least one pirate group (the port's playability choice), and is deterministic
-/// for a given `rng` state. `system.thargoids` is F690's count; zero unless a
-/// mission script set `F35(0x16)`.
+/// for a given `rng` state. `system.thargoids` is F35(0x16)'s limit; zero
+/// unless a mission script set it.
 pub fn spawn(
     player: [i64; 3],
     forward: [f64; 3],
@@ -2373,9 +2378,10 @@ mod tests {
         assert!(c.pirates == 1);
         assert_eq!(c.police, 1);
         assert_eq!(c.thargoids, 0);
-        // F35(0x16) is the only Thargoid source; it is not a system field, so
-        // the count is exactly what the caller supplies.
-        assert_eq!(counts(&system(3), &mut rng).thargoids, 3);
+        // F35(0x16) is an exclusive limit: F688 calls F922 on it exactly as it
+        // does for the trader counts, so the result is below the limit.
+        let c = counts(&system(3), &mut rng);
+        assert!(c.thargoids < 3);
         let ships = spawn(
             [0, 0, 0],
             [0.0, 0.0, 1.0],
@@ -2423,7 +2429,7 @@ mod tests {
     }
 
     #[test]
-    fn f690_spawns_thargoids_from_f35_0x16_with_data_006197_models() {
+    fn f690_spawns_rnd_f35_0x16_thargoids_with_data_006197_models() {
         assert_eq!(Role::Thargoid.type_code(), 0x11);
         assert_eq!(Role::Thargoid.ai_class(), 0x11);
         assert!(Role::Thargoid.hostile());
@@ -2451,12 +2457,15 @@ mod tests {
         );
         assert!(none.iter().all(|ship| ship.role != Role::Thargoid));
 
+        // F688 draws RND(F35(0x16)); use a limit large enough that this seed's
+        // draw and the MAX_SHIPS cap still leave a Thargoid in the traffic.
+        let limit = 12;
         let mut rng = Random::new(0x2345_6789, 0x3456_789a);
         let ships = spawn(
             [0, 0, 0],
             [0.0, 0.0, 1.0],
             &[anchor],
-            &system(2),
+            &system(limit),
             0,
             &mut rng,
             spec,
@@ -2465,7 +2474,11 @@ mod tests {
             .iter()
             .filter(|ship| ship.role == Role::Thargoid)
             .collect();
-        assert_eq!(thargoids.len(), 2, "F690 spawns one ship per F35(0x16)");
+        assert!(!thargoids.is_empty(), "RND({limit}) drew no Thargoids");
+        assert!(
+            thargoids.len() < limit,
+            "the draw must stay below F35(0x16)"
+        );
         for ship in thargoids {
             assert!(
                 SHIP_TYPES[0x11].contains(&ship.model),

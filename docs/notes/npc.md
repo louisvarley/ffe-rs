@@ -107,12 +107,13 @@ resume transit, instead of orbiting for ever.
   `MAX_SHIPS = 5`; the port keeps at least one trader and one pirate group
   (the original can roll zero) so a fresh system always has something to
   label and shoot.
-- **The Thargoid count** is `System::thargoids`, the caller's `F35(0x16)`.
-  `counts` copies it into `Counts::thargoids`; `spawn` runs F690 after the
-  traders in F688's order. `System::new(details, 0)` is the normal case, and
-  `Navigator::spawn_thargoid_traffic(count)` is the mission/script hook. There
-  is no rate, system test or random gate: exactly `count` type-0x11 ships are
-  attempted, then the port's `MAX_SHIPS` cap applies.
+- **The Thargoid limit** is `System::thargoids`, the caller's `F35(0x16)`.
+  `counts` draws `RND(limit)` into `Counts::thargoids` (F688 passes the limit to
+  F922, exactly like the trader count); `spawn` runs F690 after the traders in
+  F688's order. `System::new(details, 0)` is the normal case, and
+  `Navigator::spawn_thargoid_traffic(limit)` is the mission/script hook. There
+  is no rate, system test or other random gate: `RND(limit)` type-0x11 ships
+  are attempted, then the port's `MAX_SHIPS` cap applies.
 - **Placement:** traders, Thargoids, shuttles and police use a random phase on
   an orbit around the first station/starport (`Anchor`), radius
   `clamp(1.2 * station radius, 2.5e6, 0.75 * laser range)` original units.
@@ -343,7 +344,7 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
   cycle: the bay request/approach/dock with the bay occupied, F747's 2-3 day
   interval, the door-open launch and F651 release with the next station, the
   full-station give-up (F655's Full and F762), and the F867 clearance timeout
-  recycling the ship. The Thargoid tests check F690's `F35(0x16)` count and
+  recycling the ship. The Thargoid tests check F690's `RND(F35(0x16))` limit and
   `DATA_006197` models, `Role::Thargoid`'s type/class/hostility, F774's
   class/cargo laser choice (203 t -> 0x20MW beam, 13,000 t -> 0xcf), and the
   model shield/hull/drive words. `cargo test -p ffe-core equipment` checks the
@@ -372,8 +373,9 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
   128.7 s at `STATION_CRUISE_SPEED` (40,000 mm/s). The PNGs and the full log are
   in `docs/evidence/npc-docking/` (README.md).
 - `cargo test -p ffe-rs --test thargoid_view -- --ignored` with the same cache:
-  `Navigator::spawn_thargoid_traffic(..., 1)` runs F690 with `F35(0x16) = 1`,
-  then the test asserts model 0x31's original statistics (232 t hull, 16,430
+  `Navigator::spawn_thargoid_traffic(..., 12)` runs F690 with `F35(0x16) = 12`
+  (F688 draws `RND(12)`; this checkpoint's seed produces one);
+  the test then asserts model 0x31's original statistics (232 t hull, 16,430
   shield word, 14,715 thrust, drive 14, one mount, 203 t cargo, 90,000 mm
   radius, 928 hull, 184 shields) and F774's 20MW-beam pick, pins the model for
   a stable frame, and fires the new-game 1MW pulse at 60 Hz. Four shield hits
@@ -419,9 +421,9 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 - **Sound.** F953/F942's samples are not played (the audio layer is synthetic),
   though the sound cues from these paths are wired.
 - **Thargoids.** F690's rule, the type-0x11 model list and the role are
-  implemented, but the count is `F35(0x16)`, which only a mission script
-  writes; no ported system sets it, so ordinary traffic has none. The source
-  has no military/witchspace/random gate for F690. The model statistics'
+  implemented, but the count is `RND(F35(0x16))`, whose limit only a mission
+  script writes; no ported system sets it, so ordinary traffic has none. The
+  source has no military/witchspace/random gate for F690 beyond that draw. The model statistics'
   0x800e drive word maps to drive class 14 and `DATA_006266[14] = 0`, so the
   port's Thargoids (like the source's) have no laser energy until a loadout
   gives them some; they still chase and can be hit/killed. Their model names
@@ -438,12 +440,12 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 
 ## 5. Owner decisions
 
-- **Thargoid trigger.** F690's count is `F35(0x16)`, a mission-script global;
-  the port has no mission scripts, so ordinary traffic is zero and the
-  `Navigator::spawn_thargoid_traffic` hook is the only caller that can set it.
-  Decide whether to port the mission bytecode/scripts that write 0x16, expose a
-  developer/system override, or leave Thargoids to scripted/evidence runs.
-  Do not add a government/tech/allegiance rule: none exists in F690.
+- **Thargoid trigger.** F690's count is `RND(F35(0x16))`, a mission-script
+  global limit; the port has no mission scripts, so ordinary traffic is zero and
+  the `Navigator::spawn_thargoid_traffic` hook is the only caller that can set
+  it. Decide whether to port the mission bytecode/scripts that write 0x16,
+  expose a developer/system override, or leave Thargoids to scripted/evidence
+  runs. Do not add a government/tech/allegiance rule: none exists in F690.
 - **Thargoid armament and energy.** The port follows F774's class/cargo
   selection, so the warships carry the 20MW beam and the transporter's 0xcf is
   mountless. The model data's 0x800e drive word gives drive class 14 and

@@ -14,8 +14,8 @@ The PPMs are converted to PNG here; the test keeps writing PPMs.
 
 | Item | Source | Values |
 |---|---|---|
-| Thargoid count | `F35(0x16)` (`ffe.asm:45858`; getter `3524`, setter `3507`) | global variable 22, saved with the commander (`F65`, `6898`). No direct `F34(0x16, …)` call exists, so only mission bytecode (F37, `3646`) writes it. |
-| Spawn | `F690` (`ffe.asm:46032`), called by `F688` (`45818`) after the traders | one ship per count, F689's placement/setup with type 0x11 |
+| Thargoid count | `F35(0x16)` (`ffe.asm:45858`; getter `3524`, setter `3507`) | global variable 22, saved with the commander (`F65`, `6898`). F688 draws `RND(F35(0x16))`, so the variable is an exclusive limit. No direct `F34(0x16, …)` call exists, so only mission bytecode (F37, `3646`) writes it. |
+| Spawn | `F690` (`ffe.asm:46032`), called by `F688` (`45818`) after the traders | `RND(limit)` ships, F689's placement/setup with type 0x11 |
 | Model list | `DATA_006197` (`ffedat.asm:9616`), type 0x11 in `DATA_006199` | `0x45, 0x31,0x31, 0x32,0x32, 0x33,0x33, 0x3f,0x3f,0x3f,0x3f,0x3f` |
 | AI class / role byte | F773 writes `+0x118` (`ffe.asm:50550`) | 0x11 |
 | AI state | F690 writes `+0xff` (`46050`) | 0x11 = F737 jump countdown (`ffedat.asm:9988` row); the port starts the hostile role in `Attack` |
