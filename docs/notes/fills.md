@@ -122,3 +122,13 @@ runs the F1644/F1647 affine rasteriser with them, using the cache's bitmap 0x40
 (land), 0x121 (sea) or 0x5e (the explicit-coordinate terrain block) and the
 emitter's slot colours. Without a cache bitmap the old flat/Gouraud stand-in
 remains.
+
+The curved-surface queue is generated before the frame's palette build (the
+emitters' F1838/F1839 call F1326 while queueing), its colour words are
+registered, and the queue is drawn after the build
+(`ModelViewer::{collect_surfaces, register_surface_colours,
+draw_surface_batches}`). Child executions keep their own `surfaces` list, so
+`all_surfaces` walks the child tree: the intro's big planet is model 449, a
+surface under model 349, not a face model. Clearing the palette cube before
+each frame's registration is what keeps the surface representatives stable
+(`docs/notes/palette.md` §3).

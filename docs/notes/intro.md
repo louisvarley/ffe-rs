@@ -170,13 +170,25 @@ already in the cache. The credits are drawn from the cache, not from Rust
 strings; the old plain-text transcription and its `.text` field are gone.
 
 
-**Not reproduced.** Model 176's late animation (for example at `0x77a7d8`,
-animation `0x1be0`) calls child 456 through a frame that copies a basis F1750
-leaves as stale stack (`docs/notes/animation.md` §1.2); the port reports it once
-and keeps drawing the credits, so those frames have no ship. The intro scene's
-planet/asteroid backdrop is not part of the port's model-176 frame either, so
-the upper palette after the switch grows more slowly than the original's
-(`docs/notes/palette.md` §4). Song 0 `QQFRONT` now plays during the intro:
+**Model 176's scene.** F961 draws model 176, whose command stream selects one
+of sixteen scene children (348/349 at the sampled tics). Those children carry
+the ship (440), asteroids and the big planet, which is a *curved surface*
+(model 449) inside the child tree. Child curved surfaces are collected from the
+child executions (`all_surfaces`) and drawn. One late descendant (model 456 ->
+321) makes a frame-mode-6 call whose parent basis the original copies from
+stale stack; the port reports that single child and keeps its siblings, instead
+of discarding the whole scene. `--capture-intro` therefore shows the planet,
+ship, asteroids and galaxy at the same tics as `jjffe-smoke --intro-live`.
+
+**GAME!TEK.** Model 177 -> child 361 is the logo: one slab face and text
+`0x408a` ("GAME!TEK", glyph set 0, size 15); 362/363 are PRESENTS/DAVID
+BRABEN'S. The text record's material `0x0888` is resolved through
+F1692/F1693 and passed to the glyph instance (F1747); without it the glyph
+faces were black holes in the slab. There is no second logo path: the letters
+are the original's fixed grey, matching the executed frame at animation 63
+(`(192,192,192)` on `(64,64,64)`). See `docs/evidence/visuals/`.
+
+Song 0 `QQFRONT` now plays during the intro:
 `run_intro` calls F919's `front_end_music()`, ticks F1904, and stops the song on
 the start key. Cache v28 stores it as `base:music/qqfront`.
 
@@ -185,8 +197,10 @@ ported in `ffe_rs::palette`. The intro uses its own `F1575` colours: `(0,0,0)`
 for model 177 (fixed low entry 0, black) and `(0,0,4)` for model 176. The
 executed original at the switch frame has exactly one upper entry, six-bit
 `(1,1,17)` (expanded `#040444`), and the same entry is the clear colour; the
-port now produces that entry and background. See `docs/notes/palette.md` for
-the source map, the colour-word format and the frame evidence.
+port now produces that entry and background. The request cube is cleared before
+each frame's registration; the intro's later frames (planet, galaxy) then match
+the executed original instead of drifting into noise. See `docs/notes/palette.md`
+for the source map, the colour-word format and the frame evidence.
 
 
 **Tests and frames.** `crates/ffe-rs/tests/front_end.rs` covers the thresholds,

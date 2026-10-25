@@ -16,6 +16,12 @@ Gouraud quad. Seed 0, detail 2, zoom 0. Checked by eye on models 113 and 445
 (`tests/planet_view.rs`, `FFE_SHOT_DIR` writes PPMs); models too large for the viewer's
 32-bit view space still error.
 
+**Update (visuals):** the queue is split into `collect_surfaces` (before the palette
+build; its colour words are registered and F1877's haze word is kept) and
+`draw_surface_batches` (after the build). Child executions keep their surfaces in their
+own `Execution`, so `all_surfaces` walks the child tree: model 176's planet is model
+449 under 349. The palette cube is cleared per frame (`docs/notes/palette.md` §3).
+
 Rust: `ffe_core::model_commands::Surface` (decoded, cache independent),
 `model_execute::SurfaceEmission::{origin, axes}` (F1874). The viewer does not
 consume surfaces.

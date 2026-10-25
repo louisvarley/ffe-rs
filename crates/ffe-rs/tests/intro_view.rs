@@ -22,6 +22,104 @@ fn non_black(screen: &Screen) -> usize {
         .count()
 }
 
+/// The GAME!TEK logo model 177 -> 361 draws one slab and its own text: the
+/// port has no second (substituted) logo and no label path for it. At animation
+/// 64 the letters are the fixed light grey `(192, 192, 192)`.
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn the_game_tek_logo_is_drawn_once_with_its_letters() {
+    use ffe_rs::model_viewer::{AnimationInputs, Shape};
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let rows = [
+        [127.0 / 128.0, 0.0, 0.0],
+        [0.0, 127.0 / 128.0, 0.0],
+        [0.0, 0.0, 127.0 / 128.0],
+    ];
+    let tics = 0x10000;
+    let inputs = AnimationInputs::original(tics, 0, &viewer.shades());
+    let frame = viewer
+        .render_scene_with(
+            177,
+            rows,
+            [0.0, 0.0, 0x14820 as f64],
+            viewer.light_direction(),
+            &inputs,
+        )
+        .unwrap();
+    // One four-edge slab (model 361's face), not two.
+    let slabs = frame
+        .shapes
+        .iter()
+        .filter(|shape| matches!(shape, Shape::Polygon(edges, _) if edges.len() == 4))
+        .count();
+    assert_eq!(slabs, 1, "the GAME!TEK logo slab drawn {slabs} times");
+    // The letters come from model 361's text, never a model-name label.
+    assert!(
+        !frame
+            .shapes
+            .iter()
+            .any(|shape| matches!(shape, Shape::Label(..))),
+        "a label substituted for the logo text"
+    );
+
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.draw_intro(Some(&viewer), tics, false).unwrap();
+    let pixels = screen.logical_pixels();
+    let letters = pixels
+        .iter()
+        .take(320 * 200)
+        .filter(|pixel| **pixel == 0x00c0_c0c0)
+        .count();
+    assert!(
+        letters > 500,
+        "the GAME!TEK letters are missing: {letters} pixels"
+    );
+    // The pre-fix shortcut showed the unregistered glyph colour (nibbles x4).
+    let fallback = pixels
+        .iter()
+        .take(320 * 200)
+        .filter(|pixel| **pixel == 0x0040_6080)
+        .count();
+    assert_eq!(fallback, 0, "the port-only light-blue glyph path is drawn");
+}
+
+/// Model 176's planet is a child surface (model 449) inside model 349; the
+/// viewer must collect child surfaces, and the palette must be stable after a
+/// long intro sequence (the cube is cleared before each frame's registration).
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn the_intro_planet_is_drawn_and_the_palette_is_stable() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let fresh = ModelViewer::new(&cache).unwrap();
+    screen.draw_intro(Some(&fresh), 0x181534, false).unwrap();
+    let reference = screen.logical_pixels()[..320 * 200].to_vec();
+    let background = reference[0];
+    let drawn = reference.iter().filter(|p| **p != background).count();
+    assert!(
+        drawn > 20_000,
+        "the intro planet/ship cover only {drawn} pixels"
+    );
+
+    // Warm a second viewer through the intro: the same tic must render exactly
+    // the same frame. Before the cube was cleared per frame the accumulated
+    // cells re-cut the boxes and the planet turned to noise.
+    let mut screen = Screen::new(&cache).unwrap();
+    let warmed = ModelViewer::new(&cache).unwrap();
+    let mut tics = 0x400u32;
+    while tics < 0x181534 {
+        screen.draw_intro(Some(&warmed), tics, false).unwrap();
+        tics += 10_430;
+    }
+    screen.draw_intro(Some(&warmed), 0x181534, false).unwrap();
+    assert_eq!(
+        &reference[..],
+        &screen.logical_pixels()[..320 * 200],
+        "the intro frame drifts after a long run"
+    );
+}
+
 #[test]
 #[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v27 data.bin"]
 fn the_intro_draws_the_model_bitmap_and_credits() {
