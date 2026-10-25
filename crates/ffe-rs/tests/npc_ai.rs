@@ -89,7 +89,7 @@ fn frame(
     screen.lasers = [laser::PULSE_1MW, 0, 0, 0];
     let mut views = ViewState::default();
     views.console.labels = true;
-    screen.draw(state, views, Some(viewer), false, true, message);
+    screen.draw(state, views, Some(viewer), true, message);
 }
 
 fn setup(cache: &ffe_content::VerifiedCache) -> (Navigator, ModelViewer, Screen, Flight) {
@@ -247,14 +247,7 @@ fn a_clean_kill_makes_the_police_hostile() {
     let with = screen.logical_pixels().to_vec();
     screen.ships.clear();
     screen.labels.clear();
-    screen.draw(
-        &state,
-        ViewState::default(),
-        Some(&viewer),
-        false,
-        true,
-        message,
-    );
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, message);
     assert!(
         with != screen.logical_pixels(),
         "the police traffic did not draw"

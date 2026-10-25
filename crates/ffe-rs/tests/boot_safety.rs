@@ -239,14 +239,7 @@ fn boot_frame_and_log_stay_clean() {
         .messages
         .push("Landed at Old Blackelk.", screen.clock.clone());
     let draw = |screen: &mut Screen, message: &str| {
-        screen.draw(
-            &state,
-            ViewState::default(),
-            Some(&viewer),
-            false,
-            true,
-            message,
-        );
+        screen.draw(&state, ViewState::default(), Some(&viewer), true, message);
     };
     draw(&mut screen, "");
     save(&screen, "port-hope-boot-0000.ppm");

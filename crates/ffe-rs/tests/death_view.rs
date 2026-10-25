@@ -131,14 +131,14 @@ fn f1104s_death_hold_and_tombstone() {
     assert_eq!(outcome, Outcome::Destroyed);
     assert_eq!(state.death.unwrap().phase, DeathPhase::Exploding);
     stage_effects(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "death-explosion.ppm");
     let explosion = screen.logical_pixels().to_vec();
     let blank = {
         let mut blank = state.clone();
         blank.axes = Some(axes);
         let mut screen = Screen::new(&cache).unwrap();
-        screen.draw(&blank, views, Some(&viewer), false, true, "");
+        screen.draw(&blank, views, Some(&viewer), true, "");
         screen.logical_pixels().to_vec()
     };
     assert!(
@@ -201,7 +201,7 @@ fn f1098s_capsule_escape_frame() {
     assert_eq!(state.hull, [stats.mass * 4; 2]);
     nav.tick_effects(0.1);
     stage_effects(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "death-capsule.ppm");
     let capsule = screen.logical_pixels().to_vec();
     // The old hull and the capsule differ on screen (the model is the player's
@@ -209,7 +209,7 @@ fn f1098s_capsule_escape_frame() {
     let mut old = state.clone();
     old.ship = NEW_GAME_SHIP;
     let mut old_screen = Screen::new(&cache).unwrap();
-    old_screen.draw(&old, views, Some(&viewer), false, true, "");
+    old_screen.draw(&old, views, Some(&viewer), true, "");
     assert!(changed(old_screen.logical_pixels(), &capsule) > 0);
     println!(
         "escape frame: model {} hull {:?} general {:#010x}",

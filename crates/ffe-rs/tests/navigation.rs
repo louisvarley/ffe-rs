@@ -752,10 +752,10 @@ fn planet_discs_are_drawn() {
         orientation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
     }];
     let discs = std::mem::take(&mut screen.discs);
-    screen.draw(&state, ViewState::default(), None, false, false, "");
+    screen.draw(&state, ViewState::default(), None, false, "");
     let before = screen.logical_pixels().to_vec();
     screen.discs = discs;
-    screen.draw(&state, ViewState::default(), None, false, false, "");
+    screen.draw(&state, ViewState::default(), None, false, "");
     let changed = screen
         .logical_pixels()
         .iter()
@@ -1214,7 +1214,6 @@ fn shot(
         &state,
         ffe_rs::camera::ViewState::default(),
         Some(viewer),
-        false,
         true,
         "",
     );

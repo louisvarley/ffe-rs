@@ -84,7 +84,10 @@ line). Docked at a station the same board is the state `0x2a` screen. Wired in
   Backspace) turns it off. The brackets turn yellow and the line reads `AUTOPILOT:` while it is flying. The autopilot starts
   the original flight model if it was not running (as O does). Open-air starports are flown to but not landed on yet.
 - D, flying in a system, asks the nearest station within 100 km for docking clearance (again cancels it). Fly into the slot on the station's docking face; or engage the autopilot on a station, which docks by itself.
-- F12 is the model viewer, Shift+F12 the model lab. The other console buttons and the playtest scenarios are not in this build.
+- F11 is the original's combat-computer key; view 6 is not ported, so it has no
+  action in the player build. F12 is the source escape capsule. The port's old
+  F12 model viewer and Shift+F12 model lab are developer-only (`--dev`,
+  Ctrl+F12 and Ctrl+Shift+F12); the help page and playtest scenarios are gone.
 
 Planets move on the game clock (days plus a fraction), children relative to their parent. Long legs are transfers (the clock jumps and the ship lands short of the body's future position); the last stretch is flown in the target's frame (`Navigator::follow`) because the autopilot cannot catch a body moving at 30 km/s.
 

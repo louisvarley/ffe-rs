@@ -116,7 +116,7 @@ fn hit_particle_explosion_and_frames() {
     let views = ViewState::default();
     nav.lock_ship(nav.ships[index].id);
     stage(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     let empty = screen.logical_pixels().to_vec();
 
     // F939: one model-0x9e particle at the hit point.
@@ -141,7 +141,7 @@ fn hit_particle_explosion_and_frames() {
     // The hit particle sits on the ship's hull and the shield flash is on.
     assert!(nav.ships[index].flash > 0.0);
     stage(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "effects-hit.ppm");
     let hit_frame = screen.logical_pixels().to_vec();
     assert!(
@@ -172,7 +172,7 @@ fn hit_particle_explosion_and_frames() {
         "F926 spawned no debris"
     );
     stage(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "effects-kill.ppm");
     let kill_frame = screen.logical_pixels().to_vec();
     assert!(
@@ -187,7 +187,7 @@ fn hit_particle_explosion_and_frames() {
     }
     assert!(nav.effects.is_empty(), "the effects did not expire");
     stage(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "effects-kill-after.ppm");
     let after = screen.logical_pixels().to_vec();
     assert!(

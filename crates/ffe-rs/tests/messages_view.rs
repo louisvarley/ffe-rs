@@ -36,7 +36,7 @@ fn save(screen: &Screen, name: &str) {
 
 fn draw(screen: &mut Screen, views: ViewState) {
     let state = flight();
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
 }
 
 fn changed(before: &[u32], after: &[u32], x0: i32, x1: i32, y0: i32, y1: i32) -> usize {
@@ -62,13 +62,13 @@ fn boot_log_frame() {
         "1-Jan-3250 12:26:56".to_owned(),
     );
     let state = flight();
-    screen.draw(&state, ViewState::default(), None, false, false, "");
+    screen.draw(&state, ViewState::default(), None, false, "");
     let with_log = screen.logical_pixels().to_vec();
     save(&screen, "log-boot.ppm");
 
     // Nothing in the view or the left/middle console moved.
     screen.messages_visible = false;
-    screen.draw(&state, ViewState::default(), None, false, false, "");
+    screen.draw(&state, ViewState::default(), None, false, "");
     let without = screen.logical_pixels().to_vec();
     assert_eq!(changed(&without, &with_log, 0, 195, 0, 200), 0);
     assert_eq!(changed(&without, &with_log, 195, 320, 0, 158), 0);
@@ -180,7 +180,7 @@ fn port_only_clicks_and_view_changes_leave_the_log_clean() {
 
     let draw = |screen: &mut Screen, views: ViewState, name: &str| {
         let state = flight();
-        screen.draw(&state, views, None, false, false, "");
+        screen.draw(&state, views, None, false, "");
         save(screen, &format!("log-{name}.ppm"));
     };
     draw(&mut screen, ViewState::default(), "boot");

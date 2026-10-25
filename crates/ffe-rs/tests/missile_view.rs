@@ -81,7 +81,7 @@ fn draw(screen: &mut Screen, nav: &Navigator, state: &Flight, viewer: &ModelView
     screen.lasers = state.combat.lasers;
     screen.missile_lock = lock && nav.missile_lock.is_some();
     screen.missile_blink = true;
-    screen.draw(state, ViewState::default(), Some(viewer), false, true, "");
+    screen.draw(state, ViewState::default(), Some(viewer), true, "");
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn lock_launch_hit_and_kill_with_frames() {
     // The missile object draws through the same renderer as the ships: without
     // it the frame is different.
     screen.missiles.clear();
-    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
     assert!(
         changed(&launch_frame, screen.logical_pixels()) > 0,
         "the missile object did not draw"

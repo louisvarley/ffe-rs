@@ -71,8 +71,10 @@ ship" on). F10's missile view needs the fitted Missile Viewer and
 (`ViewMode::Missile` + `ViewState::missile`, F1054's `JUMP_004340`), and F1102
 forces the front view when that missile dies. F1099's view-5 branch draws only
 the combat target's amber (0x5f) range text. Not ported: the combat computer
-(view 6) and the Alt-arrow mouse nudge. ffe-rs moved its own development keys
-off the original ones: help F1 -> H, model viewer F6 -> M, load F9 -> Shift+F5.
+(view 6) and the Alt-arrow mouse nudge. F11 stays the source combat-computer key
+and has no action until view 6 exists (the port shows its not-ported note); F12 is the source escape capsule. The
+port's own model viewer/lab and screenshot are developer-only `--dev` commands,
+so the source view keys are not repurposed in the player build.
 
 The fixed gunsight now follows F1111 exactly (`docs/notes/combat.md`): bitmap
 97 at (129,48), drawn in any view but external/combat whose mount

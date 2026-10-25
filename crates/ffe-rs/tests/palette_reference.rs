@@ -153,7 +153,7 @@ fn the_default_and_black_space_colours_stay_the_owners_values() {
         mode: Mode::Flight,
         ..Flight::default()
     };
-    screen.draw(&state, ViewState::default(), None, false, true, "");
+    screen.draw(&state, ViewState::default(), None, true, "");
     assert_eq!(screen.logical_pixels()[0], 0);
 }
 
@@ -186,7 +186,7 @@ fn the_map_builds_a_runtime_upper_palette() {
         mode: Mode::Flight,
         ..Flight::default()
     };
-    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
 
     let upper = viewer.palette_upper6().unwrap();
     let used: Vec<[u8; 3]> = upper

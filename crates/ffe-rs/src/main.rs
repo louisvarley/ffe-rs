@@ -122,6 +122,10 @@ struct Options {
     /// Directory for the F917 tombstone screen: starts the game-over state with
     /// the new game's commander/date and saves frames through the spin.
     capture_gameover: Option<PathBuf>,
+    /// `--dev` or `FFE_DEV=1`: enables the developer-only Ctrl-chord model
+    /// viewer/lab, screenshot and the prototype-flight toggle. Never set by the
+    /// player launch path.
+    dev: bool,
 }
 
 fn options() -> Result<Options, String> {
@@ -138,6 +142,7 @@ fn options() -> Result<Options, String> {
     let mut capture_intro = None;
     let mut capture_display = None;
     let mut capture_gameover = None;
+    let mut dev = std::env::var_os("FFE_DEV").is_some_and(|value| value == "1");
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
@@ -174,6 +179,8 @@ fn options() -> Result<Options, String> {
             };
         } else if arg == "--skip-intro" && !skip_intro {
             skip_intro = true;
+        } else if arg == "--dev" && !dev {
+            dev = true;
         } else if arg == "--capture" && capture.is_none() {
             capture = Some(PathBuf::from(
                 args.next().ok_or("--capture requires a directory")?,
@@ -221,7 +228,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--dev] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -253,6 +260,7 @@ fn options() -> Result<Options, String> {
         capture_intro,
         capture_display,
         capture_gameover,
+        dev,
     })
 }
 
@@ -326,6 +334,25 @@ fn write_shot(dir: &Path, name: &str, screen: &Screen) {
     let _ = fs::write(dir.join(name), out);
 }
 
+/// Developer screenshot (`--dev` Ctrl+F11): the presented 640x480 frame as a
+/// binary PPM under `shots/`. The player build has no screenshot key; the
+/// scripted `--capture*` modes remain the reproducible capture path.
+fn save_screenshot(root: &Path, screen: &Screen) -> Result<String, String> {
+    let dir = root.join("shots");
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let mut number = 1;
+    while dir.join(format!("shot-{number:04}.ppm")).exists() {
+        number += 1;
+    }
+    let name = format!("shot-{number:04}.ppm");
+    let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+    for pixel in &screen.pixels {
+        out.extend([(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]);
+    }
+    fs::write(dir.join(&name), out).map_err(|error| error.to_string())?;
+    Ok(format!("shots/{name}"))
+}
+
 /// Write an RGB PNG from packed 0x00RRGGBB pixels.
 fn write_png(path: &Path, pixels: &[u32], width: usize, height: usize) -> Result<(), String> {
     let mut bytes = Vec::new();
@@ -360,7 +387,6 @@ fn write_display_capture(dir: &Path, cache: &ffe_content::VerifiedCache) -> Resu
         &state,
         ViewState::default(),
         scene.as_ref(),
-        false,
         true,
         "DISPLAY EVIDENCE: THE 320x200 FRAME IS UNCHANGED",
     );
@@ -580,7 +606,6 @@ fn run() -> Result<(), String> {
                 &state,
                 ViewState::default(),
                 scene.as_ref(),
-                false,
                 true,
                 &format!("SPACE COLOUR: {}", prefs::SPACE_COLOURS[index]),
             );
@@ -643,8 +668,6 @@ fn run() -> Result<(), String> {
         GameAudio::from_cache(&options.root, &cache)
     };
     sound.apply_prefs(&prefs);
-    let mut help = false;
-    let mut scenarios = false;
     let mut model_lab = None;
     // The galaxy map's state and the tables it reads (cache v21 to v25).
     let mut galaxy: Option<GalaxyMap> = None;
@@ -660,7 +683,9 @@ fn run() -> Result<(), String> {
     // skip targets (`DATA_007248`/`DATA_007249`); only the fitted Auto targetter
     // lets `T`/`Shift+T` touch them.
     let mut targeter = ffe_rs::targeter::Arming::default();
-    // The original flight model (key O); None runs the synthetic prototype flight.
+    // The original flight model; None runs the synthetic prototype flight. Only
+    // `--dev`'s O chord toggles it; a player build always flies the original
+    // model once the ship is in free flight.
     let mut original: Option<OriginalFlight> = None;
     // When each external-view or turret key went down, for the original's
     // held-key ramp.
@@ -1065,8 +1090,6 @@ fn run() -> Result<(), String> {
         let keys_down = window.get_keys();
         let controls_enabled = active
             && !prefs.open
-            && !help
-            && !scenarios
             && !paused
             && state.death.is_none()
             && model_lab.is_none()
@@ -1264,8 +1287,6 @@ fn run() -> Result<(), String> {
             && mouse_down
             && !mouse_was_down
             && state.mode == ffe_rs::flight::Mode::Flight
-            && !help
-            && !scenarios
             && model_lab.is_none()
             && model_viewer.is_none()
         {
@@ -1280,8 +1301,6 @@ fn run() -> Result<(), String> {
             && mouse_down
             && !mouse_was_down
             && state.mode == ffe_rs::flight::Mode::Flight
-            && !help
-            && !scenarios
             && model_lab.is_none()
             && model_viewer.is_none()
         {
@@ -1298,8 +1317,6 @@ fn run() -> Result<(), String> {
             && mouse_down
             && !mouse_was_down
             && state.mode == ffe_rs::flight::Mode::Docked
-            && !help
-            && !scenarios
             && model_lab.is_none()
             && model_viewer.is_none()
         {
@@ -1322,13 +1339,7 @@ fn run() -> Result<(), String> {
         .into_iter()
         .find(|(key, _)| pressed(*key))
         .and_then(|(_, digit)| acceleration_for_digit(digit))
-        .filter(|_| {
-            active
-                && !death_control
-                && !help
-                && !scenarios
-                && state.mode == ffe_rs::flight::Mode::Flight
-        });
+        .filter(|_| active && !death_control && state.mode == ffe_rs::flight::Mode::Flight);
         let chosen_step = match console_click {
             Some(Click::Acceleration(step)) => Some(step),
             _ => digit_step,
@@ -1340,7 +1351,7 @@ fn run() -> Result<(), String> {
                 message = format!("Time acceleration {}.", ACCELERATION_NAMES[step]);
             } else {
                 message = format!(
-                    "Time acceleration {} (applies to the original flight model: O).",
+                    "Time acceleration {} (applies to the original flight model).",
                     ACCELERATION_NAMES[step]
                 );
             }
@@ -1354,8 +1365,6 @@ fn run() -> Result<(), String> {
         // page on the console. The key and its console button both toggle it.
         if active
             && state.mode == ffe_rs::flight::Mode::Flight
-            && !help
-            && !scenarios
             && model_lab.is_none()
             && model_viewer.is_none()
             && (pressed(Key::F2) || console_click == Some(Click::Screen(2)))
@@ -1385,8 +1394,6 @@ fn run() -> Result<(), String> {
         // console's screen button) or Backspace returns to it.
         if active
             && !death_control
-            && !help
-            && !scenarios
             && model_lab.is_none()
             && model_viewer.is_none()
             && (pressed(Key::F4)
@@ -1411,67 +1418,75 @@ fn run() -> Result<(), String> {
             }
         }
         if active && !death_control {
-            // F1 is the original's view key and H is the hyperspace key, so
-            // the port's help page is `?` (Slash).
-            if pressed(Key::Slash) {
-                help = !help;
-                scenarios = false;
-                model_lab = None;
-                model_viewer = None;
-                held_controls.disarm(&keys_down);
-            }
             let shift_down =
                 window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
-            // F12 is the model viewer (Shift+F12 the model lab).
-            // F11 saves the presented frame for bug reports (a binary PPM).
-            if pressed(Key::F11) {
-                let dir = options.root.join("shots");
-                let _ = fs::create_dir_all(&dir);
-                let mut number = 1;
-                while dir.join(format!("shot-{number:04}.ppm")).exists() {
-                    number += 1;
-                }
-                let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
-                for pixel in &screen.pixels {
-                    out.extend([(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]);
-                }
-                message = match fs::write(dir.join(format!("shot-{number:04}.ppm")), out) {
-                    Ok(()) => format!("Saved shots/shot-{number:04}.ppm"),
-                    Err(error) => format!("Screenshot failed: {error}"),
-                };
-            }
-            if pressed(Key::F12) && shift_down {
-                held_controls.disarm(&keys_down);
-                if model_lab.is_some() {
-                    model_lab = None;
-                } else {
-                    help = false;
-                    scenarios = false;
-                    model_viewer = None;
-                    match ModelLab::new(&cache) {
-                        Ok(lab) => model_lab = Some(lab),
-                        Err(error) => {
-                            eprintln!("MODEL LAB ERROR: {error}");
-                            message = format!("MODEL LAB ERROR: {error}");
+            let ctrl_down = window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
+            // Developer-only commands. A player build binds none of these:
+            // `--dev` (or `FFE_DEV=1`) enables Ctrl+F11 screenshot,
+            // Ctrl+F12 model viewer, Ctrl+Shift+F12 model lab and O prototype
+            // flight. Plain F11/F12 stay free for the source combat computer
+            // and escape capsule.
+            let debug_key = [Key::F11, Key::F12, Key::O]
+                .into_iter()
+                .find(|key| pressed(*key));
+            if let Some(command) = debug_key
+                .and_then(|key| input::dev_command(options.dev, key, ctrl_down, shift_down))
+            {
+                match command {
+                    input::DevCommand::Screenshot => {
+                        message = match save_screenshot(&options.root, &screen) {
+                            Ok(name) => format!("Saved {name}"),
+                            Err(error) => format!("Screenshot failed: {error}"),
+                        };
+                    }
+                    input::DevCommand::ModelViewer => {
+                        held_controls.disarm(&keys_down);
+                        if model_viewer.is_some() {
+                            model_viewer = None;
+                        } else {
+                            model_lab = None;
+                            match ModelViewer::new(&cache) {
+                                Ok(viewer) => model_viewer = Some(viewer),
+                                Err(error) => {
+                                    eprintln!("MODEL VIEWER ERROR: {error}");
+                                    message = format!("MODEL VIEWER ERROR: {error}");
+                                }
+                            }
                         }
                     }
-                }
-            }
-            if pressed(Key::F12) && !shift_down {
-                held_controls.disarm(&keys_down);
-                if model_viewer.is_some() {
-                    model_viewer = None;
-                } else {
-                    help = false;
-                    scenarios = false;
-                    model_lab = None;
-                    match ModelViewer::new(&cache) {
-                        Ok(viewer) => model_viewer = Some(viewer),
-                        Err(error) => {
-                            eprintln!("MODEL VIEWER ERROR: {error}");
-                            message = format!("MODEL VIEWER ERROR: {error}");
+                    input::DevCommand::ModelLab => {
+                        held_controls.disarm(&keys_down);
+                        if model_lab.is_some() {
+                            model_lab = None;
+                        } else {
+                            model_viewer = None;
+                            match ModelLab::new(&cache) {
+                                Ok(lab) => model_lab = Some(lab),
+                                Err(error) => {
+                                    eprintln!("MODEL LAB ERROR: {error}");
+                                    message = format!("MODEL LAB ERROR: {error}");
+                                }
+                            }
                         }
                     }
+                    input::DevCommand::PrototypeFlight
+                        if state.mode == ffe_rs::flight::Mode::Flight =>
+                    {
+                        if original.take().is_some() {
+                            state.axes = None;
+                            message = "Prototype flight model (developer).".to_owned();
+                        } else {
+                            let stats = scene
+                                .as_ref()
+                                .and_then(|scene| scene.ship_stats(state.ship));
+                            original = Some(
+                                OriginalFlight::from_flight(&state, stats.as_ref())
+                                    .with_time_acceleration(acceleration),
+                            );
+                            message = "Original flight model.".to_owned();
+                        }
+                    }
+                    input::DevCommand::PrototypeFlight => {}
                 }
             }
             if pressed(Key::F3) {
@@ -1493,8 +1508,6 @@ fn run() -> Result<(), String> {
             // flies to the body (or jumps to the system), Backspace stops the autopilot.
             if let Some(nav) = nav.as_mut().filter(|_| {
                 state.mode == ffe_rs::flight::Mode::Flight
-                    && !help
-                    && !scenarios
                     && model_lab.is_none()
                     && model_viewer.is_none()
             }) {
@@ -2148,23 +2161,7 @@ fn run() -> Result<(), String> {
                     repeated(Key::Right) - repeated(Key::Left),
                     repeated(Key::Up) - repeated(Key::Down),
                 )?;
-            } else if scenarios {
-                let selected = if pressed(Key::Key1) {
-                    Some(Flight::default())
-                } else if pressed(Key::Key2) {
-                    Some(Flight::approach())
-                } else if pressed(Key::Key3) {
-                    Some(Flight::free_flight())
-                } else {
-                    None
-                };
-                if let Some(next) = selected {
-                    state = next;
-                    scenarios = false;
-                    paused = false;
-                    message = "Scenario reset. Saves kept. H for controls.".to_owned();
-                }
-            } else if !help && !paused {
+            } else if !paused {
                 // The original's view keys (FUNC_001001/FUNC_001056): F1 cycles,
                 // F6 front, F7 rear, F9 external; the console icons do the same.
                 // The ship's gun mounts (cache v12): more than two offer the turrets.
@@ -2172,29 +2169,6 @@ fn run() -> Result<(), String> {
                     .as_ref()
                     .and_then(|scene| scene.ship_stats(state.ship))
                     .map_or(0, |stats| stats.gun_mounts);
-                if pressed(Key::O) && state.mode == ffe_rs::flight::Mode::Flight {
-                    if original.take().is_some() {
-                        state.axes = None;
-                        message = "Prototype flight model.".to_owned();
-                    } else {
-                        let stats = scene
-                            .as_ref()
-                            .and_then(|scene| scene.ship_stats(state.ship));
-                        original = Some(
-                            OriginalFlight::from_flight(&state, stats.as_ref())
-                                .with_time_acceleration(acceleration),
-                        );
-                        if let Some(model) = original.as_mut() {
-                            model.set_time_acceleration(acceleration);
-                        }
-                        message = if prefs.modern {
-                            "Original flight: W/S set speed; arrows pitch and yaw, Q/E roll."
-                        } else {
-                            "Original flight: hold right mouse to steer; Enter/Shift set speed; Z/A pitch, ,/. yaw, [ ] roll."
-                        }
-                        .to_owned();
-                    }
-                }
                 if state.mode == ffe_rs::flight::Mode::Flight {
                     // F1056's launch action (its action 9, Tab: scancode 0x0f
                     // maps to action 0x09) from a landed state: `0x34` goes
@@ -2262,8 +2236,12 @@ fn run() -> Result<(), String> {
                     }
                     // F12's console icon is F1056's F1098 call (`78528`): the
                     // escape capsule or Stowmaster launches when fitted, and
-                    // nothing happens (F1098 returns 0) when it is not.
-                    if console_click == Some(Click::Capsule) {
+                    // nothing happens (F1098 returns 0) when it is not. The key
+                    // is the source's F12 (action 0xfc), as the console icon is;
+                    // Ctrl+F12 is the developer model viewer instead.
+                    let ctrl_down =
+                        window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
+                    if pressed(Key::F12) && !ctrl_down || console_click == Some(Click::Capsule) {
                         match death::escape_craft(&state.loadout) {
                             Some(craft) => {
                                 let stats = scene
@@ -2300,34 +2278,53 @@ fn run() -> Result<(), String> {
                     // Missile Viewer (general bit 9) and a missile in flight
                     // (`player+0xef`); otherwise the key does nothing.
                     let mut view_note: Option<String> = None;
-                    let chosen = if pressed(Key::F1) || clicked == Some(ViewButton::Cycle) {
-                        Some(views.mode.next(gun_mounts, views.turret.pitch))
-                    } else if pressed(Key::F6) {
-                        Some(ViewMode::Front)
-                    } else if pressed(Key::F7) {
-                        Some(ViewMode::Rear)
-                    } else if pressed(Key::F8) || clicked == Some(ViewButton::Turret) {
-                        turret
-                    } else if pressed(Key::F9) {
-                        Some(ViewMode::External)
-                    } else if pressed(Key::F10) {
-                        if views.mode == ViewMode::Missile {
-                            Some(ViewMode::Missile)
-                        } else if !state.loadout.missile_viewer() {
-                            view_note =
-                                Some("F10: fit the Missile Viewer at a starport.".to_owned());
-                            None
-                        } else if nav.as_ref().is_some_and(|nav| nav.missile_view.is_some()) {
-                            Some(ViewMode::Missile)
-                        } else {
-                            view_note = Some("F10: no missile of yours is in flight.".to_owned());
-                            None
+                    let view_command = [Key::F1, Key::F6, Key::F7, Key::F8, Key::F9, Key::F10]
+                        .into_iter()
+                        .find(|key| pressed(*key))
+                        .and_then(input::view_command);
+                    let chosen = if let Some(command) = view_command {
+                        match command {
+                            input::ViewCommand::Cycle => {
+                                Some(views.mode.next(gun_mounts, views.turret.pitch))
+                            }
+                            input::ViewCommand::Front => Some(ViewMode::Front),
+                            input::ViewCommand::Rear => Some(ViewMode::Rear),
+                            input::ViewCommand::Turret => turret,
+                            input::ViewCommand::External => Some(ViewMode::External),
+                            input::ViewCommand::Missile => {
+                                if views.mode == ViewMode::Missile {
+                                    Some(ViewMode::Missile)
+                                } else if !state.loadout.missile_viewer() {
+                                    view_note = Some(
+                                        "F10: fit the Missile Viewer at a starport.".to_owned(),
+                                    );
+                                    None
+                                } else if nav.as_ref().is_some_and(|nav| nav.missile_view.is_some())
+                                {
+                                    Some(ViewMode::Missile)
+                                } else {
+                                    view_note =
+                                        Some("F10: no missile of yours is in flight.".to_owned());
+                                    None
+                                }
+                            }
                         }
-                    } else if let Some(ViewButton::Select(mode)) = clicked {
-                        Some(mode)
                     } else {
-                        None
+                        match clicked {
+                            Some(ViewButton::Cycle) => {
+                                Some(views.mode.next(gun_mounts, views.turret.pitch))
+                            }
+                            Some(ViewButton::Turret) => turret,
+                            Some(ViewButton::Select(mode)) => Some(mode),
+                            None => None,
+                        }
                     };
+                    // F11 is the source combat-computer key. View 6 is not
+                    // ported, so say so instead of leaving a silent dead key.
+                    if view_command.is_none() && clicked.is_none() && pressed(Key::F11) {
+                        view_note =
+                            Some("The combat computer needs equipment (not ported).".to_owned());
+                    }
                     if let Some(next) = chosen {
                         let changed = next != views.mode;
                         views.mode = next;
@@ -2416,8 +2413,6 @@ fn run() -> Result<(), String> {
                     held_controls.disarm(&keys_down);
                 }
                 if state.mode == ffe_rs::flight::Mode::Docked
-                    && !help
-                    && !scenarios
                     && model_lab.is_none()
                     && model_viewer.is_none()
                 {
@@ -2914,14 +2909,7 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        if active
-            && !death_control
-            && !help
-            && !scenarios
-            && !paused
-            && model_lab.is_none()
-            && model_viewer.is_none()
-        {
+        if active && !death_control && !paused && model_lab.is_none() && model_viewer.is_none() {
             // The original's "Reverse left-right controls" and "Reverse up-down
             // controls" (DATA_009021/DATA_009022, toggled by FUNC_000216).
             let reverse = [prefs.others[3], prefs.others[4]];
@@ -3331,13 +3319,7 @@ fn run() -> Result<(), String> {
             views.mode = ViewMode::Front;
         }
         // Traffic control: doors, clearance timeouts and the docking and launch stages.
-        if active
-            && !death_control
-            && !help
-            && !paused
-            && model_lab.is_none()
-            && model_viewer.is_none()
-        {
+        if active && !death_control && !paused && model_lab.is_none() && model_viewer.is_none() {
             if let Some(nav) = nav.as_mut() {
                 let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
                     / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
@@ -3423,7 +3405,6 @@ fn run() -> Result<(), String> {
         let landed_view = nav.as_ref().is_some_and(|nav| nav.landed_view());
         if active
             && !death_control
-            && !help
             && !paused
             && !landed_view
             && model_lab.is_none()
@@ -3788,9 +3769,7 @@ fn run() -> Result<(), String> {
         }
         screen.beam = None;
         let can_fire = active
-            && !help
             && !paused
-            && !scenarios
             && state.mode == ffe_rs::flight::Mode::Flight
             && model_lab.is_none()
             && model_viewer.is_none()
@@ -4766,7 +4745,6 @@ fn run() -> Result<(), String> {
         // keyboard map: "PgUp/Dn Scroll the Message Log").
         if active
             && !death_control
-            && !help
             && !paused
             && state.mode == ffe_rs::flight::Mode::Flight
             && nav.as_ref().is_none_or(|nav| nav.view == NavView::Closed)
@@ -4826,9 +4804,9 @@ fn run() -> Result<(), String> {
                     inside.pitch = (to[1] / length).asin();
                 }
             }
-            screen.draw(&inside, views, scene.as_ref(), help, prefs.modern, &message);
+            screen.draw(&inside, views, scene.as_ref(), prefs.modern, &message);
         } else {
-            screen.draw(&state, views, scene.as_ref(), help, prefs.modern, &message);
+            screen.draw(&state, views, scene.as_ref(), prefs.modern, &message);
         }
         if let Some(dir) = &options.capture {
             if frames % 10 == 0 {
@@ -4853,21 +4831,11 @@ fn run() -> Result<(), String> {
             screen.draw_model_viewer(viewer);
         } else if let Some(lab) = &model_lab {
             screen.draw_model_lab(lab)?;
-        } else if scenarios {
-            screen.overlay(
-                "PLAYTEST SCENARIOS - RESETS UNSAVED PROGRESS",
-                &[
-                    "1  DOCKED: TRADE / LAUNCH / SAVE",
-                    "2  APPROACH: D REQUEST DOCK; COAST ~20 SEC",
-                    "3  FREE FLIGHT: STATION 1500 UNITS AHEAD",
-                    "F2 CANCELS. SAVES ARE NOT DELETED.",
-                ],
-            );
-        } else if (paused || !active) && !help && !death_control {
+        } else if (paused || !active) && !death_control {
             screen.overlay(
                 "PAUSED",
                 &[
-                    "P RESUMES. ? HELP. F2 STATUS PAGE.",
+                    "P RESUMES. F2 STATUS PAGE.",
                     "FOCUS LOSS PAUSES WITHOUT CATCH-UP.",
                 ],
             );

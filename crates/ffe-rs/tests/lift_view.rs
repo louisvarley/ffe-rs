@@ -95,14 +95,7 @@ fn the_lift_scenes_draw() {
                 world: true,
                 tics: 0x8000_0000 + frames * 994,
             });
-            screen.draw(
-                &inside,
-                ViewState::default(),
-                Some(&viewer),
-                false,
-                true,
-                "",
-            );
+            screen.draw(&inside, ViewState::default(), Some(&viewer), true, "");
             // The lift fills the 320x158 view: the port's status block must not
             // clear its bottom rows while a lift scene is drawn.
             // Only the closed/opening door stages fill the bottom rows; others
@@ -185,14 +178,7 @@ fn the_lift_scenes_draw() {
                 world: true,
                 tics: 0x8000_0000 + frames * 994,
             });
-            screen.draw(
-                &docking,
-                ViewState::default(),
-                Some(&viewer),
-                false,
-                true,
-                "",
-            );
+            screen.draw(&docking, ViewState::default(), Some(&viewer), true, "");
             save(&screen, &format!("lift-dock-{frames:04}-{stage:02x}.ppm"));
         }
     }
@@ -290,14 +276,7 @@ fn the_launch_ends_in_the_station() {
             inside.position = seat.map(|v| v as f64 / UNIT);
             inside.axes = Some([right, up, forward]);
             screen.station_view = true;
-            screen.draw(
-                &inside,
-                ViewState::default(),
-                Some(&viewer),
-                false,
-                true,
-                "",
-            );
+            screen.draw(&inside, ViewState::default(), Some(&viewer), true, "");
             let lit = lit_view_pixels(&screen);
             if stage == 0x1e {
                 waited = true;
@@ -348,14 +327,7 @@ fn the_launch_ends_in_the_station() {
     screen.lift = None;
     screen.station_view = false;
     screen.stations = stations(&nav, 0x8000_0000 + frames * 830);
-    screen.draw(
-        &inside,
-        ViewState::default(),
-        Some(&viewer),
-        false,
-        true,
-        "",
-    );
+    screen.draw(&inside, ViewState::default(), Some(&viewer), true, "");
     let lit = lit_view_pixels(&screen);
     assert!(
         lit > 4000,

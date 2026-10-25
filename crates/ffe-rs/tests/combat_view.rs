@@ -50,7 +50,7 @@ fn changed(before: &[u32], after: &[u32], x0: i32, x1: i32, y0: i32, y1: i32) ->
 }
 
 fn draw(screen: &mut Screen, state: &Flight, views: ViewState, scene: Option<&ModelViewer>) {
-    screen.draw(state, views, scene, false, true, "");
+    screen.draw(state, views, scene, true, "");
 }
 
 #[test]

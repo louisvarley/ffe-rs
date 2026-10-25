@@ -56,12 +56,12 @@ fn the_labels_and_navigation_buttons_show_their_on_images() {
     // fitted (general-equipment bit 5); the fixture is otherwise an empty ship.
     screen.systems.general |= 1 << 5;
 
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let off = screen.logical_pixels().to_vec();
     save(&screen, "labels-off.ppm");
 
     views.console.labels = true;
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let labels_on = screen.logical_pixels().to_vec();
     save(&screen, "labels-on.ppm");
     // The labels icon's 33x23 bitmap sits at 274,178.
@@ -72,7 +72,7 @@ fn the_labels_and_navigation_buttons_show_their_on_images() {
 
     views.console.labels = false;
     views.console.navigation = true;
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let navigation_on = screen.logical_pixels().to_vec();
     save(&screen, "navigation-on.ppm");
     // The navigation icon's 25x25 bitmap sits at 261,177; 261-273 is clear of
@@ -98,7 +98,7 @@ fn the_labels_toggle_draws_the_objects_name_in_the_flight_view() {
         mode: ViewMode::Front,
         ..ViewState::default()
     };
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let off = screen.logical_pixels().to_vec();
     save(&screen, "labels-text-off.ppm");
 
@@ -108,7 +108,7 @@ fn the_labels_toggle_draws_the_objects_name_in_the_flight_view() {
         centre,
     }];
     views.console.labels = true;
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let on = screen.logical_pixels().to_vec();
     save(&screen, "labels-text-on.ppm");
 
@@ -116,7 +116,7 @@ fn the_labels_toggle_draws_the_objects_name_in_the_flight_view() {
     assert!(changed(&off, &on, x + 4, x + 51, y - 5, y + 6) > 10);
     // Behind the eye, or in the console strip, F989 rejects the label.
     screen.labels[0].centre = [0.0, 0.0, -1000.0];
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     assert_eq!(
         changed(&off, screen.logical_pixels(), x + 4, x + 51, y - 5, y + 6),
         0
@@ -138,7 +138,7 @@ fn the_navigation_list_draws_markers_and_names_over_the_view() {
         },
         ..ViewState::default()
     };
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let before = screen.logical_pixels().to_vec();
     screen.draw_places(&["LONDON STATION".to_owned(), "MOSCOW STATION".to_owned()]);
     let after = screen.logical_pixels().to_vec();
@@ -207,7 +207,7 @@ fn the_gateway_places_list_is_the_originals_columns_and_cannot_be_covered() {
     .map(str::to_owned)
     .collect();
 
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let before = screen.logical_pixels().to_vec();
     screen.draw_places(&names);
     let after = screen.logical_pixels().to_vec();
@@ -242,7 +242,7 @@ fn the_gateway_places_list_is_the_originals_columns_and_cannot_be_covered() {
     // same frame again with and without messages and compare the list.
     let mut without = Screen::new(&cache).unwrap();
     without.hud = screen.hud.clone();
-    without.draw(&state, views, None, false, false, "");
+    without.draw(&state, views, None, false, "");
     let bare = without.logical_pixels().to_vec();
     without.draw_places(&names);
     let bare_list = without.logical_pixels().to_vec();
@@ -271,12 +271,12 @@ fn the_navigation_and_labels_buttons_light_independently() {
         ..ViewState::default()
     };
     screen.systems.general |= 1 << 5; // the navigation computer is fitted
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let off = screen.logical_pixels().to_vec();
 
     views.console.labels = true;
     views.console.navigation = true;
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let both = screen.logical_pixels().to_vec();
     save(&screen, "labels-and-navigation-on.ppm");
     // The labels icon (274,178, 33x23) and the navigation icon (261,177,
@@ -286,7 +286,7 @@ fn the_navigation_and_labels_buttons_light_independently() {
 
     // Closing the list leaves the labels on: only the navigation icon changes.
     views.console.navigation = false;
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let labels_only = screen.logical_pixels().to_vec();
     // The navigation icon reaches x 285, over the labels icon's left edge.
     assert_eq!(changed(&both, &labels_only, 286, 307, 178, 201), 0);
@@ -375,7 +375,7 @@ fn the_gateway_places_frame_over_a_landing_view() {
     };
     // Redraw the flight frame and put the list over it, as F1099 does.
     for _ in 0..4 {
-        screen.draw(&state, views, Some(&viewer), false, false, "");
+        screen.draw(&state, views, Some(&viewer), false, "");
         screen.draw_places(&names);
     }
     save(&screen, "places-gateway-world.ppm");
@@ -402,7 +402,7 @@ fn the_sol_places_list_frame_has_the_originals_names() {
         },
         ..ViewState::default()
     };
-    screen.draw(&state, views, None, false, false, "");
+    screen.draw(&state, views, None, false, "");
     let mut nav = Navigator::new(&cache).unwrap();
     nav.open(View::Places);
     let names = nav.lines([0; 3]);

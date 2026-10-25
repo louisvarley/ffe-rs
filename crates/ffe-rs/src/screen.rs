@@ -1558,7 +1558,6 @@ impl Screen {
         state: &Flight,
         views: ViewState,
         scene: Option<&ModelViewer>,
-        help: bool,
         _modern: bool,
         message: &str,
     ) {
@@ -1759,14 +1758,6 @@ impl Screen {
             // shields, hull, Autopilot and Set/Act/Alt at their original spots.
             self.draw_target_hud();
             self.draw_player_hud(view);
-            if state.system_flight {
-            } else if let Some((x, y)) = camera.project([0.0; 3], true) {
-                if x > 8 && x < 260 && y > 12 && y < 115 {
-                    self.text(x as usize + 5, y as usize, "STATION", 17);
-                }
-            } else {
-                self.text(8, 16, "STATION BEHIND / OFF VIEW", 18);
-            }
             // F1100's targeting tunnels (F1113/F1114), then F1111's fixed
             // gunsight (bitmap 97) and its blinking targetter cursor, then
             // F1112's velocity marker (bitmap 98, front view only).
@@ -1809,31 +1800,6 @@ impl Screen {
             // F272's text window: date/time header, ten entries, 124-pixel wrap,
             // shadow at (195, y-1) and text at (196, y), clipped to y 158..199.
             self.draw_messages();
-        }
-        if help {
-            self.rect(0, 13, 320, 145, 1);
-            for (index, line) in [
-                "NATIVE RUST PLAYABLE SLICE - DOCKING IS FFE-RS RULES",
-                "Original console, station and ship models.",
-                "MODERN: W/S thrust; arrows yaw/pitch; Q/E roll",
-                "CLASSIC: hold right mouse to steer; Enter/Shift thrust",
-                "CLASSIC keys: ,/. yaw; A/Z pitch; [ ] roll. F3 preset",
-                "X brake  D clearance  L launch  B/N trade  PGUP/DN ship",
-                "VIEWS: F1 cycle F6-F9 direct F10 missile. M launches.",
-                "F2 ship systems page. Original HUD: shields/hull/speed/log.",
-                "External: arrows turn, +/- zoom. Turret: arrows aim",
-                "F12 models (Shift+F12 lab). F11 shot. P pause. Esc prefs.",
-                "F5 snapshots. O original flight. D dock (100 km, slot <250 m/s).",
-                "TAB system map. G galaxy map: arrows, PgUp/Dn, C, H jumps",
-                "N icon: station list. L: object labels on/off.",
-                "Click a body/T: lock. K: autopilot (docks). Bksp: stop.",
-                "T/Shift+T: targeter. E: ECM. ? closes help. Esc: preference pages.",
-            ]
-            .iter()
-            .enumerate()
-            {
-                self.text(14, 19 + index * 10, line, if index == 0 { 18 } else { 15 });
-            }
         }
         self.present();
     }

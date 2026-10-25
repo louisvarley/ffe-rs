@@ -111,14 +111,7 @@ fn boot_station_has_a_planet_in_view() {
         model: Some((body.model, body.seed)),
         orientation: body.orientation,
     }];
-    screen.draw(
-        &state,
-        ViewState::default(),
-        Some(&viewer),
-        false,
-        false,
-        "",
-    );
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
     let extent = viewer.surface_extent.get();
     eprintln!(
         "surface extent {extent}, {} discs, {} distinct colours on screen",
@@ -188,14 +181,7 @@ fn local_star_light_changes_the_scene() {
         ..Flight::default()
     };
     let draw = |screen: &mut Screen| {
-        screen.draw(
-            &state,
-            ViewState::default(),
-            Some(&viewer),
-            false,
-            false,
-            "",
-        );
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
         let mut hash = 14695981039346656037u64;
         for pixel in screen.logical_pixels() {
             hash = (hash ^ u64::from(*pixel)).wrapping_mul(1099511628211);
@@ -255,14 +241,7 @@ fn flight_view_shows_planet_surfaces() {
             model: Some((body.model, body.seed)),
             orientation: body.orientation,
         }];
-        screen.draw(
-            &state,
-            ViewState::default(),
-            Some(&viewer),
-            false,
-            false,
-            "",
-        );
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
         eprintln!(
             "   extent {} model radius {:?} disc radius {radius}",
             viewer.surface_extent.get(),
@@ -558,14 +537,7 @@ fn flight_view_shows_stars() {
                 model: Some((body.model, body.seed)),
                 orientation: body.orientation,
             }];
-            screen.draw(
-                &state,
-                ViewState::default(),
-                Some(&viewer),
-                false,
-                false,
-                "",
-            );
+            screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
             if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
                 let mut ppm = b"P6\n320 200\n255\n".to_vec();
                 for p in screen.logical_pixels() {
@@ -623,14 +595,7 @@ fn planet_approach_fills_the_disc() {
             model: Some((body.model, body.seed)),
             orientation: body.orientation,
         }];
-        screen.draw(
-            &state,
-            ViewState::default(),
-            Some(&viewer),
-            false,
-            false,
-            "",
-        );
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
         let extent = viewer.surface_extent.get();
         assert!(extent > 0.0, "the surface must draw at {d} radii");
         // The disc's expected screen radius (tan of the angular radius).
@@ -724,8 +689,8 @@ fn landed_surface_pixels_are_stable_across_frames() {
         let mut screen = Screen::new(&cache).unwrap();
         screen.discs = vec![disc];
         screen.sky = ffe_rs::prefs::space_colour_rgb(4);
-        screen.draw(&state, ViewState::default(), Some(viewer), false, true, "");
-        screen.draw(&state, ViewState::default(), Some(viewer), false, true, "");
+        screen.draw(&state, ViewState::default(), Some(viewer), true, "");
+        screen.draw(&state, ViewState::default(), Some(viewer), true, "");
         screen.logical_pixels()[..320 * 158].to_vec()
     };
     let fresh = ModelViewer::new(&cache).unwrap();
@@ -821,14 +786,7 @@ fn planet_is_drawn_at_and_inside_one_radius() {
             model: Some((earth.model, earth.seed)),
             orientation: earth.orientation,
         }];
-        screen.draw(
-            &state,
-            ViewState::default(),
-            Some(&viewer),
-            false,
-            false,
-            "",
-        );
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
         let ground = screen.logical_pixels()[..320 * 158]
             .iter()
             .filter(|p| **p != 0)
@@ -921,14 +879,7 @@ fn surface_frame_shows_a_starport() {
         state.position =
             std::array::from_fn(|k| port.position[k] as f64 / UNIT + up[k] * height / UNIT);
         screen.stations.clear();
-        screen.draw(
-            &state,
-            ViewState::default(),
-            Some(&viewer),
-            false,
-            false,
-            "",
-        );
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
         let without = screen.logical_pixels().to_vec();
         screen.stations = vec![SystemStation {
             model: port.model,
@@ -938,14 +889,7 @@ fn surface_frame_shows_a_starport() {
             door: 0xffff,
             tics: 0,
         }];
-        screen.draw(
-            &state,
-            ViewState::default(),
-            Some(&viewer),
-            false,
-            false,
-            "",
-        );
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
         let with = screen.logical_pixels().to_vec();
         let changed = with.iter().zip(&without).filter(|(a, b)| a != b).count();
         // Solid faces, not just outlines: some row must hold a run of changed
@@ -1208,25 +1152,11 @@ fn level_flight_near_the_surface_shows_the_horizon() {
         door: 0xffff,
         tics: 0,
     }];
-    screen.draw(
-        &state,
-        ViewState::default(),
-        Some(&viewer),
-        false,
-        false,
-        "",
-    );
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
     let with = screen.logical_pixels().to_vec();
     screen.discs.clear();
     screen.stations.clear();
-    screen.draw(
-        &state,
-        ViewState::default(),
-        Some(&viewer),
-        false,
-        false,
-        "",
-    );
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
     let without = screen.logical_pixels().to_vec();
     let changed = with.iter().zip(&without).filter(|(a, b)| a != b).count();
     let lower = with[320 * 79..320 * 158]
@@ -1378,7 +1308,7 @@ fn landing_reaches_the_surface_state_and_launches_again() {
     let shots = std::env::var_os("FFE_SHOT_DIR");
     let save = |name: &str, state: &Flight, screen: &mut Screen| {
         if let Some(dir) = &shots {
-            screen.draw(state, ViewState::default(), Some(&viewer), false, true, "");
+            screen.draw(state, ViewState::default(), Some(&viewer), true, "");
             let mut ppm = b"P6\n320 200\n255\n".to_vec();
             for p in screen.logical_pixels() {
                 ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
@@ -1389,22 +1319,8 @@ fn landing_reaches_the_surface_state_and_launches_again() {
     // F1052 clears with the previous frame's scene colour: the second draw is
     // the settled surface view, with F1877's atmosphere sky over the space one.
     // Draw explicitly so the check does not depend on FFE_SHOT_DIR being set.
-    screen.draw(
-        &view_state,
-        ViewState::default(),
-        Some(&viewer),
-        false,
-        true,
-        "",
-    );
-    screen.draw(
-        &view_state,
-        ViewState::default(),
-        Some(&viewer),
-        false,
-        true,
-        "",
-    );
+    screen.draw(&view_state, ViewState::default(), Some(&viewer), true, "");
+    screen.draw(&view_state, ViewState::default(), Some(&viewer), true, "");
     save("surface-0000-landed.ppm", &view_state, &mut screen);
     let view = &screen.logical_pixels()[..320 * 158];
     // F1052's background at this altitude is the space colour (`DATA_008814`
@@ -1565,10 +1481,10 @@ fn new_game_landed_surface_view() {
         .collect();
     screen.sky = ffe_rs::prefs::space_colour_rgb(4);
     // Two frames: F1052 applies the previous scene's background colour.
-    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
     if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
         // Draw again so the saved frame is a settled one.
-        screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+        screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
         let mut ppm = b"P6\n320 200\n255\n".to_vec();
         for p in screen.logical_pixels() {
             ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
@@ -1697,8 +1613,8 @@ fn new_game_hope_landed_surface_view() {
     let (left, right) = screen.hud.speed_columns(&font);
     assert_eq!(left, ["Set:0.0 km{", "Act:0.0 km{"]);
     assert_eq!(right, ["Alt:0 m", "Hope"]);
-    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
-    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
     if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
         let mut ppm = b"P6\n320 200\n255\n".to_vec();
         for p in screen.logical_pixels() {
