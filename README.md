@@ -99,17 +99,19 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | Brake / pause | X / P |
 | Quit (in the preference pages) | click `Quit`, or select it and press Enter |
 | Buy / sell one unit of food (docked only) | B / N |
-| New save snapshot / load newest snapshot | F5 / Shift+F5 |
+| Quick-save / load / new numbered save | F5 / Shift+F5 / Ctrl+F5 |
 
 Modern input (W/S and arrows) is the initial preset. F3 switches to Classic,
 which follows the original's scheme: hold the **right mouse button** and move the
 mouse to steer, Enter raises the set speed and Shift lowers it, and the keyboard
 steering is `,` `.` yaw, A/Z pitch, `[`/`]` roll. Escape → `Port Options` exposes
 the same choice. The preset takes effect immediately, disarms held keys, and is
-persisted in `saves/controls.cfg` (`docs/CONTROLS.md` has the full table and the
-routing audit). The port-only display choices are persisted in
-`saves/display.cfg`; full-screen is session-only so a launch always starts in a
-window. Remapping and the other preference values are not persisted.
+persisted in the versioned `saves/config.cfg` (`docs/CONTROLS.md` has the full
+table and the routing audit). The port-only display choices and the other
+applied preference pages are persisted there too; full-screen is session-only so
+a launch always starts in a window. The old `controls.cfg`/`display.cfg`
+sidecars are read once as a migration. Input remapping is not implemented yet;
+the config reserves `bind.*` keys for it.
 Help, scenario menus, the model lab, pause, the preference pages and focus loss
 stop the simulation; refocus and press controls afresh. No audio, combat,
 planets, hyperspace, time acceleration, old-save import or Enhanced/HD-pack
@@ -250,15 +252,18 @@ The gameplay cube stays labelled synthetic until those are implemented.
    station, request docking and coast below 20 units/s until within 80 units.
    Alignment must be within about 18 degrees; unsafe close approaches reset
    the ship with an explicit warning, not damage/death.
-4. **Persistence:** while docked, B buys one; F5 saves. Quit, launch again,
-   ? closes Help, F9 restores the saved credits/cargo. F2 then 1/2/3 resets
-   the live scenario, never deletes saves.
+4. **Persistence:** while docked, B buys one; F5 quick-saves. Quit, launch again,
+   ? closes Help, Shift+F5 loads `saves/quick.json` (or press L on the intro).
+   F2 then 1/2/3 resets the live scenario, never deletes saves.
 
-Saves are immutable numbered JSON snapshots under local `saves/`. F9 loads the
-highest number. Invalid/newer-version saves report an error without replacing
-live state. Originals are never read as saves or overwritten. Prototype saves
-are a separate format, not a promise of compatibility with the eventual game.
-There is no autosave or quit confirmation; use F5 before leaving.
+Native saves are versioned JSON under local `saves/` (`quick.json` and
+`commander-NNNNNNNN.json`). Ctrl+F5 writes a new numbered file; Shift+F5 loads
+the quick save, else the newest numbered file. Files are atomic, bounded and
+validated; a corrupt/newer-version save reports an error without replacing live
+state and never falls back silently. Original commander files are recognised and
+left untouched; importing them still needs a reference specimen. There is no
+autosave or quit confirmation; use F5 before leaving. See
+`docs/notes/persistence.md` for the source map and format.
 
 Optional **implementer** Windows input test (opens/closes temporary game windows,
 needs the desktop, takes about a minute, cleans its isolated cache/save copies):

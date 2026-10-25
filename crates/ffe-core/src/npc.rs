@@ -74,6 +74,7 @@
 use crate::galaxy::Details;
 use crate::laser::{self, Damage, DamageState};
 use crate::model_animation::TICS_PER_FRAME;
+use serde::{Deserialize, Serialize};
 
 /// The original's ship-type table, `DATA_006199`/`DATA_006180..6198`: nineteen
 /// records of a count and a model list, in table order.
@@ -1672,7 +1673,7 @@ pub struct OffenceReport {
 /// (`illegal_fire`, F931/F941's once-only unlawful-discharge report), the
 /// offence count, and F236's per-starport fine ledger `DATA_009095` (six
 /// dwords indexed by the starport's ordinal, `DATA_008996`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Legal {
     pub wanted: bool,
     pub alert: bool,

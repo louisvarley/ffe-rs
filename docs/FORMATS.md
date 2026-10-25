@@ -14,23 +14,31 @@ contact sheet; correct image sizes are validated rather than silently changed.
 
 ---
 
-## Implemented experimental save format (not legacy/native-final saves)
+## Native version-2 saves (port-native; not DOS/JJFFE compatible)
 
-The playable example writes `saves/prototype-00000001.json` and increasing
-eight-digit numbers. JSON has `format: "ffe-rs-experimental"`, `version: 1` and
-`state`. State records mode, position/velocity vectors, yaw/pitch, integer credits/
-cargo/stock/ticks and the docking-request flag. Unknown/duplicate fields, wrong
-versions, non-finite/out-of-range values and inconsistent docked state fail.
-Reads are limited to 16 KiB. `serde_json` float-roundtrip parsing preserves the
-binary floating-point state exactly on save/load.
+The playable writes `saves/quick.json` on F5 and new
+`saves/commander-NNNNNNNN.json` files on Ctrl+F5. JSON has
+`format: "ffe-rs-save"`, `version: 2`, `commander` (name, rank slots, reserved
+mission slots), `state` (the full `Flight`), optional `navigation`
+(`NavigatorSave`), and the port's `original_flight`/`acceleration` flags. The
+system is identified by its galaxy code and regenerated from the cache at the
+saved clock; body indices are checked on load. Unknown/duplicate fields, wrong
+versions, non-finite/out-of-range values, inconsistent docked state, invalid
+navigation stages and saves after death fail. Reads are limited to 1 MiB.
+`serde_json` float-roundtrip parsing preserves the binary floating-point state
+exactly. The file is **not** a DOS/JJFFE commander file and makes no
+compatibility claim; see `docs/notes/persistence.md` for the source map and the
+legacy-file read-only recognition.
 
-Each F5 creates a new file exclusively, writes and syncs it; previous snapshots
-are never overwritten. A failed/interrupted write can leave a partial newest
-snapshot. F9 loads only the highest number and reports invalid data without
-changing live state, never silently falling back to an older snapshot. Scenario
-reset does not delete snapshots. No legacy commander import/export, migrations
-or compatibility promise for this development-only format. No original game
-files are used as save destinations. Final crash-atomic saves remain planned.
+Quick saves are atomic (temporary file, sync, rename); numbered saves are
+new-only. Shift+F5 loads the quick save or the newest numbered file. A load
+reports invalid data without changing live state and never silently falls back
+to an older file. The old version-1 `ffe-rs-experimental` snapshots still load
+and migrate in memory. `saves/config.cfg` is the versioned preference file;
+`controls.cfg`/`display.cfg` are read once as migration. A legacy commander
+file is recognised by size/version and reported read-only; importing it still
+needs a reference specimen and field map. No original game files are used as
+save destinations.
 
 ---
 

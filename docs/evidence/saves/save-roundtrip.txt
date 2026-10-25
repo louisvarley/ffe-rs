@@ -1,0 +1,12 @@
+native save format: ffe-rs-save version 2
+file: docs\evidence\saves\roundtrip.json
+bytes: 2747
+commander: Jameson
+system: Ross 154 (0x6a49717)
+flight state: round-trip equal
+navigator state: round-trip equal
+original-flight flag: false
+time acceleration: 2
+legal: wanted=true alert=true offences=2 fines=[0, 6000, 0, 0, 0, 0]
+ranks: [4, 7]
+missions: [Mission { id: 3, system: Some(111449879), completed: false }]

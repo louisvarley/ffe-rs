@@ -122,6 +122,10 @@ struct Options {
     /// Directory for the F917 tombstone screen: starts the game-over state with
     /// the new game's commander/date and saves frames through the spin.
     capture_gameover: Option<PathBuf>,
+    /// A native save to load instead of starting a new game.
+    load: Option<PathBuf>,
+    /// Directory for the save -> unload -> load -> resume evidence.
+    capture_save: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -138,6 +142,8 @@ fn options() -> Result<Options, String> {
     let mut capture_intro = None;
     let mut capture_display = None;
     let mut capture_gameover = None;
+    let mut load = None;
+    let mut capture_save = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
@@ -209,6 +215,14 @@ fn options() -> Result<Options, String> {
                 args.next()
                     .ok_or("--capture-gameover requires a directory")?,
             ));
+        } else if arg == "--load" && load.is_none() {
+            load = Some(PathBuf::from(
+                args.next().ok_or("--load requires a save file")?,
+            ));
+        } else if arg == "--capture-save" && capture_save.is_none() {
+            capture_save = Some(PathBuf::from(
+                args.next().ok_or("--capture-save requires a directory")?,
+            ));
         } else if arg == "--smoke-frames" && smoke_frames.is_none() {
             let frames = args
                 .next()
@@ -221,7 +235,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -253,6 +267,8 @@ fn options() -> Result<Options, String> {
         capture_intro,
         capture_display,
         capture_gameover,
+        load,
+        capture_save,
     })
 }
 
@@ -275,47 +291,78 @@ fn read_cache(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn snapshots(directory: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut paths = Vec::new();
-    for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name();
-        let text = name.to_string_lossy();
-        if let Some(number) = text
-            .strip_prefix("prototype-")
-            .and_then(|s| s.strip_suffix(".json"))
-        {
-            if number.len() == 8 && number.bytes().all(|b| b.is_ascii_digit()) {
-                paths.push(entry.path());
-            }
-        }
-    }
-    paths.sort();
-    Ok(paths)
+/// Build one native save from the live state. `nav` is `None` in the prototype
+/// loop. Validation happens in [`saves::save_atomic`]/[`saves::save_numbered`].
+fn build_save(
+    commander: &saves::Commander,
+    state: &Flight,
+    nav: Option<&Navigator>,
+    original_flight: bool,
+    acceleration: usize,
+) -> saves::SaveGame {
+    let mut save = saves::SaveGame::new(commander.clone(), state.clone(), None);
+    save.navigation = nav.map(Navigator::save_state);
+    save.original_flight = original_flight;
+    save.acceleration = acceleration;
+    save
 }
 
-fn snapshot(directory: &Path, state: &Flight) -> Result<String, String> {
-    let existing = snapshots(directory)?;
-    let next = match existing.last() {
-        Some(path) => {
-            path.file_stem()
-                .and_then(|s| s.to_str())
-                .and_then(|s| s.strip_prefix("prototype-"))
-                .ok_or("Invalid snapshot name")?
-                .parse::<u32>()
-                .map_err(|e| e.to_string())?
-                + 1
-        }
-        None => 1,
-    };
-    if next > 99_999_999 {
-        return Err("Snapshot number limit reached.".to_owned());
+/// The persisted view of the live preference pages. The remap table is not
+/// edited by this build, so it is carried through unchanged.
+fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Config {
+    settings::Config {
+        modern: prefs.modern,
+        display: prefs.display,
+        space_colour: prefs.space_colour,
+        shape_detail: prefs.shape_detail,
+        others: prefs.others,
+        maps: prefs.maps,
+        sound: prefs.sound,
+        remap: previous.remap.clone(),
     }
-    let name = format!("prototype-{next:08}.json");
-    saves::save_new(&directory.join(&name), state)?;
-    Ok(format!(
-        "Saved {name}. Shift+F5 reloads it; prior snapshots kept."
-    ))
+}
+
+/// Apply a loaded save to the running game. The caller supplies the cache so the
+/// navigator's bodies can be regenerated; the ship model and the original-flight
+/// flag decide whether the original model resumes.
+#[allow(clippy::too_many_arguments)]
+fn apply_save(
+    cache: &ffe_content::VerifiedCache,
+    scene: Option<&ModelViewer>,
+    loaded: saves::SaveGame,
+    state: &mut Flight,
+    nav: &mut Option<Navigator>,
+    original: &mut Option<OriginalFlight>,
+    dock: &mut DockState,
+    acceleration: &mut usize,
+    commander: &mut saves::Commander,
+    message: &mut String,
+) -> Result<(), String> {
+    let new_nav = match &loaded.navigation {
+        Some(navigation) => Some(Navigator::from_save(cache, navigation)?),
+        None => None,
+    };
+    *state = loaded.state;
+    *nav = new_nav;
+    *commander = loaded.commander;
+    *acceleration = loaded.acceleration;
+    *original = if loaded.original_flight && state.mode == ffe_rs::flight::Mode::Flight {
+        let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
+        Some(
+            OriginalFlight::from_flight(state, stats.as_ref())
+                .with_time_acceleration(*acceleration),
+        )
+    } else {
+        None
+    };
+    *dock = DockState::default();
+    if state.mode == ffe_rs::flight::Mode::Docked
+        && nav.as_ref().is_some_and(|nav| nav.docked.is_some())
+    {
+        dock.open(StationScreen::Services);
+    }
+    *message = format!("Loaded commander {}.", commander.name);
+    Ok(())
 }
 
 fn write_shot(dir: &Path, name: &str, screen: &Screen) {
@@ -480,6 +527,12 @@ fn intro_key(key: Key) -> Option<char> {
     }
 }
 
+/// How the front end left: a new-game start type, or the commander-load choice.
+enum IntroExit {
+    Start(u8),
+    Load(PathBuf),
+}
+
 /// F961/F962 in the original's boot loop: `GameTics` starts at 0x400, advances
 /// by the timer's tics, and the screen is redrawn every frame. A start key (1-5)
 /// leaves with that type; any other key is DOS `F147(0)` and this port maps it to
@@ -495,7 +548,8 @@ fn run_intro(
     screen: &mut Screen,
     scene: Option<&ModelViewer>,
     sound: &mut GameAudio,
-) -> Result<u8, String> {
+    save_dir: &Path,
+) -> Result<IntroExit, String> {
     let intro = Intro::new();
     let mut tics = front_end::BOOT_TICS;
     let mut version = false;
@@ -504,11 +558,25 @@ fn run_intro(
     loop {
         if !window.is_open() {
             sound.leave_front_end();
-            return Ok(1);
+            return Ok(IntroExit::Start(1));
         }
         screen.draw_intro(scene, tics, version)?;
         presenter.present(window, screen.logical_pixels(), display)?;
         for key in window.get_keys_pressed(KeyRepeat::No) {
+            // The original's title has a Commander Load choice (F220/F222); the
+            // port's front end is the intro, so L is its Load Commander key.
+            if key == Key::L {
+                match saves::load_quick_or_latest(save_dir) {
+                    Ok((path, _)) => {
+                        sound.leave_front_end();
+                        return Ok(IntroExit::Load(path));
+                    }
+                    Err(error) => {
+                        eprintln!("FRONT END LOAD: {error}");
+                        continue;
+                    }
+                }
+            }
             let Some(character) = intro_key(key) else {
                 continue;
             };
@@ -526,14 +594,14 @@ fn run_intro(
                         eprintln!("Intro start key {requested}: {notice}");
                     }
                     sound.leave_front_end();
-                    return Ok(chosen);
+                    return Ok(IntroExit::Start(chosen));
                 }
                 IntroAction::Skip { chosen, notice } => {
                     if let Some(notice) = notice {
                         eprintln!("{notice}");
                     }
                     sound.leave_front_end();
-                    return Ok(chosen);
+                    return Ok(IntroExit::Start(chosen));
                 }
             }
         }
@@ -544,6 +612,119 @@ fn run_intro(
         sound.tick(std::time::Duration::from_millis(u64::from(elapsed)));
         tics = IntroTimeline::advance(tics, elapsed);
     }
+}
+
+/// The scripted save evidence: make a complete commander, quick-save it, drop
+/// every live object (the "quit"), load the bytes back, rebuild the navigator and
+/// compare the resumed state with the original. The two frames and a text log
+/// land in `dir`.
+fn write_save_capture(cache: &ffe_content::VerifiedCache, dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|error| format!("Cannot create {}: {error}", dir.display()))?;
+    let mut nav = Navigator::new_game(cache, 1)?;
+    let mut hold = vec![0u16; ffe_core::market::NAMES];
+    hold[0] = 7;
+    hold[ffe_core::hyperspace::HYDROGEN] = 3;
+    let state = Flight {
+        mode: ffe_rs::flight::Mode::Flight,
+        system_flight: true,
+        position: [0.0, 0.0, -500.0],
+        velocity: [0.0, 0.0, 5.0],
+        yaw: 0.25,
+        pitch: -0.1,
+        credits: 12_345,
+        hold,
+        combat: Combat::new_game(),
+        loadout: ffe_core::equipment::Loadout::new_game(),
+        shields: [0x40, 0x40],
+        hull: [4608, 4608],
+        ..Flight::default()
+    };
+    nav.legal.wanted = true;
+    nav.legal.alert = true;
+    nav.legal.offences = 2;
+    nav.legal.fines[1] = 6000;
+    nav.clock += 4_000.0;
+    nav.altitude = 0x00b7_1b00;
+    let commander = saves::Commander {
+        name: "Jameson".to_owned(),
+        ranks: [4, 7],
+        missions: vec![saves::Mission {
+            id: 3,
+            system: Some(nav.system_code(nav.current).unwrap_or(0)),
+            completed: false,
+        }],
+    };
+    let mut save = saves::SaveGame::new(commander, state.clone(), Some(nav.save_state()));
+    save.acceleration = 2;
+    let path = dir.join("roundtrip.json");
+    let _ = fs::remove_file(&path);
+    saves::save_atomic(&path, &save)?;
+    let mut screen = Screen::new(cache)?;
+    let scene = ModelViewer::new(cache).ok();
+    screen.draw(
+        &state,
+        ViewState::default(),
+        scene.as_ref(),
+        false,
+        true,
+        "SAVE EVIDENCE: BEFORE QUICK-SAVE",
+    );
+    write_shot(dir, "save-before.ppm", &screen);
+
+    // Quit: drop the live navigator and state completely, then load the file.
+    let expected_navigation = save.navigation.clone().unwrap();
+    let expected_state = save.state.clone();
+    drop(nav);
+    drop(save);
+    drop(state);
+    let loaded = saves::load_game(&path)?;
+    let resumed_nav = Navigator::from_save(cache, loaded.navigation.as_ref().unwrap())?;
+    if resumed_nav.save_state() != expected_navigation {
+        return Err("Save capture: navigator did not resume byte-for-byte.".to_owned());
+    }
+    if loaded.state != expected_state {
+        return Err("Save capture: flight state did not resume byte-for-byte.".to_owned());
+    }
+    screen.draw(
+        &loaded.state,
+        ViewState::default(),
+        scene.as_ref(),
+        false,
+        true,
+        "SAVE EVIDENCE: RESUMED FROM DISK",
+    );
+    write_shot(dir, "save-after.ppm", &screen);
+    let text = format!(
+        "native save format: {} version {}\n\
+         file: {}\n\
+         bytes: {}\n\
+         commander: {}\n\
+         system: {} ({:#x})\n\
+         flight state: round-trip equal\n\
+         navigator state: round-trip equal\n\
+         original-flight flag: {}\n\
+         time acceleration: {}\n\
+         legal: wanted={} alert={} offences={} fines={:?}\n\
+         ranks: {:?}\n\
+         missions: {:?}\n",
+        saves::FORMAT,
+        saves::VERSION,
+        path.display(),
+        fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0),
+        loaded.commander.name,
+        resumed_nav.system_name(),
+        expected_navigation.system_code,
+        loaded.original_flight,
+        loaded.acceleration,
+        loaded.navigation.as_ref().unwrap().legal.wanted,
+        loaded.navigation.as_ref().unwrap().legal.alert,
+        loaded.navigation.as_ref().unwrap().legal.offences,
+        loaded.navigation.as_ref().unwrap().legal.fines,
+        loaded.commander.ranks,
+        loaded.commander.missions,
+    );
+    fs::write(dir.join("save-roundtrip.txt"), text)
+        .map_err(|error| format!("Cannot write save evidence: {error}"))
 }
 
 fn run() -> Result<(), String> {
@@ -598,6 +779,10 @@ fn run() -> Result<(), String> {
         write_display_capture(dir, &cache)?;
         return Ok(());
     }
+    if let Some(dir) = &options.capture_save {
+        write_save_capture(&cache, dir)?;
+        return Ok(());
+    }
     let save_dir = options.root.join("saves");
     if save_dir.exists() {
         let meta = fs::symlink_metadata(&save_dir).map_err(|e| e.to_string())?;
@@ -613,16 +798,17 @@ fn run() -> Result<(), String> {
     // sidecars live in `saves` and are loaded before the window so the display
     // options apply from the first frame.
     let mut prefs = Prefs::default();
-    let controls_file = save_dir.join(settings::CONTROLS_FILE);
-    if let Some(modern) = settings::load_controls(&controls_file) {
-        prefs.modern = modern;
-    }
-    let display_file = save_dir.join(settings::DISPLAY_FILE);
-    if let Some(display) = settings::load_display(&display_file) {
-        prefs.display = display;
-    }
-    let mut stored_modern = prefs.modern;
-    let mut stored_display = prefs.display;
+    // `config.cfg` is the version-2 form; the old `controls.cfg`/`display.cfg`
+    // sidecars are read once as a migration when it is absent.
+    let config = settings::load_config(&save_dir).unwrap_or_default();
+    prefs.modern = config.modern;
+    prefs.display = config.display;
+    prefs.space_colour = config.space_colour;
+    prefs.shape_detail = config.shape_detail;
+    prefs.others = config.others;
+    prefs.maps = config.maps;
+    prefs.sound = config.sound;
+    let mut stored_config = config;
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
     let mut presenter = Presenter::new();
@@ -709,18 +895,35 @@ fn run() -> Result<(), String> {
         || options.capture_planet.is_some()
         || options.capture_traffic.is_some()
         || options.capture_start.is_some()
-        || options.capture_gameover.is_some();
+        || options.capture_gameover.is_some()
+        || options.capture_save.is_some();
     let mut boot = options.boot;
-    if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(_)) {
-        boot = Boot::NewGame(run_intro(
+    let mut load_path = options.load.clone();
+    if !options.skip_intro
+        && !scripts
+        && load_path.is_none()
+        && matches!(options.boot, Boot::NewGame(_))
+    {
+        match run_intro(
             &mut window,
             &mut presenter,
             &prefs.display,
             &mut screen,
             scene.as_ref(),
             &mut sound,
-        )?);
+            &save_dir,
+        )? {
+            IntroExit::Start(start_type) => boot = Boot::NewGame(start_type),
+            IntroExit::Load(path) => load_path = Some(path),
+        }
     }
+    let mut loaded = match &load_path {
+        Some(path) => Some(
+            saves::load_game(path)
+                .map_err(|error| format!("Cannot load {}: {error}", path.display()))?,
+        ),
+        None => None,
+    };
     // F569's scan needs the model collision streams and the terrain tables. They
     // are borrowed from the cache for the whole run.
     let landing_library = ffe_rs::navigation::Library(&cache);
@@ -745,39 +948,57 @@ fn run() -> Result<(), String> {
     // The systems, their bodies and the autopilot (Tab, G, Backspace). The default
     // boot is F998's type 0 at Hope in Gateway; `--start 1` keeps Ross 154 and
     // `--start sol` the development sandbox for the existing screenshots.
-    let mut nav = match boot {
-        Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
-        Boot::Sandbox => Navigator::new(&cache),
-    }
-    .map_err(|error| {
-        eprintln!("Navigation unavailable: {error}");
-    })
-    .ok();
-    if let Some(nav) = nav.as_ref() {
-        if let Some(new_game) = nav.new_game {
-            state.credits = u32::try_from(new_game.cash).unwrap_or(0);
-            state.ship = new_game.ship;
-            // F994's state 0x30 is the landed surface view (F1050/F1054), not the
-            // docked services board: the ship sits on the open-air pad in the
-            // flight view. F1050 draws it from the cockpit with the console below.
-            state.mode = ffe_rs::flight::Mode::Flight;
-            state.system_flight = nav.docked.is_some();
-            state.position = new_game
-                .seat
-                .map(|v| v as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
-            state.velocity = [0.0; 3];
-            if let Some(index) = nav.docked {
-                state.axes = Some(nav.bodies[index].orientation);
+    let mut nav = if let Some(save) = loaded.as_ref() {
+        match &save.navigation {
+            Some(navigation) => Some(Navigator::from_save(&cache, navigation)?),
+            // A version-1 snapshot has no navigator; keep the boot's system.
+            None => match boot {
+                Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
+                Boot::Sandbox => Navigator::new(&cache),
             }
-            eprintln!(
-                "New game: {} (start type {}), {} CR, ship {}, hold {} t, time accel {}.",
-                nav.system_name(),
-                new_game.start_type,
-                new_game.cash,
-                new_game.ship,
-                new_game.cargo,
-                new_game.acceleration
-            );
+            .map_err(|error| {
+                eprintln!("Navigation unavailable: {error}");
+            })
+            .ok(),
+        }
+    } else {
+        match boot {
+            Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
+            Boot::Sandbox => Navigator::new(&cache),
+        }
+        .map_err(|error| {
+            eprintln!("Navigation unavailable: {error}");
+        })
+        .ok()
+    };
+    if loaded.is_none() {
+        if let Some(nav) = nav.as_ref() {
+            if let Some(new_game) = nav.new_game {
+                state.credits = u32::try_from(new_game.cash).unwrap_or(0);
+                state.ship = new_game.ship;
+                // F994's state 0x30 is the landed surface view (F1050/F1054), not
+                // the docked services board: the ship sits on the open-air pad in
+                // the flight view. F1050 draws it from the cockpit with the console
+                // below.
+                state.mode = ffe_rs::flight::Mode::Flight;
+                state.system_flight = nav.docked.is_some();
+                state.position = new_game
+                    .seat
+                    .map(|v| v as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
+                state.velocity = [0.0; 3];
+                if let Some(index) = nav.docked {
+                    state.axes = Some(nav.bodies[index].orientation);
+                }
+                eprintln!(
+                    "New game: {} (start type {}), {} CR, ship {}, hold {} t, time accel {}.",
+                    nav.system_name(),
+                    new_game.start_type,
+                    new_game.cash,
+                    new_game.ship,
+                    new_game.cargo,
+                    new_game.acceleration
+                );
+            }
         }
     }
     if options.skip_intro {
@@ -792,9 +1013,12 @@ fn run() -> Result<(), String> {
     // type-1 arms): one 1MW pulse laser in the front mount, a class-2 drive and
     // 1 t of energy, plus the general equipment bits and two 0x82 missiles (the
     // equipment page's icons). The port has no outfitting yet, so the same
-    // original loadout arms the sandbox too.
-    state.combat = Combat::new_game();
-    state.loadout = ffe_core::equipment::Loadout::new_game();
+    // original loadout arms the sandbox too. A loaded commander keeps its save's
+    // fitted equipment and damage words.
+    if loaded.is_none() {
+        state.combat = Combat::new_game();
+        state.loadout = ffe_core::equipment::Loadout::new_game();
+    }
     // A scripted undock for screenshots: start the launch sequence immediately.
     if let Some(dir) = &options.capture {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
@@ -891,14 +1115,6 @@ fn run() -> Result<(), String> {
     if captured_traffic {
         labels = true;
     }
-    let mut last_mode = state.mode;
-    // The scripted capture of the new game starts on the pad: the launch block
-    // below sees a docked-to-flight change and places the model there.
-    if options.capture.is_some() && nav.as_ref().is_some_and(|nav| nav.takeoff.is_some()) {
-        state.mode = ffe_rs::flight::Mode::Flight;
-        state.system_flight = true;
-        last_mode = ffe_rs::flight::Mode::Docked;
-    }
     // The station the ship has just left: its hull is not a wall to the ship
     // until it is clear of the slot (F1088 leaves the player at the station).
     let mut launch_grace: Option<usize> = None;
@@ -929,6 +1145,29 @@ fn run() -> Result<(), String> {
         Some(_) => station::SERVICES_HINT.to_owned(),
         None => String::new(),
     };
+    let mut commander = saves::Commander::default();
+    if let Some(save) = loaded.take() {
+        apply_save(
+            &cache,
+            scene.as_ref(),
+            save,
+            &mut state,
+            &mut nav,
+            &mut original,
+            &mut dock,
+            &mut acceleration,
+            &mut commander,
+            &mut message,
+        )?;
+    }
+    let mut last_mode = state.mode;
+    // The scripted capture of the new game starts on the pad: the launch block
+    // below sees a docked-to-flight change and places the model there.
+    if options.capture.is_some() && nav.as_ref().is_some_and(|nav| nav.takeoff.is_some()) {
+        state.mode = ffe_rs::flight::Mode::Flight;
+        state.system_flight = true;
+        last_mode = ffe_rs::flight::Mode::Docked;
+    }
     // F994's start state names the body the commander is standing on. This is
     // the original's start message; the boot log has no other entry.
     if let Some(name) = nav
@@ -975,39 +1214,62 @@ fn run() -> Result<(), String> {
                     break;
                 }
                 // F918(1)/F917 longjmps to the front end, which is the intro.
-                if !options.skip_intro && !scripts {
-                    boot = Boot::NewGame(run_intro(
+                let exit = if !options.skip_intro && !scripts {
+                    run_intro(
                         &mut window,
                         &mut presenter,
                         &prefs.display,
                         &mut screen,
                         scene.as_ref(),
                         &mut sound,
-                    )?);
+                        &save_dir,
+                    )?
                 } else {
-                    boot = Boot::NewGame(ffe_rs::navigation::DEFAULT_START_TYPE);
-                }
-                state = Flight::default();
-                nav = match boot {
-                    Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
-                    Boot::Sandbox => Navigator::new(&cache),
-                }
-                .map_err(|error| eprintln!("Navigation unavailable: {error}"))
-                .ok();
-                if let Some(nav) = nav.as_mut() {
-                    if let Some(new_game) = nav.new_game {
-                        state.credits = u32::try_from(new_game.cash).unwrap_or(0);
-                        state.ship = new_game.ship;
-                        state.mode = ffe_rs::flight::Mode::Docked;
+                    IntroExit::Start(ffe_rs::navigation::DEFAULT_START_TYPE)
+                };
+                match exit {
+                    IntroExit::Start(start_type) => {
+                        boot = Boot::NewGame(start_type);
+                        state = Flight::default();
+                        nav = match boot {
+                            Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
+                            Boot::Sandbox => Navigator::new(&cache),
+                        }
+                        .map_err(|error| eprintln!("Navigation unavailable: {error}"))
+                        .ok();
+                        if let Some(nav) = nav.as_mut() {
+                            if let Some(new_game) = nav.new_game {
+                                state.credits = u32::try_from(new_game.cash).unwrap_or(0);
+                                state.ship = new_game.ship;
+                                state.mode = ffe_rs::flight::Mode::Docked;
+                            }
+                        }
+                        state.combat = Combat::new_game();
+                        state.loadout = ffe_core::equipment::Loadout::new_game();
+                        original = None;
+                        views = ViewState::default();
+                        dock = DockState::default();
+                        acceleration = 0;
+                        message = "New game.".to_owned();
+                    }
+                    IntroExit::Load(path) => {
+                        let loaded = saves::load_game(&path)?;
+                        apply_save(
+                            &cache,
+                            scene.as_ref(),
+                            loaded,
+                            &mut state,
+                            &mut nav,
+                            &mut original,
+                            &mut dock,
+                            &mut acceleration,
+                            &mut commander,
+                            &mut message,
+                        )?;
+                        views = ViewState::default();
                     }
                 }
-                state.combat = Combat::new_game();
-                state.loadout = ffe_core::equipment::Loadout::new_game();
-                original = None;
-                views = ViewState::default();
-                dock = DockState::default();
                 gameover_viewer = None;
-                acceleration = 0;
                 status_page = false;
                 launch_grace = None;
                 takeoff_climb = None;
@@ -1016,7 +1278,6 @@ fn run() -> Result<(), String> {
                 labels = false;
                 held_controls.disarm(&window.get_keys());
                 last_mode = state.mode;
-                message = "New game.".to_owned();
                 if nav.as_ref().is_some_and(|nav| nav.docked.is_some()) {
                     sound.play(Cue::Station);
                 }
@@ -1106,21 +1367,17 @@ fn run() -> Result<(), String> {
             dy: if mouse_pressed { 0 } else { mouse_dy },
         };
         mouse_accumulator.update(mouse_steer);
-        // Apply a preset change once, as it happens, and persist it.
-        if prefs.modern != stored_modern {
-            stored_modern = prefs.modern;
-            mouse_accumulator.reset();
-            held_controls.disarm(&keys_down);
-            if let Err(error) = settings::save_controls(&controls_file, prefs.modern) {
-                eprintln!("CONTROLS SETTING: {error}");
+        // Persist every applied preference page in one atomic versioned file.
+        // Full-screen stays session-only and is deliberately not written.
+        let next_config = config_from_prefs(&prefs, &stored_config);
+        if next_config != stored_config {
+            if next_config.modern != stored_config.modern {
+                mouse_accumulator.reset();
+                held_controls.disarm(&keys_down);
             }
-        }
-        // Persist the port-only display options as they change. Full-screen is
-        // session-only and is deliberately not written.
-        if prefs.display != stored_display {
-            stored_display = prefs.display;
-            if let Err(error) = settings::save_display(&display_file, prefs.display) {
-                eprintln!("DISPLAY SETTING: {error}");
+            stored_config = next_config;
+            if let Err(error) = settings::save_config(&save_dir, &stored_config) {
+                eprintln!("SETTINGS: {error}");
             }
         }
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
@@ -1143,7 +1400,7 @@ fn run() -> Result<(), String> {
                 |nav| ffe_rs::galaxy_map::date_short_text(nav.elapsed()),
             );
             gameover = Some(GameOver::tombstone(
-                death::COMMANDER_NAME.to_ascii_uppercase(),
+                commander.name.to_ascii_uppercase(),
                 date,
             ));
             gameover_viewer = ModelViewer::new(&cache).ok();
@@ -2884,32 +3141,78 @@ fn run() -> Result<(), String> {
                 }
                 let shift =
                     window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
-                if pressed(Key::F5) && !shift {
-                    message = match snapshot(&save_dir, &state) {
-                        Ok(text) => text,
-                        Err(e) => {
-                            eprintln!("SAVE ERROR: {e}");
-                            format!("SAVE ERROR: {e}")
-                        }
-                    };
-                }
-                // Load moved from F9 (the original's external view) to Shift+F5.
+                let ctrl = window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
+                // Shift+F5 loads the quick save (or the newest numbered save when
+                // there is none). A load never falls back silently: a corrupt file
+                // leaves the live state alone and reports why.
                 if pressed(Key::F5) && shift {
-                    let loaded = snapshots(&save_dir).and_then(|paths| {
-                        paths
-                            .last()
-                            .ok_or("No prototype snapshots. F5 saves; Shift+F5 loads.".to_owned())
-                            .and_then(|path| saves::load(path))
-                    });
-                    match loaded {
-                        Ok(next) => {
-                            state = next;
-                            message = "Loaded most recent snapshot.".to_owned();
+                    match saves::load_quick_or_latest(&save_dir).and_then(|(path, loaded)| {
+                        apply_save(
+                            &cache,
+                            scene.as_ref(),
+                            loaded,
+                            &mut state,
+                            &mut nav,
+                            &mut original,
+                            &mut dock,
+                            &mut acceleration,
+                            &mut commander,
+                            &mut message,
+                        )
+                        .map(|()| path)
+                    }) {
+                        Ok(path) => {
+                            last_mode = state.mode;
+                            launch_grace = None;
+                            pad_grace = false;
+                            pad_station = None;
+                            takeoff_climb = None;
+                            gameover = None;
+                            message = format!(
+                                "Loaded {}. Commander {}.",
+                                path.file_name()
+                                    .map(|name| name.to_string_lossy())
+                                    .unwrap_or_default(),
+                                commander.name
+                            );
                         }
-                        Err(e) => {
-                            eprintln!("LOAD ERROR: {e}");
-                            message = format!("LOAD ERROR: {e}")
+                        Err(error) => {
+                            eprintln!("LOAD ERROR: {error}");
+                            message = format!("LOAD ERROR: {error}");
                         }
+                    }
+                } else if pressed(Key::F5) {
+                    // F5 quick-saves; Ctrl+F5 writes a new numbered save. The
+                    // source refuses no in-flight save, so only death and the
+                    // post-death tombstone are invalid states here.
+                    if gameover.is_some() || state.death.is_some() {
+                        message = "SAVE REFUSED: the commander is dead.".to_owned();
+                    } else {
+                        let save = build_save(
+                            &commander,
+                            &state,
+                            nav.as_ref(),
+                            original.is_some(),
+                            acceleration,
+                        );
+                        let result = if ctrl {
+                            saves::save_numbered(&save_dir, &save)
+                        } else {
+                            saves::save_quick(&save_dir, &save)
+                        };
+                        message = match result {
+                            Ok(path) => format!(
+                                "Saved {}.{}",
+                                path.file_name()
+                                    .map(|name| name.to_string_lossy())
+                                    .unwrap_or_default(),
+                                if ctrl { " Previous saves kept." } else { "" }
+                            ),
+                            Err(error) => {
+                                eprintln!("SAVE ERROR: {error}");
+                                format!("SAVE ERROR: {error}")
+                            }
+                        };
                     }
                 }
             }

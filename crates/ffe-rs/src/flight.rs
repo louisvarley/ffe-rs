@@ -33,13 +33,14 @@ pub struct Flight {
     #[serde(default)]
     pub thrust: f64,
     /// The ship's full orientation (right, up, forward) when the original flight
-    /// model is running (it rolls, which `yaw` and `pitch` cannot say). Not saved:
-    /// a loaded game falls back to `yaw` and `pitch`.
-    #[serde(skip)]
+    /// model is running (it rolls, which `yaw` and `pitch` cannot say). Saves from
+    /// before it load `None` and fall back to `yaw` and `pitch`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axes: Option<[[f64; 3]; 3]>,
     /// Flying in a system (the navigator's bodies, not the prototype's station at the
     /// origin): the prototype's boundary, docking and safety reset do not apply.
-    #[serde(skip)]
+    /// Saves from before it load `false`.
+    #[serde(default)]
     pub system_flight: bool,
     /// Tonnes of each commodity in the hold (the original's 38-word cargo array,
     /// `ffe_core::market`); empty is an empty hold. Saves from before the market
@@ -157,6 +158,12 @@ impl Flight {
             || self.credits > 1_000_000_000
             || !(crate::ships::FIRST_SHIP..=crate::ships::LAST_SHIP).contains(&self.ship)
             || !(self.thrust.is_finite() && self.thrust.abs() <= 1.0)
+            || self.axes.is_some_and(|axes| {
+                axes.iter().any(|row| {
+                    row.iter().any(|value| !value.is_finite() || value.abs() > 1.5)
+                        || !(0.9..=1.1).contains(&length(*row))
+                })
+            })
             || !(self.hold.is_empty() || self.hold.len() == ffe_core::market::NAMES)
             || self.hold.iter().map(|t| u32::from(*t)).sum::<u32>() > 100_000
             || self.shields[0] > self.shields[1]
