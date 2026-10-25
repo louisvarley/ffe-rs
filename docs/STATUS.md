@@ -112,12 +112,13 @@ ECM.
   traffic (`npc.md`), sound cues (`sound-cues.md`), equipment (`equipment.md`),
   scanner and targeter (`scanner.md`), the message log (`message-log.md`),
   palette (`palette.md`), legal status and fines (`legal.md`), the death
-  sequence (`death.md`), music (`music.md`), and the **ship dashboard audit**
+  sequence (`death.md`), music (`music.md`), the game-over tombstone
+  (`gameover.md`), and the **ship dashboard audit**
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables). The port's
   own key bindings are in `docs/CONTROLS.md`.
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 159 items, 95 done and 64 left on
+  in `burndown.js`; 14 milestones, 165 items, 101 done and 64 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -298,14 +299,20 @@ capture produced by two repeat runs of the local reference.
 | v0.89 intro depth and atmosphere | `model_math::text_frame` for all intro texts, F1840/F1841 surface shapes merged into F1778's keyed depth list, F1879 ring through the F1805 texture path (71 colours, was 330) | `intro_view` (10 ignored), `model_math` tests; `verify-intro/fills/textures/surface` PASS | same four oracles PASS | - | ship now draws in front of the planet; atmosphere slot colours registered per frame; remaining skipped subtrees/palette approximation documented; `docs/notes/intro.md`, `docs/notes/palette.md` |
 | v0.90 Saker default arm | F998 type 0 Saker Mk III (0x1f), hull 112, 0/0 shields, front 0x88, two 0x82, drive 2, 10,000 CR, 1 t hold, general 0x40240020, index 87; `--start 0..5`, Hope HUD parent | `front_end` (9), `navigation` (19 ignored), `combat_view` (8), `dashboard_view` (5), `planet_view` (22), `boot_safety` (5); `verify-combat/takeoff/prefs/intro` PASS; exhaustive navigation PASS | four affected oracles PASS; exhaustive PASS (76.8 s) | - | owner decisions: type-1 hold remains 1 t vs the F2 page's 7 t, model-name table shift, start types 2-5; `docs/evidence/saker/` |
 | v0.91 start flow and pad services | F224 Pause->Open->Close, F4 services over 0x30 with F1/Backspace, three-body pad world (ship/planet/starport) for F603/F1033/fall-back, 120-frame grace, Tab/L launch, `--capture-start` | `prefs` (13), `navigation` (19 ignored), `station_view` (2), `planet_view` (22), `boot_safety` (5); `verify-prefs/takeoff/intro/surface/fills/textures` PASS; exhaustive navigation PASS | six affected oracles PASS; exhaustive PASS (71.7 s) | - | owner decisions: manual pad takeoff, elevation-vs-AGL, 120-frame grace, Escape UX, Tab launch, altitude HUD; `docs/evidence/start-flow/` |
+| v0.92 Thargoid traffic | F690 `RND(F35(0x16))` mission-gated spawns, `DATA_006197` models/stats/hull/shields/drive, F774 weapon selection, role 0x11 and the 0xd5 equipment record; `System::thargoids`/`spawn_thargoid_traffic` reconcile with `SpawnOptions` | `thargoid_view` (1 ignored), `boot_safety` (5), `npc_view` (3), `npc_ai` (4); `verify-npc/combat/surface/fills/textures` PASS | five affected oracles PASS | - | no mission trigger, zero starting laser energy, hostile entry state, no ECM/missiles/surrender, original model names; `docs/evidence/thargoids/` |
+| v0.93 hyperspace destination | persistent map destination (nearest star), H jumps anywhere with help on `?`, console 0x0f, F908 altitude/fuel/range gates, F901 burn, F909 arrival reset, Out of Range/Insufficient Fuel strings | `galaxy_map_view` (3 ignored), navigation (20 ignored); `verify-hyperspace/galaxy-map/surface/prefs/takeoff` PASS; exhaustive nav PASS | five affected oracles PASS; exhaustive PASS (53.8 s) | - | no drawn jump/misjump, only 16 systems enterable, destination clearing and altitude HUD remain; `docs/notes/hyperspace.md` |
+| v0.94 shipyard and BBS | statistics-derived prices/trade-in, 58-model table, 13-row stock, buy/part-exchange, 20 bulletin templates/18 posts/pagination, generated tables, station frames | `station_view` (2 ignored), navigation (20 ignored); `verify-station/station-queue/station-models/market/surface/prefs` PASS | six station/market oracles PASS | - | model-name vs F437 source and `+0xe` shield/name confusion documented without flight-stat changes; RNG stream, availability byte and negative part-exchange remain; `docs/notes/station.md` |
+| v0.95 ECM and missile view | ECM/naval ECM (F935, F718 5/6 and 7/9/10), F719 effect, F1057 decoy, F989/F1061 arming, F10 camera/HUD, console 0x14 | `ecm_view` (1), `missile_view` (1), `combat_view` (8), `scanner_view` (2), `npc_view` (3); `verify-combat/npc/surface/prefs/fills/textures` PASS | six affected oracles PASS | - | chaff ammo source, NPC launches absent, ECM/F719 rendering, T fallback, E/roll conflict, target split; `docs/evidence/ecm/` |
+| v0.96 game-over tombstone | F1104-F1107-F917 tombstone (model 172, rare 175), no menu, timed spin to the front end, `--capture-gameover`, `--death-probe`; death placeholders removed | `gameover_view` (2, FFE_GAMEOVER_CACHE), `death_view` (2), `boot_safety` (5), `npc_ai` (4); capture path; `verify-combat/surface/prefs/intro/npc` PASS | five affected oracles PASS | - | commander name source, load UI, model 175 trigger and obituary scale/face selection; `docs/notes/gameover.md`, `docs/evidence/gameover/` |
+| v0.97 source-tagged event log | one `Source`-tagged writer (12 variants), port-only entries removed/rerouted, F271 replace/NULL-clear/ring/scroll semantics, `message_log` scan, `messages_view` evidence | `message_log` (4), `messages_view` (4), `console_view` (7), `dashboard_view` (5), `boot_safety` (5); `verify-prefs/surface/takeoff/intro` PASS | four affected oracles PASS | - | DOS start-line inference, target-lock wording, unported-click feedback and DATA_008810/scroll actions remain; `docs/notes/message-log.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 746 `#[test]` functions total; 182 are `#[ignore]`
+  `cargo clippy -D warnings`. 797 `#[test]` functions total; 189 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **563 runnable synthetic tests** (564 on Linux).
+  **607 runnable synthetic tests** (608 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

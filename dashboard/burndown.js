@@ -173,7 +173,11 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-24", title: "Unlawful-fire fines, witness jurisdiction, wanted/alert and F655 debt refusal", status: "done", version: "v0.84" },
         { id: "gameplay-25", title: "F1104 death hold, F1098 escape craft, capsule launch and GAME OVER strings", status: "done", version: "v0.85" },
         { id: "gameplay-26", title: "Saker Mk III default arm, F2 loadout and start records", status: "done", version: "v0.90" },
-        { id: "gameplay-27", title: "Escape F224 order, F4 pad services, three-body pad and 120-frame grace", status: "done", version: "v0.91" }
+        { id: "gameplay-27", title: "Escape F224 order, F4 pad services, three-body pad and 120-frame grace", status: "done", version: "v0.91" },
+        { id: "gameplay-28", title: "Mission-gated Thargoid traffic, DATA_006197 models and F774 lasers", status: "done", version: "v0.92" },
+        { id: "gameplay-29", title: "Persistent hyperspace destination, H jump and F908/F909 gates", status: "done", version: "v0.93" },
+        { id: "gameplay-30", title: "Shipyard stock, part-exchange and the 20-template bulletin board", status: "done", version: "v0.94" },
+        { id: "gameplay-31", title: "ECM/naval ECM, F719 effect, decoys and the F10 missile view", status: "done", version: "v0.95" }
       ]
     },
     {
@@ -199,7 +203,9 @@ window.FFE_BURNDOWN = {
         { id: "ui-15", title: "Message log layout, dated entries, scroll and km/h speed lines", status: "done", version: "v0.78" },
         { id: "ui-16", title: "Target range colours, two-decimal formats, arrows and cursor", status: "done", version: "v0.79" },
         { id: "ui-17", title: "Classic/Modern presets, RMB steer and controls.cfg persistence", status: "done", version: "v0.81" },
-        { id: "ui-18", title: "Presentation display scaling, Display Options and Alt+Enter fullscreen", status: "done", version: "v0.87" }
+        { id: "ui-18", title: "Presentation display scaling, Display Options and Alt+Enter fullscreen", status: "done", version: "v0.87" },
+        { id: "ui-19", title: "F917 tombstone screen, obituary and timed return to the front end", status: "done", version: "v0.96" },
+        { id: "ui-20", title: "Source-tagged event log, F271 replace/NULL-clear/ring semantics", status: "done", version: "v0.97" }
       ]
     },
     {
@@ -682,6 +688,36 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 64,
       note: "Start flow merged (v0.91): Escape runs F224's Pause->Open->Close order (closing leaves paused), F4 opens services over the 0x30 pad and F1/Backspace return, the pad world has the ship, planet (F880 mass) and starport sibling so F603 gravity/F1033 altitude/fall-back work, with a 120-frame pad grace and Tab/L launch; --capture-start and the prefs/takeoff updates are in. Owner decisions: the manual pad takeoff, elevation-vs-AGL, the grace, Escape UX, Tab launch and altitude HUD remain. One item added and completed (gameplay-27), so the remaining count is unchanged."
+    },,
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Thargoids merged (v0.92): F690's mission-gated traffic draws RND(F35(0x16)) and spawns DATA_006197 models with their stats/hull/shields/drive; F774 selects the laser and the 0x11 role/0xd5 equipment record are wired. Reconciles with spawn-safety by keeping SpawnOptions for normal entries and adding the Thargoid count to the spawner. Owner decisions: the mission trigger is absent, starting laser energy is zero, the entry state is hostile, no ECM/missiles/surrender, and original model names. One item added and completed (gameplay-28), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Hyperspace merged (v0.93): a persistent map destination (nearest-star rule), H jumps anywhere with help moved to ?, console 0x0f, F908's altitude/fuel/range gates, F901's fuel burn, F909's full arrival reset and the Out of Range/Insufficient Fuel strings; navigation/galaxy-map tests and evidence. Owner decisions: the drawn jump/misjump sequence is not ported, only 16 systems can be entered, H vs help is now source-shaped, destination clearing and the altitude HUD remain. One item added and completed (gameplay-29), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Shipyard merged (v0.94): prices and part-exchange derive from statistics (+0xa x 1000, 950 x mass difference), the 58-model table, 13-row stock, buy/part-exchange and the BBS with 20 templates/18 posts/pagination, generated tables and station frames. Owner decisions: the model-name vs F437 name source and the +0xe shield/name confusion in ships.rs are documented without changing flight stats; the RNG stream, availability byte and negative part-exchange remain. One item added and completed (gameplay-30), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "ECM merged (v0.95): ECM/naval ECM (F935, F718 table 5/6 and naval 7/9/10), F719's effect, F1057 decoy retargeting, F989/F1061 auto-targeter arming, the F10 missile camera/HUD and console 0x14; ecm_view frames. Reconciled with lockon/lasers/missiles and the palette. Owner decisions: chaff ammo source, NPC launches absent, ECM visual/F719 rendering, T fallback, E/roll conflict and the target split remain. One item added and completed (gameplay-31), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Game-over merged (v0.96): the real F1104->F1107->F917 tombstone (model 172, rare 175), no menu, timed spin back to the front end, --capture-gameover and --death-probe; the death placeholders are removed. Owner decisions: commander name source, load UI, model 175 trigger and obituary text scale/face selection. One item added and completed (ui-19), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Events merged (v0.97): one source-tagged log writer (12 Source variants), port-only entries removed or rerouted (unported clicks, view names, pause/accel/HUD/save/takeoff notices), F271's replace/NULL-clear/ring/scroll semantics, message_log scan and messages_view evidence. Escape/pause messages stay off the log and the places list still wins. Owner decisions: the DOS start-line string inference, target-lock wording, unported-click feedback and DATA_008810/scroll actions remain. One item added and completed (ui-20), so the remaining count is unchanged."
     },
   ]
 };

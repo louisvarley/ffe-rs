@@ -4,6 +4,75 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Final batch: Thargoids, hyperspace, shipyard, ECM, game-over and events
+
+- Merged, one at a time, each green and pushed: `thargoids` (04b65d1),
+  `hyperspace` (2bf8592), `shipyard` (f7c83bb), `ecm` (5b0f6de), `gameover`
+  (81a405b) and `events` (e7518ef).
+- **thargoids (v0.92).** F690 draws `RND(F35(0x16))` and spawns the
+  `DATA_006197` models with their statistics/hull/shields/drive; F774 selects
+  the weapon, and the 0x11 role and 0xd5 equipment record are wired. Conflict
+  resolution kept spawn-safety's `SpawnOptions`/normal-entry semantics and added
+  the Thargoid limit to the spawner (`System::thargoids`,
+  `Navigator::spawn_thargoid_traffic`). Owner decisions: no mission trigger,
+  zero starting laser energy, hostile entry state, no ECM/missiles/surrender,
+  original model names; `docs/evidence/thargoids/`.
+- **hyperspace (v0.93).** Persistent map destination from the nearest-star rule,
+  `H` jumps anywhere with help moved to `?`, console 0x0f, F908's
+  altitude/fuel/range gates, F901's burn, F909's arrival reset and the
+  Out of Range/Insufficient Fuel strings. Conflicts: `main.rs` (kept start-flow's
+  F4 services block and added the Slash help key; combined F4 + help paths),
+  `navigation.rs` (kept legal's illegal-fire reset and added the destination/
+  altitude resets), `CONTROLS.md` (Escape/F4/help rows). Owner decisions: no
+  drawn jump/misjump, only 16 systems enterable, destination clearing and
+  altitude HUD remain; `docs/notes/hyperspace.md`.
+- **shipyard (v0.94).** Prices/trade-in derive from statistics (`+0xa * 1000`,
+  `950 * mass difference`), with the 58-model table, 13-row stock,
+  buy/part-exchange and the BBS (20 templates, 18 posts, pagination), generated
+  tables and station frames. Conflict: `navigation.rs` imports (kept both
+  `Strings` and `shipyard`). Owner decisions: the model-name vs F437 name source
+  and the `+0xe` shield/name confusion in `ships.rs` are documented without
+  changing flight stats; RNG stream, availability byte and negative
+  part-exchange remain; `docs/notes/station.md`.
+- **ecm (v0.95).** ECM/naval ECM (F935, F718 table 5/6 and naval 7/9/10), F719's
+  effect, F1057 decoy retargeting, F989/F1061 auto-targeter arming, the F10
+  missile camera/HUD and console 0x14. Conflicts: `main.rs` (kept the lock
+  message on `name`/`range_label`), `screen.rs` help text (locked target,
+  targeter, ECM and `?` help). Owner decisions: chaff ammo source, NPC launches
+  absent, ECM/F719 rendering, T fallback, E/roll conflict and the target split;
+  `docs/evidence/ecm/`.
+- **gameover (v0.96).** The real F1104 -> F1107 -> F917 tombstone (model 172,
+  rare 175), no menu, a timed spin back to the front end, `--capture-gameover`
+  and `--death-probe`; death's placeholder strings/options are gone. Conflicts:
+  `main.rs` (combined all capture options, fixed the post-game-over
+  `run_intro` call to the presenter signature and default start), `exports.inc`
+  (kept the legal probe exports and added `_ref_damage`). Owner decisions:
+  commander name source, load UI, the model-175 trigger and obituary text
+  scale/face selection; `docs/notes/gameover.md`, `docs/evidence/gameover/`.
+- **events (v0.97).** One source-tagged log writer (12 `Source` variants); the
+  port-only entries are removed or rerouted (unported clicks, view names,
+  pause/accel/HUD/save/takeoff notices), F271's replace/NULL-clear/ring/scroll
+  semantics are in, with a `message_log` scan and `messages_view` evidence.
+  Conflicts: `main.rs` (kept `pad_board` and the transient-note comment; routed
+  the lock text through `pending_log.replace(Source::Target, ...)`) and
+  `docs/notes/dashboard.md` (F4 services, F5 transient note). Escape/pause
+  messages stay off the log and the places list still wins. Owner decisions:
+  DOS start-line inference, target-lock wording, unported-click feedback and
+  DATA_008810/scroll actions; `docs/notes/message-log.md`.
+- **`6a9dbf5` verdict.** The preserved galaxy-map console commit is **not
+  superseded** by `places` or `hyperspace`: it adds F834's 0x1c..0x24 map
+  console page and F840's F5-F12 re-imaging, which are still absent from the
+  merged port. It is not merged here because it predates start-flow/hyperspace/
+  events and its F5/F9/F10 bindings collide with the port's save/view/missile
+  keys; it should be rebased as a focused follow-up with owner input on the
+  key map. It remains on `backup/galaxy-map-6a9dbf5`.
+- Checks: every merge ran workspace tests, clippy `-D warnings`, fmt, its
+  cached/ignored suites and the affected oracles; the final full suite is
+  56 entries (55 PASS / 1 SKIP / 0 FAIL on Windows). Cache stays v29
+  (1,813 assets / 1,814 entries).
+
+---
+
 ## 2026-10-25 - Music, display, intro depth, Saker and start-flow round
 
 - Merged, one at a time, each green and pushed: `music-all` (5b7c986),
