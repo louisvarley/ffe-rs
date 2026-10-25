@@ -1,14 +1,15 @@
 # Equipment, the fitted loadout and player damage
 
-Status (2026-10-25): the equipment table and the fitted-loadout words are ported
-to `ffe-core`/`ffe-rs`; the HUD, the F991 view row, the F1116/F1120 lamps and
-the engines-off equipment page now read real state. The starport Upgrades list
-is wired: `galaxy::Tables::tech_level` supplies F869's `DATA_008995`,
-`station::upgrades` builds F383's rows through `equipment::outfitting`, and
-`ffe-rs::outfitting::fit`/`remove` implement F386's Fit/Remove actions for
-general equipment, cabins, lasers, shield generators and missiles. Drives and
-mining machines are listed (F383 offers them) but have no port state, so their
-buttons report that rather than inventing a drive word.
+Status (2026-10-25, fitting round): the equipment table and the fitted-loadout
+words are ported to `ffe-core`/`ffe-rs`; the HUD, the F991 view row, the
+F1116/F1120 lamps and the engines-off equipment page now read real state. The
+starport Upgrades list is wired: `galaxy::Tables::tech_level` supplies F869's
+`DATA_008995`, `station::upgrades` builds F383's rows through
+`equipment::outfitting`, and `ffe-rs::outfitting::fit`/`remove` implement F386's
+Fit/Remove actions for **all seven categories**: general equipment, cabins,
+lasers, drives, shield generators, missiles and mining machines. A drive is one
+byte at `ship+0xd0`; mining machines are `DATA_009104`'s ten-record list. There
+is no listed-but-disabled row left: every category F383 offers has a handler.
 
 Source: `jjffe-master/ffe.asm` / `ffedat.asm` (DOS-era recovered asm; JJFFE 2.8a7
 is the reference build). No cache change: the table is static game data with no
@@ -47,10 +48,10 @@ Categories (`record+0x10`):
 | 0 | general equipment | bitfield dword `ship+0xc8` |
 | 1 | passenger cabins | cabin count (`player+0x120`) |
 | 2 | lasers | `ship+0xd2..+0xd5` (the record's `+0x12` is the laser code) |
-| 3 | drives | drive words, not modelled |
+| 3 | drives | one byte `ship+0xd0` (`F408`/`F410`), class = record `+0x12` |
 | 4 | shield generator | `ship+0xe2` += 0x40 (`F413`), -= 0x40 (`F415`) |
 | 5 | missiles | `ship+0xd6..+0xdf`, one byte per pylon (`F418`) |
-| 6 | mining machines | machine words, not modelled |
+| 6 | mining machines | `DATA_009104`'s ten 52-byte records (`FUNC_000248`), count `+0` |
 
 `F393` (`ffe.asm:29030`) turns a general record's `+0x12` into a bit:
 
@@ -78,9 +79,108 @@ The station piece is now wired: `F869` returns the system record's byte `+5`,
 `F622` stores it in `DATA_008995`, and `galaxy::Details::tech_level()` /
 `galaxy::Tables::tech_level()` expose it. `station::upgrades` maps
 `equipment::outfitting` rows to the 0x98f5 list, and `outfitting::fit`/`remove`
-apply F386's cash (`F387`/`F388`) and space checks plus the category handlers
-(F390/F393, F399/F400, F428, F413/F415, F418/F421). Drives and mining machines
-are shown but not modelled.
+apply F386's cash (`F387`/`F388`) and space checks plus every category handler:
+F390/F393 and F391/F395 (general), F399/F398 and F401/F400 (cabins),
+F404/F403 and F406/F405 (lasers), F409/F408 and F411/F410 (the one drive),
+F414/F413 and F416/F415 (shield generators), F419/F418 and F421/F420
+(missiles), F424/F423 and F426/F425 (mining machines). F392 also uses the
+third-column fitted predicates F397/F402/F407/F412/F417/F422/F427, ported by
+`Loadout::fitted`.
+
+## The remaining category handlers
+
+### Drives (category 3, F409/F411)
+
+- `ship+0xd0` is **one** drive byte, not a list. F408 refuses a second drive
+  with 0x98f9 ("You may have only one drive system."); F410 clears the byte and
+  `ship+0x11e` (the energy pool). F411's messages are 0x98fa ("You have no ...
+  to remove.") and 0x98fb ("The drive is an integral part of your ship.") when
+  the model's statistics word at `+0x14` is negative.
+- F408 also stamps `DATA_008924 = 0x1f4` and `DATA_008926 = DATA_008807`, the
+  drive-service clock the F444 "Drive Only service (last: ...)" row reads. The
+  port's `Flight::service_days[0]` is not yet written by `outfitting::fit`
+  (a reported gap: the fit function has no Flight handle).
+- The class comes from the equipment record's `+0x12` (codes 1..9 civil, 0xa..0xd
+  military). F903's `sector::Drive` table gives the range power (`+0`), fuel
+  modifier (`+4`) and name code (`+0xc`); `hyperspace::plan` already uses them,
+  and `main::drive_state` now reads the fitted byte instead of the model's
+  delivered statistics word. F270's `DATA_005089` energy scale is
+  `laser::DRIVE_ENERGY` (class 2 0x7ff, class 3 0x3ff, ...), so fitting a drive
+  changes the first HUD gauge. Military classes (>= 0xa) use the military tank
+  and burn military fuel (`hyperspace::MILITARY_CLASS`).
+- The drive's **mass** is the equipment record's `+0x8` (Class 1 10 t, Class 2
+  25 t, ...); F390/F391 move it in and out of `DATA_008889`. F1533's separate
+  `DATA_007210` table (10/25/45/...) and `sector::Drive.mass` (`+8` of the
+  16-byte drive record: 6/12/24/...) are not the equipment mass; the former is
+  the delivered-hull hold adjustment and the latter the drive-type record's
+  third dword, which no ported routine reads.
+- **Sublight speed is not a drive stat**: the hull's statistics `+0x0/+0x2`
+  thrust limits set it (`ShipStats::limits`). The drive changes jump range,
+  jump fuel/time and the energy gauge, not the thrust word.
+
+### Mining machines (category 6, F423-F427)
+
+- `DATA_009104` is the list count (ten records of 13 dwords, `DATA_009106`;
+  `FUNC_000248` appends). `DATA_009105` is the available count; F427 returns it
+  as the fitted value for **both** mining records, so an MB4 machine also lights
+  the Vaccine row. F423/F424 refuse an eleventh record with 0x99d6
+  ("Mining Machine list full"); `FUNC_000251` removes the last idle record and
+  `FUNC_000249` compacts the list. F425 does **not** compare the row's code: the
+  Vaccine row can remove an MB4 machine, and its removal price (0) is what F388
+  refunds.
+- The port keeps `Loadout.mining: [u8; 10]` (equipment codes) and derives the
+  count. The 52-byte machine state (object, hopper, deployment) and the F243/
+  F244 deployment UI are **not ported**; fitting/removing/refunding and the
+  hold mass are. There is no market/hold difference between the two records
+  beyond their 30 t / 20 t masses.
+
+### Cabins (category 1, F399/F401)
+
+- `DATA_008890` is the cabin count (F398 increments, F400 decrements);
+  `DATA_008892` is the occupied count. F401 refuses with 0x98fc ("You cannot
+  remove an occupied cabin.") when every cabin is occupied; an unoccupied
+  cabin can always be removed. The port stores `cabins` and `occupied_cabins`
+  and exposes `cabin_capacity`/`free_cabins`; passenger missions that would
+  raise the occupied count are not ported, so it stays 0.
+- Each cabin is 5 t (record 25) and fits without a numerical cap in the source;
+  `Loadout::validate` keeps the port's conservative 100.
+
+### Shield generators (category 4, F413/F415)
+
+- Each generator adds exactly 0x40 to `ship+0xe2` (F413) and F415 refuses below
+  0x40. There is no cap in the source; the port's `validate` keeps 10.
+  `Loadout::shield_max` is `count * 0x40`. Removal does not clamp the current
+  shields (`ship+0xe0`), which is the source behaviour and can leave
+  `current > maximum`; the HUD then reads the source's ratio.
+- The statistics' shield word is at `+0xc` (the shipyard View page); `+0xe` is
+  the ship's name code (`0x4000 | index`), despite `ShipStats::shield_strength`
+  in `ffe-rs/src/ships.rs` reading `+0xe`. That mislabel is a known owner
+  decision (the NPC target readout uses it); the player's maximum shields come
+  only from F413's generators, and F1533 starts both shield words at 0.
+
+### Fuel-scoop dependency (F394)
+
+F394's code-4 branch tests the statistics word at `+4` bit 0x100 (byte `+5` bit
+0), not a general bit: a model without the mounting gets 0x9903 ("Your ship does
+not have a fuel scoop mounting."). The Saker Mk III (0x1f) has no mounting; the
+Eagle (0x17) does not either, while the Asp/Imperial Courier family do. The
+code-0x0d branch (Cargo Scoop Conversion) still needs the Fuel Scoop general bit
+(0x9904). `ShipStats::fuel_scoop_mounting` carries the byte and
+`outfitting::Limits::fuel_scoop_mounting` gates the row.
+
+### Mass and hold (F390/F391)
+
+`Loadout::mass` sums every fitted record's `+0x8` (general bits, cabins, lasers,
+shield generators, missiles, the drive and the mining machines). F390 subtracts
+it from `DATA_008889` on fit and F391 adds it back on remove; the free-space
+check is `DATA_008889 - DATA_008891`. The port's `Loadout::capacity(base,
+delivered, lasers)` applies the **difference from the delivered loadout**:
+F998's new game already prices its 6 t (plus the drive) into the 1 t
+`Navigator::hold`, while a hull bought later (F441 clears the equipment) uses the
+model's cargo statistic. `trade::capacity` is the single reader used by the
+market, the Upgrades free-space check and the cash/cargo/cabins line. This is
+why the Saker starts with a 1 t hold and why removing the delivered 10 t drive
+frees 10 t (the source's F391 quirk, because F998 never charged for it).
 
 ## The new game's fitted loadout (`F998`, `ffe.asm:74028`)
 
@@ -209,22 +309,46 @@ already cached in v20; the cache is **v28** and the equipment table adds no asse
   the combat slice's and are flagged for its owner, not changed here.
 - `F383`'s second-hand price uses a per-visit random multiplier the port has not
   reproduced; deterministic tech-multiplier prices are a reported deviation.
+- `ShipStats::shield_strength` in `ffe-rs/src/ships.rs` reads the statistics'
+  `+0xe`, which is the ship name code (`0x4000 | index`), not a shield word; the
+  shipyard View page and the model table use `+0xc`. The value reaches the NPC
+  target readout and `npc::Spec`, so changing it is an owner decision (the
+  player's own maximum shields do not read it: F413's generators set `+0xe2`).
+- A hull bought in the port (F441) starts with an empty `Loadout`: the source
+  sets `ship+0xd0` to the model's required drive class for free, which the port
+  does not do yet, so the bought ship must have a drive fitted before a jump.
+  F441's free delivered drive is the reason the port's first fit of a drive
+  charges its 10 t against the hold where the source would not.
+- F408's drive-service stamp (`DATA_008924`/`DATA_008926`), the mining-machine
+  deployment state (F243/F244, the 52-byte records) and passenger missions that
+  raise `DATA_008892` remain out of scope; the fitting, removal, refund and mass
+  effects are in.
 
 
 ## Tests
 
 - `crates/ffe-core/src/equipment.rs`: names/prices/mass/category/tech decoding,
-  the bit formula, `GENERAL_MASK`, the default type-0 loadout, fitted
-  storage per category, icon nibbles, availability/prices and validation.
+  the bit formula, `GENERAL_MASK`, the default type-0 loadout (drive 2),
+  fitted storage per category (including the shared mining list and the one
+  drive byte), the ten-machine cap, F390/F391 mass and capacity, icon nibbles,
+  availability/prices and validation.
 - `crates/ffe-rs/tests/combat.rs`: new/old save round-trips, F953 damage order,
   destruction, the no-generator new-game state, and a fitted generator keeping
   existing damage.
 - `crates/ffe-core/tests/galaxy.rs`: the record's `+5` is `DATA_008995` and the
   procedural classes read the records before `DATA_007110`.
 - `crates/ffe-rs/src/outfitting.rs`: F387/F388's ten-times price and refund,
-  the general/cabin/laser/shield/missile handlers, cash/space refusals, mount
-  and pylon limits, missing-item messages and the unmodelled drive/mining
-  categories.
+  every category handler (general/cabin/laser/drive/shield/missile/mining),
+  cash/space refusals, mount/pylon/drive/machine limits, the occupied-cabin and
+  integral-drive refusals, the fuel-scoop mounting/dependency gates, and the
+  energy-pool clear on drive removal.
+- `crates/ffe-rs/tests/fitting.rs`: the scripted fit -> effect -> remove
+  sequence (drive mass/hold/energy gauge), per-category fit/remove/refund/mass,
+  the ten-machine cap, the shared mining fitted flag, the occupied cabin and
+  F394's two gates.
+- `docs/evidence/fitting/`: `upgrades-drive.png`, `upgrades-mining.png`,
+  `upgrades-cabin.png` (ignored `station_view` run at tech 0xfd) and
+  `sequence.txt` (the scripted console trace).
 - `crates/ffe-rs/src/station.rs`: F383's available rows at tech 0xfd/0x16,
   fitted flags and the Upgrades Fit/Remove hot areas.
 - `crates/ffe-rs/tests/console_table.rs`: F991 equipment icons, F1120 lamps from

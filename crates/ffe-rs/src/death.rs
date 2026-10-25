@@ -245,7 +245,7 @@ pub fn begin(state: &mut Flight, craft_stats: Option<&ShipStats>) -> Outcome {
 /// F1098's new-ship setup, without the equipment check. Used by the automatic
 /// death path and the F12 console icon.
 pub fn board(state: &mut Flight, craft: EscapeCraft, stats: Option<&ShipStats>) {
-    let old_drive = state.combat.drive;
+    let old_drive = state.loadout.drive.max(state.combat.drive);
     let old_cabins = state.loadout.cabins;
     let mass = stats.map_or(0, |stats| stats.mass);
 
@@ -254,6 +254,10 @@ pub fn board(state: &mut Flight, craft: EscapeCraft, stats: Option<&ShipStats>) 
     state.loadout.missiles = [0; ffe_core::missile::PYLONS];
     state.loadout.shield_generators = 0;
     state.loadout.cabins = craft.cabins(old_cabins);
+    // F1098's new ship has no mining machines, and the capsule's inherited
+    // cabins cannot hold more passengers than it has cabins.
+    state.loadout.mining = [0; ffe_core::equipment::MINING_SLOTS];
+    state.loadout.occupied_cabins = state.loadout.occupied_cabins.min(state.loadout.cabins);
 
     state.combat = Combat {
         lasers: [craft.laser().unwrap_or(0), 0, 0, 0],
@@ -265,6 +269,7 @@ pub fn board(state: &mut Flight, craft: EscapeCraft, stats: Option<&ShipStats>) 
         cooling_booster: false,
         cool_carry: 0.0,
     };
+    state.loadout.drive = state.combat.drive;
     // F1533 clears both shield words; the new hull is model mass * 4.
     state.shields = [0; 2];
     state.hull = if mass == 0 {

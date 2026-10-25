@@ -317,8 +317,18 @@ fn docked_screens_draw_at_the_original_layout() {
         mounts: 1,
         pylons: 2,
         free_space: hold,
+        fuel_scoop_mounting: true,
+        drive_removable: true,
     };
-    outfitting::remove(21, tech_level, &mut loadout, &mut combat, &mut credits).unwrap();
+    outfitting::remove(
+        21,
+        tech_level,
+        &mut loadout,
+        &mut combat,
+        &mut credits,
+        limits,
+    )
+    .unwrap();
     let message = outfitting::fit(
         five_mw.index,
         tech_level,
@@ -359,6 +369,127 @@ fn docked_screens_draw_at_the_original_layout() {
         &message,
     );
     save(&screen, "Upgrades-buy-laser.ppm");
+
+    // Fitting evidence: the drive, mining-machine and cabin rows F383 offers at
+    // Ross 154's tech level. The Saker's F998 drive is Class 1 (code 2), so its
+    // row starts fitted; the mining rows share DATA_009104's list.
+    for (row_name, record, mass) in [
+        ("Interplanetary drive", 31usize, 4u32),
+        ("MB4 Mining Machine", 32, 30),
+        ("Extra Passenger Cabin", 25, 5),
+    ] {
+        let row = rows
+            .iter()
+            .find(|row| row.name == row_name)
+            .unwrap_or_else(|| panic!("the reference list has {row_name}"));
+        assert_eq!(row.index, record, "{row_name}");
+        assert_eq!(row.mass, mass, "{row_name} Wt column");
+    }
+    assert!(
+        rows.iter()
+            .find(|row| row.name == "Class 1 Hyperdrive")
+            .unwrap()
+            .fitted,
+        "F998 fits drive class 2"
+    );
+    for (row_name, shot) in [
+        ("Interplanetary drive", "Upgrades-drive.ppm"),
+        ("MB4 Mining Machine", "Upgrades-mining.ppm"),
+        ("Extra Passenger Cabin", "Upgrades-cabin.ppm"),
+    ] {
+        let at = rows.iter().position(|row| row.name == row_name).unwrap();
+        draw(
+            &mut screen,
+            Some(upgrade_view(&name, &rows, status, at.saturating_sub(6))),
+            None,
+            station::UPGRADES_HINT,
+        );
+        save(&screen, shot);
+        assert!(
+            screen.logical_pixels().iter().any(|pixel| *pixel != 0),
+            "{shot} drew"
+        );
+    }
+    // A scripted fit -> effect -> remove: F410 takes the delivered drive and its
+    // energy pool, F409 fits the Class 2 Hyperdrive (ship+0xd0 = 3), and the
+    // energy gauge scale follows the class before the drive is put back.
+    let sequence = Limits {
+        free_space: 1_000,
+        ..limits
+    };
+    let class_one = rows
+        .iter()
+        .find(|row| row.name == "Class 1 Hyperdrive")
+        .unwrap()
+        .index;
+    let class_two = rows
+        .iter()
+        .find(|row| row.name == "Class 2 Hyperdrive")
+        .unwrap()
+        .index;
+    combat.energy = 0x2000_0000;
+    let old_gauge = ffe_core::laser::energy_gauge(combat.energy, 2);
+    let mut log = Vec::new();
+    log.push((
+        "remove Class 1",
+        outfitting::remove(
+            class_one,
+            tech_level,
+            &mut loadout,
+            &mut combat,
+            &mut credits,
+            sequence,
+        )
+        .unwrap(),
+    ));
+    assert_eq!(combat.drive, 0);
+    assert_eq!(combat.energy, 0, "F410 clears ship+0x11e");
+    log.push((
+        "fit Class 2",
+        outfitting::fit(
+            class_two,
+            tech_level,
+            &mut loadout,
+            &mut combat,
+            &mut credits,
+            sequence,
+        )
+        .unwrap(),
+    ));
+    assert_eq!(loadout.drive, 3);
+    assert_eq!(combat.drive, 3);
+    let new_gauge = ffe_core::laser::energy_gauge(0x2000_0000, 3);
+    assert_ne!(new_gauge, old_gauge, "F270 scales the gauge by drive class");
+    combat.energy = 0x2000_0000;
+    log.push((
+        "remove Class 2",
+        outfitting::remove(
+            class_two,
+            tech_level,
+            &mut loadout,
+            &mut combat,
+            &mut credits,
+            sequence,
+        )
+        .unwrap(),
+    ));
+    log.push((
+        "fit Class 1 again",
+        outfitting::fit(
+            class_one,
+            tech_level,
+            &mut loadout,
+            &mut combat,
+            &mut credits,
+            sequence,
+        )
+        .unwrap(),
+    ));
+    assert_eq!(loadout.drive, 2);
+    assert_eq!(combat.drive, 2);
+    for (step, message) in &log {
+        println!("{step}: {message}");
+    }
 
     // F437's New and Reconditioned Ships list: the generated hull stock with
     // Cost, Pt.Exchg and Cap. The reference Sirocco frame's Federal shipyard

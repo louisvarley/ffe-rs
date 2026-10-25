@@ -4,11 +4,11 @@ Status (2026-10-25): **the services root, shipyard root, stockmarket, Upgrades,
 New and Reconditioned Ships and the Bulletin Board are ported**. The equipment
 table and fitted loadout live in `ffe-core::equipment` (embedded, cache still
 v26); the starport tech level is now read from F869 (below), so F383's rows,
-F387/F388's prices and F386's Fit/Remove buttons work end to end for general
-equipment, cabins, lasers, shield generators and missiles. Drives and mining
-machines are listed but their buttons report that the category has no port
-state. The repairs screen builds F444's three service rows (their actions are
-not wired yet). The shipyard's hull table is generated into
+F387/F388's prices and F386's Fit/Remove buttons work end to end for every
+category: general equipment, cabins, lasers, drives, shield generators,
+missiles and mining machines. The Upgrades Wt column now moves the hold
+(F390/F391) through `trade::capacity`. The repairs screen builds F444's three
+service rows (their actions are not wired yet). The shipyard's hull table is generated into
 `ffe-core::shipyard` from the DOS statistics blocks and `ffedat.asm`, so F437's
 rows, F438/F442's Buy/part exchange and F634/F635's stock are real; the
 Bulletin Board generates F621's advertisements from `DATA_006170` and the
@@ -200,9 +200,12 @@ anywhere while docked. These are called out as port conveniences in
   buttons. F329's second (Remove) button is drawn only for a fitted row. The
   left button/`1`..`4`/Enter calls `outfitting::fit`; the right button calls
   `outfitting::remove`; both charge/refund ten times the row's whole-credit
-  price, because the player's cash is in tenths. General bits, cabins, lasers,
-  shield generators and missiles apply to `Loadout`/`Combat`; drives and
-  mining machines have no port state and report that instead of inventing one.
+  price, because the player's cash is in tenths. **All seven categories apply**
+  to `Loadout`/`Combat`: general bits, cabins, lasers, the one drive, shield
+  generators, missiles and mining machines. F394's fuel-scoop mounting and
+  Cargo Scoop Conversion gates, F410's integral drive and F401's occupied cabin
+  are enforced. The Upgrades free-space check and the cash/cargo/cabins line use
+  `trade::capacity` (F390/F391's hold), so the Wt column has a real effect.
 - **Repairs and Servicing** (`F443`/`F444`): the three service rows
   (Deluxe 80*mass, Drive Only 50*mass, Equipment Only 50*mass) with the
   0x9815-0x9817 strings, the stored service dates (`Flight::service_days`,
@@ -259,9 +262,12 @@ owner wants it, the next step is to follow the F2 console action
    bytes) is embedded in `ffe-core::equipment`, F869/F622's `DATA_008995` tech
    level is read through `galaxy::Tables`, and `station::Upgrades` builds F383's
    rows with `equipment::outfitting`; `outfitting::fit`/`remove` implement
-   F386's cash/space checks and the general, cabin, laser, shield and missile
-   handlers. Remaining: drive (`F409`/`F411`) and mining-machine state, and the
-   second-hand random branch of F383's prices (see `docs/notes/equipment.md`).
+   F386's cash/space checks and every category handler, including the drive
+   (`F409`/`F411`), mining machines (`F423-F427`), cabins, shield generators and
+   F394's two fuel-scoop gates. Remaining: the second-hand random branch of
+   F383's prices, the drive-service clock write (F408's `DATA_008924/926`), the
+   mining-machine deployment state (F243/F244) and passenger missions that raise
+   `DATA_008892` (see `docs/notes/equipment.md`).
 2. **Shipyard ships**. `F445` reads the station's generated entries
    (`+0x2e6`, up to 13 `{model, index}` words from `F634/F635` and
    `DATA_006199..6200`) and the ship statistics. `DATA_005268..5272` is not a
