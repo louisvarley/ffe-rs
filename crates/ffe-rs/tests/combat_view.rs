@@ -407,40 +407,80 @@ fn target_damage_readout_draws_f1099s_text() {
 
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
-fn beam_is_model_156_at_the_gun() {
+fn beam_is_model_156_at_the_gun_only_where_it_is_in_front() {
     let cache = cache();
     let mut screen = Screen::new(&cache).unwrap();
     let viewer = ModelViewer::new(&cache).unwrap();
     let state = flight();
-    let views = ViewState::default();
+    let mut views = ViewState::default();
     let stats = viewer.ship_stats(state.ship);
     screen.lasers = Combat::new_game().lasers;
+    let scale = ffe_rs::screen::model_scale(&viewer).unwrap();
+
+    // F1776 places the duplicate at the front gun, 1300/8 units ahead of the
+    // ship centre; the cockpit eye is 1500/8 ahead. The cone (model 0x9c, 64
+    // model units) is therefore 1600 units behind the front camera's near
+    // plane and F1479/F1680 cull it. The port must not clamp z to invent a
+    // flash below the crosshair.
+    let beam = combat::beam(&state, stats.as_ref(), views.mode, [0, 0]);
+    let camera = ffe_rs::camera::Camera::new(&state, &views, stats.as_ref(), scale);
+    let origin = camera.point(beam.origin).map(|v| v * scale);
+    assert!(
+        origin[2] < 0.0,
+        "the front gun is not behind the eye: {origin:?}"
+    );
+    let rows = beam.axes.map(|axis| camera.direction(axis));
+    let light = camera.direction(viewer.light_direction());
+    let rendered = viewer
+        .render_scene(combat::BEAM_MODEL, rows, origin, light)
+        .unwrap();
+    assert!(
+        rendered.shapes.is_empty(),
+        "model 0x9c rendered behind the front eye"
+    );
 
     draw(&mut screen, &state, views, Some(&viewer));
+    let before = screen.logical_pixels().to_vec();
+    screen.beam = Some(beam);
+    draw(&mut screen, &state, views, Some(&viewer));
+    save(&screen, "combat-beam-front.ppm");
+    assert_eq!(
+        changed(&before, screen.logical_pixels(), 0, 320, 0, 158),
+        0,
+        "the front view invented a muzzle flash"
+    );
+
+    // The external camera is 49 m behind the ship, so the gun is in front of it
+    // and F1776's model path runs; the cone is one pixel at that distance.
+    views.mode = ViewMode::External;
+    views.external.distance = -0x00c0_0000;
+    screen.beam = None;
+    draw(&mut screen, &state, views, Some(&viewer));
+    let external_before = screen.logical_pixels().to_vec();
     let beam = combat::beam(&state, stats.as_ref(), views.mode, [0, 0]);
     screen.beam = Some(beam);
     draw(&mut screen, &state, views, Some(&viewer));
-    save(&screen, "combat-beam.ppm");
-    // Model 0x9c is a 64 mm muzzle cone at the normal camera distance, so the
-    // cockpit frame shows it as (at most) a pixel; the model itself still runs.
-    let scale = ffe_rs::screen::model_scale(&viewer).unwrap();
+    save(&screen, "combat-beam-external.ppm");
+    let external_after = screen.logical_pixels().to_vec();
+    let external = changed(&external_before, &external_after, 0, 320, 0, 158);
+    // The cone is a pixel at the original 49 m camera distance; the model still
+    // renders in front of the camera, unlike the front view's cull.
     let camera = ffe_rs::camera::Camera::new(&state, &views, stats.as_ref(), scale);
+    let origin = camera.point(beam.origin).map(|v| v * scale);
+    assert!(origin[2] > 0.0, "the external camera is not behind the gun");
     let rows = beam.axes.map(|axis| camera.direction(axis));
-    let mut origin = camera.point(beam.origin).map(|v| v * scale);
-    if origin[2] < 1000.0 {
-        origin[2] = 1000.0;
-    }
     let light = camera.direction(viewer.light_direction());
     let rendered = viewer
         .render_scene(combat::BEAM_MODEL, rows, origin, light)
         .unwrap();
     assert!(
         !rendered.shapes.is_empty(),
-        "model 0x9c did not render at the gun"
+        "model 0x9c did not render in front of the external camera"
     );
-    // The beam model is the original's 0x9c: a small muzzle flash (its record
-    // coordinates divide by 2^17, so its 8,388,607 record units are 64 model
-    // units), drawn at the front gun 1300/8 units ahead of the ship centre.
+    assert_eq!(external, 1, "the external muzzle is one pixel");
+
+    // Model 0x9c is the original's small muzzle cone: its record coordinates
+    // divide by 2^17, so its 8,388,607 record units are 64 model units.
     assert_eq!(viewer.find(combat::BEAM_MODEL).unwrap().scale, 17);
     let front = stats.unwrap().front_gun[0];
     assert_eq!(front, 1300);

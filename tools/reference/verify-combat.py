@@ -15,6 +15,11 @@ Two layers:
   129,48) in laser views only, bitmap 98 (35x35) for the velocity marker in the
   front view, F270's bars, F1099's target text, F1100's range and F998's loadout,
   and fires through the port's F931/F953 path.
+* `jjffe-smoke --laser-probe 240` calls the executed F931 on the player object
+  and prints `+0xe8`/`+0xea`/`+0x11e`/`+0x151` every frame. It pins the refire
+  unit: F730 subtracts `DATA_009155` (`tics`, 1043 in the adapter's synthetic
+  clock) from the 0x795c word, so the next pulse is `ceil(0x795c / tics)`
+  frames later, and a shot adds 400 heat and removes 800 energy.
 
 Run:
 
@@ -52,8 +57,14 @@ COMBAT_TESTS = {
     "new_game_hull_carries_f998s_one_front_pulse_laser",
     "target_damage_readout_draws_f1099s_text",
     "target_lock_uses_f1100s_green_and_two_decimal_au",
-    "beam_is_model_156_at_the_gun",
+    "beam_is_model_156_at_the_gun_only_where_it_is_in_front",
 }
+LASER_TESTS = {
+    "a_60hz_pulse_sequence_aims_fires_and_damages_an_npc",
+}
+
+
+PULSE_REFIRE = 0x795C
 
 
 def run(reference: Path, directory: Path) -> list[dict]:
@@ -63,6 +74,63 @@ def run(reference: Path, directory: Path) -> list[dict]:
         raise RuntimeError(f"reference failed ({result.returncode}): "
                            f"{result.stderr.decode(errors='replace')}")
     return [json.loads(line) for line in result.stdout.splitlines() if line]
+
+
+def run_laser(reference: Path, directory: Path) -> list[dict]:
+    result = subprocess.run([str(reference), "--laser-probe", "240"], cwd=directory,
+                            capture_output=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError(f"laser probe failed ({result.returncode}): "
+                           f"{result.stderr.decode(errors='replace')}")
+    return [json.loads(line) for line in result.stdout.splitlines() if line]
+
+
+def check_laser(rows: list[dict]) -> dict:
+    """F931/F730 from the executed game: the refire unit is DATA_009155."""
+    if not rows:
+        raise RuntimeError("--laser-probe printed no rows")
+    tics = rows[0]["tics"]
+    if not 900 <= tics <= 1200:
+        raise RuntimeError(f"implausible DATA_009155: {tics}")
+    shots = [row for row in rows
+             if row["refire"] == PULSE_REFIRE and row["refire_before"] == 0]
+    if len(shots) < 2:
+        raise RuntimeError(f"only {len(shots)} shots in the laser probe")
+    first, second = shots[0], shots[1]
+    if first["frame"] < 165:
+        raise RuntimeError(f"the probe fired too early: {first['frame']}")
+    # F931's front mount sets +0x151 bits 2 and 4 and spends 400 heat / 800
+    # energy from F998's 0x88 front pulse.
+    if first["view"] != 0 or first["flags"] & 0x6 != 0x6:
+        raise RuntimeError(f"the front mount did not fire: {first}")
+    if first["heat"] - first["heat_before"] != 400:
+        raise RuntimeError(f"F930's pulse heat is not 400: {first}")
+    if rows[0]["energy"] - first["energy"] != 800:
+        raise RuntimeError(f"F929's pulse energy is not 800: {first}")
+    if second["heat"] - second["heat_before"] != 400:
+        raise RuntimeError(f"the second shot's heat is not 400: {second}")
+    # F730 subtracts the low word of DATA_009155 every frame. The probe prints
+    # before and after its own F931 call, so the countdown between frames is
+    # visible in the next row's `refire_before`.
+    for previous, row in zip(rows, rows[1:]):
+        if row["refire"] == PULSE_REFIRE:
+            continue  # this frame fired and rewrote the word
+        expected = max(0, previous["refire"] - tics)
+        if row["refire_before"] != expected:
+            raise RuntimeError(f"frame {row['frame']}: refire {row['refire_before']} != "
+                               f"{previous['refire']} - {tics}")
+    step = (PULSE_REFIRE + tics - 1) // tics
+    if second["frame"] - first["frame"] != step:
+        raise RuntimeError(f"the pulse refires after {second['frame'] - first['frame']} "
+                           f"frames, not ceil({PULSE_REFIRE}/{tics}) = {step}")
+    return {
+        "tics": tics,
+        "shot_frames": [row["frame"] for row in shots[:3]],
+        "refire_frames": step,
+        "heat": 400,
+        "energy": 800,
+        "flags": first["flags"],
+    }
 
 
 def routine(asm: str, label: str) -> str:
@@ -95,6 +163,7 @@ def main() -> int:
             raise RuntimeError("repeated reference --state-combat traces differ")
         if not rows:
             raise RuntimeError("--state-combat printed no rows")
+        laser = check_laser(run_laser(reference, first))
         start = [row for row in rows if row["frame"] >= 161]
         if len(start) != len(rows) or not start:
             raise RuntimeError("--state-combat did not start at frame 161")
@@ -133,12 +202,27 @@ def main() -> int:
     missing = COMBAT_TESTS - passed
     if missing:
         raise RuntimeError(f"combat_view did not run {sorted(missing)} (ran {sorted(passed)})")
+    # The 60 Hz F931 -> F953 sequence at an NPC: aim, refire, damage and frames.
+    result = subprocess.run([cargo, "test", "--locked", "-p", "ffe-rs", "--test", "laser_view",
+                             "--", "--ignored", "--nocapture"],
+                            cwd=root, env=env, capture_output=True, timeout=900)
+    output = (result.stdout + result.stderr).decode(errors="replace")
+    if result.returncode:
+        raise RuntimeError(f"laser_view failed:\n{output[-3000:]}")
+    passed_laser = {test.rsplit("::", 1)[-1] for test in
+                    re.findall(r"^test (\S+) \.\.\. ok$", output, re.MULTILINE)}
+    missing = LASER_TESTS - passed_laser
+    if missing:
+        raise RuntimeError(f"laser_view did not run {sorted(missing)} "
+                           f"(ran {sorted(passed_laser)})")
     print(json.dumps({
         "rows": len(rows),
         "repeat_traces_match": True,
         "new_game": EXPECTED,
         "f931_hitscan": "F802/F930/F953/F939; no F941/F773/F1533",
+        "laser_probe": laser,
         "combat_view_tests": sorted(passed),
+        "laser_view_tests": sorted(passed_laser),
     }, indent=2))
     return 0
 

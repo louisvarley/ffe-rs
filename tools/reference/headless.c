@@ -14,6 +14,8 @@
 extern int asmmain(int argc, char **argv);
 extern unsigned char ref_state[];
 extern unsigned char *ref_pl_object_list;
+extern unsigned long ref_pl_frame_tics;
+extern void ref_laser_fire(unsigned char *object, int mount);
 extern void ref_launch_missile(void);
 extern unsigned long ref_rng(void);
 extern void ref_timer_advance(void);
@@ -485,6 +487,7 @@ static int sent_accept;
 static int state_mode, vector_mode, sent_start;
 static int state_combat_mode;
 static int missile_probe_mode;
+static int laser_probe_mode;
 /* --game-frame <frames> <key> [<key>...]: the real game from the new game on, keys sent by scan code every 40 frames after frame 200, the 320x200 frame and palette written to game-frame.bin at the end. */
 static int game_frame_mode;
 static int no_intro_start;
@@ -681,6 +684,29 @@ void TimerFrameUpdate(void)
                 }
             }
             printf("]}\n");
+            fflush(stdout);
+        }
+        if (frames + 1 >= limit) exit(0);
+    } else if (laser_probe_mode) {
+        /* F931/F730 from the executed game: call the real fire routine on the
+           player object every frame from 165 and print the laser words, so the
+           refire cadence is DATA_009155's tics, not a value chosen by the port. */
+        unsigned long player_pointer = state_u32(0xc8);
+        if (frames >= 160 && player_pointer != 0) {
+            unsigned char *p = (unsigned char *)player_pointer;
+            unsigned tics = (unsigned)ref_pl_frame_tics;
+            unsigned refire_before, heat_before;
+            refire_before = (unsigned)(p[0xe8] | p[0xe9] << 8);
+            heat_before = (unsigned)(p[0xea] | p[0xeb] << 8);
+            if (frames >= 165) ref_laser_fire(p, 0);
+            printf("{\"frame\":%lu,\"tics\":%u,\"view\":%u,\"state\":%u,"
+                   "\"refire_before\":%u,\"refire\":%u,\"heat_before\":%u,\"heat\":%u,"
+                   "\"energy\":%lu,\"flags\":%u}\n",
+                   frames, tics, (unsigned)ref_state[0xea], (unsigned)ref_state[0xe8],
+                   refire_before, (unsigned)(p[0xe8] | p[0xe9] << 8),
+                   heat_before, (unsigned)(p[0xea] | p[0xeb] << 8),
+                   (unsigned long)(p[0x11e] | p[0x11f] << 8 | p[0x120] << 16 | p[0x121] << 24),
+                   (unsigned)p[0x151]);
             fflush(stdout);
         }
         if (frames + 1 >= limit) exit(0);
@@ -5733,9 +5759,10 @@ int main(int argc, char **argv)
     }
     state_combat_mode = argc == 3 && !strcmp(argv[1], "--state-combat");
     missile_probe_mode = argc == 3 && !strcmp(argv[1], "--missile-probe");
-    state_mode = argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode);
+    laser_probe_mode = argc == 3 && !strcmp(argv[1], "--laser-probe");
+    state_mode = argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode || laser_probe_mode);
     if (argc != 2 && !state_mode)
-        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --vectors | --font | --blit | --models");
+        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --laser-probe <frames> | --vectors | --font | --blit | --models");
     count = argv[state_mode ? 2 : 1];
     {
         char *end;
