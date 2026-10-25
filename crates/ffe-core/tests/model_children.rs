@@ -81,6 +81,88 @@ fn instance(z: i32) -> InstanceContext {
 }
 
 #[test]
+fn a_failed_child_subtree_does_not_discard_its_siblings() {
+    // Model 1 calls model 2 with frame mode 6, copying its own (undefined)
+    // parent basis: the original reads stale stack, the port reports the call
+    // as failed. The parent's second child (the triangle) must still run.
+    struct Partial {
+        failing: Vec<u8>,
+        triangle: Vec<u8>,
+        vertices: Vec<u8>,
+    }
+    impl ChildModels for Partial {
+        fn model(&self, index: u16) -> Result<ChildModel<'_>, String> {
+            let (commands, radius) = match index {
+                1 => (&self.failing, 10),
+                2 => (&self.triangle, 10),
+                _ => return Err(format!("no model {index}")),
+            };
+            Ok(ChildModel {
+                commands,
+                vertices: &self.vertices,
+                vertex_count: 2,
+                normals: &[],
+                normal_count: 2,
+                scale: 0,
+                scale_offset: 0,
+                radius,
+            })
+        }
+    }
+    // Model 1: child model 2 with frame mode 6 (0x0600), then return.
+    let failing = bytes(&[14 | 2 << 5, 0x0600, 0]);
+    let triangle = bytes(&TRIANGLE);
+    let models = Partial {
+        failing,
+        triangle,
+        vertices: vec![0, 0, 10, 0, 0, 0],
+    };
+    let parent = bytes(&[14 | 1 << 5, 0x0000, 14 | 2 << 5, 0x0000, 0]);
+    let mut live = Vertices::new(&PARENT_VERTICES, 2).unwrap();
+    let environment = ChildEnvironment {
+        models: &models,
+        shades: std::array::from_fn(|i| [i as u8; 3]),
+        light: [0x1000, 0, 0],
+        arena: 0,
+    };
+    let result = execute_scene(
+        &parent,
+        &mut live,
+        &mut VertexContext::default(),
+        &visibility(),
+        None,
+        instance(1000),
+        64,
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(result.children.len(), 2);
+    let ChildOutcome::Executed(first) = &result.children[0].outcome else {
+        panic!("model 1 did not run: {:?}", result.children[0].outcome);
+    };
+    assert!(
+        matches!(
+            first.children[0].outcome,
+            ChildOutcome::Failed(ref error) if error.contains("copies the parent basis")
+        ),
+        "the nested call should be reported, not fatal: {:?}",
+        first.children[0].outcome
+    );
+    let ChildOutcome::Executed(second) = &result.children[1].outcome else {
+        panic!(
+            "the sibling child did not run: {:?}",
+            result.children[1].outcome
+        );
+    };
+    assert_eq!(second.emissions.len(), 1);
+    // The sibling's triangle still joined the parent's ordered stream.
+    assert!(matches!(
+        &result.ordered[..],
+        [Primitive::Face(face)] if face.face.vertices == [0xff, 0, 1]
+    ));
+}
+
+#[test]
 fn child_runs_with_external_vertices_and_joins_the_parent_queue() {
     let models = models(&TRIANGLE);
     let parent = bytes(&PARENT);
@@ -209,13 +291,15 @@ fn external_references_need_a_parent_and_errors_are_transactional() {
     assert!(error.contains("needs a parent instance"), "{error}");
     assert_eq!((context, live.slots()), before);
 
-    // Vertex -2 has no pointer in a call without extra vertices.
+    // Vertex -2 has no pointer in a call without extra vertices. A child that
+    // cannot run is reported in its outcome and leaves the rest of the scene
+    // intact, so the parent run itself succeeds.
     let models = models(&[3, 0x0123, 0xfe00, 0x0101, 0]);
     let parent = bytes(&PARENT);
     let mut live = Vertices::new(&PARENT_VERTICES, 2).unwrap();
     let mut context = VertexContext::default();
-    let before = (context.clone(), live.slots());
-    let error = execute_scene(
+    let before = context.clone();
+    let result = execute_scene(
         &parent,
         &mut live,
         &mut context,
@@ -225,9 +309,12 @@ fn external_references_need_a_parent_and_errors_are_transactional() {
         64,
         &environment(&models, 0),
     )
-    .unwrap_err();
+    .unwrap();
+    let ChildOutcome::Failed(error) = &result.children[0].outcome else {
+        panic!("the child should fail: {:?}", result.children[0].outcome);
+    };
     assert!(error.contains("no parent vertex pointer"), "{error}");
-    assert_eq!((context, live.slots()), before);
+    assert_eq!(context, before);
 }
 
 #[test]
@@ -246,11 +333,18 @@ fn child_locals_follow_the_original_instance_layout() {
             &environment(&models, 0),
         )
     };
-    // Reading local 3 before writing it: stack data in the original.
-    let error = run(&[13, 0x00c3, 0]).unwrap_err();
+    // Reading local 3 before writing it: stack data in the original. The child
+    // is reported failed and the parent run succeeds.
+    let result = run(&[13, 0x00c3, 0]).unwrap();
+    let ChildOutcome::Failed(error) = &result.children[0].outcome else {
+        panic!("the child should fail: {:?}", result.children[0].outcome);
+    };
     assert!(error.contains("Local 3 is uninitialised"), "{error}");
     // Writing local 7 would overwrite the +0x70 external pointer.
-    let error = run(&[13 | 7 << 8, 0x0000, 0]).unwrap_err();
+    let result = run(&[13 | 7 << 8, 0x0000, 0]).unwrap();
+    let ChildOutcome::Failed(error) = &result.children[0].outcome else {
+        panic!("the child should fail: {:?}", result.children[0].outcome);
+    };
     assert!(error.contains("external vertex pointer"), "{error}");
     // Writing local 3 defines it; locals 0..2 and 12..17 are defined from the start.
     let result = run(&[13 | 3 << 8, 0x0005, 13 | 4 << 8, 0xc3cc, 0]).unwrap();
@@ -259,7 +353,10 @@ fn child_locals_follow_the_original_instance_layout() {
     };
     assert_eq!(child.commands, [0, 4, 8]);
     // Reading the undefined basis (rotation, frame restore) is refused.
-    let error = run(&[30 | 0x8000 | 1 << 5, 0]).unwrap_err();
+    let result = run(&[30 | 0x8000 | 1 << 5, 0]).unwrap();
+    let ChildOutcome::Failed(error) = &result.children[0].outcome else {
+        panic!("the child should fail: {:?}", result.children[0].outcome);
+    };
     assert!(error.contains("basis"), "{error}");
 }
 

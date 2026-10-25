@@ -666,6 +666,83 @@ fn planet_approach_fills_the_disc() {
     }
 }
 
+/// A landed surface renders the same pixels on a fresh viewer and after a
+/// hundred frames' worth of palette registrations. The runtime palette builds
+/// each frame from that frame's colours; retaining old request cells made the
+/// terrain's representatives drift into speckle.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn landed_surface_pixels_are_stable_across_frames() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::Navigator;
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::Disc;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let nav = Navigator::new_game(&cache, 1).unwrap();
+    let moon = nav
+        .bodies
+        .iter()
+        .find(|b| b.name == "Merlin")
+        .expect("Ross 154's Merlin")
+        .clone();
+    let up: [f64; 3] = std::array::from_fn(|k| moon.position[k] as f64);
+    let length = up.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let up = up.map(|v| v / length);
+    let right = {
+        let c = [up[1], -up[0], 0.0];
+        let l = c.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+        c.map(|v| v / l)
+    };
+    let forward = [
+        up[1] * right[2] - up[2] * right[1],
+        up[2] * right[0] - up[0] * right[2],
+        up[0] * right[1] - up[1] * right[0],
+    ];
+    let state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        axes: Some([right, up, forward]),
+        position: std::array::from_fn(|k| {
+            (moon.position[k] as f64 + up[k] * moon.inner_radius as f64) / UNIT
+        }),
+        ..Flight::default()
+    };
+    let disc = Disc {
+        centre: moon.position.map(|v| v as f64 / UNIT),
+        radius: moon.inner_radius as f64 / UNIT,
+        light: [1.0, 0.0, 0.0],
+        colours: (12, 4),
+        star: false,
+        model: Some((moon.model, moon.seed)),
+        orientation: moon.orientation,
+    };
+    let render = |viewer: &ModelViewer| {
+        let mut screen = Screen::new(&cache).unwrap();
+        screen.discs = vec![disc];
+        screen.sky = ffe_rs::prefs::space_colour_rgb(4);
+        screen.draw(&state, ViewState::default(), Some(viewer), false, true, "");
+        screen.draw(&state, ViewState::default(), Some(viewer), false, true, "");
+        screen.logical_pixels()[..320 * 158].to_vec()
+    };
+    let fresh = ModelViewer::new(&cache).unwrap();
+    let first = render(&fresh);
+    let ground = first.iter().filter(|p| **p != 0x0c_0c_4c).count();
+    assert!(ground > 3_000, "the surface view drew {ground} pixels");
+    // A long warm-up must not change the frame.
+    let warmed = ModelViewer::new(&cache).unwrap();
+    for _ in 0..100 {
+        let _ = render(&warmed);
+    }
+    assert_eq!(
+        first,
+        render(&warmed),
+        "the landed surface drifts over frames"
+    );
+}
+
 /// The navigation list's layout.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]

@@ -29,6 +29,7 @@ use ffe_core::model_texture::{
 };
 use ffe_core::model_thruster::{line_colour, Shape as ThrusterShape};
 use ffe_core::star_points::{StarField, StarTables};
+use ffe_core::terrain_emit::{GROUP_CLOSE, GROUP_OPEN};
 use std::cell::Cell;
 
 /// One screen-space primitive in draw order (logical 320x158 view coordinates).
@@ -159,6 +160,70 @@ const RATES: [u32; 4] = [1, 10, 100, 1000];
 /// (EXP-009 in `docs/DEVIATIONS.md`). The emitters' reference oracles still use
 /// the original 50,000-word limit.
 pub const SURFACE_QUEUE_WORDS: usize = 0x2_0000;
+
+/// A generated surface queue held between registration and drawing: the words
+/// F1876/F1840 queued and their far-to-near order.
+struct SurfaceBatch {
+    words: Vec<u32>,
+    order: Vec<(u32, usize)>,
+}
+
+/// One textured surface entry before palette resolution: its screen points, the
+/// F1620 bitmap dword, and the slot table's raw F1326 colour words.
+struct TerrainTexture {
+    points: Vec<(i32, i32)>,
+    bitmap: u32,
+    slots: Vec<(usize, u16)>,
+    uv: Option<Vec<[i16; 2]>>,
+}
+
+/// One colour word from the 22-step terrain ramp (F1840's slot table).
+fn ramp_word(w: &[u32], at: usize, band: u32, first: usize) -> u16 {
+    let step = ((band.min(511) * 22) >> 9).min(21) as usize;
+    let word = w[at + 2 + first + step / 2];
+    let value = if step % 2 == 0 { word } else { word >> 16 };
+    (value & 0xfff) as u16
+}
+
+/// Every curved surface in this execution and its executed children, in the
+/// order the children ran. Child primitives join the root `ordered` list, but a
+/// child's surfaces stay in its own [`Execution`]; the planet in the intro's
+/// model-176 scene is one (model 449).
+fn all_surfaces<'a>(
+    result: &'a Execution,
+    out: &mut Vec<&'a ffe_core::model_execute::SurfaceEmission>,
+) {
+    out.extend(result.surfaces.iter());
+    for run in &result.children {
+        if let ChildOutcome::Executed(child) = &run.outcome {
+            all_surfaces(child, out);
+        }
+    }
+}
+
+/// The first child (or descendant) that could not run, in command order.
+fn child_error(runs: &[ChildRun]) -> Option<String> {
+    for run in runs {
+        match &run.outcome {
+            ffe_core::model_execute::ChildOutcome::Failed(error) => {
+                return Some(format!(
+                    "Child model {} at {:#x}: {error}",
+                    run.model, run.offset
+                ))
+            }
+            ffe_core::model_execute::ChildOutcome::Executed(child) => {
+                if let Some(error) = child_error(&child.children) {
+                    return Some(format!(
+                        "Child model {} at {:#x}: {error}",
+                        run.model, run.offset
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
 
 pub struct ModelViewer {
     models: Vec<ViewerModel>,
@@ -1172,43 +1237,73 @@ impl ModelViewer {
                 4096,
             )?,
         };
-        // F1330 runs after the scene has registered its colours and before it
-        // draws. Every model render receives its own build; the cube and the
-        // two banks persist on the viewer, as in the original.
+        if children_error.is_none() {
+            children_error = child_error(&result.children);
+        }
+        // F1326 registration happens while the original queues its primitives
+        // (model faces, text glyphs and the curved-surface entries), before
+        // F1330 builds. Text glyphs are executed and surface queues generated
+        // here so every colour they use is in the cube for this build. Start
+        // from an empty cube so the boxes are cut around this frame's colours.
+        self.textures.clear_palette_cube();
         self.register_execution_colours(&result);
-        self.prepare_palette();
         let mut frame = Frame {
             children_error,
             jitter: vertices.jitter(),
             texts: result.texts.iter().filter(|text| !text.culled).count(),
             ..Frame::default()
         };
-        self.draw_primitives(&result, &mut frame)?;
-        self.draw_texts(
+        let mut text_runs = Vec::new();
+        self.collect_texts(
             &result,
             model.index,
             &mut vertices,
             instance,
             light_view,
             &mut frame,
+            &mut text_runs,
         )?;
-        self.draw_child_texts(&result.children, light_view, &mut frame)?;
-        self.draw_surfaces(&result, light, &mut frame);
+        self.collect_child_texts(&result.children, light_view, &mut frame, &mut text_runs)?;
+        // Text glyph colours are F1326-registered by F1747 before the build. The
+        // visible glyph faces use the font's fixed low-palette materials, and the
+        // text instance colour (the GAME!TEK cyan) is only added to local faces;
+        // registering it would put a dynamic cell in model 177's empty upper
+        // palette, which the executed original does not have.
+        let (surfaces, skipped, haze) = self.collect_surfaces(&result, light);
+        frame.skipped += skipped;
+        for batch in &surfaces {
+            self.register_surface_colours(batch);
+        }
+        // F1330 runs after the scene has registered its colours and before it
+        // draws. Every model render receives its own build; the cube and the
+        // two banks persist on the viewer, as in the original.
+        self.prepare_palette();
+        if let Some(word) = haze {
+            self.haze_sky.set(Some(self.textures.rgb(word)));
+        }
+        self.draw_primitives(&result, &mut frame)?;
+        for run in &text_runs {
+            self.draw_primitives(run, &mut frame)?;
+        }
+        self.draw_surface_batches(&surfaces, &mut frame);
         Ok(frame)
     }
 
-    /// One F1805/F1807/F1806/F1808 queue entry as a textured shape. `at` is the
+    /// One F1805/F1807/F1806/F1808 queue entry as a texture recipe. `at` is the
     /// entry's header word (`at + 2` is its handler); `explicit` selects the
     /// F1806/F1808 form with its own u/v pairs and a slot table written at a
     /// base offset (`tex >> 16`), as F1645/F1648 and their entry handlers read
     /// them. `None` when the words are short or the bitmap is not in the cache.
+    ///
+    /// The recipe keeps the slot colour words (F1326) rather than RGB, so the
+    /// caller can register them with the runtime palette before F1330 builds.
     fn terrain_texture(
         &self,
         w: &[u32],
         at: usize,
         corners: usize,
         explicit: bool,
-    ) -> Option<Shape> {
+    ) -> Option<TerrainTexture> {
         let entry = at + 2;
         let words = match (corners, explicit) {
             (3, false) => 12,
@@ -1235,22 +1330,19 @@ impl ModelViewer {
         let id = tex & 0xfff;
         // F1620/F1643: a missing bitmap has nothing to draw.
         self.textures.map(id)?;
-        let slots = if explicit {
+        let slots: Vec<(usize, u16)> = if explicit {
             let base = ((tex >> 16) as u16) as usize;
             let count = (w[entry + count_at] & 0xffff) as usize;
-            let mut slots = vec![[0u8; 3]; base + count];
+            let mut slots = Vec::with_capacity(count);
             for k in 0..count {
                 let word = *w.get(entry + colours_at + k / 2)?;
                 let colour = if k % 2 == 0 { word } else { word >> 16 };
-                slots[base + k] = self.textures.rgb((colour & 0xffff) as u16);
+                slots.push((base + k, (colour & 0xffff) as u16));
             }
             slots
         } else {
             (0..7)
-                .map(|k| {
-                    self.textures
-                        .rgb((w[entry + colours_at + k] & 0xffff) as u16)
-                })
+                .map(|k| (k, (w[entry + colours_at + k] & 0xffff) as u16))
                 .collect()
         };
         let uv: Option<Vec<[i16; 2]>> = uv_at.map(|first| {
@@ -1261,31 +1353,59 @@ impl ModelViewer {
                 })
                 .collect()
         });
-        let textured = Textured {
+        Some(TerrainTexture {
             points,
             bitmap: if explicit { id } else { tex },
             slots,
-        };
-        Some(match uv {
-            Some(uv) => Shape::TexturedUv(textured, uv),
-            None => Shape::Textured(textured),
+            uv,
         })
     }
 
-    /// Opcode 31: the curved surfaces through the ported F1876 and its emitter,
-    /// the queue drawn far to near. Flat entries are F1804 triangles; the rest are
-    /// F1805/F1807 descriptor textures or F1806/F1808 explicit-coordinate
-    /// textures, drawn by F1644/F1647. F1877's haze ring is drawn too.
-    fn draw_surfaces(&self, result: &Execution, light: [i32; 3], frame: &mut Frame) {
+    /// Resolve a surface recipe's slot colours through the built palette.
+    fn texture_shape(&self, recipe: &TerrainTexture) -> Shape {
+        let length = recipe
+            .slots
+            .iter()
+            .map(|(index, _)| index + 1)
+            .max()
+            .unwrap_or(0);
+        let mut slots = vec![[0u8; 3]; length];
+        for (index, word) in &recipe.slots {
+            slots[*index] = self.textures.rgb(*word);
+        }
+        let textured = Textured {
+            points: recipe.points.clone(),
+            bitmap: recipe.bitmap,
+            slots,
+        };
+        match &recipe.uv {
+            Some(uv) => Shape::TexturedUv(textured, uv.clone()),
+            None => Shape::Textured(textured),
+        }
+    }
+
+    /// Opcode 31: generate the curved surfaces through the ported F1876 and its
+    /// emitter and keep the queue, far-to-near order, for drawing after F1330.
+    /// The skip count and F1877's raw haze colour word are returned as well.
+    fn collect_surfaces(
+        &self,
+        result: &Execution,
+        light: [i32; 3],
+    ) -> (Vec<SurfaceBatch>, usize, Option<u16>) {
         use ffe_core::terrain::Terrain;
         use ffe_core::terrain_draw::Scene;
-        use ffe_core::terrain_emit::{draw_planet, Queue, Shading, GROUP_CLOSE, GROUP_OPEN};
+        use ffe_core::terrain_emit::{draw_planet, Queue, Shading};
         use ffe_core::terrain_haze::{Haze, Sky};
-        for emission in &result.surfaces {
+        let mut batches = Vec::new();
+        let mut skipped = 0usize;
+        let mut haze = None;
+        let mut emissions = Vec::new();
+        all_surfaces(result, &mut emissions);
+        for emission in emissions {
             let (Some((table, maps)), Some(origin), Some(vectors)) =
                 (&self.terrain, emission.origin, emission.axes)
             else {
-                frame.skipped += 1;
+                skipped += 1;
                 continue;
             };
             let surface = &emission.surface;
@@ -1380,15 +1500,88 @@ impl ModelViewer {
             // it (`DATA_008814..8817`), and only draws stars when the flag is 0.
             if sky.flag != 0 {
                 let [red, green, blue] = sky.colour;
-                self.haze_sky
-                    .set(Some(self.textures.rgb(
-                        u16::from(red) << 8 | u16::from(green) << 4 | u16::from(blue),
-                    )));
+                haze = Some(u16::from(red) << 8 | u16::from(green) << 4 | u16::from(blue));
             }
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
-            for (_, at) in order {
-                let w = &queue.words;
+            batches.push(SurfaceBatch {
+                words: queue.words,
+                order,
+            });
+        }
+        (batches, skipped, haze)
+    }
+
+    /// Register every colour a surface queue will resolve (F1326 while F1840
+    /// queues, before F1330 builds).
+    fn register_surface_colours(&self, batch: &SurfaceBatch) {
+        let w = &batch.words;
+        for (_, at) in &batch.order {
+            let handler = w[*at + 2];
+            if handler == GROUP_OPEN {
+                let mut pos = *at + 3;
+                while pos < w.len() && w[pos] != GROUP_CLOSE {
+                    match w[pos] & 0xff {
+                        5 => {
+                            self.textures.register_colour((w[pos + 6] & 0xfff) as u16);
+                            self.textures.register_colour((w[pos + 12] & 0xfff) as u16);
+                            pos += 13;
+                        }
+                        10 => {
+                            self.textures.register_colour((w[pos + 5] & 0xfff) as u16);
+                            pos += 6;
+                        }
+                        _ => break,
+                    }
+                }
+                continue;
+            }
+            let corners = match handler & 0xff {
+                4 | 7 | 8 => 3,
+                5 | 6 | 9 => 4,
+                _ => continue,
+            };
+            let explicit = matches!(handler & 0xff, 6 | 8);
+            if let Some(recipe) = self.terrain_texture(w, *at, corners, explicit) {
+                for (_, word) in &recipe.slots {
+                    self.textures.register_colour(*word);
+                }
+                continue;
+            }
+            for word in self.surface_fallback_colours(w, *at, handler & 0xff) {
+                self.textures.register_colour(word);
+            }
+        }
+    }
+
+    /// The colour words the flat/Gouraud fallback for an entry resolves.
+    fn surface_fallback_colours(&self, w: &[u32], at: usize, handler: u32) -> Vec<u16> {
+        match handler {
+            8 => (0..3)
+                .map(|k| ramp_word(w, at, w[at + 6 + k] >> 16, 9))
+                .collect(),
+            6 => vec![
+                ramp_word(w, at, w[at + 7] >> 16, 11),
+                ramp_word(w, at, w[at + 8] >> 16, 11),
+                ramp_word(w, at, 0, 11),
+                ramp_word(w, at, 0, 11),
+            ],
+            other => vec![match other {
+                4 => (w[at + 6] & 0xfff) as u16,
+                7 => (w[at + 10] & 0xfff) as u16,
+                _ => (w[at + 11] & 0xfff) as u16,
+            }],
+        }
+    }
+
+    /// Draw the surfaces' queues far to near after the palette build. Flat
+    /// entries are F1804 triangles; the rest are F1805/F1807 descriptor
+    /// textures or F1806/F1808 explicit-coordinate textures, drawn by
+    /// F1644/F1647. F1877's haze ring is drawn too.
+    fn draw_surface_batches(&self, batches: &[SurfaceBatch], frame: &mut Frame) {
+        for batch in batches {
+            let w = &batch.words;
+            for &(_, at) in &batch.order {
                 let handler = w[at + 2];
                 if handler == GROUP_OPEN {
                     // The atmosphere ring: bare entries up to the close marker.
@@ -1442,52 +1635,39 @@ impl ModelViewer {
                 // cache carries it. Without it, the old flat/gouraud stand-in runs.
                 let explicit = matches!(handler & 0xff, 6 | 8);
                 if let Some(texture) = self.terrain_texture(w, at, corners, explicit) {
-                    frame.shapes.push(texture);
+                    frame.shapes.push(self.texture_shape(&texture));
                     continue;
                 }
                 // The detail entries (F1808, F1806) colour each corner from the 22-step
                 // ramp by its height band and blend across the face; the textured
                 // ones (F1807, F1805) take the middle of their seven slots, the flat
                 // ones their colour.
-                let ramp = |band: u32, first: usize| -> [u8; 3] {
-                    let step = ((band.min(511) * 22) >> 9).min(21) as usize;
-                    let word = w[at + 2 + first + step / 2];
-                    let value = if step % 2 == 0 { word } else { word >> 16 };
-                    self.textures.rgb((value & 0xfff) as u16)
-                };
+                let colour = |word: u16| self.textures.rgb(word);
                 match handler & 0xff {
                     8 => {
-                        let colours = (0..3)
-                            .map(|k| ramp(w[at + 6 + k] >> 16, 9))
+                        let colours = self
+                            .surface_fallback_colours(w, at, 8)
+                            .into_iter()
+                            .map(colour)
                             .collect::<Vec<_>>();
                         frame.shapes.push(Shape::Gouraud(points, colours));
                     }
                     6 => {
-                        // A, B and the two crossings at sea level (band 0).
-                        let colours = [
-                            ramp(w[at + 7] >> 16, 11),
-                            ramp(w[at + 8] >> 16, 11),
-                            ramp(0, 11),
-                            ramp(0, 11),
-                        ];
+                        let colours = self.surface_fallback_colours(w, at, 6);
                         frame.shapes.push(Shape::Gouraud(
                             vec![points[0], points[1], points[2]],
-                            vec![colours[0], colours[1], colours[2]],
+                            vec![colour(colours[0]), colour(colours[1]), colour(colours[2])],
                         ));
                         frame.shapes.push(Shape::Gouraud(
                             vec![points[0], points[2], points[3]],
-                            vec![colours[0], colours[2], colours[3]],
+                            vec![colour(colours[0]), colour(colours[2]), colour(colours[3])],
                         ));
                     }
                     other => {
-                        let colour = match other {
-                            4 => w[at + 6],
-                            7 => w[at + 10],
-                            _ => w[at + 11],
-                        } & 0xfff;
+                        let colours = self.surface_fallback_colours(w, at, other);
                         frame
                             .shapes
-                            .push(Shape::Fill(points, self.textures.rgb(colour as u16)));
+                            .push(Shape::Fill(points, self.textures.rgb(colours[0])));
                     }
                 }
             }
@@ -1812,13 +1992,16 @@ impl ModelViewer {
     }
 
     /// The texts of child models (the lift's posters are child models of the lift
-    /// and the bay): each executed child's texts are drawn in its own instance, with
-    /// a fresh vertex cache over its records and the externals its parent gave it.
-    fn draw_child_texts(
+    /// and the bay): each executed child's texts are executed in its own instance,
+    /// with a fresh vertex cache over its records and the externals its parent gave
+    /// it, and their glyph primitives are queued for drawing after the palette
+    /// build.
+    fn collect_child_texts(
         &self,
         runs: &[ChildRun],
         light_view: [f64; 3],
         frame: &mut Frame,
+        out: &mut Vec<Execution>,
     ) -> Result<(), String> {
         for run in runs {
             let (ChildOutcome::Executed(execution), Some(setup)) = (&run.outcome, &run.setup)
@@ -1831,27 +2014,29 @@ impl ModelViewer {
                 Vertices::child(child.vertices, child.vertex_count, setup.externals)?
                     .with_normal_records(child.normals);
             frame.texts += execution.texts.iter().filter(|text| !text.culled).count();
-            self.draw_texts(
+            self.collect_texts(
                 execution,
                 u32::from(run.model),
                 &mut vertices,
                 setup.instance,
                 light_view,
                 frame,
+                out,
             )?;
-            self.draw_child_texts(&execution.children, light_view, frame)?;
+            self.collect_child_texts(&execution.children, light_view, frame, out)?;
         }
         Ok(())
     }
 
     /// Opcode 10 text (F1747): run each character's glyph program through the
     /// executor in a frame at the text's position, and move the pen to the font
-    /// vertex the program's final return word names. The glyph geometry is drawn
-    /// after the model's own primitives (the original queues it into the same
-    /// depth order, which is not modelled yet). Control codes below 0x20 use the
-    /// font's component anchors, which are not imported: a string stops there and
-    /// is reported in [`Frame::skipped`] rather than guessed.
-    fn draw_texts(
+    /// vertex the program's final return word names. The glyph geometry is queued
+    /// for drawing after the model's own primitives (the original queues it into
+    /// the same depth order, which is not modelled yet). Control codes below
+    /// 0x20 use the font's component anchors, which are not imported: a string
+    /// stops there and is reported in [`Frame::skipped`] rather than guessed.
+    #[allow(clippy::too_many_arguments)]
+    fn collect_texts(
         &self,
         result: &Execution,
         model: u32,
@@ -1859,6 +2044,7 @@ impl ModelViewer {
         instance: InstanceContext,
         light_view: [f64; 3],
         frame: &mut Frame,
+        out: &mut Vec<Execution>,
     ) -> Result<(), String> {
         for emission in &result.texts {
             if emission.culled {
@@ -1916,13 +2102,19 @@ impl ModelViewer {
             let size = u32::from(text.size);
             let mut glyph_vertices = Vertices::new(&font.vertices, font.vertex_count)?
                 .with_normal_records(&font.normals);
+            // F1747 resolves the text's own material through F1692/F1693/F1691
+            // (material RGB + instance colour + the text normal's colour) and
+            // gives that to the glyph instance as its colour. Without it the
+            // font's black faces come out black (the GAME!TEK letters).
+            let text_colour =
+                resolve_colour(text.material, emission.context.colour, emission.shade);
             let mut glyph_context = VertexContext {
                 matrix,
                 basis: matrix,
                 scale: size,
                 globals: emission.context.globals,
                 locals: emission.context.locals,
-                colour: emission.context.colour,
+                colour: text_colour,
                 ..Default::default()
             };
             // The glyphs are lit as any object: the font's normal records, with the camera and
@@ -2024,7 +2216,7 @@ impl ModelViewer {
                 .map_err(|error| {
                     format!("{error} (glyph {code:?} of text at {:#x})", text.offset)
                 })?;
-                self.draw_primitives(&execution, frame)?;
+                out.push(execution);
                 let next =
                     glyph_vertices.resolve(anchor as i8, &glyph_context, pen, generation, false)?;
                 pen = next.view;

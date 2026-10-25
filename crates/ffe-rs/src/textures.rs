@@ -128,6 +128,19 @@ impl TextureSet {
         }
     }
 
+    /// Start a frame with an empty request cube. The original's F1326 marks
+    /// only the colours the frame queues; the built cells are overwritten by the
+    /// next F1330. Keeping old cells would re-cut the boxes every frame around
+    /// colours no longer on screen, which drifts the representatives (the
+    /// intro's planet and galaxy turn to noise after a few hundred frames).
+    /// Clearing before the frame's registration gives each frame the build the
+    /// executed original shows.
+    pub fn clear_palette_cube(&self) {
+        if let Some(palette) = self.palette.borrow_mut().as_mut() {
+            palette.clear();
+        }
+    }
+
     /// The resolved RGB of a registered colour (`F1327`), when the palette has
     /// built its cell.
     pub fn palette_rgb(&self, colour: u16) -> Option<[u8; 3]> {

@@ -268,7 +268,8 @@ impl RuntimePalette {
     }
 
     /// Clear the cube like `F1328_DPalClear`; the low half and the colour
-    /// banks stay. Called when a palette file is loaded, not every frame.
+    /// banks stay. The viewer calls it before each frame's registration so the
+    /// 64 boxes are cut around the colours that frame actually queues.
     pub fn clear(&mut self) {
         self.cells = [0; CELLS];
     }
@@ -479,5 +480,27 @@ mod tests {
         assert_eq!(palette.resolve(0x004), None);
         palette.build();
         assert!(palette.resolve(0x004).is_some());
+    }
+
+    #[test]
+    fn clearing_between_frames_keeps_the_current_colours_representative() {
+        // A screen's previous frames may have registered hundreds of cells. The
+        // viewer clears the cube before each frame's registration, so a lone
+        // colour is its own single-cell box rather than a box median-cut around
+        // old colours. This is the surface-colour stability guard.
+        let mut palette = palette();
+        for r in 0..8u16 {
+            for g in 0..8u16 {
+                for b in 0..8u16 {
+                    palette.register(r << 8 | g << 4 | b);
+                }
+            }
+        }
+        palette.build();
+        palette.clear();
+        palette.register(0x0f0);
+        palette.build();
+        // Single-cell (0,15,0): 4 * cell + 1 per component.
+        assert_eq!(palette.resolve(0x0f0), Some([4, 244, 4]));
     }
 }

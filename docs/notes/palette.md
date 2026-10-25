@@ -84,9 +84,16 @@ object keep a palette index across a rebuild even though the palette moves.
 6. `F1331` uploads the changed slots at `0x80 + slot`, then toggles the bank.
 
 `F1327` returns `DATA_007770[key] - 1` for a fixed word, else
-`DATA_009141[DATA_009139[key] - 1]`. The cube is not cleared between frames
-during a screen; `F1328` clears it only when a palette file is loaded
-(`F125`/`F126`; `F1641` calls it after the low palette).
+`DATA_009141[DATA_009139[key] - 1]`. The cube is not cleared between frames in
+the assembly (`F1328` clears it only when a palette file is loaded,
+`F125`/`F126`; `F1641` calls it after the low palette). Keeping every built
+cell for a whole screen does not match the executed frames: after a long intro
+the accumulated cells re-cut the 64 boxes and the planet and galaxy collapse
+into noise, while original frames 1514 and 1515 have identical upper palettes.
+The port therefore clears the cube before each frame's registration
+(`ModelViewer::render_matrix`), so each build is cut around the colours that
+frame queues, which reproduces the executed frames. The previous bank still
+claims its boxes, so slot identity within a frame is unchanged.
 
 **When it runs:** the intro loop calls it after F961/F962 every frame
 (`ffe.asm:68461`); the in-game loop calls it on the redraw branch
@@ -108,7 +115,11 @@ during a screen; `F1328` clears it only when a palette file is loaded
   (faces, lit/flat/texture slot colours, lines, points, splines, polygons,
   thruster glows/lines) before `build()`, then draws. The background word is
   registered first, like `F1330`'s `DATA_009217` call. This is one build per
-  model render; the cube and both banks persist on the viewer.
+  model render; the cube is cleared at the start of each frame's registration
+  and both banks persist on the viewer. Text glyph executions and the curved
+  surface queue are built before the build, so the glyph faces' and the
+  terrain's F1326 colours are in the cube. The text's own material colour is
+  resolved through F1692/F1693 and given to the glyph instance (F1747).
 - `screen.rs::draw_intro` sets F961's background word before rendering and
   fills the frame with its resolved RGB. `front_end::IntroFrame::background`
   carries F961's `(0,0,0)`/`(0,0,4)`.
@@ -155,17 +166,20 @@ clears to `#0c0c4c` and `space-black` to `#000000`. `landed-starport` changes
 
 ## 6. Remaining differences and decisions
 
-- **Terrain queue colours** are not pre-registered before the build: the
-  curved-surface queue is produced inside `draw_surfaces` after the model
-  build. Terrain keeps the fixed map and the nibble fallback. Pre-registering
-  the queue is the next step if surface colour fidelity is required.
+- **Terrain queue colours** are registered before the build and the cube is
+  cleared per frame (see §3). `verify-surface.py` still reports structural
+  coverage differences (the port's starport hull draws less than the
+  original's), but the surface colours are stable across frames and
+  `landed_surface_pixels_are_stable_across_frames` pins it.
 - **One build per model render** instead of one per scene frame. The port's
-  build sees only that model's colours (plus the persistent cube), whereas the
-  original registers every object before one build. The intro (one model) is
-  exact; a multi-object flight frame can partition the boxes differently.
-- **The intro's backdrop content** (planet/asteroid scene) is not drawn by the
-  port's model-176 frame, so its later upper palette grows differently even
-  though the switch frame matches.
+  build sees only that model's colours, whereas the original registers every
+  object before one build. The intro (one model) is exact; a multi-object
+  flight frame can partition the boxes differently.
+- **The intro's backdrop content** now draws: model 176's selected branch
+  (348/349) runs its child tree, and child curved surfaces (model 449) are
+  collected from the child executions. The one failing descendant (456 -> 321,
+  a mode-6 call whose basis is stale stack in the original) is reported and
+  skipped without discarding the scene.
 - **The non-default space colours** remain the owner's EXP-013 interpolation
   from the captured `#0c0c4c`; the runtime build is not used to derive the
   preference's four intermediate values.

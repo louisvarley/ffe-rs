@@ -78,6 +78,9 @@ pub struct TextEmission {
     pub text: Text,
     pub culled: bool,
     pub context: VertexContext,
+    /// The colour of the text's normal entry. F1747's F1692/F1693/F1691 chain
+    /// adds it before the colour becomes the glyph instance colour.
+    pub shade: [u8; 3],
 }
 
 /// A child-model call operand event (F1749/F1750). The child's culling, frame and
@@ -353,6 +356,11 @@ pub enum ChildOutcome {
     /// The child's own command-order record (its primitives are in the root
     /// [`Execution::ordered`]; its queue events in the root [`Execution::queue`]).
     Executed(Box<Execution>),
+    /// The child (or a descendant) could not run. The original would draw
+    /// whatever its stale stack held; the port leaves this child out but keeps
+    /// its already-executed siblings, so one bad subtree does not discard the
+    /// whole scene.
+    Failed(String),
 }
 
 /// The instance F1750/F1740/F1685/F1774 built for a child.
@@ -1464,13 +1472,13 @@ fn run(
             }
             10 => {
                 for text in program.texts.iter().filter(|t| t.offset == offset) {
-                    let culled = visibility
+                    let normal = visibility
                         .normals
                         .get(usize::from(text.normal))
                         .ok_or_else(|| {
                             format!("Text at {offset:#x} references an out-of-range normal.")
-                        })?
-                        .culled;
+                        })?;
+                    let culled = normal.culled;
                     if let (false, Some(live)) = (culled, vertices.as_deref_mut()) {
                         live.resolve(
                             text.vertex as i8,
@@ -1484,6 +1492,7 @@ fn run(
                         text: text.clone(),
                         culled,
                         context: working.clone(),
+                        shade: normal.colour,
                     });
                 }
                 Some(command.size as i32)
@@ -1513,7 +1522,16 @@ fn run(
                             parent: working,
                             defined: &defined,
                         };
-                        let run = call_child(frame, call, live, environment, shared)?;
+                        let run = match call_child(frame, call, live, environment, shared) {
+                            Ok(run) => run,
+                            Err(error) => ChildRun {
+                                offset: submodel.offset,
+                                model: submodel.model,
+                                radius: 0,
+                                outcome: ChildOutcome::Failed(error),
+                                setup: None,
+                            },
+                        };
                         result.children.push(run);
                     }
                 }
