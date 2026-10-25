@@ -174,9 +174,15 @@ impl Click {
     /// The note for a click whose behaviour is not ported, or `None` when it is.
     pub fn unported(self) -> Option<&'static str> {
         match self {
-            // F2 is the status/equipment page (F1120), F3 the map and F1 the views.
-            Click::Screen(2) | Click::Screen(3) | Click::Navigation | Click::Hyperspace => None,
-            Click::Screen(_) => Some("F4/F5 (comms) are not ported yet."),
+            // F2 is the status/equipment page (F1120), F3 the map, F1 the views
+            // and F4 the station/comms action (F343): from `0x2a`/`0x30` it is
+            // the services board, and `main` opens it at the pad.
+            Click::Screen(2)
+            | Click::Screen(3)
+            | Click::Screen(4)
+            | Click::Navigation
+            | Click::Hyperspace => None,
+            Click::Screen(_) => Some("F5 (comms) is not ported yet."),
             Click::Missile => Some("The missile view needs equipment (not ported)."),
             Click::Combat => Some("The combat computer needs equipment (not ported)."),
             // F1056 (78528) calls F1098; `main` runs the launch or reports that

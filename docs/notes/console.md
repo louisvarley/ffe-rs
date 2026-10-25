@@ -56,8 +56,9 @@ hyperspace) and 0x74 (`t` target). F1 and F2 overlap at x 74-79, where F2 wins.
   navigation computer (lit while its list is open) and hyperspace. The
   navigation list, the labels toggle, hyperspace and target are ported; see
   `labels.md`.
-- F2-F5, the missile and combat views and the escape capsule answer with "not
-  ported yet".
+- F2 opens the status page, F3 the map and F4 the services board from a docked
+  or pad state (`F343`); F5, the missile and combat views and the escape capsule
+  answer with "not ported yet".
 - A readout under the title shows speed, the set speed (original model) and the
   time scale; it is ffe-rs's, not the original's.
 - The F991 equipment icons and the F1120 lamps read the real fitted loadout

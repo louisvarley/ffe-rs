@@ -39,6 +39,66 @@ def check(text: str, needle: str, where: str) -> None:
         raise RuntimeError(f"{where} no longer contains {needle!r}")
 
 
+def db_bytes(text: str) -> bytearray:
+    data = bytearray()
+    for line in text.splitlines():
+        line = line.split(";", 1)[0].strip()
+        if not line.lower().startswith("db"):
+            continue
+        for match in re.finditer(r"'([^']*)'|0x([0-9a-fA-F]+)", line[2:]):
+            if match.group(1) is not None:
+                data += match.group(1).encode("latin-1")
+            else:
+                data.append(int(match.group(2), 16))
+    return data
+
+
+def data_block(asm: str, label: str) -> str:
+    match = re.search(rf"^{label}:\s*(?:;.*)?$", asm, re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"ffedat.asm is missing {label}")
+    end = re.search(r"^[A-Za-z_][A-Za-z0-9_]*:\s*(?:;.*)?$", asm[match.end():],
+                    re.MULTILINE)
+    return asm[match.end():match.end() + end.start()] if end else asm[match.end():]
+
+
+def services_and_keys(ffe: str, data: str) -> int:
+    """F4 and action 9, from the tables and the routines.
+
+    The DOS key table is 256 bytes: 0x80+scancode is the unshifted row (the
+    shift state byte is 0x80 when *up*), so F4 (0x3e) is index 0xbe and Tab
+    (0x0f) is 0x8f. F1056's action 0x09 is the launch; F343 opens the services
+    board from 0x2a or 0x30.
+    """
+    keys = db_bytes(data_block(data, "DATA_007688"))
+    actions = db_bytes(data_block(data, "DATA_004893"))
+    checks = 0
+    if keys[0xBE] != 0xF4:
+        raise RuntimeError(f"plain F4 maps to {keys[0xBE]:#x}, not the station action 0xf4")
+    if keys[0x8F] != 0x09:
+        raise RuntimeError(f"plain Tab maps to {keys[0x8F]:#x}, not launch action 9")
+    if keys[0xA6] != 0x6C:
+        raise RuntimeError(f"plain L maps to {keys[0xA6]:#x}, not the label action 0x6c")
+    if actions[12] != 0xF4:
+        raise RuntimeError(f"module 12 (station) has action {actions[12]:#x}, not 0xf4")
+    checks += 4
+    station_table = data_block(data, "DATA_005285")
+    check(station_table, "dd FUNC_000320", "DATA_005285")
+    check(station_table, "dd FUNC_000343", "DATA_005285")
+    checks += 2
+    f343 = routine(ffe, "FUNC_000343")
+    for needle in ("cmp al,0x2a", "cmp al,0x30", "call FUNC_000333",
+                   "mov ebx,0x2c"):
+        check(f343, needle, "F343")
+        checks += 1
+    f1056 = routine(ffe, "FUNC_001056")
+    for needle in ("sub eax,byte +0x9", "jz near JUMP_004417",
+                   "sub eax,byte +0x63"):
+        check(f1056, needle, "F1056")
+        checks += 1
+    return checks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -47,6 +107,8 @@ def main() -> int:
     args = parser.parse_args()
     cache = args.cache.resolve(strict=True)
     asm = (args.sources.resolve(strict=True) / "ffe.asm").read_text(
+        encoding="utf-8", errors="replace")
+    data = (args.sources.resolve(strict=True) / "ffedat.asm").read_text(
         encoding="utf-8", errors="replace")
     f1013 = routine(asm, "FUNC_001013")
     f1031 = routine(asm, "FUNC_001031")
@@ -65,6 +127,7 @@ def main() -> int:
                    "test byte [eax+0x14c],0x20",
                    "mov byte [DATA_008870],0x24"):
         check(f1031, needle, "F1031")
+    extra = services_and_keys(asm, data)
     root = Path(__file__).resolve().parents[2]
     cargo = shutil.which("cargo") or str(Path.home() / ".cargo" / "bin" / "cargo.exe")
     env = dict(os.environ, FFE_WORLD_CACHE=str(cache))
@@ -75,10 +138,20 @@ def main() -> int:
     output = (result.stdout + result.stderr).decode(errors="replace")
     if result.returncode:
         raise RuntimeError(f"takeoff test failed:\n{output[-3000:]}")
-    if "takeoff modes [36, 38]" not in output:
+    if "modes [36, 38]" not in output:
         raise RuntimeError("the takeoff test did not observe 0x24 -> 0x26:\n" + output[-2000:])
     if "cleared true" not in output or "mode 0x0" not in output:
         raise RuntimeError("the takeoff test did not reach free flight:\n" + output[-2000:])
+    # The DOS default start (F829 record 0, Hope / Old Blackelk) must take off
+    # through the same machine with the planet as the ship's parent.
+    command[command.index("new_game_takes_off_from_the_pad_into_free_flight")] = \
+        "default_start_takes_off_from_hope"
+    result = subprocess.run(command, cwd=root, env=env, capture_output=True, timeout=900)
+    output = (result.stdout + result.stderr).decode(errors="replace")
+    if result.returncode:
+        raise RuntimeError(f"default-start takeoff test failed:\n{output[-3000:]}")
+    if "start 0 modes [36, 38]" not in output or "cleared true" not in output:
+        raise RuntimeError("the default start did not take off from Hope:\n" + output[-2000:])
     print(json.dumps({
         "scenario": "ffe-takeoff-v1",
         "f1013_guard": "altitude > 0x30d40 or DATA_008918 != 0 sets DATA_008870 = 0x26",
@@ -86,7 +159,9 @@ def main() -> int:
         "observed_modes": [36, 38],
         "cleared": True,
         "final_mode": "0x0",
-        "asm_checks": 11,
+        "services_action": "plain F4 -> 0xf4 -> module 12 (station) -> F343 from 0x2a/0x30",
+        "launch_action": "plain Tab -> action 9 -> F1056 JUMP_004417 (L is the label action 0x6c)",
+        "asm_checks": 11 + extra,
         "cache": str(cache),
     }, indent=2))
     return 0

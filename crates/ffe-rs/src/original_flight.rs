@@ -174,19 +174,25 @@ impl OriginalFlight {
         self.player.set_speed
     }
 
-    /// Start the persistent two-body world of an open-air takeoff: the ship
-    /// (body 1) at its absolute position relative to the starport (body 2).
-    /// F570's frame switches then carry across frames instead of being undone
-    /// by a fresh world each tick.
+    /// Start the persistent three-body world of an open-air takeoff. The
+    /// original's F994 parents the player to the starport's parent (the planet)
+    /// — `+0x56` is the object two slots below the starport — and the starport
+    /// is a sibling. That is what gives F603 its gravity and F1033 its altitude
+    /// above the terrain. Body 1 is the ship, body 2 the planet it is parented
+    /// to and body 3 the starport, so F570's frame switches (and their position,
+    /// velocity and orientation changes) persist from frame to frame while the
+    /// ship is on the pad. Dropped when the takeoff clears.
     pub fn begin_pad_takeoff(
         &mut self,
-        parent: &Body,
-        parent_position: [i64; 3],
+        planet: &Body,
+        planet_position: [i64; 3],
+        station: &Body,
+        station_position: [i64; 3],
         player_model: &ModelInfo,
     ) {
         let motion = self.player.motion;
         let vector: [i64; 3] =
-            std::array::from_fn(|k| motion.position[k].wrapping_sub(parent_position[k]));
+            std::array::from_fn(|k| motion.position[k].wrapping_sub(planet_position[k]));
         let (outer_radius, inner_radius) = player_model.radii();
         let mut world = Bodies {
             stamp: 1,
@@ -215,23 +221,46 @@ impl OriginalFlight {
             words,
             ..Body::default()
         };
-        let mut station = *parent;
-        station.position = parent_position;
-        station.parent = 0;
-        station.rotating = 0;
-        station.index = 2;
-        world.body[2] = station;
+        // F994's parent: the planet the starport orbits, with F880's gravity
+        // word (`+0xa4`) for F603.
+        let mut parent = *planet;
+        parent.position = planet_position;
+        parent.parent = 0;
+        parent.rotating = 0;
+        parent.index = 2;
+        parent.delay = 0;
+        parent.stamp = 0;
+        world.body[2] = parent;
+        // The starport is a sibling in the planet's frame, so F576's pad contact
+        // and its `0x20` effect region still report against the ship.
+        if station_position != planet_position || station.model != planet.model {
+            let mut port = *station;
+            port.position =
+                std::array::from_fn(|k| station_position[k].wrapping_sub(planet_position[k]));
+            port.parent = 2;
+            port.rotating = 0;
+            port.index = 3;
+            port.delay = 0;
+            port.stamp = 0;
+            world.body[3] = port;
+            world.live[3] = true;
+            world.physical[3] = true;
+        }
         self.player.motion.position = vector;
         self.player.motion.parent = 2;
         self.player.motion.rotating = 0;
-        self.player.motion.switch_delay = 0;
+        // The port's planet orientation is fixed; keep the ship in the linear
+        // frame so F572/F573's fixed-point round trip cannot move it when the
+        // 13-tick selector runs during the climb.
+        self.player.motion.switch_delay = 0x7f;
         self.player.motion.updated = 0;
         self.pad_world = Some(world);
     }
 
     /// One frame on the pad in that world: the same F1041/F601/F1512/F1033
-    /// tick as [`OriginalFlight::step_landing`], with the starport as the
-    /// player's parent so F570's `0x20` region and F1031's hand-off see it.
+    /// tick as [`OriginalFlight::step_landing`], with the planet as the
+    /// player's parent (F603's gravity and F1033's altitude) and the starport a
+    /// sibling (F1031's `0x20` effect region and the pad contact).
     pub fn step_pad(
         &mut self,
         elapsed: f64,
@@ -240,6 +269,7 @@ impl OriginalFlight {
     ) -> Result<Contact, String> {
         let (_, world_tics) = self.prepare(elapsed, keys);
         self.player.reference_counter = 0xd;
+        self.player.motion.switch_delay = 0x7f;
         let world = self
             .pad_world
             .as_mut()
@@ -281,13 +311,15 @@ impl OriginalFlight {
         world.body[1].position = motion.position;
         world.body[1].velocity = motion.velocity;
         world.body[1].orientation = std::array::from_fn(|k| motion.orientation[k / 3][k % 3]);
+        // F1677's absolute position first: it already inverts a rotating frame,
+        // so the one-frame hand-over to the system frame does not move the ship
+        // by a frame-rotation-sized step.
+        let absolute = world.absolute(1).unwrap_or(motion.position);
         if world.body[1].rotating != 0 {
             world.to_linear(1, 2);
         }
-        let station = world.body[2].position;
         let body = world.body[1];
-        self.player.motion.position =
-            std::array::from_fn(|k| body.position[k].wrapping_add(station[k]));
+        self.player.motion.position = absolute;
         self.player.motion.velocity = body.velocity;
         self.player.motion.orientation =
             std::array::from_fn(|k| std::array::from_fn(|c| body.orientation[3 * k + c]));

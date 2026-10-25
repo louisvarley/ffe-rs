@@ -65,6 +65,39 @@ def db_bytes(text: str) -> bytearray:
     return data
 
 
+def routine(asm: str, label: str) -> str:
+    match = re.search(rf"^{label}:\s*(?:;.*)?$", asm, re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"ffe.asm is missing {label}")
+    end = re.search(r"^FUNC_[0-9A-F]+:\s*(?:;.*)?$", asm[match.end():], re.MULTILINE)
+    return asm[match.end():match.end() + end.start()] if end else asm[match.end():]
+
+
+def escape_flow(asm: str, data: str) -> int:
+    """F224 and the two tables: Escape is action 7 -> module 10 (SysMenu).
+
+    The first press stops time; only a stopped clock (and no open menu) reaches
+    `FUNC_000229_SysMenuSwitchOn`, the preference pages.
+    """
+    checks = 0
+    f224 = routine(asm, "FUNC_000224_SysMenuProcessEsc_Event1")
+    for needle in ("cmp dword [DATA_009012],byte +0x0",
+                   "call FUNC_000220_SysMenuStopTime",
+                   "cmp byte [DATA_009044],0x0",
+                   "call near [DATA_004924]    ; FUNC_000229_SysMenuSwitchOn"):
+        if needle not in f224:
+            raise RuntimeError(f"F224 no longer contains {needle!r}")
+        checks += 1
+    keys = db_bytes(block(data, "DATA_007688"))
+    actions = db_bytes(block(data, "DATA_004893"))
+    if keys[1] != 0x07:
+        raise RuntimeError(f"scancode 1 (Escape) maps to {keys[1]:#x}, not action 7")
+    if actions[10] != 0x07:
+        raise RuntimeError(f"module 10 (SysMenu) has action {actions[10]:#x}, not 7")
+    checks += 2
+    return checks
+
+
 def runs(data: bytes) -> list[str]:
     """The drawn text runs: 0xfe x y is a position, 0x0d/0xfd a row."""
     out, current, index = [], bytearray(), 0
@@ -132,12 +165,15 @@ def main() -> int:
     root = (args.root or Path(__file__).resolve().parents[2]).resolve()
     asm = (args.sources.resolve(strict=True) / "ffedat.asm").read_text(
         encoding="utf-8", errors="replace")
+    ffe = (args.sources.resolve(strict=True) / "ffe.asm").read_text(
+        encoding="utf-8", errors="replace")
     page_runs = {page: runs(db_bytes(block(asm, label)))
                  for page, (label, _) in BLOCKS.items()}
     source = (root / "crates" / "ffe-rs" / "src" / "prefs.rs").read_text(
         encoding="utf-8", errors="replace")
     port = constants(source)
     checks = check(page_runs, port)
+    checks += escape_flow(ffe, asm)
     # The checker must be able to fail: drop one original label and one port entry.
     broken_runs = {page: list(values) for page, values in page_runs.items()}
     broken_runs[1] = [value for value in broken_runs[1] if value != port["SPACE_COLOURS"][0]]
@@ -171,6 +207,8 @@ def main() -> int:
         "scenario": "ffe-prefs-v1",
         "pages": {str(page): len(values) for page, values in page_runs.items()},
         "string_checks": checks,
+        "escape_flow": "F224: Escape 1 stops time (F220), Escape 2 opens the pages (F229); "
+                       "scancode 1 -> action 7 -> module 10",
         "constants": {name: len(values) for name, values in port.items()},
         "tests": passed,
         "tamper_rejected": True,

@@ -24,7 +24,7 @@ else the first station - so the launch puts that world in view (Sol: Mars High,
 1.61 Mars radii). That is a starting-scenario choice, not the original's fixed
 start.
 | Stations in the flight view and docking | done (2026-10-24), ffe-rs rules: see "Docking" below |
-| Open-air starport takeoff | done (2026-10-25): F1013 `0x24`, F1031 `0x26`, F1032/F651 bay release (`docs/notes/intro.md`) |
+| Open-air starport takeoff | done (2026-10-25, verified from the default start): F1013 `0x24`, F1031 `0x26`, F1032/F651 bay release, F994's planet parent for F603 (`docs/notes/intro.md`) |
 | Galaxy beyond the 12 hand-coded systems | not done: the other table systems need the sector star generator (F832-F856, tables `DATA_006799..6808`) and their name strings |
 
 ## The autopilot
@@ -46,7 +46,17 @@ transfer then about 300 s of flight), Mercury and Daedalus.
 
 ## Keys (the playable)
 
-The game starts docked at the first station of Sol (L launches, which puts the ship out from that station on the original flight model). Docked, the screen is the original's station services root (`docs/notes/station.md`): Launch Request, Shipyard, Bulletin Board and Stockmarket, with the original's title, rows, buttons, hot areas and `1`-`4` keys. Up/Down choose a row, Enter or a click on the row's button activates it, Backspace goes back, and the Stockmarket opens the verified market (B/N still buy and sell the selected line). Wired in `main.rs` (not the original's map screens):
+The DOS default start is landed at Old Blackelk on Hope (`--start sol` keeps the
+older Sol/Mars High sandbox). At the pad the screen is the original's landed
+flight view; the launch action (plain Tab, or the port's `L`) asks F654 and
+flies the takeoff (`docs/notes/intro.md`). F4 opens the original's station
+services root (`docs/notes/station.md`) over the landed view: Launch Request,
+Shipyard, Bulletin Board and Stockmarket, with the original's title, rows,
+buttons, hot areas and `1`-`4` keys. Up/Down choose a row, Enter or a click on
+the row's button activates it, Backspace/F1 leaves the board, and the
+Stockmarket opens the verified market (B/N still buy and sell the selected
+line). Docked at a station the same board is the state `0x2a` screen. Wired in
+`main.rs` (not the original's map screens):
 
 - The console's map icon (or G): the **galaxy map**, the original's 3D scene (`docs/notes/galaxy-map.md`): the stars around the
   centre with their names, the grid, the range sphere of the drive and a marker on the star nearest the centre, whose name,
@@ -221,9 +231,11 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   ordinary flight view from the settled ship, the console and message log unchanged, and
   the world still turns around it. F1012 runs no flight step while landed (no
   F1037/F1041/F601/F603/F1512), so the ship is held still; `nav.follow` still carries it
-  with its planet. `L` is F1056's launch action: F1013 starts at `0x24`, the fixed up
-  thrust climbs, F1013 hands over to `0x26` and F1031 clears it to `0x00` (the same
-  `Takeoff` machine as the open-air pad, without the pad world). The open-air starport's
+  with its planet. The launch action is F1056's action 9, plain Tab (`L` is the
+  port's convenience and the source's label action otherwise): F1013 starts at
+  `0x24`, the fixed up thrust climbs, F1013 hands over to `0x26` and F1031
+  clears it to `0x00` (the same `Takeoff` machine as the open-air pad, without
+  the pad world). The open-air starport's
   parallel `0x2e` -> `0x30` pair is in the machine too (`Landing::at_starport`). Tests:
   `takeoff.rs` pins the transitions;
   `planet_view.rs::landing_reaches_the_surface_state_and_launches_again` runs the whole
@@ -231,9 +243,16 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   the default start, its Hope HUD strings and the landed frame;
   `tools/reference/verify-surface.py` compares the type-1 new game's landed-at-starport
   view with the executed original's (`--game-frame 500 0`).
-- **Services.** The docked services board remains the original's state `0x2a`, opened by a
-  completed docking (`Traffic::Docked`) and by the docked screen's own navigation; the
-  new game's `0x30` no longer opens it at boot (EXP-014).
+- **Services.** The docked services board is the original's state `0x2a`, opened by a
+  completed docking (`Traffic::Docked`) and by the docked screen's own navigation.
+  From state `0x30` at an open-air starport it is F4 (or the console's phone
+  icon): plain F4 is action `0xf4` in `DATA_007688`, module 12's event 1,
+  `F343`, which tests `0x2a`/`0x30` and calls `F333`; the board is drawn over
+  the landed view, and F1 (the console screen button, action `0xf1`) or the
+  port's Backspace returns to `0x30`. The new game still boots into the landed
+  view, not the board (EXP-014); `docs/evidence/start-flow/` has the reference
+  and port frames, and `default_start_services_board_is_old_blackelk` pins the
+  title and rows.
 - **The landed background.** F1052 clears the upper view to the previous scene's
   `DATA_008814..8817` colour and draws F1775's stars only while the flag is clear. At a
   starport or in a rough landing above the haze surface the flag stays 0, so the sky is the

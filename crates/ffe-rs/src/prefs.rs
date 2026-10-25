@@ -244,6 +244,28 @@ impl Default for Prefs {
     }
 }
 
+/// What the Escape key does, in the original's order (`FUNC_000224`): the first
+/// press stops time (`FUNC_000220`), the next opens the preference pages, and
+/// Escape in the pages returns to the game with the clock still stopped
+/// (`FUNC_000223` calling the flight module's `FUNC_001003`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Escape {
+    Pause,
+    Open,
+    Close,
+}
+
+/// `paused` is the port's stopped-time flag, `open` the preference pages.
+pub fn escape_action(open: bool, paused: bool) -> Escape {
+    if open {
+        Escape::Close
+    } else if paused {
+        Escape::Open
+    } else {
+        Escape::Pause
+    }
+}
+
 impl Prefs {
     /// Escape opens the pages; Escape closes them again (the original's
     /// `FUNC_000224` Escape flow, without its separate pause step).

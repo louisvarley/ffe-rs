@@ -349,3 +349,53 @@ fn docked_screens_draw_at_the_original_layout() {
     );
     save(&screen, "Repairs-ours.ppm");
 }
+
+/// The default DOS start (Gateway/Hope, record 0) is landed at Old Blackelk in
+/// state `0x30`. F4 at the pad is F343: the services board is the same screen
+/// as a docked station's, titled with the starport. The reference capture
+/// `docs/evidence/start-flow/original-services.png` is the executed original's
+/// frame after `--game-frame 500 0x3e`.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn default_start_services_board_is_old_blackelk() {
+    let cache = cache();
+    let nav = Navigator::new_game(&cache, 0).unwrap();
+    let station = nav.docked.expect("landed at the default start's starport");
+    let name = nav.bodies[station].name.clone();
+    assert_eq!(name, "Old Blackelk");
+    assert_eq!(
+        station::title(StationScreen::Services, &name),
+        "Old Blackelk Services"
+    );
+    let state = nav.new_game.expect("a new game state");
+    assert_eq!(state.player_state, 0x30, "F994's landed state");
+    let status = station::Status {
+        cargo_used: 0,
+        cargo_capacity: nav.hold(&cache, state.ship),
+        cash: state.cash,
+        ..station::Status::default()
+    };
+    assert_eq!(status.cargo_capacity, 1, "the Saker's new-game hold");
+    let rows = station::SERVICES
+        .iter()
+        .map(|entry| DockRow {
+            main: entry.title.to_owned(),
+            detail: entry.detail.map(str::to_owned),
+            columns: Vec::new(),
+            fitted: false,
+        })
+        .collect();
+    let view = DockView {
+        screen: StationScreen::Services,
+        title: station::title(StationScreen::Services, &name),
+        rows,
+        status,
+        scroll: 0,
+        selected: 0,
+        total: station::SERVICES.len(),
+    };
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.system = nav.system_name().to_owned();
+    draw(&mut screen, Some(view), None, station::SERVICES_HINT);
+    save(&screen, "start-services-ours.ppm");
+}

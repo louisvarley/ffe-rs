@@ -82,6 +82,17 @@ the launch/landing wording, not in the menu. `F333` omits Shipyard, Bulletin
 Board and Stockmarket for a Thargoid system (`w[D8996] == 4`); the port has no
 Thargoid system.
 
+**Entering and leaving it from state `0x30`.** Plain F4 is `DATA_007688`'s
+`0xf4` (the unshifted half of the table; the shift byte is `0x80` when up), and
+`DATA_004893` entry 12 sends it to the station module's event 1, `F343`. At
+`0x30` F343 sets the console buttons, calls `F333` and leaves the state at
+`0x30`; the board is drawn over the landed view with the flight console below.
+F4 again re-displays the root. The way back is the console's screen button
+`0xf1` (plain F1: module 3 event 1, `FUNC_001003`, which switches back to the
+game view); the port also accepts Backspace from the root. The reference
+captures are `docs/evidence/start-flow/original-services.png` and
+`original-services-back.png`; the port's are the `ours-*` pair.
+
 ## The starport tech level (F869/F622)
 
 `F869` (`ffe.asm:60899`) returns the system record's fields; `F622`
@@ -262,6 +273,6 @@ High's 0xfd), the 51-row F383 list, and F444's 3040/1900/1900 service rows at
 mass 38.
 
 What was not captured: the commander/F2 status screen (not part of the
-station menu), a Thargoid system's services (the port has none), and a
-starport's services under a different title (the layout is the same; the
-difference is in `F650`'s pads, not the screen).
+station menu) and a Thargoid system's services (the port has none). The
+default start's starport services at Old Blackelk are captured in
+`docs/evidence/start-flow/` (`default_start_services_board_is_old_blackelk`).
