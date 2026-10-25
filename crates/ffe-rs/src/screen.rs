@@ -188,8 +188,20 @@ pub struct SystemShip {
     pub centre: [f64; 3],
     pub axes: [[f64; 3]; 3],
     pub flash: bool,
-    /// A destroyed ship: only the flash marker is drawn.
+    /// A destroyed ship: the ship model is gone; F942's effect draws instead.
     pub dead: bool,
+}
+
+/// A short-lived system effect to draw: F939's particle (model 0x9e), F942's
+/// explosion (0x9b) or F926's debris pod (0x99).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemEffect {
+    pub model: u32,
+    pub centre: [f64; 3],
+    pub axes: [[f64; 3]; 3],
+    /// Object global word 4 (`+0xa4`): model 155's fragment gate. `0` for the
+    /// other effects, which do not read it.
+    pub mass: u16,
 }
 
 /// The retired port-only map buttons. Kept as constants so the integrator's
@@ -219,6 +231,9 @@ pub struct Screen {
     pub stations: Vec<SystemStation>,
     /// The system's NPC ships (set by the caller each frame).
     pub ships: Vec<SystemShip>,
+    /// The system's short-lived visuals: F939 hit particles, F942 explosions
+    /// and F926 debris (set by the caller each frame).
+    pub effects: Vec<SystemEffect>,
     /// Direction toward the local star in flight space (`None` outside a system):
     /// ships, stations and lift objects are lit by it instead of the original's
     /// fixed default light. Planet discs carry their own light.
@@ -660,6 +675,7 @@ impl Screen {
             discs: Vec::new(),
             stations: Vec::new(),
             ships: Vec::new(),
+            effects: Vec::new(),
             sun: None,
             market: None,
             dock: None,
@@ -2205,11 +2221,12 @@ impl Screen {
             self.draw_ship(scene, state, camera);
         }
         self.draw_system_ships(scene, state, camera);
+        self.draw_system_effects(scene, state, camera);
     }
 
     /// The system's NPC ships, farthest first. A ship whose shields absorbed a
     /// hit also draws F1536's model 0x9d (157) over itself; a destroyed ship
-    /// draws only the marker (F942's particle effects are not ported).
+    /// draws no model (F942's effect in `draw_system_effects` replaces it).
     fn draw_system_ships(&mut self, scene: &ModelViewer, state: &Flight, camera: &Camera) {
         let Some(scale) = model_scale(scene) else {
             return;
@@ -2234,50 +2251,11 @@ impl Screen {
                     self.draw_shapes(scene, &frame.shapes);
                 }
             }
-            if ship.flash || ship.dead {
-                let mut inputs = AnimationInputs::original(
-                    flight_tics(state),
-                    if ship.dead { 0x1c } else { 0 },
-                    &scene.shades(),
-                );
+            if ship.flash {
+                let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
                 inputs.jitter = self.jitter.cursor;
                 let ship_scale = scene.find(ship.model).map(|model| model.scale);
-                if ship.dead {
-                    // F942 creates a model-0x9b explosion object at the ship with
-                    // the render scale (`+0x7e`) decremented. The port's viewer
-                    // currently produces no shapes for 0x9b (its command stream is
-                    // visibility-gated on state the port does not set), so fall
-                    // back to F1536's model 0x9d at a larger scale: a visible
-                    // stand-in for the original's explosion.
-                    let mut drew = false;
-                    if let Ok(frame) = scene.render_scene_with_scale(
-                        crate::combat::DEATH_MODEL,
-                        ship_scale.map(|scale| scale.saturating_sub(1)),
-                        rows,
-                        origin,
-                        light,
-                        &inputs,
-                    ) {
-                        if !frame.shapes.is_empty() {
-                            self.jitter.cursor = frame.jitter;
-                            self.draw_shapes(scene, &frame.shapes);
-                            drew = true;
-                        }
-                    }
-                    if !drew {
-                        if let Ok(frame) = scene.render_scene_with_scale(
-                            crate::combat::SHIELD_FLASH_MODEL,
-                            ship_scale.map(|scale| scale.saturating_add(2)),
-                            rows,
-                            origin,
-                            light,
-                            &inputs,
-                        ) {
-                            self.jitter.cursor = frame.jitter;
-                            self.draw_shapes(scene, &frame.shapes);
-                        }
-                    }
-                } else if let Ok(frame) = scene.render_scene_with_scale(
+                if let Ok(frame) = scene.render_scene_with_scale(
                     crate::combat::SHIELD_FLASH_MODEL,
                     ship_scale,
                     rows,
@@ -2285,6 +2263,37 @@ impl Screen {
                     light,
                     &inputs,
                 ) {
+                    self.jitter.cursor = frame.jitter;
+                    self.draw_shapes(scene, &frame.shapes);
+                }
+            }
+        }
+    }
+
+    /// The system's short-lived effects, farthest first: F939's hit particle,
+    /// F942's explosion and F926's debris. The explosion passes FFP 1.0 as the
+    /// object's global word 4, the value model 155's fragment branches select
+    /// its twelve shapes for (see `ffe_core::effects`).
+    fn draw_system_effects(&mut self, scene: &ModelViewer, state: &Flight, camera: &Camera) {
+        let Some(scale) = model_scale(scene) else {
+            return;
+        };
+        let mut order = self.effects.clone();
+        order.sort_by(|a, b| {
+            distance(camera.position, b.centre).total_cmp(&distance(camera.position, a.centre))
+        });
+        let light = self.scene_light(scene, camera);
+        for effect in order {
+            let origin = camera.point(effect.centre).map(|v| v * scale);
+            if origin.iter().any(|value| value.abs() > STATION_DRAW_RANGE) {
+                continue;
+            }
+            let rows = effect.axes.map(|axis| camera.direction(axis));
+            let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
+            inputs.globals[ffe_core::effects::EXPLOSION_MASS_GLOBAL] = effect.mass;
+            inputs.jitter = self.jitter.cursor;
+            if let Ok(frame) = scene.render_scene_with(effect.model, rows, origin, light, &inputs) {
+                if !frame.shapes.is_empty() {
                     self.jitter.cursor = frame.jitter;
                     self.draw_shapes(scene, &frame.shapes);
                 }

@@ -615,28 +615,13 @@ fn run() -> Result<(), String> {
     // A scripted NPC traffic frame: put the ship beside the spawned pirate,
     // labels on, and fire a shield hit and a kill through F953/F942.
     let mut captured_traffic = false;
+    let mut capture_placed = false;
     if let Some(dir) = &options.capture_traffic {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
-        if let Some(nav) = nav.as_mut() {
-            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
-            let found = nav
-                .ships
-                .iter()
-                .position(|ship| ship.role == ffe_core::npc::Role::Pirate)
-                .or_else(|| (!nav.ships.is_empty()).then_some(0));
-            if let Some(index) = found {
-                let target = nav.ships[index].position;
-                let from_mm = [target[0], target[1], target[2] - 200_000];
-                let from = from_mm.map(|v| v as f64 / unit);
-                state.mode = ffe_rs::flight::Mode::Flight;
-                state.system_flight = true;
-                state.position = from;
-                state.velocity = [0.0; 3];
-                state.axes = Some(axes_looking_at(from, target.map(|v| v as f64 / unit)));
-                nav.lock_ship(nav.ships[index].id);
-                captured_traffic = true;
-            }
-        }
+        // The camera and the frozen target are placed on the first flight frame
+        // (the launch's F688 traffic spawn replaces the ships this block would
+        // otherwise select); labels start on.
+        captured_traffic = true;
     }
     // The station models' docking faces (their +z ends) and sizes, from the vertices.
     if let (Some(nav), Some(scene)) = (nav.as_mut(), scene.as_ref()) {
@@ -2440,6 +2425,42 @@ fn run() -> Result<(), String> {
             }
             .to_owned();
         }
+        // The scripted traffic capture leaves the pad immediately and spawns
+        // F688's traffic at the starport's launch point, so the camera can be
+        // placed beside a pirate. The target is held still so the 2 km camera
+        // keeps it in frame through the hit and the kill; traffic otherwise
+        // closes at PIRATE_SPEED.
+        if options.capture_traffic.is_some() && !capture_placed {
+            state.mode = ffe_rs::flight::Mode::Flight;
+            state.system_flight = true;
+            if let Some(nav) = nav.as_mut() {
+                let launch = nav.station().map_or([0; 3], |(_, at)| at);
+                let forward = ship_axes(&state)[2];
+                nav.respawn_traffic(&cache, launch, forward);
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                let found = nav
+                    .ships
+                    .iter()
+                    .position(|ship| ship.role == ffe_core::npc::Role::Pirate)
+                    .or_else(|| (!nav.ships.is_empty()).then_some(0));
+                if let Some(index) = found {
+                    let target = nav.ships[index].position;
+                    let ship = &mut nav.ships[index];
+                    ship.state = ffe_core::npc::State::Hold;
+                    ship.max_speed = 0.0;
+                    ship.velocity = [0.0; 3];
+                    let from_mm = [target[0], target[1], target[2] - 2_000_000];
+                    let from = from_mm.map(|v| v as f64 / unit);
+                    state.position = from;
+                    state.velocity = [0.0; 3];
+                    state.axes = Some(axes_looking_at(from, target.map(|v| v as f64 / unit)));
+                    let id = nav.ships[index].id;
+                    nav.lock_ship(id);
+                    capture_placed = true;
+                    original = None;
+                }
+            }
+        }
         if last_mode != ffe_rs::flight::Mode::Docked && state.mode == ffe_rs::flight::Mode::Docked {
             dock.open(StationScreen::Services);
         }
@@ -2542,7 +2563,8 @@ fn run() -> Result<(), String> {
                                     let name = ship.name.clone();
                                     let model = ship.model;
                                     nav.lock_ship(id);
-                                    let outcome = nav.player_attack(id, shot.damage);
+                                    let outcome =
+                                        nav.damage_ship_at(id, shot.damage, Some(hit.point));
                                     if let Some(attack) = outcome {
                                         state.credits = state.credits.saturating_add(attack.bounty);
                                         message = match attack.damage {
@@ -2724,6 +2746,26 @@ fn run() -> Result<(), String> {
                         axes: ship.axes(),
                         flash: ship.flash > 0.0,
                         dead: !ship.alive(),
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        // F939/F942/F926: the system's hit particles, explosions and debris.
+        screen.effects = match nav.as_ref() {
+            Some(nav) => {
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                nav.effects
+                    .iter()
+                    .map(|effect| ffe_rs::screen::SystemEffect {
+                        model: effect.model,
+                        centre: effect.position.map(|v| v as f64 / unit),
+                        axes: effect.axes(),
+                        mass: if effect.kind == ffe_core::effects::Kind::Explosion {
+                            ffe_core::effects::EXPLOSION_MASS
+                        } else {
+                            0
+                        },
                     })
                     .collect()
             }
@@ -3201,7 +3243,7 @@ fn run() -> Result<(), String> {
                 write_shot(dir, &format!("planet-{frames:04}.ppm"), &screen);
             }
         } else if let Some(dir) = &options.capture_traffic {
-            if frames == 0 || frames == 10 || frames == 20 {
+            if matches!(frames, 0 | 10 | 11 | 20 | 21 | 40 | 79) {
                 write_shot(dir, &format!("traffic-{frames:02}.ppm"), &screen);
             }
         }
@@ -3295,7 +3337,7 @@ fn run() -> Result<(), String> {
             || (options.capture.is_some() && frames >= 1000)
             || takeoff_done_at.is_some_and(|done| frames >= done + 100)
             || (options.capture_planet.is_some() && (frames >= 6000 || arrived))
-            || (options.capture_traffic.is_some() && frames >= 24)
+            || (options.capture_traffic.is_some() && frames >= 80)
         {
             break;
         }

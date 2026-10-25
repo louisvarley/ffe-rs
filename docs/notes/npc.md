@@ -235,17 +235,28 @@ The port's `State` names the subset it runs and lists its original codes in
 - `Screen::ships` (`SystemShip`) draws each live ship with the verified model
   executor at its position and axes, farthest first.
 - A shield hit sets `NpcShip::flash` and draws F1536's model **0x9d (157)** at
-  the hit ship with the **ship's** render scale. A kill draws F942's model
-  **0x9b (155)** at the ship with the scale decremented; the port's executor
-  queues no shapes for 0x9b, so the screen falls back to model 157 at ship
-  scale + 2. `DEATH_SECONDS` then removes the slot.
-- The labels toggle (`l`) includes NPC ships at their `+0x124` name; a click or
-  a laser hit locks a ship (`ship_lock`) and shows F1100's range and F1099's
-  hull/shields/shield-strength text. `T` cycles ships when one is locked; the
-  autopilot refuses a ship target.
+  the hit ship with the **ship's** render scale (F1536 copies the ship's
+  `+0x7e`). The model is a shield bubble; the original replaces the ship with
+  it for the frame, the port draws it over the ship for 0.25 s so it is
+  visible.
+- A kill draws F942's model **0x9b (155)** at the ship with its random
+  orientation and F926's model-0x99 debris pods (ported in
+  `ffe_core::effects`, `docs/notes/combat.md` §7.1); the ship itself draws no
+  model and its slot is recycled after `DEATH_SECONDS` (0.6 s), like F927.
+  Model 155's twelve fragment calls are gated on object global word 4
+  (`+0xa4`): F942 writes `0xffffffff`, which selects none, so the port passes
+  FFP 1.0 (`0x4000`) to draw the fragment set; they stay wireframe until
+  F1560/F1613's fill lands.
+- The labels toggle (`l`) includes NPC ships at their `+0x124` name and the
+  camera position; `F989`'s bounds and `F1108`'s font/colour are unchanged.
+- A click on a ship (or a laser hit) locks it (`Navigator::ship_lock`, a stable
+  id), clears a body lock, and shows F1100's range plus F1099's
+  hull/shields/shield-strength text. `T` cycles ships when a ship is locked,
+  bodies otherwise; the autopilot refuses a ship target (it has no standoff
+  or docking face).
 - The laser path (`main`) includes live ships after the bodies in
-  `laser::hit`; a hit calls `Navigator::player_attack` and therefore F953,
-  F942, the crime check and the bounty.
+  `laser::hit`; a hit calls `Navigator::damage_ship_at` and therefore F939's
+  particle, F953, F942, F926's debris, the crime check and the bounty.
 
 ## 3. Tests and frames
 
@@ -290,19 +301,27 @@ The port's `State` names the subset it runs and lists its original codes in
   the surface traffic.
 - **Station-bay ships (F691).** The cache's ship-data table is not loaded.
 - **Exact F702 placement.** The raw ffp orbit is not used; see the deviation.
-- **F942's effects and sound.** Model 0x9b's shapes are not drawn (157
-  fallback), the particle curves and samples are absent.
+- **F942's effects.** Ported 2026-10-25: the model-0x9b destruction object and
+  F926's debris pods are in `ffe_core::effects` and drawn by `Screen`; F939's
+  hit particle is drawn at the hit point. The twelve fragment shapes render as
+  outlines until the F1560/F1613 polygon fill is ported. F942's messages,
+  bounty and escape-pod variants are not ported.
+- **Sound.** F953/F942's samples are not played (the audio layer is synthetic),
+  though the sound cues from these paths are wired.
 - **Thargoids.** The F690 branch needs F35's random table; no Thargoid traffic
   is spawned, so the port's Thargoid laser/role is only reachable in tests.
 - **Persistence of the player's own damage** is in `Flight`'s serde words; the
   NPC traffic itself is not saved (it is regenerated on entry, as F680 does).
 - **The original's deaths.** The player's destruction is a starport recovery,
   not F924's game-over/pod sequence.
+- **The target readout** is only for locked ships and uses the port's output
+  path; the combat targeter is drawn (F1113/F1114) but its arming is absent
+  (`docs/notes/scanner.md`).
 
 ## 5. Owner decisions
 
-- **Player damage model.** The port now runs F953 against the player's
-  `Flight` shields/hull words; the new-game Eagle has no shield generator
+- **Player damage model.** The port runs F953 against the player's `Flight`
+  shields/hull words; the new-game Eagle has no shield generator
   (`+0xe2 = 0`), so a pirate's 1MW pulse kills it in two hits. Decide whether
   the new game should carry a shield generator (equipment) or whether AI
   damage should be scaled to keep the sandbox playable.
@@ -317,5 +336,10 @@ The port's `State` names the subset it runs and lists its original codes in
   rules produce the original's many more ships.
 - **Full docking AI.** Whether to port F752/F753/F750/F756/F740/F762 (so
   traffic really arrives and departs) or keep the orbit stand-in.
-- **F942's model 0x9b** and the AI sound cues remain unported; decide whether
-  the visibility state or a 0x9b-specific executor is worth it.
+- **Effect lifetimes.** The port gives each effect its own seconds; decide
+  whether to follow the original's AI timers (F764/F769/F927).
+- **Explosion fragments.** Model 155 is gated on the object's global word 4
+  (`+0xa4`); F942 writes `0xffffffff`, which selects no fragments, so the port
+  deliberately passes `EXPLOSION_MASS` 0x4000 to draw the twelve. Keep that
+  deviation or follow F942 literally (no fragments); the shapes also need
+  F1560/F1613's fill before they are solid.

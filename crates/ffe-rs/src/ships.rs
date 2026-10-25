@@ -126,6 +126,7 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
         thrust: stats.forward_thrust,
         drive: stats.drive as u8,
         gun_mounts: stats.gun_mounts,
+        cargo: u16::try_from(stats.cargo.max(0)).unwrap_or(0),
     })
 }
 

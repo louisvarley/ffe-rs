@@ -203,7 +203,9 @@ pub const BEAM_MODEL: u32 = 0x9c;
 /// absorbed a hit (`ship+0x151 & 1`).
 pub const SHIELD_FLASH_MODEL: u32 = 0x9d;
 /// F942's death object model, `0x9b` (155), created with type 0xb and AI state
-/// 0x1c at the destroyed ship; its explosion curves are the original's model.
+/// 0x1c at the destroyed ship. The screen draws it from a
+/// `screen::SystemEffect` with global word 4 = `EXPLOSION_MASS`
+/// (`ffe_core::effects`); the constant stays here for callers and tests.
 pub const DEATH_MODEL: u32 = 0x9b;
 
 /// Screen position of the velocity marker in the front view, F1112: the

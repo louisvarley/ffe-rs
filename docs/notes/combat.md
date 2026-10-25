@@ -245,6 +245,20 @@ or turret laser today. Do not give turrets a laser by invention.
   `npc-hit.ppm` (model 157) and `npc-kill.ppm` (the death marker). The live
   `--capture-traffic <dir>` mode shows the same in the real new game
   (`traffic-00/10/20.ppm`). See `docs/notes/npc.md`.
+- **Effect tests (2026-10-25):** `cargo test -p ffe-core --lib effects` (three
+  unit tests: one model-158 particle per hit at the hit point with the source's
+  velocity and the `0x9c40` cutoff, F942's one model-0x9b object plus F922/F926
+  debris counts and velocities, and the effects' travel and lifetimes).
+  `cargo test -p ffe-rs --test effects_view -- --ignored` with
+  `FFE_WORLD_CACHE`: `effects-hit.ppm` (F939 at the hit point), `effects-kill.ppm`
+  and `effects-kill-after.ppm` (the model-0x9b explosion plus debris and its
+  expiry), and a check that model 155 draws 0 shapes for global 4 = `0xffff`
+  but at least 12 for `0x4000`, while model 158 draws six.
+- **Live effect frames:** `ffe-rs.exe --root <repo> --skip-intro
+  --capture-traffic <dir>` now holds the pirate still and places the camera
+  2 km behind it; `traffic-00`, `-10`, `-11`, `-20`, `-21`, `-40` and `-79`
+  show the shield flash, the green model-155/debris explosion and the clean
+  view after its lifetime.
 - **Reference:** `tools/reference/headless.c` now has a `--state-combat <frames>`
   mode that runs the real new game and prints the player object's laser words.
   `jjffe-smoke.exe --state-combat 170` in a disposable directory prints, from
@@ -279,9 +293,49 @@ the original's F635 model tables and F688 counts. A ship is labelled by the `l`
 toggle, can be clicked or hit to lock, and then shows F1099's hull/shields/shield
 strength readout; the laser path includes live ships after the bodies, calls
 F953's shields/hull damage and F942's destruction, and draws F1536's model 0x9d
-(157) shield flash. A killed ship shows a short death marker (F942's model 0x9b
-produces no shapes in the port's executor yet, so model 157 at a larger scale
-stands in) and is removed after `DEATH_SECONDS`.
+(157) shield flash. A hit also spawns F939's model-0x9e particle at F817's hit
+point; a kill spawns F942's model-0x9b explosion and F926's model-0x99 debris
+(ported 2026-10-25 in `ffe_core::effects`; see 7.1).
+
+### 7.1 Hit particles, explosions and debris (`ffe_core::effects`)
+
+- **F939** (`ffe.asm:70291`) is called once per laser hit by F931
+  (`ffe.asm:69804-69808`) as `F939(player, hit_position, 1)`. It clones the
+  ship and sets **model 0x9e (158)**, control byte `0x29` (control 9 with
+  F928's "counted explosion" bit 0x20), AI state `+0xff = 0x1a` and AI class
+  `+0x118 = 0xf8`, with a random YZT orientation (F1675). It keeps the cloned
+  velocity only when `DATA_008867 >= 0x9c40` or the source's `+0x14c` has bit
+  0x10, and zeroes `+0x8c/+0x90/+0x94` otherwise. The third argument shifts
+  the object's distance word `+0x7e` (bit 1: +2, bit 2: −1); the laser path
+  passes 1.
+- **F942** (`ffe.asm:70650`) is called by F953 when the hull is used up
+  (`ffe.asm:71281-71287`). It creates **model 0x9b (155)**, control 0xb, AI
+  state `+0xff = 0x1c`, `+0xa4 = 0xffffffff`, `+0x9e = 0xffff`, a random YZT
+  matrix, and the ship's distance word `+0x7e` decremented by one (restored
+  when the statistics' mass word `+0x6` is at least 10; at 0x190 or more it
+  uses the two radii, which the port does not model). For ship models
+  0x0f..0x3f it also spawns debris with **F926** (`ffe.asm:69099`):
+  `F922(6) - 2` pods plus `min(4, cargo_space >> 1)` cargo pods, each **model
+  0x99 (153)** with a random 0..1023 added to every velocity word. F952
+  (`ffe.asm:71154`) is the hull-hit subsystem roll (F945/F947/F948/F949), not
+  a particle; the port leaves it out with the equipment damage model.
+- **The port:** `effects::hit` spawns one model-0x9e effect at the hit point
+  with the ship's velocity (above `PARTICLE_SPEED`) and a random orientation;
+  `effects::explosion` spawns the model-0x9b object plus F942's debris count
+  from `Spec.cargo` (`+0x116`). Each carries a port lifetime (`HIT_SECONDS`
+  0.4 s, `EXPLOSION_SECONDS` 1.0 s, `DEBRIS_SECONDS` 1.2 s) because the
+  original's AI timers (F764/F769/F927) are not ported.
+  `Navigator::effects` holds them, `tick_ships` ages and expires them, and
+  `Screen::SystemEffect` renders them with `render_scene_with`.
+- **The model-155 gate.** Model 155's command stream is a chain of arithmetic
+  (opcodes 13/29) and bit-branch (19/20) blocks around twelve child fragment
+  calls (models 320..325). The branches read object **global word 4
+  (`+0xa4`)**: they select no fragment for F942's `0xffffffff`, but all twelve
+  for FFP 1.0 (`0x4000`). The port passes `EXPLOSION_MASS = 0x4000` in
+  `SystemEffect.mass`, so F942's fragment set draws. The twelve shapes are
+  F1721 complex polygons, which the port's renderer draws as outlines because
+  the F1560/F1559/F1613 span fill is still unported (`docs/notes/fills.md`);
+  the explosion is a wireframe cloud until that stream lands.
 
 **The AI shoots back (2026-10-25).** Hostile ships run the flight/combat states
 and call F931 with their front laser (`NpcShip::fire`): heat, energy and refire
@@ -306,17 +360,19 @@ is the single F942 test.
 - **Ship targets and the target hull/shield readout.** The generated systems
   contain NPC traffic (`docs/notes/npc.md`), so F953's damage, F942's
   destruction, model 157's shield-hit flash and the `(235,1)` readout are
-  reachable for a locked or hit ship. The ships now fire (see above); docking,
-  missiles and Thargoids remain absent, and the death effect is a 157 stand-in
-  for F942's 0x9b object.
+  reachable for a locked or hit ship. The ships fire and have the flight/combat
+  AI (see above); docking, missiles and Thargoids remain absent. F942's model
+  0x9b explosion, F939's hit particle and F926's debris are ported and drawn
+  (see §7).
 - **Rear and turret lasers.** The new-game Eagle has one mount; the port has
   no outfitting/save equipment. The firing paths (mount 1/2/3, turret axes and
   gun offsets) are implemented and tested, but no playable loadout reaches
   them.
 - **Missiles.** `M`/`F1096`/`F941` and the missile object/AI (models 6..13,
   lock, tracking, damage) are not ported. The Eagle carries two 0x82 missiles.
-- **Hit effects/explosions.** `F939`'s particles, `F942`'s death effect and
-  the `F952` explosion are not ported; only the model 156 muzzle cone is drawn.
+- **Hit effects/explosions.** `F939`'s particle, `F942`'s explosion and the
+  `F926` debris are ported in `ffe_core::effects` and drawn by `screen`; see §7.
+  `F952` is subsystem damage, not a visual effect.
 - **Sound cues** (0x0a/0x0b/0x1c/0x1d/0x14) are not played.
 - **The combat targeter** is ported (`docs/notes/scanner.md`): F1100/F1113's
   targeting tunnels, F1114's boxes, F1111's blinking F1612 circle/box cursor
@@ -330,15 +386,21 @@ is the single F942 test.
   slice clears this.
 
 **Owner decisions:** NPC traffic and its flight/combat AI are implemented at the
-state-rules level (see `docs/notes/npc.md`); decide whether to port F942's
-model-155 explosion, the target-computer equipment and the auto-targeter arming
-that switches F1113/F1114's tunnels on (the port draws them only when the
-targeter flags are set), missiles, and a shield generator for the player (the
-AI's fire is lethal in two hits without one). F1100's per-target text colour and
-arrow forms remain a small deviation; the port's own lock brackets stand in when
-the targeter is not armed.
+state-rules level (see `docs/notes/npc.md`); decide whether to port the
+target-computer equipment and the auto-targeter arming that switches
+F1113/F1114's tunnels on (the port draws them only when the targeter flags are
+set), missiles, and a shield generator for the player (the AI's fire is lethal in
+two hits without one). F1100's per-target text colour and arrow forms remain a
+small deviation; the port's own lock brackets stand in when the targeter is not
+armed. For the effects, decide whether their lifetimes should follow the
+original's AI timers (F764/F769/F927) rather than the port's per-effect seconds,
+and whether the model-155 explosion keeps the `EXPLOSION_MASS` word `0x4000`
+that selects its twelve fragments or follows F942's literal `0xffffffff` (which
+selects none). Until F1560/F1613 fill the fragments, the explosion draws its
+wireframe.
 
 The player's F953 words have a save-compatible test
 (`crates/ffe-rs/tests/combat.rs`) and the AI sequence has its own cached test
 (`crates/ffe-rs/tests/npc_ai.rs`, `npc-ai-*.ppm`). The scanner contacts and the
-targeter's four-box tunnels have their own cached test (`scanner_view`).
+targeter's four-box tunnels have their own cached test (`scanner_view`), and the
+effects are framed by `effects_view`.

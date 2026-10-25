@@ -178,7 +178,8 @@ window.FFE_BURNDOWN = {
         { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
         { id: "ui-9", title: "Options, key bindings screen", status: "done", version: "v0.48p" },
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "todo" },
-        { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "todo" }
+        { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "todo" },
+        { id: "ui-12", title: "Hit particles, explosions and debris (F939/F942/F926)", status: "done", version: "v0.66" }
       ]
     },
     {
@@ -530,6 +531,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 69,
       note: "Scanner and targeter merged (v0.65): F275's contacts (bodies and live ships, parent frames, the 19-colour table, stalks and the 8-frame orientation overlay) and F1113/F1114's four-box tunnels, F1614 edges and F1612 circle with F1100's size rule are drawn, gated by the scanner `+0xca & 4` and the targeting-tunnel preference. Remaining: auto-targeter arming/equipment, F1100's per-target colours/arrows, and collapsing two simultaneous targets. ui-1 is done."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 69,
+      note: "Effects merged (v0.66): F939's model-158 hit particle at F817's hit point, F942's model-155 destruction object and F926's model-0x99 debris are in ffe-core::effects and drawn by Screen::SystemEffect; F942's +0xa4 gate is explained and the port deliberately passes EXPLOSION_MASS 0x4000 so the twelve fragments draw (wireframe until F1560/F1613 fills). --capture-traffic and the effect lifetimes follow the effect's own seconds; AI/police, scanner and HUD paths are unchanged. One item added and completed (ui-12), so the remaining count is unchanged. Owner decisions: effects lifetimes vs AI timers and the EXPLOSION_MASS deviation."
     }
   ]
 };

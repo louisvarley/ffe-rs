@@ -4,6 +4,43 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Hit particles, explosions and debris merged (v0.66)
+
+- Merged `effects` (9974338): `ffe_core::effects` spawns F939's model-158 hit
+  particle at F817's hit point, F942's model-155 destruction object and F926's
+  model-0x99 debris pods (the pod count from the ship's `+0x116` cargo,
+  `min(4, cargo >> 1)`); `Navigator::effects` holds them and `tick_ships` ages
+  them; `Screen::SystemEffect` draws them. `--capture-traffic` and the traffic
+  capture timing were brought over, and `NpcShip`/`Spec`/`Persisted` carry the
+  cargo word so a restored ship still makes debris.
+- Conflicts: `lib.rs`, `npc.rs`, `main.rs`, `navigation.rs`, `ships.rs`,
+  `npc_view.rs`, `combat.md`, `npc.md`. The effects branch's `damage_ship_at`
+  was reconciled with the shipai `player_attack`: `damage_ship_at` now returns
+  `Option<Attack>` and calls `player_attack` (legal/bounty/police) after
+  spawning F939/F942/F926 at the pre-hit position, axes and velocity;
+  `damage_ship` remains the `Damage`-only wrapper, and `tick_ships` keeps the
+  shipai signature (events + player radius) while ticking the effects even when
+  the traffic list is empty. `Spec`/`NpcShip`/`Persisted` carry both branches'
+  fields (thrust/drive/mounts and cargo).
+- **F942's `+0xa4` gate:** model 155's twelve fragment calls read object global
+  word 4; F942 writes `0xffffffff` (all bits set) which selects none. The port
+  deliberately passes FFP 1.0 (`EXPLOSION_MASS` 0x4000) so the twelve fragments
+  draw, and they are wireframe until F1560/F1613's polygon fill lands. This is
+  a recorded deviation/owner decision.
+- **Owner decisions:** effect lifetimes are the port's per-effect seconds
+  rather than the original's AI timers (F764/F769/F927); keep `EXPLOSION_MASS`
+  0x4000 or follow F942 literally (no fragments); the fills dependency
+  (F1560/F1613) before the explosion is solid. Sound cues from these paths were
+  already wired.
+- Cache: the branch predates v27; all cached tests ran against the local v27
+  `data.bin` (ignored).
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `--test effects_view -- --ignored` (2), `npc_view` (1)
+  and `npc_ai` (3), plus dashboard/combat/console/station/lift/market/scanner/
+  intro cached suites.
+
+---
+
 ## 2026-10-25 - Scanner contacts and the combat targeter merged (v0.65)
 
 - Merged `scanner` (7a82070, eda3790): `ffe_rs::scanner` implements F275's

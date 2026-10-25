@@ -65,6 +65,20 @@ fn ships(screen: &mut Screen, nav: &Navigator) {
             dead: !ship.alive(),
         })
         .collect();
+    screen.effects = nav
+        .effects
+        .iter()
+        .map(|effect| ffe_rs::screen::SystemEffect {
+            model: effect.model,
+            centre: effect.position.map(|v| v as f64 / unit),
+            axes: effect.axes(),
+            mass: if effect.kind == ffe_core::effects::Kind::Explosion {
+                ffe_core::effects::EXPLOSION_MASS
+            } else {
+                0
+            },
+        })
+        .collect();
 }
 
 /// The pirate is the traffic ship away from the station, so the frame is the
@@ -180,11 +194,22 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
     assert_eq!(ray.index, 0);
     assert_eq!(nav.damage_ship(ship_id, 50), Some(laser::Damage::Shields));
 
-    // F953/F942: a hit at least the remaining hull destroys the ship; the port
-    // keeps a short death marker (F942's particles are not ported).
-    let ship = nav.ships.get_mut(index).unwrap();
-    assert_eq!(ship.hit(1000), laser::Damage::Destroyed);
-    assert!(!ship.alive());
+    // F953/F942: a hit at least the remaining hull destroys the ship; F942's
+    // explosion object and F926's debris replace it.
+    assert_eq!(
+        nav.damage_ship(ship_id, 1000),
+        Some(laser::Damage::Destroyed)
+    );
+    assert!(nav
+        .effects
+        .iter()
+        .any(|effect| { effect.kind == ffe_core::effects::Kind::Explosion }));
+    assert!(!nav
+        .ships
+        .iter()
+        .find(|ship| ship.id == ship_id)
+        .unwrap()
+        .alive());
     ships(&mut screen, &nav);
     screen.draw(&state, views, Some(&viewer), false, true, "");
     save(&screen, "npc-kill.ppm");
@@ -193,17 +218,20 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
         changed(&hit_frame, &kill_frame) > 3,
         "the death frame did not differ from the ship and its shield flash"
     );
-    // The death marker is still F1536's model drawn where the ship was.
+    // The kill visuals are the effects, not a marker on the dead ship.
     screen.ships.clear();
+    screen.effects.clear();
     screen.draw(&state, views, Some(&viewer), false, true, "");
     assert!(
         changed(&kill_frame, screen.logical_pixels()) > 3,
-        "the death marker did not draw"
+        "the explosion effect did not draw"
     );
-    // The marker's timer is what removes the slot (F927's recycle).
+    // The effects outlive the ship's slot and expire on their own lifetime;
+    // F927 recycles the slot on the same ticks.
     screen.ships = Vec::new();
-    for _ in 0..40 {
+    let shortest = ffe_core::effects::DEBRIS_SECONDS;
+    for _ in 0..(shortest / 0.02) as usize + 2 {
         nav.tick_ships(0.02, 994, from, 10_000);
     }
-    assert!(nav.ships.iter().all(|ship| ship.id != ship_id));
+    assert!(nav.effects.is_empty(), "the effects did not expire");
 }

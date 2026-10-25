@@ -564,8 +564,8 @@ pub fn model_for(role: Role, allegiance: u32, rng: &mut Random) -> u32 {
 }
 
 /// The fields of an original ship the NPC needs: its model's radii, its
-/// statistics' thrust, mass and shield words, and its gun mounts. Built by
-/// `ffe-rs` from the cache.
+/// statistics' thrust, mass, shield and cargo words, and its gun mounts. Built
+/// by `ffe-rs` from the cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Spec {
     pub model: u32,
@@ -579,6 +579,9 @@ pub struct Spec {
     pub drive: u8,
     /// The statistics' gun mounts (`+0x4`).
     pub gun_mounts: i8,
+    /// The cargo space (`+0x116`): F942 uses `min(4, cargo >> 1)` extra debris
+    /// pods.
+    pub cargo: u16,
 }
 
 impl Spec {
@@ -742,6 +745,8 @@ pub struct NpcShip {
     /// The statistics' shield word (`+0xe`), which F1099 shows as
     /// "Shield Strength d".
     pub shield_strength: i16,
+    /// The ship's cargo space (`+0x116`), which F942 turns into debris pods.
+    pub cargo: u16,
     pub state: State,
     pub anchor: [i64; 3],
     pub orbit_radius: f64,
@@ -809,6 +814,7 @@ impl NpcShip {
                 mass: spec.mass,
             },
             shield_strength: spec.shield_strength as i16,
+            cargo: spec.cargo,
             state: if hostile { State::Attack } else { State::Hold },
             anchor,
             orbit_radius,
@@ -1102,6 +1108,9 @@ pub struct Persisted {
     pub radius: i64,
     pub damage: DamageState,
     pub shield_strength: i16,
+    /// The statistics' cargo space (`+0x116`), kept for F942's debris on a
+    /// later destruction.
+    pub cargo: u16,
     pub hostile: bool,
     pub laser: Option<u8>,
     pub guns: laser::State,
@@ -1136,6 +1145,7 @@ pub fn persist(ships: &[NpcShip], player: [i64; 3]) -> Vec<Persisted> {
             radius: ship.radius,
             damage: ship.damage,
             shield_strength: ship.shield_strength,
+            cargo: ship.cargo,
             hostile: true,
             laser: ship.laser,
             guns: ship.guns,
@@ -1170,6 +1180,7 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             radius: record.radius,
             damage: record.damage,
             shield_strength: record.shield_strength,
+            cargo: record.cargo,
             state: State::Attack,
             anchor: player,
             orbit_radius: ANCHOR_ORBIT,
@@ -1518,6 +1529,7 @@ mod tests {
             thrust: if model >= 0x35 { 3_270 } else { 13_625 },
             drive: 2,
             gun_mounts: 1,
+            cargo: 8,
         })
     }
 
