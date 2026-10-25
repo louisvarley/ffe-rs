@@ -85,10 +85,10 @@ at the first visit: water 0.9, grain 38.0, precious metals 1735.6, gem stones 30
   legal goods (25 at Sol) with price, stock and the tonnes held, the Buy and Sell buttons and the
   original's cargo/cash/cabins line. Up/Down choose, Enter/`1`-`4` select, B buys a tonne, N sells
   one (Shift: ten, stopping at the first refusal); the left/right row buttons buy and sell too.
-- Selecting a `0x9829` "GOODS BOUGHT AND SOLD" bulletin advertisement opens F454's black market:
-  the same screen with the illegal goods listed (33 at Sol) and the advertisement's company name as
-  its 0x98d7 title. F640's fake advertisement is one of these; any row action there is F542/F543's
-  500.0 CR trading-in-illegal-goods trap (offence 5), not a trade.
+- Selecting a `0x9829` "GOODS BOUGHT AND SOLD" bulletin advertisement (row button or Enter) opens
+  F454's black market: the same screen with the illegal goods listed (33 at Sol) and the
+  advertisement's company name as its 0x98d7 title. F640's fake advertisement is one of these; any
+  row action there is F542/F543's 500.0 CR trading-in-illegal-goods trap (offence 5), not a trade.
 - Launching from a station runs F233's event-5 customs scan. If the hold has any bit-7 commodity
   and the system's `+7` danger byte beats `random & 7`, the smuggling offence (7) records 2500
   printed / 25000 owed with no wanted bit. The scan's stream is seeded from the system, clock,
