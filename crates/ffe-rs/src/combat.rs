@@ -199,6 +199,12 @@ pub const GUNSIGHT_BITMAP: u32 = 0x61;
 pub const VELOCITY_MARKER_BITMAP: u32 = 0x62;
 /// F1776's laser-beam model, `0x9c` (156).
 pub const BEAM_MODEL: u32 = 0x9c;
+/// F1536's shield-hit flash model, `0x9d` (157), drawn at a ship whose shields
+/// absorbed a hit (`ship+0x151 & 1`).
+pub const SHIELD_FLASH_MODEL: u32 = 0x9d;
+/// F942's death object model, `0x9b` (155), created with type 0xb and AI state
+/// 0x1c at the destroyed ship; its explosion curves are the original's model.
+pub const DEATH_MODEL: u32 = 0x9b;
 
 /// Screen position of the velocity marker in the front view, F1112: the
 /// velocity direction projected as an F1479 point with a small +z offset. A

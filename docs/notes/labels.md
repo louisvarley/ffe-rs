@@ -40,8 +40,8 @@ the bottom of the 320x200 screen.
   `FUNC_001584_TextWriteDefaultClip`: **font 15, colour 15, unshadowed**, at
   screen x + 1, y. It skips the object whose model is 0x9a and, near the player,
   ships with type byte 0x87 == 0xb and AI state 0x24 (a docked/landed state
-  pair); the port has no AI ships, so only the model-0x9a skip would ever
-  apply and no body uses it.
+  pair). The port labels bodies and its NPC traffic; its traffic has no 0x24
+  state, so the near-target suppression is not reproduced.
 - Older `srctools/cplayer.txt` says `b[D8871] & 4`, but that is a different
   address from the executed assembly's `player+0xe9`. The assembly is
   authoritative; the cplayer note belongs to an older address map.
@@ -83,8 +83,8 @@ the bottom of the 320x200 screen.
   starts off, as the player flag does. `Screen::labels` carries the names and
   camera positions; `Screen::draw_body_labels` applies F989's bounds and
   F1108's position, font and colour. The port's "objects" are the navigator's
-  bodies (there are no AI ships yet), so labels appear on stars, planets, moons,
-  stations and starports.
+  bodies plus its NPC ships (`docs/notes/npc.md`), so labels appear on stars,
+  planets, moons, stations, starports and traffic.
 - `Navigator::places()`/`navigation::place_indices` use only station/starport
   bodies, in `bodies` order (the system generator's creation order, which F927's
   descending slots preserve). `View::Places` pages 18 at a time because a
@@ -107,8 +107,10 @@ the bottom of the 320x200 screen.
   `[ship+0xc8]` bit 0x20. The labels button is unconditional in both.
 - **Paging.** The original has one page of 18; the port pages with
   Left/Right/Page Up/Down only when a generated system has more than 18 places.
-- **Object set.** The port's labels and list come from the navigator's bodies;
-  the original also labels AI ships and some mission objects, which the port
-  does not have.
+- **Object set.** The port's labels and list come from the navigator's bodies
+  plus its NPC ships (`docs/notes/npc.md`); the original also labels mission
+  objects, which the port does not have. The places list stays stations and
+  starports only, as the original's does.
 - **F1108's near-target suppression** (type 0x87 == 0xb and AI state 0x24) is
-  not reproduced because the port has no AI ship state.
+  not reproduced: the port's traffic AI has no 0x24 docked/landed state pair
+  (its ships in station bays are not modelled).

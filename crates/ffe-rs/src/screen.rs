@@ -150,8 +150,8 @@ pub struct TargetHud {
 }
 
 /// F1099's target shields/hull readout (`0x8625`/`0x8626`), when a ship target
-/// carries them. Stations and planets have no such state in the port yet, so
-/// this stays `None` for every live body.
+/// carries them (`docs/notes/npc.md`). Stations and planets have no such state,
+/// so this stays `None` for a body target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TargetDamage {
     /// Hull per-mille (`0..=1000`), F1099's `hull * 250 / mass`.
@@ -169,6 +169,18 @@ pub struct TargetDamage {
 pub struct BodyLabel {
     pub name: String,
     pub centre: [f64; 3],
+}
+
+/// An NPC ship to draw in the system view: its model, centre and axes in flight
+/// units, and whether F1536's shield-hit flash (model 0x9d) is showing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemShip {
+    pub model: u32,
+    pub centre: [f64; 3],
+    pub axes: [[f64; 3]; 3],
+    pub flash: bool,
+    /// A destroyed ship: only the flash marker is drawn.
+    pub dead: bool,
 }
 
 /// The map buttons along the bottom of the view: left edge, right edge and label.
@@ -195,6 +207,8 @@ pub struct Screen {
     pub discs: Vec<Disc>,
     /// The system's stations (set by the caller each frame, in system flight).
     pub stations: Vec<SystemStation>,
+    /// The system's NPC ships (set by the caller each frame).
+    pub ships: Vec<SystemShip>,
     /// Direction toward the local star in flight space (`None` outside a system):
     /// ships, stations and lift objects are lit by it instead of the original's
     /// fixed default light. Planet discs carry their own light.
@@ -211,7 +225,7 @@ pub struct Screen {
     /// The system and the station the player is at, for the docked screen and the top bar.
     pub system: String,
     pub station: String,
-    /// The locked-on target and its range, while the autopilot has one.
+    /// The locked-on target and its range, for a body or an NPC ship.
     pub lock: String,
     /// Where the locked body shows in the view (set by the caller each frame).
     pub target_mark: Option<TargetMark>,
@@ -611,6 +625,7 @@ impl Screen {
             lock_external: true,
             discs: Vec::new(),
             stations: Vec::new(),
+            ships: Vec::new(),
             sun: None,
             market: None,
             dock: None,
@@ -1985,6 +2000,92 @@ impl Screen {
         }
         if !ship_drawn {
             self.draw_ship(scene, state, camera);
+        }
+        self.draw_system_ships(scene, state, camera);
+    }
+
+    /// The system's NPC ships, farthest first. A ship whose shields absorbed a
+    /// hit also draws F1536's model 0x9d (157) over itself; a destroyed ship
+    /// draws only the marker (F942's particle effects are not ported).
+    fn draw_system_ships(&mut self, scene: &ModelViewer, state: &Flight, camera: &Camera) {
+        let Some(scale) = model_scale(scene) else {
+            return;
+        };
+        let mut order = self.ships.clone();
+        order.sort_by(|a, b| {
+            distance(camera.position, b.centre).total_cmp(&distance(camera.position, a.centre))
+        });
+        let light = self.scene_light(scene, camera);
+        for ship in order {
+            let origin = camera.point(ship.centre).map(|v| v * scale);
+            if origin.iter().any(|value| value.abs() > STATION_DRAW_RANGE) {
+                continue;
+            }
+            let rows = ship.axes.map(|axis| camera.direction(axis));
+            if !ship.dead {
+                let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
+                inputs.jitter = self.jitter.cursor;
+                if let Ok(frame) = scene.render_scene_with(ship.model, rows, origin, light, &inputs)
+                {
+                    self.jitter.cursor = frame.jitter;
+                    self.draw_shapes(scene, &frame.shapes);
+                }
+            }
+            if ship.flash || ship.dead {
+                let mut inputs = AnimationInputs::original(
+                    flight_tics(state),
+                    if ship.dead { 0x1c } else { 0 },
+                    &scene.shades(),
+                );
+                inputs.jitter = self.jitter.cursor;
+                let ship_scale = scene.find(ship.model).map(|model| model.scale);
+                if ship.dead {
+                    // F942 creates a model-0x9b explosion object at the ship with
+                    // the render scale (`+0x7e`) decremented. The port's viewer
+                    // currently produces no shapes for 0x9b (its command stream is
+                    // visibility-gated on state the port does not set), so fall
+                    // back to F1536's model 0x9d at a larger scale: a visible
+                    // stand-in for the original's explosion.
+                    let mut drew = false;
+                    if let Ok(frame) = scene.render_scene_with_scale(
+                        crate::combat::DEATH_MODEL,
+                        ship_scale.map(|scale| scale.saturating_sub(1)),
+                        rows,
+                        origin,
+                        light,
+                        &inputs,
+                    ) {
+                        if !frame.shapes.is_empty() {
+                            self.jitter.cursor = frame.jitter;
+                            self.draw_shapes(scene, &frame.shapes);
+                            drew = true;
+                        }
+                    }
+                    if !drew {
+                        if let Ok(frame) = scene.render_scene_with_scale(
+                            crate::combat::SHIELD_FLASH_MODEL,
+                            ship_scale.map(|scale| scale.saturating_add(2)),
+                            rows,
+                            origin,
+                            light,
+                            &inputs,
+                        ) {
+                            self.jitter.cursor = frame.jitter;
+                            self.draw_shapes(scene, &frame.shapes);
+                        }
+                    }
+                } else if let Ok(frame) = scene.render_scene_with_scale(
+                    crate::combat::SHIELD_FLASH_MODEL,
+                    ship_scale,
+                    rows,
+                    origin,
+                    light,
+                    &inputs,
+                ) {
+                    self.jitter.cursor = frame.jitter;
+                    self.draw_shapes(scene, &frame.shapes);
+                }
+            }
         }
     }
 

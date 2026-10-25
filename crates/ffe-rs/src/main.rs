@@ -49,6 +49,10 @@ struct Options {
     /// out from the nearest planet, the autopilot is engaged, and frames are
     /// saved through the approach.
     capture_planet: Option<PathBuf>,
+    /// Directory for a scripted NPC traffic frame: the ship is put in flight
+    /// beside a spawned pirate, labels and the target readout are on, and a
+    /// shield hit and a kill are applied and saved.
+    capture_traffic: Option<PathBuf>,
     /// The boot: the original new game (default) or `--start sol`'s sandbox.
     boot: Boot,
     /// `--skip-intro`: the logo/intro screens are not shown. The front end is
@@ -65,6 +69,7 @@ fn options() -> Result<Options, String> {
     let mut smoke_frames = None;
     let mut capture = None;
     let mut capture_planet = None;
+    let mut capture_traffic = None;
     let mut boot = Boot::NewGame(1);
     let mut boot_given = false;
     let mut skip_intro = false;
@@ -109,6 +114,11 @@ fn options() -> Result<Options, String> {
             capture_planet = Some(PathBuf::from(
                 args.next().ok_or("--capture-planet requires a directory")?,
             ));
+        } else if arg == "--capture-traffic" && capture_traffic.is_none() {
+            capture_traffic = Some(PathBuf::from(
+                args.next()
+                    .ok_or("--capture-traffic requires a directory")?,
+            ));
         } else if arg == "--capture-prefs" && capture_prefs.is_none() {
             capture_prefs = Some(PathBuf::from(
                 args.next().ok_or("--capture-prefs requires a directory")?,
@@ -125,7 +135,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-prefs DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -149,6 +159,7 @@ fn options() -> Result<Options, String> {
         smoke_frames,
         capture,
         capture_planet,
+        capture_traffic,
         boot,
         skip_intro,
         capture_prefs,
@@ -439,6 +450,32 @@ fn run() -> Result<(), String> {
             }
         }
     }
+    // A scripted NPC traffic frame: put the ship beside the spawned pirate,
+    // labels on, and fire a shield hit and a kill through F953/F942.
+    let mut captured_traffic = false;
+    if let Some(dir) = &options.capture_traffic {
+        fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        if let Some(nav) = nav.as_mut() {
+            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+            let found = nav
+                .ships
+                .iter()
+                .position(|ship| ship.role == ffe_core::npc::Role::Pirate)
+                .or_else(|| (!nav.ships.is_empty()).then_some(0));
+            if let Some(index) = found {
+                let target = nav.ships[index].position;
+                let from_mm = [target[0], target[1], target[2] - 200_000];
+                let from = from_mm.map(|v| v as f64 / unit);
+                state.mode = ffe_rs::flight::Mode::Flight;
+                state.system_flight = true;
+                state.position = from;
+                state.velocity = [0.0; 3];
+                state.axes = Some(axes_looking_at(from, target.map(|v| v as f64 / unit)));
+                nav.lock_ship(nav.ships[index].id);
+                captured_traffic = true;
+            }
+        }
+    }
     // The station models' docking faces (their +z ends) and sizes, from the vertices.
     if let (Some(nav), Some(scene)) = (nav.as_mut(), scene.as_ref()) {
         for model in STATION_MODELS {
@@ -454,6 +491,9 @@ fn run() -> Result<(), String> {
     // The original's text-label flag: player struct +0xe9 bit 2 (DATA_008871 in
     // cplayer.txt's older naming), toggled by `l` or the console's labels icon.
     let mut labels = false;
+    if captured_traffic {
+        labels = true;
+    }
     let mut last_mode = state.mode;
     // The station the ship has just left: its hull is not a wall to the ship
     // until it is clear of the slot (F1088 leaves the player at the station).
@@ -916,6 +956,8 @@ fn run() -> Result<(), String> {
                                         model.teleport(jumped.arrival);
                                     }
                                     burn_fuel(&mut state, nav.drive, jumped.fuel);
+                                    let forward = ship_axes(&state)[2];
+                                    nav.spawn_traffic(&cache, jumped.arrival, forward);
                                     message = format!(
                                         "Hyperspace: {} in {:.1} days, {} t of fuel. Arrived in the {} system.",
                                         ffe_rs::navigation::range_text(jumped.distance),
@@ -947,7 +989,18 @@ fn run() -> Result<(), String> {
                     if pressed(Key::T) || console_click == Some(Click::Target) {
                         let back = window.is_key_down(Key::LeftShift)
                             || window.is_key_down(Key::RightShift);
-                        if let Some(body) = nav.cycle_lock(ship, if back { -1 } else { 1 }) {
+                        if nav.ship_lock.is_some() {
+                            if let Some(ship) = nav.cycle_ship_lock(if back { -1 } else { 1 }) {
+                                message = format!(
+                                    "Locked on {} {}. Space fires; a ship cannot be flown to.",
+                                    ship.name,
+                                    describe(distance(
+                                        ship_position(&original, &state),
+                                        ship.position
+                                    ))
+                                );
+                            }
+                        } else if let Some(body) = nav.cycle_lock(ship, if back { -1 } else { 1 }) {
                             message = format!(
                                 "Locked on {} {}. K or AUTOPILOT flies there.",
                                 body.name,
@@ -959,7 +1012,8 @@ fn run() -> Result<(), String> {
                         .filter(|(_, y)| console_click.is_none() && (12..118).contains(y))
                     {
                         let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
-                        let candidates: Vec<(usize, [f64; 3], f64)> = nav
+                        let body_count = nav.bodies.len();
+                        let mut candidates: Vec<(usize, [f64; 3], f64)> = nav
                             .bodies
                             .iter()
                             .enumerate()
@@ -971,19 +1025,49 @@ fn run() -> Result<(), String> {
                                 )
                             })
                             .collect();
+                        candidates.extend(nav.ships.iter().enumerate().filter_map(
+                            |(index, ship)| {
+                                ship.alive().then_some((
+                                    body_count + index,
+                                    ship.position.map(|v| v as f64 / unit),
+                                    ship.radius as f64 / unit,
+                                ))
+                            },
+                        ));
                         let hit = Screen::pick(&state, &views, scene.as_ref(), &candidates, point);
-                        if let Some(body) = hit.and_then(|index| nav.lock(index)) {
-                            message = format!(
-                                "Locked on {} {}. K or AUTOPILOT flies there.",
-                                body.name,
-                                describe(distance(ship, body.position))
-                            );
+                        if let Some(index) = hit {
+                            if index < body_count {
+                                nav.ship_lock = None;
+                                if let Some(body) = nav.lock(index) {
+                                    message = format!(
+                                        "Locked on {} {}. K or AUTOPILOT flies there.",
+                                        body.name,
+                                        describe(distance(ship, body.position))
+                                    );
+                                }
+                            } else {
+                                nav.locked = None;
+                                let id = nav.ships[index - body_count].id;
+                                if let Some(ship) = nav.lock_ship(id) {
+                                    message = format!(
+                                        "Locked on {} {}. Space fires.",
+                                        ship.name,
+                                        describe(distance(
+                                            ship_position(&original, &state),
+                                            ship.position
+                                        ))
+                                    );
+                                }
+                            }
                         }
                     }
                     if pressed(Key::K) || console_click == Some(Click::Autopilot) {
                         if nav.locked.is_none() {
-                            message =
-                                "Lock a target first: click it in the view, or press T.".to_owned();
+                            message = if nav.ship_lock.is_some() {
+                                "A ship cannot be followed by the autopilot.".to_owned()
+                            } else {
+                                "Lock a target first: click it in the view, or press T.".to_owned()
+                            };
                         } else {
                             held_controls.disarm(&keys_down);
                             if original.is_none() {
@@ -1825,9 +1909,25 @@ fn run() -> Result<(), String> {
                             state.system_flight = true;
                             launch_grace = Some(index);
                             message = format!("Clear of {}.", nav.bodies[index].name);
+                            // F688 spawns the system traffic on entering it;
+                            // the sandbox has no new game, so the launch is its
+                            // system-entry point.
+                            let player = ship_position(&original, &state);
+                            let forward = ship_axes(&state)[2];
+                            nav.spawn_traffic(&cache, player, forward);
                         }
                     }
                 }
+            }
+        }
+        // The system's NPC traffic: its reduced F688/F635 state machine, ticked
+        // in game time like the stations' doors.
+        if active && !help && !paused && model_lab.is_none() && model_viewer.is_none() {
+            if let Some(nav) = nav.as_mut() {
+                let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
+                    / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
+                let player = ship_position(&original, &state);
+                nav.tick_ships(elapsed * factor, player);
             }
         }
         // A new state (docking, a scenario, a load) ends the original flight model.
@@ -1925,9 +2025,11 @@ fn run() -> Result<(), String> {
                         let origin = beam.origin.map(|v| {
                             (v * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT).round() as i64
                         });
+                        let body_count = nav.as_ref().map_or(0, |nav| nav.bodies.len());
                         let targets: Vec<laser::Target> =
                             nav.as_ref().map_or_else(Vec::new, |nav| {
-                                nav.bodies
+                                let mut targets: Vec<laser::Target> = nav
+                                    .bodies
                                     .iter()
                                     .enumerate()
                                     .filter(|(_, body)| body.radius > 0)
@@ -1936,27 +2038,62 @@ fn run() -> Result<(), String> {
                                         centre: body.position,
                                         radius: body.radius,
                                     })
-                                    .collect()
+                                    .collect();
+                                targets.extend(
+                                    nav.ships
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(_, ship)| ship.alive())
+                                        .map(|(index, ship)| ship.target(body_count + index)),
+                                );
+                                targets
                             });
                         if let Some(hit) = laser::hit(origin, beam.axes[2], &targets) {
-                            if let Some(nav) = nav.as_ref() {
-                                if let Some(body) = nav.bodies.get(hit.index) {
-                                    if !shot.beam {
-                                        message = format!(
-                                            "{} hit: {}.",
-                                            body.name,
-                                            match shot.code {
-                                                laser::PULSE_1MW => "1MW pulse laser",
-                                                laser::PULSE_5MW => "5MW pulse laser",
-                                                laser::BEAM_1MW => "1MW beam laser",
-                                                laser::BEAM_4MW => "4MW beam laser",
-                                                laser::BEAM_20MW => "20MW beam laser",
-                                                laser::BEAM_100MW => "100MW beam laser",
-                                                laser::MINING_30MW => "30MW mining laser",
-                                                laser::THARGOID => "Thargoid laser",
-                                                _ => "laser",
+                            if hit.index < body_count {
+                                if let Some(nav) = nav.as_ref() {
+                                    if let Some(body) = nav.bodies.get(hit.index) {
+                                        if !shot.beam {
+                                            message = format!(
+                                                "{} hit: {}.",
+                                                body.name,
+                                                match shot.code {
+                                                    laser::PULSE_1MW => "1MW pulse laser",
+                                                    laser::PULSE_5MW => "5MW pulse laser",
+                                                    laser::BEAM_1MW => "1MW beam laser",
+                                                    laser::BEAM_4MW => "4MW beam laser",
+                                                    laser::BEAM_20MW => "20MW beam laser",
+                                                    laser::BEAM_100MW => "100MW beam laser",
+                                                    laser::MINING_30MW => "30MW mining laser",
+                                                    laser::THARGOID => "Thargoid laser",
+                                                    _ => "laser",
+                                                }
+                                            );
+                                        }
+                                    }
+                                }
+                            } else if let Some(nav) = nav.as_mut() {
+                                let index = hit.index - body_count;
+                                if let Some(ship) = nav.ships.get(index) {
+                                    let id = ship.id;
+                                    let name = ship.name.clone();
+                                    nav.lock_ship(id);
+                                    let outcome = nav.damage_ship(id, shot.damage);
+                                    if let Some(ship) = nav.ships.iter().find(|ship| ship.id == id)
+                                    {
+                                        message = match outcome {
+                                            Some(ffe_core::laser::Damage::Shields) => format!(
+                                                "{name}: shields absorb the hit ({}% left).",
+                                                ship.shield_percent()
+                                            ),
+                                            Some(ffe_core::laser::Damage::Hull) => format!(
+                                                "{name}: hull {}%.",
+                                                ship.hull_per_mille() / 10
+                                            ),
+                                            Some(ffe_core::laser::Damage::Destroyed) => {
+                                                format!("{name} destroyed.")
                                             }
-                                        );
+                                            None => format!("{name}: no damage."),
+                                        };
                                     }
                                 }
                             }
@@ -1977,6 +2114,16 @@ fn run() -> Result<(), String> {
         screen.energy = state.combat.energy;
         screen.heat = state.combat.heat;
         screen.drive = state.combat.drive;
+        // The scripted traffic capture fires on frame 10 (shield hit) and frame
+        // 20 (kill) through the same F953/F942 words a player shot uses.
+        if options.capture_traffic.is_some() && (frames == 10 || frames == 20) {
+            if let Some(nav) = nav.as_mut() {
+                if let Some(id) = nav.ship_lock {
+                    let damage = if frames == 10 { 50 } else { 1000 };
+                    nav.damage_ship(id, damage);
+                }
+            }
+        }
         if let Some(nav) = nav.as_ref() {
             screen.system = nav.system_name().to_owned();
             screen.station = nav
@@ -2050,6 +2197,24 @@ fn run() -> Result<(), String> {
             }
             None => Vec::new(),
         };
+        // F688's NPC ships: model, position and axes in flight space; a dead ship
+        // keeps only F1536's flash marker (F942's particles are not ported).
+        screen.ships = match nav.as_ref() {
+            Some(nav) => {
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                nav.ships
+                    .iter()
+                    .map(|ship| ffe_rs::screen::SystemShip {
+                        model: ship.model,
+                        centre: ship.position.map(|v| v as f64 / unit),
+                        axes: ship.axes(),
+                        flash: ship.flash > 0.0,
+                        dead: !ship.alive(),
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
         // The labels toggle's object names (the original's F1108 reads the object's
         // +0x124 string): every body of the system, at its camera position.
         screen.labels.clear();
@@ -2061,6 +2226,14 @@ fn run() -> Result<(), String> {
                     .extend(nav.bodies.iter().map(|body| ffe_rs::screen::BodyLabel {
                         name: body.name.clone(),
                         centre: body.position.map(|v| v as f64 / unit),
+                    }));
+                screen
+                    .labels
+                    .extend(nav.ships.iter().filter(|ship| ship.alive()).map(|ship| {
+                        ffe_rs::screen::BodyLabel {
+                            name: ship.name.clone(),
+                            centre: ship.position.map(|v| v as f64 / unit),
+                        }
                     }));
             }
         }
@@ -2182,88 +2355,130 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        // The autopilot's target, else the locked body: a line of text and brackets in the view.
+        // The autopilot's target, else the locked body, else a locked NPC ship:
+        // a line of text and brackets in the view.
         let engaged = nav.as_ref().and_then(|nav| nav.target);
-        let marked = engaged.or_else(|| nav.as_ref().and_then(|nav| nav.locked));
-        screen.has_lock = nav.as_ref().is_some_and(|nav| nav.locked.is_some());
-        screen.lock = match nav.as_ref().zip(marked) {
-            Some((nav, i)) => format!(
-                "{}: {} {}",
-                if engaged.is_some() {
-                    "AUTOPILOT"
-                } else {
-                    "TARGET"
-                },
-                nav.bodies[i].name.to_ascii_uppercase(),
-                describe(distance(
-                    ship_position(&original, &state),
-                    nav.bodies[i].position
-                ))
-                .to_ascii_uppercase()
-            ),
-            None => String::new(),
+        let locked_ship = nav.as_ref().and_then(|nav| nav.locked_ship());
+        let marked = if locked_ship.is_none() {
+            engaged.or_else(|| nav.as_ref().and_then(|nav| nav.locked))
+        } else {
+            None
         };
-        screen.target_mark = nav
-            .as_ref()
-            .zip(marked)
-            .filter(|_| state.mode == ffe_rs::flight::Mode::Flight)
-            .and_then(|(nav, i)| {
-                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
-                let body = nav.bodies.get(i)?;
-                let (x, y, radius) = Screen::body_screen(
-                    &state,
-                    &views,
-                    scene.as_ref(),
-                    body.position.map(|v| v as f64 / unit),
-                    body.radius as f64 / unit,
-                )?;
-                Some(ffe_rs::screen::TargetMark {
+        screen.has_lock =
+            locked_ship.is_some() || nav.as_ref().is_some_and(|nav| nav.locked.is_some());
+        let player_at = ship_position(&original, &state);
+        screen.lock = if let Some(ship) = locked_ship {
+            format!(
+                "TARGET: {} {}",
+                ship.name.to_ascii_uppercase(),
+                describe(distance(player_at, ship.position)).to_ascii_uppercase()
+            )
+        } else {
+            match nav.as_ref().zip(marked) {
+                Some((nav, i)) => format!(
+                    "{}: {} {}",
+                    if engaged.is_some() {
+                        "AUTOPILOT"
+                    } else {
+                        "TARGET"
+                    },
+                    nav.bodies[i].name.to_ascii_uppercase(),
+                    describe(distance(player_at, nav.bodies[i].position)).to_ascii_uppercase()
+                ),
+                None => String::new(),
+            }
+        };
+        screen.target_mark = if let Some(ship) = locked_ship {
+            (state.mode == ffe_rs::flight::Mode::Flight)
+                .then(|| {
+                    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                    Screen::body_screen(
+                        &state,
+                        &views,
+                        scene.as_ref(),
+                        ship.position.map(|v| v as f64 / unit),
+                        ship.radius as f64 / unit,
+                    )
+                })
+                .flatten()
+                .map(|(x, y, radius)| ffe_rs::screen::TargetMark {
                     x,
                     y,
                     radius,
-                    engaged: engaged.is_some(),
+                    engaged: false,
                 })
-            });
+        } else {
+            nav.as_ref()
+                .zip(marked)
+                .filter(|_| state.mode == ffe_rs::flight::Mode::Flight)
+                .and_then(|(nav, i)| {
+                    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                    let body = nav.bodies.get(i)?;
+                    let (x, y, radius) = Screen::body_screen(
+                        &state,
+                        &views,
+                        scene.as_ref(),
+                        body.position.map(|v| v as f64 / unit),
+                        body.radius as f64 / unit,
+                    )?;
+                    Some(ffe_rs::screen::TargetMark {
+                        x,
+                        y,
+                        radius,
+                        engaged: engaged.is_some(),
+                    })
+                })
+        };
         // The Graphic Detail page's space colour and the Others page's stars
         // option (the original's DATA_008815..817 / DATA_009019).
         screen.sky = prefs::space_colour_rgb(prefs.space_colour);
         screen.stars_visible = prefs.others[1];
         screen.lock_external = prefs.others[2];
-        // F1100's range readout for the locked body, in the original's km/AU
-        // conversion. A body that does not project is behind or off the view and
-        // takes the fixed (50,50) text, as F1100 does.
+        // F1100's range readout for the locked target, in the original's km/AU
+        // conversion. A target that does not project is behind or off the view
+        // and takes the fixed (50,50) text, as F1100 does.
         screen.target_hud = None;
         screen.target_damage = None;
         if state.mode == ffe_rs::flight::Mode::Flight {
-            if let Some((nav, index)) = nav.as_ref().zip(marked) {
-                if let Some(body) = nav.bodies.get(index) {
-                    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
-                    let from = original.as_ref().map_or_else(
-                        || state.position.map(|v| (v * unit).round() as i64),
-                        |model| model.player().motion.position,
-                    );
-                    let (mantissa, exponent) = laser::range_words(from, body.position);
-                    let (value, au) = laser::range_value(mantissa, exponent);
-                    let forward = ship_axes(&state)[2];
-                    let toward = [
-                        (body.position[0] - from[0]) as f64,
-                        (body.position[1] - from[1]) as f64,
-                        (body.position[2] - from[2]) as f64,
-                    ];
-                    let behind =
-                        forward[0] * toward[0] + forward[1] * toward[1] + forward[2] * toward[2]
-                            <= 0.0;
-                    let (x, y, offscreen) = match screen.target_mark {
-                        Some(mark) => (mark.x, mark.y, false),
-                        None => (50, 50, !behind),
-                    };
-                    screen.target_hud = Some(ffe_rs::screen::TargetHud {
-                        x,
-                        y,
-                        value,
-                        au,
-                        behind,
-                        offscreen,
+            let target = if let Some(ship) = locked_ship {
+                Some((ship.position, Some(ship)))
+            } else {
+                marked.and_then(|index| {
+                    nav.as_ref()?
+                        .bodies
+                        .get(index)
+                        .map(|body| (body.position, None))
+                })
+            };
+            if let Some((position, ship)) = target {
+                let from = player_at;
+                let (mantissa, exponent) = laser::range_words(from, position);
+                let (value, au) = laser::range_value(mantissa, exponent);
+                let forward = ship_axes(&state)[2];
+                let toward = [
+                    (position[0] - from[0]) as f64,
+                    (position[1] - from[1]) as f64,
+                    (position[2] - from[2]) as f64,
+                ];
+                let behind =
+                    forward[0] * toward[0] + forward[1] * toward[1] + forward[2] * toward[2] <= 0.0;
+                let (x, y, offscreen) = match screen.target_mark {
+                    Some(mark) => (mark.x, mark.y, false),
+                    None => (50, 50, !behind),
+                };
+                screen.target_hud = Some(ffe_rs::screen::TargetHud {
+                    x,
+                    y,
+                    value,
+                    au,
+                    behind,
+                    offscreen,
+                });
+                if let Some(ship) = ship {
+                    screen.target_damage = Some(ffe_rs::screen::TargetDamage {
+                        hull: ship.hull_per_mille(),
+                        shields: (ship.damage.shields_max > 0).then(|| ship.shield_percent()),
+                        shield_strength: ship.shield_strength,
                     });
                 }
             }
@@ -2328,6 +2543,10 @@ fn run() -> Result<(), String> {
             // the approach, plus the first frame.
             if frames % 100 == 0 {
                 write_shot(dir, &format!("planet-{frames:04}.ppm"), &screen);
+            }
+        } else if let Some(dir) = &options.capture_traffic {
+            if frames == 0 || frames == 10 || frames == 20 {
+                write_shot(dir, &format!("traffic-{frames:02}.ppm"), &screen);
             }
         }
         if let Some(viewer) = &model_viewer {
@@ -2419,6 +2638,7 @@ fn run() -> Result<(), String> {
         if options.smoke_frames.is_some_and(|limit| frames >= limit)
             || (options.capture.is_some() && frames >= 1000)
             || (options.capture_planet.is_some() && (frames >= 6000 || arrived))
+            || (options.capture_traffic.is_some() && frames >= 24)
         {
             break;
         }
@@ -2490,6 +2710,23 @@ fn ship_position(original: &Option<OriginalFlight>, state: &Flight) -> [i64; 3] 
         },
         |model| model.player().motion.position,
     )
+}
+
+/// The ship axes looking from `from` at `to` (flight units), for the scripted
+/// traffic frame.
+fn axes_looking_at(from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
+    let unit = |v: [f64; 3]| {
+        let length = v.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-9);
+        v.map(|x| x / length)
+    };
+    let forward = unit(std::array::from_fn(|i| to[i] - from[i]));
+    let right = unit([forward[2], 0.0, -forward[0]]);
+    let up = [
+        forward[1] * right[2] - forward[2] * right[1],
+        forward[2] * right[0] - forward[0] * right[2],
+        forward[0] * right[1] - forward[1] * right[0],
+    ];
+    [right, up, forward]
 }
 
 fn main() {

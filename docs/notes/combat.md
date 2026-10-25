@@ -214,10 +214,13 @@ or turret laser today. Do not give turrets a laser by invention.
   old saves load with no lasers.
 - `Screen`: the bitmap-97 gunsight, bitmap-98 velocity marker, F270's three
   bars, F1100's on/off-view range text, F1099's target hull/shield text (draw
-  path exercised by a synthetic frame), and F1776's model 156 at the gun.
-- `main`: Space fires the view's mount; the hit uses `nav.bodies` with their
-  interaction radii; a hit message names the body and laser. The new-game
-  `Flight` starts with the F998 loadout.
+  path exercised by a synthetic frame and live ship targets), and F1776's
+  model 156 at the gun.
+- `main`: Space fires the view's mount; the hit tests `nav.bodies` and the live
+  NPC ships (`docs/notes/npc.md`) with their interaction radii; a hit message
+  names the body or ship and the laser, and a ship hit runs F953/F942, sets the
+  F1536 flash and locks the ship. The new-game `Flight` starts with the F998
+  loadout.
 
 ## 6. Evidence
 
@@ -236,6 +239,11 @@ or turret laser today. Do not give turrets a laser by invention.
   matches all 256 opaque pixels of bitmap 97 at (129,48) exactly, so the
   gunsight is the original art at the original position in the real playable,
   not only in a synthetic test.
+- **NPC traffic frames (2026-10-25):** `cargo test -p ffe-rs --test npc_view -- --ignored`
+  draws `npc-system.ppm` (traffic, a ship label and the target readout),
+  `npc-hit.ppm` (model 157) and `npc-kill.ppm` (the death marker). The live
+  `--capture-traffic <dir>` mode shows the same in the real new game
+  (`traffic-00/10/20.ppm`). See `docs/notes/npc.md`.
 - **Reference:** `tools/reference/headless.c` now has a `--state-combat <frames>`
   mode that runs the real new game and prints the player object's laser words.
   `jjffe-smoke.exe --state-combat 170` in a disposable directory prints, from
@@ -246,7 +254,8 @@ or turret laser today. Do not give turrets a laser by invention.
   the executed original: one `0x88` front pulse laser, two `0x82` missiles, an
   Eagle (model 23), 1 t energy and no shields. The existing `--state` output is
   unchanged.
-- The hit/damage path is synthetic (no NPC ships); see §7.
+- The hit/damage path has live ship targets now (the traffic above); the
+  target-readout draw path also has a synthetic frame test. See §7.
 
 ## 7. Reachability and what remains
 
@@ -256,13 +265,23 @@ muzzle cone at the gun, the on-screen target range for the locked body, and
 hit messages. Hits on stations/planets are detected (their interaction radius)
 but do no damage, exactly as F953 skips non-ship objects.
 
+**Ship targets (2026-10-25).** Generated systems now carry NPC traffic
+(`docs/notes/npc.md`): traders, shuttles, police and a pirate group spawn with
+the original's F635 model tables and F688 counts. A ship is labelled by the `l`
+toggle, can be clicked or hit to lock, and then shows F1099's hull/shields/shield
+strength readout; the laser path includes live ships after the bodies, calls
+F953's shields/hull damage and F942's destruction, and draws F1536's model 0x9d
+(157) shield flash. A killed ship shows a short death marker (F942's model 0x9b
+produces no shapes in the port's executor yet, so model 157 at a larger scale
+stands in) and is removed after `DEATH_SECONDS`.
+
 **Not reachable in this build:**
 
 - **Ship targets and the target hull/shield readout.** The generated systems
-  contain planets, moons, stations and starports, no NPC ships. F953's damage,
-  F942's destruction, model 157's shield-hit flash, and the `(235,1)` readout
-  need a ship object with shields/hull. `Screen::target_damage` and the damage
-  functions are implemented and tested; no live body sets them.
+  contain NPC traffic (`docs/notes/npc.md`), so F953's damage, F942's
+  destruction, model 157's shield-hit flash and the `(235,1)` readout are
+  reachable for a locked or hit ship. The ships do not fire and have no full
+  combat AI; the death effect is a 157 stand-in for F942's 0x9b object.
 - **Rear and turret lasers.** The new-game Eagle has one mount; the port has
   no outfitting/save equipment. The firing paths (mount 1/2/3, turret axes and
   gun offsets) are implemented and tested, but no playable loadout reaches
@@ -280,7 +299,7 @@ but do no damage, exactly as F953 skips non-ship objects.
   muzzle cone and the target `Hull:` line would draw; the dashboard's retire-port-UI
   slice clears this.
 
-**Owner decisions:** model the combat targeter and NPC ships (which unlocks
-damage, hit flashes and missile lock), port missiles, and/or keep the port's
-lock brackets as a deviation. The target damage readout is dead code until
-ships exist; it is not shown for stations.
+**Owner decisions:** NPC traffic is implemented at the traffic level (see
+`docs/notes/npc.md`); decide whether to port the full AI and ship fire, police
+response/wanted status, F942's model-155 explosion, the combat targeter, and
+missiles. The port's lock brackets remain a deviation from F1113/F1114.

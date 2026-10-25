@@ -100,6 +100,32 @@ pub struct ShipList {
     ships: Vec<(u32, String)>,
 }
 
+/// The NPC view of a ship model: its name (cache v11), F1533's radii and the
+/// statistics' mass and shield word. `None` for a model without statistics
+/// (the original's traffic tables can name a model this cache does not).
+pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec> {
+    let info = ffe_core::objects::ModelInfo::read(
+        cache.asset("base:model/records")?,
+        cache.asset("base:ship/stats")?,
+        model,
+    )?;
+    let stats = ShipStats::from_block(&info.stats?)?;
+    let names = cache.asset("base:text/model-names")?;
+    let name = names
+        .split(|byte| *byte == 0)
+        .nth(model as usize)
+        .map(|name| String::from_utf8_lossy(name).trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| format!("Ship {model}"));
+    Some(ffe_core::npc::Spec {
+        model,
+        name,
+        radius: info.radii().0,
+        mass: stats.mass,
+        shield_strength: stats.shield_strength as u16,
+    })
+}
+
 impl ShipList {
     /// Ships with an original name (cache v11) and a model the viewer can draw.
     /// Empty without the name table.
