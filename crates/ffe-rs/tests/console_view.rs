@@ -173,8 +173,8 @@ fn the_gateway_places_list_is_the_originals_columns_and_cannot_be_covered() {
     };
     // The original's HUD and message window under the list.
     screen.hud = PlayerHud {
-        set_speed: Some(17),
-        actual_speed: 19,
+        set_speed: Some(17.0),
+        actual_speed: 19.0,
         altitude: Some(615),
         registration: "Hope".to_owned(),
         ..PlayerHud::default()
@@ -335,8 +335,8 @@ fn the_gateway_places_frame_over_a_landing_view() {
         orientation: planet.orientation,
     }];
     screen.hud = PlayerHud {
-        set_speed: Some(17),
-        actual_speed: 19,
+        set_speed: Some(17.0),
+        actual_speed: 19.0,
         altitude: Some(615),
         registration: "Hope".to_owned(),
         ..PlayerHud::default()

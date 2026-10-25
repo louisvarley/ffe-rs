@@ -677,10 +677,7 @@ fn run() -> Result<(), String> {
         nav.docked
             .map(|index| (nav.bodies[index].name.as_str(), nav.bodies[index].kind))
     }) {
-        Some((name, NavKind::Starport)) => format!(
-            "Landed at {name}, {}. L launches; Up/Down choose goods, B buys, N sells.",
-            nav.as_ref().map_or("", |nav| nav.system_name())
-        ),
+        Some((name, NavKind::Starport)) => format!("Landed at {name}."),
         Some(_) => station::SERVICES_HINT.to_owned(),
         None => "Docked. L launches.".to_owned(),
     };
@@ -2126,15 +2123,9 @@ fn run() -> Result<(), String> {
                                 message = format!("Arrived at {}.", body.name);
                                 nav.target = None;
                             } else if nav.docking() {
-                                let range = distance(model.player().motion.position, body.position);
-                                message = format!(
-                                    "Autopilot: docking at {} {}.",
-                                    body.name,
-                                    describe(range)
-                                );
+                                message = format!("Autopilot: docking at {}.", body.name);
                             } else {
-                                let range = distance(model.player().motion.position, body.position);
-                                message = format!("Autopilot: {} {}.", body.name, describe(range));
+                                message = format!("Autopilot to {}.", body.name);
                             }
                         }
                     }
@@ -2372,10 +2363,12 @@ fn run() -> Result<(), String> {
                             views.turret.pitch = turret[1];
                         }
                         if keys.faster || keys.slower {
+                            let set = model.set_speed_metres();
+                            let actual = state.speed() * 9.7;
                             message = format!(
-                                "Set speed {:.0} m/s, speed {:.0} m/s.",
-                                model.set_speed_metres(),
-                                state.speed() * 9.7
+                                "Set:{} Act:{}",
+                                ffe_rs::hud::speed_text(set),
+                                ffe_rs::hud::speed_text(actual)
                             );
                         }
                         if let Some(text) = state.finish_step() {
@@ -3494,8 +3487,8 @@ fn run() -> Result<(), String> {
         screen.hud = PlayerHud {
             shields: state.shields,
             hull: state.hull,
-            set_speed: views.console.set_speed,
-            actual_speed: state.speed().round() as i32,
+            set_speed: original.as_ref().map(|model| model.set_speed_metres()),
+            actual_speed: state.speed() * 9.7,
             altitude: Some(0),
             registration: ships.name(state.ship).unwrap_or("").to_owned(),
             autopilot,
@@ -3522,17 +3515,45 @@ fn run() -> Result<(), String> {
         };
         screen.clock = nav.as_ref().map(|nav| nav.date_text()).unwrap_or_default();
         // F271: a changed console message becomes a dated log entry. F351's
-        // bong accompanies a newly shown message.
+        // bong accompanies a newly shown message. A continuously updated line
+        // (the autopilot's range or the Set/Act readout) overwrites the newest
+        // entry instead of adding a near-identical one each frame: that is
+        // F271's replace flag (`ffe.asm:20776-20792`).
         if message != logged && !message.is_empty() {
-            screen.messages.push(message.clone(), screen.clock.clone());
+            let replaces = |family: &str| message.starts_with(family) && logged.starts_with(family);
+            if replaces("Autopilot:") || replaces("Autopilot to ") || replaces("Set:") {
+                screen
+                    .messages
+                    .update(message.clone(), screen.clock.clone());
+            } else {
+                screen.messages.push(message.clone(), screen.clock.clone());
+                // F351's bong accompanies a newly shown message, not an update of
+                // the newest one.
+                sound.play(Cue::Message);
+            }
             logged.clone_from(&message);
-            sound.play(Cue::Message);
         }
         // F273's auto-scroll timer runs on the world tics.
         let log_tics =
             (elapsed * 50.0 * f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])).max(0.0)
                 as u32;
         screen.messages.tick(log_tics);
+        // F273's Page Up/Down scroll the message log while flying (the original's
+        // keyboard map: "PgUp/Dn Scroll the Message Log").
+        if active
+            && !help
+            && !paused
+            && state.mode == ffe_rs::flight::Mode::Flight
+            && nav.as_ref().is_none_or(|nav| nav.view == NavView::Closed)
+            && model_lab.is_none()
+            && model_viewer.is_none()
+        {
+            let older = i32::from(window.is_key_pressed(Key::PageUp, KeyRepeat::Yes)) * 8;
+            let newer = i32::from(window.is_key_pressed(Key::PageDown, KeyRepeat::Yes)) * 8;
+            if older != newer {
+                screen.scroll_messages(older - newer);
+            }
+        }
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();

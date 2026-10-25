@@ -15,10 +15,12 @@
 //! when the two words are equal; hull is `[ship+0xe4] * 250 / descriptor[+6]`
 //! (one decimal percentage) and only with `player+0x10e != 0`; Set is
 //! `player+0x1b8`, Act `player+0xd8`, Alt `player+0xdc / 1000`, and the
-//! registration is `DATA_009124`. The original's speed conversion (`F1393`) and
-//! its `km`/`m` suffixes are not modelled: the port shows the flight model's
-//! speed in m/s. The *positions, conditions and value formulas* are the
-//! original's.
+//! registration is `DATA_009124`. Speeds are printed through `F1393`
+//! (`ffe.asm:85000-85048`, string `0x8620/22`): the original's velocity unit is
+//! 0.095 m/s, so the low branch is `unit * 3.42 km/h` (the same as `m/s * 3.6`)
+//! with one decimal and the `kmh` suffix; above `0x4705d` units (about
+//! 99,491 km/h) it switches to two decimals and `kms` (string `DATA_007653/4`).
+//! The port keeps its flight model in m/s and converts here.
 //!
 //! The turret angles are `player+0x204` and `+0x206` scaled by `900 / 65536`
 //! (the shifts and multiplies at `80633-80647`); the second is negated.
@@ -35,9 +37,24 @@ pub const HUD_COLOUR: u8 = 15;
 pub const TURRET_COLOUR: u8 = 18;
 /// `F1399`'s wrap width for the speed block (`0x94`/0x8b in the string).
 const SPEED_WRAP: usize = 0x8b;
+/// `F1393`'s switch from km/h to km/s at 0x4705d velocity units. One unit is
+/// 0.095 m/s, so this is 27,636.355 m/s or 99,490.878 km/h.
+pub const SPEED_KM_S_FROM_KM_H: f64 = 99_490.878;
+
+/// `F1393`'s speed string for a speed in metres per second: `1002.0 km/h`, or
+/// `27.70 km/s` above the source threshold. The source's `{`/`|` glyphs are the
+/// per-hour and per-second markers; the port spells them `km/h`/`km/s`.
+pub fn speed_text(metres_per_second: f64) -> String {
+    let kmh = metres_per_second.max(0.0) * 3.6;
+    if kmh <= SPEED_KM_S_FROM_KM_H {
+        format!("{kmh:.1} km/h")
+    } else {
+        format!("{:.2} km/s", kmh / 3600.0)
+    }
+}
 
 /// The values `F1099` prints for the player this frame.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PlayerHud {
     /// `ship+0xe0` current and `+0xe2` maximum shield words. Equal words mean
     /// the original draws no shield line.
@@ -47,9 +64,9 @@ pub struct PlayerHud {
     pub hull: [u16; 2],
     /// `player+0x1b8` set speed, in m/s; `None` while the original would use the
     /// Act-only string (`0x8620`).
-    pub set_speed: Option<i32>,
+    pub set_speed: Option<f64>,
     /// `player+0xd8` actual speed, in m/s.
-    pub actual_speed: i32,
+    pub actual_speed: f64,
     /// `player+0xdc / 1000` altitude in metres, when the port has one.
     pub altitude: Option<i32>,
     /// `DATA_009124`, the ship registration (the model name here).
@@ -83,19 +100,23 @@ impl PlayerHud {
         })
     }
 
-    /// `0x8622`/`0x8623` (or the Act-only `0x8620`/`0x8621`): the two-line speed
-    /// block, then the registration on the third line. Returned as lines so the
-    /// caller draws them at `F1586`'s 8-pixel spacing.
+    /// `0x8622`/`0x8623` (or the Act-only `0x8620`/`0x8621`): the Set and Act
+    /// lines, the Alt line and the registration, exactly as the source strings
+    /// lay them out. Returned as lines so the caller draws them at `F1586`'s
+    /// 8-pixel spacing.
     pub fn speed_lines(&self, font: &BitmapFont) -> Vec<String> {
-        let speed = |value: i32| format!("{value} m/s");
         let mut text = match self.set_speed {
             Some(set) if !self.autopilot => {
-                format!("Set: {} Act: {}", speed(set), speed(self.actual_speed))
+                format!(
+                    "Set:{}\rAct:{}",
+                    speed_text(set),
+                    speed_text(self.actual_speed)
+                )
             }
-            _ => format!("Act: {}", speed(self.actual_speed)),
+            _ => format!("Act:{}", speed_text(self.actual_speed)),
         };
         if let Some(altitude) = self.altitude {
-            text.push_str(&format!("\rAlt: {altitude} m"));
+            text.push_str(&format!("\rAlt:{altitude} m"));
         }
         if !self.registration.is_empty() {
             text.push('\r');
@@ -180,15 +201,15 @@ mod tests {
     #[test]
     fn the_speed_block_uses_the_set_act_alt_and_registration_strings() {
         let hud = PlayerHud {
-            set_speed: Some(250),
-            actual_speed: 180,
+            set_speed: Some(250.0),
+            actual_speed: 180.0,
             altitude: Some(1200),
             registration: "EAGLE".to_owned(),
             ..PlayerHud::default()
         };
         assert_eq!(
             hud.speed_lines(&font()),
-            ["Set: 250 m/s Act: 180 m/s", "Alt: 1200 m", "EAGLE"]
+            ["Set:900.0 km/h", "Act:648.0 km/h", "Alt:1200 m", "EAGLE"]
         );
         // Autopilot: the Act-only twin, no Set.
         let autopilot = PlayerHud {
@@ -197,8 +218,18 @@ mod tests {
         };
         assert_eq!(
             autopilot.speed_lines(&font()),
-            ["Act: 180 m/s", "Alt: 1200 m", "EAGLE"]
+            ["Act:648.0 km/h", "Alt:1200 m", "EAGLE"]
         );
+    }
+
+    #[test]
+    fn f1393_prints_kmh_then_kms_above_100000_kmh() {
+        assert_eq!(speed_text(0.0), "0.0 km/h");
+        // FFE's Set:1002.0 km/h is 278.3 m/s.
+        assert_eq!(speed_text(278.333_333), "1002.0 km/h");
+        // 0x4705d units is 99,490.8 km/h; above it the source switches to km/s.
+        assert_eq!(speed_text(27_636.0), "99489.6 km/h");
+        assert_eq!(speed_text(30_000.0), "30.00 km/s");
     }
 
     #[test]
