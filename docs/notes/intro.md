@@ -236,6 +236,21 @@ now takes the regular F1805/F1647 texture path and its slot colours are
 registered before F1330; the intro view has 71 distinct colours, like the
 executed original's 71 (`docs/evidence/visuals/intro-colour-stats.txt`).
 
+**Nebula and stars (2026-10-25).** Model 176's branch child 348 calls model 315
+(the nebula: descriptor bitmaps 53..=58) before its planet children; F1778
+starts the nebula in an F1780 group keyed `First` (`0xffffffff`), so the planet
+must cover it. The port's shape/key bookkeeping appended a shape's key after
+the primitive's match arm, and the textured-face `continue` skipped that append,
+so every later shape took the previous primitive's key and the nebula was drawn
+after the planet. `draw_primitives` now pushes the key with each shape
+(`intro-nebula-before/after.png`). Model 315's child 316 is the star field:
+F1766 (opcode 24) walks vertex pairs through F1471, stops at the first `0x7f`
+pair and queues one F1814 entry whose particles are drawn by F1611 at
+`(screen - 1)` when `z >= 0x40` and the point is on the 320x158 view. The size
+is F1474 shifted by `+0x148 - 7` (or masked with `0x7fff` when bit 15 is set)
+and divided by the instance depth through F1666. Opcode 24 was previously
+decoded but skipped, so no star was queued (`intro-stars-before/after.png`).
+
 Song 0 `QQFRONT` now plays during the intro:
 `run_intro` calls F919's `front_end_music()`, ticks F1904, and stops the song on
 the start key. Cache v28 stores it as `base:music/qqfront`.

@@ -13,6 +13,8 @@ this branch. The original frames come from the local JJFFE smoke adapter
 | PRESENTS at animation 248 | `intro-presents-before.png` | `intro-presents-after.png` |
 | DAVID BRABEN'S at animation 328 | `intro-david-before.png` | `intro-david-after.png` |
 | Intro ship/planet depth order at `0x181534` | `intro-ship-order-before.png` | `intro-ship-order-after.png` |
+| Intro nebula vs planet at `0x181534` | `intro-nebula-before.png` | `intro-nebula-after.png` |
+| Intro star chains at `0xef9c4` | `intro-stars-before.png` | `intro-stars-after.png` |
 | Earth approach at `--capture-planet` frame 1000 | `planet-approach-before.png` | `planet-approach-after.png` |
 
 The intro frame's 128 upper palette entries after the fix are in
@@ -70,6 +72,20 @@ isolates the handedness fix. The ship-order pair is `--capture-intro` at
   ship. `Frame::keys` now carries each shape's key and `merge_surface_shapes`
   inserts the surface entries in the descending-key order. The old and new
   frames are `intro-ship-order-before.png` / `intro-ship-order-after.png`.
+* **Nebula behind the planet.** `draw_primitives` used to append a shape's key
+  after its match arm; a `continue` in the textured-face path skipped that
+  append, so every later shape inherited the wrong key. Model 315's nebula
+  (descriptor bitmaps 53..=58, F1780 group key `First`) then landed after the
+  planet's surface entries and painted over its disc. Keys are now pushed with
+  each shape (`intro-nebula-before/after.png`; 3,682 pixels change at
+  `0x181534`, all on the planet's limb and nebula).
+* **Stars.** F1766 queues model 316's vertex-pair chains; F1814 draws one
+  F1611 particle at every point (the 0x7f pair ends the chain). Opcode 24 was
+  decoded but not executed or drawn, so the intro had no star field.
+  `ChainEmission`/`Primitive::Chain` now run it through `model_depth::key` and
+  `particle_clipped`, with the F1474/F1666 size and signed external vertices.
+  `intro-stars-before/after.png` at `0xef9c4` (the chain-grey stars at
+  `(15,11)` and `(59,35)` reach the screen).
 * **Atmosphere ring colours.** F1879's ring is an F1805 textured quad (bitmap
   0x43 and seven slot colours) plus an F1804 flat quad. The port approximated
   the textured quad with two Gouraud triangles, which invented 268 RGB values

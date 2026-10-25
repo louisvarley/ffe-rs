@@ -315,8 +315,8 @@ fn executed_reference_station_queues() {
                 QueueEvent::Label(key) => Some([6, 0, *key]),
                 QueueEvent::Thruster(key) => Some([7, 0, *key]),
                 QueueEvent::ThrusterLine(key) => Some([8, 0, *key]),
-                // Points and lines stay hooked in the probe and are not queued there.
-                QueueEvent::Point(_) | QueueEvent::Line(_) => None,
+                // Points, lines and chains stay hooked in the probe and are not queued there.
+                QueueEvent::Point(_) | QueueEvent::Line(_) | QueueEvent::Chain(_) => None,
             })
             .collect();
         assert_eq!(

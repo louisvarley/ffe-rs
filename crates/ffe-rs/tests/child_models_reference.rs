@@ -455,7 +455,7 @@ fn executed_reference_child_models() {
                 QueueEvent::Label(key) => Some([6, 0, *key]),
                 QueueEvent::Thruster(key) => Some([7, 0, *key]),
                 QueueEvent::ThrusterLine(key) => Some([8, 0, *key]),
-                QueueEvent::Point(_) | QueueEvent::Line(_) => None,
+                QueueEvent::Point(_) | QueueEvent::Line(_) | QueueEvent::Chain(_) => None,
             })
             .collect();
         // Vertex-lookup events (1: text F1470, 7: child F1471) fire only on a cache miss.
