@@ -1,0 +1,338 @@
+//! Local-only frame checks for the combat HUD: F1111's gunsight, F1112's
+//! velocity marker, F270's gauges, F1100's range text and F1776's beam.
+//!
+//! `FFE_WORLD_CACHE=<data.bin> FFE_SHOT_DIR=<dir> cargo test -p ffe-rs --test
+//! combat_view -- --ignored --nocapture`
+
+use ffe_rs::camera::{ViewMode, ViewState};
+use ffe_rs::combat::{self, Combat};
+use ffe_rs::flight::{Flight, Mode};
+use ffe_rs::model_viewer::ModelViewer;
+use ffe_rs::screen::{Screen, TargetHud};
+
+fn cache() -> ffe_content::VerifiedCache {
+    ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+        .unwrap()
+}
+
+fn flight() -> Flight {
+    let mut state = Flight {
+        mode: Mode::Flight,
+        position: [0.0; 3],
+        velocity: [0.0, 0.0, 100.0],
+        system_flight: true,
+        ship: ffe_rs::navigation::NEW_GAME_SHIP,
+        ..Flight::default()
+    };
+    state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    state
+}
+
+fn save(screen: &Screen, name: &str) {
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        let mut ppm = b"P6\n320 200\n255\n".to_vec();
+        for p in screen.logical_pixels() {
+            ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+        }
+        std::fs::write(std::path::Path::new(&dir).join(name), ppm).unwrap();
+    }
+}
+
+fn changed(before: &[u32], after: &[u32], x0: i32, x1: i32, y0: i32, y1: i32) -> usize {
+    (y0.max(0)..y1.min(200))
+        .flat_map(|y| (x0.max(0)..x1.min(320)).map(move |x| (x, y)))
+        .filter(|(x, y)| {
+            let at = *y as usize * 320 + *x as usize;
+            before[at] != after[at]
+        })
+        .count()
+}
+
+fn draw(screen: &mut Screen, state: &Flight, views: ViewState, scene: Option<&ModelViewer>) {
+    screen.draw(state, views, scene, false, true, "");
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn gunsight_is_f1111s_bitmap_97_in_laser_views_only() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut state = flight();
+    // No velocity marker over the gunsight; F1112 draws after F1111 otherwise.
+    state.velocity = [0.0, 0.0, -100.0];
+    let views = ViewState::default();
+
+    screen.lasers = [0; 4];
+    draw(&mut screen, &state, views, None);
+    let none = screen.logical_pixels().to_vec();
+
+    let mut front = views;
+    front.mode = ViewMode::Front;
+    screen.lasers = [ffe_core::laser::PULSE_1MW, 0, 0, 0];
+    draw(&mut screen, &state, front, None);
+    let with_sight = screen.logical_pixels().to_vec();
+    save(&screen, "combat-gunsight-front.ppm");
+    // F1111 blits 61x61 at (129,48).
+    assert!(
+        changed(&none, &with_sight, 129, 190, 48, 109) > 20,
+        "the front gunsight did not draw"
+    );
+    // Compare every non-masked bitmap pixel with the frame.
+    let record = cache
+        .manifest()
+        .files
+        .iter()
+        .find(|record| record.id == "base:bitmap/secondary/001")
+        .unwrap();
+    let ffe_content::AssetKind::IndexedBitmap {
+        width,
+        height,
+        offset_x,
+        offset_y,
+        masked_zero,
+        ..
+    } = record.asset
+    else {
+        panic!("secondary 1 is not an indexed bitmap");
+    };
+    let bitmap = ffe_rs::indexed::IndexedImage::new(
+        width,
+        height,
+        [offset_x, offset_y],
+        masked_zero,
+        cache.asset("base:bitmap/secondary/001").unwrap(),
+    )
+    .unwrap();
+    let palette = ffe_rs::indexed::palette_rgb6(cache.asset("base:palette/low").unwrap()).unwrap();
+    let mut expected = 0;
+    for (index, value) in bitmap.indices().iter().enumerate() {
+        if *value == 0 {
+            continue;
+        }
+        let (row, col) = (index / width as usize, index % width as usize);
+        let pixel = with_sight[(48 + row) * 320 + 129 + col];
+        assert_eq!(
+            pixel,
+            palette[usize::from(*value)],
+            "gunsight pixel {col},{row} value {value} pixel {pixel} expected {}",
+            palette[usize::from(*value)]
+        );
+        expected += 1;
+    }
+    assert!(expected > 200, "only {expected} opaque gunsight pixels");
+
+    // Rear view with no rear laser: no gunsight. With one: the same bitmap.
+    let mut rear = views;
+    rear.mode = ViewMode::Rear;
+    screen.lasers = [0; 4];
+    draw(&mut screen, &state, rear, None);
+    let rear_base = screen.logical_pixels().to_vec();
+    screen.lasers = [ffe_core::laser::PULSE_1MW, 0, 0, 0];
+    draw(&mut screen, &state, rear, None);
+    let rear_none = screen.logical_pixels().to_vec();
+    assert_eq!(changed(&rear_base, &rear_none, 129, 190, 48, 109), 0);
+    screen.lasers = [ffe_core::laser::PULSE_1MW, ffe_core::laser::PULSE_1MW, 0, 0];
+    draw(&mut screen, &state, rear, None);
+    let rear_sight = screen.logical_pixels().to_vec();
+    assert!(changed(&rear_none, &rear_sight, 129, 190, 48, 109) > 20);
+    save(&screen, "combat-gunsight-rear.ppm");
+
+    // External view never draws it (F1099's view 4).
+    let mut external = views;
+    external.mode = ViewMode::External;
+    screen.lasers = [0; 4];
+    draw(&mut screen, &state, external, None);
+    let external_base = screen.logical_pixels().to_vec();
+    screen.lasers = [ffe_core::laser::PULSE_1MW; 4];
+    draw(&mut screen, &state, external, None);
+    let external_sight = screen.logical_pixels().to_vec();
+    assert_eq!(
+        changed(&external_base, &external_sight, 129, 190, 48, 109),
+        0,
+        "the external view must not draw the gunsight"
+    );
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn velocity_marker_and_range_text_follow_f1112_f1100() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut state = flight();
+    let views = ViewState::default();
+
+    state.velocity = [0.0, 0.0, 100.0];
+    draw(&mut screen, &state, views, None);
+    let centre = screen.logical_pixels().to_vec();
+    state.velocity = [20.0, 0.0, 100.0];
+    draw(&mut screen, &state, views, None);
+    let right = screen.logical_pixels().to_vec();
+    save(&screen, "combat-velocity-marker.ppm");
+    // The marker is 35x35 at (x-19,y-18): the prograde marker moved right.
+    assert!(
+        changed(&centre, &right, 141, 176, 61, 96) > 10,
+        "the velocity marker did not follow the velocity"
+    );
+
+    // F1100's on-view range text sits at the target screen position minus 5.
+    screen.target_hud = Some(TargetHud {
+        x: 160,
+        y: 79,
+        value: 100,
+        au: false,
+        behind: false,
+        offscreen: false,
+    });
+    draw(&mut screen, &state, views, None);
+    let ranged = screen.logical_pixels().to_vec();
+    save(&screen, "combat-range.ppm");
+    assert!(
+        changed(&right, &ranged, 150, 190, 70, 82) > 5,
+        "the range text did not draw at the target"
+    );
+    // Off-screen: F1100's fixed (50,50) with the Out of Range string.
+    screen.target_hud = Some(TargetHud {
+        x: 50,
+        y: 50,
+        value: 100,
+        au: false,
+        behind: false,
+        offscreen: true,
+    });
+    draw(&mut screen, &state, views, None);
+    let offscreen = screen.logical_pixels().to_vec();
+    save(&screen, "combat-range-offscreen.ppm");
+    assert!(changed(&ranged, &offscreen, 50, 200, 45, 70) > 20);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn gauges_show_f270s_energy_and_heat_bars() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let state = flight();
+    let views = ViewState::default();
+    screen.lasers = [0; 4];
+
+    screen.energy = 0;
+    screen.heat = 0;
+    draw(&mut screen, &state, views, None);
+    let empty = screen.logical_pixels().to_vec();
+    screen.energy = 0x2000_0000;
+    screen.drive = 2;
+    draw(&mut screen, &state, views, None);
+    let full = screen.logical_pixels().to_vec();
+    save(&screen, "combat-gauges-full.ppm");
+    // Gauge 1 (energy) is primary 275 at x249, y161, 17x15.
+    assert!(
+        changed(&empty, &full, 249, 267, 160, 176) > 20,
+        "the energy bar did not fill"
+    );
+    // Gauge 2 (heat) is primary 274 at x242.
+    screen.energy = 0;
+    screen.heat = 0xffff;
+    draw(&mut screen, &state, views, None);
+    let hot = screen.logical_pixels().to_vec();
+    save(&screen, "combat-gauges-heat.ppm");
+    assert!(
+        changed(&empty, &hot, 242, 260, 160, 176) > 20,
+        "the heat bar did not fill"
+    );
+    // The clip top: h = value * 12 >> 16 and ymin = 0xad - h. A full bar starts
+    // at ymin 0xa2; an empty one at 0xad.
+    assert_eq!(ffe_core::laser::gauge_height(0xffff), 11);
+    assert_eq!(ffe_core::laser::gauge_height(0), 0);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn new_game_hull_carries_f998s_one_front_pulse_laser() {
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let stats = viewer
+        .ship_stats(ffe_rs::navigation::NEW_GAME_SHIP)
+        .unwrap();
+    assert_eq!(stats.gun_mounts, 1);
+    assert_eq!(stats.front_gun, [1300, 0]);
+    assert_eq!(stats.rear_gun, [800, 0]);
+    assert_eq!(stats.missiles, 2);
+    // The start-type 1 record (`FUNC_000998`, ffe.asm:74099) fits 0x88 in front.
+    let combat = Combat::new_game();
+    assert_eq!(combat.lasers, [ffe_core::laser::PULSE_1MW, 0, 0, 0]);
+    // Model 23 is the Eagle long range fighter (shipidx.txt); the old status
+    // note's "Sidewinder" for start type 1 is the one to correct.
+    assert_eq!(ffe_rs::navigation::NEW_GAME_SHIP, 23);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn target_damage_readout_draws_f1099s_text() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let state = flight();
+    let views = ViewState::default();
+    draw(&mut screen, &state, views, None);
+    let before = screen.logical_pixels().to_vec();
+    screen.target_damage = Some(ffe_rs::screen::TargetDamage {
+        hull: 500,
+        shields: Some(75),
+        shield_strength: 42,
+    });
+    draw(&mut screen, &state, views, None);
+    save(&screen, "combat-target-damage.ppm");
+    assert!(
+        changed(&before, screen.logical_pixels(), 235, 310, 0, 32) > 20,
+        "the target hull/shields text did not draw at 235,1"
+    );
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn beam_is_model_156_at_the_gun() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let state = flight();
+    let views = ViewState::default();
+    let stats = viewer.ship_stats(state.ship);
+    screen.lasers = Combat::new_game().lasers;
+
+    draw(&mut screen, &state, views, Some(&viewer));
+    let beam = combat::beam(&state, stats.as_ref(), views.mode, [0, 0]);
+    screen.beam = Some(beam);
+    draw(&mut screen, &state, views, Some(&viewer));
+    save(&screen, "combat-beam.ppm");
+    // Model 0x9c is a 64 mm muzzle cone at the normal camera distance, so the
+    // cockpit frame shows it as (at most) a pixel; the model itself still runs.
+    let scale = ffe_rs::screen::model_scale(&viewer).unwrap();
+    let camera = ffe_rs::camera::Camera::new(&state, &views, stats.as_ref(), scale);
+    let rows = beam.axes.map(|axis| camera.direction(axis));
+    let mut origin = camera.point(beam.origin).map(|v| v * scale);
+    if origin[2] < 1000.0 {
+        origin[2] = 1000.0;
+    }
+    let light = camera.direction(viewer.light_direction());
+    let rendered = viewer
+        .render_scene(combat::BEAM_MODEL, rows, origin, light)
+        .unwrap();
+    assert!(
+        !rendered.shapes.is_empty(),
+        "model 0x9c did not render at the gun"
+    );
+    // The beam model is the original's 0x9c: a small muzzle flash (its record
+    // coordinates divide by 2^17, so its 8,388,607 record units are 64 model
+    // units), drawn at the front gun 1300/8 units ahead of the ship centre.
+    assert_eq!(viewer.find(combat::BEAM_MODEL).unwrap().scale, 17);
+    let front = stats.unwrap().front_gun[0];
+    assert_eq!(front, 1300);
+    let ahead = f64::from(front) * 8.0 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    assert!((beam.origin[2] - ahead).abs() < 1e-9, "{:?}", beam.origin);
+
+    // A new-game combat state fires a pulse on the front mount only.
+    let mut combat = Combat::new_game();
+    assert!(combat.fire(0, 994).is_ok());
+    assert!(
+        combat.fire(0, 994).is_err(),
+        "the refire gate did not block"
+    );
+}

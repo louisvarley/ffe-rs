@@ -118,7 +118,7 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 7 | Right-hand buttons 0x0f-0x12 / 0x00-0x0a | `DATA_005100`; hot areas 0x6e/0x6c/0x48; `NAVIGATION.md` | **in progress elsewhere** | `console.rs:114-138` hot areas; `screen.rs` draws port buttons instead | Two right-hand icons (in-system list, labels) are being done in another branch; do not duplicate |
 | 8 | Autopilot/STOP/TARGET buttons | none (port addition) | drawn-but-inert (visual) | `screen.rs:113-115,987-1011` | Port-only; they cover the original HUD area and must move/retire for a fully original dashboard |
 | 9 | Button table/state engine (82 records, radios, visibility) | `DATA_005100` `ffedat.asm:4601`; `F261/262/263/264` `ffe.asm:20336-20490` | partial (hard-coded 14) | `console.rs`; `screen.rs:198` | Table not imported; visibility/cur/radio state not modelled; F262's radio reset not reproduced |
-| 10 | Three bar gauges | `F270` `ffe.asm:20554-20622` | **missing** | none | No gauge art/positions/values; `+0x11e`, `+0xea`, `DATA_008921` not modelled |
+| 10 | Three bar gauges | `F270` `ffe.asm:20554-20622` | done | `combat.rs` (`GAUGE_BITMAPS`), `screen.rs` `draw_gauges`, `laser::gauge_height`; `combat_view` local frames | Energy (`+0x11e`), heat (`+0xea`) and the third (`DATA_008921`, always zero) drawn at x249/242/237; the original art is secondary 179/178/177 |
 | 11 | Scanner background/range rings | panel 43 art; `F272` | partial | `screen.rs:711` (panel art) | Rings are only the static art; no computed contacts/rings |
 | 12 | Scanner contacts | `F274/F275` `ffe.asm:21239-21526`; `F1569` `93327` | **partial / placeholder** | `screen.rs:907-915` draws one 3-pixel station blip | No object list scan, filter, stalk length, colour table, or scale |
 | 13 | Scanner orientation | `F273` `ffe.asm:21114-21118`; secondary 254-261 | **missing** | none | 8-frame overlay at (101,175) not drawn |
@@ -127,11 +127,11 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 16 | Speed / set speed / altitude | `F1099` string 0x8620/22, x15,y148 | partial (port line) | `screen.rs:936-950` (y13) | Port's own "SPEED ... SET ..." at y13 in m/s; original text/position/units differ |
 | 17 | Shields % | `F1099` `ffe.asm:80780-80820`, 0x8624 at (2,1) | **missing** | none | `ship+0xe0/+0xe2` not modelled; original text overwritten by top bar |
 | 18 | Hull % | `F1099` `ffe.asm:80821-80855`, 0x8638 at (2,11) | **missing** | none | `player+0x10e`, `ship+0xe4`, descriptor mass not modelled |
-| 19 | Target range / reticle / off-screen text | `F1100` `ffe.asm:81021-81344`; 0x8604/05, 0x8606-11; `F1112` bitmap 98 | partial | `screen.rs:891-906` corners; `lock` string y22 | No range at the target, no off-screen "Behind"/"Out of Range", no bitmap 98 X |
-| 20 | Target shields/hull readout | `F1099` `ffe.asm:80856-80900`, 0x8625/26 at (235,1) | **missing** | none | Target damage state not modelled |
+| 19 | Target range / reticle / off-screen text | `F1100` `ffe.asm:81021-81344`; 0x8604/05, 0x8606-11 | done (range) | `laser::{range_words, range_value}`, `screen.rs` `draw_target_hud`; `combat_view` local frames | Range at the target and the (50,50) "Behind"/"Out of Range" text draw; the exact arrow variants are port wording. Bitmap 98 is the velocity marker, not a target reticle (row 23) |
+| 20 | Target shields/hull readout | `F1099` `ffe.asm:80856-80900`, 0x8625/26 at (235,1) | implemented, unreachable | `laser::damage`, `screen.rs` `draw_target_hud`; `combat_view` local frame | The generated systems have no NPC ships, so no live target carries shields/hull; the draw path is exercised only by the synthetic frame. Model 157's shield-hit flash is likewise unreachable |
 | 21 | Target warnings: Hyp.Analyser, bounty, clouds | `F1099` `ffe.asm:80900-80990`; 0x862f/30/31/32/34 | **missing** | none | No equipment/cloud/mission state |
-| 22 | Gunsight / fixed crosshair | `F1111` `ffe.asm:81954`; bitmap 97 at (129,48) | partial | `screen.rs:902-905` four lines, front only | Wrong art, wrong view rule (original checks per-view equipment; not views 4/6) |
-| 23 | Target X reticle | `F1112` `ffe.asm:81996`; bitmap 98 | partial | brackets at `screen.rs:891` | Not the original X, no size/clip rule |
+| 22 | Gunsight / fixed crosshair | `F1111` `ffe.asm:81954`; bitmap 97 at (129,48) | done | `screen.rs` `draw_gunsight`, `combat.rs` `GUNSIGHT_BITMAP`; `combat_view` local frames | Original bitmap at the original position; drawn in front/rear/turret views when that mount has a laser, never external; the port has no combat-computer view |
+| 23 | Velocity / prograde marker | `F1112` `ffe.asm:81996`; bitmap 98 | done | `screen.rs` `draw_velocity_marker`, `combat.rs` `velocity_marker`; `combat_view` local frames | Bitmap 98 is the velocity marker (front view only), **not** a target X; the offset (-19,-18) and clip rule are the original's |
 | 24 | Turret declination/rotation text | `F1099` `ffe.asm:80700-80740`; 0x8636 at (5,76) | **missing** | none | No turret readout |
 | 25 | Status lamps 0x37-0x39 | `DATA_005100`; initial images; `F151`/`F217` | missing | none | 3 ship-icon lamps at (52,185)/(71,189)/(87,188) |
 | 26 | Status lamps 0x45-0x49 | `F1116` `ffe.asm:82223-82346` | **missing** | none | Conditions/images not modelled |
@@ -370,12 +370,23 @@ distance through F590/F1466/F1489, converts it to km/AU (`DATA_008883` selects
 the range band; `0x8604` km, `0x8605` AU), and draws the number at the target's
 screen position minus 5 px. Off-screen/behind/out-of-range targets move to
 (50,50) or (50,60 for nav) and select `0x8606`-`0x8611` (`ffe.asm:81180-81330`).
-`F1112` (`ffe.asm:81996`) blits **bitmap 98** (35x35 X) at the target
-(`x-19,y-18`), clipped to the view.
 
-Port: corner brackets (`screen.rs:891-906`) and a `lock` string at `(3,22)`
-(`screen.rs:986-989`). No range at the target, no off-screen text, no X
-bitmap. `TargetMark` carries only x/y/radius/engaged (`screen.rs:122-127`).
+Port: `laser::range_words`/`range_value` implement the conversion, and
+`main.rs` feeds `screen.target_hud` from the locked body (the original model's
+player position, else the prototype state). `screen.rs` `draw_target_hud` draws
+the range at the target mark or the (50,50) "Target ... Behind" /
+"Target Out of Range (...)" text. `TargetMark` still carries the port's own
+brackets; they are not `F1113/F1114`.
+
+### 6.3b The velocity marker (`F1112`) — bitmap 98
+
+The earlier audit called bitmap 98 a "target X"; the code says otherwise. In the
+**front view only**, `F1099` (`ffe.asm:80605-80628`) converts the ship's
+velocity (`ship+0x8c`) into the object frame, adds 255 to z, projects it with
+`F1479`, and `F1112` blits bitmap 98 (35x35) at `(x-19, y-18)` when
+`x > 14`, `y > 14`, `x <= 0x131`, `y <= 0x8f`. It is the velocity/prograde
+marker; there is no target X in this routine. The port draws it from
+`combat::velocity_marker`; `docs/notes/views.md` had it right.
 
 ### 6.4 Target damage and warnings (`F1099`)
 
@@ -388,7 +399,12 @@ Below it, when the target has the relevant equipment, it draws:
 - `0x8634` "Bounty: $" at (235,71), colour 16;
 - cloud type/`0x8630/31/32` at (225,1), colour 15.
 
-None of this state exists in the port.
+`F953`'s shields-then-hull damage and F942's destruction are ported
+(`ffe_core::laser::damage`), and `screen.rs` draws the `(235,1)` readout from
+`TargetDamage`. **No live target reaches it:** the generated systems contain no
+NPC ships, so `main.rs` only sets `screen.target_damage` for a body that carries
+shield/hull state, which none does. The model 157 shield-hit flash is unreachable
+for the same reason; stations and planets take no damage in F953 anyway.
 
 ### 6.5 Turret angles (`F1099`, 0x8636)
 
@@ -417,9 +433,10 @@ player creation in this build (`ffe.asm:73943`), so its meaning is **not
 established**. Do not label the bars "fuel"/"shields" without
 an owner decision; the art itself has no text.
 
-Port: no gauges and none of the three state values (`flight.rs` has no energy,
-heat or third gauge). This is the largest purely visual gap after the message
-log.
+Port: the three bars are drawn (`combat.rs` `GAUGE_BITMAPS`, `screen.rs`
+`draw_gauges`), with the energy scaled by the drive byte as `F270` does. The
+third bar reads a constant zero because `DATA_008921` is only ever reset in this
+build. The original art is secondary 179/178/177 (ids 275/274/273).
 
 ### 6.7 Scanner (`F274/F275`, `F1569`, orientation 254-261)
 
@@ -467,16 +484,30 @@ no right-hand column. This is the largest behavioural gap in the dashboard.
 - Fixed gunsight: `F1111` (`ffe.asm:81954`) blits **bitmap 97** (61x61 circled
   X) at (129,48), i.e. centred on the view, when the current view's equipment
   byte `ship+0xd2+view` is non-zero. It also draws the locked-target box/circle
-  when `DATA_007246/247` and the blink flag are set.
-- Target X: **bitmap 98** via `F1112` (above).
+  when `DATA_007246/247` and the blink flag are set. Ported: `draw_gunsight`
+  draws the original art at the original position in the views with a mount
+  laser (front/rear/turret), never external; the port has no combat-computer
+  view. The targeter box/circle is still the port's own brackets.
+- Velocity/prograde marker: **bitmap 98** via `F1112` (front view only, above).
+  It is **not** a target X; the port draws it with `draw_velocity_marker`.
 - Target brackets: `F1113/F1114` (`ffe.asm:82024-82192`) draw four lines of a
   square around the target with the size from its distance/shift; the port's
   brackets are its own.
-- **No velocity-vector marker was found** in `F1099`/`F1100`/`F1111`/`F1112`.
-  If one exists it is outside the audited flight HUD. Do not invent one.
 - Bitmaps 99/100 (64x64 frame, 62x62 dashed frame) are imported but no
   constant-index flight draw site was found; treat them as unused/unknown
   until a reference frame shows them.
+
+### 6.9c The new-game ship and its laser (F998)
+
+`FUNC_000998` for start type 1 (Ross 154) sets model **23 (0x17), the Eagle long
+range fighter** — not a Sidewinder (model 26 / 0x1a) — with one front `0x88`
+(1MW pulse) laser, two `0x82` missiles, drive byte 2, `0x20000000` energy and
+1000 CR (`docs/notes/combat.md` §4; confirmed against the executed original by
+`--state-combat`). The cache's statistics block for model 23 has one gun mount,
+so only the front view has a laser: the gunsight and firing are front-only in
+the playable, while the rear/turret paths are tested with a synthetic loadout.
+Earlier notes that called start type 1 a Sidewinder are wrong; the port's
+`NEW_GAME_SHIP = 23` is right.
 
 ### 6.10 Status lamps and the engines-off page
 
@@ -521,12 +552,12 @@ the engines-off console page are absent.
 
 | Mode | Original | Port |
 |---|---|---|
-| **Flight / front** | `F1099` HUD, console, scanner contacts, message log | panel/buttons/port line; no HUD/scanner/log |
-| **Rear** | same console; own ship hidden only in front; target range text still drawn (tunnels skip views 4/6) | same port console; own ship drawn; crosshair front-only (original is equipment/view-based) |
-| **Turrets** | same console; turret eye; `0x8636` declination/rotation text | view + eye; no text; arrows/A-Z aim |
-| **External** | same console; crosshair not drawn (views 4/6); ship drawn | view + camera; crosshair hidden |
+| **Flight / front** | `F1099` HUD, console, scanner contacts, message log | gunsight 97 (with a front laser), velocity marker 98, gauges, target range and the port's scanner blip; no original message log |
+| **Rear** | same console; own ship hidden only in front; target range text still drawn (tunnels skip views 4/6) | same port console; own ship drawn; gunsight 97 when the rear mount has a laser (the new-game Eagle has none) |
+| **Turrets** | same console; turret eye; `0x8636` declination/rotation text | view + eye; gunsight per mount; no declination text; arrows/A-Z aim |
+| **External** | same console; crosshair not drawn (views 4/6); ship drawn | view + camera; no gunsight or velocity marker |
 | **Missile (5)** | `F1099`/`F1100` missile branch, tracked missile, console | missing (no missiles/equipment) |
-| **Combat computer (6)** | bitmap 97 gunsight, target boxes, `F1108/F1109`, console | missing |
+| **Combat computer (6)** | bitmap 97 gunsight, target boxes, `F1108/F1109`, console | no such view in the port |
 | **Docked** | separate station/cockpit screens; the console art is shared | port market/status box; console buttons suppressed (`screen.rs:715`) |
 | **Landed (rough/normal)/take-off** | strings `0x8614-0x8617`; surface state; console | no landed state; docking is an immediate mode change |
 | **Map** | F3 galaxy map, system list, console date/name/type/fuel (`galaxy-map.md`, `NAVIGATION.md`) | galaxy scene + system list ported; console formatting is the port's |
@@ -583,7 +614,7 @@ What is missing is **tables and state**:
 | Gauge table | `DATA_005089`, `ffedat.asm:4560` | 16 dwords used by gauge 1. |
 | Contact colour table | `DATA_008683`, `ffedat.asm:27855` | 76 bytes / 19 dwords. |
 | HUD string selectors | `DATA_007257`, `ffedat.asm:18634` | Pointer table for 0x8600..0x863a; strings already in the cache, so this can stay code (`0x8600 + n`). |
-| Ship/target state | `ship+0xe0/e2/e4`, `+0x11e`, `+0xea`, `+0xc8..+0xcb`, `+0xd2+view`, `+0x98/9a`, `+0x8a`, target `+0xe2` | None modelled in `flight.rs`/`ships.rs`; gauges/HUD/scanner need it or explicit placeholders. |
+| Ship/target state | `ship+0xe0/e2/e4`, `+0x11e`, `+0xea`, `+0xc8..+0xcb`, `+0xd2+view`, `+0x98/9a`, `+0x8a`, target `+0xe2` | Lasers, energy, heat, refire, drive and the cooling booster are modelled in `combat.rs` (on `Flight`); the player's shields/hull are still absent, and no live target carries target `+0xe2/e0/e4`. |
 | Scanner object list | live slots `0x72..1`, presence byte, scanner flag 0x10, model/descriptor | `Navigator` has bodies, but not the original's object flags/contact colour; `ModelViewer` has the models. |
 | Message log | `DATA_008681` ring, `DATA_008678/79/682` | Ten 1025-byte entry buffers (stride 0x40e); implement in Rust, no asset. |
 | Runtime upper palette | `docs/STATUS.md` item 2 | Unknown; affects text/colour fidelity. |
@@ -621,7 +652,7 @@ same importer that produced the primary/secondary tables rather than guessing.
   turret/external/engines off) shows exactly the original's visible indices.
 - **Size**: M.
 
-### Slice C - Gauges (S/M)
+### Slice C - Gauges (S/M) - done (v0.57)
 - **What**: draw `F270`'s three bars at x237/242/249,y161, clipped at
   `0xad - (value * 12 >> 16)`; add a `GaugeState { energy, heat, third }` fed by
   the flight/player model or explicit placeholders.
@@ -657,11 +688,14 @@ same importer that produced the primary/secondary tables rather than guessing.
   capture; orientation frame changes with `DATA_008933` values 0..7.
 - **Size**: M.
 
-### Slice F - HUD text and reticles (M)
+### Slice F - HUD text and reticles (M) - partial (v0.57)
 - **What**: port `F1099`'s positions and string selection: shields (2,1), hull
   (2,11), Autopilot (15,139), Set/Act/Alt (15,148), target damage (235,1),
   warnings (235,51/61/71), clouds (225,1), turret Decn/Rotn (5,76); bitmap 97
-  gunsight and bitmap 98 target X.
+  gunsight and bitmap 98 velocity marker. **Done in v0.57:** gunsight 97,
+  velocity marker 98, F1100 range and the target damage text (no live target).
+  **Still to do:** the player's own shields/hull, the warnings/clouds, turret
+  angles and the Autopilot/Set/Act/Alt lines.
 - **Files**: `screen.rs` draw block, new `hud.rs`, `camera.rs`/`flight.rs` for
   state, `console.rs` for strings.
 - **Deps**: C (state), E (target), strings already cached.

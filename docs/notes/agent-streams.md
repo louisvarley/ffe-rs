@@ -34,6 +34,7 @@ and pushed before the next one started.
 | lift fix | `204d717` | `ebacdb3` | Launched ship stays in the station until F1089's door opens, hull skipped until clear | Adds `SystemStation.door`; planet tests set it to `0xffff`. DEVIATIONS launch entry renumbered **EXP-011** (EXP-010 was taken). `flight-11` done (v0.55). |
 | station UI | `f3cb3d8`, `d93b1ad` | `89581bc` | Original docked services, shipyard, stockmarket, upgrades and ships screens; market becomes one screen | Rewrote the docked screen and the docked input; conflicts in `main.rs`, `screen.rs`, `STATUS.md` resolved keeping the planets/lift guards and the console icons. `ui-4` done (v0.56), EXP-014. |
 | prefs | `d37cb84`, `bf80d08` | `7e40a46` | Escape preference pages, space colour, Modern/Classic, Quit | Conflicts in `indexed.rs`, `main.rs`, `screen.rs`, `STATUS.md`; EXP renumbered to EXP-012/013. `ui-9` done (v0.48p). Followed by the owner's space-colour decision (`a780418`): default `#0c0c4c`, Black stays `#000000`. |
+| combat | `0c28c87` | see `PORT_LOG.md` | Crosshair (F1111 bitmap 97, F1112 bitmap 98 velocity marker), Space laser firing (F930/F931/F929/F730/F938), F953/F942 damage, F270 gauges, F1100 range, F998 loadout | Conflicts in `indexed.rs`, `main.rs`, `screen.rs`, same pattern as prefs. `gameplay-4` done; `ui-1`/`ui-2` in progress. Target readout/flash unreachable with no NPC ships. `docs/notes/combat.md`. Also fixed the `ship_position` `[0,0,0]` fallback and corrected the Eagle (model 23) ship in the intro/status docs. |
 
 ## Branches not in this round
 

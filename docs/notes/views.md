@@ -71,6 +71,13 @@ modelled), eye offsets (the rear view does not draw the own ship), the
 Alt-arrow mouse nudge. ffe-rs moved its own development keys off the original
 ones: help F1 -> H, model viewer F6 -> M, load F9 -> Shift+F5.
 
+The fixed gunsight now follows F1111 exactly (`docs/notes/combat.md`): bitmap
+97 at (129,48), drawn in any view but external/combat whose mount
+(`ship+0xd2+view`) has a laser. Bitmap 98 is F1112's **velocity marker** in the
+front view, not a target X. The port's autopilot target stays marked with its
+own brackets; the original's targeter boxes (`DATA_007246/247`) are still
+unported.
+
 The right-hand console buttons (hyperspace 0x0f, text labels 0x10 and the
 navigation computer 0x11) are recorded in `labels.md`; they share the console
 table and hot areas but not the view radio group (their radio ids are 7, 6 and

@@ -78,7 +78,7 @@ new-game state.** Concretely:
    sequence repeats. Keys 1-5 start; V shows the version.
 7. Song **0** (`MUSIC/QQFRONT.HMP`, the DOS song table's first entry) plays in
    the intro, restarts when done, and stops when a start key is chosen.
-8. Pressing 1 starts the **verified new game**: Ross 154, Sidewinder, 1000
+8. Pressing 1 starts the **verified new game**: Ross 154, Eagle (model 23), 1000
    credit-units (100.0 CR), day 0x121cf7, fraction 0x80000000, display
    3250-01-01 12:00, player state 0x30, player index 107, time acceleration 994.
 9. The intro is deterministic (no wall clock in the timeline; fixed steps) and
@@ -576,7 +576,7 @@ enough (the block needs a 0xbd980 read bound).
   `time_accel=994`; 238 in-game clock transitions; no return to the intro;
   framebuffer/palette activity; both runs byte-identical.
 - Add a Rust test for `Navigator::new_game(1)` that asserts the same fields
-  (`NEW_GAME_*`, date 3250-01-01 12:00, Ross 154, Sidewinder, 1000 units).
+  (`NEW_GAME_*`, date 3250-01-01 12:00, Ross 154, Eagle (model 23), 1000 units).
 - **RNG caveat (D2):** the trace's `rng_a`/`rng_b` are JJFFE's
   (`0x456789ab` seed). Do not assert them as DOS; if you port `F147`'s seed, use
   the DOS value and document the trace difference.

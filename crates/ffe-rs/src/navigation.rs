@@ -817,8 +817,8 @@ pub const NEW_GAME_PLAYER_STATE: u8 = 0x30;
 pub const NEW_GAME_PLAYER_INDEX: u8 = 107;
 /// F997's default time acceleration (`DATA_009012`).
 pub const NEW_GAME_ACCELERATION: u32 = 994;
-/// The tonnes the starting ship's equipment leaves out of its hold: the
-/// Sidewinder's 20 t statistic less this is the new game's 8 t.
+/// The tonnes the starting ship's equipment leaves out of its hold: the hull's
+/// 20 t statistic less this is the new game's 8 t.
 pub const NEW_GAME_HOLD_LOSS: i32 = 0xc;
 /// The physics-list slot of the starting starport (`0x6e`): F994's `F1532(0x6e)`
 /// is the object the player's ship is placed at and docked with.

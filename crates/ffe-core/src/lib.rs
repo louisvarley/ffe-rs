@@ -8,6 +8,7 @@ pub mod handcoded;
 pub mod hmp;
 pub mod hyperspace;
 pub mod landing;
+pub mod laser;
 pub mod lift;
 pub mod market;
 pub mod model;

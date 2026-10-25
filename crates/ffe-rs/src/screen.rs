@@ -134,6 +134,35 @@ pub struct TargetMark {
     pub engaged: bool,
 }
 
+/// F1100's target readout: the target's screen position, the converted range
+/// (`DATA_008882/3`), and the off-screen state. The range number is in km or AU
+/// according to [`TargetHud::au`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetHud {
+    pub x: i32,
+    pub y: i32,
+    pub value: i32,
+    pub au: bool,
+    /// The target is behind the camera (F1100's 0x8000 screen words).
+    pub behind: bool,
+    /// The target is in front but off the view (F1100's out-of-range branch).
+    pub offscreen: bool,
+}
+
+/// F1099's target shields/hull readout (`0x8625`/`0x8626`), when a ship target
+/// carries them. Stations and planets have no such state in the port yet, so
+/// this stays `None` for every live body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetDamage {
+    /// Hull per-mille (`0..=1000`), F1099's `hull * 250 / mass`.
+    pub hull: i32,
+    /// Shield percent, or `None` when the target has no shield generator
+    /// (`0x8626`).
+    pub shields: Option<i32>,
+    /// The descriptor's shield-strength word (`0x8625`'s last value).
+    pub shield_strength: i16,
+}
+
 /// An object's name label in the flight view (the original F1108's text from
 /// object `+0x124`). `centre` is in flight units, as the camera takes it.
 #[derive(Debug, Clone, PartialEq)]
@@ -192,6 +221,21 @@ pub struct Screen {
     pub galaxy: Option<MapScene>,
     /// Whether a body is locked, for the autopilot buttons.
     pub has_lock: bool,
+    /// The four mount lasers (`ship+0xd2..+0xd5`), for F1111's gunsight rule.
+    pub lasers: [u8; 4],
+    /// The beam to draw this frame (F1776's model 0x9c at the gun), when a shot fired.
+    pub beam: Option<crate::combat::LaserBeam>,
+    /// The energy pool (`+0x11e`) and heat (`+0xea`) F270's first two bars show.
+    pub energy: u32,
+    pub heat: u16,
+    /// The drive byte (`+0xd0`) the energy bar scales by.
+    pub drive: u8,
+    /// F1100's target range text, when a target is locked.
+    pub target_hud: Option<TargetHud>,
+    /// F1099's target shields/hull text, when the target is a ship with that state.
+    pub target_damage: Option<TargetDamage>,
+    /// F270's three bar bitmaps (primary 275, 274, 273), when cached.
+    gauges: [Option<IndexedImage>; 3],
     /// The original console view icons (secondary bitmaps 63..81), when cached.
     icons: Vec<Option<IndexedImage>>,
     /// The navigation list's marker, primary bitmap 0x31.
@@ -323,6 +367,32 @@ impl Screen {
             });
         screen.dock_icons = std::array::from_fn(|k| {
             let asset_id = format!("base:bitmap/primary/{:03}", 0x2e + k);
+            let record = cache.manifest().files.iter().find(|r| r.id == asset_id)?;
+            match record.asset {
+                AssetKind::IndexedBitmap {
+                    width,
+                    height,
+                    offset_x,
+                    offset_y,
+                    masked_zero,
+                    ..
+                } => IndexedImage::new(
+                    width,
+                    height,
+                    [offset_x, offset_y],
+                    masked_zero,
+                    cache.asset(&asset_id)?,
+                )
+                .ok(),
+                _ => None,
+            }
+        });
+        // F270's three bars: bitmap ids 275 (energy), 274 (heat) and 273 (the
+        // third value, DATA_008921, which this build leaves at zero). Ids 96 and
+        // up are the secondary table.
+        screen.gauges = crate::combat::GAUGE_BITMAPS.map(|id| {
+            let index = id.checked_sub(96)?;
+            let asset_id = format!("base:bitmap/secondary/{index:03}");
             let record = cache.manifest().files.iter().find(|r| r.id == asset_id)?;
             match record.asset {
                 AssetKind::IndexedBitmap {
@@ -550,6 +620,14 @@ impl Screen {
             labels: Vec::new(),
             galaxy: None,
             has_lock: false,
+            lasers: [0; 4],
+            beam: None,
+            energy: 0,
+            heat: 0,
+            drive: 0,
+            target_hud: None,
+            target_damage: None,
+            gauges: [None, None, None],
             system: String::new(),
             station: String::new(),
             lock: String::new(),
@@ -565,6 +643,131 @@ impl Screen {
     fn pixel(&mut self, x: i32, y: i32, colour: u8) {
         if (0..320).contains(&x) && (0..200).contains(&y) {
             self.frame[y as usize * 320 + x as usize] = self.palette[usize::from(colour)];
+        }
+    }
+
+    /// F270's three bars at y161: the energy pool scaled by the drive, the laser
+    /// heat, and the third value (always zero in this build). Each is clipped
+    /// from the top at `0xad - (value * 12 >> 16)`.
+    fn draw_gauges(&mut self) {
+        let values = [
+            ffe_core::laser::energy_gauge(self.energy, self.drive),
+            u32::from(self.heat),
+            0,
+        ];
+        for (index, value) in values.into_iter().enumerate() {
+            if let Some(icon) = self.gauges[index].as_ref() {
+                let ymin = 0xad - ffe_core::laser::gauge_height(value);
+                icon.blit_clipped(&mut self.indexed, [249, 242, 237][index], 161, ymin);
+            }
+        }
+    }
+
+    /// F1776's visible beam: model 0x9c (156) at the gun, oriented along the
+    /// mount's axes. It is drawn on the firing frame only.
+    fn draw_beam(
+        &mut self,
+        scene: &ModelViewer,
+        state: &Flight,
+        beam: &crate::combat::LaserBeam,
+        camera: &Camera,
+    ) {
+        let scale = model_scale(scene).unwrap_or(DEFAULT_MODEL_SCALE);
+        let rows = beam.axes.map(|axis| camera.direction(axis));
+        let mut origin = camera.point(beam.origin).map(|v| v * scale);
+        // The gun can sit a couple of metres behind the cockpit eye (the Eagle's
+        // 1300/8 against the eye's 1500/8). F1776 still draws the beam from the
+        // gun; the part behind the eye is invisible, so start the model at the
+        // near plane instead of letting the near-face cull drop the whole beam.
+        if origin[2] < 1000.0 {
+            origin[2] = 1000.0;
+        }
+        let light = self.scene_light(scene, camera);
+        let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
+        inputs.jitter = self.jitter.cursor;
+        if let Ok(frame) =
+            scene.render_scene_with(crate::combat::BEAM_MODEL, rows, origin, light, &inputs)
+        {
+            self.jitter.cursor = frame.jitter;
+            self.draw_shapes(scene, &frame.shapes);
+        }
+    }
+
+    /// F1111's fixed gunsight: secondary bitmap 1 (id 97) at (129,48), drawn
+    /// only in the views F1099 does not skip (not external or combat) and only
+    /// when that view's mount has a laser (`ship+0xd2+view`).
+    fn draw_gunsight(&mut self, view: ViewMode) {
+        let mount = match view {
+            ViewMode::Front => 0,
+            ViewMode::Rear => 1,
+            ViewMode::TopTurret => 2,
+            ViewMode::BottomTurret => 3,
+            ViewMode::External => return,
+        };
+        if self.lasers[mount] == 0 {
+            return;
+        }
+        if let Some(Some(icon)) = self.icons.get(crate::combat::GUNSIGHT_BITMAP as usize) {
+            icon.blit_colours(&mut self.frame, &self.palette, 129, 48);
+        }
+    }
+
+    /// F1112's velocity marker: bitmap 98 at the velocity direction, offset by
+    /// (-19,-18), in the front view only.
+    fn draw_velocity_marker(&mut self, state: &Flight, camera: &Camera) {
+        let Some((x, y)) = crate::combat::velocity_marker(camera, state.velocity) else {
+            return;
+        };
+        if let Some(Some(icon)) = self
+            .icons
+            .get(crate::combat::VELOCITY_MARKER_BITMAP as usize)
+        {
+            icon.blit_colours(&mut self.frame, &self.palette, x - 19, y - 18);
+        }
+    }
+
+    /// F1100's range text, and F1099's target shields/hull (when a ship target
+    /// carries them). Off-view targets use the original's fixed (50,50) spot and
+    /// its "Behind"/"Out of Range" strings.
+    fn draw_target_hud(&mut self) {
+        if let Some(target) = self.target_hud {
+            let unit = if target.au { "AU" } else { "km" };
+            let (x, y, text) = if target.behind {
+                (50, 50, format!("Target {} {} Behind", target.value, unit))
+            } else if target.offscreen {
+                (
+                    50,
+                    50,
+                    format!("Target Out of Range ({} {})", target.value, unit),
+                )
+            } else {
+                (
+                    target.x - 5,
+                    target.y - 5,
+                    format!("{} {}", target.value, unit),
+                )
+            };
+            // F1100's on-view bounds; anything else goes to the fixed spot.
+            let (x, y) = if (0..0x138).contains(&x) && (0..0x8e).contains(&y) {
+                (x, y)
+            } else {
+                (50, 50)
+            };
+            self.text(x.max(0) as usize, y.max(0) as usize, &text, 95);
+        }
+        if let Some(damage) = self.target_damage {
+            let hull = damage.hull;
+            let mut lines = vec![format!("Hull: {}.{}%", hull / 10, hull % 10)];
+            match damage.shields {
+                Some(shields) => {
+                    lines.push(format!("Shields: {shields}.0%"));
+                    lines.push(format!("Shield Strength {}", damage.shield_strength));
+                }
+                None => lines.push("Shields: None".to_owned()),
+            }
+            for (index, line) in lines.iter().enumerate() {
+                self.text(235, 1 + index * 10, line, 15);
+            }
         }
     }
 
@@ -848,6 +1051,9 @@ impl Screen {
         self.panel.blit(&mut self.indexed, 0, 158);
         let mut views = views;
         views.lock_external = self.lock_external;
+        if state.mode != Mode::Docked {
+            self.draw_gauges();
+        }
         let view = views.mode;
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
@@ -1019,11 +1225,17 @@ impl Screen {
                 self.draw_lift(scene, &lift, &camera, stats.map_or([0, 0], |s| s.eye));
                 self.lift = Some(lift);
             }
+            // F1776's muzzle beam, drawn with the scene on the firing frame.
+            if let (Some(beam), Some(scene)) = (self.beam, scene) {
+                self.draw_beam(scene, state, &beam, &camera);
+            }
             // Text labels (`l`): the original's F989 walks the live objects and
             // F1108 draws each name at its screen position (font 15, colour 15).
             if world && views.console.labels {
                 self.draw_body_labels(&camera);
             }
+            // F1100's range and F1099's target shields/hull.
+            self.draw_target_hud();
             if state.system_flight {
             } else if let Some((x, y)) = camera.project([0.0; 3], true) {
                 if x > 8 && x < 260 && y > 12 && y < 115 {
@@ -1031,6 +1243,12 @@ impl Screen {
                 }
             } else {
                 self.text(8, 16, "STATION BEHIND / OFF VIEW", 18);
+            }
+            // F1111's fixed gunsight (bitmap 97) and F1112's velocity marker
+            // (bitmap 98, front view only). The port's own lock brackets stay.
+            self.draw_gunsight(view);
+            if view == ViewMode::Front {
+                self.draw_velocity_marker(state, &camera);
             }
             // The locked body: corner brackets around it, yellow while the autopilot is
             // flying to it.
@@ -1043,12 +1261,6 @@ impl Screen {
                     self.line(corner, (corner.0 - sx * arm, corner.1), colour);
                     self.line(corner, (corner.0, corner.1 - sy * arm), colour);
                 }
-            }
-            if view == ViewMode::Front {
-                self.line((155, 79), (158, 79), 18);
-                self.line((162, 79), (165, 79), 18);
-                self.line((160, 74), (160, 77), 18);
-                self.line((160, 81), (160, 84), 18);
             }
             // Prototype contact on the original scanner artwork, not original scanner math.
             if !state.system_flight {

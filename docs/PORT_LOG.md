@@ -4,6 +4,43 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Crosshair, laser firing and the combat HUD merged (v0.57)
+
+- Merged `combat` (0c28c87): `ffe_core::laser` (F930's table, F931's gates,
+  F929's energy, F730's refire, F938's cooling, F953/F942 damage, F1100's
+  range words, F270's gauge heights, the F817/F819 hit test),
+  `ffe_rs::combat::Combat` on `Flight` (F998's loadout, serde default so old
+  saves load with no lasers), `Screen::{draw_gunsight, draw_velocity_marker,
+  draw_gauges, draw_target_hud}`, `IndexedImage::blit_clipped`, and Space firing
+  the current view's mount. Hits are hitscan and only the model-156 muzzle cone
+  is drawn; there is no laser projectile or beam line. `docs/notes/combat.md`
+  records the routines, the F998 loadout and what remains.
+- Conflicts resolved by combining both intents: `indexed.rs` kept `blit_rgb`
+  and added combat's `indices`/`size` accessors and clipped blit; `main.rs`
+  kept the space colour/stars block and added F1100's target HUD; `screen.rs`
+  kept the dock, prefs and marker icons and added the gauge bitmaps plus
+  `lock_external` and the gauge draw call. No stream's work was dropped.
+- **Corrected the dashboard audit** (`docs/notes/dashboard.md`): bitmap 98 is
+  the velocity/prograde marker (`F1112`), not a target X; bitmap 97 is the
+  gunsight at (129,48), drawn per mount and never in views 4/6; the gauges and
+  F1100 range are now drawn; the target hull/shield readout and model 157's
+  flash are implemented but unreachable because the generated systems have no
+  NPC ships; the combat targeter boxes, missiles, explosions and sounds remain.
+  Start type 1 is the **Eagle long range fighter (model 23)**, not a
+  Sidewinder; `intro.md`, `intro-todo.md`, `STATUS.md`, `NAVIGATION.md`,
+  `DEVIATIONS.md` (EXP-010) and the source comments now say so.
+- **Fixed the reported lock/range bug:** `ship_position` returned `[0,0,0]`
+  whenever the original flight model was not running, so the lock line and
+  every navigation distance were measured from the system origin in the
+  sandbox. It now falls back to the prototype state's position scaled to system
+  millimetres, the same fallback the new target range uses.
+- Local checks: `cargo test -p ffe-core laser` (8), `-p ffe-rs --test combat`
+  (4 + 5 unit), `--test combat_view -- --ignored` with the cache (6), whole
+  workspace, clippy and fmt green. The new `--state-combat` reference mode
+  prints F998's loadout from the executed original.
+
+---
+
 ## 2026-10-25 - Space colour uses the captured original default (#0c0c4c)
 
 Owner decision: the default flight background is the original's, not the old

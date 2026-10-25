@@ -144,7 +144,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-1", title: "Market and economy tables, pricing and cargo", status: "in-progress", version: "market-v20" },
         { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "todo" },
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "todo" },
-        { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "todo" },
+        { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "done", version: "v0.57" },
         { id: "gameplay-5", title: "Missiles and countermeasures", status: "todo" },
         { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "todo" },
         { id: "gameplay-7", title: "Police, pirates and other encounters", status: "todo" },
@@ -164,8 +164,8 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "ui-0", title: "Console buttons: time acceleration meter and screen buttons", status: "done", version: "v0.49i" },
-        { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "todo" },
-        { id: "ui-2", title: "Crosshair, targeting and the HUD overlay", status: "todo" },
+        { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "in-progress", version: "v0.57" },
+        { id: "ui-2", title: "Crosshair, targeting and the HUD overlay", status: "in-progress", version: "v0.57" },
         { id: "ui-3", title: "Missile, combat and external camera views", status: "todo" },
         { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "done", version: "v0.56" },
         { id: "ui-5", title: "Menu and text rendering for every screen", status: "todo" },
@@ -481,6 +481,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 75,
       note: "Escape preference pages merged (v0.48p, EXP-012/013): the original's five pages, hot areas and icons, a port Modern/Classic page and Quit; space colour and stars are applied. The default space colour is now the captured original entry 182 (#0c0c4c), Black stays #000000 with its stars, and the options screen is done (ui-9)."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 74,
+      note: "Crosshair and lasers merged (v0.57): the original bitmap 97 gunsight at (129,48) in the views whose mount has a laser, bitmap 98's velocity marker (corrected: not a target X), F270's three gauges, F1100's target range and F1111/F1100's view rules; Space fires the new-game Eagle's front 1MW pulse with F930/F931/F929/F730/F938 and F953's shields-then-hull damage (gameplay-4 done). ui-1 and ui-2 start: scanner contacts, player shields/hull, the message log and the combat targeter remain; no NPC ships, so the target readout and model-157 flash are implemented but unreachable."
     }
   ]
 };

@@ -20,9 +20,9 @@ piece is called out below.
   that start, so the console shows 1 Jan 3250, noon. The development sandbox
   keeps a 0-based clock (`start_clock`), so the date stays right in both.
 - **F998's state for start type 1**: 1000 CR (`DATA_008888`), ship 23 (the
-  Sidewinder), the hold is the ship's 20 t less `0xc` (8 t), and time
-  acceleration 994 (`DATA_009012`). F994 sets the player's state byte to
-  `0x30` (landed at an open-air starport's pad) and `DATA_008857` (the
+  Eagle long range fighter, `0x17`), the hold is the ship's 20 t less `0xc`
+  (8 t), and time acceleration 994 (`DATA_009012`). F994 sets the player's state
+  byte to `0x30` (landed at an open-air starport's pad) and `DATA_008857` (the
   player's object index) is 107.
 - **The pad**: F994 calls F650 with the player's ship and object `0x6e`; that
   object is the system's starport. In this checkout Ross 154's starport is

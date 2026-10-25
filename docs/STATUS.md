@@ -8,8 +8,9 @@ coverage and `docs/notes/` for the feature records.
 ## Navigation aid
 
 The default boot is the original's new game (`ffe_rs::navigation::new_game`):
-Ross 154, the Sidewinder, 1000 CR, 1 Jan 3250 12:00 and player state 0x30 on
-the starport's pad; `--start sol` keeps the Sol/Mars High development sandbox.
+Ross 154, the Eagle (model 23), 1000 CR, 1 Jan 3250 12:00 and player state 0x30
+on the starport's pad; `--start sol` keeps the Sol/Mars High development
+sandbox.
 The front end's logo/credit timeline is `ffe_rs::front_end` (the JJFFE legal
 splash is not part of it; `docs/notes/intro.md`). Open-air starport takeoff is
 still blocked with a message (EXP-010).
@@ -28,7 +29,12 @@ at them (D for clearance, or the autopilot), which closes the launch, fly, dock,
 loop inside a generated system. Traffic control and the timed docking and launch stages are the
 original's (`ffe_core::traffic`, `docs/notes/docking.md`; the record routines match the executed
 original on 8,192 cases); the slot test and the missing lift scenes are
-ffe-rs's own (EXP-005).
+ffe-rs's own (EXP-005). Since 2026-10-25 the flight view draws the original's
+crosshair, velocity marker and the three F270 gauges, and Space fires the
+new-game Eagle's front 1MW pulse laser with the original's heat, energy, refire
+and damage rules (`docs/notes/combat.md`; hitscan, no laser projectile). The
+generated systems have no NPC ships yet, so the target hull/shield readout and
+the shield-hit flash are ported but unreachable.
 
 ## How to read this repo
 
@@ -50,7 +56,7 @@ ffe-rs's own (EXP-005).
   audit** (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 133 items, 58 done and 75 left on
+  in `burndown.js`; 14 milestones, 133 items, 59 done and 74 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -168,7 +174,7 @@ capture produced by two repeat runs of the local reference.
 | v0.45 animation inputs, station spin | `ffe-core::model_animation` | `model_animation.rs` (6) | `verify-animation.py` (2,640 rotation + 4,096 orbital + F1537/F1680/F1683 set-ups) | `10ed4039…`, `2ab63f4d…` | global 0 = GameTics >> 10, global 1 gear/door (F865); F866/F1675 spin, model 74 at speed 10 |
 | v0.46 ship statistics, eyes, turrets | cache v12 `base:ship/stats`, `ShipStats`, `camera` eye/turret views | `views.rs` | none (data imported byte-exact; views from the assembly) | — | thrust limits feed global 15; F8 turret views for > 2 gun mounts |
 | v0.48e surface plumbing | `trace_surface` queue words (events 60/61) | — | whole-table oracle unchanged (448, 0 mismatched) | `4431b861…` | F1823 (entry hash map) and F1833 (mode dispatch) read and documented; surfaces are planet-scale, so the synthetic z-2000 station context clips them all |
-| v0.48p front end and new game | `ffe_rs::front_end`, `navigation::{Body, START_SYSTEMS, NewGameState, new_game}`, date helper | `front_end.rs` (8), `navigation.rs` (+1, ignored), `intro_reference.rs` (1, ignored) | `verify-intro.py` (76 cases, 10 tamper fields) | `a9489bbe5d0a2765938c1d14f8ba70505c0726bcd110d492eb01959616eafc3d` | F961/F962's 18 credits, model 177/176, bitmap 0x42, animation and the F829/F998/F994 start (Ross 154, Sidewinder, 1000 CR, state 0x30, pad seat); default boot is the new game, `--start sol` the sandbox; JJFFE legal splash and V line are not boot data; starport takeoff blocked (EXP-010) |
+| v0.48p front end and new game | `ffe_rs::front_end`, `navigation::{Body, START_SYSTEMS, NewGameState, new_game}`, date helper | `front_end.rs` (8), `navigation.rs` (+1, ignored), `intro_reference.rs` (1, ignored) | `verify-intro.py` (76 cases, 10 tamper fields) | `a9489bbe5d0a2765938c1d14f8ba70505c0726bcd110d492eb01959616eafc3d` | F961/F962's 18 credits, model 177/176, bitmap 0x42, animation and the F829/F998/F994 start (Ross 154, Eagle model 23, 1000 CR, state 0x30, pad seat); default boot is the new game, `--start sol` the sandbox; JJFFE legal splash and V line are not boot data; starport takeoff blocked (EXP-010) |
 | v0.48d surface helpers | `ffe_core::model_surface::{cross_sign, mix32, max_abs_msb}` | `model_surface.rs` (2) | `--surface-sign` (12 pairs), `--surface-helpers` (8 mixes, 9 points) pinned | — | F1875, F1824, F1825 ported; F1816/F1817/F1820 are arena allocators to replace, not reproduce |
 | v0.48c surface resolution | `SurfaceEmission::{origin, axes}` (F1874), `trace_surface` probe | `model_execute.rs` (+1) | `verify-station-models.py`: 448 models, 40 surface resolutions, 0 mismatched | `2036461a…` | origin (F1470 view), word0/6/10 and the three axis vectors verified; F1876's patch rendering not ported (see `docs/notes/surfaces.md`) |
 | v0.48b 3D text | `ffe-convert::glyph_programs`, `GlyphSet`, `ModelViewer::draw_texts`, cache v14 | `text.rs` (1), `glyphs.rs` (1, ignored), `embedded.rs` (+1), `cache.rs` (+1) | census: all three font sets import; models 15/30/66/453 draw text with nothing skipped | — | F1747: each character's program runs through `execute_live` in an F1740 frame, its return word sets the next pen; `0x3016`/`0x3022` expand the object string |
@@ -176,14 +182,15 @@ capture produced by two repeat runs of the local reference.
 | v0.47 console clicks, plume flicker | `Screen::logical_point`, `AnimationInputs::jitter`, `Frame::jitter`, viewer `cycle_thrust` | `views.rs` (+1), `model_viewer.rs` (+1) | none (presentation) | — | view icons now take clicks at any window size; F1476 stream runs across frames so plumes flicker; viewer E key sets engine thrust |
 | v0.49j right-hand console buttons | `console::RIGHT_BUTTONS`, `navigation::{View::Places, place_indices}`, `Screen::{draw_places, place_row, label_positions}`, `ConsoleState::{labels, navigation}`; main `l`/`n` | `console.rs` (+2), `navigation.rs` (+1), `console_view.rs` (3, ignored) | DOS `FIRSTENC.EXE` hot-area table 0xea68c and button records 0xbe912/0xbe950/0xbe98e byte-identical; no new oracle | — | labels F989/F1108 (player `+0xe9` bit 2); places F1099/F1020 (stations/starports, 18 rows, action 0xd1+n); `docs/notes/labels.md` |
 | v0.48p Escape preference pages, space colour | `ffe_rs::prefs`, `Screen::draw_prefs`, `Screen::{sky, stars_visible}`, `IndexedImage::blit_rgb` | `prefs.rs` (8 + unit tests), `prefs.rs` test (8) | none (layout/strings from `ffedat.asm`; the original Escape frame is a manual capture) | — | pages 0-4 are `DATA_004963`..`DATA_004967` with `DATA_004903`..`DATA_004905` hot areas and primary icon bitmaps 44/45; space colour is `DATA_008815..817` (default Light Blue, six-bit `#0c0c4c`); port page 5 (Modern/Classic) and `Quit`; grey unimplemented rows; see `docs/notes/prefs.md`, EXP-012/013 |
+| v0.57 crosshair, lasers, combat HUD | `ffe_core::laser`, `ffe_rs::combat::Combat` (on `Flight`), `Screen::{draw_gunsight, draw_velocity_marker, draw_gauges, draw_target_hud}`, `IndexedImage::blit_clipped`, main Space fire | `laser.rs` (8), `combat.rs` (4), `combat_view.rs` (6, ignored), local frames | `--state-combat` prints F998's loadout from the executed original (model 23, one `0x88` mount, two `0x82` missiles, 1 t energy); no new verify-all entry | — | bitmap 97 gunsight at (129,48) per mount (not views 4/6), bitmap 98 velocity marker (front only), F270 bars, F1100 range; F930/F931/F929/F730/F938 firing, F953/F942 damage; no NPC ships yet, so the target readout and model-157 flash are unreachable; `docs/notes/combat.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 444 `#[test]` functions total; 112 are `#[ignore]`
+  `cargo clippy -D warnings`. 467 `#[test]` functions total; 118 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **331 runnable synthetic tests** (332 on Linux).
+  **348 runnable synthetic tests** (349 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

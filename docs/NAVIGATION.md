@@ -14,7 +14,7 @@ systems, and an autopilot to planets, stations and other bodies for testing.
 | Console `n` icon: the system's places list | done 2026-10-24: the original's stations/starports list, marker clicks engage the autopilot (`docs/notes/labels.md`) |
 | Console `l` icon: text labels | done 2026-10-24: the original player flag, F989/F1108 labels over the flight view |
 
-The default boot is now the original's new game: Ross 154, the Sidewinder,
+The default boot is now the original's new game: Ross 154, the Eagle (model 23),
 1000 CR, 1 Jan 3250 12:00, landed on the starport pad (`navigation::new_game`,
 `docs/notes/intro.md`). Open-air starport takeoff is blocked until F1013's
 0x24 -> 0x26 path is ported (EXP-010). The development sandbox (`--start sol`)

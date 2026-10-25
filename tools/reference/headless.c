@@ -479,6 +479,7 @@ static unsigned char palette[256 * 3];
 static unsigned long frames, limit = 32, milliseconds, clock_reads, blits;
 static int sent_accept;
 static int state_mode, vector_mode, sent_start;
+static int state_combat_mode;
 /* --game-frame <frames> <key> [<key>...]: the real game from the new game on, keys sent by scan code every 40 frames after frame 200, the 320x200 frame and palette written to game-frame.bin at the end. */
 static int game_frame_mode;
 static unsigned long game_keys[16], game_key_count, game_key_next, game_key_frame = 200;
@@ -616,6 +617,21 @@ void TimerFrameUpdate(void)
     if (game_frame_mode) {
         /* a frame hash only: the trace stays small */
         printf("{\"frame\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+    } else if (state_combat_mode) {
+        unsigned long player_pointer = state_u32(0xc8);
+        if (frames >= 160 && player_pointer != 0) {
+            unsigned char *p = (unsigned char *)player_pointer;
+            printf("{\"frame\":%lu,\"player\":%u,\"model\":%lu,\"mounts\":%u,\"lasers\":[%u,%u,%u,%u],\"missiles\":[%u,%u,%u,%u,%u,%u],\"drive\":%u,\"shields\":[%u,%u],\"hull\":%u,\"refire\":%u,\"heat\":%u,\"energy\":%lu,\"cash\":%lu}\n",
+                frames, (unsigned)state_u32(0xc0), (unsigned long)(p[0x82] | p[0x83]<<8 | p[0x84]<<16 | p[0x85]<<24),
+                (unsigned)p[0xd1], (unsigned)p[0xd2], (unsigned)p[0xd3], (unsigned)p[0xd4], (unsigned)p[0xd5],
+                (unsigned)p[0xd6], (unsigned)p[0xd7], (unsigned)p[0xd8], (unsigned)p[0xd9], (unsigned)p[0xda], (unsigned)p[0xdb],
+                (unsigned)p[0xd0], (unsigned)(p[0xe0] | p[0xe1]<<8), (unsigned)(p[0xe2] | p[0xe3]<<8),
+                (unsigned)(p[0xe4] | p[0xe5]<<8), (unsigned)(p[0xe8] | p[0xe9]<<8),
+                (unsigned)(p[0xea] | p[0xeb]<<8),
+                (unsigned long)(p[0x11e] | p[0x11f]<<8 | p[0x120]<<16 | p[0x121]<<24), state_u32(0x114));
+            fflush(stdout);
+        }
+        if (frames + 1 >= limit) exit(0);
     } else if (state_mode) {
         printf("{\"frame\":%lu,\"clock_ms\":%lu,\"game_tics\":%lu,\"game_days\":%lu,\"rng_a\":%lu,\"rng_b\":%lu,\"player_state\":%u,\"player_index\":%lu,\"cash\":%lu,\"start_type\":%lu,\"time_accel\":%lu,\"system_counter\":%lu,\"accel_counter\":%lu,\"pixels_fnv1a64\":\"%016llx\",\"palette_fnv1a64\":\"%016llx\"}\n",
             frames, milliseconds, state_u32(0), state_u32(4), state_u32(0x24), state_u32(0x28),
@@ -5554,9 +5570,10 @@ int main(int argc, char **argv)
         asmmain(0, NULL);
         return 2;
     }
-    state_mode = argc == 3 && !strcmp(argv[1], "--state");
+    state_combat_mode = argc == 3 && !strcmp(argv[1], "--state-combat");
+    state_mode = argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode);
     if (argc != 2 && !state_mode)
-        fail("usage: jjffe-smoke <frames> | --state <frames> | --vectors | --font | --blit | --models");
+        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --vectors | --font | --blit | --models");
     count = argv[state_mode ? 2 : 1];
     {
         char *end;
