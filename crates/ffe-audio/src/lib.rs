@@ -10,17 +10,24 @@
 
 mod audio;
 pub mod library;
+pub mod mixer;
 pub mod player;
 pub mod settings;
 pub mod sink;
+#[cfg(target_os = "windows")]
+mod waveout;
 
 pub use audio::{Audio, AudioEngine, AudioError};
 pub use library::{MusicLibrary, SONG_NAMES, SONG_TITLES};
+pub use mixer::{
+    decode_wav, level_centibels, level_gain, sample_desc, EffectLibrary, EffectSample, Mixer,
+    SampleDesc, WavError, EFFECT_NAMES, SAMPLE_RATE, SAMPLE_TABLE, VOICE_COUNT,
+};
 pub use player::{LoopMode, MusicPlayer};
 pub use settings::{AudioSettings, SoundFlags, SONG_COUNT};
 pub use sink::{
-    MidiSink, NullMidiSink, NullSampleSink, RecordingMidiSink, RecordingSampleSink, SampleCall,
-    SampleSink,
+    MidiSink, MixerSampleSink, NullMidiSink, NullSampleSink, RecordingMidiSink, RecordingMixSink,
+    RecordingSampleSink, SampleCall, SampleSink,
 };
 
 #[cfg(target_os = "windows")]

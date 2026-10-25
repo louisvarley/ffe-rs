@@ -1,10 +1,12 @@
 use crate::library::MusicLibrary;
+use crate::mixer::EffectLibrary;
 use crate::player::MusicPlayer;
 use crate::settings::{AudioSettings, SoundFlags, SONG_COUNT};
-use crate::sink::{MidiSink, NullMidiSink, NullSampleSink, SampleSink};
+use crate::sink::{MidiSink, MixerSampleSink, NullMidiSink, NullSampleSink, SampleSink};
 use ffe_core::hmp::HmpError;
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Errors from loading or playing audio. A missing song is reported explicitly;
@@ -131,22 +133,53 @@ impl AudioEngine {
         Self::new(library, NullMidiSink, NullSampleSink)
     }
 
-    /// Open the WinMM system-MIDI device. `None` uses `MIDI_MAPPER`.
+    /// Headless but effect-decoding: the mixer renders (and discards) real PCM,
+    /// which is useful for captures that must not open a device but still want
+    /// the effect path exercised.
+    pub fn silent_with_effects(library: MusicLibrary, effects: EffectLibrary) -> Self {
+        Self::new(library, NullMidiSink, MixerSampleSink::new(effects))
+    }
+
+    /// Open the WinMM system-MIDI device. `None` uses `MIDI_MAPPER`. The effect
+    /// mixer opens its own `waveOut` device (or stays headless if none exists).
     #[cfg(target_os = "windows")]
     pub fn windows(library: MusicLibrary, device: Option<u32>) -> Result<Self, AudioError> {
         let sink =
             crate::sink::WindowsMidiSink::open(device).map_err(AudioError::MidiUnavailable)?;
-        Ok(Self::new(library, sink, NullSampleSink))
+        let samples = MixerSampleSink::open(EffectLibrary::new())
+            .unwrap_or_else(|_| MixerSampleSink::new(EffectLibrary::new()));
+        Ok(Self::new(library, sink, samples))
     }
 
-    /// Prefer the system MIDI device, falling back to silence when none is
-    /// available. This is the helper a game loop should normally use.
+    /// Prefer the system MIDI device and the default wave output, falling back
+    /// to silence/headless independently. This is the helper a game loop should
+    /// normally use.
     pub fn system(library: MusicLibrary) -> Self {
+        Self::system_with_effects(library, EffectLibrary::new())
+    }
+
+    /// [`Self::system`] with the cache's decoded effects installed.
+    pub fn system_with_effects(library: MusicLibrary, effects: EffectLibrary) -> Self {
         #[cfg(target_os = "windows")]
-        if let Ok(engine) = Self::windows(library.clone(), None) {
-            return engine;
+        {
+            let samples = MixerSampleSink::open(effects.clone())
+                .unwrap_or_else(|_| MixerSampleSink::new(effects));
+            match crate::sink::WindowsMidiSink::open(None) {
+                Ok(midi) => Self::new(library, midi, samples),
+                Err(_) => Self::new(library, NullMidiSink, samples),
+            }
         }
-        Self::silent(library)
+        #[cfg(not(target_os = "windows"))]
+        {
+            Self::new(library, NullMidiSink, MixerSampleSink::new(effects))
+        }
+    }
+
+    /// Install decoded effect WAVs after construction. The game uses this when
+    /// it opens the cache after the audio engine (the `system` constructors take
+    /// an empty set so the device can open first).
+    pub fn set_effects(&mut self, effects: EffectLibrary) {
+        self.samples.set_effects(Arc::new(effects));
     }
 
     pub fn library(&self) -> &MusicLibrary {

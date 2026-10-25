@@ -202,10 +202,11 @@ window.FFE_BURNDOWN = {
       title: "Audio",
       status: "planned",
       tasks: [
-        { id: "audio-1", title: "Sound effects: the 23 effects and sound requests", status: "in-progress", version: "v0.61" },
+        { id: "audio-1", title: "Sound effects: the 23 effects and sound requests", status: "done", version: "v0.70" },
         { id: "audio-2", title: "HMP to MIDI parsing", status: "done", version: "v0.48q" },
         { id: "audio-3", title: "MIDI synthesis and music playback", status: "done", version: "v0.48q" },
-        { id: "audio-4", title: "Positional volume and mixing", status: "in-progress", version: "v0.61" }
+        { id: "audio-4", title: "Positional volume and mixing", status: "in-progress", version: "v0.70" },
+        { id: "audio-5", title: "Software mixer, WinMM waveOut sink and the intro song", status: "done", version: "v0.70" }
       ]
     },
     {
@@ -554,6 +555,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 69,
       note: "Deterministic oracle gate merged (v0.69): the Windows --worldgen repeatability failure is fixed by masking only the object-name ranges F877/F878 build from an uninitialised byte (raw first run kept for the Rust oracle); world/world-linux are split so Windows SKIPs --sysgen and --surface-draw. New combat, ship-types, npc, dashboard, takeoff and prefs oracles join the 55-entry suite (54 PASS, 1 SKIP, 0 FAIL); ship-types found and fixed F635 slot 0x3 (Ross 154 uses slot 5). One item added and completed (foundation-8), so the remaining count is unchanged. Remaining gaps: F688's spawn sequence, F635 population<4, pinned (not frame) HUD/NPC/takeoff/prefs, and galaxy-map as the only frame-level comparison."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 68,
+      note: "Software mixer merged (v0.70): ffe-audio decodes the cached WAVs, keeps the 40-entry sample table and 16 voices with F1908's reuse/fixed-voice/laser1-steal rules, bakes loops, pitch-resamples and applies F1907's centibel curve; a WinMM waveOut sink with a headless fallback makes every wired cue audible, and GameAudio::from_cache/system_with_effects connect it to the playable. The intro now plays song 0 (F919/F1904/leave_front_end, music_on respected) and cache v28 adds base:music/qqfront (1,797 assets / 1,798 ZIP entries) with a v27 fallback. One item added and completed (audio-5); audio-1 is done and audio-4 stays in progress. Remaining: continuous station/engine beds (F1910/F1908), positional audio (F1759 is unused by DOS), .mid overrides, caching the other 16 songs (owner decision) and a device picker."
     }
   ]
 };

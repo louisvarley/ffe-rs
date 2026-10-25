@@ -57,9 +57,12 @@ Thargoids remain (`docs/notes/npc.md`). Since
 2026-10-25 the game also posts the original's sound cues and scene music
 (`docs/notes/sound-cues.md`): F1906/F1907/F1908 dispatch and gates, F1902's
 song rules and the live event sites, with the Sound Effects page applied at
-boot and on change. The effect mixer/device is still a null sink, so cues are
-recorded/no-op on a real run; music plays through the HMP/WinMM player, and
-song 0 waits for the intro to be drawn. Since 2026-10-25 the fitted equipment is
+boot and on change. Since 2026-10-25 the effect mixer is real: `ffe-audio`'s
+software mixer decodes the cached WAVs, keeps F1908's 16-voice reuse rules and
+F1907's centibel volume, and a WinMM `waveOut` sink (with a headless fallback)
+makes the wired cues audible; the intro also plays song 0 until
+`leave_front_end`. The HMP/WinMM music player remains for the other songs. Since
+2026-10-25 the fitted equipment is
 real too (`docs/notes/equipment.md`): the 66-record table (DOS bytes), F393's
 general bits, ten missile pylons, cabins, shield generators and F383's
 availability/prices; the flight state carries the loadout and applies F953's
@@ -107,7 +110,7 @@ ECM.
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 141 items, 72 done and 69 left on
+  in `burndown.js`; 14 milestones, 142 items, 74 done and 68 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -264,14 +267,15 @@ capture produced by two repeat runs of the local reference.
 | v0.67 missiles, lock-on and pylon lamps | `ffe_core::missile` (types, F941 impulse, F758 guidance, F718/F721 contact), `ffe_rs::missile`, `Combat::missiles`, `Navigator::{missile_lock, missiles, launch_missile, tick_missiles}`, `Screen::SystemMissile`, `tools/reference/headless.c --missile-probe` | `missile.rs` (7), `missile_view.rs` (1, ignored), `combat.rs` (+ missile pylon), console pylon-lamp test | `--missile-probe` (pylon 130→0, model-6 object, owner 107, target 114, guidance every 20 frames) calibrates 0.4 s/24 s | — | `M` launches the first pylon after a `Shift+T` lock; the object flies F758's lead/turn with F585's quantisation, fuses at 131 m, calls F718/F721/F953, and the F1120 pylon lamps follow `Combat::missiles`. Missile view (F10), NPC launches, ECM and the F1113 nav box/lamps remain; `docs/notes/combat.md` §8 |
 | v0.68 surface landing and landed view | `ffe_core::traffic` (0x32/0x34, `Takeoff::from_landed`), `Navigator::{land, landed_state, landing_frame, begin_surface_launch}`, `OriginalFlight::settle_landing`, `Screen` surface sky/landed view, `verify-surface.py` | `takeoff.rs` (6), `planet_view.rs` (19, ignored), `verify-surface.py` in `verify-all.py` | `verify-surface.py`: `sky_matches: true`, header_close 0.9934, view coverage 0.589 | — | F1021's rough touch drives 0x32 → F1047's 0x34; the starport 0x2e/0x30 states, F1050/F1054 landed view and F1877's haze sky (stars suppressed) draw, and `L` climbs again through 0x24 → 0x26 → 0x00. The `+0x138` collision vs `+0x140` drawn radius can show space where the original shows ground; pad landing from flight is not routed to 0x2e/0x30; 0x30 shows services (EXP-014); the landed state is not saved; surface depth/fills remain; `docs/NAVIGATION.md` |
 | v0.69 deterministic reference gate and new oracles | `verify-world.py` name masking, `world`/`world-linux` split, `verify-all.py` PASS/FAIL/SKIP + `--list`/`--only`/timeouts, new `verify-{combat,ship-types,npc,dashboard,takeoff,prefs}.py`, `npc_reference.rs`, F635 slot-0x3 fix, `tools/reference/README.md` | `npc_reference.rs` (1, ignored), 55-entry oracle suite | **54 PASS, 1 SKIP, 0 FAIL** (Windows; `world-linux` skips `--sysgen`/`--surface-draw`); `ship-types` trace `ae421da6…` | — | the Windows `--worldgen` repeatability failure is fixed by masking only the object-name ranges F877/F878 build from an uninitialised byte; every other byte is still compared. New stream oracles cover combat's executed loadout/hitscan/pixels, F635's table (slot 0x3 fix), NPC, dashboard, takeoff and prefs. Remaining gaps: F688's spawn sequence, F635 `population < 4`, pinned (not frame) HUD/NPC/takeoff/prefs, and `galaxy-map` as the only frame-level comparison; `tools/reference/README.md` |
+| v0.70 software mixer, WinMM sink, intro theme, cache v28 | `ffe-audio::mixer` (WAV decode, 40 samples, 16 voices, F1908 reuse/fixed/laser1 steal, baked loops, pitch, F1907 centibels), `sink`/`waveout`, `GameAudio::from_cache`/`system_with_effects`, intro song 0 (`music_on`), cache v28 `base:music/qqfront` | `ffe-audio` (3), `sound_mixer.rs` (3), `sound_cues` (2), `front_end` (9); 1,797 assets / 1,798 ZIP entries | 55-entry suite: **54 PASS, 1 SKIP, 0 FAIL** against v28 | — | every wired cue is audible through the WinMM `waveOut` sink with a headless fallback; the intro plays F919/F1904's song 0 and stops on `leave_front_end`; v27 remains loadable and v28 is preferred. Continuous beds (F1910/F1908), positional audio (F1759 unused by DOS), `.mid` overrides, caching the other 16 songs and a device picker remain; `docs/notes/sound.md`/`sound-cues.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 584 `#[test]` functions total; 137 are `#[ignore]`
+  `cargo clippy -D warnings`. 599 `#[test]` functions total; 137 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **446 runnable synthetic tests** (447 on Linux).
+  **461 runnable synthetic tests** (462 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
@@ -311,7 +315,7 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v27 (1796 assets, 462 of 466 models, 219 model strings,
+  `data.bin` is cache v28 (1797 assets, 462 of 466 models, 219 model strings,
   3 glyph sets, the F650 pad tables and the intro credits/char widths); `.cache/data-v1..v5-backup.bin`,
   `data-v10-backup.bin`, `data-v12-backup.bin` and `data-v13-backup.bin` are
   retained.

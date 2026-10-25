@@ -1,5 +1,6 @@
 use crate::AudioError;
 use ffe_core::hmp::HmpSong;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub use crate::settings::SONG_COUNT;
@@ -44,16 +45,35 @@ pub const SONG_TITLES: [&str; SONG_COUNT] = [
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MusicLibrary {
     root: PathBuf,
+    /// Cache-backed HMP payloads, by song index. Cache v28 stores the intro
+    /// (`base:music/qqfront`); the other 16 stay player-supplied runtime files.
+    cached: BTreeMap<usize, Vec<u8>>,
 }
 
 impl MusicLibrary {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            cached: BTreeMap::new(),
+        }
     }
 
     /// The default layout: `<game>/MUSIC`.
     pub fn from_game_dir(game_dir: impl AsRef<Path>) -> Self {
         Self::new(game_dir.as_ref().join("MUSIC"))
+    }
+
+    /// Use an HMP payload from the content cache instead of `MUSIC/<name>.HMP`.
+    /// The cache path is tried first, so a cache asset works without the
+    /// player's folder and a stale folder cannot shadow it.
+    pub fn insert_hmp(&mut self, index: usize, bytes: Vec<u8>) {
+        if index < SONG_COUNT {
+            self.cached.insert(index, bytes);
+        }
+    }
+
+    pub fn cached(&self, index: usize) -> bool {
+        self.cached.contains_key(&index)
     }
 
     pub fn root(&self) -> &Path {
@@ -90,10 +110,19 @@ impl MusicLibrary {
         self.path_for(index).is_some()
     }
 
-    /// Read and parse one song.
+    /// Read and parse one song, preferring the cache payload when present.
     pub fn load(&self, index: usize) -> Result<HmpSong, AudioError> {
         if index >= SONG_COUNT {
             return Err(AudioError::SongOutOfRange(index));
+        }
+        if let Some(bytes) = self.cached.get(&index) {
+            return HmpSong::parse(bytes).map_err(|source| AudioError::Hmp {
+                path: PathBuf::from(format!(
+                    "<cache:base:music/{}>",
+                    Self::name(index).unwrap_or("song")
+                )),
+                source,
+            });
         }
         let path = self
             .path_for(index)
@@ -135,6 +164,21 @@ mod tests {
         assert!(matches!(
             library.load(0),
             Err(AudioError::SongMissing { index: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn a_cached_payload_is_preferred_over_the_music_folder() {
+        let mut library = MusicLibrary::new("also-missing");
+        library.insert_hmp(0, b"not an HMP".to_vec());
+        assert!(library.cached(0));
+        // The folder is not consulted: a cache parse error is reported as Hmp,
+        // not SongMissing.
+        assert!(matches!(library.load(0), Err(AudioError::Hmp { .. })));
+        assert!(!library.cached(1));
+        assert!(matches!(
+            library.load(1),
+            Err(AudioError::SongMissing { index: 1, .. })
         ));
     }
 }

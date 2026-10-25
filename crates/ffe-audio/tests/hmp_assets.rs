@@ -107,3 +107,19 @@ fn the_shipped_directory_contains_the_table_names() {
         directory.display()
     );
 }
+
+#[test]
+fn the_cached_intro_song_parses_without_the_music_folder() {
+    let Some(directory) = music_dir() else {
+        eprintln!("skipping the cached-intro test: set FFE_MUSIC_DIR");
+        return;
+    };
+    let bytes = std::fs::read(directory.join("QQFRONT.HMP")).unwrap();
+    let mut library = MusicLibrary::new("missing-music");
+    library.insert_hmp(0, bytes);
+    assert!(library.cached(0));
+    let song = library.load(0).unwrap();
+    assert!(song.data_track_count() > 0);
+    assert_eq!(song.division, 192);
+    assert!(song.duration_seconds() > 100.0);
+}

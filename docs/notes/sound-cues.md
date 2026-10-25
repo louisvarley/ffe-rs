@@ -1,12 +1,13 @@
 # Sound cues and music wiring
 
-Status: the game now posts the original's effect cues and scene music. The
-cue table, the preference page switches, the music rules and the event sites
-are wired and tested. The **effect mixer is still absent**: `AudioEngine`'s
-device engine owns a `NullSampleSink`, so cue calls are recorded/no-op on a
-real run until `docs/notes/sound.md` §5 item 1 lands. Music is audible through
-the existing HMP/WinMM player. Captures and the smoke test construct a silent
-engine, so no test or capture path opens a device.
+Status: the game posts the original's effect cues and scene music, and the
+16-voice mixer now plays them. The cue table, the preference page switches, the
+music rules and the event sites are wired and tested. `AudioEngine`'s device
+engine owns a WinMM `waveOut` mixer fed by the cache's `base:effect/*` WAVs; the
+recording/headless sinks still see the original sample-table calls. Song 0
+(`QQFRONT`) starts with the intro per F919 and is cached in v28
+(`base:music/qqfront`). Captures and the smoke test construct a silent engine,
+so no test or capture path opens a device.
 
 This note is the implementation record for `crates/ffe-rs/src/sound.rs` and the
 call sites in `crates/ffe-rs/src/main.rs`. The source of truth is the DOS
@@ -96,7 +97,7 @@ decides **when** to call it.
 
 | Scene | Original | Port call |
 |---|---|---|
-| Front end | `F919` 68420/68429 play song 0, replay when `F1904` says done | `front_end_music()` + `tick` replay; **not called** by the current boot (see §5) |
+| Front end | `F919` 68420/68429 play song 0, replay when `F1904` says done | `front_end_music()` + `tick` replay in `run_intro`; `leave_front_end()` on the start key |
 | Battle | `F750` 49585 / `F236` 18909 play song 14 if `DATA_009035 & DATA_009029`; otherwise stop (`49589`/`18913`) | `start_battle()` on the first ship hit |
 | Combat end / death | `F770` 50460 stops | `end_battle()` when the last pirate dies |
 | Hyperspace | `F656` 44749 plays song 15 if `DATA_009033` | `hyperspace_music()` after a successful jump |
@@ -157,27 +158,39 @@ Automated:
   `RecordingSampleSink` (no MIDI device, no `MUSIC/`) records a combat/launch
   cue sequence and checks the codes, default level and pitch; it also checks
   the effects mute and the 50% volume scale.
+- `crates/ffe-rs/tests/sound_mixer.rs`: the headless `MixerSampleSink` renders
+  the waveform: a cue produces its decoded PCM (not just a record), the mute
+  stops active voices and suppresses new ones, and 50% effects volume produces
+  `level_gain(31)` of full scale.
+- `crates/ffe-audio` unit tests: WAV decode/validation, one-shot/loop counts,
+  the `0x0f`/`0x10` repeat rules, the laser1 steal, and the exact centibel
+  values. `crates/ffe-content` tests cover the v28 `music_hmp` asset.
 - `crates/ffe-rs/tests/prefs.rs` and `src/prefs.rs`: the Sound page rows apply
   and toggle.
 
 Manual check with a device (Windows):
 
 1. Put a `data.bin` built from a game folder and its `MUSIC/` under one root
-   (`ffe-tools build-data --root <game>` writes `data.bin` there; the 17 HMPs
-   stay in `<game>/MUSIC`).
+   (`ffe-tools build-data --game <game> --out data.bin` writes `data.bin` there;
+   the 17 HMPs stay in `<game>/MUSIC`, although v28 also caches QQFRONT).
 2. `cargo run -p ffe-rs -- --root <game>`.
-3. Launch from the station (`L`). F1048 stops any song; F1098's launch cue and
+3. The intro should play song 0 through the system MIDI synth and restart it
+   after its 117.5 s event timeline ends; the start key stops it.
+4. Launch from the station (`L`). F1048 stops any song; F1098's launch cue and
    F1094's random docking song follow at the end of the lift sequence. The
    system MIDI device should play the song. On a machine with no MIDI port the
    engine falls back to silence and the game is unaffected.
-4. Fire (`Space`) at an NPC: `0x0a` should be requested (it is currently a
-   no-op on the device), the first hit plays `0x1e` and starts song 14 when
-   "Music in battles" is on, and a kill asks for `0x05` plus `0x1f` for a mass
-   of 10 t or more.
-5. Hyperspace from the galaxy map: `0x21`, then song 15 with "Music after
+5. Fire (`Space`) at an NPC: `0x0a` `laser1` should be audible; the first hit
+   plays `0x1e` and starts song 14 when "Music in battles" is on, and a kill
+   plays `0x05` plus `0x1f` for a mass of 10 t or more.
+6. Hyperspace from the galaxy map: `0x21`, then song 15 with "Music after
    hyperspace" on.
-6. Escape → Sound Effects: toggling "Music on" or "Sound effects on" should
-   stop the music immediately; the other switches take effect on the next cue.
+7. Escape → Sound Effects: toggling "Music on" stops the music immediately;
+   "Sound effects on" stops all 16 voices and mutes new cues; the other switches
+   take effect on the next cue.
+8. If no sound is heard, check the Windows default wave device and that
+   `waveOutOpen` succeeded (the engine falls back headless silently). The
+   `logErr` path is not exposed; add a device picker if this proves common.
 
 `--capture*` and `--smoke-frames` run `GameAudio::silent`, so they never open a
 device and their output is unchanged.
@@ -186,30 +199,26 @@ device and their output is unchanged.
 
 ## 5. What is missing
 
-1. **Effect mixer/device.** `AudioEngine::system` uses `NullSampleSink`; only
-   the recording sink sees `play_sample`. The cache already has all 23 effect
-   WAVs (`base:effect/<name>`, canonical 16-bit mono 22,050 Hz WAV):
-   airopen, bip, bong, boom, camera, chime, clunkit, damage, ecm, hype, laser1,
-   laser2, laser3, laser4, launch, missexpl, necm, nowt, roar, shipexp, siren,
-   station, wind. **No wired sample is missing.** `nowt` is a 44-byte silent
-   WAV; `chime`, `laser3`, `laser4`, `clunkit` and `roar` are in the table/data
-   but have no call site in `ffe.asm`, so they are not cues.
-2. **Continuous beds.** `Engine`, `Station` and `Wind` are one-shot calls. The
-   original loops `station` 50 times, keeps fixed voices 1/2/7, updates the
-   station bed with `F1910` and randomises the wind's second voice in `F1908`.
-   Those are mixer rules.
-3. **Title/front-end music.** `front_end_music()` implements F919 (song 0,
-   replay on done, stop on leave) and is unit-tested, but the current boot goes
-   straight into the new game and does not draw the front-end/intro screens, so
-   nothing calls it yet. Wire it when `front_end.rs` is drawn.
-4. **Unreachable cues.** ECM/naval ECM, missile launch/explosion and wind have
+1. **Continuous beds.** `Engine`, `Station` and `Wind` are one-shot calls. The
+   mixer implements `station`'s 50-copy loop and `0x10`'s volume/pitch update,
+   but the flight state does not yet call `F1910`/`F1908`'s envelope, so the
+   engine/station/wind beds are short bursts rather than a sustained bed. This
+   is the next audible gap.
+2. **Unreachable cues.** ECM/naval ECM, missile launch/explosion and wind have
    mapping/tests but no game event yet: the port has no ECM control, missile
    firing or atmosphere state. Player death (`F770`, `F941`) is not modelled;
    the only current `F770`-equivalent is the last pirate's death.
-5. **`.mid` override.** The port reads `MUSIC/*.HMP` only. JJFFE prefers a
-   `.mid` next to the HMP; that is still the documented difference.
-6. **Volume UI.** The two port-extension volumes are API-only; the original
+3. **`.mid` override.** The port reads `MUSIC/*.HMP` (or the v28 cached song 0).
+   JJFFE prefers a `.mid` next to the HMP; that is still the documented
+   difference.
+4. **Volume UI.** The two port-extension volumes are API-only; the original
    page has no sliders.
+5. **Positional audio.** `F1759` exists but is not called by the DOS game. The
+   mixer is mono and has no pan/distance attenuation; add it only if a caller
+   needs it.
+6. **Other 16 songs in the cache.** Only QQFRONT is cached. The runtime `MUSIC/`
+   path still supplies the rest; caching all 17 would raise v28 to 1813 assets
+   and remove the folder dependency.
 
 No dashboard, `docs/PORT_LOG.md`, `docs/STATUS.md` or
 `docs/notes/agent-streams.md` edits were made by this stream.

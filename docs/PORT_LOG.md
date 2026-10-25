@@ -4,6 +4,37 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Software mixer, WinMM sink, intro theme and cache v28 (v0.70)
+
+- Merged `audiomix` (638f32a): `ffe-audio::mixer` decodes the cached WAVs,
+  keeps the 40-entry sample table and 16 voices with F1908's reuse,
+  fixed-voice and laser1-steal rules, bakes loops, pitch-resamples and applies
+  F1907's exact centibel volume curve; `sink`/`waveout` add a WinMM `waveOut`
+  sink with a headless fallback. `GameAudio::from_cache`/`system_with_effects`
+  connect it to the playable, so the cues wired by `soundfx` are audible. The
+  intro plays song 0 through F919/F1904 and stops on `leave_front_end`
+  (`music_on` respected).
+- **Cache v28** adds `base:music/qqfront`: 1,797 assets / 1,798 ZIP entries.
+  The reader still loads v27 (v28 is preferred); `verify-assets.py` expects the
+  v28 counts. The local `data.bin` was rebuilt to v28 and the full oracle suite
+  ran against it.
+- Merge was conflict-free (`ort`). One transient full-suite failure was
+  environmental: `target/release/ffe-rs.exe` was briefly locked (cargo could not
+  remove it, failing `depth`/`textures`/`lines`/`fills`); after rebuilding the
+  release binary the same four passed and the re-run gave **54 PASS, 1 SKIP,
+  0 FAIL of 55** (the SKIP is `world-linux` on Windows).
+- **Owner/remaining:** continuous station/engine beds (F1910/F1908), positional
+  audio (F1759 is unused by DOS), `.mid` overrides, caching the other 16 songs
+  (owner decision) and a device picker. The mixer's rules and the v28 fallback
+  are in `docs/notes/sound.md`/`sound-cues.md`.
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `cargo test -p ffe-audio` (3), `--test sound_mixer` (3),
+  `--test sound_cues` (2), `--test front_end` (9); every cached view suite
+  (dashboard, combat, console, station, lift, market, npc, npc_ai, effects,
+  scanner, missile, intro, planet) passes against v28.
+
+---
+
 ## 2026-10-25 - Deterministic reference gate and the new oracles merged (v0.69)
 
 - Merged `oracles` (f812f2b): the Windows `--worldgen` repeatability failure is

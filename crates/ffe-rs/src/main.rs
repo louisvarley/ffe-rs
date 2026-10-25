@@ -306,17 +306,24 @@ fn intro_key(key: Key) -> Option<char> {
 /// by the timer's tics, and the screen is redrawn every frame. A start key (1-5)
 /// leaves with that type; any other key is DOS `F147(0)` and this port maps it to
 /// the verified type 1. V latches the version line from 0x719668.
+///
+/// F919 runs around the same loop: song 0 (`QQFRONT`) starts with the intro,
+/// replays when `F1904` reports done, and stops on the leaving key (`ffe.asm`
+/// 68419-68428 and 68484).
 fn run_intro(
     window: &mut Window,
     screen: &mut Screen,
     scene: Option<&ModelViewer>,
+    sound: &mut GameAudio,
 ) -> Result<u8, String> {
     let intro = Intro::new();
     let mut tics = front_end::BOOT_TICS;
     let mut version = false;
     let mut last = Instant::now();
+    sound.front_end_music();
     loop {
         if !window.is_open() {
+            sound.leave_front_end();
             return Ok(1);
         }
         screen.draw_intro(scene, tics, version)?;
@@ -340,12 +347,14 @@ fn run_intro(
                     if let Some(notice) = notice {
                         eprintln!("Intro start key {requested}: {notice}");
                     }
+                    sound.leave_front_end();
                     return Ok(chosen);
                 }
                 IntroAction::Skip { chosen, notice } => {
                     if let Some(notice) = notice {
                         eprintln!("{notice}");
                     }
+                    sound.leave_front_end();
                     return Ok(chosen);
                 }
             }
@@ -353,6 +362,8 @@ fn run_intro(
         let now = Instant::now();
         let elapsed = now.duration_since(last).as_millis().min(100) as u32;
         last = now;
+        // F1904/F232 and F919's replay: the same tick the game loop uses.
+        sound.tick(std::time::Duration::from_millis(u64::from(elapsed)));
         tics = IntroTimeline::advance(tics, elapsed);
     }
 }
@@ -440,7 +451,7 @@ fn run() -> Result<(), String> {
     let mut sound = if headless {
         GameAudio::silent(&options.root)
     } else {
-        GameAudio::from_game_dir(&options.root)
+        GameAudio::from_cache(&options.root, &cache)
     };
     sound.apply_prefs(&prefs);
     let mut help = false;
@@ -486,7 +497,12 @@ fn run() -> Result<(), String> {
         || options.capture_traffic.is_some();
     let mut boot = options.boot;
     if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(1)) {
-        boot = Boot::NewGame(run_intro(&mut window, &mut screen, scene.as_ref())?);
+        boot = Boot::NewGame(run_intro(
+            &mut window,
+            &mut screen,
+            scene.as_ref(),
+            &mut sound,
+        )?);
     }
     // F569's scan needs the model collision streams and the terrain tables. They
     // are borrowed from the cache for the whole run.

@@ -163,6 +163,8 @@ type 1 with a notice; an owner decision is still needed for types 2-5.
 **Assets.** Cache v27 adds `base:text/intro-credits` (19 raw NUL-terminated
 strings from `0xbd361`: 18 credits + the DOS version, layout codes preserved)
 and `base:text/char-widths` (`DATA_007648`, 256 signed bytes from `0xe9998`).
+Cache v28 adds `base:music/qqfront`, the player's `MUSIC/QQFRONT.HMP`
+byte-for-byte, so the F919 theme is available at boot.
 Model 176/177, the primary bitmap 0x42, the main font and the low palette were
 already in the cache. The credits are drawn from the cache, not from Rust
 strings; the old plain-text transcription and its `.text` field are gone.
@@ -174,7 +176,10 @@ and the low palette directly. Model 176's late animation (for example at
 `0x77a7d8`, animation `0x1be0`) calls child 456 through a frame that copies a
 basis F1750 leaves as stale stack (`docs/notes/animation.md` §1.2); the port
 reports it once and keeps drawing the credits, so those frames have no ship.
-No music backend exists (song 0 `QQFRONT` is still not played).
+Song 0 `QQFRONT` now plays during the intro: `run_intro` calls F919's
+`front_end_music()`, ticks F1904, and stops the song on the start key. Cache v28
+stores it as `base:music/qqfront`. The dynamic upper palette remains the only
+drawing omission here.
 
 **Tests and frames.** `crates/ffe-rs/tests/front_end.rs` covers the thresholds,
 the `0x400` clock, the `0x7e7b76` reset, the DOS V gate, keys at any tics and
