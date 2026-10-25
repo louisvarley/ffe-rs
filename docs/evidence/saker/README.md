@@ -42,15 +42,22 @@ two KL760 2, Scanner 1, Automatic Pilot 1, Atmospheric Shielding 1; the
 Navigation computer is 0 t) = 1 t. The F2 page shows that free hold and the
 port uses it as `navigation::DEFAULT_CARGO`.
 
-## Port frame
+## Port frames
+
+`port-default-boot.png` is the first frame of the playable after the default
+start (`ffe-rs --root . --skip-intro --capture <dir>`, frame `shot-0000.ppm`
+scaled 2x by the window). It shows `Hull: 100.0%` (112/112), no shield line
+(both words are zero), `Act:0.0 km/h`, `Alt:0 m`, the parent name `Hope`,
+`Landed at Old Blackelk.` and the equipment lamps/missile icons. This is the
+actual `main` boot path, not only a test fixture.
 
 `port-saker-default.png` is written by
 `cargo test -p ffe-rs --test dashboard_view -- --ignored
 the_default_start_draws_the_sakers_hull_and_equipment_page` with
-`FFE_WORLD_CACHE` and `FFE_SHOT_DIR`. It is the new-game `Flight` with
-`DEFAULT_SHIP = 0x1f`, `Combat::new_game()`, `Loadout::new_game()` and
-`ensure_damage(112)`: `Hull: 100.0%`, no shield line (both words are zero), the
-two missile icons on F1120's pylons and no other missile pylon. The terrain and
-starport are the port's current approximations (other streams own them); the
-HUD and equipment policy is checked in `tests/dashboard_view.rs` and
+`FFE_WORLD_CACHE` and `FFE_SHOT_DIR` at the native 320x200. It is the new-game
+`Flight` with `DEFAULT_SHIP = 0x1f`, `Combat::new_game()`,
+`Loadout::new_game()` and `ensure_damage(112)`: the hull line, no shield line,
+the two missile icons on F1120's pylons and no other missile pylon. The terrain
+and starport are the port's current approximations (other streams own them);
+the HUD and equipment policy is checked in `tests/dashboard_view.rs` and
 `tests/combat_view.rs`.

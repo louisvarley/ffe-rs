@@ -3545,13 +3545,32 @@ fn run() -> Result<(), String> {
             state.ensure_damage(hull_full);
         }
         let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
+        // F1099 prints DATA_009124, the parent object's name: at the default
+        // start it is Hope, the planet under Old Blackelk. A surface landing
+        // names the body itself; in free flight the port falls back to the
+        // system.
+        let registration = nav
+            .as_ref()
+            .and_then(|nav| {
+                let index = nav.docked.or_else(|| nav.landed_body())?;
+                let body = &nav.bodies[index];
+                Some(
+                    body.parent
+                        .and_then(|p| nav.bodies.get(p))
+                        .map_or_else(|| body.name.clone(), |parent| parent.name.clone()),
+                )
+            })
+            .unwrap_or_else(|| {
+                nav.as_ref()
+                    .map_or(String::new(), |nav| nav.system_name().to_owned())
+            });
         screen.hud = PlayerHud {
             shields: state.shields,
             hull: state.hull,
             set_speed: original.as_ref().map(|model| model.set_speed_metres()),
             actual_speed: state.speed() * 9.7,
             altitude: Some(0),
-            registration: ships.name(state.ship).unwrap_or("").to_owned(),
+            registration,
             autopilot,
             turret: views.mode.is_turret().then(|| {
                 (
