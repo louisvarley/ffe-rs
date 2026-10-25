@@ -5,6 +5,7 @@ use ffe_rs::combat::{self, Combat};
 use ffe_rs::console::{
     acceleration_for_digit, Click, ConsoleState, ShipSystems, ACCELERATION_NAMES,
 };
+use ffe_rs::death::{self, Outcome};
 use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Flight, STEP};
 use ffe_rs::front_end::{self, Intro, IntroAction, IntroTimeline};
@@ -747,6 +748,7 @@ fn run() -> Result<(), String> {
             && !help
             && !scenarios
             && !paused
+            && state.death.is_none()
             && model_lab.is_none()
             && model_viewer.is_none()
             && nav.as_ref().is_none_or(|nav| nav.view == NavView::Closed);
@@ -794,6 +796,53 @@ fn run() -> Result<(), String> {
             }
         }
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
+        // F1104's death sequence: the external-view hold, then the status page's
+        // GAME OVER/DIED headings. N starts a new game (the SysMenu path) and Q
+        // quits; the flight controls and the traffic AI are held while it runs.
+        if let Some(value) = state.death.as_mut() {
+            value.tick(elapsed);
+        }
+        let mut death_control = state.death.is_some();
+        if active
+            && state
+                .death
+                .as_ref()
+                .is_some_and(|death| death.is_game_over())
+        {
+            if pressed(Key::Q) {
+                return Ok(());
+            }
+            if pressed(Key::N) {
+                let new_nav = match boot {
+                    Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
+                    Boot::Sandbox => Navigator::new(&cache),
+                };
+                if let Ok(new_nav) = new_nav {
+                    nav = Some(new_nav);
+                    state = Flight::default();
+                    if let Some(new_game) = nav.as_ref().and_then(|nav| nav.new_game) {
+                        state.credits = u32::try_from(new_game.cash).unwrap_or(0);
+                        state.ship = new_game.ship;
+                        state.mode = ffe_rs::flight::Mode::Docked;
+                    }
+                    state.combat = Combat::new_game();
+                    state.loadout = ffe_core::equipment::Loadout::new_game();
+                    original = None;
+                    views = ViewState::default();
+                    dock = DockState::default();
+                    status_page = false;
+                    launch_grace = None;
+                    takeoff_climb = None;
+                    galaxy = None;
+                    paused = false;
+                    acceleration = 0;
+                    labels = false;
+                    held_controls.disarm(&keys_down);
+                    death_control = true;
+                    message = "New game.".to_owned();
+                }
+            }
+        }
         // A console click on the mouse-down edge, in flight (client pixels against
         // the client size: get_mouse_pos divides by the creation scale only, which
         // breaks after a resize).
@@ -809,7 +858,7 @@ fn run() -> Result<(), String> {
         // closes them again. The original reaches the same screen through a
         // first Escape that stops time (FUNC_000224); this port opens the
         // pages directly, as the owner asked.
-        if active && pressed(Key::Escape) {
+        if active && !death_control && pressed(Key::Escape) {
             prefs.escape();
             sound.play(Cue::UiBeep);
             held_controls.disarm(&keys_down);
@@ -865,6 +914,7 @@ fn run() -> Result<(), String> {
             continue;
         }
         let click_point = if active
+            && !death_control
             && mouse_down
             && !mouse_was_down
             && state.mode == ffe_rs::flight::Mode::Flight
@@ -880,6 +930,7 @@ fn run() -> Result<(), String> {
             None
         };
         let console_click = if active
+            && !death_control
             && mouse_down
             && !mouse_was_down
             && state.mode == ffe_rs::flight::Mode::Flight
@@ -897,6 +948,7 @@ fn run() -> Result<(), String> {
         };
         // A click on a docked screen's button (F328 hot areas) on the mouse-down edge.
         let dock_click = if active
+            && !death_control
             && mouse_down
             && !mouse_was_down
             && state.mode == ffe_rs::flight::Mode::Docked
@@ -924,7 +976,13 @@ fn run() -> Result<(), String> {
         .into_iter()
         .find(|(key, _)| pressed(*key))
         .and_then(|(_, digit)| acceleration_for_digit(digit))
-        .filter(|_| active && !help && !scenarios && state.mode == ffe_rs::flight::Mode::Flight);
+        .filter(|_| {
+            active
+                && !death_control
+                && !help
+                && !scenarios
+                && state.mode == ffe_rs::flight::Mode::Flight
+        });
         let chosen_step = match console_click {
             Some(Click::Acceleration(step)) => Some(step),
             _ => digit_step,
@@ -973,7 +1031,7 @@ fn run() -> Result<(), String> {
         if let Some(note) = console_click.and_then(Click::unported) {
             message = note.to_owned();
         }
-        if active {
+        if active && !death_control {
             // F1 is the original's view key; help moves to H.
             if pressed(Key::H) && nav.as_ref().is_none_or(|nav| nav.view != NavView::Galaxy) {
                 help = !help;
@@ -1639,6 +1697,30 @@ fn run() -> Result<(), String> {
                             "Text labels off.".to_owned()
                         };
                     }
+                    // F12's console icon is F1056's F1098 call (`78528`): the
+                    // escape capsule or Stowmaster launches when fitted, and
+                    // nothing happens (F1098 returns 0) when it is not.
+                    if console_click == Some(Click::Capsule) {
+                        match death::escape_craft(&state.loadout) {
+                            Some(craft) => {
+                                let stats = scene
+                                    .as_ref()
+                                    .and_then(|scene| scene.ship_stats(craft.model()));
+                                death::board(&mut state, craft, stats.as_ref());
+                                if original.is_some() {
+                                    original = Some(
+                                        OriginalFlight::from_flight(&state, stats.as_ref())
+                                            .with_time_acceleration(acceleration),
+                                    );
+                                }
+                                death::play_escape_audio(&mut sound);
+                                message = format!("{} launched.", craft.name());
+                            }
+                            None => {
+                                message = "No escape capsule fitted.".to_owned();
+                            }
+                        }
+                    }
                     let clicked = console_click.and_then(|click| match click {
                         Click::CycleView => Some(ViewButton::Cycle),
                         Click::Front => Some(ViewButton::Select(ViewMode::Front)),
@@ -2150,7 +2232,13 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        if active && !help && !scenarios && !paused && model_lab.is_none() && model_viewer.is_none()
+        if active
+            && !death_control
+            && !help
+            && !scenarios
+            && !paused
+            && model_lab.is_none()
+            && model_viewer.is_none()
         {
             // The original's "Reverse left-right controls" and "Reverse up-down
             // controls" (DATA_009021/DATA_009022, toggled by FUNC_000216).
@@ -2523,7 +2611,13 @@ fn run() -> Result<(), String> {
             views.mode = ViewMode::Front;
         }
         // Traffic control: doors, clearance timeouts and the docking and launch stages.
-        if active && !help && !paused && model_lab.is_none() && model_viewer.is_none() {
+        if active
+            && !death_control
+            && !help
+            && !paused
+            && model_lab.is_none()
+            && model_viewer.is_none()
+        {
             if let Some(nav) = nav.as_mut() {
                 let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
                     / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
@@ -2596,6 +2690,7 @@ fn run() -> Result<(), String> {
         // player is not a target.
         let landed_view = nav.as_ref().is_some_and(|nav| nav.landed_view());
         if active
+            && !death_control
             && !help
             && !paused
             && !landed_view
@@ -2652,8 +2747,29 @@ fn run() -> Result<(), String> {
                                     )
                                 }
                                 ffe_core::laser::Damage::Destroyed => {
-                                    playership_destroyed(&mut state, &mut original, nav, mass);
-                                    format!("{name} destroys your ship. Recovered at the starport.")
+                                    if state.death.is_some() {
+                                        // F1104's 81466 guard: further hits on a
+                                        // ship already in the death hold do nothing.
+                                        continue;
+                                    }
+                                    let outcome = playership_destroyed(
+                                        &mut state,
+                                        &mut original,
+                                        nav,
+                                        scene.as_ref(),
+                                        &mut views,
+                                        acceleration,
+                                    );
+                                    match outcome {
+                                        Outcome::Escaped(craft) => {
+                                            death::play_destroyed_escape_audio(&mut sound);
+                                            death::escaped_message(&name, craft)
+                                        }
+                                        Outcome::Destroyed => {
+                                            death::play_destroyed_audio(&mut sound);
+                                            death::destroyed_message(&name)
+                                        }
+                                    }
                                 }
                             };
                         }
@@ -2696,6 +2812,12 @@ fn run() -> Result<(), String> {
                         ffe_rs::missile::MissileEvent::Expired { .. } => {}
                     }
                 }
+            }
+        } else if death_control {
+            // F1104's external view: the traffic AI is off, but F942's explosion
+            // (model 0x9b) and F926's debris still age and draw.
+            if let Some(nav) = nav.as_mut() {
+                nav.tick_effects(elapsed);
             }
         }
         // A new state (docking, a scenario, a load) ends the original flight model.
@@ -2852,7 +2974,7 @@ fn run() -> Result<(), String> {
         // 50 Hz frame count: F730's refire word (0x795c) and F930's beam branch
         // are both in those tics.
         let frame_tics = combat::frame_tics(elapsed, acceleration_factor);
-        if active && !paused && state.mode == ffe_rs::flight::Mode::Flight {
+        if active && !death_control && !paused && state.mode == ffe_rs::flight::Mode::Flight {
             // F938 reads `ship+0xc8 & 1` (the laser cooling booster) directly.
             state.combat.cooling_booster = state.loadout.cooling_booster();
             state.combat.tick(frame_tics, elapsed * acceleration_factor);
@@ -3636,6 +3758,30 @@ fn run() -> Result<(), String> {
         if stats.is_some() {
             state.ensure_damage(hull_full);
         }
+        // A save or damage path that left the hull at zero without running F953's
+        // lethal branch still enters F1104 once.
+        if state.destroyed() && state.death.is_none() {
+            if let Some(nav) = nav.as_mut() {
+                let outcome = playership_destroyed(
+                    &mut state,
+                    &mut original,
+                    nav,
+                    scene.as_ref(),
+                    &mut views,
+                    acceleration,
+                );
+                match outcome {
+                    Outcome::Escaped(craft) => {
+                        death::play_destroyed_escape_audio(&mut sound);
+                        message = format!("{} launched.", craft.name());
+                    }
+                    Outcome::Destroyed => {
+                        death::play_destroyed_audio(&mut sound);
+                        message = "Your ship is destroyed. GAME OVER.".to_owned();
+                    }
+                }
+            }
+        }
         let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
         // F1099 prints DATA_009124, the parent object's name: at the new game it
         // is Hope, the planet under Old Blackelk. A surface landing names the
@@ -3716,6 +3862,7 @@ fn run() -> Result<(), String> {
         // F273's Page Up/Down scroll the message log while flying (the original's
         // keyboard map: "PgUp/Dn Scroll the Message Log").
         if active
+            && !death_control
             && !help
             && !paused
             && state.mode == ffe_rs::flight::Mode::Flight
@@ -3780,6 +3927,15 @@ fn run() -> Result<(), String> {
         } else {
             screen.draw(&state, views, scene.as_ref(), help, prefs.modern, &message);
         }
+        if state
+            .death
+            .as_ref()
+            .is_some_and(|death| death.is_game_over())
+        {
+            // `DATA_005129`/`DATA_005130`: the status page's GAME OVER and
+            // COMMANDER <name> DIED headings.
+            screen.draw_game_over(death::COMMANDER_NAME, "N NEW GAME   Q QUIT");
+        }
         if let Some(dir) = &options.capture {
             if frames % 10 == 0 {
                 write_shot(dir, &format!("shot-{frames:04}.ppm"), &screen);
@@ -3809,7 +3965,7 @@ fn run() -> Result<(), String> {
                     "F2 CANCELS. SAVES ARE NOT DELETED.",
                 ],
             );
-        } else if (paused || !active) && !help {
+        } else if (paused || !active) && !help && !death_control {
             screen.overlay(
                 "PAUSED",
                 &[
@@ -3819,7 +3975,8 @@ fn run() -> Result<(), String> {
             );
         }
         if let Some(nav) = nav.as_ref().filter(|nav| {
-            state.mode == ffe_rs::flight::Mode::Flight
+            !death_control
+                && state.mode == ffe_rs::flight::Mode::Flight
                 && nav.view != NavView::Closed
                 && galaxy.is_none()
         }) {
@@ -3963,35 +4120,57 @@ fn ship_position(original: &Option<OriginalFlight>, state: &Flight) -> [i64; 3] 
     )
 }
 
-/// F942 on the player, as far as this sandbox can present it: the hull is used
-/// up, so the ship is recovered at the nearest starport or station with a fresh
-/// hull. The original runs its game-over/escape-pod sequence (F942 destroys the
-/// player object and F924 notifies the flight state); that screen is not ported.
+/// F942/F1104 on the player: spawn the destruction object at the old position,
+/// then run F1104's F1098 test. With an escape craft fitted the player is moved
+/// into it (F1098) and keeps flying; otherwise the external-view death hold
+/// starts and [`Flight::death`] carries it to the game-over page.
+///
+/// This replaces the earlier substitute that recovered the player at the
+/// nearest starport.
 fn playership_destroyed(
     state: &mut Flight,
     original: &mut Option<OriginalFlight>,
-    nav: &Navigator,
-    mass: u16,
-) {
-    let full = mass.max(1).saturating_mul(4);
-    state.hull = [full, full];
-    state.velocity = [0.0; 3];
-    state.thrust = 0.0;
+    nav: &mut Navigator,
+    scene: Option<&ModelViewer>,
+    views: &mut ViewState,
+    acceleration: usize,
+) -> Outcome {
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
-    let station = nav.bodies.iter().find(|body| {
-        matches!(
-            body.kind,
-            ffe_rs::navigation::Kind::Starport | ffe_rs::navigation::Kind::Station
-        )
-    });
-    if let Some(body) = station {
-        let at = body.position.map(|value| value as f64 / unit);
-        let distance = ffe_rs::navigation::standoff(body) / unit;
-        state.position = [at[0], at[1], at[2] - distance];
-        if let Some(model) = original.as_mut() {
-            model.teleport(state.position.map(|value| (value * unit).round() as i64));
+    let position = ship_position(original, state);
+    let velocity = state.velocity.map(|value| value * unit);
+    let axes = ship_axes(state);
+    let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
+    let cargo = stats.map_or(0, |stats| stats.cargo.max(0) as u16);
+    nav.effects.extend(death::player_explosion(
+        position,
+        velocity,
+        cargo,
+        axes,
+        state.ticks as f64 * STEP,
+    ));
+    let craft = death::escape_craft(&state.loadout);
+    let craft_stats =
+        craft.and_then(|craft| scene.and_then(|scene| scene.ship_stats(craft.model())));
+    let outcome = death::begin(state, craft_stats.as_ref());
+    match outcome {
+        Outcome::Escaped(_) => {
+            // The new object is the player's ship now: rebuild the original
+            // flight model around the capsule/fighter's statistics, keeping the
+            // old position and velocity F1098 copied.
+            if original.is_some() {
+                *original = Some(
+                    OriginalFlight::from_flight(state, craft_stats.as_ref())
+                        .with_time_acceleration(acceleration),
+                );
+            }
+            views.console.status_page = false;
+        }
+        Outcome::Destroyed => {
+            // F1104's `DATA_008872 = 4`: watch the explosion from outside.
+            views.mode = ViewMode::External;
         }
     }
+    outcome
 }
 
 /// The ship axes looking from `from` at `to` (flight units), for the scripted

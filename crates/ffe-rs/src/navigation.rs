@@ -1874,6 +1874,17 @@ impl Navigator {
         self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::CAPTURE)
     }
 
+    /// Advance F939/F942/F926's effects without running the traffic AI. The
+    /// death sequence stops the player's ship but still shows its explosion
+    /// (F1104's external view), so `main` calls this while `Flight::death` is
+    /// set.
+    pub fn tick_effects(&mut self, seconds: f64) {
+        for effect in &mut self.effects {
+            effect.tick(seconds);
+        }
+        self.effects.retain(Effect::alive);
+    }
+
     /// One frame of NPC traffic: the flight AI, F931's fire and F927's recycle of
     /// ships that are dead, fled or too far from the player. `tics` are the
     /// frame's game tics and `player_radius` the player's interaction radius
@@ -1889,10 +1900,7 @@ impl Navigator {
     ) -> Vec<ShipEvent> {
         self.player_at = player;
         let mut events = Vec::new();
-        for effect in &mut self.effects {
-            effect.tick(seconds);
-        }
-        self.effects.retain(Effect::alive);
+        self.tick_effects(seconds);
         if self.ships.is_empty() {
             return events;
         }
