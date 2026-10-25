@@ -8,10 +8,10 @@
 //! line from (160,79) to the target, and `F1114` draws its four edges clipped to
 //! the 320x158 view.
 //!
-//! `F1100` also owns the range text: its value is in hundredths, the string's
-//! FF30 index 7 writes two decimals, and the on-view suffix has no leading
-//! space (`5.40AU`). [`range_text`] builds the exact on-view, Behind, Out of
-//! Range and arrow forms.
+//! `F1100` also owns the range text: its value is fixed point (hundredths of a
+//! km, thousandths of an AU), the FF30 writers put two or three decimals after
+//! the point, and the on-view suffix has no leading space (`5.400AU`).
+//! [`range_text`] builds the exact on-view, Behind, Out of Range and arrow forms.
 //!
 //! `F1111` (the gunsight routine) draws a blinking cursor while one of the
 //! original's auto-targetter flags is set: `DATA_007246` is the navigation
@@ -103,16 +103,34 @@ pub fn tunnel_base(mantissa: i16) -> i32 {
     0x40 + (((-i32::from(mantissa)) & 0x7ff) >> 5)
 }
 
-/// F1100's number: the km/AU value is in hundredths (`laser::range_value`), and
-/// the string's FF30 index 7 is `FUNC_001381_FF30Write2dpFracV1`, so the text
-/// is always `<int>.<two digits><unit>` with no space before the suffix
-/// (`ffedat.asm:18889-18891`; `ffe.asm:81263-81281`). The trailing zeros are
-/// kept: 540 -> `5.40AU`, 5 -> `0.05AU`.
-pub fn range_number(value: i32, au: bool) -> String {
-    let unit = if au { "AU" } else { "km" };
+/// F1100's number: the km value is in hundredths (`0x3007`, two decimals) and
+/// the AU value in thousandths (`0x300a`, three decimals), both from
+/// `laser::range_value`. The string's FF30 index is the fixed-point writer, so
+/// the text has no space before the suffix (`ffedat.asm:18889-18891`;
+/// `ffe.asm:81263-81281`). The trailing zeros are kept: 540 -> `5.400AU`,
+/// 5 -> `0.005AU`.
+fn range_parts(value: i32, au: bool) -> (String, &'static str) {
     let sign = if value < 0 { "-" } else { "" };
     let value = value.unsigned_abs();
-    format!("{sign}{}.{:02}{unit}", value / 100, value % 100)
+    if au {
+        (format!("{sign}{}.{:03}", value / 1000, value % 1000), "AU")
+    } else {
+        (format!("{sign}{}.{:02}", value / 100, value % 100), "km")
+    }
+}
+
+/// F1100's number with its unit attached (`5.400AU`).
+pub fn range_number(value: i32, au: bool) -> String {
+    let (number, unit) = range_parts(value, au);
+    format!("{number}{unit}")
+}
+
+/// The same number with a space before the unit, for the port's prose lines
+/// (`5.400 AU`). This is the one range formatter: messages, the map and the
+/// target HUD all come through it.
+pub fn range_spaced(value: i32, au: bool) -> String {
+    let (number, unit) = range_parts(value, au);
+    format!("{number} {unit}")
 }
 
 /// F1100's off-view arrow pick (`ffe.asm:81299-81323`): row 79 and below uses
@@ -314,26 +332,33 @@ mod tests {
     }
 
     #[test]
-    fn the_range_is_hundredths_with_two_decimals_and_no_space() {
-        assert_eq!(range_number(540, true), "5.40AU");
+    fn the_range_is_fixed_point_with_two_km_or_three_au_decimals() {
+        // AU values are thousandths (0x300a): 5400 -> 5.400AU.
+        assert_eq!(range_number(5400, true), "5.400AU");
         assert_eq!(range_number(100, false), "1.00km");
-        assert_eq!(range_number(5, true), "0.05AU");
+        assert_eq!(range_number(5, true), "0.005AU");
         assert_eq!(range_number(0, false), "0.00km");
-        assert_eq!(range_number(12_345, true), "123.45AU");
+        assert_eq!(range_number(12_345, true), "12.345AU");
         // F1545 writes the sign before the integer, F1377 puts the point in.
-        assert_eq!(range_number(-5, true), "-0.05AU");
+        assert_eq!(range_number(-5, true), "-0.005AU");
+        // The prose form shares the formatter but separates the unit.
+        assert_eq!(range_spaced(5400, true), "5.400 AU");
+        assert_eq!(range_spaced(12_345, false), "123.45 km");
     }
 
     #[test]
     fn the_range_forms_are_f1100s_strings() {
-        assert_eq!(range_text(RangeForm::OnView, 540, true), b"5.40AU".to_vec());
         assert_eq!(
-            range_text(RangeForm::Behind, 540, true),
-            b"Target 5.40AU Behind".to_vec()
+            range_text(RangeForm::OnView, 5400, true),
+            b"5.400AU".to_vec()
         );
         assert_eq!(
-            range_text(RangeForm::OutOfRange, 540, true),
-            b"Target Out of Range (5.40AU)".to_vec()
+            range_text(RangeForm::Behind, 5400, true),
+            b"Target 5.400AU Behind".to_vec()
+        );
+        assert_eq!(
+            range_text(RangeForm::OutOfRange, 5400, true),
+            b"Target Out of Range (5.400AU)".to_vec()
         );
         // The four off-view forms: 0x7d/0x7e left/right, 0x7f/0x80 below.
         assert_eq!(
@@ -345,12 +370,12 @@ mod tests {
             b"Target 1.00km ~".to_vec()
         );
         assert_eq!(
-            range_text(RangeForm::Arrow(RangeArrow::BelowLeft), 540, true),
-            b"\x7f Target 5.40AU".to_vec()
+            range_text(RangeForm::Arrow(RangeArrow::BelowLeft), 5400, true),
+            b"\x7f Target 5.400AU".to_vec()
         );
         assert_eq!(
-            range_text(RangeForm::Arrow(RangeArrow::BelowRight), 540, true),
-            b"Target 5.40AU \x80".to_vec()
+            range_text(RangeForm::Arrow(RangeArrow::BelowRight), 5400, true),
+            b"Target 5.400AU \x80".to_vec()
         );
     }
 

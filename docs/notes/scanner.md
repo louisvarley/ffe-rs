@@ -152,9 +152,10 @@ do not draw the tunnel.
   implement the draw path and frames; deciding whether to add the equipment and
   the F1010/F1060/F1062 arming is an owner decision.
 - **Range text.** Ported as F1100: the text colour is the target's COLPAL
-  (0x11 nav green / 0x10 combat red, 0x5f in missile view). The number is in
-  hundredths with two decimals and no space (`5.40AU`, `1.00km`), drawn one
-  10-row line below the target's `-5` origin. The off-view Behind, Out of
+  (0x11 nav green / 0x10 combat red, 0x5f in missile view). The km number is
+  in hundredths with two decimals, the AU number in thousandths with three,
+  and no space before the unit (`5.400AU`, `1.00km`), drawn one 10-row line
+  below the target's `-5` origin. The off-view Behind, Out of
   Range and four arrow forms (0x7d/0x7e left/right, 0x7f/0x80 below) are
   ported. Two simultaneous targets (0xec and 0xed) are still collapsed to one
   display, and the port has no missile view for 0x5f.

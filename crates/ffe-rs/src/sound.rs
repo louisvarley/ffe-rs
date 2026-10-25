@@ -415,11 +415,20 @@ impl GameAudio {
         }
     }
 
-    /// `F1094`: the end of a docking or launch sequence chooses a random
-    /// enabled song when "Docking music" (`player+0x3f5f`) is set.
-    pub fn docking_music(&mut self) {
+    /// `F1094`: the end of a launch sequence chooses a random enabled song when
+    /// "Docking music" (`player+0x3f5f`) is set. A station *docked* state is
+    /// F1903's stop, not this call (`GameAudio::stop_song`).
+    pub fn sequence_end_music(&mut self) {
         if self.audio.sound_flags().docking_music && self.audio.settings().music_on {
             let _ = self.audio.play_song(-1);
+        }
+    }
+
+    /// `F1047`/`F1048`: a rough landing changes no music; an open-air starport's
+    /// F1048 stops the song (F1903) before F1049/F1050 draw the landed view.
+    pub fn landed(&mut self, starport: bool) {
+        if starport {
+            self.audio.stop_song();
         }
     }
 
@@ -652,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn battle_hyperspace_and_docking_music_follow_the_original_rules() {
+    fn battle_hyperspace_and_sequence_music_follow_the_original_rules() {
         let recorder = Recorder::default();
         let mut game = GameAudio::new(recorder.clone());
         game.start_battle();
@@ -664,7 +673,7 @@ mod tests {
         assert_eq!(recorder.recorded().stops, 1);
 
         game.hyperspace_music();
-        game.docking_music();
+        game.sequence_end_music();
         assert_eq!(recorder.recorded().songs, vec![14, 15, -1]);
 
         let mut flags = game.flags();
@@ -673,8 +682,18 @@ mod tests {
         game.set_flags(flags);
         let before = recorder.recorded().songs.len();
         game.hyperspace_music();
-        game.docking_music();
+        game.sequence_end_music();
         assert_eq!(recorder.recorded().songs.len(), before);
+    }
+
+    #[test]
+    fn a_starport_landing_stops_the_song_and_a_rough_landing_leaves_it() {
+        let recorder = Recorder::default();
+        let mut game = GameAudio::new(recorder.clone());
+        game.landed(false);
+        assert_eq!(recorder.recorded().stops, 0);
+        game.landed(true);
+        assert_eq!(recorder.recorded().stops, 1);
     }
 
     #[test]

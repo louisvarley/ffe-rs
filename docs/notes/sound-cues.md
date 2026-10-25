@@ -29,7 +29,7 @@ stream designed) and exposes:
 | `front_end_music()` / `leave_front_end()` | `F919` | song 0 and its done-replay; stop on leaving |
 | `start_battle()` / `end_battle()` | `F750` / `F770` | siren, song 14 if enabled, stop at combat end |
 | `hyperspace_music()` | `F656` | song 15 if "Music after hyperspace" |
-| `docking_music()` | `F1094` | random enabled song if "Docking music" |
+| `sequence_end_music()` | `F1094` | random enabled song if "Docking music" |
 | `stop_for_sequence()` | `F1048`/`F1091` | a docking/launch transition stops the song |
 | `apply_prefs(&Prefs)` | `F216`/`F1908`/`F1902` | the ten Sound Effects switches |
 | `tick(elapsed)` | `F1904`/`F232`/`F919` | advance MIDI, continuous-music/done handling |
@@ -101,7 +101,7 @@ decides **when** to call it.
 | Battle | `F750` 49585 / `F236` 18909 play song 14 if `DATA_009035 & DATA_009029`; otherwise stop (`49589`/`18913`) | `start_battle()` on the first ship hit |
 | Combat end / death | `F770` 50460 stops | `end_battle()` when the last pirate dies |
 | Hyperspace | `F656` 44749 plays song 15 if `DATA_009033` | `hyperspace_music()` after a successful jump |
-| Docking/launch end | `F1094` 80278 plays `-2` (random) if `player+0x3f5f` | `docking_music()` on `Traffic::Docked`/`LaunchDone` and a surface landing |
+| Launch sequence end | `F1094` 80278 plays `-2` (random) if `player+0x3f5f` | `sequence_end_music()`; a station dock/landing is F1903's stop (`stop_song`), not this |
 | Docking/launch transition | `F1048` 77305, `F1091` 80056 stop | `stop_for_sequence()` on `begin_launch`/`begin_docking` |
 | Continuous music | `F232` 18597 checks `F1904` and plays `-1` | `tick` → `update_music()` |
 | Leaving the front end | `F919` 68484 stops | `leave_front_end()` |
@@ -152,7 +152,7 @@ Automated:
 
 - `crates/ffe-rs/src/sound.rs` unit tests: every cue's table index, the
   `laser1`/`laser2` bank split, the four per-sample preference gates, the
-  `F1907` log-volume table, battle/hyperspace/docking music, the F919 replay and
+  `F1907` log-volume table, battle/hyperspace/sequence-end music, the F919 replay and
   F232 continuous selection, and the ten preference rows.
 - `crates/ffe-rs/tests/sound_cues.rs`: a headless `AudioEngine` with
   `RecordingSampleSink` (no MIDI device, no `MUSIC/`) records a combat/launch
@@ -176,10 +176,11 @@ Manual check with a device (Windows):
 2. `cargo run -p ffe-rs -- --root <game>`.
 3. The intro should play song 0 through the system MIDI synth and restart it
    after its 117.5 s event timeline ends; the start key stops it.
-4. Launch from the station (`L`). F1048 stops any song; F1098's launch cue and
-   F1094's random docking song follow at the end of the lift sequence. The
-   system MIDI device should play the song. On a machine with no MIDI port the
-   engine falls back to silence and the game is unaffected.
+4. Launch from the station (`L`). F1048 stops any song; F1098's launch cue
+   follows at the end of the lift sequence, and F1094's random sequence-end
+   song is only a launch-end choice. The system MIDI device should play the
+   song. On a machine with no MIDI port the engine falls back to silence and
+   the game is unaffected.
 5. Fire (`Space`) at an NPC: `0x0a` `laser1` should be audible; the first hit
    plays `0x1e` and starts song 14 when "Music in battles" is on, and a kill
    plays `0x05` plus `0x1f` for a mass of 10 t or more.

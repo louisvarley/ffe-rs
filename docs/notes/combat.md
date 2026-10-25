@@ -185,11 +185,12 @@ exponent and normalises (`F1496`). The displayed number is:
 - exponent <= 0x1d: `mantissa * 0xd1d0 >> (0x1d - exponent)` km (`0x8604`);
 - else: `mantissa * 0xeb54 >> (0x35 - exponent)` AU (`0x8605`).
 
-The value is in **hundredths**: `0x8604/05` expand through FF80 index 3
-(`F1115`) to `DATA_007282/283`, whose FF30 index 7 is
-`FUNC_001381_FF30Write2dpFracV1` / `FUNC_001377_StringConvertFraction` with
-two places. The suffix is concatenated with no space, and trailing zeros stay:
-`540` AU is `5.40AU`, `5` AU is `0.05AU`, `100` km is `1.00km`
+The km value is in **hundredths** and the AU value in **thousandths**:
+`0x8604/05` expand through FF80 index 3 (`F1115`) to `DATA_007282/283`,
+whose FF30 writers are `FUNC_001381_FF30Write2dpFracV1` for the km string and
+`FUNC_001377_StringConvertFraction` with three places for AU. The suffix is
+concatenated with no space, and trailing zeros stay: `5400` AU is `5.400AU`,
+`5` AU is `0.005AU`, `100` km is `1.00km`
 (`ffedat.asm:18889-18915`). The on-view string starts with an ignored 0x81
 byte and a newline (`0x0d`), so the text sits 10 rows below F1100's
 `target - 5` origin: `(x-5, y+5)`. The off-view strings are
@@ -533,8 +534,9 @@ state-rules level (see `docs/notes/npc.md`); decide whether to port the
 target-computer equipment and the auto-targeter arming that switches
 F1113/F1114's tunnels on (the port draws them only when the targeter flags are
 set), missiles, and a shield generator for the player (the AI's fire is lethal in
-two hits without one). F1100's per-target text colour, two-decimal km/AU format
-and off-view arrow forms are ported; the port's own lock brackets are gone. For
+two hits without one). F1100's per-target text colour, two-decimal km /
+three-decimal AU format and off-view arrow forms are ported; the port's own
+lock brackets are gone. For
 the effects, decide whether their lifetimes should follow the
 original's AI timers (F764/F769/F927) rather than the port's per-effect seconds,
 and whether the model-155 explosion keeps the `EXPLOSION_MASS` word `0x4000`

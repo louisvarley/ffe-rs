@@ -1,4 +1,4 @@
-# F1100 target display: green lock boxes and `5.40AU`
+# F1100 target display: green lock boxes and `5.400AU`
 
 Source: DOS FFE `FUNC_001099` / `FUNC_001100` (`ffe.asm:80555-81340`) and the
 strings at `ffedat.asm:18889-18915`. The target colour is a COLPAL index:
@@ -23,11 +23,11 @@ Port test frames from the pre-change tree:
 
 ## After
 
-`cargo test -p ffe-rs --test combat_view target_lock_uses_f1100s_green_and_two_decimal_au -- --ignored`
+`cargo test -p ffe-rs --test combat_view target_lock_uses_f1100s_green_and_three_decimal_au -- --ignored`
 with `FFE_WORLD_CACHE=data.bin` and `FFE_SHOT_DIR=docs/evidence/lockon`:
 
 - `after-lock-nav-green.png`, `after-lock-nav-green-crop.png`: four nested
-  green tunnel boxes (0x11), green `5.40AU` one 10-row line below the target at
+  green tunnel boxes (0x11), green `5.400AU` one 10-row line below the target at
   `(x-5, y+5)`. This is the owner's original layout.
 - `after-nav-cursor-crop.png`: F1111's navigation auto-targetter box, also
   green 0x11.

@@ -188,7 +188,7 @@ fn velocity_marker_and_range_text_follow_f1112_f1100() {
     draw(&mut screen, &state, views, None);
     let ranged = screen.logical_pixels().to_vec();
     save(&screen, "combat-range.ppm");
-    // The original's leading newline puts "5.40AU" one 10-row line below the
+    // The original's leading newline puts "0.540AU" one 10-row line below the
     // target's -5 origin: x=155, y=84.
     assert!(
         changed(&right, &ranged, 150, 190, 82, 94) > 5,
@@ -212,7 +212,7 @@ fn velocity_marker_and_range_text_follow_f1112_f1100() {
 
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
-fn target_lock_uses_f1100s_green_and_two_decimal_au() {
+fn target_lock_uses_f1100s_green_and_three_decimal_au() {
     let cache = cache();
     let mut screen = Screen::new(&cache).unwrap();
     let mut state = flight();
@@ -248,7 +248,7 @@ fn target_lock_uses_f1100s_green_and_two_decimal_au() {
     let base = screen.logical_pixels().to_vec();
 
     // F1100/F1113 for a navigation target: the four tunnel boxes and the range
-    // text share colour 0x11. The text is the original's "5.40AU", one line
+    // text share colour 0x11. The text is the original's "0.540AU", one line
     // under the target (x 155, y 84).
     screen.target_hud = Some(TargetHud {
         x: 160,
@@ -270,7 +270,7 @@ fn target_lock_uses_f1100s_green_and_two_decimal_au() {
     save(&screen, "combat-lock-nav-green.ppm");
     assert!(
         changed(&base, &nav, 150, 195, 82, 94) > 5,
-        "the green 5.40AU text did not draw under the target"
+        "the green 0.540AU text did not draw under the target"
     );
     for y in 82..94 {
         for x in 150..195 {
