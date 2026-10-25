@@ -13,6 +13,8 @@
 
 extern int asmmain(int argc, char **argv);
 extern unsigned char ref_state[];
+extern unsigned char *ref_pl_object_list;
+extern void ref_launch_missile(void);
 extern unsigned long ref_rng(void);
 extern void ref_timer_advance(void);
 extern unsigned long ref_system_counter, ref_accel_counter, ref_time_accel;
@@ -480,6 +482,7 @@ static unsigned long frames, limit = 32, milliseconds, clock_reads, blits;
 static int sent_accept;
 static int state_mode, vector_mode, sent_start;
 static int state_combat_mode;
+static int missile_probe_mode;
 /* --game-frame <frames> <key> [<key>...]: the real game from the new game on, keys sent by scan code every 40 frames after frame 200, the 320x200 frame and palette written to game-frame.bin at the end. */
 static int game_frame_mode;
 static unsigned long game_keys[16], game_key_count, game_key_next, game_key_frame = 200;
@@ -617,6 +620,64 @@ void TimerFrameUpdate(void)
     if (game_frame_mode) {
         /* a frame hash only: the trace stays small */
         printf("{\"frame\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+    } else if (missile_probe_mode) {
+        /* F1096/F941 from the executed game: set the pylon word and the combat
+           target, call the launch, then print the object slots' model/control/
+           AI/owner/target/position/velocity/age. */
+        if (frames == 200) {
+            unsigned player = state_u32(0xc0);
+            unsigned char *list = ref_pl_object_list;
+            unsigned target = 0, i;
+            for (i = 0x72; i > 0; --i) {
+                unsigned char *o = list + i * 0x152 + 0x74;
+                unsigned model;
+                if (i == player || o[0x87] == 0) continue;
+                model = o[0x82] | o[0x83] << 8 | o[0x84] << 16 | o[0x85] << 24;
+                if (model == 0) continue;
+                target = i;
+                break;
+            }
+            ref_state[0xc4] = 1; /* DATA_008858, the pylon to launch */
+            ref_state[0xed] = (unsigned char)target; /* DATA_008875 */
+            fprintf(stderr, "missile-probe: player %u, target %u\n", player, target);
+            if (target != 0) ref_launch_missile();
+        }
+        if (frames >= 199) {
+            unsigned player = state_u32(0xc0);
+            unsigned char *player_object = (unsigned char *)state_u32(0xc8);
+            unsigned char *list = ref_pl_object_list;
+            unsigned i;
+            printf("{\"frame\":%lu,\"player\":%u,\"player_pylons\":[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u],\"objects\":[",
+                   frames, player,
+                   player_object[0xd6], player_object[0xd7], player_object[0xd8], player_object[0xd9],
+                   player_object[0xda], player_object[0xdb], player_object[0xdc], player_object[0xdd],
+                   player_object[0xde], player_object[0xdf]);
+            {
+                int first = 1;
+                for (i = 1; i <= 0x72; ++i) {
+                    unsigned char *o = list + i * 0x152 + 0x74;
+                    unsigned long long px, py, pz;
+                    if (o[0x87] == 0) continue;
+                    memcpy(&px, o + 0x3e, 8);
+                    memcpy(&py, o + 0x46, 8);
+                    memcpy(&pz, o + 0x4e, 8);
+                    printf("%s{\"index\":%u,\"model\":%lu,\"control\":%u,\"ai\":%u,\"owner\":%u,\"target\":%u,"
+                           "\"pos\":[%lld,%lld,%lld],\"vel\":[%ld,%ld,%ld],\"age\":%u}",
+                           first ? "" : ",", i,
+                           (unsigned long)(o[0x82] | o[0x83] << 8 | o[0x84] << 16 | o[0x85] << 24),
+                           (unsigned)o[0x87], (unsigned)o[0xff], (unsigned)o[0x100], (unsigned)o[0xfe],
+                           (long long)px, (long long)py, (long long)pz,
+                           (long)(o[0x8c] | o[0x8d] << 8 | o[0x8e] << 16 | o[0x8f] << 24),
+                           (long)(o[0x90] | o[0x91] << 8 | o[0x92] << 16 | o[0x93] << 24),
+                           (long)(o[0x94] | o[0x95] << 8 | o[0x96] << 16 | o[0x97] << 24),
+                           (unsigned)(o[0x9e] | o[0x9f] << 8));
+                    first = 0;
+                }
+            }
+            printf("]}\n");
+            fflush(stdout);
+        }
+        if (frames + 1 >= limit) exit(0);
     } else if (state_combat_mode) {
         unsigned long player_pointer = state_u32(0xc8);
         if (frames >= 160 && player_pointer != 0) {
@@ -5571,7 +5632,8 @@ int main(int argc, char **argv)
         return 2;
     }
     state_combat_mode = argc == 3 && !strcmp(argv[1], "--state-combat");
-    state_mode = argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode);
+    missile_probe_mode = argc == 3 && !strcmp(argv[1], "--missile-probe");
+    state_mode = argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode);
     if (argc != 2 && !state_mode)
         fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --vectors | --font | --blit | --models");
     count = argv[state_mode ? 2 : 1];
@@ -5585,3 +5647,4 @@ int main(int argc, char **argv)
     fail("JJFFE returned before the requested frame bound");
     return 2;
 }
+

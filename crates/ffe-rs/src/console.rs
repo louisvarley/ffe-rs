@@ -553,3 +553,29 @@ pub fn acceleration_for_digit(digit: char) -> Option<usize> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn f1120_draws_the_missile_pylons_from_the_d6_words() {
+        let mut systems = ShipSystems {
+            slots: [0x82, 0x82, 0, 0, 0, 0, 0, 0, 0, 0],
+            ..ShipSystems::default()
+        };
+        let mut console = Console::new();
+        console.apply_engines_off_page(&systems);
+        // The two 0x82 words show icons 0x3b/0x3c with image 2 (& 0xf).
+        assert!(console.is_visible(0x3b));
+        assert!(console.is_visible(0x3c));
+        assert_eq!(console.buttons[0x3b].cur, 2);
+        assert_eq!(console.buttons[0x3c].cur, 2);
+        assert!(!console.is_visible(0x3d));
+        // The 0x4f lamp is hidden while DATA_007247 (the missile lock) is set.
+        assert!(console.is_visible(0x4f));
+        systems.data_247 = true;
+        console.apply_engines_off_page(&systems);
+        assert!(!console.is_visible(0x4f));
+    }
+}

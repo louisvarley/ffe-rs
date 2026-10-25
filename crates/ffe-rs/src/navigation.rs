@@ -687,6 +687,11 @@ pub struct Navigator {
     /// The id of the ship locked as the target (F1020's target byte for ships;
     /// the port keeps bodies in `locked` and ships here).
     pub ship_lock: Option<u32>,
+    /// The combat target (`DATA_008875`) the missile lock-on uses. F1096/F941
+    /// launch at this target, not at the navigation target `ship_lock`.
+    pub missile_lock: Option<u32>,
+    /// The missiles in flight (F941 objects, model 4..13).
+    pub missiles: crate::missile::MissileField,
     /// The system index the traffic was spawned for: a killed ship is not
     /// restored until the system is entered again.
     spawned: Option<usize>,
@@ -901,6 +906,8 @@ impl Navigator {
             traffic: HashMap::new(),
             ships: Vec::new(),
             ship_lock: None,
+            missile_lock: None,
+            missiles: crate::missile::MissileField::default(),
             spawned: None,
             sequence: None,
             takeoff: None,
@@ -1385,6 +1392,8 @@ impl Navigator {
             |model| crate::ships::npc_spec(cache, model),
         );
         self.ship_lock = None;
+        self.missile_lock = None;
+        self.missiles.clear();
         self.spawned = Some(self.current);
         !self.ships.is_empty()
     }
@@ -1405,6 +1414,48 @@ impl Navigator {
         {
             self.ship_lock = None;
         }
+    }
+
+    /// F941: put a missile in flight at the combat target. The caller has
+    /// already taken the pylon word from `Combat`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_missile(
+        &mut self,
+        spec: ffe_core::missile::Spec,
+        code: u8,
+        owner: u32,
+        target: u32,
+        position: [i64; 3],
+        axes: [[f64; 3]; 3],
+        pylon: usize,
+        launcher_radius: i64,
+    ) {
+        self.missiles.launch(
+            spec,
+            code,
+            owner,
+            Some(target),
+            position,
+            axes,
+            pylon,
+            launcher_radius,
+        );
+    }
+
+    /// One frame of missiles: F758/F717's tracking, the fuse and F953's damage.
+    /// The combat target is cleared when its ship is gone.
+    pub fn tick_missiles(
+        &mut self,
+        seconds: f64,
+        _player: [i64; 3],
+    ) -> Vec<crate::missile::MissileEvent> {
+        if self
+            .missile_lock
+            .is_some_and(|id| !self.ships.iter().any(|ship| ship.id == id && ship.alive()))
+        {
+            self.missile_lock = None;
+        }
+        self.missiles.tick(seconds, &mut self.ships)
     }
 
     /// The locked NPC ship, if one is.

@@ -11,6 +11,7 @@ pub mod landing;
 pub mod laser;
 pub mod lift;
 pub mod market;
+pub mod missile;
 pub mod model;
 pub mod model_animation;
 pub mod model_commands;

@@ -13,6 +13,7 @@ pub mod hud;
 pub mod indexed;
 pub mod input;
 pub mod messages;
+pub mod missile;
 pub mod model_lab;
 pub mod model_viewer;
 pub mod navigation;
