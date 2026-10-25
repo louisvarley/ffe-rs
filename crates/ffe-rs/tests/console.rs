@@ -151,18 +151,25 @@ fn the_right_hand_buttons_are_the_originals_table_entries() {
 #[test]
 fn the_navigation_list_rows_are_the_originals_marker_hot_areas() {
     use ffe_rs::screen::Screen;
-    // F1099: markers at (5, 5+15r) and (230, 5+15r), 10 pixels wide and high.
-    assert_eq!(Screen::place_row(5, 5), Some(0));
-    assert_eq!(Screen::place_row(15, 15), Some(0));
-    assert_eq!(Screen::place_row(5, 20), Some(1));
+    // F1099: markers at (10, 5+15r) and (230, 5+15r), 10 pixels wide and high.
+    assert_eq!(Screen::place_row(10, 5), Some(0));
+    assert_eq!(Screen::place_row(20, 15), Some(0));
+    assert_eq!(Screen::place_row(10, 20), Some(1));
     assert_eq!(Screen::place_row(230, 5), Some(9));
     assert_eq!(Screen::place_row(240, 20), Some(10));
-    assert_eq!(Screen::place_row(5, 125), Some(8));
+    assert_eq!(Screen::place_row(10, 125), Some(8));
     assert_eq!(Screen::place_row(230, 140), None);
     // The name to the right is not a button, unlike the ffe-rs system map.
-    assert_eq!(Screen::place_row(16, 5), None);
+    assert_eq!(Screen::place_row(21, 5), None);
     assert_eq!(Screen::place_row(241, 5), None);
     assert_eq!(Screen::place_row(100, 5), None);
-    assert_eq!(Screen::place_row(4, 5), None);
-    assert_eq!(Screen::place_row(5, 4), None);
+    assert_eq!(Screen::place_row(9, 5), None);
+    assert_eq!(Screen::place_row(10, 4), None);
+    // The two columns split at nine rows, as the original's start guide's
+    // "first column ... below Dublin Citadel" and the manual's Gateway frame.
+    assert_eq!(Screen::place_cell(0), Some((10, 5)));
+    assert_eq!(Screen::place_cell(8), Some((10, 125)));
+    assert_eq!(Screen::place_cell(9), Some((230, 5)));
+    assert_eq!(Screen::place_cell(17), Some((230, 125)));
+    assert_eq!(Screen::place_cell(18), None);
 }

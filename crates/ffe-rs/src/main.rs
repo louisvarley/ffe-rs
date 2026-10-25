@@ -3665,7 +3665,10 @@ fn run() -> Result<(), String> {
                 };
                 screen.draw_nav_list(&rows, &detail);
             } else if nav.view == NavView::Places {
-                // F1099's own list: markers and names only, over the view.
+                // F1099's own list: markers and names only, over the view. It is
+                // drawn after `screen.draw` (F1099's HUD and F272's message
+                // window), so no console writing can cover it; its rows end at
+                // y 133, above F272's window at y 158.
                 screen.draw_places(&nav.lines(ship));
             } else {
                 screen.draw_map(

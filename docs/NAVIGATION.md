@@ -54,10 +54,13 @@ The game starts docked at the first station of Sol (L launches, which puts the s
   +/- zoom (Shift slower), dragging turns the view, C returns to your system, H or Enter jumps to the selected star if it is
   one of the systems on offer, G closes. The jump is the hyperdrive's as below; the list of systems is gone from the playable.
 - The console's navigation-computer icon (or N): the original's list of the places in this system — its
-  stations and starports, two columns of nine with the original marker bitmap and names. A click on a marker row
-  (only the marker is a hot area, as in F1099) locks that body and engages the autopilot. Left/Right (or Page
-  Up/Down) page it if a generated system has more than 18 places. Tab remains the ffe-rs system map of every body:
-  a click on a row (or Enter) engages the autopilot to it and closes the list. Backspace turns the autopilot off.
+  stations and starports, two columns of nine (markers at x 10 and 230, names at x 25 and 245, 15-pixel rows
+  from y 5) with the original marker bitmap and green colour 17, over the view and with no panel. A click on
+  a marker row (only the marker is a hot area, as in F1099) locks that body and engages the autopilot.
+  Left/Right (or Page Up/Down) page it if a generated system has more than 18 places. Tab remains the ffe-rs
+  system map of every body: a click on a row (or Enter) engages the autopilot to it and closes the list.
+  Backspace turns the autopilot off. See `docs/notes/labels.md` and `docs/evidence/places/` (the original's
+  Gateway frame from the manual).
 - The labels icon or L toggles the original's text labels: the names of the system's bodies over the flight view
   (colour 15, at the object's screen position). The console icon lights while they are on.
 - The top bar's button changes between modern and classic controls (modern by default; F3 too). Classic is the original's keys: Enter/Shift set speed, Z/A pitch, comma/period yaw, [ ] roll. Modern adds W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll).

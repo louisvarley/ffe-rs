@@ -1865,25 +1865,26 @@ impl Screen {
         (row < 9).then_some(column * 9 + row)
     }
 
+    /// The top-left corner of F1099's list entry `index`: nine rows of fifteen
+    /// pixels down the first column from (10, 5), then the second from x 230
+    /// (ffe.asm 80515-80516, 80575-80579). `None` past the original's eighteen
+    /// marker hot areas (`0xd1..=0xe2`).
+    pub fn place_cell(index: usize) -> Option<(i32, i32)> {
+        const COLUMNS: [i32; 2] = [10, 230];
+        const ROWS: usize = 9;
+        (index < COLUMNS.len() * ROWS)
+            .then(|| (COLUMNS[index / ROWS], 5 + 15 * (index % ROWS) as i32))
+    }
+
     /// The original navigation computer's marker under (x, y): F1099 adds a
-    /// hot area from the marker's top-left corner, 10 pixels wide and high
-    /// (ffe.asm 80536-80551), in the first column at x 5..=15 and the second
+    /// hot area at the marker's top-left corner, 10 pixels wide and high
+    /// (ffe.asm 80536-80551), in the first column at x 10..=20 and the second
     /// at x 230..=240, nine rows from y 5 every 15 pixels.
     pub fn place_row(x: i32, y: i32) -> Option<usize> {
-        if !(5..140).contains(&y) {
-            return None;
-        }
-        let row = ((y - 5) / 15) as usize;
-        if row >= 9 {
-            return None;
-        }
-        if (5..=15).contains(&x) {
-            Some(row)
-        } else if (230..=240).contains(&x) {
-            Some(9 + row)
-        } else {
-            None
-        }
+        (0..18).find(|index| {
+            Self::place_cell(*index)
+                .is_some_and(|(cx, cy)| (cx..=cx + 10).contains(&x) && (cy..=cy + 10).contains(&y))
+        })
     }
 
     /// The navigation computer: a marker square and a name per body, nine rows in two
@@ -1917,13 +1918,13 @@ impl Screen {
     /// the name fifteen pixels to its right, nine rows of fifteen pixels from y 5,
     /// then a second column from x 230. It is drawn over the flight view (the
     /// original calls F1100 first and F1099 then draws only the markers and names),
-    /// with no title, selection, distance or background.
+    /// with no title, selection, distance or background. The rows all lie above
+    /// y 134, so F272's message window (y 159..199) and F1099's own Set/Act text
+    /// (y 148) cannot cover them.
     pub fn draw_places(&mut self, rows: &[String]) {
         for (index, name) in rows.iter().take(18).enumerate() {
-            let (x, y) = if index < 9 {
-                (5i32, 5 + 15 * (index as i32))
-            } else {
-                (230i32, 5 + 15 * ((index - 9) as i32))
+            let Some((x, y)) = Self::place_cell(index) else {
+                break;
             };
             if let Some(marker) = &self.marker {
                 marker.blit_colours(&mut self.frame, &self.palette, x, y);
