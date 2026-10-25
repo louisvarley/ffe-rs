@@ -277,7 +277,6 @@ fn the_flight_background_is_the_original_space_colour() {
             &state,
             ffe_rs::camera::ViewState::default(),
             None,
-            false,
             true,
             "test",
         );
@@ -306,7 +305,6 @@ fn the_black_space_colour_still_draws_the_stars() {
         &state,
         ffe_rs::camera::ViewState::default(),
         None,
-        false,
         true,
         "test",
     );
@@ -321,7 +319,6 @@ fn the_black_space_colour_still_draws_the_stars() {
         &state,
         ffe_rs::camera::ViewState::default(),
         None,
-        false,
         true,
         "test",
     );

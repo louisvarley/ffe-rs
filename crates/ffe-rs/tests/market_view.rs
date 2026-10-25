@@ -109,14 +109,7 @@ fn the_market_screen_draws() {
             mode: Mode::Docked,
             ..Flight::default()
         };
-        screen.draw(
-            &state,
-            ViewState::default(),
-            None,
-            false,
-            true,
-            "Bought 3 t.",
-        );
+        screen.draw(&state, ViewState::default(), None, true, "Bought 3 t.");
         if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
             let mut ppm = b"P6\n320 200\n255\n".to_vec();
             for p in screen.logical_pixels() {

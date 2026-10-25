@@ -11,10 +11,10 @@ the current experimental example is not that faithful renderer.
 > autopilot, and the galaxy map drawn the original's way (its dots match the
 > executed original pixel for pixel). Labels, 3D text, lines, curves, flat faces
 > and polygon spans use the original's rasterisers.
-> The **F12 model viewer** (cache v29) runs every imported ship, station and
-> object program through the verified executor and draws its faces, textured
-> faces, complex polygons, lines, points, curves, text, labels and child models
-> in the original render order.
+> The **developer model viewer** (`--dev`, Ctrl+F12) (cache v29) runs every
+> imported ship, station and object program through the verified executor and
+> draws its faces, textured faces, complex polygons, lines, points, curves, text,
+> labels and child models in the original render order.
 > **449 of the 466 original model programs** execute natively and match the
 > original command for command; the rest are slots the original itself cannot run.
 > Still unfinished: curved surfaces (F1876) and therefore a planet in the flight
@@ -47,6 +47,26 @@ startup fails, the console waits for Enter so the error can be read. No original
 assets, reference source or x86 executable are linked into the native game
 binary. Do not distribute the cache or captures.
 
+### Developer options
+
+The player build has no help page, model viewer, model lab, screenshot key,
+scenario reset menu or prototype-flight toggle. The reproducible capture paths
+remain command-line flags: `--smoke-frames N` and `--capture*` (see the evidence
+notes). `--dev` (or `FFE_DEV=1`) additionally enables the developer inspection
+commands, none of which takes a source key:
+
+| Flag / key | Effect |
+|---|---|
+| `--dev` or `FFE_DEV=1` | enable the four commands below |
+| Ctrl+F11 | `shots/shot-NNNN.ppm` of the presented frame |
+| Ctrl+F12 | the model viewer |
+| Ctrl+Shift+F12 | the station model lab |
+| O | toggle the synthetic prototype flight model |
+
+`--skip-intro`, `--start 0..5|sol` and the `--capture*` flags are also developer
+inputs. They remain because the reference harness and the checked-in evidence
+use them; none adds a player-facing control.
+
 Build ID: **0.9 experimental**. Resizable 1280x960 initial window (4x, pixel-perfect, 1:1
 nearest, original 4:3 pixels). Rendering uses a **320x200 logical canvas**, with
 320x158 view plus console starting at row 158, nearest sampling and 4:3
@@ -75,23 +95,22 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 
 | Action | Binding |
 |---|---|
-| Help / named reset scenarios / input preset | ? / F2 / F3 |
+| Status page (ship systems and equipment) | F2 |
 | Systems map (choose a star with the centre) / hyperspace to the chosen star | G / H |
 | Preference pages (graphic detail, space colour, sound, others, maps, port options) | Escape |
 | Display options (window scale 1x-6x, fit, filter, pixels, fullscreen) | Escape -> Port Options -> Display Options |
 | Fullscreen (port extension) | Alt+Enter |
 | Views (as the original): cycle / front / rear / turret / external; or click the console view icons (any window size) | F1 / F6 / F7 / F8 / F9 |
+| Missile view (with the viewer fitted and a missile in flight) | F10 |
+| Combat computer (source F11; view 6 is not ported, so it shows a note) | F11 |
+| Escape capsule (if fitted) | F12 |
 | External view: turn camera; zoom out / in (both of a pair resets) | arrows; + / - |
 | Change ship (the original's named craft) | Page Up / Page Down |
-| Original flight model on / off (set speed, original steering and physics) | O |
+| Original flight model on / off (set speed, original steering and physics) | automatic in flight; O is developer-only |
 | Original flight: raise / lower the set speed | Enter / Shift |
 | Original flight: pitch, yaw, roll | Z A, `,` `.`, `[` `]` |
 | Time acceleration 1x / 10x / 100x / 1000x / 10000x (original model) | 6 7 8 9 0, or click the meter at the lower left |
 | Pause mark on the meter | click it (or P) |
-| Station model lab (pauses gameplay) / return | Shift+F12 |
-| Model viewer, every imported model (pauses gameplay) / return | F12 |
-| Viewer: previous / next model; turn; zoom; test input | Page Up / Page Down; arrows; + / -; 0 / 5 / 9 |
-| Viewer: original animation clock / landing gear or door / time rate / engines off, half, full | C / G / T / E |
 | Launch / request or cancel docking | L / D |
 | Classic thrust / reverse; yaw; pitch; roll | Enter / Shift; `.` `,`; A / Z; `]` `[` |
 | Classic steering by mouse | hold the right button and move the mouse |
@@ -110,10 +129,12 @@ persisted in `saves/controls.cfg` (`docs/CONTROLS.md` has the full table and the
 routing audit). The port-only display choices are persisted in
 `saves/display.cfg`; full-screen is session-only so a launch always starts in a
 window. Remapping and the other preference values are not persisted.
-Help, scenario menus, the model lab, pause, the preference pages and focus loss
-stop the simulation; refocus and press controls afresh. No audio, combat,
-planets, hyperspace, time acceleration, old-save import or Enhanced/HD-pack
-toggle is implemented.
+Pause, the preference pages, focus loss and the developer-only model lab/viewer
+stop the simulation; refocus and press controls afresh. The player build has no
+help page or debug keys: F1 is the source view cycle. `--dev` (or `FFE_DEV=1`)
+enables Ctrl+F11 screenshot, Ctrl+F12 model viewer, Ctrl+Shift+F12 model lab and
+O prototype flight for development only. No audio, combat, planets, hyperspace,
+time acceleration, old-save import or Enhanced/HD-pack toggle is implemented.
 
 ### Display options (port extension)
 
@@ -237,24 +258,23 @@ The gameplay cube stays labelled synthetic until those are implemented.
 
 ### Short owner playtest (about 3 minutes)
 
-1. **Start and trade:** run the command above; ? closes Help. Press B:
+1. **Start and trade:** run the command above. Press B:
    credits **1000 -> 990**, cargo **0 -> 1**. Press N: **999**, cargo **0**.
    Look for the original proportional text and grey/red console at the bottom.
 2. **Launch and fly:** L launches. Briefly hold W (about 0.4 seconds) to
    reach roughly **12 units/s**; release to coast. Try the arrow keys,
    then X to brake. F3 selects Classic controls (hold the right mouse button and
-   move to steer; Enter raises thrust). F1 lists both presets.
-3. **Easy docking check:** F2, then **2** resets to **Approach**. Press D and
-   do not thrust/turn: it docks in about **20 seconds**. This reset discards
-   unsaved progress. The real launch route is also flyable: from L, face the
-   station, request docking and coast below 20 units/s until within 80 units.
+   move to steer; Enter raises thrust). F1 cycles the original's views.
+3. **Status and docking:** F2 opens the ship-systems page (F2 returns).
+   Request clearance with D near a station and dock under 250 m/s within the
+   slot's alignment corridor. The real launch route is also flyable: from L, face
+   the station, request docking and coast below 20 units/s until within 80 units.
    Alignment must be within about 18 degrees; unsafe close approaches reset
    the ship with an explicit warning, not damage/death.
 4. **Persistence:** while docked, B buys one; F5 saves. Quit, launch again,
-   ? closes Help, F9 restores the saved credits/cargo. F2 then 1/2/3 resets
-   the live scenario, never deletes saves.
+   Shift+F5 restores the saved credits/cargo. Saves are never deleted by a reset.
 
-Saves are immutable numbered JSON snapshots under local `saves/`. F9 loads the
+Saves are immutable numbered JSON snapshots under local `saves/`. Shift+F5 loads the
 highest number. Invalid/newer-version saves report an error without replacing
 live state. Originals are never read as saves or overwritten. Prototype saves
 are a separate format, not a promise of compatibility with the eventual game.
@@ -267,9 +287,10 @@ needs the desktop, takes about a minute, cleans its isolated cache/save copies):
 .\tools\test-playable.ps1
 ```
 
-This exercises actual window input, model-lab pausing/action/save isolation,
-trade, launch/thrust/docking, both presets,
-braking/pause, corrupt-load rejection and persistence across a new process.
+This exercises actual window input, the classic/modern presets, trade,
+launch/thrust/docking, braking/pause, corrupt-load rejection and persistence
+across a new process. Developer-only inspection commands are not part of this
+player check.
 Keep the desktop available: it explicitly acquires/verifies both foreground and
 the target thread's active/focused window, and fails if Windows refuses focus.
 The coast check polls actual saved docking state rather than assuming 40 seconds

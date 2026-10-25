@@ -189,12 +189,12 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 30 | Missile / combat-computer views | `F1099` views 5/6; `F1110`; `views.md` | **missing** | `console.rs` messages only | Need equipment/missiles/targeting; buttons hidden |
 | 31 | Docked/landed screens | FFE station services; `F2` screens | partial (port screen) | `station.rs`, `screen.rs` `draw_dock` | Port's own market/status box; no original station/cockpit screens |
 | 32 | Galaxy/system maps | `F840` etc.; `galaxy-map.md`; `NAVIGATION.md` | done (scene), partial (console) | `galaxy_map.rs`, `screen.rs` | Map scene verified; the clock is now the original's, the rest of the map text is the port's |
-| 33 | Damage/death/escape capsule | `F1104` death; `F1098` capsule; `F12` | partial | `Flight::{ensure_damage, take_damage, hit, destroyed}`, `laser::apply_damage`, NPC fire, `ffe_core::effects`; `npc_ai`/`effects_view` frames | F953's shields-then-hull damage and destruction are live (NPC fire calls `take_damage`; a destroyed player is recovered at the nearest starport); F939's hit particle, F942's explosion and F926's debris draw. F1104's death screen, F1098's capsule, recharge/repair and the original game-over sequence are missing; F12 is the model viewer |
+| 33 | Damage/death/escape capsule | `F1104` death; `F1098` capsule; `F12` | partial | `Flight::{ensure_damage, take_damage, hit, destroyed}`, `laser::apply_damage`, NPC fire, `ffe_core::effects`; `npc_ai`/`effects_view` frames | F953's shields-then-hull damage and destruction are live (NPC fire calls `take_damage`; a destroyed player is recovered at the nearest starport); F939's hit particle, F942's explosion and F926's debris draw. F1104's death screen, F1098's capsule, recharge/repair and the original game-over sequence are missing; F12 is the source escape capsule |
 | 34 | Hyperspace countdown | `F908-F910`; `DEVIATIONS.md` EXP-007 | **missing** | `main.rs` immediate jump | No countdown UI/scene |
 | 35 | Autopilot indicator | `F1099` 0x8618 at (2,139); `F1116` 0x47 | done | `hud.rs`, `screen.rs`, `main.rs`; `dashboard_view` local frames | "Autopilot" at (2,139) and lamp 0x47 when the autopilot targets; the nav target's tunnels are F1100/F1113's |
 | 36 | Text metrics / clipping | `F1586` `ffe.asm:93785`; font asset 9 rows | partial | `indexed.rs`, `messages.rs` wrap; `dashboard_view` local frames | The console log uses the 124-pixel wrap and y 158 clip; other port text still wraps by 308 px at x3 with 9/10 px spacing |
 | 37 | Hot areas | `DATA_007684` `ffedat.asm:23641`; `F1439`; mouse poll `ffe.asm:86045-86070` | done (22/22) | `console.rs`; `tests/console.rs` | Exact coordinates/order; clicks without a handler keep only the transient note, not a dated F271 entry |
-| 38 | Keys | `F1056`; `DATA_007688`; JJFFE 6-0 | partial | `views.md`; `main.rs` | F2 (status page) added, but its DOS mapping is unverified; F3 still toggles Modern/Classic (the original F3 is the map, available by click); F10 unused; F11/F12 repurposed |
+| 38 | Keys | `F1056`; `DATA_007688`; JJFFE 6-0 | partial | `views.md`; `main.rs` | F2 (status page) added, but its DOS mapping is unverified; F3 still toggles Modern/Classic (the original F3 is the map, available by click); F1/F6-F10, F12 and plain F4 match; F11 has no action until combat view 6 is ported; the old dev keys are `--dev` Ctrl chords |
 | 39 | Port-only top bar/status block/map buttons | none | retired | `screen.rs` | Removed in the HUD merge; the original HUD, message window and scanner own those rows |
 | 40 | Radio groups | `F262` `ffe.asm:20369-20413`; table | done | `console.rs` `F262`, `tests/console_table.rs` | Set-image-with-radio-reset implemented over the 82-record table |
 | 41 | Contact colours | `DATA_008683` `ffedat.asm:27855`; `F275` | done | `scanner.rs` `CONTACT_COLOURS`, unit test | 19-colour table from F259, indexed by the mass word `>> 4`; default 0x0f |
@@ -638,7 +638,7 @@ the user asked; the console record is the original's.
 | **Docked** | separate station/cockpit screens; the console art is shared | port station screens; console buttons suppressed (`screen.rs`) |
 | **Landed (rough/normal)/take-off** | strings `0x8614-0x8617`; surface state; console | surface landing is F575's settled contact with no landed screen; the new game's open-air starport pad takes off through F1013 `0x24` -> F1031 `0x26` -> `0x00` |
 | **Map** | F3 galaxy map, system list, console date/name/type/fuel (`galaxy-map.md`, `NAVIGATION.md`) | galaxy scene + system list ported; the console clock is the original's, the rest of the map text is the port's |
-| **Damage/death** | hull/shield %, `F1104` death to external view, `F1098` escape capsule (F12) | no player damage; hull reads 100.0%, shields hidden; F12 is the model viewer |
+| **Damage/death** | hull/shield %, `F1104` death to external view, `F1098` escape capsule (F12) | no player damage; hull reads 100.0%, shields hidden; F12 is the source escape capsule |
 | **Hyperspace** | `F908-F910` countdown/scene; console | immediate jump (`main.rs`, EXP-007) |
 | **Autopilot** | `0x8618` at (2,139), lamp `0x47`, targeter boxes | `0x8618` at (2,139) when the autopilot targets; lamp 0x47; nav tunnels in colour 0x11 |
 
@@ -659,9 +659,12 @@ the user asked; the console record is the original's.
   Shift+F1..F5. The port uses 6-0. JJFFE also moves F to FPS, R to refuel,
   `;`/Insert to ECM and adds numpad thrust (`jjffe28.txt`).
 - **Port key deviations**: F3 toggles modern/classic controls
-  (`main.rs:513`) although the original F3 is the map; F10/F11/F12 are
-  repurposed; F2/F5 are unused. F1/F6/F7/F9 and F8 match. Plain F4 is the
-  station/comms action (and launches on a pad via Tab/F1056 action 9).
+  (`main.rs`) although the original F3 is the map; F2 is the port's status page
+  (DOS mapping unverified). F1/F6-F10 match the source (F10 is now the missile
+  view). F11 is left for the unported combat computer and F12 is the source
+  escape capsule; the old F11/F12 dev keys live behind `--dev` Ctrl chords.
+  Plain F4 is the station/comms action (and launches on a pad via Tab/F1056
+  action 9).
 - **Redraw**: original `F262` changes an image, `F263/264` visibility,
   `F1439` hot areas, and `F1116`/`F991`/`F1120` re-derive state after mode,
   target, equipment or engine changes; pixels are redrawn by `F272` each
@@ -907,8 +910,8 @@ port block are **done** (`hud`, `combat` and earlier rounds). What remains:
    station screens or only the flight console.
 6. **Right-hand buttons**: confirm the other branch's mapping for 0x0f-0x12
    (nav/labels/H/capsule) before table import fixes their state.
-7. **F12**: original escape capsule vs the port's model viewer; needs a
-   non-original key for the dev viewer.
+7. **F12**: resolved 2026-10-25 — F12 is the source escape capsule; the model
+   viewer is developer-only (`--dev`, Ctrl+F12).
 8. **Text fidelity**: accept a port wrap/colour approximation until
    `DATA_007648` and the upper palette are available, or block the HUD slice on
    them.

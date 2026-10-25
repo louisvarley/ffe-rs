@@ -166,14 +166,14 @@ fn system_traffic_contacts_tunnels_and_targeter_blink() {
     assert!(scanner::CONTACT_COLOURS.contains(&mark.colour));
 
     screen.scanner = Some(view.clone());
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "scanner-system.ppm");
     let with_contacts = screen.logical_pixels().to_vec();
     screen.scanner = Some(scanner::View {
         contacts: Vec::new(),
         ..view.clone()
     });
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "scanner-system-empty.ppm");
     let no_contacts = screen.logical_pixels().to_vec();
     assert!(
@@ -187,14 +187,14 @@ fn system_traffic_contacts_tunnels_and_targeter_blink() {
         contacts: Vec::new(),
         ..view.clone()
     });
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     let orientation_0 = screen.logical_pixels().to_vec();
     screen.scanner = Some(scanner::View {
         orientation: 4,
         contacts: Vec::new(),
         ..view.clone()
     });
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     assert!(
         changed(&orientation_0, screen.logical_pixels(), SCANNER_AREA) > 50,
         "the F273 orientation overlay did not change"
@@ -215,7 +215,7 @@ fn system_traffic_contacts_tunnels_and_targeter_blink() {
     screen.targeter = Some(targeter::Cursor::Combat);
     screen.blink = true;
     screen.tunnels = None;
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     let no_tunnels = screen.logical_pixels().to_vec();
     save(&screen, "scanner-blink-on.ppm");
     screen.tunnels = Some(targeter::Tunnels {
@@ -224,7 +224,7 @@ fn system_traffic_contacts_tunnels_and_targeter_blink() {
         base: targeter::tunnel_base(mantissa),
         colour: targeter::COMBAT_COLOUR,
     });
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "scanner-tunnels.ppm");
     let blink_on = screen.logical_pixels().to_vec();
     assert!(
@@ -234,7 +234,7 @@ fn system_traffic_contacts_tunnels_and_targeter_blink() {
 
     // F1111/F1023: the combat cursor blinks on the game second.
     screen.blink = false;
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "scanner-blink-off.ppm");
     assert!(
         changed(&blink_on, screen.logical_pixels(), CURSOR_AREA) > 10,
@@ -244,7 +244,7 @@ fn system_traffic_contacts_tunnels_and_targeter_blink() {
     // The navigation targetter is the box at (160,79), colour 0x11.
     screen.targeter = Some(targeter::Cursor::Navigation);
     screen.blink = true;
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "scanner-nav-cursor.ppm");
     assert!(
         changed(&blink_off, screen.logical_pixels(), CURSOR_AREA) > 10,
@@ -318,7 +318,7 @@ fn contacts_clip_to_the_ring_and_the_stalk_band() {
     assert!(marks.iter().all(|mark| (102..=192).contains(&mark.x)));
     screen.scanner = Some(view.clone());
     screen.systems.ca = 0x04;
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "scanner-clipped.ppm");
     let clipped = screen.logical_pixels().to_vec();
 
@@ -328,7 +328,7 @@ fn contacts_clip_to_the_ring_and_the_stalk_band() {
         contacts: Vec::new(),
         ..view
     });
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     let bare = screen.logical_pixels().to_vec();
     let mut differences = 0;
     for y in 0..200 {

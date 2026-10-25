@@ -45,7 +45,7 @@ fn the_map_draws() {
         mode: Mode::Flight,
         ..Flight::default()
     };
-    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
     if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
         let mut ppm = b"P6\n320 200\n255\n".to_vec();
         for p in screen.logical_pixels() {
@@ -117,7 +117,7 @@ fn the_map_destination_and_jump_frames() {
     });
     // The scene is deterministic: the same map state renders the same shapes.
     assert_eq!(shapes, map.render(&viewer, &tables).unwrap());
-    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
     save(&screen, "galaxy-map-destination.ppm");
     let before_system = nav.system_name().to_owned();
     let before_clock = nav.clock;
@@ -139,7 +139,7 @@ fn the_map_destination_and_jump_frames() {
             .describe(&viewer, Some(&details))
             .unwrap_or_default(),
     });
-    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
     save(&screen, "hyperspace-arrival.ppm");
     if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
         std::fs::write(

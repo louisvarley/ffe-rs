@@ -350,6 +350,42 @@ fn object_labels_follow_f989_bounds_and_f1108_position() {
 }
 
 #[test]
+fn f1_cycles_the_view_without_painting_the_removed_help_page() {
+    // F1 is the source view-cycle key; the port help page and its `?` binding
+    // are gone. This optional frame pair is the evidence capture:
+    // `FFE_WORLD_CACHE=<data.bin> FFE_RS_CLEANUP_CAPTURE=<dir> cargo test
+    //  -p ffe-rs --locked --test views f1_cycles`.
+    assert_eq!(
+        ffe_rs::input::view_command(minifb::Key::F1),
+        Some(ffe_rs::input::ViewCommand::Cycle)
+    );
+    let (Ok(cache_path), Ok(directory)) = (
+        std::env::var("FFE_WORLD_CACHE"),
+        std::env::var("FFE_RS_CLEANUP_CAPTURE"),
+    ) else {
+        return;
+    };
+    let cache = ffe_content::read(&std::fs::read(cache_path).unwrap()).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let viewer = ffe_rs::model_viewer::ModelViewer::new(&cache).unwrap();
+    let state = Flight::free_flight();
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut views = ViewState::default();
+    for (frame, name) in [(0, "f1-front.ppm"), (1, "f1-rear.ppm")] {
+        if frame > 0 {
+            views.mode = views.mode.next(2, 0);
+            assert_eq!(views.mode, ViewMode::Rear);
+        }
+        screen.draw(&state, views, Some(&viewer), true, "");
+        let mut ppm = b"P6\n320 200\n255\n".to_vec();
+        for pixel in screen.logical_pixels() {
+            ppm.extend([(*pixel >> 16) as u8, (*pixel >> 8) as u8, *pixel as u8]);
+        }
+        std::fs::write(std::path::Path::new(&directory).join(name), ppm).unwrap();
+    }
+}
+
+#[test]
 fn console_hot_areas_select_views() {
     assert_eq!(
         Screen::view_button(150, 170),

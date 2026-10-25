@@ -526,25 +526,28 @@ An experimental playable build now exists: run `tools/play.ps1`, or
 contains its actual controls and four short tests. It is an explicitly isolated
 prototype, not completion of the faithful slice. At the owner's request its default
 input is Modern (W/S and arrows), with the original's Classic scheme via F3
-(right-button mouse steering, Enter/Shift set speed; see `docs/CONTROLS.md`). Named F2 scenarios are Docked,
-Approach and Free Flight; F1 shows help. F5 creates a numbered native experimental
-snapshot; F9 loads the newest. No legacy save import, audio, remapping, HD packs
-or auto-conversion yet. Do not request tests for those absent features.
+(right-button mouse steering, Enter/Shift set speed; see `docs/CONTROLS.md`). F5
+creates a numbered native experimental snapshot; Shift+F5 loads the newest. The
+player build has no help page, scenario menu or debug keys: F1 is the source view
+cycle and F12 the escape capsule. Developer inspection (model viewer/lab,
+screenshot, prototype flight) is behind `--dev`/`FFE_DEV=1`. No legacy save
+import, audio, remapping, HD packs or auto-conversion yet. Do not request tests
+for those absent features.
 
 The checklist below remains the **eventual faithful-slice acceptance contract**.
 Automated numeric/importer/replay tests are the implementer's responsibility.
 
-Each test build must include `ffe-rs.exe`, a version/build ID, a Help/Controls
-screen showing actual bindings, and a Playtest menu with named deterministic
-starting scenarios and reset. No guessed key sequences or manual save editing.
+Each test build must include `ffe-rs.exe`, a version/build ID, controls
+documentation (`docs/CONTROLS.md`) showing actual bindings, and an optional
+`--dev` inspection mode. No guessed key sequences or manual save editing.
 Place an installed supported release in `game/` beside the executable, then run
 `.\ffe-rs.exe`. Do not put only the BIN/CUE image or patch installer in `game/`.
 The test sheet must identify which source hashes that build supports.
 
 | Test | Steps | Expected result | Owner time |
 |---|---|---|---|
-| 1. Import and start | First run from a fresh test folder; select the supplied Docked scenario. Relaunch once. | Clear progress/detected version; Classic cockpit appears; second run reuses cache. No source files changed. | 2 min |
-| 2. Launch, fly, dock | Reset Docked; launch with the binding shown in Help; turn/thrust, use time controls, then dock using the documented scenario route/autopilot. | Stable controls, readable HUD, no obvious jumps/collisions or docking failure. | 5 min |
+| 1. Import and start | First run from a fresh test folder, then relaunch. | Clear progress/detected version; Classic cockpit appears; second run reuses cache. No source files changed. | 2 min |
+| 2. Launch, fly, dock | Launch with L, turn/thrust, use time controls, then dock using the documented autopilot/docking route. | Stable controls, readable HUD, no obvious jumps/collisions or docking failure. | 5 min |
 | 3. Trade and save | In Docked, buy/sell one item; save to a new native slot; relaunch and load it. Once supplied, import a reference commander copy. | Credits/cargo/location persist; legacy import preserves supplied checkpoint values; original save untouched. | 3 min |
 | 4. Presets and audio | Switch Classic/Modern controls via Options, verify one remapped action, play the short music/effect preview and mute/unmute. | Both presets work; no stuck inputs, missing channels or unintended gameplay change. | 2 min |
 | 5. Live image pack (when available) | Load the small sample returned image pack; switch Classic/Enhanced twice during flight. Repeat with no pack. | Correct artwork/fallback, no restart, no position/time/cargo reset, no residual filtering in Classic; clear status without pack. | 3 min |

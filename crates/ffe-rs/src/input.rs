@@ -21,6 +21,57 @@ use crate::camera::ViewMode;
 use crate::flight::Controls as FlightControls;
 use crate::original_flight::Keys as OriginalKeys;
 
+/// The original's view keys (`DATA_007688` actions `0xf1`..`0xfa`). F1 cycles;
+/// F6-F10 select a view directly. F11 is the combat computer, not a view the
+/// port has, and F12 is the escape capsule, so neither is a debug key.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ViewCommand {
+    Cycle,
+    Front,
+    Rear,
+    Turret,
+    External,
+    Missile,
+}
+
+/// Map one flight key to its source view action. The caller applies the
+/// equipment/view gates for the missile view.
+pub fn view_command(key: Key) -> Option<ViewCommand> {
+    match key {
+        Key::F1 => Some(ViewCommand::Cycle),
+        Key::F6 => Some(ViewCommand::Front),
+        Key::F7 => Some(ViewCommand::Rear),
+        Key::F8 => Some(ViewCommand::Turret),
+        Key::F9 => Some(ViewCommand::External),
+        Key::F10 => Some(ViewCommand::Missile),
+        _ => None,
+    }
+}
+
+/// The port's developer-only controls. None are bound in a player build: the
+/// caller passes `--dev` or `FFE_DEV=1` to enable them, and every one uses a
+/// Ctrl chord (or O) so no source key is taken.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DevCommand {
+    Screenshot,
+    ModelViewer,
+    ModelLab,
+    PrototypeFlight,
+}
+
+pub fn dev_command(enabled: bool, key: Key, ctrl: bool, shift: bool) -> Option<DevCommand> {
+    if !enabled {
+        return None;
+    }
+    match key {
+        Key::F11 if ctrl && !shift => Some(DevCommand::Screenshot),
+        Key::F12 if ctrl && shift => Some(DevCommand::ModelLab),
+        Key::F12 if ctrl => Some(DevCommand::ModelViewer),
+        Key::O if !ctrl && !shift => Some(DevCommand::PrototypeFlight),
+        _ => None,
+    }
+}
+
 #[derive(Default)]
 pub struct HeldControls {
     held: Vec<Key>,
@@ -514,6 +565,54 @@ mod tests {
         assert_eq!(accumulator.packed(), 0);
         accumulator.update(step(true, 1, 0));
         assert_eq!(accumulator.packed(), 1);
+    }
+
+    #[test]
+    fn the_source_view_keys_are_unchanged_and_help_is_not_a_binding() {
+        assert_eq!(view_command(Key::F1), Some(ViewCommand::Cycle));
+        assert_eq!(view_command(Key::F6), Some(ViewCommand::Front));
+        assert_eq!(view_command(Key::F7), Some(ViewCommand::Rear));
+        assert_eq!(view_command(Key::F8), Some(ViewCommand::Turret));
+        assert_eq!(view_command(Key::F9), Some(ViewCommand::External));
+        assert_eq!(view_command(Key::F10), Some(ViewCommand::Missile));
+        // The retired port help key and the debug keys are not view actions.
+        assert_eq!(view_command(Key::Slash), None);
+        assert_eq!(view_command(Key::F11), None);
+        assert_eq!(view_command(Key::F12), None);
+    }
+
+    #[test]
+    fn developer_commands_require_the_dev_switch_and_never_take_a_source_key() {
+        // A player build has no debug bindings at all.
+        for (key, ctrl, shift) in [
+            (Key::F11, true, false),
+            (Key::F12, true, false),
+            (Key::F12, true, true),
+            (Key::O, false, false),
+        ] {
+            assert_eq!(dev_command(false, key, ctrl, shift), None);
+        }
+        // Enabled, the debug chord is Ctrl+F11 / Ctrl+F12 / Ctrl+Shift+F12.
+        assert_eq!(
+            dev_command(true, Key::F11, true, false),
+            Some(DevCommand::Screenshot)
+        );
+        assert_eq!(
+            dev_command(true, Key::F12, true, false),
+            Some(DevCommand::ModelViewer)
+        );
+        assert_eq!(
+            dev_command(true, Key::F12, true, true),
+            Some(DevCommand::ModelLab)
+        );
+        assert_eq!(
+            dev_command(true, Key::O, false, false),
+            Some(DevCommand::PrototypeFlight)
+        );
+        // Plain F11/F12 stay free for their source actions.
+        assert_eq!(dev_command(true, Key::F11, false, false), None);
+        assert_eq!(dev_command(true, Key::F12, false, false), None);
+        assert_eq!(dev_command(true, Key::F12, false, true), None);
     }
 
     #[test]

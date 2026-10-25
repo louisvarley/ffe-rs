@@ -116,7 +116,7 @@ fn draw(
         })
         .collect();
     screen.lasers = state.combat.lasers;
-    screen.draw(state, views, Some(viewer), false, true, "");
+    screen.draw(state, views, Some(viewer), true, "");
 }
 
 #[test]

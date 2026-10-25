@@ -155,12 +155,12 @@ fn system_ship_label_sits_at_the_projected_centre_in_the_fixed_font() {
     ships(&mut screen, &nav);
     screen.ships.clear();
     screen.labels.clear();
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     let empty = screen.logical_pixels().to_vec();
 
     // The ship's projected rect.
     ships(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     let ship_frame = screen.logical_pixels().to_vec();
     let ship_box = bounds(&empty, &ship_frame).expect("the ship drew");
     save(&screen, "label-ship.ppm");
@@ -171,7 +171,7 @@ fn system_ship_label_sits_at_the_projected_centre_in_the_fixed_font() {
         name: name.clone(),
         centre,
     }];
-    screen.draw(&state, labels_on, Some(&viewer), false, true, "");
+    screen.draw(&state, labels_on, Some(&viewer), true, "");
     let label_frame = screen.logical_pixels().to_vec();
     let label_box = bounds(&empty, &label_frame).expect("the label drew");
     save(&screen, "label-only.ppm");
@@ -200,10 +200,10 @@ fn system_ship_label_sits_at_the_projected_centre_in_the_fixed_font() {
     let mut far = state.clone();
     far.position = std::array::from_fn(|k| centre[k] + (state.position[k] - centre[k]) * 10.0);
     screen.labels.clear();
-    screen.draw(&far, views, Some(&viewer), false, true, "");
+    screen.draw(&far, views, Some(&viewer), true, "");
     let far_empty = screen.logical_pixels().to_vec();
     screen.labels = vec![BodyLabel { name, centre }];
-    screen.draw(&far, labels_on, Some(&viewer), false, true, "");
+    screen.draw(&far, labels_on, Some(&viewer), true, "");
     let far_frame = screen.logical_pixels().to_vec();
     let far_box = bounds(&far_empty, &far_frame).expect("the far label drew");
     let (fx, fy, _) = Screen::body_screen(&far, &views, Some(&viewer), centre, 0.0).unwrap();
@@ -275,7 +275,7 @@ fn several_ship_labels_and_a_label_at_the_view_edge() {
     });
     screen.target_damage = None;
     views.console.labels = true;
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "labels-several.ppm");
 
     // Every label's pen is F1108's projected point + (4, -4); the edge labels
@@ -339,14 +339,14 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
     });
     screen.lasers = [laser::PULSE_1MW, 0, 0, 0];
     ships(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "npc-system.ppm");
     let with_ships = screen.logical_pixels().to_vec();
 
     // Without the ships the view is empty sky plus labels/HUD; the ships add a
     // lot of pixels.
     screen.ships.clear();
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     let empty = screen.logical_pixels().to_vec();
     assert!(
         changed(&with_ships, &empty) > 50,
@@ -362,11 +362,11 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
     assert_eq!(ship.hit(50), laser::Damage::Shields);
     assert!(ship.flash > 0.0);
     ships(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "npc-hit.ppm");
     let hit_frame = screen.logical_pixels().to_vec();
     screen.ships[index].flash = false;
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     let no_flash = screen.logical_pixels().to_vec();
     assert!(
         changed(&hit_frame, &no_flash) > 3,
@@ -403,7 +403,7 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
         .unwrap()
         .alive());
     ships(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "npc-kill.ppm");
     let kill_frame = screen.logical_pixels().to_vec();
     assert!(
@@ -413,7 +413,7 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
     // The kill visuals are the effects, not a marker on the dead ship.
     screen.ships.clear();
     screen.effects.clear();
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     assert!(
         changed(&kill_frame, screen.logical_pixels()) > 3,
         "the explosion effect did not draw"

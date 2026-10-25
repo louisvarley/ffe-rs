@@ -290,7 +290,6 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
             ffe_rs::camera::ViewState::default(),
             None,
             false,
-            false,
             "test",
         );
         let image = screen.pixels.clone();
@@ -305,16 +304,20 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
                 );
             }
         }
+        // The retired help page must not paint anything: the same state drawn
+        // again is byte-identical apart from the console/clock already there.
         screen.draw(
             &state,
             ffe_rs::camera::ViewState::default(),
             None,
             true,
-            true,
             "help",
         );
-        assert_ne!(image, screen.pixels);
-        screen.overlay("SCENARIOS", &["1 DOCKED", "2 APPROACH", "3 FLIGHT"]);
+        assert_eq!(
+            image, screen.pixels,
+            "the removed help overlay must not draw a frame"
+        );
+        screen.overlay("PAUSED", &["P RESUMES. F2 STATUS PAGE."]);
         let vertices = [1, 0, 10, 20, 30, 0];
         let lab = ffe_rs::model_lab::ModelLab::from_models([
             ffe_rs::model_lab::StationVertices::new(74, 2, 13, &vertices).unwrap(),
@@ -410,7 +413,6 @@ fn flight_view_draws_the_station_model_in_place_of_the_placeholder() {
         &state,
         ffe_rs::camera::ViewState::default(),
         None,
-        false,
         true,
         "placeholder",
     );
@@ -419,7 +421,6 @@ fn flight_view_draws_the_station_model_in_place_of_the_placeholder() {
         &state,
         ffe_rs::camera::ViewState::default(),
         Some(&scene),
-        false,
         true,
         "placeholder",
     );
@@ -452,7 +453,6 @@ fn flight_view_draws_the_station_model_in_place_of_the_placeholder() {
         &state,
         ffe_rs::camera::ViewState::default(),
         Some(&other),
-        false,
         true,
         "placeholder",
     );

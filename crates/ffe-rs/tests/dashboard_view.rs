@@ -29,7 +29,7 @@ fn flight() -> Flight {
 }
 
 fn draw(screen: &mut Screen, state: &Flight, views: ViewState) {
-    screen.draw(state, views, None, false, true, "");
+    screen.draw(state, views, None, true, "");
 }
 
 fn save(screen: &Screen, name: &str) {

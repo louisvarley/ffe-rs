@@ -158,7 +158,7 @@ fn a_60hz_pulse_sequence_aims_fires_and_damages_an_npc() {
     screen.lasers = Combat::new_game().lasers;
     ships(&mut screen, &nav);
     target_readout(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "laser-aim-before.ppm");
     let before = screen.logical_pixels().to_vec();
 
@@ -206,11 +206,11 @@ fn a_60hz_pulse_sequence_aims_fires_and_damages_an_npc() {
         // F1776's model 0x9c is at the gun behind the front eye: the front frame
         // must be the same with or without it (the original's near-plane cull).
         screen.beam = Some(beam);
-        screen.draw(&state, views, Some(&viewer), false, true, "");
+        screen.draw(&state, views, Some(&viewer), true, "");
         save(&screen, &format!("laser-shot-{}.ppm", shot_frames.len()));
         let with_beam = screen.logical_pixels().to_vec();
         screen.beam = None;
-        screen.draw(&state, views, Some(&viewer), false, true, "");
+        screen.draw(&state, views, Some(&viewer), true, "");
         muzzle_changed += changed(&with_beam, screen.logical_pixels());
         save(&screen, &format!("laser-hit-{}.ppm", shot_frames.len()));
         if shot_frames.len() == 1 {

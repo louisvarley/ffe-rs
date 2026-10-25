@@ -106,7 +106,6 @@ fn classic_input_strip_capture() {
                 ViewState::default(),
                 None,
                 false,
-                false,
                 &format!(
                     "CLASSIC frame {frame}: Enter + RMB  thrust {:.1}  yaw {:.2}  pitch {:.2}",
                     input.thrust, state.yaw, state.pitch

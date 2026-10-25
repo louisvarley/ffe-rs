@@ -110,14 +110,7 @@ fn frame(
         })
         .collect();
     screen.lasers = [laser::PULSE_1MW, 0, 0, 0];
-    screen.draw(
-        state,
-        ViewState::default(),
-        Some(viewer),
-        false,
-        true,
-        message,
-    );
+    screen.draw(state, ViewState::default(), Some(viewer), true, message);
 }
 
 /// Point the camera 500 m from `at` on the far side from `away` (the station),
@@ -309,7 +302,6 @@ fn a_trader_approaches_docks_and_launches() {
                         &state,
                         ViewState::default(),
                         Some(&viewer),
-                        false,
                         true,
                         "Launching: bay released.",
                     );

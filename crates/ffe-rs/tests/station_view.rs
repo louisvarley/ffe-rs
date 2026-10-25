@@ -33,7 +33,7 @@ fn draw(screen: &mut Screen, dock: Option<DockView>, market: Option<MarketView>,
         mode: Mode::Docked,
         ..Flight::default()
     };
-    screen.draw(&state, ViewState::default(), None, false, true, message);
+    screen.draw(&state, ViewState::default(), None, true, message);
 }
 
 /// The Upgrades DockView F327/F329 draw from F383's rows.

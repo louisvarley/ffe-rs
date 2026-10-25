@@ -191,7 +191,7 @@ fn a_thargoid_spawns_from_f690_and_dies_to_the_players_laser() {
     screen.lasers = Combat::new_game().lasers;
     ships(&mut screen, &nav);
     target_readout(&mut screen, &nav);
-    screen.draw(&state, views, Some(&viewer), false, true, "");
+    screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "thargoid-before.ppm");
     let before = screen.logical_pixels().to_vec();
 
@@ -228,7 +228,7 @@ fn a_thargoid_spawns_from_f690_and_dies_to_the_players_laser() {
         shots += 1;
         ships(&mut screen, &nav);
         target_readout(&mut screen, &nav);
-        screen.draw(&state, views, Some(&viewer), false, true, "");
+        screen.draw(&state, views, Some(&viewer), true, "");
         if !shield_hit && attack.damage == laser::Damage::Shields {
             shield_hit = true;
             save(&screen, "thargoid-hit-shields.ppm");
@@ -275,6 +275,6 @@ fn a_thargoid_spawns_from_f690_and_dies_to_the_players_laser() {
     death_state.axes = Some(look_at(death_from, centre));
     ships(&mut screen, &nav);
     target_readout(&mut screen, &nav);
-    screen.draw(&death_state, views, Some(&viewer), false, true, "");
+    screen.draw(&death_state, views, Some(&viewer), true, "");
     save(&screen, "thargoid-death.ppm");
 }

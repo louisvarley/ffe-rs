@@ -59,12 +59,11 @@ right button is the steering hold. The left button remains the console pointer
 | Aim the turret | **A**/**Z** pitch, **,**/**.** yaw, or the held right mouse button |
 | External camera: turn / zoom | **arrows** / **+** **-** |
 | Status page | **F2** |
-| Original flight model on/off | **O** |
+| Combat computer (source F11; the port has no view 6 yet) | **F11** (shows the not-ported note) |
+| Escape capsule or Stowmaster (if fitted) | **F12** |
 | Preference pages | **Escape** twice: the first press pauses, the second opens them; Escape again returns to the game with time still stopped (the original's `FUNC_000224` order) |
-| Help page | **?** |
 | Starport services at a pad | **F4** (or the console's phone icon), as `F343`; **F1** or **Backspace** returns to the landed view |
 | Save / load newest snapshot | **F5** / **Shift+F5** |
-| Screenshot / model viewer / model lab | **F11** / **F12** / **Shift+F12** |
 | Change ship | **Page Up / Page Down** |
 | Docked rows / actions | **Up/Down**, **Enter**, **1**..**4**, **Backspace**, **B**/**N** trade |
 | Quit from the preference pages | click `Quit`, or select it and press Enter |
@@ -97,8 +96,8 @@ only, right button held, ship or external view).
 | Mouse steering | none (the right button does not steer) |
 
 Every other action in the Classic table above is shared: Space, M, T/Shift+T,
-K, Backspace, D, L, Tab, N, G, H, C, 6-0, P, F1/F6-F9, F2, O, Escape, F5,
-F11/F12, Page Up/Down, the docked keys and the left-button console pointer.
+K, Backspace, D, L, Tab, N, G, H, C, 6-0, P, F1/F6-F10, F2, F12, Escape, F5,
+Shift+F5, Page Up/Down, the docked keys and the left-button console pointer.
 In the external view the arrows belong to the camera in both presets; Modern has
 no ship steering there, while Classic's keys and right-button mouse still steer.
 
@@ -141,21 +140,27 @@ the yaw keys/axis and the pitch keys/axis, and flips the mouse x and y.
 | Turret aim | Both presets accepted A/Z, comma/period **and** arrows | Modern arrows only; Classic A/Z and comma/period plus mouse |
 | Modern external view | Fell back to the Classic comma/period/A/Z keys | Arrows are the camera; no Modern ship steering there |
 | Preset switch | Changed `prefs.modern`; held keys were not always cleared; no persistence | Immediate, disarms keys, resets the mouse, persists to `saves/controls.cfg` |
-| Page/help text | "Classic-like", stale roll/toggle wording | `docs/CONTROLS.md`, `Port Options` and the F1 help name the real scheme |
+| Page/help text | "Classic-like", stale roll/toggle wording | `docs/CONTROLS.md` and `Port Options` name the real scheme; the port's `?` help page was removed, so F1 stays the original view cycle |
 
 No action was duplicated between the presets after the change. `Enter` and
 `Shift` are still shared with the menu/station contexts and Shift+T /
 Shift+F5, but the flight branch only sees them when no list, page or overlay is
 open, so these are context chords rather than preset leakage. `X`, Space, M, T,
-K, Backspace, D, L, Tab, N, G, C, F1-F9, F11/F12, F5, Page Up/Down, 6-0, P and
-the left-button pointer are intentionally shared.
+K, Backspace, D, L, Tab, N, G, C, F1-F10, F12, F5, Shift+F5, Page Up/Down, 6-0,
+P and the left-button pointer are intentionally shared. F11 is the source
+combat-computer key and has no action until view 6 is ported.
 
 ## Tests
 
 - `crates/ffe-rs/src/input.rs`: per-preset routing, Classic Enter/Shift thrust,
   no Classic keys in Modern and no Modern keys in Classic, right-button steering
   only in Classic, reverse options, the mouse accumulator, immediate preset
-  switching through `Prefs`.
+  switching through `Prefs`, the source view keys (F1 cycle, F6-F9 direct,
+  F10 missile), and the developer-command gate (nothing without `--dev`, then
+  Ctrl+F11/F12 and O only).
+- `crates/ffe-rs/tests/views.rs`: `f1_cycles_front_rear_turret_external` and the
+  optional `f1_cycles_the_view_without_painting_the_removed_help_page` frame
+  pair (`FFE_WORLD_CACHE` + `FFE_RS_CLEANUP_CAPTURE`).
 - `crates/ffe-rs/tests/controls.rs`: 60-frame flights showing Classic
   Enter+right-button moving the ship and Modern ignoring the same input; an
   optional frame/input strip (set `FFE_RS_CONTROLS_CAPTURE`).
@@ -168,7 +173,22 @@ the left-button pointer are intentionally shared.
 - `crates/ffe-rs/src/display.rs` and `tests/prefs.rs`: fit rectangles, nearest
   and linear scaling, mouse mapping, the display page and the `display.cfg`
   round trip (`docs/notes/display.md`).
-- Evidence: `docs/evidence/controls/README.md` and `docs/evidence/display/`.
+- `crates/ffe-rs/tests/playable.rs`: the retired help page draws no frame.
+- Evidence: `docs/evidence/controls/README.md`, `docs/evidence/display/` and
+  `docs/evidence/cleanup/` (F1 front/rear pair).
+
+## Removed port-only UI (2026-10-25)
+
+The player-facing build no longer has the `?` help page, the playtest scenario
+menu, the F11 screenshot, the F12 model viewer/Shift+F12 model lab or the O
+prototype-flight toggle. These were port additions, not source behaviour. F1 is
+the original view cycle again, F11 is left for the source combat computer (view 6
+is not ported yet) and F12 is the source escape-capsule action.
+
+The developer capability is still available behind `--dev` or `FFE_DEV=1`:
+Ctrl+F11 screenshot, Ctrl+F12 model viewer, Ctrl+Shift+F12 model lab and O
+prototype flight. The CLI `--capture*`, `--smoke-frames`, `--skip-intro` and
+`--start 0..5|sol` inputs are unchanged for the oracles and evidence runs.
 
 ## Remaining differences and owner decisions
 
