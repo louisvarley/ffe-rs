@@ -144,7 +144,7 @@ fn port_page_switches_modern_and_classic_controls() {
 }
 
 #[test]
-fn the_f3_switch_flips_the_preset_and_the_page_shows_it() {
+fn the_port_page_flips_the_preset_and_shows_it() {
     use ffe_rs::input::Preset;
     use ffe_rs::prefs::Mark;
 

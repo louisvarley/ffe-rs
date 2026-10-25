@@ -43,6 +43,14 @@ The port stores game time as `Navigator::clock` (world seconds) and derives
 `calendar.advance(nav.day())` in order. A direct `Navigator::jump` is the
 source's "enter at once, no time" path and does not tick.
 
+The playable calls `Navigator::advance` once per live frame, in **every** module:
+free flight, the open-air pad (`0x30`), a landed surface (`0x32`/`0x34`), the
+docked station and the services boards. F152 is a system timer, not part of the
+flight step, so it must not sit inside the original flight model's branch (the
+old placement froze the green date whenever there was no model). Pause, the
+F224 preference pages, focus loss and the death/game-over hold stop it; the
+dashboard's time acceleration (`6`..`0`, `DATA_009012`) scales each frame.
+
 ## F633: the daily starport update
 
 `F633` (`ffe.asm:43279`) is reached through the station module's action

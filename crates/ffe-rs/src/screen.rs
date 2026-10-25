@@ -274,6 +274,11 @@ pub struct Screen {
     pub market: Option<MarketView>,
     /// The docked services/shipyard/BBS screen of this frame.
     pub dock: Option<DockView>,
+    /// F343's services board on a starport pad (`0x30`): the same screen as the
+    /// docked view, but drawn over the landed flight view. The console, scanner
+    /// and message clock stay live; the flight HUD text is covered like the
+    /// source's station screen. The ship's mode stays `Flight`.
+    pub pad_services: bool,
     /// The lift scene to draw this frame, in a docking or launching sequence.
     pub lift: Option<LiftView>,
     /// The view is from inside a station (a launch before the ship is in
@@ -744,6 +749,7 @@ impl Screen {
             sun: None,
             market: None,
             dock: None,
+            pad_services: false,
             lift: None,
             station_view: false,
             target_mark: None,
@@ -1581,7 +1587,7 @@ impl Screen {
         }
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
-        if state.mode != Mode::Docked {
+        if state.mode != Mode::Docked || self.pad_services {
             // F272's order: primary 43 panel, the scanner globe (secondary
             // 254..261), then F261's buttons, then F270's gauges. F274's
             // contacts come last, after the view (see `draw_scanner_contacts`).
@@ -1612,7 +1618,7 @@ impl Screen {
         // quantised colour (`prefs::space_colour_rgb`, `DATA_008815..817`) and
         // registers the same `(0,0,index)` request with the runtime palette, so
         // the models and FX around it are quantised against it.
-        if state.mode != Mode::Docked {
+        if state.mode != Mode::Docked || self.pad_services {
             // F1052 clears with the background colour the previous frame's scene
             // left in `DATA_008814..8817`; a planet's haze overrides the space
             // colour until the eye is out of it again.
@@ -1625,6 +1631,17 @@ impl Screen {
             return;
         }
         if state.mode == Mode::Docked {
+            self.frame[..320 * 158].copy_from_slice(&self.cabin);
+            if let Some(dock) = self.dock.take() {
+                self.draw_dock(&dock);
+            } else if self.market.is_some() {
+                self.draw_market();
+            }
+        } else if self.pad_services {
+            // F343 over the landed view (`0x30`): the station screen covers the
+            // 3-D view, while the console/scanner page and the message clock
+            // above it stay live. The ship's mode is still `Flight`, so closing
+            // the board with F1 (F1003) reveals the same landed view and model.
             self.frame[..320 * 158].copy_from_slice(&self.cabin);
             if let Some(dock) = self.dock.take() {
                 self.draw_dock(&dock);
@@ -1776,7 +1793,10 @@ impl Screen {
         // lines, and the lift's lower rows).
         if state.mode == Mode::Docked {
             // The docked screens put the game's console message in the console's
-            // message area at the lower right, not over the menu.
+            // message area at the lower right, not over the menu. F272's green
+            // date/time header stays live under it (the source's station screen
+            // shows the clock advancing).
+            self.draw_messages();
             let mut lines = Vec::new();
             let mut line = String::new();
             for ch in message.chars() {
@@ -1794,21 +1814,35 @@ impl Screen {
                 lines.push(line);
             }
             for (index, line) in lines.iter().take(2).enumerate() {
-                self.text(195, 176 + index * 10, line, 18);
+                self.text(195, 184 + index * 10, line, 18);
             }
         } else {
             // F272's text window: date/time header, ten entries, 124-pixel wrap,
             // shadow at (195, y-1) and text at (196, y), clipped to y 158..199.
+            // The pad services board keeps it, so the green clock stays visible
+            // over the console (F272 runs in the station screens too).
             self.draw_messages();
-        }
-        self.present();
-    }
-
-    pub fn overlay(&mut self, title: &str, lines: &[&str]) {
-        self.rect(12, 24, 296, 92, 1);
-        self.text(20, 31, title, 18);
-        for (index, line) in lines.iter().enumerate() {
-            self.text(20, 47 + index * 13, line, 15);
+            if self.pad_services {
+                let mut lines = Vec::new();
+                let mut line = String::new();
+                for ch in message.chars() {
+                    let ch = if ch.is_ascii() && !ch.is_ascii_control() {
+                        ch
+                    } else {
+                        '?'
+                    };
+                    line.push(ch);
+                    if self.font.width(&line).is_ok_and(|measured| measured >= 124) {
+                        lines.push(std::mem::take(&mut line));
+                    }
+                }
+                if !line.is_empty() {
+                    lines.push(line);
+                }
+                for (index, line) in lines.iter().take(2).enumerate() {
+                    self.text(195, 184 + index * 10, line, 18);
+                }
+            }
         }
         self.present();
     }

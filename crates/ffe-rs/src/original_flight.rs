@@ -287,6 +287,24 @@ impl OriginalFlight {
         )
     }
 
+    /// Move the pad world's planet and starport to their current navigator
+    /// positions. The player's position in the pad world is relative to the
+    /// planet (F994's `+0x56`), so the ship follows the body while the game
+    /// clock runs; without this the ship stayed at the start-of-game absolute
+    /// spot and the surface slid away at the planet's orbital speed.
+    pub fn set_pad_bodies(&mut self, planet_position: [i64; 3], station_position: [i64; 3]) {
+        let Some(world) = self.pad_world.as_mut() else {
+            return;
+        };
+        world.body[2].position = planet_position;
+        if world.live[3] {
+            world.body[3].position =
+                std::array::from_fn(|k| station_position[k].wrapping_sub(planet_position[k]));
+        }
+        // F1677's absolute-position cache is keyed by the frame stamp.
+        world.stamp = world.stamp.wrapping_add(1);
+    }
+
     /// The ship is still in the pad world.
     pub fn on_pad(&self) -> bool {
         self.pad_world.is_some()

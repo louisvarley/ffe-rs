@@ -306,8 +306,9 @@ impl Prefs {
         }
     }
 
-    /// The F3 switch between the two flight presets; the Port Options rows set
-    /// the same value through [`Prefs::apply`].
+    /// Flip the two flight presets. The player reaches this through the
+    /// `Port Options` rows ([`Action::Modern`]) only: the source F3 is the
+    /// galaxy map, not a preset switch.
     pub fn toggle_modern(&mut self) {
         self.modern = !self.modern;
     }
@@ -726,7 +727,7 @@ impl Prefs {
                 texts.push(Text {
                     x: 48,
                     y: 92,
-                    text: "F3 or these rows switch preset; docs/CONTROLS.md.",
+                    text: "These rows switch the preset; docs/CONTROLS.md.",
                     colour: 15,
                 });
                 texts.push(Text {
