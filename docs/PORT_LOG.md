@@ -4,6 +4,45 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Deterministic reference gate and the new oracles merged (v0.69)
+
+- Merged `oracles` (f812f2b): the Windows `--worldgen` repeatability failure is
+  fixed at its root. F877/F878 build part of each object's name from an
+  uninitialised byte, so two runs can differ; the two-run comparison now masks
+  only the object-name ranges `0x26..0x3f` and `0x124..0x138`, keeps the raw
+  first run for the Rust oracle and compares every other byte exactly. The
+  world scenarios are split into `world` (Windows-safe) and `world-linux`
+  (`--sysgen` needs a working SIGALRM watchdog, `--surface-draw` needs POSIX
+  fork/`open_memstream`), so the Windows gap is an explicit SKIP rather than a
+  failure.
+- `verify-all.py` was rewritten to print one PASS/FAIL/SKIP line per oracle,
+  map exit 77 to SKIP, enforce per-oracle timeouts, and support `--list`,
+  `--only` and exit codes (0 clean, 1 failure, 2 missing input). The merge kept
+  the surface branch's `verify-surface.py` entry and the v27 fixes
+  (`verify-assets.py`'s 1,797 ZIP entries, `verify-intro.py`'s no-text-tamper),
+  and the final list has **55 entries**.
+- New oracles: `verify-combat.py` (executed F998 loadout/hitscan/pixels),
+  `verify-ship-types.py` (F635's nineteen records from `ffedat.asm`),
+  `verify-npc.py`, `verify-dashboard.py`, `verify-takeoff.py` and
+  `verify-prefs.py`, plus the `npc_reference.rs` Rust side. The `ship-types`
+  oracle found **F635 table slot 0x3** carried `DATA_006181`'s list instead of
+  `DATA_006183`'s (and the Federal/Imperial labels were swapped); fixed. Ross
+  154 uses slot 5, so the playable is unchanged. Its trace SHA-256 is
+  `ae421da6e844b377033ca95d094458ea0894575fc0a0f1ca7acc350e8391d2cd`.
+- **Full suite (v27 cache, 1,796 assets / 1,797 ZIP entries): 54 PASS, 1 SKIP,
+  0 FAIL in 708 s.** The only SKIP is `world-linux` on Windows. `verify-prefs`
+  expected five unit tests; it now expects six (the soundfx rows added one) —
+  a mechanical count fix.
+- Remaining oracle gaps: F688's spawn sequence and F635's `population < 4`
+  branch are not covered; `hud`, `npc`, `takeoff` and `prefs` are pinned from
+  `ffe.asm`/the cache rather than frame captures; `galaxy-map` is the only
+  frame-level comparison.
+- Checks: full `verify-all.py` (above), `cargo test --workspace --locked`,
+  clippy `-D warnings`, `cargo fmt --check`. No game behaviour changed for
+  oracle convenience.
+
+---
+
 ## 2026-10-25 - Surface landing and the landed view merged (v0.68)
 
 - Merged `surface` (f05c403, 2bbfa20): F1021's rough touch drives 0x32 and

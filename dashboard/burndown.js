@@ -29,7 +29,8 @@ window.FFE_BURNDOWN = {
         { id: "foundation-4", title: "Core primitives: RNG, timer and clock verified against the original", status: "done", version: "v0.0" },
         { id: "foundation-5", title: "Reference harness: JJFFE adapter, Windows and Linux builds, trace tooling", status: "done", version: "v0.0-v0.1" },
         { id: "foundation-6", title: "Original bitmap font and console image decoding", status: "done", version: "v0.2" },
-        { id: "foundation-7", title: "verify-all runner and CI", status: "done", version: "v0.38" }
+        { id: "foundation-7", title: "verify-all runner and CI", status: "done", version: "v0.38" },
+        { id: "foundation-8", title: "Deterministic reference gate: worldgen masking, platform SKIPs and the merged-stream oracles", status: "done", version: "v0.69" }
       ]
     },
     {
@@ -548,6 +549,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 69,
       note: "Surface landing merged (v0.68): F1021's rough touch drives 0x32 -> F1047's 0x34, the starport 0x2e/0x30 states, Takeoff::from_landed and OriginalFlight::settle_landing; F1050/F1054 draw the landed view with F1877's haze sky (stars suppressed), and L climbs again through 0x24 -> 0x26 -> 0x00. verify-surface.py joins verify-all.py and reports sky_matches: true (header_close 0.9934, view coverage 0.589). One item added and completed (world-12); flight-8 and ui-11 are in progress. Owner decisions: the +0x138 collision vs +0x140 drawn-radius mismatch, pad landing from flight not routed to 0x2e/0x30, 0x30 services vs F1050's landed view (EXP-014), the landed state not saved, and surface object depth/fills."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 69,
+      note: "Deterministic oracle gate merged (v0.69): the Windows --worldgen repeatability failure is fixed by masking only the object-name ranges F877/F878 build from an uninitialised byte (raw first run kept for the Rust oracle); world/world-linux are split so Windows SKIPs --sysgen and --surface-draw. New combat, ship-types, npc, dashboard, takeoff and prefs oracles join the 55-entry suite (54 PASS, 1 SKIP, 0 FAIL); ship-types found and fixed F635 slot 0x3 (Ross 154 uses slot 5). One item added and completed (foundation-8), so the remaining count is unchanged. Remaining gaps: F688's spawn sequence, F635 population<4, pinned (not frame) HUD/NPC/takeoff/prefs, and galaxy-map as the only frame-level comparison."
     }
   ]
 };

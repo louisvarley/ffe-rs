@@ -107,7 +107,7 @@ ECM.
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 140 items, 71 done and 69 left on
+  in `burndown.js`; 14 milestones, 141 items, 72 done and 69 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -165,21 +165,23 @@ needs the player's own files, NASM and the MSVC x86 tools; none of it is public
 CI. Rebuild the reference after any change to `tools/reference/`, and note that
 the child oracle's trace SHA-256 changes with every rebuild (see below).
 
-**2026-10-25 re-run.** After the combat/NPC/missile/surface reference rebuilds and
-the v27 cache, the full suite (now **48** entries with `verify-surface.py`) gave
-**47 of 48 passed** in 608 s. `verify-surface.py` reports `sky_matches: true`
-(header_close 0.9934, view coverage 0.589). The only failure is `verify-world.py`'s
-`--worldgen` repeatability check, the known Windows ASLR nondeterminism (the same
-case recorded on 2026-10-24), not a regression. Two stale script expectations
-were fixed on the way: `verify-assets.py` now expects the v27 ZIP's 1,797 entries
-(1,796 assets + manifest) and `verify-intro.py` no longer tampers the trace's
-plain `text` field, which the port deliberately does not compare (it draws the
-cached DOS bytes and checks codes/colour/position/wrap). The recorded trace
-SHA-256 values in the table below were re-derived for every oracle that lists one
-(instance, order, point-line, text-submodel, colour, base-transform, station,
-station-queue, intro, collide, world-tick) and are **unchanged**, so the column is
-current; re-record an entry if its script's adaptor changes. No oracle exposed a
-behavioural regression.
+**2026-10-25 final re-run.** After the oracle branch, the suite has **55
+entries: 54 PASS, 1 SKIP, 0 FAIL** in 708 s (`world-linux` skips on Windows:
+`--sysgen` needs a SIGALRM watchdog and `--surface-draw` needs POSIX fork).
+`verify-surface.py` reports `sky_matches: true` (header_close 0.9934, view
+coverage 0.589). The `--worldgen` repeatability failure is gone: the two-run
+comparison now masks only the object-name ranges F877/F878 build from an
+uninitialised byte (0x26..0x3f and 0x124..0x138), keeps the raw first run for
+the Rust oracle and is byte-for-byte elsewhere. The new `ship-types` oracle
+found and fixed F635 table slot 0x3 (DATA_006183's eight models); Ross 154 uses
+slot 5, so the playable is unchanged, and the `ship-types` trace SHA-256 is
+`ae421da6e844b377033ca95d094458ea0894575fc0a0f1ca7acc350e8391d2cd`. The
+recorded trace SHA-256 values in the table below were re-derived for every
+oracle that lists one and are **unchanged**; re-record an entry if its script's
+adaptor changes. No oracle exposed a behavioural regression. Remaining oracle
+gaps: F688's spawn sequence and F635's `population < 4` branch are not covered;
+`hud`, `npc`, `takeoff` and `prefs` are pinned from `ffe.asm`/the cache rather
+than frame captures; `galaxy-map` is the only frame-level comparison.
 
 ## Milestone status
 
@@ -261,14 +263,15 @@ capture produced by two repeat runs of the local reference.
 | v0.66 hit particles, explosions and debris | `ffe_core::effects` (F939 hit, F942 explosion, F926 debris), `Navigator::{damage_ship_at, effects}`, `Screen::SystemEffect`, `NpcShip::cargo` persistence | `effects_view.rs` (2, ignored), effects unit tests, `npc_view`/`npc_ai` | none (models 155/158/0x99 come from the cache; F942's `+0xa4` gate is documented) | — | every laser hit spawns F939's model-158 particle at F817's hit point; a kill spawns F942's model-155 object and F926's debris from the ship's cargo; the effect lifetimes advance in `tick_ships`. Model 155's twelve fragments are drawn with the deliberate `EXPLOSION_MASS` 0x4000 word and stay wireframe until F1560/F1613 fills; effect lifetimes vs the original AI timers remain an owner decision; `docs/notes/combat.md` §7.1 |
 | v0.67 missiles, lock-on and pylon lamps | `ffe_core::missile` (types, F941 impulse, F758 guidance, F718/F721 contact), `ffe_rs::missile`, `Combat::missiles`, `Navigator::{missile_lock, missiles, launch_missile, tick_missiles}`, `Screen::SystemMissile`, `tools/reference/headless.c --missile-probe` | `missile.rs` (7), `missile_view.rs` (1, ignored), `combat.rs` (+ missile pylon), console pylon-lamp test | `--missile-probe` (pylon 130→0, model-6 object, owner 107, target 114, guidance every 20 frames) calibrates 0.4 s/24 s | — | `M` launches the first pylon after a `Shift+T` lock; the object flies F758's lead/turn with F585's quantisation, fuses at 131 m, calls F718/F721/F953, and the F1120 pylon lamps follow `Combat::missiles`. Missile view (F10), NPC launches, ECM and the F1113 nav box/lamps remain; `docs/notes/combat.md` §8 |
 | v0.68 surface landing and landed view | `ffe_core::traffic` (0x32/0x34, `Takeoff::from_landed`), `Navigator::{land, landed_state, landing_frame, begin_surface_launch}`, `OriginalFlight::settle_landing`, `Screen` surface sky/landed view, `verify-surface.py` | `takeoff.rs` (6), `planet_view.rs` (19, ignored), `verify-surface.py` in `verify-all.py` | `verify-surface.py`: `sky_matches: true`, header_close 0.9934, view coverage 0.589 | — | F1021's rough touch drives 0x32 → F1047's 0x34; the starport 0x2e/0x30 states, F1050/F1054 landed view and F1877's haze sky (stars suppressed) draw, and `L` climbs again through 0x24 → 0x26 → 0x00. The `+0x138` collision vs `+0x140` drawn radius can show space where the original shows ground; pad landing from flight is not routed to 0x2e/0x30; 0x30 shows services (EXP-014); the landed state is not saved; surface depth/fills remain; `docs/NAVIGATION.md` |
+| v0.69 deterministic reference gate and new oracles | `verify-world.py` name masking, `world`/`world-linux` split, `verify-all.py` PASS/FAIL/SKIP + `--list`/`--only`/timeouts, new `verify-{combat,ship-types,npc,dashboard,takeoff,prefs}.py`, `npc_reference.rs`, F635 slot-0x3 fix, `tools/reference/README.md` | `npc_reference.rs` (1, ignored), 55-entry oracle suite | **54 PASS, 1 SKIP, 0 FAIL** (Windows; `world-linux` skips `--sysgen`/`--surface-draw`); `ship-types` trace `ae421da6…` | — | the Windows `--worldgen` repeatability failure is fixed by masking only the object-name ranges F877/F878 build from an uninitialised byte; every other byte is still compared. New stream oracles cover combat's executed loadout/hitscan/pixels, F635's table (slot 0x3 fix), NPC, dashboard, takeoff and prefs. Remaining gaps: F688's spawn sequence, F635 `population < 4`, pinned (not frame) HUD/NPC/takeoff/prefs, and `galaxy-map` as the only frame-level comparison; `tools/reference/README.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 583 `#[test]` functions total; 136 are `#[ignore]`
+  `cargo clippy -D warnings`. 584 `#[test]` functions total; 137 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **447 runnable synthetic tests** (448 on Linux).
+  **446 runnable synthetic tests** (447 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
