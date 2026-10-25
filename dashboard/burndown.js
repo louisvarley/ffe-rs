@@ -146,7 +146,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "in-progress", version: "v0.62" },
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.62" },
         { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "done", version: "v0.57" },
-        { id: "gameplay-5", title: "Missiles and countermeasures", status: "todo" },
+        { id: "gameplay-5", title: "Missiles and countermeasures", status: "in-progress", version: "v0.67" },
         { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "in-progress", version: "v0.63" },
         { id: "gameplay-7", title: "Police, pirates and other encounters", status: "in-progress", version: "v0.63" },
         { id: "gameplay-8", title: "Combat scenario replay against the reference", status: "todo" },
@@ -159,7 +159,8 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-15", title: "Time-driven events over a long run", status: "todo" },
         { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" },
         { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" },
-        { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "done", version: "v0.63" }
+        { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "done", version: "v0.63" },
+        { id: "gameplay-19", title: "Player missiles, missile lock and F1120 pylon lamps", status: "done", version: "v0.67" }
       ]
     },
     {
@@ -536,6 +537,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 69,
       note: "Effects merged (v0.66): F939's model-158 hit particle at F817's hit point, F942's model-155 destruction object and F926's model-0x99 debris are in ffe-core::effects and drawn by Screen::SystemEffect; F942's +0xa4 gate is explained and the port deliberately passes EXPLOSION_MASS 0x4000 so the twelve fragments draw (wireframe until F1560/F1613 fills). --capture-traffic and the effect lifetimes follow the effect's own seconds; AI/police, scanner and HUD paths are unchanged. One item added and completed (ui-12), so the remaining count is unchanged. Owner decisions: effects lifetimes vs AI timers and the EXPLOSION_MASS deviation."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 69,
+      note: "Missiles merged (v0.67): ffe-core::missile (type/damage tables, F941's launch impulse, F758's 20-frame guidance and 60-update lifetime, the 131 m fuse, F718/F721 contact and F953 damage), ten pylon words in Combat, Navigator lock/launch/tick, M launch with Shift+T lock, missile objects drawn, F1114's circle and F1120 pylon lamps; --missile-probe calibrates 0.4 s guidance/24 s lifetime. Remaining: the missile view (F10), NPC launches, ECM, F1113 navigation box/lamps and the full F1116 targeter; owner decisions on Shift+T and the approximated lead/turn. One item added and completed (gameplay-19), so the remaining count is unchanged; gameplay-5 is in progress."
     }
   ]
 };

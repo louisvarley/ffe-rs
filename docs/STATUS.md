@@ -73,9 +73,13 @@ the port's own top bar, speed line and status block are retired
 and the combat/navigation targeter tunnels (`docs/notes/scanner.md`). Laser hits
 and kills also draw F939's hit particle, F942's explosion and F926's debris
 (`ffe_core::effects`, `docs/notes/combat.md`; model 155 is wireframe until the
-F1560/F1613 fill). Still
+F1560/F1613 fill). Player missiles are in: `M` launches the first pylon against
+a `Shift+T` lock, F758's guidance and F585's turn run on the missile object, the
+131 m fuse calls F953, and the F1120 pylon lamps follow the remaining words
+(`docs/notes/combat.md` §8). Still
 open: auto-targeter arming/equipment, per-target range colours, altitude units,
-and F1104/F1098's death/capsule screens.
+F1104/F1098's death/capsule screens, the missile view (F10), NPC launches and
+ECM.
 
 ## How to read this repo
 
@@ -99,7 +103,7 @@ and F1104/F1098's death/capsule screens.
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 138 items, 69 done and 69 left on
+  in `burndown.js`; 14 milestones, 139 items, 70 done and 69 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -245,14 +249,15 @@ capture produced by two repeat runs of the local reference.
 | v0.64 intro playback and cache v27 | `ffe_rs::{front_end::IntroTimeline, intro_text::IntroText}`, `Screen::draw_intro`, `main::run_intro`, cache v27 (`base:text/intro-credits`, `base:text/char-widths`), `--capture-intro` | `front_end.rs` (9), `intro_view.rs` (2, ignored), `intro_text.rs` unit tests, `intro_reference.rs` (ignored) | `verify-intro.py` 76 cases unchanged (trace `a9489bbe…`); cache import verified by `verify-assets.py` | — | default boot plays F961/F962 (models 177/176, bitmap 0x42, the 18 DOS credits with layout codes, the `0x400` GameTics clock and the `0x7e7b76` reset), V's version gate and keys 1-5; scripted captures use `--skip-intro`; old v26 caches still load but the intro reports the missing assets. Model 176's stale-basis frames, the dynamic upper palette and an intro music backend remain; `docs/notes/intro.md` |
 | v0.65 scanner contacts and targeter | `ffe_rs::scanner` (F275 filters, `DATA_008683` colours, stalk geometry, orientation), `ffe_rs::targeter` (F1113 tunnels, F1114 edges, F1612 circle, F1100 size), `ShipSystems::ca`, `Screen::draw_scanner`; main feeds bodies and ships | `scanner_view.rs` (2, ignored), `scanner.rs`/`targeter.rs` unit tests (8), cached frames | none (the geometry/colour table are from `ffe.asm`; no new oracle) | — | contacts for the system's bodies and NPC ships (starports filtered), 19-colour mass table, up/down stalk clipping and the 8-frame globe; the combat/navigation targeter tunnels and circle draw when the preference/flags allow. Auto-targeter arming/equipment, per-target range colours and two simultaneous targets remain; `docs/notes/scanner.md` |
 | v0.66 hit particles, explosions and debris | `ffe_core::effects` (F939 hit, F942 explosion, F926 debris), `Navigator::{damage_ship_at, effects}`, `Screen::SystemEffect`, `NpcShip::cargo` persistence | `effects_view.rs` (2, ignored), effects unit tests, `npc_view`/`npc_ai` | none (models 155/158/0x99 come from the cache; F942's `+0xa4` gate is documented) | — | every laser hit spawns F939's model-158 particle at F817's hit point; a kill spawns F942's model-155 object and F926's debris from the ship's cargo; the effect lifetimes advance in `tick_ships`. Model 155's twelve fragments are drawn with the deliberate `EXPLOSION_MASS` 0x4000 word and stay wireframe until F1560/F1613 fills; effect lifetimes vs the original AI timers remain an owner decision; `docs/notes/combat.md` §7.1 |
+| v0.67 missiles, lock-on and pylon lamps | `ffe_core::missile` (types, F941 impulse, F758 guidance, F718/F721 contact), `ffe_rs::missile`, `Combat::missiles`, `Navigator::{missile_lock, missiles, launch_missile, tick_missiles}`, `Screen::SystemMissile`, `tools/reference/headless.c --missile-probe` | `missile.rs` (7), `missile_view.rs` (1, ignored), `combat.rs` (+ missile pylon), console pylon-lamp test | `--missile-probe` (pylon 130→0, model-6 object, owner 107, target 114, guidance every 20 frames) calibrates 0.4 s/24 s | — | `M` launches the first pylon after a `Shift+T` lock; the object flies F758's lead/turn with F585's quantisation, fuses at 131 m, calls F718/F721/F953, and the F1120 pylon lamps follow `Combat::missiles`. Missile view (F10), NPC launches, ECM and the F1113 nav box/lamps remain; `docs/notes/combat.md` §8 |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 566 `#[test]` functions total; 133 are `#[ignore]`
+  `cargo clippy -D warnings`. 579 `#[test]` functions total; 134 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **432 runnable synthetic tests** (433 on Linux).
+  **444 runnable synthetic tests** (445 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

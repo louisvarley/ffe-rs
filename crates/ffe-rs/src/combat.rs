@@ -1,4 +1,4 @@
-﻿//! The player's laser installation and its firing state (guide: `docs/notes/combat.md`).
+//! The player's laser installation and its firing state (guide: `docs/notes/combat.md`).
 //!
 //! The original keeps the four mount lasers at `ship+0xd2..+0xd5`, the refire
 //! countdown at `+0xe8`, the heat at `+0xea` and the energy at `+0x11e`. The
@@ -18,9 +18,14 @@ use crate::ships::ShipStats;
 /// The player's laser installation and the three words F931 gates on.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct Combat {
-    /// Front, rear, top and bottom laser equipment codes (`ship+0xd2..+0xd5`).
+    /// The front, rear, top and bottom laser equipment codes (`ship+0xd2..+0xd5`).
     #[serde(default)]
     pub lasers: [u8; 4],
+    /// The ten missile pylon words (`ship+0xd6..+0xdf`); the low nibble is the
+    /// type (`DATA_007220`), bit 0x40 a mine. Saves from before missiles load
+    /// with none.
+    #[serde(default)]
+    pub missiles: [u8; ffe_core::missile::PYLONS],
     /// The energy pool (`+0x11e`); F929 removes each shot's cost.
     #[serde(default)]
     pub energy: u32,
@@ -46,8 +51,12 @@ impl Combat {
     /// F998's start type 1 record: a 1MW pulse laser in the front mount, a
     /// class-2 drive and `0x20000000` energy (one tonne).
     pub fn new_game() -> Self {
+        let mut missiles = [0; ffe_core::missile::PYLONS];
+        missiles[0] = ffe_core::missile::PLAYER_MISSILE;
+        missiles[1] = ffe_core::missile::PLAYER_MISSILE;
         Self {
             lasers: [laser::PULSE_1MW, 0, 0, 0],
+            missiles,
             energy: 0x2000_0000,
             heat: 0,
             refire: 0,
@@ -55,6 +64,32 @@ impl Combat {
             cooling_booster: false,
             cool_carry: 0.0,
         }
+    }
+
+    /// F1054's `M` scan: the first non-zero pylon word and its 1-based index
+    /// (`ship+0xc4`). `None` when the ship has no missiles.
+    pub fn first_missile(&self) -> Option<(usize, u8)> {
+        self.missiles
+            .iter()
+            .position(|code| *code != 0)
+            .map(|index| (index + 1, self.missiles[index]))
+    }
+
+    /// F941: clear the pylon word after a successful launch. `pylon` is the
+    /// 1-based index [`Combat::first_missile`] returns.
+    pub fn take_missile(&mut self, pylon: usize) -> Option<u8> {
+        let slot = self.missiles.get_mut(pylon.checked_sub(1)?)?;
+        let code = *slot;
+        if code == 0 {
+            return None;
+        }
+        *slot = 0;
+        Some(code)
+    }
+
+    /// The number of missiles still on the pylons.
+    pub fn missile_count(&self) -> usize {
+        self.missiles.iter().filter(|code| **code != 0).count()
     }
 
     /// The original's three mutable words.
@@ -240,12 +275,55 @@ mod tests {
     }
 
     #[test]
-    fn new_game_has_f998s_front_pulse_laser() {
+    fn new_game_has_f998s_front_pulse_laser_and_two_missiles() {
         let combat = Combat::new_game();
         assert_eq!(combat.lasers, [laser::PULSE_1MW, 0, 0, 0]);
+        assert_eq!(
+            combat.missiles,
+            [
+                ffe_core::missile::PLAYER_MISSILE,
+                ffe_core::missile::PLAYER_MISSILE,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        );
+        assert_eq!(combat.missile_count(), 2);
+        assert_eq!(
+            combat.first_missile(),
+            Some((1, ffe_core::missile::PLAYER_MISSILE))
+        );
         assert_eq!(combat.energy, 0x2000_0000);
         assert_eq!(combat.drive, 2);
         assert_eq!(combat.energy_gauge(), 0xffe0);
+    }
+
+    #[test]
+    fn the_missile_scan_finds_the_first_pylon_and_clears_it() {
+        let mut combat = Combat::new_game();
+        assert_eq!(
+            combat.take_missile(1),
+            Some(ffe_core::missile::PLAYER_MISSILE)
+        );
+        assert_eq!(combat.missiles[0], 0);
+        assert_eq!(combat.missile_count(), 1);
+        assert_eq!(
+            combat.first_missile(),
+            Some((2, ffe_core::missile::PLAYER_MISSILE))
+        );
+        assert_eq!(combat.take_missile(1), None);
+        assert_eq!(
+            combat.take_missile(2),
+            Some(ffe_core::missile::PLAYER_MISSILE)
+        );
+        assert_eq!(combat.first_missile(), None);
+        assert_eq!(combat.take_missile(0), None);
+        assert_eq!(combat.take_missile(99), None);
     }
 
     #[test]

@@ -553,3 +553,7 @@ _ref_display_mode equ FUNC_001573
 _ref_clear_buffer equ FUNC_001577_ClearBuf
 _ref_gui_get_last_action equ FUNC_001414_GuiGetLastAction
 _ref_gui_set_last_action equ FUNC_001415_GuiSetLastAction
+
+; Missile launch (F1096 -> F941), for the --missile-probe adapter mode.
+GLOBAL _ref_launch_missile
+_ref_launch_missile equ FUNC_001096

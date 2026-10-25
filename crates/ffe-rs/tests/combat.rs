@@ -8,6 +8,8 @@ use ffe_rs::flight::{Flight, Mode};
 fn new_game_loadout_and_gun_mounts_are_f998s() {
     let combat = Combat::new_game();
     assert_eq!(combat.lasers, [ffe_core::laser::PULSE_1MW, 0, 0, 0]);
+    assert_eq!(combat.missile_count(), 2);
+    assert_eq!(combat.missiles[0], ffe_core::missile::PLAYER_MISSILE);
     assert_eq!(combat.energy, 0x2000_0000);
     assert_eq!(combat.drive, 2);
     assert_eq!(combat.energy_gauge(), 0xffe0);

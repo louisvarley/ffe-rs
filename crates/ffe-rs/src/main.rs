@@ -1175,7 +1175,26 @@ fn run() -> Result<(), String> {
                     if pressed(Key::T) || console_click == Some(Click::Target) {
                         let back = window.is_key_down(Key::LeftShift)
                             || window.is_key_down(Key::RightShift);
-                        if nav.ship_lock.is_some() {
+                        let combat_id = if back { nav.ship_lock } else { None };
+                        if let Some(id) = combat_id {
+                            // Shift+T selects the combat target (DATA_008875),
+                            // the one F1096/F941 launch a missile at.
+                            let name = nav
+                                .ships
+                                .iter()
+                                .find(|ship| ship.id == id)
+                                .map_or_else(String::new, |ship| ship.name.clone());
+                            nav.missile_lock = if nav.missile_lock == Some(id) {
+                                None
+                            } else {
+                                Some(id)
+                            };
+                            message = if nav.missile_lock.is_some() {
+                                format!("Missile target locked: {name}. M launches.")
+                            } else {
+                                "Missile target lock off.".to_owned()
+                            };
+                        } else if nav.ship_lock.is_some() {
                             if let Some(ship) = nav.cycle_ship_lock(if back { -1 } else { 1 }) {
                                 message = format!(
                                     "Locked on {} {}. Space fires; a ship cannot be flown to.",
@@ -1245,6 +1264,69 @@ fn run() -> Result<(), String> {
                                             ship.position
                                         ))
                                     );
+                                }
+                            }
+                        }
+                    }
+                    if pressed(Key::M) {
+                        // F1054's 'm': the first non-zero pylon in
+                        // ship+0xd6..+0xdf; F1096 requires DATA_008875 (the
+                        // combat target) and calls F941.
+                        match (state.combat.first_missile(), nav.missile_lock) {
+                            (None, _) => message = "No missiles left.".to_owned(),
+                            (Some(_), None) => {
+                                message =
+                                    "No missile target: lock a ship and press Shift+T.".to_owned()
+                            }
+                            (Some((pylon, code)), Some(id)) => {
+                                let target = nav
+                                    .ships
+                                    .iter()
+                                    .find(|ship| ship.id == id && ship.alive())
+                                    .map(|ship| ship.name.clone());
+                                match target {
+                                    None => message = "The missile target is gone.".to_owned(),
+                                    Some(name) => {
+                                        let model = ffe_core::missile::model(code).unwrap_or(0);
+                                        let stats = scene
+                                            .as_ref()
+                                            .and_then(|scene| scene.ship_stats(model));
+                                        let missile_radius = ffe_core::objects::ModelInfo::read(
+                                            model_records,
+                                            model_stats,
+                                            model,
+                                        )
+                                        .map_or(0, |info| info.radii().1);
+                                        let launcher_radius = ffe_core::objects::ModelInfo::read(
+                                            model_records,
+                                            model_stats,
+                                            state.ship,
+                                        )
+                                        .map_or(0, |info| info.radii().1);
+                                        if let Some(spec) = ffe_rs::missile::MissileField::spec(
+                                            code,
+                                            stats,
+                                            missile_radius,
+                                        ) {
+                                            let axes = ship_axes(&state);
+                                            let position = ship_position(&original, &state);
+                                            if state.combat.take_missile(pylon).is_some() {
+                                                nav.launch_missile(
+                                                    spec,
+                                                    code,
+                                                    0,
+                                                    id,
+                                                    position,
+                                                    axes,
+                                                    pylon,
+                                                    launcher_radius,
+                                                );
+                                                message = format!("Missile away at {name}.");
+                                            }
+                                        } else {
+                                            message = "Missile model unavailable.".to_owned();
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2318,6 +2400,34 @@ fn run() -> Result<(), String> {
                         }
                     }
                 }
+                for event in nav.tick_missiles(elapsed * factor, player) {
+                    match event {
+                        ffe_rs::missile::MissileEvent::Hit { name, outcome, .. } => {
+                            message = match outcome {
+                                ffe_core::laser::Damage::Shields => {
+                                    let left = nav
+                                        .ships
+                                        .iter()
+                                        .find(|ship| ship.name == name)
+                                        .map_or(0, |ship| ship.shield_percent());
+                                    format!("{name}: missile absorbed by shields ({left}% left).")
+                                }
+                                ffe_core::laser::Damage::Hull => {
+                                    let hull = nav
+                                        .ships
+                                        .iter()
+                                        .find(|ship| ship.name == name)
+                                        .map_or(0, |ship| ship.hull_per_mille() / 10);
+                                    format!("{name}: missile hit, hull {hull}%.")
+                                }
+                                ffe_core::laser::Damage::Destroyed => {
+                                    format!("{name} destroyed by missile.")
+                                }
+                            }
+                        }
+                        ffe_rs::missile::MissileEvent::Expired { .. } => {}
+                    }
+                }
             }
         }
         // A new state (docking, a scenario, a load) ends the original flight model.
@@ -2771,6 +2881,28 @@ fn run() -> Result<(), String> {
             }
             None => Vec::new(),
         };
+        // F941's missile objects: the same renderer draws models 4..13.
+        screen.missiles = match nav.as_ref() {
+            Some(nav) => {
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                nav.missiles
+                    .missiles
+                    .iter()
+                    .filter(|missile| missile.alive())
+                    .map(|missile| ffe_rs::screen::SystemMissile {
+                        model: missile.spec.model,
+                        centre: missile.position.map(|v| v as f64 / unit),
+                        axes: missile.axes,
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        // DATA_007247 (combat target) and DATA_007252 (F1113's blink).
+        screen.missile_lock = nav.as_ref().is_some_and(|nav| nav.missile_lock.is_some());
+        screen.missile_blink = nav.as_ref().is_some_and(|nav| {
+            ((nav.clock * ffe_rs::original_flight::TICS_PER_SECOND / 49_710.0) as u64) & 1 == 0
+        });
         // The labels toggle's object names (the original's F1108 reads the object's
         // +0x124 string): every body of the system, at its camera position.
         screen.labels.clear();
@@ -3162,10 +3294,12 @@ fn run() -> Result<(), String> {
             e8: if autopilot { 2 } else { 0 },
             e9: if labels { 4 } else { 0 },
             mounts: stats.map_or(1, |stats| stats.gun_mounts),
+            slots: state.combat.missiles,
             data_246: screen.target_mark.is_some(),
-            data_247: screen.target_mark.is_some_and(|mark| mark.engaged),
+            // F1120 hides the 0x4f lamp while the missile combat target is set;
+            // F1063/F1064 write DATA_008875/7247.
+            data_247: nav.as_ref().is_some_and(|nav| nav.missile_lock.is_some()),
             general: state.loadout.general,
-            slots: state.loadout.missiles,
             ..screen.systems
         };
         screen.clock = nav.as_ref().map(|nav| nav.date_text()).unwrap_or_default();

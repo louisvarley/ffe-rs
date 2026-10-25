@@ -4,6 +4,41 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Missiles, lock-on and pylon lamps merged (v0.67)
+
+- Merged `missiles` (ef41062): `ffe_core::missile` (the ten pylon codes and
+  damage table, F941's launch impulse and separation, F758's 20-frame guidance,
+  the 60-update/24 s lifetime and 131 m fuse, F718/F721 contact and F953
+  damage), `ffe_rs::missile`, ten pylon words in `Combat`, and
+  `Navigator::{missile_lock, missiles, launch_missile, tick_missiles}`. `M`
+  launches the first pylon only after a `Shift+T` lock; missile objects draw
+  through the model renderer, the combat target draws F1114's circle and the
+  F1120 pylon lamps follow `Combat::missiles`.
+- Conflicts: `main.rs` (the NPC event block vs the missile tick; the lock/lamp
+  `ShipSystems` fields), `navigation.rs` (spawn clear), `screen.rs`
+  (`SystemEffect` vs `SystemMissile`, and the targeter/gunsight interleave),
+  `docs/notes/combat.md`. Resolution keeps the shipai/effects tick and event
+  loop, then ticks missiles and handles `MissileEvent`; both `SystemEffect` and
+  `SystemMissile` are drawn; the equipment `Loadout` remains the saved pylon
+  mirror while `Combat::missiles` is the live F941 word set used by the lamps
+  (the new game sets both).
+- `--missile-probe` in `tools/reference/headless.c` (with its export alias)
+  runs the executed original's new game: the pylon `[130,130]` becomes
+  `[0,130]`, a model-6 object appears with owner 107/target 114, and its
+  guidance runs every 20 frames. That is the calibration for the port's 0.4 s
+  guidance interval, 24 s lifetime and per-thrust acceleration.
+- **Owner decisions:** the missile view (F10), NPC launches (F754), ECM, the
+  F1113 navigation box and the remaining F1116 targeter lamps are not wired;
+  `Shift+T` is the port's lock gesture; the F597 lead and F585 turn
+  quantisation are approximated in floating point.
+- Cache: the branch predates v27; the local v27 `data.bin` (1,796 assets,
+  ignored) served every cached test.
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `--test missile_view -- --ignored` (1), `--test combat`
+  (9) and `--test npc_ai -- --ignored` (3).
+
+---
+
 ## 2026-10-25 - Hit particles, explosions and debris merged (v0.66)
 
 - Merged `effects` (9974338): `ffe_core::effects` spawns F939's model-158 hit

@@ -158,6 +158,11 @@ impl Flight {
                 .lasers
                 .iter()
                 .any(|code| *code != 0 && ffe_core::laser::index(*code).is_none_or(|i| i > 10))
+            || self
+                .combat
+                .missiles
+                .iter()
+                .any(|code| *code != 0 && ffe_core::missile::model(*code).is_none())
         {
             return Err("save contains out-of-range prototype state".to_owned());
         }

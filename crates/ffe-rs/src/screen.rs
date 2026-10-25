@@ -204,6 +204,15 @@ pub struct SystemEffect {
     pub mass: u16,
 }
 
+/// A missile object (F941, models 4..13) drawn through the same object renderer
+/// as the ships. Missiles carry no flash or death marker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemMissile {
+    pub model: u32,
+    pub centre: [f64; 3],
+    pub axes: [[f64; 3]; 3],
+}
+
 /// The retired port-only map buttons. Kept as constants so the integrator's
 /// layout tests can see where the non-original UI used to be; nothing draws or
 /// clicks them now (the original's navigation is the `n` console icon).
@@ -234,6 +243,13 @@ pub struct Screen {
     /// The system's short-lived visuals: F939 hit particles, F942 explosions
     /// and F926 debris (set by the caller each frame).
     pub effects: Vec<SystemEffect>,
+    /// The missiles in flight (F941 objects), drawn by the same object renderer.
+    pub missiles: Vec<SystemMissile>,
+    /// The combat target (`DATA_007247`) is set: F1111 draws F1114's circle at
+    /// the view centre.
+    pub missile_lock: bool,
+    /// The F1111 blink (`DATA_007252`): the circle flashes about once a second.
+    pub missile_blink: bool,
     /// Direction toward the local star in flight space (`None` outside a system):
     /// ships, stations and lift objects are lit by it instead of the original's
     /// fixed default light. Planet discs carry their own light.
@@ -676,6 +692,9 @@ impl Screen {
             stations: Vec::new(),
             ships: Vec::new(),
             effects: Vec::new(),
+            missiles: Vec::new(),
+            missile_lock: false,
+            missile_blink: false,
             sun: None,
             market: None,
             dock: None,
@@ -792,6 +811,11 @@ impl Screen {
             icon.blit_colours(&mut self.frame, &self.palette, 129, 48);
         }
         self.draw_targeter_cursor(view);
+        // F1111: the combat target (`DATA_007247`) draws F1114's circle at
+        // (0x9f,0x4f), radius 0x10, colour 0xc, while F1113's blink is on.
+        if self.missile_lock && self.missile_blink {
+            self.circle(0x9f, 0x4f, 0x10, 0x0c);
+        }
     }
 
     /// F1111's auto-targetter cursor, drawn after the gunsight: `DATA_007246`'s
@@ -1070,6 +1094,21 @@ impl Screen {
     fn line(&mut self, start: (i32, i32), end: (i32, i32), colour: u8) {
         let value = self.palette[usize::from(colour)];
         self.line_value(start, end, value);
+    }
+
+    /// `FUNC_001612_DrawCircle`: a 32-segment circle, used by F1114's combat
+    /// target mark.
+    fn circle(&mut self, x: i32, y: i32, radius: i32, colour: u8) {
+        let mut previous = (x + radius, y);
+        for step in 1..=32 {
+            let angle = step as f64 / 32.0 * std::f64::consts::TAU;
+            let point = (
+                x + (angle.cos() * f64::from(radius)).round() as i32,
+                y + (angle.sin() * f64::from(radius)).round() as i32,
+            );
+            self.line(previous, point, colour);
+            previous = point;
+        }
     }
 
     /// Bresenham in the 320x158 view, bounded to 4096 steps.
@@ -2232,6 +2271,13 @@ impl Screen {
             return;
         };
         let mut order = self.ships.clone();
+        order.extend(self.missiles.iter().map(|missile| SystemShip {
+            model: missile.model,
+            centre: missile.centre,
+            axes: missile.axes,
+            flash: false,
+            dead: false,
+        }));
         order.sort_by(|a, b| {
             distance(camera.position, b.centre).total_cmp(&distance(camera.position, a.centre))
         });
