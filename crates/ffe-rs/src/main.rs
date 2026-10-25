@@ -12,6 +12,7 @@ use ffe_rs::front_end::{self, Intro, IntroAction, IntroTimeline};
 use ffe_rs::galaxy_map::GalaxyMap;
 use ffe_rs::hud::PlayerHud;
 use ffe_rs::input;
+use ffe_rs::messages::{Channel, Event as LogEvent, Post, Source};
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::navigation::{
@@ -42,6 +43,31 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+/// One frame's F271 write. `main` only puts source-faithful game events here;
+/// port-only notices stay in `message` (the docked/port note) and never get a
+/// date stamp. The last event of a frame wins, as the old `message = ...` chain
+/// did.
+#[derive(Default)]
+struct PendingLog(Option<LogEvent>);
+
+impl PendingLog {
+    fn add(&mut self, source: Source, text: impl Into<String>) {
+        self.0 = Some(LogEvent::new(source, text));
+    }
+
+    fn replace(&mut self, source: Source, text: impl Into<String>) {
+        self.0 = Some(LogEvent::replace(source, text));
+    }
+
+    fn clear(&mut self, source: Source) {
+        self.0 = Some(LogEvent::clear(source));
+    }
+
+    fn take(&mut self) -> Option<LogEvent> {
+        self.0.take()
+    }
+}
 
 /// Which game the boot starts: the original's new game or the development sandbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -498,8 +524,10 @@ fn run() -> Result<(), String> {
     let mut acceleration = 0usize;
     // F2's status/equipment page (`F1120`, `DATA_008871 & 8`).
     let mut status_page = false;
-    // The last message pushed into the original's ten-entry log.
-    let mut logged = String::new();
+    // The single route into the original's ten-entry log. Port-only notices
+    // (`message` below) never enter it.
+    let mut log_channel = Channel::default();
+    let mut pending_log = PendingLog::default();
     let mut model_viewer: Option<ModelViewer> = None;
     // The flight view's station is the original model 74 when the cache has it;
     // otherwise the placeholder wireframe stays.
@@ -704,17 +732,24 @@ fn run() -> Result<(), String> {
     let mut takeoff_climb: Option<([i64; 3], [f64; 3])> = None;
     // The station screen the commander is on (the services root by default).
     let mut dock = DockState::default();
+    // The port's transient note (docked screens draw it under the menu). It is
+    // deliberately not the F271 log: port-only hints must not get a date stamp.
     let mut message = match nav.as_ref().and_then(|nav| {
         nav.docked
             .map(|index| (nav.bodies[index].name.as_str(), nav.bodies[index].kind))
     }) {
-        Some((name, NavKind::Starport)) => format!(
-            "Landed at {name}, {}. L launches.",
-            nav.as_ref().map_or("", |nav| nav.system_name())
-        ),
+        Some((_, NavKind::Starport)) => String::new(),
         Some(_) => station::SERVICES_HINT.to_owned(),
-        None => "Docked. L launches.".to_owned(),
+        None => String::new(),
     };
+    // F994's start state names the body the commander is standing on. This is
+    // the original's start message; the boot log has no other entry.
+    if let Some(name) = nav
+        .as_ref()
+        .and_then(|nav| nav.docked.map(|index| nav.bodies[index].name.clone()))
+    {
+        pending_log.add(Source::Start, format!("Landed at {name}."));
+    }
     if let Some(name) = &captured_planet {
         message = format!("Capture: autopilot to {name} from three radii.");
     }
@@ -1023,8 +1058,9 @@ fn run() -> Result<(), String> {
             }
             .to_owned();
         }
-        // Every console button the port has no screen for says so in the message
-        // log instead of doing nothing.
+        // Every console click beeps (F1056). A click whose screen is not ported
+        // gets only the port's transient note: the source writes no F271 entry
+        // for F4/F5, the missile or combat-computer views.
         if console_click.is_some() {
             sound.play(Cue::UiBeep);
         }
@@ -1296,19 +1332,23 @@ fn run() -> Result<(), String> {
                                     // "Music after hyperspace" switch is on.
                                     sound.play(Cue::Hyperspace);
                                     sound.hyperspace_music();
-                                    message = format!(
-                                        "Hyperspace: {} in {:.1} days, {} t of fuel. Arrived in the {} system.",
-                                        ffe_rs::navigation::range_text(jumped.distance),
-                                        jumped.days,
-                                        jumped.fuel,
-                                        nav.system_name()
+                                    pending_log.add(
+                                        Source::Navigation,
+                                        format!(
+                                            "Hyperspace: {} in {:.1} days, {} t of fuel. Arrived in the {} system.",
+                                            ffe_rs::navigation::range_text(jumped.distance),
+                                            jumped.days,
+                                            jumped.fuel,
+                                            nav.system_name()
+                                        ),
                                     );
                                     nav.view = NavView::Closed;
                                 }
                                 Err(error) => message = format!("Jump refused: {error}"),
                             }
                         } else if let Some(body) = nav.engage() {
-                            message = format!("Autopilot to {}.", body.name);
+                            pending_log
+                                .replace(Source::Autopilot, format!("Autopilot to {}.", body.name));
                             nav.view = NavView::Closed;
                         }
                     }
@@ -1317,7 +1357,9 @@ fn run() -> Result<(), String> {
                     && nav.target.take().is_some()
                 {
                     nav.disengage();
-                    message = "Autopilot off.".to_owned();
+                    // F864 clears the current replace-mode message when the
+                    // autopilot ends instead of printing another line.
+                    pending_log.clear(Source::Autopilot);
                 }
                 // Targets: a click on a body in the view, T (Shift+T the previous) or the
                 // target buttons lock on to it; K or the AUTOPILOT button flies there, and
@@ -1341,24 +1383,36 @@ fn run() -> Result<(), String> {
                             } else {
                                 Some(id)
                             };
-                            message = if nav.missile_lock.is_some() {
-                                format!("Missile target locked: {name}. M launches.")
+                            if nav.missile_lock.is_some() {
+                                pending_log.replace(
+                                    Source::Target,
+                                    format!("Missile target locked: {name}. M launches."),
+                                );
                             } else {
-                                "Missile target lock off.".to_owned()
-                            };
+                                pending_log.replace(Source::Target, "Missile target lock off.");
+                            }
                         } else if nav.ship_lock.is_some() {
                             if let Some(ship) = nav.cycle_ship_lock(if back { -1 } else { 1 }) {
-                                message = format!(
-                                    "Locked on {} {}. Space fires; a ship cannot be flown to.",
-                                    ship.name,
-                                    range_label(ship_position(&original, &state), ship.position)
+                                pending_log.replace(
+                                    Source::Target,
+                                    format!(
+                                        "Locked on {} {}. Space fires; a ship cannot be flown to.",
+                                        ship.name,
+                                        range_label(
+                                            ship_position(&original, &state),
+                                            ship.position
+                                        )
+                                    ),
                                 );
                             }
                         } else if let Some(body) = nav.cycle_lock(ship, if back { -1 } else { 1 }) {
-                            message = format!(
-                                "Locked on {} {}. K or AUTOPILOT flies there.",
-                                body.name,
-                                range_label(ship, body.position)
+                            pending_log.replace(
+                                Source::Target,
+                                format!(
+                                    "Locked on {} {}. K or AUTOPILOT flies there.",
+                                    body.name,
+                                    range_label(ship, body.position)
+                                ),
                             );
                         }
                     }
@@ -1394,10 +1448,13 @@ fn run() -> Result<(), String> {
                                 nav.ship_lock = None;
                                 if let Some(body) = nav.lock(index) {
                                     sound.play(Cue::UiBeep);
-                                    message = format!(
-                                        "Locked on {} {}. K or AUTOPILOT flies there.",
-                                        body.name,
-                                        range_label(ship, body.position)
+                                    pending_log.replace(
+                                        Source::Target,
+                                        format!(
+                                            "Locked on {} {}. K or AUTOPILOT flies there.",
+                                            body.name,
+                                            range_label(ship, body.position)
+                                        ),
                                     );
                                 }
                             } else {
@@ -1405,13 +1462,16 @@ fn run() -> Result<(), String> {
                                 let id = nav.ships[index - body_count].id;
                                 if let Some(ship) = nav.lock_ship(id) {
                                     sound.play(Cue::UiBeep2);
-                                    message = format!(
-                                        "Locked on {} {}. Space fires.",
-                                        ship.name,
-                                        range_label(
-                                            ship_position(&original, &state),
-                                            ship.position
-                                        )
+                                    pending_log.replace(
+                                        Source::Target,
+                                        format!(
+                                            "Locked on {} {}. Space fires.",
+                                            ship.name,
+                                            range_label(
+                                                ship_position(&original, &state),
+                                                ship.position
+                                            )
+                                        ),
                                     );
                                 }
                             }
@@ -1422,7 +1482,9 @@ fn run() -> Result<(), String> {
                         // ship+0xd6..+0xdf; F1096 requires DATA_008875 (the
                         // combat target) and calls F941.
                         match (state.combat.first_missile(), nav.missile_lock) {
-                            (None, _) => message = "No missiles left.".to_owned(),
+                            (None, _) => {
+                                pending_log.add(Source::Combat, "No missiles left.");
+                            }
                             (Some(_), None) => {
                                 message =
                                     "No missile target: lock a ship and press Shift+T.".to_owned()
@@ -1434,7 +1496,10 @@ fn run() -> Result<(), String> {
                                     .find(|ship| ship.id == id && ship.alive())
                                     .map(|ship| ship.name.clone());
                                 match target {
-                                    None => message = "The missile target is gone.".to_owned(),
+                                    None => {
+                                        pending_log
+                                            .add(Source::Combat, "The missile target is gone.");
+                                    }
                                     Some(name) => {
                                         let model = ffe_core::missile::model(code).unwrap_or(0);
                                         let stats = scene
@@ -1472,7 +1537,7 @@ fn run() -> Result<(), String> {
                                                 );
                                                 // F941 repeats F931's F237(ship, 3)
                                                 // for the player's missile.
-                                                message = match nav.player_fired(position) {
+                                                match nav.player_fired(position) {
                                                     Some(report) => {
                                                         let mut text = report.offence.message;
                                                         if report.police {
@@ -1480,10 +1545,13 @@ fn run() -> Result<(), String> {
                                                                 " Police are responding.",
                                                             );
                                                         }
-                                                        text
+                                                        pending_log.add(Source::Legal, text);
                                                     }
-                                                    None => format!("Missile away at {name}."),
-                                                };
+                                                    None => pending_log.add(
+                                                        Source::Combat,
+                                                        format!("Missile away at {name}."),
+                                                    ),
+                                                }
                                             }
                                         } else {
                                             message = "Missile model unavailable.".to_owned();
@@ -1514,11 +1582,17 @@ fn run() -> Result<(), String> {
                                 );
                             }
                             if let Some(body) = nav.engage_locked() {
-                                message = if matches!(body.kind, NavKind::Station) {
-                                    format!("Autopilot: docking at {}.", body.name)
+                                if matches!(body.kind, NavKind::Station) {
+                                    pending_log.replace(
+                                        Source::Autopilot,
+                                        format!("Autopilot: docking at {}.", body.name),
+                                    );
                                 } else {
-                                    format!("Autopilot to {}.", body.name)
-                                };
+                                    pending_log.replace(
+                                        Source::Autopilot,
+                                        format!("Autopilot to {}.", body.name),
+                                    );
+                                }
                             }
                         }
                     }
@@ -1714,9 +1788,12 @@ fn run() -> Result<(), String> {
                                     );
                                 }
                                 death::play_escape_audio(&mut sound);
-                                message = format!("{} launched.", craft.name());
+                                pending_log
+                                    .add(Source::Death, format!("{} launched.", craft.name()));
                             }
                             None => {
+                                // F1098 returns 0 without a message when no
+                                // escape craft is fitted (ffe.asm:78528).
                                 message = "No escape capsule fitted.".to_owned();
                             }
                         }
@@ -1749,10 +1826,11 @@ fn run() -> Result<(), String> {
                         let changed = next != views.mode;
                         views.mode = next;
                         if changed {
-                            // F1125: `0x27` camera on a view change.
+                            // F1125: `0x27` camera on a view change. The source
+                            // changes the view silently; the port must not write
+                            // a "Front View." entry into F271.
                             sound.play(Cue::Camera);
                         }
-                        message = format!("{}.", views.mode.name());
                     }
                 }
                 let now = Instant::now();
@@ -2020,9 +2098,10 @@ fn run() -> Result<(), String> {
                                         // sample comes at the end of the lift
                                         // sequence (`Traffic::LaunchDone`).
                                         sound.stop_for_sequence();
-                                        message =
-                                            "Launch permission granted: moving into the lift."
-                                                .to_owned();
+                                        pending_log.add(
+                                            Source::Launch,
+                                            "Launch permission granted: moving into the lift.",
+                                        );
                                     }
                                     Err(error) => message = error,
                                 }
@@ -2078,12 +2157,14 @@ fn run() -> Result<(), String> {
                                         buy,
                                         if shift { 10 } else { 1 },
                                     ) {
-                                        Ok(text) => message = text,
+                                        Ok(text) => pending_log.add(Source::Trade, text),
                                         Err(error) => message = format!("Trade failed: {error}"),
                                     }
                                 }
                             }
                         }
+                        // The port has no screen for this service. This is a
+                        // port-only note, not a source F271 entry.
                         StationAction::NotPorted(text) => message = text.to_owned(),
                     }
                 }
@@ -2107,8 +2188,10 @@ fn run() -> Result<(), String> {
                                 Ok(()) => {
                                     acceleration = 0;
                                     sound.stop_for_sequence();
-                                    message = "Launch permission granted: moving into the lift."
-                                        .to_owned();
+                                    pending_log.add(
+                                        Source::Launch,
+                                        "Launch permission granted: moving into the lift.",
+                                    );
                                     None
                                 }
                                 Err(error) => Some(Err(error)),
@@ -2173,7 +2256,7 @@ fn run() -> Result<(), String> {
                                         buying,
                                         if shift { 10 } else { 1 },
                                     ) {
-                                        Ok(text) => message = text,
+                                        Ok(text) => pending_log.add(Source::Trade, text),
                                         Err(error) => message = format!("Trade failed: {error}"),
                                     }
                                     None
@@ -2192,13 +2275,13 @@ fn run() -> Result<(), String> {
                     None
                 };
                 if let Some(result) = action {
-                    message = match result {
-                        Ok(text) => text.to_owned(),
+                    match result {
+                        Ok(text) => pending_log.add(Source::Trade, text),
                         Err(error) => {
                             eprintln!("ERROR: {error}");
-                            format!("ERROR: {error}")
+                            message = format!("ERROR: {error}");
                         }
-                    };
+                    }
                 }
                 let shift =
                     window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
@@ -2287,19 +2370,28 @@ fn run() -> Result<(), String> {
                             if let Some((landing, seconds)) = command.skip {
                                 model.teleport(landing);
                                 nav.transfer(&cache, seconds);
+                                // Capture-only teleport note; not a source line.
                                 message = format!("Transfer to {}: {:.0} s.", body.name, seconds);
                             } else if command.arrived {
-                                message = format!("Arrived at {}.", body.name);
+                                pending_log
+                                    .add(Source::Navigation, format!("Arrived at {}.", body.name));
                                 nav.target = None;
                             } else if nav.docking() {
-                                message = format!("Autopilot: docking at {}.", body.name);
+                                pending_log.replace(
+                                    Source::Autopilot,
+                                    format!("Autopilot: docking at {}.", body.name),
+                                );
                             } else {
-                                message = format!("Autopilot to {}.", body.name);
+                                pending_log.replace(
+                                    Source::Autopilot,
+                                    format!("Autopilot to {}.", body.name),
+                                );
                             }
                         }
                     }
                     if let Some(notice) = nav.notice.take() {
-                        message = notice;
+                        // F654/F655's traffic-control refusal (`0x98b7..0x98b9`).
+                        pending_log.add(Source::Docking, notice);
                     }
                     let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
                         / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
@@ -2385,9 +2477,12 @@ fn run() -> Result<(), String> {
                             if contact.flags & 0x40 != 0 {
                                 landed_at = Some(index);
                             } else if contact.flags & 0x80 != 0 {
-                                message = format!(
-                                    "Crash: damage {}. The ship bounced off the surface.",
-                                    contact.damage.max(0)
+                                pending_log.add(
+                                    Source::Collision,
+                                    format!(
+                                        "Crash: damage {}. The ship bounced off the surface.",
+                                        contact.damage.max(0)
+                                    ),
                                 );
                                 sound.play(Cue::HullDamage);
                             }
@@ -2431,17 +2526,17 @@ fn run() -> Result<(), String> {
                                         model.set_mode(mode);
                                     }
                                     model.apply(&mut state);
-                                    message = if starport {
-                                        format!(
-                                            "Landed at {}. L asks for launch clearance.",
-                                            nav.bodies[index].name
-                                        )
+                                    if starport {
+                                        pending_log.add(
+                                            Source::Landing,
+                                            format!("Landed at {}.", nav.bodies[index].name),
+                                        );
                                     } else {
-                                        format!(
-                                            "Landed on {}. The surface view is ahead; L launches.",
-                                            nav.bodies[index].name
-                                        )
-                                    };
+                                        pending_log.add(
+                                            Source::Landing,
+                                            format!("Landed on {}.", nav.bodies[index].name),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -2528,8 +2623,11 @@ fn run() -> Result<(), String> {
                                                 // (`0x13`). The song stops at the
                                                 // docked state (F1091).
                                                 sound.play(Cue::Docking);
-                                                message = format!(
-                                                    "{name}: docking, aligning with the lift."
+                                                pending_log.replace(
+                                                    Source::Docking,
+                                                    format!(
+                                                        "{name}: docking, aligning with the lift."
+                                                    ),
                                                 );
                                             }
                                         }
@@ -2537,8 +2635,10 @@ fn run() -> Result<(), String> {
                                             model.teleport(clear);
                                             model.face(nav.bodies[index].position);
                                             model.apply(&mut state);
-                                            message =
-                                                format!("{name}: {}. Pushed clear.", reason.text());
+                                            pending_log.add(
+                                                Source::Collision,
+                                                format!("{name}: {}. Pushed clear.", reason.text()),
+                                            );
                                         }
                                     }
                                 }
@@ -2554,19 +2654,8 @@ fn run() -> Result<(), String> {
                             views.turret.yaw = turret[0];
                             views.turret.pitch = turret[1];
                         }
-                        if keys.faster || keys.slower {
-                            let source_speed = |metres: f64| {
-                                (metres * 1000.0 / ffe_rs::original_flight::MM_PER_SECOND).round()
-                                    as i32
-                            };
-                            let set = model.set_speed_metres();
-                            let actual = state.speed() * 9.7;
-                            message = format!(
-                                "Set:{} Act:{}",
-                                PlayerHud::speed_text(source_speed(set)),
-                                PlayerHud::speed_text(source_speed(actual))
-                            );
-                        }
+                        // Set:/Act: are F1099's HUD lines (`DATA_007310/312`),
+                        // not F271 entries: the HUD reads them from the state.
                         if let Some(text) = state.finish_step() {
                             message = text.to_owned();
                             original = (state.mode == ffe_rs::flight::Mode::Flight).then(|| {
@@ -2625,13 +2714,19 @@ fn run() -> Result<(), String> {
                 for event in nav.tick_traffic(tics, elapsed * factor) {
                     match event {
                         Traffic::Stage(text) => {
-                            message = format!(
-                                "{}: {text}.",
-                                if nav.sequence.is_some_and(|s| s.launching) {
-                                    "Launching"
-                                } else {
-                                    "Docking"
-                                }
+                            // F863's progress line uses F271's replace flag, so
+                            // the stages update one entry instead of filling the
+                            // ring with near-identical dates.
+                            pending_log.replace(
+                                Source::Docking,
+                                format!(
+                                    "{}: {text}.",
+                                    if nav.sequence.is_some_and(|s| s.launching) {
+                                        "Launching"
+                                    } else {
+                                        "Docking"
+                                    }
+                                ),
                             );
                             // F1026/F1029's airlock `0x12`/`0x13` on the door
                             // stages (the other stages have no cue).
@@ -2656,7 +2751,10 @@ fn run() -> Result<(), String> {
                             // F1088 sets the station's door opening; the ship is
                             // still in the lift until it is open (LaunchDone). Keep
                             // the docked/inside view, not the flight view.
-                            message = format!("Launching: leaving {}.", nav.bodies[index].name);
+                            pending_log.add(
+                                Source::Launch,
+                                format!("Launching: leaving {}.", nav.bodies[index].name),
+                            );
                             sound.play(Cue::Door);
                         }
                         Traffic::LaunchDone(index) => {
@@ -2670,7 +2768,10 @@ fn run() -> Result<(), String> {
                             // after a hyperspace exit.
                             sound.play(Cue::Launch);
                             sound.play(Cue::Engine);
-                            message = format!("Clear of {}.", nav.bodies[index].name);
+                            pending_log.add(
+                                Source::Launch,
+                                format!("Clear of {}.", nav.bodies[index].name),
+                            );
                             // F688 spawns the system traffic on entering it;
                             // the sandbox has no new game, so the launch is its
                             // system-entry point.
@@ -2726,25 +2827,31 @@ fn run() -> Result<(), String> {
                         } => {
                             let outcome = state.take_damage(damage, mass);
                             let laser = if beam { "beam laser" } else { "pulse laser" };
-                            message = match outcome {
+                            match outcome {
                                 ffe_core::laser::Damage::Shields => {
                                     let percent = if state.shields[1] == 0 {
                                         0
                                     } else {
                                         state.shields[0] as i32 * 100 / i32::from(state.shields[1])
                                     };
-                                    format!(
-                                        "{name} hits with its {laser}: shields {percent}% left."
-                                    )
+                                    pending_log.add(
+                                        Source::Combat,
+                                        format!(
+                                            "{name} hits with its {laser}: shields {percent}% left."
+                                        ),
+                                    );
                                 }
                                 ffe_core::laser::Damage::Hull => {
                                     let per_mille =
                                         state.hull[0] as i32 * 250 / i32::from(mass.max(1));
-                                    format!(
-                                        "{name} hits with its {laser}: hull {}.{}%.",
-                                        per_mille / 10,
-                                        per_mille % 10
-                                    )
+                                    pending_log.add(
+                                        Source::Combat,
+                                        format!(
+                                            "{name} hits with its {laser}: hull {}.{}%.",
+                                            per_mille / 10,
+                                            per_mille % 10
+                                        ),
+                                    );
                                 }
                                 ffe_core::laser::Damage::Destroyed => {
                                     if state.death.is_some() {
@@ -2763,51 +2870,65 @@ fn run() -> Result<(), String> {
                                     match outcome {
                                         Outcome::Escaped(craft) => {
                                             death::play_destroyed_escape_audio(&mut sound);
-                                            death::escaped_message(&name, craft)
+                                            pending_log.add(
+                                                Source::Death,
+                                                death::escaped_message(&name, craft),
+                                            );
                                         }
                                         Outcome::Destroyed => {
                                             death::play_destroyed_audio(&mut sound);
-                                            death::destroyed_message(&name)
+                                            pending_log.add(
+                                                Source::Death,
+                                                death::destroyed_message(&name),
+                                            );
                                         }
                                     }
                                 }
-                            };
+                            }
                         }
                         ffe_rs::navigation::ShipEvent::PoliceHostile { name } => {
-                            message = format!("{name} is police and turns on you. You are wanted.");
+                            pending_log.add(
+                                Source::Legal,
+                                format!("{name} is police and turns on you. You are wanted."),
+                            );
                         }
                         ffe_rs::navigation::ShipEvent::AlertCleared => {
-                            message = "The police have called off the chase.".to_owned();
+                            pending_log.add(Source::Legal, "The police have called off the chase.");
                         }
                         ffe_rs::navigation::ShipEvent::Escaped { name } => {
-                            message = format!("{name} jumps out.");
+                            pending_log.add(Source::Navigation, format!("{name} jumps out."));
                         }
                     }
                 }
                 for event in nav.tick_missiles(elapsed * factor, player) {
                     match event {
                         ffe_rs::missile::MissileEvent::Hit { name, outcome, .. } => {
-                            message = match outcome {
-                                ffe_core::laser::Damage::Shields => {
-                                    let left = nav
-                                        .ships
-                                        .iter()
-                                        .find(|ship| ship.name == name)
-                                        .map_or(0, |ship| ship.shield_percent());
-                                    format!("{name}: missile absorbed by shields ({left}% left).")
-                                }
-                                ffe_core::laser::Damage::Hull => {
-                                    let hull = nav
-                                        .ships
-                                        .iter()
-                                        .find(|ship| ship.name == name)
-                                        .map_or(0, |ship| ship.hull_per_mille() / 10);
-                                    format!("{name}: missile hit, hull {hull}%.")
-                                }
-                                ffe_core::laser::Damage::Destroyed => {
-                                    format!("{name} destroyed by missile.")
-                                }
-                            }
+                            pending_log.add(
+                                Source::Combat,
+                                match outcome {
+                                    ffe_core::laser::Damage::Shields => {
+                                        let left = nav
+                                            .ships
+                                            .iter()
+                                            .find(|ship| ship.name == name)
+                                            .map_or(0, |ship| ship.shield_percent());
+                                        format!(
+                                            "{name}: missile absorbed by shields ({left}% left)."
+                                        )
+                                    }
+                                    ffe_core::laser::Damage::Hull => {
+                                        let hull = nav
+                                            .ships
+                                            .iter()
+                                            .find(|ship| ship.name == name)
+                                            .map_or(0, |ship| ship.hull_per_mille() / 10);
+                                        format!("{name}: missile hit, hull {hull}%.")
+                                    }
+                                    ffe_core::laser::Damage::Destroyed => {
+                                        format!("{name} destroyed by missile.")
+                                    }
+                                },
+                            );
                         }
                         ffe_rs::missile::MissileEvent::Expired { .. } => {}
                     }
@@ -2963,6 +3084,9 @@ fn run() -> Result<(), String> {
         }
         if last_mode != ffe_rs::flight::Mode::Docked && state.mode == ffe_rs::flight::Mode::Docked {
             dock.open(StationScreen::Services);
+            // F964's leave-flight path clears the current replace-mode message
+            // (the autopilot/docking progress line) instead of dating it.
+            pending_log.clear(Source::Autopilot);
         }
         last_mode = state.mode;
         // Lasers (F1040/F931): Space holds the fire input, the current view picks
@@ -3053,20 +3177,23 @@ fn run() -> Result<(), String> {
                                 if let Some(nav) = nav.as_ref() {
                                     if let Some(body) = nav.bodies.get(hit.index) {
                                         if !shot.beam {
-                                            message = format!(
-                                                "{} hit: {}.",
-                                                body.name,
-                                                match shot.code {
-                                                    laser::PULSE_1MW => "1MW pulse laser",
-                                                    laser::PULSE_5MW => "5MW pulse laser",
-                                                    laser::BEAM_1MW => "1MW beam laser",
-                                                    laser::BEAM_4MW => "4MW beam laser",
-                                                    laser::BEAM_20MW => "20MW beam laser",
-                                                    laser::BEAM_100MW => "100MW beam laser",
-                                                    laser::MINING_30MW => "30MW mining laser",
-                                                    laser::THARGOID => "Thargoid laser",
-                                                    _ => "laser",
-                                                }
+                                            pending_log.add(
+                                                Source::Combat,
+                                                format!(
+                                                    "{} hit: {}.",
+                                                    body.name,
+                                                    match shot.code {
+                                                        laser::PULSE_1MW => "1MW pulse laser",
+                                                        laser::PULSE_5MW => "5MW pulse laser",
+                                                        laser::BEAM_1MW => "1MW beam laser",
+                                                        laser::BEAM_4MW => "4MW beam laser",
+                                                        laser::BEAM_20MW => "20MW beam laser",
+                                                        laser::BEAM_100MW => "100MW beam laser",
+                                                        laser::MINING_30MW => "30MW mining laser",
+                                                        laser::THARGOID => "Thargoid laser",
+                                                        _ => "laser",
+                                                    },
+                                                ),
                                             );
                                         }
                                         // F953's hull/impact sample for a
@@ -3085,7 +3212,7 @@ fn run() -> Result<(), String> {
                                         nav.damage_ship_at(id, shot.damage, Some(hit.point));
                                     if let Some(attack) = outcome {
                                         state.credits = state.credits.saturating_add(attack.bounty);
-                                        message = match attack.damage {
+                                        let mut text = match attack.damage {
                                             ffe_core::laser::Damage::Shields => format!(
                                                 "{name}: shields absorb the hit{}.",
                                                 if attack.crime { ". You are wanted" } else { "" }
@@ -3110,8 +3237,9 @@ fn run() -> Result<(), String> {
                                             }
                                         };
                                         if attack.police {
-                                            message.push_str(" Police are responding.");
+                                            text.push_str(" Police are responding.");
                                         }
+                                        pending_log.add(Source::Combat, text);
                                     }
                                     // F750/F236: the first hit starts the battle
                                     // (siren + song 14 if enabled); F953/F942
@@ -3155,17 +3283,18 @@ fn run() -> Result<(), String> {
                         screen.beam = Some(beam);
                     }
                     Err(laser::FireError::Overheated) => {
-                        message = "Lasers overheated.".to_owned();
+                        pending_log.add(Source::Combat, "Lasers overheated.");
                     }
                     Err(laser::FireError::NoEnergy) => {
-                        message = "No energy for the lasers.".to_owned();
+                        pending_log.add(Source::Combat, "No energy for the lasers.");
                     }
                     Err(laser::FireError::NoLaser | laser::FireError::Refire) => {}
                 }
             }
         }
         if let Some(text) = legal_message {
-            message = text;
+            // F236's unlawful-discharge report is the frame's final F271 line.
+            pending_log.add(Source::Legal, text);
         }
         screen.lasers = state.combat.lasers;
         screen.energy = state.combat.energy;
@@ -3773,11 +3902,11 @@ fn run() -> Result<(), String> {
                 match outcome {
                     Outcome::Escaped(craft) => {
                         death::play_destroyed_escape_audio(&mut sound);
-                        message = format!("{} launched.", craft.name());
+                        pending_log.add(Source::Death, format!("{} launched.", craft.name()));
                     }
                     Outcome::Destroyed => {
                         death::play_destroyed_audio(&mut sound);
-                        message = "Your ship is destroyed. GAME OVER.".to_owned();
+                        pending_log.add(Source::Death, "Your ship is destroyed. GAME OVER.");
                     }
                 }
             }
@@ -3835,24 +3964,15 @@ fn run() -> Result<(), String> {
             ..screen.systems
         };
         screen.clock = nav.as_ref().map(|nav| nav.date_text()).unwrap_or_default();
-        // F271: a changed console message becomes a dated log entry. F351's
-        // bong accompanies a newly shown message. A continuously updated line
-        // (the autopilot's range or the Set/Act readout) overwrites the newest
-        // entry instead of adding a near-identical one each frame: that is
-        // F271's replace flag (`ffe.asm:20776-20792`).
-        if message != logged && !message.is_empty() {
-            let replaces = |family: &str| message.starts_with(family) && logged.starts_with(family);
-            if replaces("Autopilot:") || replaces("Autopilot to ") || replaces("Set:") {
-                screen
-                    .messages
-                    .update(message.clone(), screen.clock.clone());
-            } else {
-                screen.messages.push(message.clone(), screen.clock.clone());
-                // F351's bong accompanies a newly shown message, not an update of
-                // the newest one.
+        // F271: one source-tagged game event per frame becomes a dated log
+        // entry. `pending_log` never receives port-only notices (unported
+        // buttons, view names, pause/status toggles, debug text); those stay in
+        // `message` and are not dated. F351's bong accompanies a newly shown
+        // message, not a replace-flag update (`ffe.asm:20776-20792`).
+        if let Some(event) = pending_log.take() {
+            if log_channel.post(&mut screen.messages, event, &screen.clock) == Post::Added {
                 sound.play(Cue::Message);
             }
-            logged.clone_from(&message);
         }
         // F273's auto-scroll timer runs on the world tics.
         let log_tics =

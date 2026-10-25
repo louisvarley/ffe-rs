@@ -3,9 +3,10 @@
 //! `FFE_WORLD_CACHE=<data.bin> FFE_SHOT_DIR=<dir> cargo test -p ffe-rs --test
 //! messages_view -- --ignored --nocapture`
 
-use ffe_rs::camera::ViewState;
-use ffe_rs::console::ConsoleState;
+use ffe_rs::camera::{ViewMode, ViewState};
+use ffe_rs::console::{Click, ConsoleState};
 use ffe_rs::flight::{Flight, Mode};
+use ffe_rs::messages::{Channel, Event, Post, Source};
 use ffe_rs::screen::Screen;
 
 fn cache() -> ffe_content::VerifiedCache {
@@ -150,6 +151,80 @@ fn log_beside_places_frame() {
     assert_eq!(changed(&without, &with_log, 0, 229, 0, 158), 0);
     // The log is still in its own window when the list is open.
     assert!(changed(&without, &with_log, 195, 320, 158, 200) > 100);
+}
+
+/// The owner's sequence: boot, the unported F4/F5/missile/combat clicks and
+/// every view change. The F271 log must stay the one source start line: none of
+/// those actions writes a dated entry in the original.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn port_only_clicks_and_view_changes_leave_the_log_clean() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.clock = "1-Jan-3250 12:00:00".to_owned();
+    let mut channel = Channel::default();
+    assert_eq!(
+        channel.post(
+            &mut screen.messages,
+            Event::new(Source::Start, "Landed at Old Blackelk."),
+            &screen.clock,
+        ),
+        Post::Added
+    );
+    let assert_clean = |screen: &Screen, frame: &str| {
+        let entries = screen.messages.entries();
+        assert_eq!(entries.len(), 1, "{frame} gained a log entry: {entries:?}");
+        assert_eq!(entries[0].text, "Landed at Old Blackelk.");
+        assert_eq!(entries[0].source, Some(Source::Start));
+    };
+
+    let draw = |screen: &mut Screen, views: ViewState, name: &str| {
+        let state = flight();
+        screen.draw(&state, views, None, false, false, "");
+        save(screen, &format!("log-{name}.ppm"));
+    };
+    draw(&mut screen, ViewState::default(), "boot");
+
+    // The unported console buttons only produce the port's transient note (or
+    // nothing); none is an F271 entry.
+    for (index, click) in [
+        Click::Screen(4),
+        Click::Screen(5),
+        Click::Missile,
+        Click::Combat,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let note = click.unported().unwrap_or("");
+        assert!(!note.is_empty());
+        draw(
+            &mut screen,
+            ViewState::default(),
+            &format!("unported-{index}"),
+        );
+        assert_clean(&screen, "unported click");
+    }
+
+    for (index, mode) in [
+        ViewMode::Front,
+        ViewMode::Rear,
+        ViewMode::TopTurret,
+        ViewMode::External,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        draw(
+            &mut screen,
+            ViewState {
+                mode,
+                ..ViewState::default()
+            },
+            &format!("view-{index}"),
+        );
+        assert_clean(&screen, "view change");
+    }
 }
 
 fn screen_font(cache: &ffe_content::VerifiedCache) -> ffe_rs::indexed::BitmapFont {
