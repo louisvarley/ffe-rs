@@ -2683,7 +2683,7 @@ impl Navigator {
                         flag,
                         b.name,
                         b.kind.label(),
-                        describe(distance(ship, b.position))
+                        range_label(ship, b.position)
                     )
                 })
                 .collect(),

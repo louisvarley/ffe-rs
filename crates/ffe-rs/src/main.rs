@@ -14,7 +14,7 @@ use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::navigation::{
-    describe, distance, range_label, refusal, Kind as NavKind, Navigator, Traffic, View as NavView,
+    distance, range_label, refusal, Kind as NavKind, Navigator, Traffic, View as NavView,
 };
 use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
 use ffe_rs::outfitting::{self, Limits};
@@ -3300,7 +3300,7 @@ fn run() -> Result<(), String> {
             format!(
                 "TARGET: {} {}",
                 ship.name.to_ascii_uppercase(),
-                describe(distance(player_at, ship.position)).to_ascii_uppercase()
+                range_label(player_at, ship.position).to_ascii_uppercase()
             )
         } else {
             match nav.as_ref().zip(marked) {
@@ -3312,7 +3312,7 @@ fn run() -> Result<(), String> {
                         "TARGET"
                     },
                     nav.bodies[i].name.to_ascii_uppercase(),
-                    describe(distance(player_at, nav.bodies[i].position)).to_ascii_uppercase()
+                    range_label(player_at, nav.bodies[i].position).to_ascii_uppercase()
                 ),
                 None => String::new(),
             }
@@ -3678,7 +3678,7 @@ fn run() -> Result<(), String> {
                         "{} {} {} PAGE {}/{}  LEFT/RIGHT: PAGES",
                         body.name.to_ascii_uppercase(),
                         body.kind.label().to_ascii_uppercase(),
-                        describe(distance(ship, body.position)).to_ascii_uppercase(),
+                        range_label(ship, body.position).to_ascii_uppercase(),
                         nav.page + 1,
                         nav.pages()
                     ),
