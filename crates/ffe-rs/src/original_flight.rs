@@ -308,9 +308,16 @@ impl OriginalFlight {
 
     /// F1677's absolute position in millimetres (the player's own position
     /// outside the pad world, where it is already absolute).
-    pub fn absolute_position(&mut self) -> [i64; 3] {
-        match self.pad_world.as_mut() {
-            Some(world) => world.absolute(1).unwrap_or(self.player.motion.position),
+    pub fn absolute_position(&self) -> [i64; 3] {
+        match &self.pad_world {
+            Some(world) => {
+                // Resolve the live motion without depending on a previous
+                // collision pass's cached body/stamp.
+                let mut world = world.clone();
+                world.stamp = world.stamp.wrapping_add(1);
+                world.body[1].take_motion(&self.player.motion);
+                world.absolute(1).unwrap_or(self.player.motion.position)
+            }
             None => self.player.motion.position,
         }
     }
@@ -322,6 +329,7 @@ impl OriginalFlight {
             return;
         };
         let motion = self.player.motion;
+        world.stamp = world.stamp.wrapping_add(1);
         world.body[1].position = motion.position;
         world.body[1].velocity = motion.velocity;
         world.body[1].orientation = std::array::from_fn(|k| motion.orientation[k / 3][k % 3]);
@@ -346,7 +354,7 @@ impl OriginalFlight {
     /// Put the ship at a position (millimetres) with its velocity cleared and the
     /// set speed zero: a jump arrival.
     pub fn teleport(&mut self, position: [i64; 3]) {
-        self.player.motion.position = position;
+        self.shift(position);
         self.player.motion.velocity = [0; 3];
         self.player.set_speed = 0;
     }
@@ -354,7 +362,7 @@ impl OriginalFlight {
     /// Turn toward a point by at most `rate` radians per second over `seconds`: the
     /// original's autopilot sets the turn rates itself rather than pressing keys.
     pub fn turn_toward(&mut self, target: [i64; 3], seconds: f64, rate: f64) {
-        let at = self.player.motion.position;
+        let at = self.absolute_position();
         let want: [f64; 3] = std::array::from_fn(|k| (target[k] - at[k]) as f64);
         let length = want.iter().map(|v| v * v).sum::<f64>().sqrt();
         if length < 1.0 {
@@ -408,7 +416,7 @@ impl OriginalFlight {
 
     /// Turn the ship to face a point (keeping it level against the system's y axis).
     pub fn face(&mut self, target: [i64; 3]) {
-        let at = self.player.motion.position;
+        let at = self.absolute_position();
         let mut forward: [f64; 3] = std::array::from_fn(|k| (target[k] - at[k]) as f64);
         let length = forward.iter().map(|v| v * v).sum::<f64>().sqrt();
         if length < 1.0 {
@@ -439,7 +447,18 @@ impl OriginalFlight {
 
     /// Move the ship without touching its velocity or set speed (a change of frame).
     pub fn shift(&mut self, position: [i64; 3]) {
-        self.player.motion.position = position;
+        let before = self.absolute_position();
+        if let Some(world) = self.pad_world.as_mut() {
+            // Navigator follows the moving planet in system coordinates. Carry
+            // the local world's origin with it, retaining the ship/pad contact.
+            for (axis, value) in position.iter().enumerate() {
+                world.body[2].position[axis] =
+                    world.body[2].position[axis].wrapping_add(value.wrapping_sub(before[axis]));
+            }
+            world.stamp = world.stamp.wrapping_add(1);
+        } else {
+            self.player.motion.position = position;
+        }
     }
 
     pub fn acceleration_step(&self) -> usize {
@@ -632,10 +651,7 @@ impl OriginalFlight {
     /// In the pad world the player's position is relative to the starport, so
     /// F1677's absolute position is what the views and navigation see.
     pub fn apply(&mut self, flight: &mut Flight) {
-        let position = match self.pad_world.as_mut() {
-            Some(world) => world.absolute(1).unwrap_or(self.player.motion.position),
-            None => self.player.motion.position,
-        };
+        let position = self.absolute_position();
         let motion = &self.player.motion;
         let axes: [[f64; 3]; 3] = motion
             .orientation

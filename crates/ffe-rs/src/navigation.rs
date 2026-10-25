@@ -647,7 +647,8 @@ pub fn autopilot(
     let right_axis = unit(without(raw[0], forward_axis));
     let up_axis = unit(without(without(raw[1], forward_axis), right_axis));
     let rows = [right_axis, up_axis, forward_axis];
-    let offset: [f64; 3] = std::array::from_fn(|k| (target[k] - motion.position[k]) as f64);
+    let position = flight.absolute_position();
+    let offset: [f64; 3] = std::array::from_fn(|k| (target[k] - position[k]) as f64);
     let range = offset.iter().map(|v| v * v).sum::<f64>().sqrt();
     let dir = offset.map(|v| v / range.max(1.0));
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -4207,7 +4208,7 @@ impl Navigator {
         }
         if let Some((_, seconds)) = command.skip {
             // The body moves while the ship travels: aim for where it will be.
-            let ship = flight.player().motion.position;
+            let ship = flight.absolute_position();
             let mut seconds = seconds;
             let mut future = body.position;
             for _ in 0..6 {

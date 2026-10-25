@@ -1229,7 +1229,7 @@ fn run() -> Result<(), String> {
         // world time in a minute of wall time.
         let elapsed = if options.capture_planet.is_some() {
             0.1
-        } else if options.capture_gameover.is_some() {
+        } else if options.capture_gameover.is_some() || options.capture_start.is_some() {
             1.0 / 50.0
         } else {
             measured
@@ -3666,7 +3666,7 @@ fn run() -> Result<(), String> {
                 let mut command_face = None;
                 if nav.as_ref().is_some_and(|nav| nav.holding()) {
                     keys = OriginalKeys::default();
-                    model.teleport(model.player().motion.position);
+                    model.teleport(model.absolute_position());
                 }
                 if let Some(nav) = nav.as_mut().filter(|nav| !nav.holding()) {
                     // A landed ship has no autopilot input (F1012 runs no F1037
@@ -3705,14 +3705,22 @@ fn run() -> Result<(), String> {
                     let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
                         / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
                     nav.advance(&cache, elapsed * factor);
-                    if let Some(moved) = nav.follow(model.player().motion.position) {
+                    let before = model.absolute_position();
+                    if let Some(moved) = nav.follow(before) {
                         model.shift(moved);
+                        // The climb origin is in system coordinates too.
+                        if let Some((origin, _)) = takeoff_climb.as_mut() {
+                            for k in 0..3 {
+                                origin[k] =
+                                    origin[k].wrapping_add(moved[k].wrapping_sub(before[k]));
+                            }
+                        }
                     }
                     // The planet capture continues to the nearest open-air
                     // starport once the planet's standoff is reached, so the saved
                     // frames show the buildings on the surface.
                     if options.capture_planet.is_some() && !capture_port && nav.target.is_none() {
-                        let from = model.player().motion.position;
+                        let from = model.absolute_position();
                         let port = nav
                             .bodies
                             .iter()
@@ -3951,7 +3959,7 @@ fn run() -> Result<(), String> {
                         }
                         // The stations: the slot docks a cleared ship, the hull pushes it clear.
                         if let Some(nav) = nav.as_mut().filter(|_| state.system_flight) {
-                            let ship = model.player().motion.position;
+                            let ship = model.absolute_position();
                             if let Some(index) = launch_grace {
                                 let body = &nav.bodies[index];
                                 let clear = nav
@@ -5947,7 +5955,7 @@ fn run() -> Result<(), String> {
         }) {
             let ship = original
                 .as_ref()
-                .map_or([0; 3], |model| model.player().motion.position);
+                .map_or([0; 3], |model| model.absolute_position());
             let title = match nav.view {
                 NavView::Galaxy => "SYSTEMS: H HYPERSPACES TO THE SELECTED".to_owned(),
                 NavView::Places => nav.system_name().to_uppercase(),
@@ -6067,7 +6075,7 @@ fn ship_position(original: &Option<OriginalFlight>, state: &Flight) -> [i64; 3] 
             let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
             state.position.map(|v| (v * unit).round() as i64)
         },
-        |model| model.player().motion.position,
+        |model| model.absolute_position(),
     )
 }
 

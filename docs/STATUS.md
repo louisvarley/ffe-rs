@@ -5,6 +5,17 @@ status snippets in `README.md`, `CLAUDE.MD` and `docs/PORT_LOG.md` where they
 disagree with it. Read this first, then `docs/MODEL_COMMANDS.md` for the opcode
 coverage and `docs/notes/` for the feature records.
 
+## Launch follow-up (2026-10-25)
+
+Fixed planet-relative positions being read as system coordinates during pad
+takeoff, and carried the local origin/climb reference across orbital refresh.
+The new moving-world regression reproduces the original 10.8 km jump at frame
+50 and passes after the fix, including nearby autopilot and hand-off continuity.
+The planet ground/horizon is **still unresolved**: Hope's terrain-only near-pad
+view emits no ground. Station geometry masked that in previous tests. Prioritise
+ui-11 and whole-frame evidence; see TAKEOVER_ISSUES.md. Services console icons
+and clickable F1 return are restored separately.
+
 ## Immediate boot death follow-up
 
 Fixed first-frame recharge initialising a new hull as [0,full]. It now starts

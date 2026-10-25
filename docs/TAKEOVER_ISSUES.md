@@ -47,3 +47,35 @@ the fix and passes after initialising both words to full. A second test confirms
 existing damage and actual destroyed hulls remain unchanged. All 13 damage
 and 8 death tests pass. The earlier boot tests bypassed recharge and therefore
 missed this defect. This is a regression, not an unimplemented feature.
+
+## Follow-up: launch frame/range investigation
+
+Reproduced the one-second problem in a new test which advances the system clock
+while stepping the pad world. At frame 50, the first orbital refresh moved the
+port 10,812,465 mm from the ship. The existing takeoff tests kept the system
+positions fixed and missed this. Main fed the planet-relative motion position
+to Navigator::follow and several other system-space consumers, so it selected
+the wrong frame. The persistent pad world's planet origin also stayed fixed.
+
+Fixed those boundaries to use absolute_position (including autopilot ranges,
+targeting and station contacts). Carry the local world's origin and the climb
+reference along with the navigator's orbital drift. Resolve absolute position
+from current motion rather than a potentially stale cached body. The new test
+passes three seconds of orbital refresh within 1 km of the port, confirms that
+a nearby autopilot target is treated as nearby, and checks no position jump
+when the pad world is released. Capture-start now uses deterministic 20 ms
+frames so it exercises refreshes reliably.
+
+**Still unresolved:** the source-faithful terrain/horizon during launch. A
+terrain-only Hope view near the pad produced only 43 non-sky pixels (HUD/stars),
+with zero planet shapes emitted. Earlier tests included station geometry and
+therefore did not establish that the planet ground was present. The renderer
+also uses an inner-bound flight sphere versus an outer-bound landed sphere.
+Changing that choice or the scaling alone did not repair the missing ground;
+those experiments were reverted. This is an unfinished surface rendering/
+culling/integration case under ui-11 and v0.48-14, now ahead of other visual
+polish. The scripted post-launch capture still shows an empty forward view.
+Do not describe this investigation as a complete launch-fidelity fix.
+
+The services icons fix is included: common console controls draw on docked
+pages and the F1 icon returns to the ship from the pad board.

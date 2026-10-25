@@ -1,5 +1,17 @@
 # Port log
 
+## 2026-10-25 — launch orbital-frame regression (partial fix)
+
+New moving-clock test reproduced the one-second jump (port 10.8 km away at
+frame 50). Use absolute positions at navigation/autopilot/range/contact
+boundaries; carry the pad world's origin and climb reference with orbital drift;
+resolve current motion before the pad-world hand-off. Capture-start is now a
+fixed 20 ms step. Near-port range and no-teleport hand-off assertions pass.
+The empty Hope terrain/horizon is still unresolved: a terrain-only view emits
+no planet shapes; previous tests counted buildings. No guessed core culling or
+radius changes retained. Details in TAKEOVER_ISSUES.md.
+
+
 ## 2026-10-25 — services return-to-ship icon
 
 Docked rendering skipped all console buttons and the input collector rejected

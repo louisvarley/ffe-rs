@@ -1663,3 +1663,86 @@ fn the_navigation_computer_lists_the_systems_places() {
     nav.open(View::System);
     assert!(nav.listed().iter().any(|i| !nav.bodies[*i].kind.is_place()));
 }
+
+#[test]
+#[ignore = "Local-only: needs FFE_WORLD_CACHE"]
+fn pad_takeoff_stays_near_the_port_when_the_system_clock_advances() {
+    use ffe_rs::navigation::{landing_body, Navigator};
+    use ffe_rs::original_flight::Keys as OriginalKeys;
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let index = nav.docked.unwrap();
+    let start = nav.new_game.unwrap();
+    let station = nav.bodies[index].clone();
+    let planet = nav.bodies[station.parent.unwrap()].clone();
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = |model| ffe_core::objects::ModelInfo::read(records, stats, model).unwrap();
+    let mut flight = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: start.ship,
+        position: start
+            .seat
+            .map(|v| v as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT),
+        axes: Some(station.orientation),
+        ..Flight::default()
+    };
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    model.begin_takeoff();
+    model.begin_pad_takeoff(
+        &landing_body(&planet, &info(planet.model)),
+        planet.position,
+        &landing_body(&station, &info(station.model)),
+        station.position,
+        &info(start.ship),
+    );
+    let library = ffe_rs::navigation::Library(&cache);
+    let tools = ffe_core::surface::SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
+    for frame in 0..150 {
+        nav.advance(&cache, 0.02);
+        if let Some(at) = nav.follow(model.absolute_position()) {
+            model.shift(at);
+        }
+        model
+            .step_pad(0.02, &OriginalKeys::default(), Some(&tools))
+            .unwrap();
+        model.apply(&mut flight);
+        let range = distance(model.absolute_position(), nav.bodies[index].position);
+        assert!(
+            range < 1_000_000.0,
+            "frame {frame}: pad now {range} mm away after orbital refresh"
+        );
+    }
+    let command = ffe_rs::navigation::autopilot(
+        &model,
+        nav.bodies[index].position,
+        1_000_000.0,
+        &mut ffe_rs::navigation::Memory::default(),
+    );
+    assert!(
+        command.keys.slower && command.face.is_none(),
+        "autopilot must brake at the nearby port, rather than aim for a distant point"
+    );
+    assert!(command.skip.is_none());
+    let before = model.absolute_position();
+    model.end_pad_takeoff();
+    assert_eq!(
+        model.absolute_position(),
+        before,
+        "clearing the pad must not teleport the ship"
+    );
+    model.apply(&mut flight);
+    for (axis, value) in before.iter().enumerate() {
+        let displayed = flight.position[axis] * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+        assert!(
+            (displayed - *value as f64).abs() <= 1.0,
+            "render position differs from system position"
+        );
+    }
+}

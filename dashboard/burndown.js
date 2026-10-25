@@ -811,5 +811,10 @@ window.FFE_BURNDOWN = {
       remaining: 63,
       note: "Fixed missing services console: common screen icons/time meter now draw in Docked mode and the F1 icon returns from the pad services board. Old Blackelk regression reproduced before fix; four station-view tests pass. No milestone completion change."
     },
+    {
+      date: "2026-10-25",
+      remaining: 63,
+      note: "Launch investigation: fixed system/local position confusion and stale pad-world origin across the first orbital refresh (10.8 km jump reproduced at frame 50). Nearby autopilot and hand-off continuity checks pass. Empty Hope ground remains an unfinished ui-11/v0.48-14 case; existing tests counted buildings and did not prove terrain visibility. No milestone completion change."
+    },
   ]
 };
