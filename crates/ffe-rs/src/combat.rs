@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::camera::{self, ViewMode};
 use crate::flight::Flight;
-use crate::original_flight::UNITS_PER_FLIGHT_UNIT;
+use crate::original_flight::{TICS_PER_SECOND, UNITS_PER_FLIGHT_UNIT};
 use crate::ships::ShipStats;
 
 /// The player's laser installation and the three words F931 gates on.
@@ -136,6 +136,16 @@ impl Combat {
     pub fn energy_gauge(&self) -> u32 {
         laser::energy_gauge(self.energy, self.drive)
     }
+}
+
+/// `DATA_009155` for one frame: the elapsed second converted to the original's
+/// 1/49710 s tics and scaled by the time-acceleration factor. At 1x a 50 Hz
+/// frame is 994 tics and a 60 Hz frame 828. F730 subtracts this word from the
+/// refire countdown (`+0xe8`) and F930's beam branch scales by `tics >> 7`, so a
+/// frame count or a 50 Hz tick is not a substitute: 0x795c tics is 0.63 s, and
+/// 0x795c frames would be ten minutes.
+pub fn frame_tics(elapsed: f64, acceleration_factor: f64) -> u32 {
+    (elapsed.max(0.0) * TICS_PER_SECOND * acceleration_factor.max(0.0)) as u32
 }
 
 /// One frame's visible laser beam: model `0x9c` (156) drawn at the gun, with the
@@ -301,6 +311,44 @@ mod tests {
         assert_eq!(combat.energy, 0x2000_0000);
         assert_eq!(combat.drive, 2);
         assert_eq!(combat.energy_gauge(), 0xffe0);
+    }
+
+    #[test]
+    fn frame_tics_are_data_009155_and_clear_the_pulse_refire() {
+        // DATA_009155 at 1x: elapsed seconds in 1/49710 s tics.
+        assert_eq!(frame_tics(0.02, 1.0), 994);
+        assert_eq!(frame_tics(1.0 / 60.0, 1.0), 828);
+        assert_eq!(frame_tics(1.0 / 144.0, 1.0), 345);
+        // The time-acceleration factor multiplies the frame time (1x = 994).
+        assert_eq!(frame_tics(1.0 / 60.0, 10.0), 8283);
+        assert_eq!(frame_tics(0.0, 1.0), 0);
+
+        // A 1MW pulse writes 0x795c tics to the refire word. At 60 Hz that is
+        // 38 frames (0.63 s), not 0x795c frames (ten minutes); the second shot
+        // then succeeds.
+        let tics = frame_tics(1.0 / 60.0, 1.0);
+        let mut combat = Combat::new_game();
+        assert!(combat.fire(0, tics).is_ok());
+        let mut frames = 0;
+        while combat.refire != 0 {
+            combat.tick(tics, 1.0 / 60.0);
+            frames += 1;
+            assert!(frames <= 39, "the refire word did not clear");
+        }
+        assert_eq!(frames, 38);
+        assert_eq!(combat.fire(0, tics).unwrap().damage, 50);
+
+        // The same wall time at 10x clears the word ten times sooner: the
+        // original's countdown is in accelerated tics.
+        let tics = frame_tics(1.0 / 60.0, 10.0);
+        combat.refire = ffe_core::laser::PULSE_REFIRE;
+        let mut frames = 0;
+        while combat.refire != 0 {
+            combat.tick(tics, 10.0 / 60.0);
+            frames += 1;
+            assert!(frames < 10);
+        }
+        assert_eq!(frames, 4);
     }
 
     #[test]

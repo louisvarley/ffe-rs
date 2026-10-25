@@ -1,5 +1,6 @@
 ; Adapter-only symbol aliases. Preincluded by NASM, never patched into legacy files.
 GLOBAL _ref_state
+GLOBAL _ref_laser_fire
 GLOBAL _ref_rng
 GLOBAL _ref_timer_advance
 GLOBAL _ref_system_counter
@@ -262,6 +263,7 @@ _ref_player_craft equ DATA_008857
 _ref_scanner equ DATA_008933
 _ref_pl_frame_tics equ DATA_009155
 _ref_pl_object_list equ DATA_009133
+_ref_laser_fire equ FUNC_000931
 _ref_pl_altitude equ DATA_008867
 _ref_pl_mode equ DATA_008870
 _ref_pl_flags equ DATA_008871

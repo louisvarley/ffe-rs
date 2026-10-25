@@ -269,6 +269,11 @@ pub const RANGE: f64 = 0x7f_ffff as f64;
 /// tests the laser line against a box of the object's radius in the object's
 /// parent frame; the system frame is that frame here (all bodies are given in
 /// it), so a ray against each axis-aligned box is the same test.
+///
+/// Only a non-negative entry distance is a hit. F819 skips a negative distance
+/// (`test ebx,ebx / jl`), so a box that contains the gun (a planet's interaction
+/// radius around a ship, the station the player is beside) has a negative
+/// entry and is skipped instead of swallowing every shot.
 pub fn hit(origin: [i64; 3], direction: [f64; 3], targets: &[Target]) -> Option<Hit> {
     let mut best: Option<Hit> = None;
     for target in targets {
@@ -276,15 +281,14 @@ pub fn hit(origin: [i64; 3], direction: [f64; 3], targets: &[Target]) -> Option<
             continue;
         }
         let radius = target.radius as f64;
-        let (mut near, mut far) = (0.0_f64, RANGE);
-        let mut miss = false;
+        let (mut near, mut far) = (f64::NEG_INFINITY, f64::INFINITY);
         for axis in 0..3 {
             let min = target.centre[axis] as f64 - radius;
             let max = target.centre[axis] as f64 + radius;
             let origin = origin[axis] as f64;
             if direction[axis].abs() < 1e-12 {
                 if origin < min || origin > max {
-                    miss = true;
+                    near = f64::INFINITY;
                     break;
                 }
             } else {
@@ -295,13 +299,12 @@ pub fn hit(origin: [i64; 3], direction: [f64; 3], targets: &[Target]) -> Option<
                 }
                 near = near.max(t1);
                 far = far.min(t2);
-                if near > far || far < 0.0 {
-                    miss = true;
-                    break;
-                }
             }
         }
-        if miss || near > RANGE {
+        // A negative entry means the box is behind the gun or the gun is inside
+        // it; F819 computes a negative distance and skips it. Zero (the gun on
+        // the near face) is the original's non-negative case.
+        if near < 0.0 || near > far || near > RANGE {
             continue;
         }
         let point = std::array::from_fn(|axis| {
@@ -518,6 +521,33 @@ mod tests {
         assert!(hit([0; 3], [-1.0, 0.0, 0.0], &targets).is_none());
         // The first box wins even when a farther one is also crossed.
         assert_eq!(hit([0; 3], [1.0, 0.0, 0.0], &targets).unwrap().index, 7);
+    }
+
+    #[test]
+    fn a_box_that_contains_the_gun_is_not_hit() {
+        // F819 requires a non-negative distance along the ray: a planet's or
+        // station's interaction box around the gun must not steal the shot.
+        let inside = Target {
+            index: 3,
+            centre: [0, 0, 0],
+            radius: 1_000,
+        };
+        assert!(hit([0; 3], [1.0, 0.0, 0.0], &[inside]).is_none());
+        // The same box with the gun just inside its near face.
+        assert!(hit([-500, 0, 0], [1.0, 0.0, 0.0], &[inside]).is_none());
+        // A box entirely behind and one starting exactly at the gun are skipped;
+        // a box with a positive entry still hits at its near face.
+        let ahead = Target {
+            index: 4,
+            centre: [10_000, 0, 0],
+            radius: 1_000,
+        };
+        assert!(hit([20_000, 0, 0], [1.0, 0.0, 0.0], &[ahead]).is_none());
+        let face = hit([9_000, 0, 0], [1.0, 0.0, 0.0], &[ahead]).unwrap();
+        assert_eq!(face.distance, 0.0);
+        let shot = hit([0; 3], [1.0, 0.0, 0.0], &[ahead]).unwrap();
+        assert_eq!(shot.point, [9_000, 0, 0]);
+        assert_eq!(shot.distance, 9_000.0);
     }
 
     #[test]

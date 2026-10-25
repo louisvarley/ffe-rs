@@ -2740,8 +2740,10 @@ fn run() -> Result<(), String> {
         // happens this frame. The beam is F1776's model 0x9c at the gun.
         let acceleration_factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
             / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
-        let frame_tics =
-            (elapsed * 50.0 * f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])) as u32;
+        // DATA_009155 is elapsed time in the original's 1/49710 s tics, not a
+        // 50 Hz frame count: F730's refire word (0x795c) and F930's beam branch
+        // are both in those tics.
+        let frame_tics = combat::frame_tics(elapsed, acceleration_factor);
         if active && !paused && state.mode == ffe_rs::flight::Mode::Flight {
             // F938 reads `ship+0xc8 & 1` (the laser cooling booster) directly.
             state.combat.cooling_booster = state.loadout.cooling_booster();
@@ -2762,9 +2764,12 @@ fn run() -> Result<(), String> {
             if let Some(mount) = combat::mount(views.mode) {
                 match state.combat.fire(mount, frame_tics) {
                     Ok(shot) => {
-                        // F930: `laser1` for banks 0..3, `laser2` for 4..15; the
-                        // port's four mounts are all in the first bank.
-                        sound.play(Cue::Laser { bank: mount as u8 });
+                        // F930: the code's `(DATA_008836 & 0x78) >> 3` index
+                        // selects `laser1` for 0..3 and `laser2` for 4..15 (the
+                        // beam codes), not the mount number.
+                        sound.play(Cue::Laser {
+                            bank: shot.index as u8,
+                        });
                         let stats = scene
                             .as_ref()
                             .and_then(|scene| scene.ship_stats(state.ship));

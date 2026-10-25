@@ -776,14 +776,11 @@ impl Screen {
     ) {
         let scale = model_scale(scene).unwrap_or(DEFAULT_MODEL_SCALE);
         let rows = beam.axes.map(|axis| camera.direction(axis));
-        let mut origin = camera.point(beam.origin).map(|v| v * scale);
-        // The gun can sit a couple of metres behind the cockpit eye (the Eagle's
-        // 1300/8 against the eye's 1500/8). F1776 still draws the beam from the
-        // gun; the part behind the eye is invisible, so start the model at the
-        // near plane instead of letting the near-face cull drop the whole beam.
-        if origin[2] < 1000.0 {
-            origin[2] = 1000.0;
-        }
+        // F1776 places the duplicate at the gun and hands it to F1680; the
+        // projection culls anything behind the near plane. The Eagle's gun
+        // (1300/8) sits behind the front eye (1500/8), so the original has no
+        // front-view muzzle: do not invent one by clamping z here.
+        let origin = camera.point(beam.origin).map(|v| v * scale);
         let light = self.scene_light(scene, camera);
         let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
         inputs.jitter = self.jitter.cursor;

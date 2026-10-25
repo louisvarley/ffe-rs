@@ -1,8 +1,12 @@
 //! Synthetic combat-state tests that need no cache: the loadout, save
-//! compatibility, the firing gates and the range conversion.
+//! compatibility, the firing gates, the range conversion, and the ray and
+//! mount geometry F931/F1040 use.
 
-use ffe_rs::combat::Combat;
+use ffe_core::laser;
+use ffe_rs::camera::ViewMode;
+use ffe_rs::combat::{self, Combat};
 use ffe_rs::flight::{Flight, Mode};
+use ffe_rs::ships::ShipStats;
 
 #[test]
 fn new_game_loadout_and_gun_mounts_are_f998s() {
@@ -205,6 +209,137 @@ fn f953_damages_the_players_hull_and_records_the_full_value() {
     assert_eq!(shielded.shields, [0, 100]);
     assert_eq!(shielded.take_damage(60, 25), Damage::Hull);
     assert_eq!(shielded.hull, [40, 100]);
+}
+
+/// The new-game Eagle's descriptor words (F998/F1533): one gun mount, the eye
+/// at 1500/30, the front gun at 1300/0 and the rear/turret words.
+fn eagle_stats() -> ShipStats {
+    let mut block = [0u8; 48];
+    let word = |block: &mut [u8; 48], offset: usize, value: i16| {
+        block[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    };
+    word(&mut block, 0x04, 1); // gun mounts
+    word(&mut block, 0x06, 25); // mass
+    word(&mut block, 0x18, 1500); // eye forward
+    word(&mut block, 0x1a, 30); // eye up
+    word(&mut block, 0x20, 1300); // front gun forward
+    word(&mut block, 0x22, 0); // front gun up
+    word(&mut block, 0x24, 800); // rear gun
+    word(&mut block, 0x26, 0);
+    word(&mut block, 0x28, 36); // top turret
+    word(&mut block, 0x2a, 30);
+    word(&mut block, 0x2c, 64); // bottom turret
+    word(&mut block, 0x2e, 34);
+    ShipStats::from_block(&block).unwrap()
+}
+
+fn straight_flight() -> Flight {
+    Flight {
+        mode: Mode::Flight,
+        position: [0.0; 3],
+        axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        ..Flight::default()
+    }
+}
+
+fn gun_mm(state: &Flight, view: ViewMode, turret: [i16; 2]) -> ([i64; 3], [f64; 3]) {
+    let stats = eagle_stats();
+    let beam = combat::beam(state, Some(&stats), view, turret);
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    (beam.origin.map(|v| (v * unit).round() as i64), beam.axes[2])
+}
+
+#[test]
+fn f931s_ray_starts_at_the_gun_and_follows_the_mount_axis() {
+    let state = straight_flight();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    // The front ray is the gun's 1300/8 = 10400 mm, not the eye's 12000 mm.
+    let (origin, direction) = gun_mm(&state, ViewMode::Front, [0, 0]);
+    assert_eq!(origin, [0, 0, (1300.0 * 8.0 / unit * unit).round() as i64]);
+    assert_eq!(origin[2], 10_400);
+    assert_eq!(direction, [0.0, 0.0, 1.0]);
+
+    let ahead = laser::Target {
+        index: 7,
+        centre: [0, 0, 200_000],
+        radius: 5_000,
+    };
+    let shot = laser::hit(origin, direction, &[ahead]).expect("the centre shot misses");
+    assert_eq!(shot.index, 7);
+    // The 13-bit interaction box starts 5 m before the centre.
+    assert_eq!(shot.point, [0, 0, 195_000]);
+
+    // F931 does not aim at the crosshair's screen position: a ship 20 m to the
+    // side at 200 m is outside the 5 m box and the nose-parallel ray misses.
+    let off_axis = laser::Target {
+        centre: [20_000, 0, 200_000],
+        ..ahead
+    };
+    assert!(laser::hit(origin, direction, &[off_axis]).is_none());
+
+    // F1111's bitmap 97 is 61x61 at (129,48), so its centre is (159,78), one
+    // pixel up-left of F1479's projection centre (160,79). A target on the
+    // crosshair is therefore 0.78 m off the nose at 200 m, still inside a 5 m
+    // box; the 1 px offset is the original's art, not a ray error.
+    let crosshair = laser::Target {
+        centre: [
+            (f64::from(-200_000) / 256.0).round() as i64,
+            (f64::from(200_000) / 256.0).round() as i64,
+            200_000,
+        ],
+        ..ahead
+    };
+    assert!(
+        laser::hit(origin, direction, &[crosshair]).is_some(),
+        "the gun ray does not pass through the crosshair"
+    );
+    let (sx, sy) = ffe_rs::camera::Camera {
+        position: state.position,
+        axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    }
+    .project([0.0, 0.0, 200_000.0], true)
+    .unwrap();
+    assert_eq!((sx, sy), (160, 79));
+}
+
+#[test]
+fn every_view_fires_its_own_mount_along_its_own_axis() {
+    let state = straight_flight();
+    // Front: +z from the front gun.
+    let (origin, direction) = gun_mm(&state, ViewMode::Front, [0, 0]);
+    assert_eq!(origin[2], 10_400);
+    assert_eq!(direction, [0.0, 0.0, 1.0]);
+    // Rear: F931 negates the forward axis and uses the rear gun word, so the
+    // ray leaves from 800/8 = 6400 mm behind the centre towards -z.
+    let (origin, direction) = gun_mm(&state, ViewMode::Rear, [0, 0]);
+    assert_eq!(origin[2], -6_400);
+    assert_eq!(direction, [0.0, 0.0, -1.0]);
+    let behind = laser::Target {
+        index: 1,
+        centre: [0, 0, -200_000],
+        radius: 5_000,
+    };
+    assert_eq!(laser::hit(origin, direction, &[behind]).unwrap().index, 1);
+    // The external view is F1040's mount 0, with the ship's axes and gun, not
+    // the external camera's: the shot comes from the ship, not the eye.
+    assert_eq!(combat::mount(ViewMode::External), Some(0));
+    assert_eq!(
+        combat::beam(&state, Some(&eagle_stats()), ViewMode::External, [0, 0]),
+        combat::beam(&state, Some(&eagle_stats()), ViewMode::Front, [0, 0])
+    );
+    // Turrets use F1038's yaw/pitch axes: a quarter turn puts the top turret's
+    // ray on +x.
+    let (origin, direction) = gun_mm(&state, ViewMode::TopTurret, [0x4000, 0]);
+    for (actual, expected) in direction.into_iter().zip([1.0, 0.0, 0.0]) {
+        assert!((actual - expected).abs() < 1e-12, "{direction:?}");
+    }
+    assert_eq!(origin, [288, 240, 0]);
+    let side = laser::Target {
+        index: 2,
+        centre: [200_000, 0, 0],
+        radius: 5_000,
+    };
+    assert_eq!(laser::hit(origin, direction, &[side]).unwrap().index, 2);
 }
 
 #[test]

@@ -55,6 +55,11 @@ entry; `ffedat.asm:23894`). `F1040` reads it every frame (not a Gui action):
 - views 0..3 fire mounts 0..3 (front, rear, top turret, bottom turret);
 - views 4 and 6 (external, combat computer) fire **mount 0** (front).
 
+The external view therefore *does* fire in the original (`F1040` maps 4 and 6
+to mount 0 and F931 uses the ship's axes and front gun, not the external
+camera). The port keeps that. The gunsight is still not drawn in view 4, so it
+is a blind shot from the external camera, as in the DOS game.
+
 The keys `M`/`m` (missile launch) are a separate Gui action: F1056
 (`ffe.asm:78017`, `cplayer.txt:566`) finds the first non-zero missile at
 `ship+0xd6..+0xdf` and calls `F1096` (`ffe.asm:80303`), which calls `F941`
@@ -87,11 +92,17 @@ The fire routine:
 The visible object is model `0x9c` (156), set on a duplicate of the player
 object and drawn at the gun by `F1776`; it is a small (about 64 mm after its
 `scale` 17) muzzle cone, not a line to the target. The cockpit eye of the Eagle
-is 1500/8 units ahead and the gun 1300/8, so the cone is normally a pixel or
-two at the gun. A long beam line is **not** in the original; do not add one.
-The hit flash is model `0x9d` (157), drawn at a ship whose shields absorbed a
-hit (`ship+0x151 & 1`, `F1536` at `ffe.asm:91274-91320`). Stations and planets
-take neither shields nor hull in `F953`, so they do not get that flash.
+is 1500/8 units ahead and the gun 1300/8, so the cone is 200/8 = 25 units
+**behind the front eye**; `F1776` hands it to `F1680`, whose F1479 projection
+has a near clip, so the original draws no front-view muzzle at all. The port
+must not clamp it onto the near plane: doing so invented a flash 62 px below
+the crosshair (2026-10-25, see §6.1). The cone is in front of the **external**
+camera (whose default is 49 m behind the ship) and shows as a pixel there; the
+rear and turret duplicates sit at or behind their cameras too. A long beam
+line is **not** in the original; do not add one. The hit flash is model `0x9d`
+(157), drawn at a ship whose shields absorbed a hit (`ship+0x151 & 1`, `F1536`
+at `ffe.asm:91274-91320`). Stations and planets take neither shields nor hull
+in `F953`, so they do not get that flash.
 
 ### 2.3 Costs, damage and timing (`F930`, `ffe.asm:69454`)
 
@@ -126,6 +137,25 @@ JJFFE and records the difference here.
 `F938` (`ffe.asm:70122`) cools `+0xea` by `seconds * 0x400`, or `* 0x1000`
 with the laser cooling booster (`ship+0xc8 & 1`). `seconds` is whole game
 seconds; the port carries the fraction between frames.
+
+### 2.3.1 The unit of `DATA_009155` (2026-10-25)
+
+`DATA_009155` is elapsed time in **1/49710 s tics**, not a 50 Hz frame count
+and not a frame counter. At 1x a 50 Hz frame is 994 and a 60 Hz frame 828; the
+time-acceleration factor multiplies it (10x is 9942 at 50 Hz). `main` already
+passed the right value (`elapsed * 50 * TIME_ACCELERATION[acceleration]`: the
+table holds tics per 50 Hz frame, 994 at 1x, so that is 49700 tics a second);
+the 2026-10-25 audit extracted it as `combat::frame_tics` and added the test
+below so the unit cannot be mistaken for a 50 Hz tick or a frame count. At
+60 Hz a 1MW pulse fires at frames 0 and 38 (0.63 s), at 50 Hz 0 and 32.
+
+The executed original pins it (`jjffe-smoke --laser-probe 240`, a new adapter
+mode that calls the real F931 on the player object): `DATA_009155` is 1043 in
+the adapter's synthetic clock, F730 subtracts 1043 every frame, and shots land
+at frames 165, 195 and 225 — 30 frames = ceil(0x795c/1043). Each shot adds 400
+heat, removes 800 energy and sets `+0x151 = 6` (fired + front mount).
+`tools/reference/verify-combat.py` asserts the cadence, heat and energy from
+that probe.
 
 ### 2.4 Damage (`F953`, `ffe.asm:71190`)
 
@@ -213,14 +243,23 @@ or turret laser today. Do not give turrets a laser by invention.
 - `ffe_core::laser`: F930's table and pulse/beam branches, F931's gates, F730's
   refire, F938's cooling, F953's shields/hull damage, F1100's range words and
   km/AU value, F270's bar height/energy scale, and F817/F819's hit test against
-  each body's interaction radius (`body.radius`, object `+0x138`).
+  each body's interaction radius (`body.radius`, object `+0x138`). F819 only
+  accepts a **non-negative** distance along the ray (it skips a negative one),
+  so a box that contains the gun — a planet's atmosphere radius around a nearby
+  ship, or the starport the player is beside — is not a hit; the port now
+  requires `near >= 0` (2026-10-25). The box is tested axis-aligned in the system
+  frame here; F819 aligns it with the target's own axes, which only changes
+  grazing shots (see §7).
+- `ffe_rs::combat::frame_tics`: `DATA_009155` from the frame's seconds and the
+  time-acceleration factor (§2.3.1), used by both the refire countdown and
+  F930's beam costs.
 - `ffe_rs::combat::Combat`: the four mount codes, energy, heat, refire, drive,
   cooling booster and the new-game loadout; serde with `#[serde(default)]` so
   old saves load with no lasers.
 - `Screen`: the bitmap-97 gunsight, bitmap-98 velocity marker, F270's three
   bars, F1100's on/off-view range text, F1099's target hull/shield text (draw
   path exercised by a synthetic frame and live ship targets), and F1776's
-  model 156 at the gun.
+  model 156 at the gun with F1680's near clip (no clamped front-view flash).
 - `main`: Space fires the view's mount; the hit tests `nav.bodies` and the live
   NPC ships (`docs/notes/npc.md`) with their interaction radii; a hit message
   names the body or ship and the laser, and a ship hit runs F953/F942, sets the
@@ -299,6 +338,45 @@ or turret laser today. Do not give turrets a laser by invention.
   have a save-compatibility test in `tests/combat.rs`. See `docs/notes/npc.md`.
 - The hit/damage path has live ship targets now (the traffic above); the
   target-readout draw path also has a synthetic frame test. See §7.
+
+### 6.1 The 2026-10-25 laser audit
+
+Owner report: "lasers do not seem to fire quite right." Reproduced and fixed:
+
+- **Refire/beam tics checked (not a bug).** The port's old
+  `elapsed * 50 * TIME_ACCELERATION[acceleration]` was already 994 tics at
+  50 Hz and 828 at 60 Hz, and F730/F930 therefore used the right word. The
+  executed probe still pins it (shots at frames 165/195/225, 30 frames apart at
+  `tics` 1043) and the port fires at 0/38/76 in the new `laser_view` test. The
+  conversion is now `combat::frame_tics` with a unit test, so a future change
+  to a 50 Hz frame count is caught (§2.3.1).
+- **Invented muzzle.** The port clamped the model-156 origin's z to 1000, which
+  drew the cone at (160,140), 62 px below the gunsight, in the front view. F1776
+  draws it at the gun (1600 units behind the front eye) and F1680's near clip
+  drops it. `combat-beam-front.ppm` is now pixel-identical with and without the
+  beam; `combat-beam-external.ppm` shows the original external-view pixel.
+- **Gun-containing boxes.** `laser::hit` clamped the entry distance to 0, so a
+  planet/station box around the gun was hit at distance 0 and swallowed the
+  shot (reproduced by the new `laser_view` setup 200 m from a pirate in a
+  system where the starport/planet box surrounds the gun). F819 skips a negative
+  distance; the core test
+  `a_box_that_contains_the_gun_is_not_hit` covers it.
+- **Sound bank.** F930 selects `laser1`/`laser2` from the code's
+  `(code & 0x78) >> 3` index, not the mount; `main` used the mount. A beam in
+  the front mount now plays `laser2`.
+- **Checked and kept.** The shot is the mount's nose-parallel ray from the gun,
+  not an auto-aim at the crosshair; the 1 px art offset of bitmap 97
+  (`(159,78)` vs F1479's `(160,79)`) is in the original and does not miss a
+  ship-sized box at 200 m. External view fires mount 0 (F1040). The front/rear/
+  turret mount mapping and `ship[0xd2+view]` are unchanged and tested.
+- **Tests/frames.** `cargo test -p ffe-rs --test combat` (run geometry, mount
+  axes, 60 Hz refire); `cargo test -p ffe-core --lib laser` (inside-box hit);
+  `cargo test -p ffe-rs --test combat_view -- --ignored` (front cull, external
+  muzzle); new `cargo test -p ffe-rs --test laser_view -- --ignored` fires at
+  60 Hz at a pirate and keeps `laser-aim-before.ppm`, `laser-shot-1..3.ppm`,
+  `laser-hit-1..3.ppm` (shields 100 -> 50 -> 0, hull 100 -> 50, model-157 flash
+  and F1099's readout). `verify-combat.py` now runs `--laser-probe` and the new
+  view test.
 
 ## 7. Reachability and what remains
 
@@ -410,6 +488,19 @@ is the single F942 test.
 - The port's own status block at y119..157 covers the lower centre where the
   muzzle cone and the target `Hull:` line would draw; the dashboard's retire-port-UI
   slice clears this.
+
+**Remaining laser differences (2026-10-25):**
+
+- The hit test uses an axis-aligned box in the system frame; F819 aligns the
+  box with the target's axes. A centred shot is the same, so this only changes
+  grazing shots and would need each target's orientation in `laser::Target`.
+- The original has no visible front-view muzzle (model 0x9c is behind the eye)
+  and the sound is the firing cue; keep it that way unless the owner wants a
+  port-only HUD flash. Model 156 is one pixel in the external view.
+- F929's empty-energy recovery from fuel/cargo (`0x9907`) is still not
+  modelled; the new game's 1 t pool is effectively unlimited.
+- F952's subsystem damage and the target readout's exact colour/arrow forms
+  remain as before.
 
 **Owner decisions:** NPC traffic and its flight/combat AI are implemented at the
 state-rules level (see `docs/notes/npc.md`); decide whether to port the
