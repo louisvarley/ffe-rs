@@ -281,18 +281,29 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 
 ### Police and wanted (the reconstruction)
 
-- `Navigator::legal` is `npc::Legal { wanted, offences }`, the port's
-  counterpart of `DATA_008646` bit 0 and `DATA_008647`.
+- `Navigator::legal` is `npc::Legal`, the port's counterpart of `DATA_008646`
+  bit 0 (`wanted`), `DATA_008647` (`alert`), `DATA_008860` bit 2
+  (`illegal_fire`), the offence count and F236's six-starport fine ledger
+  (`DATA_009095`). `docs/notes/legal.md` has the full source map.
 - `Navigator::player_attack(id, damage)` is the player's laser path: it runs
   F953/F942, pays F942's pirate bounty, and if the ship is *clean* (trader,
   shuttle, police or military) sets `wanted` and increments `offences`.
   Pirates and Thargoids are fair game.
-- A wanted player makes every police and military ship `provoke()`: they set
-  `hostile = true` and switch to `Attack` (`F783` clears the original's alert
-  when the chase ends; the port's wanted state stays until a new game).
+- `Navigator::player_fired(at)` is F931/F941's player branch: the first shot in
+  a system (F931's `DATA_008860` bit 2) reports the unlawful-discharge offence
+  through F237(ship, 3). F236 records the fine and wanted bit only with a
+  nearby starport (F234/F235; `starport_in_range` uses F1680's exponential
+  distance byte and the source's `0x13` threshold). The message is F236's exact
+  `DATA_005040` text and the fine is a per-starport debt (ten times the printed
+  amount), not an immediate cash deduction. A recorded offence provokes every
+  police and military ship (`F238`'s response) and sets `alert`.
+- `F783` clears `wanted`/`alert` when a police object (`+0x118 == 0xe`) is
+  removed; `tick_ships` emits `ShipEvent::AlertCleared`. It does not clear the
+  illegal-fire flag.
 - The port does **not** spawn extra police; F688's police count is the only
-  source. `DATA_008647`'s spawn/response path and the fines/wanted display are
-  not ported.
+  source. Fines are wired into F655's docking refusal (`>= 0x2710`), but the
+  fines office (`F366`) and the F2 legal-status screen are not ported. There is
+  no flight HUD badge in the source.
 
 ### Death, recycle and persistence (F674/F680/F927)
 

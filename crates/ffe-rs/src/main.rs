@@ -1412,7 +1412,20 @@ fn run() -> Result<(), String> {
                                                     pylon,
                                                     launcher_radius,
                                                 );
-                                                message = format!("Missile away at {name}.");
+                                                // F941 repeats F931's F237(ship, 3)
+                                                // for the player's missile.
+                                                message = match nav.player_fired(position) {
+                                                    Some(report) => {
+                                                        let mut text = report.offence.message;
+                                                        if report.police {
+                                                            text.push_str(
+                                                                " Police are responding.",
+                                                            );
+                                                        }
+                                                        text
+                                                    }
+                                                    None => format!("Missile away at {name}."),
+                                                };
                                             }
                                         } else {
                                             message = "Missile model unavailable.".to_owned();
@@ -2647,6 +2660,9 @@ fn run() -> Result<(), String> {
                         ffe_rs::navigation::ShipEvent::PoliceHostile { name } => {
                             message = format!("{name} is police and turns on you. You are wanted.");
                         }
+                        ffe_rs::navigation::ShipEvent::AlertCleared => {
+                            message = "The police have called off the chase.".to_owned();
+                        }
                         ffe_rs::navigation::ShipEvent::Escaped { name } => {
                             message = format!("{name} jumps out.");
                         }
@@ -2852,10 +2868,23 @@ fn run() -> Result<(), String> {
             && nav
                 .as_ref()
                 .is_none_or(|nav| nav.view == NavView::Closed && nav.sequence.is_none());
+        // F236's unlawful-discharge message is the frame's report when the
+        // shot is the system's first; keep it over the hit text below.
+        let mut legal_message: Option<String> = None;
         if can_fire && window.is_key_down(Key::Space) {
             if let Some(mount) = combat::mount(views.mode) {
                 match state.combat.fire(mount, frame_tics) {
                     Ok(shot) => {
+                        if let Some(nav) = nav.as_mut() {
+                            if let Some(report) = nav.player_fired(ship_position(&original, &state))
+                            {
+                                let mut text = report.offence.message;
+                                if report.police {
+                                    text.push_str(" Police are responding.");
+                                }
+                                legal_message = Some(text);
+                            }
+                        }
                         // F930: the code's `(DATA_008836 & 0x78) >> 3` index
                         // selects `laser1` for 0..3 and `laser2` for 4..15 (the
                         // beam codes), not the mount number.
@@ -3012,6 +3041,9 @@ fn run() -> Result<(), String> {
                     Err(laser::FireError::NoLaser | laser::FireError::Refire) => {}
                 }
             }
+        }
+        if let Some(text) = legal_message {
+            message = text;
         }
         screen.lasers = state.combat.lasers;
         screen.energy = state.combat.energy;

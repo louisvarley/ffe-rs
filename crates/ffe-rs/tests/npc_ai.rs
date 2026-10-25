@@ -11,11 +11,11 @@
 //! carried through a jump).
 
 use ffe_core::laser;
-use ffe_core::npc::Role;
+use ffe_core::npc::{Role, State};
 use ffe_rs::camera::ViewState;
 use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::model_viewer::ModelViewer;
-use ffe_rs::navigation::{Navigator, ShipEvent, NEW_GAME_SHIP};
+use ffe_rs::navigation::{Navigator, ShipEvent, DEFAULT_CASH, DEFAULT_SHIP, NEW_GAME_SHIP};
 use ffe_rs::screen::{Screen, SystemShip};
 
 fn cache() -> ffe_content::VerifiedCache {
@@ -298,4 +298,92 @@ fn a_pirate_close_to_the_player_follows_a_jump() {
     let message = "The pirate followed the jump.";
     frame(&mut screen, &viewer, &state, &nav, message);
     save(&screen, "npc-ai-restored.ppm");
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn firing_at_hope_is_fined_and_shows_f236s_message() {
+    let cache = cache();
+    // F829 record 0 / F998's default arm: Gateway [-1,4], planet Hope,
+    // starport Old Blackelk, state 0x30, Saker Mk III, 10,000 CR.
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let new_game = nav.new_game.expect("the new game state");
+    assert_eq!(new_game.start_type, 0);
+    assert_eq!(new_game.player_state, 0x30);
+    assert_eq!(new_game.cash, DEFAULT_CASH);
+    assert_eq!(new_game.ship, DEFAULT_SHIP);
+    let seat = new_game.seat;
+    let docked = nav.docked.expect("docked at Old Blackelk");
+    let starport = &nav.bodies[docked];
+    let name = starport.name.clone();
+    assert_eq!(name, "Old Blackelk");
+    assert_eq!(nav.system_name(), "Gateway");
+    // The fine ledger's DATA_008996 index is the ordinal among starports.
+    let ordinal = nav.bodies[..docked]
+        .iter()
+        .filter(|body| body.kind == ffe_rs::navigation::Kind::Starport)
+        .count();
+    assert_eq!(nav.starport_in_range(seat), Some(ordinal), "{name}");
+
+    let mut state = Flight {
+        mode: Mode::Flight,
+        position: seat.map(|v| v as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT),
+        system_flight: true,
+        ship: DEFAULT_SHIP,
+        credits: u32::try_from(DEFAULT_CASH).unwrap(),
+        ..Flight::default()
+    };
+    state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    assert!(!nav.legal.wanted);
+    // The F931 gates (refire/heat/energy) pass before the legal branch runs.
+    let mut combat = ffe_rs::combat::Combat::new_game();
+    assert!(combat.fire(0, 994).is_ok(), "the first shot fires");
+
+    let report = nav.player_fired(seat).expect("recorded at Hope");
+    assert_eq!(
+        report.offence.message,
+        "Unlawful discharge of weapon is not permitted here. Pay a $600 fine."
+    );
+    assert_eq!(report.offence.fine, 600);
+    assert_eq!(report.offence.charged, 6_000);
+    assert!(nav.legal.wanted);
+    assert!(nav.legal.alert);
+    assert_eq!(nav.legal.fines[ordinal], 6_000);
+    // F236 is a debt: cash is untouched (10,000 CR on the default start).
+    assert_eq!(state.credits, u32::try_from(DEFAULT_CASH).unwrap());
+    // The recorded offence turns the police and military ships hostile.
+    assert!(report.police);
+    assert!(nav
+        .ships
+        .iter()
+        .filter(|ship| ship.role == Role::Police)
+        .all(|ship| ship.is_hostile()));
+
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    // F271/F351: the changed message becomes the newest log entry.
+    screen.clock = nav.date_text();
+    screen.messages_visible = true;
+    screen.system = nav.system_name().to_owned();
+    screen.station = name.clone();
+    screen
+        .messages
+        .push(report.offence.message.clone(), nav.date_text());
+    frame(&mut screen, &viewer, &state, &nav, &report.offence.message);
+    save(&screen, "legal-hope.ppm");
+
+    // F783: the police object is removed and clears the alert.
+    let police = nav
+        .ships
+        .iter_mut()
+        .find(|ship| ship.role == Role::Police)
+        .expect("police");
+    police.state = State::Escaped;
+    let radius = viewer.model_radius(DEFAULT_SHIP).unwrap();
+    let events = nav.tick_ships(0.02, 994, seat, i64::from(radius));
+    assert!(!nav.legal.wanted);
+    assert!(!nav.legal.alert);
+    assert!(events.contains(&ShipEvent::AlertCleared));
+    // The illegal-fire flag is the system's, not the chase's.
+    assert!(nav.legal.illegal_fire);
 }
