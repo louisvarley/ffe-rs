@@ -142,7 +142,7 @@ uncommitted on 2026-10-24; **excluded** = owner decision.
 | 6 | Wrap (F1398 + `DATA_007648`) | **missing** | `ffe.asm:85127`; width table DOS file `0xe9998` | width table verified byte-for-byte against DOS; no Rust code | — |
 | 7 | Primary bitmap 0x42 at (5,158) | **partial** (data done) | `ffedat.asm`/DOS; cache `base:bitmap/primary/066`; `ffe.asm:71734-71760` | asset 311×42, sha256 `dc65f833…`; no blit in the intro path | — |
 | 8 | Model 177/176 drawing | **partial** (data + renderer primitive done) | DOS model table; `crates/ffe-rs/src/model_viewer.rs::render_scene_with`; `ffe.asm:71624-71648`, `102201` | census: 176 has 2 vertices/68 executed commands, 177 has 6/29; a probe renders 6-8 shapes for 177 and 44 for 176 at 0x181534 (frame not yet proven, see C1) | — |
-| 9 | Intro palette / `F1575` calls | **partial** | `ffe.asm:71649-71715`, `93539`, `82962`; `screen.rs` static low palette | no dynamic palette; intro likely low-palette only; check hashes | — |
+| 9 | Intro palette / `F1575` calls | **done** | `ffe.asm:71649-71715`, `93539`, `82962`; `ffe_rs::palette`, `screen.rs::draw_intro` | `(0,0,0)`/`(0,0,4)` built; switch entry and clear match the executed original | `docs/notes/palette.md` |
 | 10 | Boot state machine (`GameTics` 0x400, loop, keys) | **missing** | `ffe.asm:68405-68495`; `main.rs` | none | default boot = intro |
 | 11 | V / version line | **partial**, wrong data | `ffe.asm:71776-71796`; DOS gate `0x719668`; `front_end.rs::VERSION_LINE` | DOS string differs; gate differs | — |
 | 12 | Start keys 1-5 | **partial** | `ffe.asm:68443-68452`; key table at `DATA_007191`; `front_end.rs::Intro::key` | only type 1 state verified; gating wrong | ship 2-5 or map with deviation |
@@ -420,11 +420,12 @@ Every item has: **what**, **touch**, **depends**, **accept**, **size**
     a key; 1 enters at frame-equivalent state of `--state`; the intro loops at
     0x7e7b76; `--skip-intro` still starts the game; no auto-start in tests.
   - **Size:** M. **Unblocks:** the whole feature; F3.
-- [ ] **C3. Palette fidelity.**
+- [x] **C3. Palette fidelity.**
   - **What:** reproduce `F961`'s `F1575` calls (`(0,0,0)` for 177, `(0,0,4)` for
-    176) and decide whether the intro needs `F1330_DPalBuild`. The static low
-    palette may be sufficient because the models have no faces; confirm by
-    comparing the rendered colours against the reference.
+    176) and decide whether the intro needs `F1330_DPalBuild`. Implemented:
+    `F1326`/`F1327`/`F1330`/`F1331` are ported in `ffe_rs::palette`; the
+    executed original's switch frame has one upper entry, `(1,1,17)`, and the
+    port matches it. See `docs/notes/palette.md`.
   - **Touch:** `screen.rs` / a small palette module; `front_end.rs`.
   - **Depends:** C1. **Accept:** palette-index values in the screenshot match
     the reference at the sample tics, or the difference is documented.

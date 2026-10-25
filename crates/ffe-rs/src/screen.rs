@@ -17,6 +17,7 @@ use crate::targeter;
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::JITTER_SEED;
 use ffe_core::model_fill::{fill_polygon, fill_quad, fill_triangle};
+use ffe_core::model_lighting::pack;
 use ffe_core::model_line::{draw_curve, draw_line};
 use std::io::Cursor;
 
@@ -1383,11 +1384,11 @@ impl Screen {
         }
     }
 
-    /// F961 + F962 at one `GameTics`: clear to black, draw model 177/176 through
-    /// F1682/F1683, blit primary bitmap 0x42 at y 158, then the applicable
-    /// credits (and the version line once V latches it). The dynamic upper
-    /// palette (`F1575`/`F1330_DPalBuild`) is not reproduced: the model path
-    /// emits the original's fixed colours directly, as the flight view does.
+    /// F961 + F962 at one `GameTics`: clear to F961's F1575 background, draw
+    /// model 177/176 through F1682/F1683, blit primary bitmap 0x42 at y 158,
+    /// then the applicable credits (and the version line once V latches it).
+    /// The background and the model's unfixed colours resolve through the
+    /// runtime upper palette (`F1326`/`F1327`/`F1330`).
     pub fn draw_intro(
         &mut self,
         scene: Option<&ModelViewer>,
@@ -1396,9 +1397,12 @@ impl Screen {
     ) -> Result<(), String> {
         use crate::front_end::{IntroTimeline, PRIMARY_BITMAP_Y, VERSION_LINE};
         let intro = IntroTimeline::at(tics);
-        self.frame[..LOGICAL_WIDTH * LOGICAL_HEIGHT].fill(self.palette[0]);
+        let background = pack(intro.background) & 0xfff;
         if let Some(viewer) = scene {
-            if intro.model != 0 {
+            viewer.set_background(background);
+        }
+        let model = match scene {
+            Some(viewer) if intro.model != 0 => {
                 // F959's DATA_007235/DATA_007236: object origin (0, 0, 0x14820)
                 // and the 0x7f000000 row scale (127/128), with the F961 animation
                 // word as global 0, not a raw tic count.
@@ -1429,8 +1433,24 @@ impl Screen {
                         self.intro_error_reported = true;
                     }
                 }
-                self.draw_shapes(viewer, &frame.shapes);
+                Some(frame)
             }
+            Some(viewer) => {
+                // The loop point draws no model but F961 still clears to the
+                // last F1575 colour; build it with the accumulated cube.
+                viewer.prepare_palette();
+                None
+            }
+            None => None,
+        };
+        // F961's clear (F1618) uses the palette entry F1575 resolved.
+        let clear = scene
+            .and_then(|viewer| viewer.palette_rgb(background))
+            .map(|[r, g, b]| u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))
+            .unwrap_or(self.palette[0]);
+        self.frame[..LOGICAL_WIDTH * LOGICAL_HEIGHT].fill(clear);
+        if let (Some(viewer), Some(frame)) = (scene, model) {
+            self.draw_shapes(viewer, &frame.shapes);
         }
         if intro.bitmap {
             let bitmap = self
@@ -1470,6 +1490,18 @@ impl Screen {
         let mut views = views;
         views.lock_external = self.lock_external;
         let view = views.mode;
+        // The original registers the effective background (space colour, or the
+        // previous frame's haze) with F1326 before building the palette.
+        let background = self.surface_sky.unwrap_or(self.sky);
+        if let Some(scene) = scene {
+            scene.set_background(
+                pack([
+                    (((background >> 16) & 0xff) as u8) >> 4,
+                    (((background >> 8) & 0xff) as u8) >> 4,
+                    ((background & 0xff) as u8) >> 4,
+                ]) & 0xfff,
+            );
+        }
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
         if state.mode != Mode::Docked {
@@ -1499,9 +1531,10 @@ impl Screen {
             *pixel = self.palette[usize::from(*index)];
         }
         // The original clears the upper view to the palette entry nearest its
-        // space colour (FUNC_001618_ClearUpperBuf); the port draws the captured
-        // quantised colour (`prefs::space_colour_rgb`, `DATA_008815..817`)
-        // directly. The docked screen and the maps paint over it.
+        // space colour (`FUNC_001618_ClearUpperBuf`); the port draws the captured
+        // quantised colour (`prefs::space_colour_rgb`, `DATA_008815..817`) and
+        // registers the same `(0,0,index)` request with the runtime palette, so
+        // the models and FX around it are quantised against it.
         if state.mode != Mode::Docked {
             // F1052 clears with the background colour the previous frame's scene
             // left in `DATA_008814..8817`; a planet's haze overrides the space

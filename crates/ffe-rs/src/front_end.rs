@@ -16,6 +16,10 @@
 /// F961 draws model 177 while `GameTics < 0x8276e`; from there it draws 176.
 pub const MODEL_FIRST: u32 = 177;
 pub const MODEL_SECOND: u32 = 176;
+/// F961's `F1575` background arguments: `(0,0,0)` for model 177
+/// (`ffe.asm:71660-71668`) and `(0,0,4)` for model 176 (`71689-71695`).
+pub const MODEL_FIRST_BACKGROUND: [u8; 3] = [0, 0, 0];
+pub const MODEL_SECOND_BACKGROUND: [u8; 3] = [0, 0, 4];
 /// The tics at which the second model takes over (`F961`'s `0x8276e`).
 pub const MODEL_SWITCH: u32 = 0x8276e;
 /// F962 blits the primary bitmap 0x42 at y = 0x9e once `GameTics > 0x795cc`.
@@ -279,6 +283,10 @@ pub struct IntroFrame {
     /// (before any credit) while `GameTics < 0x8276e`, so the first credit's
     /// window starts at the model switch, not at 0.
     pub lines: Vec<&'static IntroLine>,
+    /// F961's F1575 argument (nibble RGB): `(0,0,0)` for model 177 and
+    /// `(0,0,4)` for model 176 (`ffe.asm:71660-71695`). The runtime palette
+    /// resolves it to the clear colour.
+    pub background: [u8; 3],
 }
 
 /// The intro's deterministic timeline.
@@ -296,6 +304,9 @@ impl IntroTimeline {
                 bitmap: false,
                 finished: true,
                 lines: Vec::new(),
+                // The last F1575 colour (model 176's) is still in the palette
+                // when F961 clears and flips at the loop point.
+                background: MODEL_SECOND_BACKGROUND,
             };
         }
         let (model, animation) = if tics < MODEL_SWITCH {
@@ -313,6 +324,11 @@ impl IntroTimeline {
                 .iter()
                 .filter(|line| line.visible(tics))
                 .collect(),
+            background: if tics < MODEL_SWITCH {
+                MODEL_FIRST_BACKGROUND
+            } else {
+                MODEL_SECOND_BACKGROUND
+            },
         }
     }
 

@@ -167,14 +167,22 @@ Model 176/177, the primary bitmap 0x42, the main font and the low palette were
 already in the cache. The credits are drawn from the cache, not from Rust
 strings; the old plain-text transcription and its `.text` field are gone.
 
-**Not reproduced.** The dynamic upper palette (`F1575`/`F1330_DPalBuild`) is not
-ported: F961's `(0,0,0)`/`(0,0,4)` start colours only change the runtime palette
-the original builds, while this port's model/bitmap path uses the fixed colours
-and the low palette directly. Model 176's late animation (for example at
-`0x77a7d8`, animation `0x1be0`) calls child 456 through a frame that copies a
-basis F1750 leaves as stale stack (`docs/notes/animation.md` §1.2); the port
-reports it once and keeps drawing the credits, so those frames have no ship.
-No music backend exists (song 0 `QQFRONT` is still not played).
+**Not reproduced.** Model 176's late animation (for example at `0x77a7d8`,
+animation `0x1be0`) calls child 456 through a frame that copies a basis F1750
+leaves as stale stack (`docs/notes/animation.md` §1.2); the port reports it once
+and keeps drawing the credits, so those frames have no ship. The intro scene's
+planet/asteroid backdrop is not part of the port's model-176 frame either, so
+the upper palette after the switch grows more slowly than the original's
+(`docs/notes/palette.md` §4). No music backend exists (song 0 `QQFRONT` is still
+not played).
+
+**Runtime palette (2026-10-25).** `F1575`/`F1326`/`F1327`/`F1330`/`F1331` are
+ported in `ffe_rs::palette`. The intro uses its own `F1575` colours: `(0,0,0)`
+for model 177 (fixed low entry 0, black) and `(0,0,4)` for model 176. The
+executed original at the switch frame has exactly one upper entry, six-bit
+`(1,1,17)` (expanded `#040444`), and the same entry is the clear colour; the
+port now produces that entry and background. See `docs/notes/palette.md` for
+the source map, the colour-word format and the frame evidence.
 
 **Tests and frames.** `crates/ffe-rs/tests/front_end.rs` covers the thresholds,
 the `0x400` clock, the `0x7e7b76` reset, the DOS V gate, keys at any tics and
