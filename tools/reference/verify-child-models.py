@@ -72,7 +72,9 @@ def main():
                    if line.startswith(("compared", "children", "thrusters", "not executed", "  model",
                                        "  skipped"))]
         if result.returncode:
-            raise RuntimeError("Rust/original mismatch:\n" + "\n".join(summary))
+            detail = result.stderr.decode(errors="replace")
+            raise RuntimeError("Rust/original mismatch:\n" + "\n".join(summary)
+                               + "\n--- Rust test output ---\n" + detail[-12000:])
         rows = [json.loads(line) for line in first.splitlines()]
         position = {row["model"]: number for number, row in enumerate(rows)}
         # Tamper: a child face's depth, a child set-up field, a cull outcome, a thruster

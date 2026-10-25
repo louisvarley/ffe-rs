@@ -40,3 +40,8 @@ jjffe-smoke --intro-live 62          # original GAME!TEK letters (animation 63)
   holes; the text colour is now resolved from the text material (F1692/F1693)
   and applied to the glyph instance. The letters are exactly the original's
   `(192,192,192)` at animation 63. There is no second logo draw path.
+* **Child-model oracle.** A model whose child now fails is skipped by
+  `verify-child-models.py`: the original would execute it against whatever its
+  stale stack held, so there is no source-correct sibling-preserving trace to
+  compare. The skipped subtrees are the captured `Failed` outcomes, not a
+  changed compare rule.

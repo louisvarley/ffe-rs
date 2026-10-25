@@ -4,6 +4,77 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Visual, start, landing, spawn, legal and death round
+
+- Merged, one at a time, each green and pushed: `visuals` (33d00a9),
+  `landed-view` (9ed9f89), `landing-audit` (b0fda6d), `spawn-safety` (b55be74),
+  `legal` (30ffe51) and `death` (67a7b8e).
+- **visuals (v0.82 preview).** A failed child subtree no longer discards its
+  siblings and child curved surfaces are collected, so the intro's planet is
+  back; surface colours are registered before the palette build with a
+  per-frame cube clear, and the GAME!TEK text material/glyph colour is applied.
+  Conflicts: none. Owner decisions: model 456 -> 321 stays skipped (stale
+  basis), some logo rotations are a shade darker (normal/lighting), message-log
+  stamps unchanged.
+- **landed-view.** The default start is F829 record 0: Gateway [-1,4], planet
+  Hope, starport Old Blackelk, Saker Mk III (0x1f), 10,000 CR, state 0x30, index
+  87; state 0x30 draws the landed surface view. HUD parent `Hope`, F1393 speed
+  columns at source positions, Set/Act and Alt. Conflicts: `hud.rs` and
+  `main.rs` speed fields/messages. Resolution: kept landed-view's original
+  speed-unit HUD (`PlayerHud::speed_columns`, F1393 `km{`/`km|`) over log-ui's
+  m/s conversion, and adapted the places/log tests to integer speed words; the
+  autopilot range messages stay log-ui's range-free text. The start-record-1
+  test is explicitly not the default. Owner decisions: the Saker loadout still
+  uses the Eagle/type-1 list, open-air re-docking does not enter services 0x2a,
+  start keys 2-5 still Ross 154, the fine message trigger is not invented and
+  duplicate log stamps remain; `docs/evidence/landed/`.
+- **landing-audit (v0.82).** One F1100 formatter (`targeter::range_number` /
+  `range_spaced`: 2 dp km below 17,592,186.04 km, 3 dp AU above; the raw
+  fixed-point bug is fixed), F741's 4,096 km station hand-off and 6,144 km
+  starport hand-off, `Navigator::land_at_starport` `0x2e`->`0x30` + F381/F654
+  launch, F1903 stop at a starport landing, and `sequence_end_music` replacing
+  the stale `docking_music` helper. Conflicts: `laser.rs` (combined both range
+  tests), `main.rs` (launch climb, range messages, imports), `navigation.rs`
+  (range/tests), `screen.rs` (range HUD), `NAVIGATION.md` (kept the resolved
+  terrain paragraph and the new starport gaps). The `combat` oracle and the
+  exhaustive navigation test pass. Owner decisions: final pad descent needs
+  F741/F742/F745/F746 + F599/F600, pad contact needs the F576 decode or
+  F1019/F1021 0x20/0x40, instant long-leg transfer vs F596/F606, crash/bounce
+  fidelity, planet auto-land standoff.
+- **spawn-safety (v0.83).** `npc::spawn` takes `SpawnOptions`; a normal entry
+  uses F688's counts and the anchor orbit, while the capture-only guarantee and
+  near-player pirate framing moved to `SpawnOptions::CAPTURE` and
+  `respawn_traffic`. `Navigator::on_pad`/`landed_view` name F994's 0x30 and
+  F1021/F1047, and main skips the NPC AI/fire/missile step while landed.
+  Conflicts: `hud.rs` (the branch's pre-landed-view F64 HUD; restored main's
+  F1393 block) and `main.rs` speed fields/message; mechanical integer speed
+  fixtures in `boot_safety`/`planet_view`, and the landed HUD test now checks
+  both columns. Owner decisions: anchor-orbit stand-in vs F702's system-wide
+  point, per-kind count caps, landed freeze (source traffic still moves).
+- **legal (v0.84).** F236 row 3 prints `$600` and records `6000`; the 4500 in
+  the owner note is not in `DATA_005039` (the only 4500 is the Saker's ship
+  value). Starport witness F234/F235 with the 0x13 exponential byte, no anarchy
+  gate, wanted/alert, F783 clear, per-starport fines and F655's >=10,000 refusal
+  are ported. Conflict: `navigation.rs` tests (combined range/starport tests
+  with the distance-byte/witness tests). Owner decisions: 4500 vs 600 (keep the
+  DOS table; an override would be explicit data), fines office/payment window
+  and police spawns not ported, F2 LEGAL STATUS absent; `docs/notes/legal.md`.
+- **death (v0.85).** The starport-recovery substitute is removed. F1104's
+  external view and 5.001 s hold, F1098's capsule/Stowmaster with an exact
+  loadout reset, F12 capsule launch, death cues/song stop, save rejection and
+  the GAME OVER/COMMANDER DIED strings are in; the full game-over screen is the
+  later `gameover` stream. Conflicts: none (semantic review confirmed the
+  spawn-safety landed guard and legal police path still run). Owner decisions:
+  commander name placeholder, derelict AI not ported, 5 s timer consumer open;
+  `docs/notes/death.md`.
+- Checks: per merge workspace tests, clippy `-D warnings`, fmt, the branch's
+  cached/ignored suites and the affected oracles; the exhaustive
+  `autopilot_after_every_jump` passes in release (59-105 s) because the debug
+  run takes hours. Final suite: 56 entries (55 PASS / 1 SKIP / 0 FAIL on
+  Windows); cache stays v28 (1,797 assets).
+
+---
+
 ## 2026-10-25 - Six-stream integration round: controls, lasers, lock-on, log, places, terrain
 
 - Merged, one at a time, each green and pushed: `terrain` (365bd36), `places`

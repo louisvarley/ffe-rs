@@ -111,6 +111,17 @@ struct Stats {
 
 /// The probe's event streams for one frame, recursing into child runs where the
 /// original runs them.
+/// True when this execution or any executed descendant has a child that failed
+/// to run. Such a scene cannot be compared with the original's stale-stack
+/// behaviour, so its parent model is skipped rather than failing the oracle.
+fn has_failed_child(execution: &Execution) -> bool {
+    execution.children.iter().any(|run| match &run.outcome {
+        ChildOutcome::Failed(_) => true,
+        ChildOutcome::Executed(child) => has_failed_child(child),
+        ChildOutcome::Culled | ChildOutcome::NoRoom => false,
+    })
+}
+
 fn events(
     result: &Execution,
     depth: u32,
@@ -407,6 +418,18 @@ fn executed_reference_child_models() {
                 continue;
             }
         };
+        // A failed child is a deliberate port difference: the original would
+        // draw whatever its stale stack held, while the port leaves that child
+        // out and keeps its siblings. There is no source-correct trace to
+        // compare for the parent, so skip the whole model (the visuals notes
+        // record the skipped subtrees).
+        if has_failed_child(&result) {
+            if std::env::var_os("FFE_CHILD_VERBOSE").is_some() {
+                eprintln!("  skipped model {index}: a child could not execute");
+            }
+            skipped.push(index);
+            continue;
+        }
         let (mut nested, mut points) = (Vec::new(), Vec::new());
         let before = stats.executed + stats.culled + stats.no_room;
         events(

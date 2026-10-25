@@ -1,5 +1,9 @@
 # F1100 target display: green lock boxes and `5.400AU`
 
+The captured frame predates landing-audit's fixed-point correction (it shows the
+old two-decimal `5.40AU`); the current formatter prints `5.400AU` for the same
+5400 thousandths.
+
 Source: DOS FFE `FUNC_001099` / `FUNC_001100` (`ffe.asm:80555-81340`) and the
 strings at `ffedat.asm:18889-18915`. The target colour is a COLPAL index:
 0x11 for the navigation target (low palette entry 17, green `#00f000`) and

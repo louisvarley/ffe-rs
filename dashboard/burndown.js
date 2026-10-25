@@ -165,7 +165,11 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "done", version: "v0.63" },
         { id: "gameplay-19", title: "Player missiles, missile lock and F1120 pylon lamps", status: "done", version: "v0.67" },
         { id: "gameplay-20", title: "Starport tech level, Upgrades Fit/Remove, fuel-scoop gate and repairs rows", status: "done", version: "v0.73" },
-        { id: "gameplay-21", title: "Laser muzzle origin, hit-box entry and 50/60 Hz tics", status: "done", version: "v0.80" }
+        { id: "gameplay-21", title: "Laser muzzle origin, hit-box entry and 50/60 Hz tics", status: "done", version: "v0.80" },
+        { id: "gameplay-22", title: "F1100 fixed-point ranges, 4,096/6,144 km hand-offs and starport land_at_starport", status: "done", version: "v0.82" },
+        { id: "gameplay-23", title: "New-game pad spawn safety: SpawnOptions, no forced near-player pirate, landed freeze", status: "done", version: "v0.83" },
+        { id: "gameplay-24", title: "Unlawful-fire fines, witness jurisdiction, wanted/alert and F655 debt refusal", status: "done", version: "v0.84" },
+        { id: "gameplay-25", title: "F1104 death hold, F1098 escape craft, capsule launch and GAME OVER strings", status: "done", version: "v0.85" }
       ]
     },
     {
@@ -623,6 +627,26 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 65,
       note: "Controls merged (v0.81): the Classic preset holds RMB to steer (F1038 in the original flight, 50-px stick in the prototype), Enter/Shift set speed, preset-specific turret/external routing with no leaks, immediate switching and saves/controls.cfg persistence; Modern behaviour unchanged. Owner decisions: a sensitivity option, prototype roll missing, Classic default vs Modern, and only controls persist. One item added and completed (ui-17), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Landing audit merged (v0.82): one F1100 range formatter (2 dp km below 17,592,186.04 km, 3 dp AU above; the raw fixed-point bug is fixed in the target HUD, messages and map), F741's 4,096 km station hand-off and 6,144 km starport hand-off, Navigator::land_at_starport's 0x2e->0x30 and F381/F654 launch, and station dock music is F1903's stop (the stale docking_music helper is now sequence_end_music). Owner decisions: the starport final pad descent needs F741/F742/F745/F746 + F599/F600, pad contact needs the F576 decode or F1019/F1021's 0x20/0x40, instant long-leg transfer vs F596/F606, crash/bounce fidelity, and the planet auto-land standoff. One item added and completed (gameplay-22), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Spawn safety merged (v0.83): the default new game no longer spawns a pirate beside the pad. npc::spawn takes SpawnOptions; a normal entry uses F688's counts and the anchor orbit, while the capture-only guarantee/near-player pirate framing moved to SpawnOptions::CAPTURE and respawn_traffic. Navigator::on_pad/landed_view name F994's 0x30 and F1021/F1047, and main skips the NPC AI/fire/missile step while landed (F1012/F1048). Owner decisions: the anchor-orbit stand-in vs F702's system-wide point, the port's per-kind count caps, and the landed freeze (the source's traffic still moves). One item added and completed (gameplay-23), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Legal merged (v0.84): the unlawful-discharge offence is DOS F236's row 3 - the executed original prints 'Unlawful discharge of weapon is not permitted here. Pay a $600 fine.' and adds 6000 CR to the starport ledger. The starport-witness roll (F234/F235, 0x13 exponential distance, no anarchy gate), wanted/alert, F783 clear, per-starport fines and F655's >=10,000 debt refusal are ported; the 4500 in the owner's memory is not in DATA_005039 (the only 4500 is the Saker's ship value). Owner decisions: 4500 vs 600 (the port keeps the DOS table; a 4500 override would be an explicit data option), the fines office/payment window and police spawns are not ported, and F2's LEGAL STATUS screen is absent. One item added and completed (gameplay-24), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Death merged (v0.85): the starport-recovery substitute is gone. A lethal hit runs F1104's external view and 5.001 s hold, F1098's escape craft when fitted (capsule/Stowmaster, exact loadout reset, F12/F381 launch), the death cues and song stop, save rejection, and the status page's GAME OVER / COMMANDER DIED strings (the gameover stream later supplies the full screen). The landed guard still suppresses NPC fire, and the legal police path still works. Owner decisions: the commander name is a fixed placeholder, the derelict AI is not ported, and the 5 s timer's consumer/advance remains open. One item added and completed (gameplay-25), so the remaining count is unchanged."
     },
   ]
 };
