@@ -127,6 +127,16 @@ impl IndexedImage {
         })
     }
 
+    /// The raw low-palette indices, row-major.
+    pub fn indices(&self) -> &[u8] {
+        &self.indices
+    }
+
+    /// The image's dimensions.
+    pub fn size(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
+
     pub fn blit(&self, pixels: &mut [u8; 64000], x: i32, y: i32) {
         for row in 0..self.height {
             let py = i64::from(y) + i64::from(self.offset[1]) + row as i64;
@@ -162,6 +172,27 @@ impl IndexedImage {
                 let index = self.indices[row * self.width + col];
                 if index != 0 || !self.masked_zero {
                     pixels[py as usize * 320 + px as usize] = palette[usize::from(index)];
+                }
+            }
+        }
+    }
+
+    /// F1622's clipped blit: the same image, but only rows at or below `ymin`
+    /// (F270 grows each gauge bar upward from the bottom by raising `ymin`).
+    pub fn blit_clipped(&self, pixels: &mut [u8; 64000], x: i32, y: i32, ymin: i32) {
+        for row in 0..self.height {
+            let py = i64::from(y) + i64::from(self.offset[1]) + row as i64;
+            if !(0..200).contains(&py) || py < i64::from(ymin) {
+                continue;
+            }
+            for col in 0..self.width {
+                let px = i64::from(x) + i64::from(self.offset[0]) + col as i64;
+                if !(0..320).contains(&px) {
+                    continue;
+                }
+                let index = self.indices[row * self.width + col];
+                if index != 0 || !self.masked_zero {
+                    pixels[py as usize * 320 + px as usize] = index;
                 }
             }
         }

@@ -26,6 +26,8 @@ pub struct ShipStats {
     pub mass: u16,
     /// +0x8, the cargo space (tonnes, signed word) before the hyperdrive's mass.
     pub cargo: i16,
+    /// +0xe, the shield-strength word F1099's target readout shows.
+    pub shield_strength: i16,
     /// +0x12, missile mounts.
     pub missiles: u16,
     /// +0x14, the hyperdrive word: negative means a drive of the class in its low byte.
@@ -33,9 +35,13 @@ pub struct ShipStats {
     /// +0x18/+0x1a, the cockpit eye: along the forward axis, along the up axis
     /// (FUNC_001054 front and rear views).
     pub eye: [i16; 2],
-    /// +0x28/+0x2a, the top turret (view 2; the eye is 0x3e above it).
+    /// +0x20/+0x22, the front gun's forward and up offsets (F931/F1776).
+    pub front_gun: [i16; 2],
+    /// +0x24/+0x26, the rear gun's offsets.
+    pub rear_gun: [i16; 2],
+    /// +0x28/+0x2a, the top turret's gun offsets (view 2; the eye is 0x3e above it).
     pub top_turret: [i16; 2],
-    /// +0x2c/+0x2e, the bottom turret (view 3; the eye is 0x3e below it).
+    /// +0x2c/+0x2e, the bottom turret's gun offsets (view 3; the eye is 0x3e below it).
     pub bottom_turret: [i16; 2],
 }
 
@@ -49,9 +55,12 @@ impl ShipStats {
             gun_mounts: block[4] as i8,
             mass: word(6),
             cargo: word(8) as i16,
+            shield_strength: word(0xe) as i16,
             missiles: word(0x12),
             drive: word(0x14) as i16,
             eye: [word(0x18) as i16, word(0x1a) as i16],
+            front_gun: [word(0x20) as i16, word(0x22) as i16],
+            rear_gun: [word(0x24) as i16, word(0x26) as i16],
             top_turret: [word(0x28) as i16, word(0x2a) as i16],
             bottom_turret: [word(0x2c) as i16, word(0x2e) as i16],
         })

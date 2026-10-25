@@ -1,5 +1,7 @@
+use ffe_core::laser;
 use ffe_core::traffic::Reply;
-use ffe_rs::camera::{key_amount, ExternalKeys, ViewMode, ViewState};
+use ffe_rs::camera::{key_amount, ship_axes, ExternalKeys, ViewMode, ViewState};
+use ffe_rs::combat::{self, Combat};
 use ffe_rs::console::{acceleration_for_digit, Click, ConsoleState, ACCELERATION_NAMES};
 use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Controls, Flight, STEP};
@@ -304,6 +306,10 @@ fn run() -> Result<(), String> {
     if options.skip_intro {
         eprintln!("--skip-intro: the logo sequence and the credits are not shown.");
     }
+    // F998's new-game armament: one 1MW pulse laser in the front mount, a class-2
+    // drive and 1 t of energy on the start-type 1 hull. The port has no outfitting
+    // or save equipment, so the same original loadout arms the sandbox too.
+    state.combat = Combat::new_game();
     // A scripted undock for screenshots: start the launch sequence immediately.
     if let Some(dir) = &options.capture {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
@@ -1075,6 +1081,16 @@ fn run() -> Result<(), String> {
                     message = match ships.step(state.ship, ship_step) {
                         Some(ship) => {
                             state.ship = ship;
+                            // The port has no outfitting: the new-game front laser
+                            // stays fitted while the hull has a gun mount, and is
+                            // removed from a hull with none.
+                            let mounts = scene
+                                .as_ref()
+                                .and_then(|scene| scene.ship_stats(ship))
+                                .map_or(0, |stats| stats.gun_mounts);
+                            if mounts <= 0 {
+                                state.combat.lasers = [0; 4];
+                            }
                             // FUNC_001110 re-applies the closest-camera limit.
                             let minimum = scene
                                 .as_ref()
@@ -1083,10 +1099,6 @@ fn run() -> Result<(), String> {
                             views.external.distance =
                                 views.external.distance.min(minimum.saturating_neg());
                             // ffe-rs: a ship without turrets leaves a turret view.
-                            let mounts = scene
-                                .as_ref()
-                                .and_then(|scene| scene.ship_stats(ship))
-                                .map_or(0, |stats| stats.gun_mounts);
                             if views.mode.is_turret() && mounts <= 2 {
                                 views.mode = ViewMode::Front;
                             }
@@ -1526,6 +1538,95 @@ fn run() -> Result<(), String> {
             .to_owned();
         }
         last_mode = state.mode;
+        // Lasers (F1040/F931): Space holds the fire input, the current view picks
+        // the mount, and F931's refire/heat/energy gates decide whether a shot
+        // happens this frame. The beam is F1776's model 0x9c at the gun.
+        let acceleration_factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
+            / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
+        let frame_tics =
+            (elapsed * 50.0 * f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])) as u32;
+        if active && !paused && state.mode == ffe_rs::flight::Mode::Flight {
+            state.combat.tick(frame_tics, elapsed * acceleration_factor);
+        }
+        screen.beam = None;
+        let can_fire = active
+            && !help
+            && !paused
+            && !scenarios
+            && state.mode == ffe_rs::flight::Mode::Flight
+            && model_lab.is_none()
+            && model_viewer.is_none()
+            && nav
+                .as_ref()
+                .is_none_or(|nav| nav.view == NavView::Closed && nav.sequence.is_none());
+        if can_fire && window.is_key_down(Key::Space) {
+            if let Some(mount) = combat::mount(views.mode) {
+                match state.combat.fire(mount, frame_tics) {
+                    Ok(shot) => {
+                        let stats = scene
+                            .as_ref()
+                            .and_then(|scene| scene.ship_stats(state.ship));
+                        let beam = combat::beam(
+                            &state,
+                            stats.as_ref(),
+                            views.mode,
+                            [views.turret.yaw, views.turret.pitch],
+                        );
+                        let origin = beam.origin.map(|v| {
+                            (v * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT).round() as i64
+                        });
+                        let targets: Vec<laser::Target> =
+                            nav.as_ref().map_or_else(Vec::new, |nav| {
+                                nav.bodies
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, body)| body.radius > 0)
+                                    .map(|(index, body)| laser::Target {
+                                        index,
+                                        centre: body.position,
+                                        radius: body.radius,
+                                    })
+                                    .collect()
+                            });
+                        if let Some(hit) = laser::hit(origin, beam.axes[2], &targets) {
+                            if let Some(nav) = nav.as_ref() {
+                                if let Some(body) = nav.bodies.get(hit.index) {
+                                    if !shot.beam {
+                                        message = format!(
+                                            "{} hit: {}.",
+                                            body.name,
+                                            match shot.code {
+                                                laser::PULSE_1MW => "1MW pulse laser",
+                                                laser::PULSE_5MW => "5MW pulse laser",
+                                                laser::BEAM_1MW => "1MW beam laser",
+                                                laser::BEAM_4MW => "4MW beam laser",
+                                                laser::BEAM_20MW => "20MW beam laser",
+                                                laser::BEAM_100MW => "100MW beam laser",
+                                                laser::MINING_30MW => "30MW mining laser",
+                                                laser::THARGOID => "Thargoid laser",
+                                                _ => "laser",
+                                            }
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        screen.beam = Some(beam);
+                    }
+                    Err(laser::FireError::Overheated) => {
+                        message = "Lasers overheated.".to_owned();
+                    }
+                    Err(laser::FireError::NoEnergy) => {
+                        message = "No energy for the lasers.".to_owned();
+                    }
+                    Err(laser::FireError::NoLaser | laser::FireError::Refire) => {}
+                }
+            }
+        }
+        screen.lasers = state.combat.lasers;
+        screen.energy = state.combat.energy;
+        screen.heat = state.combat.heat;
+        screen.drive = state.combat.drive;
         if let Some(nav) = nav.as_ref() {
             screen.system = nav.system_name().to_owned();
             screen.station = nav
@@ -1719,6 +1820,45 @@ fn run() -> Result<(), String> {
                     engaged: engaged.is_some(),
                 })
             });
+        // F1100's range readout for the locked body, in the original's km/AU
+        // conversion. A body that does not project is behind or off the view and
+        // takes the fixed (50,50) text, as F1100 does.
+        screen.target_hud = None;
+        screen.target_damage = None;
+        if state.mode == ffe_rs::flight::Mode::Flight {
+            if let Some((nav, index)) = nav.as_ref().zip(marked) {
+                if let Some(body) = nav.bodies.get(index) {
+                    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                    let from = original.as_ref().map_or_else(
+                        || state.position.map(|v| (v * unit).round() as i64),
+                        |model| model.player().motion.position,
+                    );
+                    let (mantissa, exponent) = laser::range_words(from, body.position);
+                    let (value, au) = laser::range_value(mantissa, exponent);
+                    let forward = ship_axes(&state)[2];
+                    let toward = [
+                        (body.position[0] - from[0]) as f64,
+                        (body.position[1] - from[1]) as f64,
+                        (body.position[2] - from[2]) as f64,
+                    ];
+                    let behind =
+                        forward[0] * toward[0] + forward[1] * toward[1] + forward[2] * toward[2]
+                            <= 0.0;
+                    let (x, y, offscreen) = match screen.target_mark {
+                        Some(mark) => (mark.x, mark.y, false),
+                        None => (50, 50, !behind),
+                    };
+                    screen.target_hud = Some(ffe_rs::screen::TargetHud {
+                        x,
+                        y,
+                        value,
+                        au,
+                        behind,
+                        offscreen,
+                    });
+                }
+            }
+        }
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();

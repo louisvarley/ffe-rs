@@ -46,6 +46,10 @@ pub struct Flight {
     /// load empty.
     #[serde(default)]
     pub hold: Vec<u16>,
+    /// The laser installation and its heat, energy and refire words. Saves from
+    /// before combat load no lasers.
+    #[serde(default)]
+    pub combat: crate::combat::Combat,
 }
 
 fn default_ship() -> u32 {
@@ -78,6 +82,7 @@ impl Default for Flight {
             axes: None,
             system_flight: false,
             hold: Vec::new(),
+            combat: crate::combat::Combat::default(),
         }
     }
 }
@@ -124,6 +129,13 @@ impl Flight {
             || !(self.thrust.is_finite() && self.thrust.abs() <= 1.0)
             || !(self.hold.is_empty() || self.hold.len() == ffe_core::market::NAMES)
             || self.hold.iter().map(|t| u32::from(*t)).sum::<u32>() > 100_000
+            || self.combat.drive > 0x0e
+            || !(self.combat.cool_carry.is_finite() && (0.0..1.0).contains(&self.combat.cool_carry))
+            || self
+                .combat
+                .lasers
+                .iter()
+                .any(|code| *code != 0 && ffe_core::laser::index(*code).is_none_or(|i| i > 10))
         {
             return Err("save contains out-of-range prototype state".to_owned());
         }

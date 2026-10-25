@@ -1,0 +1,316 @@
+﻿//! The player's laser installation and its firing state (guide: `docs/notes/combat.md`).
+//!
+//! The original keeps the four mount lasers at `ship+0xd2..+0xd5`, the refire
+//! countdown at `+0xe8`, the heat at `+0xea` and the energy at `+0x11e`. The
+//! new game's start type 1 (Ross 154, model `0x17`) fits one 1MW pulse laser
+//! (`0x88`) in the front mount, two missiles, a class-2 drive and 1 t of
+//! energy; `FUNC_000998` at `ffe.asm:74099` is the source. There is no
+//! outfitting or save equipment in this port, so that new-game loadout is kept
+//! when the development ship list changes the hull.
+use ffe_core::laser::{self, FireError, LaserSpec, State};
+use serde::{Deserialize, Serialize};
+
+use crate::camera::{self, ViewMode};
+use crate::flight::Flight;
+use crate::original_flight::UNITS_PER_FLIGHT_UNIT;
+use crate::ships::ShipStats;
+
+/// The player's laser installation and the three words F931 gates on.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct Combat {
+    /// Front, rear, top and bottom laser equipment codes (`ship+0xd2..+0xd5`).
+    #[serde(default)]
+    pub lasers: [u8; 4],
+    /// The energy pool (`+0x11e`); F929 removes each shot's cost.
+    #[serde(default)]
+    pub energy: u32,
+    /// The heat (`+0xea`); F931 refuses above 0xf000 and F938 cools it.
+    #[serde(default)]
+    pub heat: u16,
+    /// The pulse refire countdown (`+0xe8`).
+    #[serde(default)]
+    pub refire: u16,
+    /// The drive byte (`+0xd0`) F270's energy bar scales by.
+    #[serde(default)]
+    pub drive: u8,
+    /// `ship+0xc8 & 1`, the laser cooling booster (equipment is not otherwise
+    /// modelled; always false in the port for now).
+    #[serde(default)]
+    pub cooling_booster: bool,
+    /// F938 applies whole seconds; the fraction is carried for the next frame.
+    #[serde(default)]
+    pub cool_carry: f64,
+}
+
+impl Combat {
+    /// F998's start type 1 record: a 1MW pulse laser in the front mount, a
+    /// class-2 drive and `0x20000000` energy (one tonne).
+    pub fn new_game() -> Self {
+        Self {
+            lasers: [laser::PULSE_1MW, 0, 0, 0],
+            energy: 0x2000_0000,
+            heat: 0,
+            refire: 0,
+            drive: 2,
+            cooling_booster: false,
+            cool_carry: 0.0,
+        }
+    }
+
+    /// The original's three mutable words.
+    pub fn state(&self) -> State {
+        State {
+            refire: self.refire,
+            heat: self.heat,
+            energy: self.energy,
+        }
+    }
+
+    fn store(&mut self, state: State) {
+        self.refire = state.refire;
+        self.heat = state.heat;
+        self.energy = state.energy;
+    }
+
+    /// F931/F930 for one mount. On success the heat, energy and refire words are
+    /// updated and the shot's cost and damage returned.
+    pub fn fire(&mut self, mount: usize, frame_tics: u32) -> Result<LaserSpec, FireError> {
+        let code = *self.lasers.get(mount).unwrap_or(&0);
+        let mut state = self.state();
+        let result = laser::fire(code, &mut state, frame_tics);
+        self.store(state);
+        result
+    }
+
+    /// F730 and F938 for one frame: the refire countdown and the heat cooling.
+    /// `seconds` is accelerated world time; F938 takes whole seconds, so the
+    /// fraction is carried until it makes one.
+    pub fn tick(&mut self, frame_tics: u32, seconds: f64) {
+        let mut state = self.state();
+        laser::tick_refire(&mut state, frame_tics);
+        self.cool_carry += seconds.max(0.0);
+        let whole = self.cool_carry.floor();
+        if whole >= 1.0 {
+            laser::cool(&mut state, whole, self.cooling_booster);
+            self.cool_carry -= whole;
+        }
+        self.store(state);
+    }
+
+    /// F270's first gauge value.
+    pub fn energy_gauge(&self) -> u32 {
+        laser::energy_gauge(self.energy, self.drive)
+    }
+}
+
+/// One frame's visible laser beam: model `0x9c` (156) drawn at the gun, with the
+/// ship's (or turret's) axes, exactly as F1776 sets up the duplicate object.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaserBeam {
+    /// Gun position in flight units.
+    pub origin: [f64; 3],
+    /// The axes the beam is drawn along (right, up, forward), flight space.
+    pub axes: [[f64; 3]; 3],
+}
+
+/// The mount a view fires, F1040: the view itself for 0..3, the front mount in
+/// the external and combat views (4 and 6), and no firing in the missile view
+/// (5). Returns the mount index into `Combat::lasers`.
+pub fn mount(view: ViewMode) -> Option<usize> {
+    match view {
+        ViewMode::Front => Some(0),
+        ViewMode::Rear => Some(1),
+        ViewMode::TopTurret => Some(2),
+        ViewMode::BottomTurret => Some(3),
+        ViewMode::External => Some(0),
+    }
+}
+
+/// FUNC_001513 as the camera uses it.
+fn rotate(v1: [f64; 3], v2: [f64; 3], angle: u16) -> ([f64; 3], [f64; 3]) {
+    let radians = f64::from(angle) / 65536.0 * std::f64::consts::TAU;
+    let (s, c) = radians.sin_cos();
+    (
+        std::array::from_fn(|i| v1[i] * c + v2[i] * s),
+        std::array::from_fn(|i| v2[i] * c - v1[i] * s),
+    )
+}
+
+/// The axes of a mount: the ship's for front and rear (rear is a half turn
+/// about up), the turret's for the two turret mounts (FUNC_001513 by
+/// `+0x204`/`+0x206`, as the camera and F1776 do).
+pub fn mount_axes(state: &Flight, view_mode: ViewMode, turret: [i16; 2]) -> [[f64; 3]; 3] {
+    let [right, up, forward] = camera::ship_axes(state);
+    match view_mode {
+        ViewMode::Rear => [right.map(|v| -v), up, forward.map(|v| -v)],
+        ViewMode::TopTurret | ViewMode::BottomTurret => {
+            let (forward, right) = rotate(forward, right, turret[0] as u16);
+            let (up, forward) = rotate(up, forward, turret[1] as u16);
+            [right, up, forward]
+        }
+        _ => [right, up, forward],
+    }
+}
+
+/// The gun's position in flight units. F931/F1776 place it at
+/// `forward * zoff + up * yoff`, each word in eighths of an original position
+/// unit; the ship statistics give the mount's two words.
+pub fn gun_origin(
+    state: &Flight,
+    stats: Option<&ShipStats>,
+    view_mode: ViewMode,
+    axes: [[f64; 3]; 3],
+) -> [f64; 3] {
+    let words = stats.map_or([0, 0], |stats| match view_mode {
+        ViewMode::Front | ViewMode::External => stats.front_gun,
+        ViewMode::Rear => stats.rear_gun,
+        ViewMode::TopTurret => stats.top_turret,
+        ViewMode::BottomTurret => stats.bottom_turret,
+    });
+    // The original's `axis * word * 8 >> 12` (the Q31 row's high word is Q15).
+    let scale = 8.0 / UNITS_PER_FLIGHT_UNIT;
+    let [along, above] = words.map(|word| f64::from(word) * scale);
+    std::array::from_fn(|i| state.position[i] + axes[2][i] * along + axes[1][i] * above)
+}
+
+/// The beam for a shot, ready for `Screen`.
+pub fn beam(
+    state: &Flight,
+    stats: Option<&ShipStats>,
+    view_mode: ViewMode,
+    turret: [i16; 2],
+) -> LaserBeam {
+    let axes = mount_axes(state, view_mode, turret);
+    LaserBeam {
+        origin: gun_origin(state, stats, view_mode, axes),
+        axes,
+    }
+}
+
+/// Re-export the core laser errors for callers that match on them.
+pub use ffe_core::laser::FireError as LaserError;
+
+/// F270's three bar bitmap ids (combined table ids; 96 and up are secondary).
+pub const GAUGE_BITMAPS: [u32; 3] = [275, 274, 273];
+
+/// The bitmap id of the fixed gunsight, `F1111`'s `0x61` (97).
+pub const GUNSIGHT_BITMAP: u32 = 0x61;
+/// The bitmap id of the velocity marker, `F1112`'s `0x62` (98).
+pub const VELOCITY_MARKER_BITMAP: u32 = 0x62;
+/// F1776's laser-beam model, `0x9c` (156).
+pub const BEAM_MODEL: u32 = 0x9c;
+
+/// Screen position of the velocity marker in the front view, F1112: the
+/// velocity direction projected as an F1479 point with a small +z offset. A
+/// zero velocity sits at the view centre.
+pub fn velocity_marker(camera: &camera::Camera, velocity: [f64; 3]) -> Option<(i32, i32)> {
+    let [x, y, z] = camera.direction(velocity);
+    if x.abs() + y.abs() + z.abs() < 1e-12 {
+        return Some((160, 79));
+    }
+    if z <= 0.0 {
+        return None;
+    }
+    let sx = 160.0 + 256.0 * x / z;
+    let sy = 79.0 - 256.0 * y / z;
+    // F1112's own bounds, before the -19/-18 draw offset.
+    ((15..=0x131).contains(&(sx as i32)) && (15..=0x8f).contains(&(sy as i32)))
+        .then_some((sx as i32, sy as i32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flight() -> Flight {
+        Flight {
+            mode: crate::flight::Mode::Flight,
+            position: [0.0; 3],
+            axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+            ..Flight::default()
+        }
+    }
+
+    #[test]
+    fn new_game_has_f998s_front_pulse_laser() {
+        let combat = Combat::new_game();
+        assert_eq!(combat.lasers, [laser::PULSE_1MW, 0, 0, 0]);
+        assert_eq!(combat.energy, 0x2000_0000);
+        assert_eq!(combat.drive, 2);
+        assert_eq!(combat.energy_gauge(), 0xffe0);
+    }
+
+    #[test]
+    fn firing_uses_the_mount_and_updates_the_words() {
+        let mut combat = Combat::new_game();
+        let shot = combat.fire(0, 994).unwrap();
+        assert_eq!((shot.damage, shot.heat, shot.energy), (50, 400, 800));
+        assert_eq!(combat.heat, 400);
+        assert_eq!(combat.energy, 0x2000_0000 - 800);
+        assert_eq!(combat.refire, laser::PULSE_REFIRE);
+        assert_eq!(combat.fire(0, 994), Err(ffe_core::laser::FireError::Refire));
+        // No rear, turret or bottom laser on the new-game hull.
+        for mount in 1..4 {
+            assert_eq!(
+                combat.fire(mount, 994),
+                Err(ffe_core::laser::FireError::NoLaser)
+            );
+        }
+        combat.tick(laser::PULSE_REFIRE as u32, 0.02);
+        assert_eq!(combat.refire, 0);
+        assert!(combat.fire(0, 994).is_ok());
+    }
+
+    #[test]
+    fn mounts_fire_from_the_view_that_is_showing() {
+        assert_eq!(mount(ViewMode::Front), Some(0));
+        assert_eq!(mount(ViewMode::Rear), Some(1));
+        assert_eq!(mount(ViewMode::TopTurret), Some(2));
+        assert_eq!(mount(ViewMode::BottomTurret), Some(3));
+        assert_eq!(mount(ViewMode::External), Some(0));
+    }
+
+    #[test]
+    fn gun_offsets_follow_f931s_word_scale() {
+        let state = flight();
+        let mut block = [0u8; 48];
+        let word = |block: &mut [u8; 48], offset: usize, value: i16| {
+            block[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        };
+        word(&mut block, 0x04, 1);
+        word(&mut block, 0x06, 25);
+        word(&mut block, 0x18, 1500);
+        word(&mut block, 0x1a, 30);
+        word(&mut block, 0x20, 1300);
+        word(&mut block, 0x24, 800);
+        word(&mut block, 0x28, 36);
+        word(&mut block, 0x2a, 30);
+        word(&mut block, 0x2c, 64);
+        word(&mut block, 0x2e, 34);
+        let stats = ShipStats::from_block(&block).unwrap();
+        let axes = mount_axes(&state, ViewMode::Front, [0, 0]);
+        let origin = gun_origin(&state, Some(&stats), ViewMode::Front, axes);
+        let along = 1300.0 * 8.0 / UNITS_PER_FLIGHT_UNIT;
+        assert!((origin[2] - along).abs() < 1e-12, "{origin:?}");
+        assert!((origin[0]).abs() < 1e-12 && (origin[1]).abs() < 1e-12);
+        // Rear is behind, front of a half-turned ship.
+        let rear = mount_axes(&state, ViewMode::Rear, [0, 0]);
+        let behind = gun_origin(&state, Some(&stats), ViewMode::Rear, rear);
+        assert!((behind[2] + 800.0 * 8.0 / UNITS_PER_FLIGHT_UNIT).abs() < 1e-12);
+    }
+
+    #[test]
+    fn velocity_marker_is_the_prograde_direction_only() {
+        let camera = camera::Camera {
+            position: [0.0; 3],
+            axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        };
+        assert_eq!(velocity_marker(&camera, [0.0, 0.0, 100.0]), Some((160, 79)));
+        assert_eq!(
+            velocity_marker(&camera, [20.0, 0.0, 100.0]),
+            Some((211, 79))
+        );
+        assert_eq!(velocity_marker(&camera, [0.0, 0.0, -100.0]), None);
+        assert_eq!(velocity_marker(&camera, [0.0, 0.0, 0.0]), Some((160, 79)));
+    }
+}
