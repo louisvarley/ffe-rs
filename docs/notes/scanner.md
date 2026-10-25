@@ -167,6 +167,13 @@ do not draw the tunnel.
   small index shifts (e.g. 9 vs 8, 15 vs 9) across the panel, so a pixel-exact
   console-oracle comparison cannot use JJFFE's embedded `ffebmp.asm`; the
   scanner globe/ring placement and the contact position still agree.
+- **F1100 target-visibility test.** JJFFE has the original
+  `test byte [ebx+0x14c],0x10 / jz` commented out at `ffe.asm:81093`, so its
+  range/tunnel display does not require the 0x10 flag (F880's stations). The
+  port follows JJFFE and shows the range/tunnels for any locked object; if the
+  DOS executable ran the test, only station-flagged objects would show them.
+  This is the one routine-level JJFFE-vs-DOS candidate found here; the DOS
+  binary was not executed.
 - **Unarmed equipment.** `+0xca & 4` is defaulted on for every ship because the
   port has no equipment model; the original's new-game ship carries the scanner
   in its equipment block.
