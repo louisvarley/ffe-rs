@@ -187,6 +187,9 @@ dependencies = [
 [[package]]
 name = "ffe-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "ffe-rs"

@@ -29,10 +29,12 @@
 //! the F688 counts and the spawn roles are the original's. The flight AI is a
 //! traffic-level state machine (hold near an anchor, cruise, attack) using the
 //! original's idea but not its per-state routines, and the ships do not fire,
-//! dock or use hyperspace. Placement uses the original's rule (a random phase
-//! on an orbit around an anchor) with a radius in the port's unit system that
-//! keeps the ships reachable: the original's raw F702 word is a system-wide
-//! orbit, not a point near the player. See `docs/notes/npc.md`.
+//! dock or use hyperspace. The player's side of F953 is
+//! `ffe_rs::flight::Flight::hit`, ready for the AI/police fire path. Placement
+//! uses the original's rule (a random phase on an orbit around an anchor) with
+//! a radius in the port's unit system that keeps the ships reachable: the
+//! original's raw F702 word is a system-wide orbit, not a point near the
+//! player. See `docs/notes/npc.md`.
 
 use crate::galaxy::Details;
 use crate::laser::{self, Damage, DamageState};

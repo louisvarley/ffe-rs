@@ -50,16 +50,22 @@ pub struct Flight {
     /// before combat load no lasers.
     #[serde(default)]
     pub combat: crate::combat::Combat,
-    /// The player's shield words (`ship+0xe0` current, `+0xe2` maximum). `[0, 0]`
-    /// means the port has no shield state; a save with a damaged shield keeps
-    /// the original's `Shields: n%` line visible. `F1099` does not draw the line
-    /// when the two words are equal (a pristine ship).
+    /// The player's shield words (`ship+0xe0` current, `+0xe2` maximum). The
+    /// maximum is `0x40` per fitted shield generator (`F413`); `[0, 0]` means
+    /// no shield state, as on a new-game ship without a generator. `F1099` does
+    /// not draw the line when the two words are equal (a pristine shield).
     #[serde(default)]
     pub shields: [u16; 2],
     /// The hull word (`ship+0xe4`, mass * 4) and its full value. `[0, 0]` means
-    /// untracked; the HUD then shows a full hull from the ship statistics.
+    /// untracked until [`Flight::ensure_damage`] fills it from the ship
+    /// statistics (the descriptor mass word times four, as F1533 does).
     #[serde(default)]
     pub hull: [u16; 2],
+    /// The fitted equipment (`ship+0xc8`, `+0xd6..+0xdf`, `+0xe2`). Saves from
+    /// before equipment load with nothing fitted; the new game sets F998's
+    /// loadout in `main`.
+    #[serde(default)]
+    pub loadout: ffe_core::equipment::Loadout,
 }
 
 fn default_ship() -> u32 {
@@ -95,6 +101,7 @@ impl Default for Flight {
             combat: crate::combat::Combat::default(),
             shields: [0; 2],
             hull: [0; 2],
+            loadout: ffe_core::equipment::Loadout::default(),
         }
     }
 }
@@ -143,6 +150,7 @@ impl Flight {
             || self.hold.iter().map(|t| u32::from(*t)).sum::<u32>() > 100_000
             || self.shields[0] > self.shields[1]
             || self.hull[0] > self.hull[1]
+            || !self.loadout.validate()
             || self.combat.drive > 0x0e
             || !(self.combat.cool_carry.is_finite() && (0.0..1.0).contains(&self.combat.cool_carry))
             || self
@@ -327,6 +335,46 @@ impl Flight {
             return Some("Unsafe approach: station safety reset. Slow down and request docking.");
         }
         None
+    }
+
+    /// Give the damage words the values object set-up gives a ship: F1533
+    /// (`ffe.asm:90970`) stores the descriptor mass word times four in
+    /// `+0xe4`, and the shield maximum (`+0xe2`) is `0x40` per fitted shield
+    /// generator (F413 adds, F415 removes). A save from before the damage
+    /// model loads with `[0, 0]` and takes the full hull here; an existing
+    /// damaged ship keeps its words while its full value matches, and a change
+    /// of hull (or of generators) resets them.
+    pub fn ensure_damage(&mut self, hull_full: u16) {
+        if hull_full != 0 && self.hull[1] != hull_full {
+            self.hull = [hull_full, hull_full];
+        }
+        let shield_max = self.loadout.shield_max();
+        if shield_max != self.shields[1] {
+            self.shields = [shield_max, shield_max];
+        }
+    }
+
+    /// F953 (`ffe.asm:71190`) on the player: the shields absorb the hit first,
+    /// then the hull; a hit at least the remaining hull destroys the ship.
+    /// NPCs do not fire in the port yet, so this is the API the future AI/station
+    /// attack paths call; `ensure_damage` must have filled the hull first.
+    pub fn hit(&mut self, damage: u32) -> ffe_core::laser::Damage {
+        let mut state = ffe_core::laser::DamageState {
+            shields: self.shields[0],
+            shields_max: self.shields[1],
+            hull: self.hull[0],
+            mass: self.hull[1] / 4,
+        };
+        let result = ffe_core::laser::apply_damage(&mut state, damage);
+        self.shields[0] = state.shields;
+        self.hull[0] = state.hull;
+        result
+    }
+
+    /// The hull word is used up (F942's destruction); the port has no death or
+    /// escape-capsule screen yet, so callers only report it.
+    pub fn destroyed(&self) -> bool {
+        self.hull[1] != 0 && self.hull[0] == 0
     }
 }
 

@@ -1,0 +1,420 @@
+//! The equipment table and the player's fitted loadout.
+//!
+//! The original keeps the 66 equipment definitions at `DATA_005289`
+//! (`ffedat.asm:6425`, 22 bytes each) and lists them at a starport with `F383`
+//! (`ffe.asm:28564`). `F392` (`ffe.asm:28998`) dispatches a record to a
+//! category handler, and `F393` (`ffe.asm:29030`) reads its `+0x12` selector
+//! as a bit in the ship's general-equipment dword (`ship+0xc8`):
+//!
+//! ```text
+//! bit = (record[0x12] ^ 0x10) & 0x1f
+//! ```
+//!
+//! The same dword is what `F991` (`ffe.asm:73469`), `F1116` (`82223`) and
+//! `F1120` (`82429`) test for the view-row icons and the engines-off page's
+//! system lamps. Its four bytes are `ship+0xc8..+0xcb`; the category handlers
+//! for lasers (2), missiles (5) and shield generators (4) use `+0xd2..+0xd5`,
+//! `+0xd6..+0xdf` and `+0xe0/+0xe2` instead, so [`Loadout`] keeps those fields
+//! separately.
+//!
+//! The table itself is generated from `ffedat.asm` into
+//! `crate::equipment_table` by `tools/gen-equipment-table.py`; it is static
+//! game data with no cache dependency, so no cache version changes.
+
+use serde::{Deserialize, Serialize};
+
+use crate::equipment_table::EQUIPMENT;
+
+/// The original's 66 equipment records.
+pub const EQUIPMENT_COUNT: usize = 66;
+/// Ten missile pylons: `ship+0xd6..+0xdf` (`F1120` shows one icon each).
+pub const MISSILE_SLOTS: usize = 10;
+/// `F1120`'s ten missile icons are at console records `0x3b..=0x44`; the low
+/// nibble of a slot byte selects the image (`slot & 0xf`).
+pub const ICON_RECORDS: std::ops::RangeInclusive<usize> = 0x3b..=0x44;
+
+/// `DATA_005289`'s record category, the index into `DATA_005297`'s handler
+/// pointers (`record[0x10]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Category {
+    /// General equipment; the bitfield at `ship+0xc8`.
+    General = 0,
+    /// Passenger cabins, counted at `player+0x120`.
+    Cabin = 1,
+    /// Lasers, fitted to `ship+0xd2..+0xd5`.
+    Laser = 2,
+    /// Hyperdrives/military drives.
+    Drive = 3,
+    /// Shield generators; each adds 0x40 to `ship+0xe2` (`F413`).
+    Shield = 4,
+    /// Missiles, fitted to `ship+0xd6..+0xdf` (`F418`).
+    Missile = 5,
+    /// Mining machines.
+    Mining = 6,
+}
+
+/// One 22-byte record of `DATA_005289`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Equipment {
+    /// `DATA_005299[0x9875 + index]`, the original's name string.
+    pub name: &'static str,
+    /// `+0x00`, the price before `F383`'s tech multiplier.
+    pub price: u32,
+    /// `+0x04`, the removal price before the multiplier (the "for Removal"
+    /// column of template 0x98f5).
+    pub removal: u32,
+    /// `+0x08`, the weight in tonnes (the "Wt" column).
+    pub mass: u32,
+    /// `+0x10`, the category/handler index.
+    pub category: Category,
+    /// `+0x12`: the general-equipment bit selector, laser code, missile code,
+    /// shield/cabin/drive selector, depending on the category.
+    pub code: u8,
+    /// `+0x13`, the minimum starport tech level (`DATA_008995`) F383 tests.
+    pub tech_level: u8,
+    /// `+0x14`, F383's second (used/second-hand) price branch.
+    pub used: bool,
+    /// `+0x11`, 0x80 in most records, 0x00 or 0x83 in three. No routine this
+    /// slice ports reads it; kept so the decoded record is complete.
+    pub flags: u8,
+}
+
+/// The decoded table.
+pub fn equipment() -> &'static [Equipment; EQUIPMENT_COUNT] {
+    &EQUIPMENT
+}
+
+/// One record by index, if in range.
+pub fn get(index: usize) -> Option<&'static Equipment> {
+    EQUIPMENT.get(index)
+}
+
+/// The general-equipment bits any `Category::General` record can set. Bits 14,
+/// 15 and 16 have no record; a fitted loadout must leave them clear.
+pub const GENERAL_MASK: u32 = 0xff_fe_3f_ff;
+
+/// The missile record whose code is `code` (`ship+0xd6..` stores this byte).
+pub fn missile_by_code(code: u8) -> Option<&'static Equipment> {
+    EQUIPMENT
+        .iter()
+        .find(|item| item.category == Category::Missile && item.code == code)
+}
+
+/// True for the ten missile codes (0xc0, 0xc1, 0x82..0x89).
+pub fn is_missile_code(code: u8) -> bool {
+    missile_by_code(code).is_some()
+}
+
+/// True for a laser code in the equipment table (`F403` copies `record[0x12]`
+/// straight into `ship+0xd2..+0xd5`).
+pub fn is_laser_code(code: u8) -> bool {
+    EQUIPMENT
+        .iter()
+        .any(|item| item.category == Category::Laser && item.code == code)
+}
+
+/// `F383`'s tech-dependent price multiplier: 12 at tech >= 0xcc, 11 at 0xb3,
+/// 10 at 0x17, otherwise 9.
+pub fn tech_multiplier(tech_level: u16) -> u32 {
+    if tech_level >= 0xcc {
+        0xc
+    } else if tech_level >= 0xb3 {
+        0xb
+    } else if tech_level >= 0x17 {
+        0xa
+    } else {
+        9
+    }
+}
+
+/// The price to fit `index` at a starport of `tech_level` (`record.price *
+/// tech_multiplier`). The original's used branch uses a fresh random value from
+/// `F34`/`F35`; the port uses the same tech multiplier for both branches, so a
+/// second-hand price is deterministic (documented deviation).
+pub fn fit_price(index: usize, tech_level: u16) -> Option<u32> {
+    get(index).map(|item| item.price.saturating_mul(tech_multiplier(tech_level)))
+}
+
+/// The removal price, computed the same way as [`fit_price`] (`F383` multiplies
+/// both words before storing them).
+pub fn removal_price(index: usize, tech_level: u16) -> Option<u32> {
+    get(index).map(|item| item.removal.saturating_mul(tech_multiplier(tech_level)))
+}
+
+/// One row of `F383`'s Upgrades list at a starport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutfittingRow {
+    /// Index into [`equipment`].
+    pub index: usize,
+    pub price: u32,
+    pub removal: u32,
+    pub mass: u32,
+    /// F392/F393 says this record is already fitted.
+    pub fitted: bool,
+}
+
+/// What a starport at `tech_level` offers, in `DATA_005289` order: `F383` keeps
+/// a record when the station's tech level is at least the record's (`station <
+/// record` skips). `lasers` is `ship+0xd2..+0xd5`, which is where the laser
+/// category's fitted check reads.
+pub fn outfitting(tech_level: u16, loadout: &Loadout, lasers: &[u8; 4]) -> Vec<OutfittingRow> {
+    EQUIPMENT
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| tech_level >= u16::from(item.tech_level))
+        .map(|(index, item)| OutfittingRow {
+            index,
+            price: item.price.saturating_mul(tech_multiplier(tech_level)),
+            removal: item.removal.saturating_mul(tech_multiplier(tech_level)),
+            mass: item.mass,
+            fitted: loadout.fitted(index, lasers),
+        })
+        .collect()
+}
+
+/// The player's fitted equipment: the words the HUD, the equipment page and the
+/// starport's fitted flags read.
+///
+/// `general` is `ship+0xc8` (the `Category::General` bitfield), `missiles` is
+/// `ship+0xd6..+0xdf`, `shield_generators` is the count behind `F413`'s
+/// `ship+0xe2`, and `cabins` is the extra-cabin count. Lasers live in
+/// `ffe-rs`'s `Combat` (`ship+0xd2..+0xd5`) so there is one source for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Loadout {
+    #[serde(default)]
+    pub general: u32,
+    #[serde(default)]
+    pub missiles: [u8; MISSILE_SLOTS],
+    #[serde(default)]
+    pub shield_generators: u8,
+    #[serde(default)]
+    pub cabins: u16,
+}
+
+impl Loadout {
+    /// `F998` start type 1 (the port's new game): `ship+0xc8 = 0x40240000`
+    /// (scanner, automatic pilot, atmospheric shielding), two 0x82 missiles
+    /// (`KL760 Homing Missile`) and no shield generator (`+0xe2 = 0`). The front
+    /// laser is `Combat::new_game`'s 0x88.
+    pub fn new_game() -> Self {
+        let mut missiles = [0; MISSILE_SLOTS];
+        missiles[0] = 0x82;
+        missiles[1] = 0x82;
+        Self {
+            general: 0x4024_0000,
+            missiles,
+            shield_generators: 0,
+            cabins: 0,
+        }
+    }
+
+    /// The general-equipment dword as its four bytes (`ship+0xc8..+0xcb`).
+    pub fn bytes(&self) -> [u8; 4] {
+        self.general.to_le_bytes()
+    }
+
+    /// `F392`: is record `index` fitted? Lasers are checked against the
+    /// passed mount words; drives and mining machines are not modelled yet.
+    pub fn fitted(&self, index: usize, lasers: &[u8; 4]) -> bool {
+        let Some(item) = get(index) else {
+            return false;
+        };
+        match item.category {
+            Category::General => self.general & (1 << ((item.code ^ 0x10) & 0x1f)) != 0,
+            Category::Cabin => self.cabins != 0,
+            Category::Laser => lasers.contains(&item.code),
+            Category::Shield => self.shield_generators != 0,
+            Category::Missile => self.missiles.contains(&item.code),
+            Category::Drive | Category::Mining => false,
+        }
+    }
+
+    /// `ship+0xc8 & 1`: the laser cooling booster (`F938` doubles the cooling).
+    pub fn cooling_booster(&self) -> bool {
+        self.general & 1 != 0
+    }
+
+    /// `ship+0xe2`: 0x40 per fitted shield generator (`F413` adds, `F415`
+    /// subtracts).
+    pub fn shield_max(&self) -> u16 {
+        u16::from(self.shield_generators) * 0x40
+    }
+
+    /// The missile record in pylon `slot`, when the slot is occupied.
+    pub fn missile(&self, slot: usize) -> Option<&'static Equipment> {
+        self.missiles.get(slot).copied().and_then(missile_by_code)
+    }
+
+    /// `F1120`'s icon image for pylon `slot`: `slot_byte & 0xf`, or `None` when
+    /// the pylon is empty. Console records 0x3b-0x44 list the ten bitmaps.
+    pub fn missile_icon(&self, slot: usize) -> Option<u8> {
+        let code = *self.missiles.get(slot)?;
+        (code != 0).then_some(code & 0xf)
+    }
+
+    /// A loadout the save validator accepts: only real general bits, missile
+    /// codes and laser codes; small cabin/generator counts.
+    pub fn validate(&self) -> bool {
+        self.general & !GENERAL_MASK == 0
+            && self
+                .missiles
+                .iter()
+                .all(|code| *code == 0 || is_missile_code(*code))
+            && self.shield_generators <= 10
+            && self.cabins <= 100
+    }
+
+    /// True when record `index` is a general record whose bit is set.
+    pub fn has_general(&self, index: usize) -> bool {
+        get(index).is_some_and(|item| {
+            item.category == Category::General
+                && self.general & (1 << ((item.code ^ 0x10) & 0x1f)) != 0
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_table_has_the_original_66_records_and_names() {
+        assert_eq!(equipment().len(), 66);
+        // The name code is 0x9875 + index, which is DATA_005299[0x75 + index].
+        assert_eq!(equipment()[0].name, "XB13 Dummy Prox. Mine");
+        assert_eq!(equipment()[10].name, "Missile Viewer");
+        assert_eq!(equipment()[16].name, "Navigation computer");
+        assert_eq!(equipment()[21].name, "1MW Pulse Laser");
+        assert_eq!(equipment()[27].name, "Shield Generator");
+        assert_eq!(equipment()[65].name, "Thargoid Laser");
+    }
+
+    #[test]
+    fn records_decode_price_mass_category_and_tech() {
+        // The station template 0x98f5's three numeric columns.
+        let laser = get(21).unwrap();
+        assert_eq!((laser.price, laser.removal, laser.mass), (90, 70, 1));
+        assert_eq!(laser.category, Category::Laser);
+        assert_eq!(laser.code, 0x88);
+        assert_eq!(laser.tech_level, 78);
+        assert!(laser.used);
+        let shield = get(27).unwrap();
+        assert_eq!((shield.price, shield.mass), (250, 4));
+        assert_eq!(shield.category, Category::Shield);
+        assert_eq!(shield.code, 0x00);
+        assert_eq!(shield.tech_level, 156);
+        let hyperdrive = get(58).unwrap();
+        assert_eq!((hyperdrive.price, hyperdrive.mass), (96000, 600));
+        assert_eq!(hyperdrive.category, Category::Drive);
+        // The DOS release's byte: the JJFFE listing has 0xd7 here.
+        assert_eq!(get(53).unwrap().tech_level, 0xeb);
+    }
+
+    #[test]
+    fn the_general_mask_is_exactly_the_bits_the_table_uses() {
+        let used = equipment()
+            .iter()
+            .filter(|item| item.category == Category::General)
+            .fold(0u32, |mask, item| mask | (1 << ((item.code ^ 0x10) & 0x1f)));
+        assert_eq!(used, GENERAL_MASK);
+        // The new game's three bits are all real general bits.
+        assert_eq!(Loadout::new_game().general & !GENERAL_MASK, 0);
+    }
+
+    #[test]
+    fn f393s_bit_formula_maps_the_documented_items() {
+        let loadout = Loadout {
+            general: (1 << 5) | (1 << 6) | (1 << 9) | (1 << 27),
+            ..Loadout::default()
+        };
+        assert!(loadout.has_general(16), "Navigation computer is bit 5");
+        assert!(loadout.has_general(17), "Combat Computer is bit 6");
+        assert!(loadout.has_general(10), "Missile Viewer is bit 9");
+        assert!(loadout.has_general(42), "Escape Capsule is bit 27");
+        assert!(!loadout.has_general(39), "Naval ECM is bit 23");
+        assert!(loadout.fitted(42, &[0; 4]));
+        assert!(!loadout.fitted(27, &[0; 4]), "no shield generator fitted");
+        assert!(!loadout.cooling_booster());
+    }
+
+    #[test]
+    fn f383_tech_multiplier_and_availability_follow_the_station() {
+        assert_eq!(tech_multiplier(0), 9);
+        assert_eq!(tech_multiplier(0x16), 9);
+        assert_eq!(tech_multiplier(0x17), 10);
+        assert_eq!(tech_multiplier(0xb2), 10);
+        assert_eq!(tech_multiplier(0xb3), 11);
+        assert_eq!(tech_multiplier(0xcb), 11);
+        assert_eq!(tech_multiplier(0xcc), 12);
+
+        let empty = Loadout::default();
+        // Tech 0x16: only the tech <= 0x16 records. The Extra Passenger Cabin
+        // (tech 19 = 0x13) is the only one.
+        let low = outfitting(0x16, &empty, &[0; 4]);
+        assert_eq!(low.len(), 1);
+        assert_eq!(low[0].index, 25);
+        assert_eq!(low[0].price, 150 * 9);
+        // A high-tech station offers everything; the 1MW pulse laser is 90*12.
+        let all = outfitting(0xff, &empty, &[0; 4]);
+        assert_eq!(all.len(), 66);
+        assert_eq!(all[21].price, 90 * 12);
+        assert_eq!(all[21].removal, 70 * 12);
+        assert_eq!(all[21].mass, 1);
+        assert!(!all[21].fitted);
+        // A fitted laser is flagged through the mount words.
+        let fitted = outfitting(0xff, &empty, &[0x88, 0, 0, 0]);
+        assert!(fitted[21].fitted);
+        assert!(!fitted[28].fitted);
+    }
+
+    #[test]
+    fn fitted_uses_the_category_handler_storage() {
+        let mut loadout = Loadout::new_game();
+        // New game: scanner (bit 18), autopilot (21), atmospheric shielding (30),
+        // two 0x82 homing missiles, no shield generator.
+        assert!(loadout.fitted(20, &[0; 4]), "Scanner");
+        assert!(loadout.fitted(24, &[0; 4]), "Automatic Pilot");
+        assert!(loadout.fitted(15, &[0; 4]), "Atmospheric Shielding");
+        assert!(loadout.fitted(2, &[0; 4]), "KL760 Homing Missile");
+        assert!(!loadout.fitted(10, &[0; 4]), "Missile Viewer");
+        assert!(!loadout.fitted(27, &[0; 4]), "Shield Generator");
+        assert_eq!(loadout.shield_max(), 0);
+        loadout.shield_generators = 2;
+        assert_eq!(loadout.shield_max(), 0x80);
+        assert!(loadout.fitted(27, &[0; 4]));
+        loadout.cabins = 1;
+        assert!(loadout.fitted(25, &[0; 4]), "Extra Passenger Cabin");
+        assert!(loadout.fitted(21, &[0x88, 0, 0, 0]), "front 1MW pulse");
+    }
+
+    #[test]
+    fn icon_images_are_the_missile_slot_low_nibble() {
+        let loadout = Loadout::new_game();
+        assert_eq!(loadout.missile_icon(0), Some(2));
+        assert_eq!(loadout.missile_icon(1), Some(2));
+        assert_eq!(loadout.missile_icon(2), None);
+        assert_eq!(loadout.missile(0).unwrap().name, "KL760 Homing Missile");
+        assert_eq!(loadout.missile(2), None);
+    }
+
+    #[test]
+    fn validation_rejects_bits_and_codes_the_original_never_sets() {
+        assert!(Loadout::default().validate());
+        assert!(Loadout::new_game().validate());
+        assert!(!Loadout {
+            general: 1 << 14, // no record uses bit 14
+            ..Loadout::default()
+        }
+        .validate());
+        assert!(!Loadout {
+            missiles: [0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0], // not one of the ten codes
+            ..Loadout::default()
+        }
+        .validate());
+        assert!(!Loadout {
+            shield_generators: 11,
+            ..Loadout::default()
+        }
+        .validate());
+    }
+}

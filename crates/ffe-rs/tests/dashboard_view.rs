@@ -187,9 +187,7 @@ fn the_lamps_and_the_equipment_page_are_the_originals() {
     // ten equipment icons for the slots that are set.
     screen.systems = ShipSystems {
         slots: [1, 2, 0, 0, 0, 0, 0, 0, 0, 3],
-        ca: 0x80,
-        cb: 0x4,
-        c8: 4,
+        general: (1 << 2) | (1 << 19) | (1 << 23) | (1 << 24) | (1 << 26),
         e8: 0x34,
         ..ShipSystems::default()
     };
@@ -212,4 +210,43 @@ fn the_lamps_and_the_equipment_page_are_the_originals() {
     // Slot icons 0x3c (33,164) and 0x3d (9,167) draw their image 1/2 bitmaps.
     assert!(changed(&normal, &page, 33, 60, 164, 180) > 10);
     assert!(changed(&normal, &page, 9, 40, 167, 180) > 10);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_equipment_page_draws_the_new_games_real_missile_icons() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let state = flight();
+    let views = ViewState {
+        console: ConsoleState {
+            status_page: true,
+            ..ConsoleState::default()
+        },
+        ..ViewState::default()
+    };
+    // The page with no equipment: only the 60x45 diagram.
+    screen.systems = ShipSystems::default();
+    draw(&mut screen, &state, views);
+    let empty = screen.logical_pixels().to_vec();
+    save(&screen, "dashboard-equipment-empty.ppm");
+    // F998's loadout: general bits 0x40240000 and two 0x82 missiles, which
+    // F1120 draws as image 2 (bitmap 346) on records 0x3b and 0x3c.
+    screen.systems = ShipSystems::default().with_loadout(&ffe_core::equipment::Loadout::new_game());
+    draw(&mut screen, &state, views);
+    let loaded = screen.logical_pixels().to_vec();
+    save(&screen, "dashboard-equipment-newgame.ppm");
+    assert!(
+        changed(&empty, &loaded, 14, 30, 165, 176) > 20,
+        "0x3b at (14,165) did not draw the first missile icon"
+    );
+    assert!(
+        changed(&empty, &loaded, 33, 50, 164, 175) > 20,
+        "0x3c at (33,164) did not draw the second missile icon"
+    );
+    assert_eq!(
+        changed(&empty, &loaded, 0, 10, 168, 178),
+        0,
+        "0x3f at (1,168) has no missile"
+    );
 }

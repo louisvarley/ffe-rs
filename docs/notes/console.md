@@ -60,3 +60,6 @@ hyperspace) and 0x74 (`t` target). F1 and F2 overlap at x 74-79, where F2 wins.
   ported yet".
 - A readout under the title shows speed, the set speed (original model) and the
   time scale; it is ffe-rs's, not the original's.
+- The F991 equipment icons and the F1120 lamps read the real fitted loadout
+  (`ffe_core::equipment`; see `equipment.md`), not defaults. The ten F1120 icons
+  are the missile pylons: F998's new game carries two `0x82` missiles.
