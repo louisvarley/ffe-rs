@@ -1333,11 +1333,25 @@ impl ModelViewer {
                 ((word0 >> 4) & 15) as u8,
                 (word0 & 15) as u8,
             ];
+            let extent = self.surface_extent.get();
+            let eye_squared = origin
+                .iter()
+                .map(|v| f64::from(*v) * f64::from(*v))
+                .sum::<f64>();
+            let eye_inside = extent > 0.0 && eye_squared < extent * extent;
             let record = Haze {
                 origin,
                 axes: scene.axes,
                 material,
-                strength: i32::from(surface.parameters[1]).wrapping_shl(16),
+                // F1877's haze ring and sky are for an eye outside the planet.
+                // The landed view sits on the terrain, inside the base sphere;
+                // the original clears to the space colour there, so the ring is
+                // left out rather than painted over the sky and ground.
+                strength: if eye_inside {
+                    0
+                } else {
+                    i32::from(surface.parameters[1]).wrapping_shl(16)
+                },
                 scale: i32::from(surface.parameters[2]),
                 light,
                 shades: self.lighting.shades,

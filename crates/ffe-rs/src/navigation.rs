@@ -4,7 +4,7 @@
 //! that flies the original flight model to a chosen body with the same keys a
 //! player presses. See `docs/NAVIGATION.md`.
 use crate::docking::{Contact, Port, CLEARANCE_RANGE};
-use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND};
+use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND, UNITS_PER_FLIGHT_UNIT};
 use ffe_content::VerifiedCache;
 use ffe_core::effects::{self, Effect};
 use ffe_core::galaxy::{tables, Tables};
@@ -482,6 +482,23 @@ pub fn describe(mm: f64) -> String {
     } else {
         format!("{:.1} km", mm / 1.0e6)
     }
+}
+
+/// The radius the flight view draws a body's surface at, in flight units.
+///
+/// In flight the surface model's base sphere is the inner radius word
+/// (`+0x140`); it is what keeps the eye outside the shell on an approach. Once
+/// the ship is settled on the ground the view draws the outer radius word
+/// (`+0x138`), the same radius F1533 and the terrain contact use, so a rough
+/// landing sits on the drawn ground. F879's starports are on the terrain at
+/// about 0.9 of the outer radius.
+pub fn surface_radius(body: &Body, landed: bool) -> f64 {
+    let radius = if landed {
+        body.radius
+    } else {
+        body.inner_radius
+    };
+    radius as f64 / UNITS_PER_FLIGHT_UNIT
 }
 
 /// The standoff the autopilot stops at: just off the body's surface or station.

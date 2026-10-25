@@ -94,17 +94,19 @@ is the object's `+0xa0` only for bodies of the navigator. The planet is oriented
 its object's rows (the spin is `clock[0] >> 17`, so they are identity until the clock
 passes 2^17 days). Looks checked by eye (`tests/planet_view.rs`, `FFE_SHOT_DIR`).
 
-**The close-range fix (2026-10-24).** Two things used to make a planet disappear on
+**The close-range fix (2026-10-25).** Two things used to make a planet disappear on
 approach. The flight view dropped every disc with `z <= radius` (the centre nearer than
 one radius along the view axis), which is exactly the geometry of a landing approach;
-and the surface was scaled so its base sphere had the *outer* radius `+0x138` (the
-atmosphere's), while F879 places starports on the terrain at the *inner* radius
-`+0x140` (the solid body; Earth is 4,970 km against 7,810 km). At starport altitude the
-eye was therefore inside the drawn sphere and every terrain triangle was a backface.
-The filter is gone and `main.rs` now uses the inner radius for the surface; the course
-from 3 radii down to the ground stays drawn (regression:
+and the approach drew the *inner* base sphere (`+0x140`) while F1533, F581's terrain
+query and F879's starports use the *outer* radius (`+0x138`). A rough landing settled
+at about 0.9 outer over a 0.64-outer drawn base and saw only sky. `main.rs` now draws
+the inner base on approach and the outer radius once the ship is settled
+(`navigation::surface_radius`), so a rough landing sits on the ground the landed view
+draws. F1876's far side is culled for an eye inside the base and F1877's ring/sky is
+left out there, so the landed view shows ground under the space colour. The old filter
+is gone; the course from 3 radii down to the ground stays drawn (regression:
 `planet_is_drawn_at_and_inside_one_radius`, frames `surface-k1.00.ppm` ... in
-`FFE_SHOT_DIR`). The outer radius is still the collision/atmosphere radius.
+`FFE_SHOT_DIR`; the cached landed test also asserts ground pixels below the horizon).
 
 **The surface queue at close range.** F1876's triangles go through F1778's
 order queue, whose original buffer is 50,000 words. A planet at 3 and 2 radii
@@ -227,15 +229,15 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
 - Planet surfaces draw their triangles, but the textured fills are flat colours or
   blends (see above), so the detail is blockier than the original's; the night side is
   drawn with the shade table and has no atmospheric glow except the ported haze ring.
-- **Terrain collision fidelity.** F581's terrain record tests the ship against the model's
-  surface at the body's `+0x138` (outer) radius, while `Screen::draw_discs` scales the drawn
-  surface to `+0x140` (inner, `docs/notes/terrain.md`). A rough landing away from a starport
-  therefore settles the ship at the collision sphere while the drawn terrain's base sphere is
-  up to ~1.4 times smaller: the ground under the eye can be thousands of kilometres below and
-  the view can show the space colour where the original shows the surface. F879's starports sit
-  on the high ground, which is why their frames (and the reference comparison) show the terrain
-  and buildings. Fixing this needs one radius for both (and a check that the starport does not
-  fall inside the drawn sphere), an owner decision.
+- **Terrain collision fidelity (resolved for the settled view, 2026-10-25).** F581's
+  terrain record tests the ship against the model's surface at the body's `+0x138`
+  (outer) radius. On approach the flight view draws the inner base sphere (keeping the
+  eye outside the shell); once settled it draws the outer radius
+  (`navigation::surface_radius(body, true)`), the same one the contact uses. A rough
+  landing therefore settles on the drawn ground; the cached test
+  `surface_and_landing_use_one_radius` checks both radii and `landing_body`'s outer
+  radius. F1877's haze is left out for an eye inside the base so it cannot paint over
+  the landed ground.
 - **Starport landings from flight.** The machine has F1019/F1021's open-air `0x2e` -> `0x30`
   pair, but the playable still gives a starport pad touch the in-flight contact (no `0x20`
   effect-region flag is modelled) instead of the `0x30` services state. The new game's `0x30`
