@@ -168,6 +168,12 @@ table and the targeter/missile-view behaviour.
 
 ## Player damage
 
+Status (2026-10-25, fuel/damage/repair slice): F953's shields-then-hull order,
+F952/F950's subsystem roll, the six thruster words, F938's shield recharge and
+hull auto-repair, F929's fuel/energy recovery, the fuel scoop and F444-F452's
+repair actions are ported. The hull/shield HUD lines show the real words and
+F938 now recharges them.
+
 `F953` (`ffe.asm:71190`) is shared by the player and the NPC ships:
 shields absorb the hit first (`+0xe0`), then the hull (`+0xe4`); a hit at least
 the remaining hull sets it to 0 and F942 destroys the object. Only objects with
@@ -175,15 +181,49 @@ control byte `+0x87 == 3` (player) or `0xb` (AI) take this path.
 
 - Rust: `Flight::{ensure_damage, hit, destroyed}` over
   `ffe_core::laser::{DamageState, apply_damage}` (the same F953 core the NPCs
-  already use). `ensure_damage` sets the hull full from the model statistics and
-  the shield maximum from the fitted generators.
-- **NPCs do not fire and the port has no station/police attack path**, so nothing
-  calls `hit` yet. The API is wired and tested; the future NPC-fire slice should
-  call `state.hit(damage)` where F930's hit test would run.
-- Not ported: F938's shield recharge (`+0xe2 * tics / 32`, `/64` without the
-  energy booster) and hull auto-repair (general bit 31), F1104's death screen and
-  F1098's escape capsule. The hull/shield HUD lines now show the real words
-  (a new-game ship has no shield generator, so the shield line stays hidden).
+  already use). `ensure_damage` sets the hull full from the model statistics,
+  the shield maximum from the fitted generators and (on a new hull) fresh
+  thruster words and damage.
+- **F952/F950 subsystem damage.** `Flight::take_damage_with_systems` applies the
+  hit and, on a hull hit at least a quarter of the remaining hull (or when
+  F953's proportional draw fires), runs F950's roll: `>= 0x5555` damages a
+  random fitted general item (F945/F933, `ship+0xcc`), `< 0x888` destroys the
+  drive (drive 0, energy 0), `< 0x1c71` reduces it to class 1, otherwise one of
+  the six thruster limit words is zeroed (F949). Messages are 0x98c9/0x98ca/
+  0x98cb. F952's outer `F922(cargo space) < DATA_008889` split needs the
+  player's combat score, which the port does not carry; the port runs F950
+  directly (reported deviation).
+- The six words (`ship+0xbc..+0xc6`) are Left/Right/Bottom/Top/Main/Reverse
+  (`DATA_008935`'s names) and are the `ffe_core::thrust::Limits` the flight
+  model clamps against, so a destroyed thruster removes that direction's
+  thrust. `Flight::limits` feeds `OriginalFlight::set_limits` every frame.
+  F929's engine failure (`engine_failed`) zeroes the limits without appearing
+  as a damaged thruster.
+- **F938** (`ffe.asm:70122`): shields regain `max * tics / 32` (halved without
+  the Energy Booster, bit 28) per frame, capped at the maximum; the Hull
+  Auto-Repair System (bit 31) adds `tics` hull points up to the full hull.
+- **F929** (`ffe.asm:69365`): the thrust cost is
+  `mass * (|x|+|y|+|z|) >> 9 * tics`; an emptied pool burns one tonne of fuel
+  with the Auto Refueller (hydrogen below drive class 10, military fuel from
+  class 10) for `0x20000000` energy. Without fuel the pool stays empty, F929's
+  bit-0 warning latches and the thrust limits stay zero (message 0x9907).
+  F930's shot path refuels through the same function when a shot empties the
+  pool. The port's fuel is the hold's hydrogen/military-fuel slot, the same
+  source F901 uses.
+- **Fuel scoop** (`F1033`, `ffe.asm:76144`; equipment bit 20): a star contact
+  within 30 km (`0x1c9c380` mm) at speed `>= 0x2328` adds one tonne of hydrogen
+  to the hold when there is cargo space, message 0x9906. The recovered build's
+  `+0x1e8` scoop timer has no visible decrement; the port carries the
+  `0x2468a`-tic (about 3 s) cooldown itself.
+- **Crash damage.** F575's tail damage (`mass * 4 * speed lost / 0x708`, at
+  least mass/4) is now applied through `take_damage_with_systems` on a
+  planetary crash, not only logged.
+- **Service dates/counters.** `Flight::service_days` are `DATA_008926`/
+  `DATA_008925`; `damage.service_counters` are `DATA_008924`/`DATA_008923`.
+  F933/F934's daily roll (counter -1 a day, then `F922(0x100) > counter`)
+  breaks a fitted item or the drive after the 500-day service interval; the
+  Deluxe/Drive/Equipment repairs reset the counters and dates.
+- F1104's death screen and F1098's escape capsule remain separate slices.
 
 ## Cache impact
 
@@ -226,12 +266,17 @@ already cached in v20; the cache is **v28** and the equipment table adds no asse
   and pylon limits, missing-item messages and the unmodelled drive/mining
   categories.
 - `crates/ffe-rs/src/station.rs`: F383's available rows at tech 0xfd/0x16,
-  fitted flags and the Upgrades Fit/Remove hot areas.
+  fitted flags, the Upgrades Fit/Remove hot areas, F444's damage/service rows
+  and every F446-F452 charge and effect.
+- `crates/ffe-rs/tests/damage.rs`: F950's four thresholds, F953's hull gate,
+  the repair row costs/titles, ten-times charges and refusals, F450-F452's
+  counters/dates, F938 recharge/auto-repair, F929 fuel/energy, the scoop cap,
+  the daily servicing roll and a damage -> dock -> repair -> fly sequence.
 - `crates/ffe-rs/tests/console_table.rs`: F991 equipment icons, F1120 lamps from
   the dword bits, and F998's two real missile icons.
 - `crates/ffe-rs/tests/station_view.rs` (ignored, needs `FFE_WORLD_CACHE`):
-  the Upgrades, buy-a-laser, empty-ships and repairs frames and the current
-  system's tech level.
+  the Upgrades, buy-a-laser, empty-ships and repairs frames (including the
+  damaged/repaired pair) and the current system's tech level.
 - `crates/ffe-rs/tests/dashboard_view.rs` (ignored, needs
   `FFE_WORLD_CACHE`): `dashboard-equipment-empty.ppm` vs
   `dashboard-equipment-newgame.ppm` checks the two icon rectangles at

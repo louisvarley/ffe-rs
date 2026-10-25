@@ -127,8 +127,13 @@ in `F953`, so they do not get that flash.
 while its heat stays under 0xf000.
 
 `F929` (`ffe.asm:69365`) removes the energy from `+0x11e`; on empty it may use
-fuel/cargo or fails the drive, with message 0x9907. The new game has
+fuel/cargo or fail the drive, with message 0x9907. The new game has
 `0x20000000` (1 t), so firing is effectively energy-unlimited in normal play.
+The port now models the empty-pool recovery in `Flight::{burn_fuel,
+refuel_energy}`: the Auto Refueller burns one tonne of hydrogen (military fuel
+from drive class 10 up) for `0x20000000` energy; without fuel the warning
+latches and the thrust limits stay zero. F938's thrust cost
+(`mass * (|x|+|y|+|z|) >> 9 * tics`) is charged each flight frame.
 
 `F730` (`ffe.asm:48263`) decrements `+0xe8` by the low word of `DATA_009155`;
 JJFFE changed the DOS guard from `jng` to `jnz` (the "Pulse laser
@@ -456,7 +461,9 @@ point; a kill spawns F942's model-0x9b explosion and F926's model-0x99 debris
   `F922(6) - 2` pods plus `min(4, cargo_space >> 1)` cargo pods, each **model
   0x99 (153)** with a random 0..1023 added to every velocity word. F952
   (`ffe.asm:71154`) is the hull-hit subsystem roll (F945/F947/F948/F949), not
-  a particle; the port leaves it out with the equipment damage model.
+  a particle; the port runs it in `Flight::take_damage_with_systems` and
+  `ffe-rs::damage` (equipment bits, drive and thruster words) with the
+  original's messages.
 - **The port:** `effects::hit` spawns one model-0x9e effect at the hit point
   with the ship's velocity (above `PARTICLE_SPEED`) and a random orientation;
   `effects::explosion` spawns the model-0x9b object plus F942's debris count
@@ -547,10 +554,13 @@ is the single F942 test.
 - The original has no visible front-view muzzle (model 0x9c is behind the eye)
   and the sound is the firing cue; keep it that way unless the owner wants a
   port-only HUD flash. Model 156 is one pixel in the external view.
-- F929's empty-energy recovery from fuel/cargo (`0x9907`) is still not
-  modelled; the new game's 1 t pool is effectively unlimited.
-- F952's subsystem damage and the target readout's exact colour/arrow forms
-  remain as before.
+- F929's empty-energy recovery from fuel/cargo (`0x9907`) is ported (the Auto
+  Refueller burns the hold's hydrogen/military fuel); the new game's 1 t pool
+  is effectively unlimited while fuel remains.
+- F952's subsystem damage is ported for equipment, the drive and the six
+  thrusters; F952's outer `F922(cargo space) < DATA_008889` cargo split still
+  has no score word, and the target readout's exact colour/arrow forms remain
+  as before.
 
 **Owner decisions:** NPC traffic and its flight/combat AI are implemented at the
 state-rules level (see `docs/notes/npc.md`); decide whether to port the

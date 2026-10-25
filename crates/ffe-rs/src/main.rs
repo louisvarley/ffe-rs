@@ -2501,9 +2501,8 @@ fn run() -> Result<(), String> {
                                     // F354's digit action is the left (Fit) button.
                                     dock_action = Some(StationAction::Fit { row: index });
                                 } else if dock.screen == StationScreen::Repairs {
-                                    dock_action = Some(StationAction::NotPorted(
-                                        "Repairs and servicing actions are not ported.",
-                                    ));
+                                    // F354's digit action is the row button.
+                                    dock_action = Some(StationAction::Repair { row: index });
                                 } else if dock.screen == StationScreen::Ships {
                                     // F354's digit action is the left (Buy) button.
                                     dock_action = Some(StationAction::BuyShip { row: index });
@@ -2522,9 +2521,7 @@ fn run() -> Result<(), String> {
                         if dock.screen == StationScreen::Upgrades {
                             dock_action = Some(StationAction::Fit { row: dock.selected });
                         } else if dock.screen == StationScreen::Repairs {
-                            dock_action = Some(StationAction::NotPorted(
-                                "Repairs and servicing actions are not ported.",
-                            ));
+                            dock_action = Some(StationAction::Repair { row: dock.selected });
                         } else if dock.screen == StationScreen::Ships {
                             dock_action = Some(StationAction::BuyShip { row: dock.selected });
                         } else if let Some(entry) =
@@ -2548,9 +2545,7 @@ fn run() -> Result<(), String> {
                             match hot {
                                 station::Hot::Row(index) => {
                                     if dock.screen == StationScreen::Repairs {
-                                        dock_action = Some(StationAction::NotPorted(
-                                            "Repairs and servicing actions are not ported.",
-                                        ));
+                                        dock_action = Some(StationAction::Repair { row: index });
                                     } else if dock.screen == StationScreen::Bulletin {
                                         // F453/F523: selecting an advertisement
                                         // shows it in full; the mission reply
@@ -2735,6 +2730,28 @@ fn run() -> Result<(), String> {
                         StationAction::ViewShip { row } => {
                             if let Some(nav) = nav.as_mut() {
                                 message = view_ship(nav, &cache, &state, row);
+                            }
+                        }
+                        StationAction::Repair { row } => {
+                            let rows = station_repairs(&state, scene.as_ref());
+                            match rows.get(row) {
+                                Some(repair) => {
+                                    let repair = repair.clone();
+                                    let day = nav.as_ref().map_or(0, |nav| nav.day());
+                                    let stats = scene
+                                        .as_ref()
+                                        .and_then(|scene| scene.ship_stats(state.ship));
+                                    message = match station::apply_repair(
+                                        &mut state,
+                                        stats.as_ref(),
+                                        &repair,
+                                        day,
+                                    ) {
+                                        Ok(text) => text.to_owned(),
+                                        Err(text) => text,
+                                    };
+                                }
+                                None => message = "No such repair.".to_owned(),
                             }
                         }
                         StationAction::Trade { buy, row } => {
@@ -2934,6 +2951,16 @@ fn run() -> Result<(), String> {
                 reverse,
             );
             if let Some(model) = original.as_mut() {
+                // F598/F600 clamp against the object's six limit words; a
+                // damaged thruster or F929's engine failure changes them.
+                model.set_limits(
+                    state.limits(
+                        scene
+                            .as_ref()
+                            .and_then(|scene| scene.ship_stats(state.ship))
+                            .as_ref(),
+                    ),
+                );
                 let mut keys = input::original_keys(
                     preset,
                     input::View::of(views.mode),
@@ -3097,6 +3124,23 @@ fn run() -> Result<(), String> {
                                     ),
                                 );
                                 sound.play(Cue::HullDamage);
+                                // F575's tail hands F953 the crash damage
+                                // (`mass * 4 * speed lost / 0x708`, at least
+                                // mass / 4), which the port previously only
+                                // logged.
+                                if contact.damage > 0 {
+                                    let mass = scene
+                                        .as_ref()
+                                        .and_then(|scene| scene.ship_stats(state.ship))
+                                        .map_or(25, |stats| stats.mass);
+                                    let (_, system) = state.take_damage_with_systems(
+                                        u32::try_from(contact.damage).unwrap_or(u32::MAX),
+                                        mass,
+                                    );
+                                    if let Some(event) = system {
+                                        pending_log.add(Source::Collision, event.message());
+                                    }
+                                }
                             }
                             Some(contact)
                         })
@@ -3456,7 +3500,10 @@ fn run() -> Result<(), String> {
                         ffe_rs::navigation::ShipEvent::Hit {
                             name, damage, beam, ..
                         } => {
-                            let outcome = state.take_damage(damage, mass);
+                            let (outcome, system) = state.take_damage_with_systems(damage, mass);
+                            if let Some(event) = system {
+                                pending_log.add(Source::Combat, event.message());
+                            }
                             let laser = if beam { "beam laser" } else { "pulse laser" };
                             match outcome {
                                 ffe_core::laser::Damage::Shields => {
@@ -3781,10 +3828,66 @@ fn run() -> Result<(), String> {
         // 50 Hz frame count: F730's refire word (0x795c) and F930's beam branch
         // are both in those tics.
         let frame_tics = combat::frame_tics(elapsed, acceleration_factor);
+        let player_stats = scene
+            .as_ref()
+            .and_then(|scene| scene.ship_stats(state.ship));
         if active && !death_control && !paused && state.mode == ffe_rs::flight::Mode::Flight {
             // F938 reads `ship+0xc8 & 1` (the laser cooling booster) directly.
             state.combat.cooling_booster = state.loadout.cooling_booster();
             state.combat.tick(frame_tics, elapsed * acceleration_factor);
+            if let Some(stats) = player_stats {
+                state.ensure_thrusters(&stats);
+                // F938: shield recharge and the Hull Auto-Repair System.
+                state.recharge(frame_tics, stats.mass.saturating_mul(4));
+                // F938's engine load through F929: the sum of the three thrust
+                // words times the mass, scaled and charged per tic.
+                let sum = original
+                    .as_ref()
+                    .map_or(0, |model| state.thrust_sum(model.thrust_words()));
+                let warned = state.damage.fuel_empty;
+                if state.spend_thrust_energy(frame_tics, stats.mass, sum) && !warned {
+                    pending_log.add(Source::Combat, "WARNING: Internal Fuel Tank Empty.");
+                }
+            }
+            // F933/F934: the daily servicing roll from the game clock.
+            if let Some(nav) = nav.as_ref() {
+                for event in state.service_day(nav.day()) {
+                    pending_log.add(Source::Combat, event.message());
+                }
+            }
+            // F1033's fuel scoop: a star contact within 30 km at speed, one
+            // tonne of hydrogen per about three seconds.
+            state.scoop_cooldown = (state.scoop_cooldown - elapsed * acceleration_factor).max(0.0);
+            if state.loadout.fuel_scoop()
+                && state.scoop_cooldown == 0.0
+                && nav.as_ref().is_some_and(|nav| nav.sequence.is_none())
+            {
+                let player = ship_position(&original, &state);
+                let surface = nav.as_ref().and_then(|nav| {
+                    nav.bodies
+                        .iter()
+                        .filter(|body| body.kind == NavKind::Star)
+                        .map(|body| (distance(player, body.position) - body.radius as f64) as i64)
+                        .min()
+                });
+                let speed_word = (state.speed() * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT
+                    / ffe_rs::original_flight::MM_PER_SECOND)
+                    as i32;
+                if let Some(distance) = surface {
+                    if ffe_rs::damage::scoop_ready(distance, speed_word, true) {
+                        let capacity = nav
+                            .as_ref()
+                            .map_or(0, |nav| nav.cargo_space(&cache, state.ship).max(0) as u32);
+                        if let Some(tonnes) = state.scoop_hydrogen(capacity) {
+                            state.scoop_cooldown = ffe_rs::damage::SCOOP_COOLDOWN;
+                            pending_log.add(
+                                Source::Combat,
+                                format!("Fuel Scoops Working: {tonnes}t Hydrogen in Hold."),
+                            );
+                        }
+                    }
+                }
+            }
         }
         screen.beam = None;
         let can_fire = active
@@ -3804,6 +3907,9 @@ fn run() -> Result<(), String> {
             if let Some(mount) = combat::mount(views.mode) {
                 match state.combat.fire(mount, frame_tics) {
                     Ok(shot) => {
+                        // F929: a shot that empties the pool refuels from the
+                        // hold when the Auto Refueller is fitted.
+                        state.refuel_after_energy();
                         if let Some(nav) = nav.as_mut() {
                             if let Some(report) = nav.player_fired(ship_position(&original, &state))
                             {
@@ -5193,9 +5299,10 @@ fn view_ship(
     }
 }
 
-/// F444's three service rows for the player's ship: the statistics' mass, the
-/// drive byte (`ship+0xd0`) and the stored service days. The date-only form is
-/// what the 0x9816/0x9817 templates print.
+/// F444's rows for the player's ship: the statistics' mass, the drive byte
+/// (`ship+0xd0`), the hull words and the damage state (thruster words and
+/// damaged general bits). The date-only form is what the 0x9816/0x9817
+/// templates print.
 fn station_repairs(state: &Flight, scene: Option<&ModelViewer>) -> Vec<station::RepairRow> {
     let mass = scene
         .and_then(|scene| scene.ship_stats(state.ship))
@@ -5207,9 +5314,12 @@ fn station_repairs(state: &Flight, scene: Option<&ModelViewer>) -> Vec<station::
             .unwrap_or("")
             .to_owned()
     };
-    station::repairs(
+    station::repairs_for(
         mass,
         state.combat.drive != 0,
+        state.hull,
+        state.damage.equipment,
+        state.damage.damaged_thrusters(),
         &date(state.service_days[0]),
         &date(state.service_days[1]),
     )

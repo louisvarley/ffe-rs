@@ -527,6 +527,62 @@ fn docked_screens_draw_at_the_original_layout() {
     save(&screen, "Repairs-ours.ppm");
 }
 
+/// The repairs list with damage and after a full repair (the slice's frame
+/// evidence): the two hull rows, the destroyed Main thruster and the damaged
+/// Fuel Scoop appear from real damage state, then disappear.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn repair_rows_show_damage_and_clear_after_repair() {
+    let cache = cache();
+    let name = "Sirocco Station";
+    let status = station::Status {
+        cargo_used: 0,
+        cargo_capacity: 2,
+        cash: 100_000,
+        cabins_used: 0,
+        cabins_total: 0,
+    };
+    let mut screen = Screen::new(&cache).unwrap();
+    for (label, hull, equipment, thrusters) in [
+        (
+            "Repairs-damaged.ppm",
+            [140, 152],
+            1 << 20,
+            [false, false, false, false, true, false],
+        ),
+        ("Repairs-repaired.ppm", [152, 152], 0, [false; 6]),
+    ] {
+        let repairs = station::repairs_for(
+            38,
+            true,
+            hull,
+            equipment,
+            thrusters,
+            "1-Jan-3250",
+            "1-Jan-3250",
+        );
+        let tiles = DockView {
+            screen: StationScreen::Repairs,
+            title: station::title(StationScreen::Repairs, name),
+            rows: repairs
+                .iter()
+                .map(|row| DockRow {
+                    main: row.title.clone(),
+                    detail: None,
+                    columns: vec![(station::REPAIR_COST_X, format!("${}", row.cost), 0x7d)],
+                    fitted: false,
+                })
+                .collect(),
+            status,
+            scroll: 0,
+            selected: 0,
+            total: repairs.len(),
+        };
+        draw(&mut screen, Some(tiles), None, station::REPAIRS_HINT);
+        save(&screen, label);
+    }
+}
+
 /// The default DOS start (Gateway/Hope, record 0) is landed at Old Blackelk in
 /// state `0x30`. F4 at the pad is F343: the services board is the same screen
 /// as a docked station's, titled with the starport. The reference capture

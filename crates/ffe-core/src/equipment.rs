@@ -111,6 +111,35 @@ pub const CHAFF_BIT: u32 = 1 << 11;
 pub const ECM_BIT: u32 = 1 << 19;
 /// `ship+0xc8` bit 23: the Naval E.C.M. System (record code `0x07`).
 pub const NAVAL_ECM_BIT: u32 = 1 << 23;
+/// `ship+0xc8` bit 20: the Fuel Scoop (record code `0x04`). F1033 scoops one
+/// tonne of hydrogen when this is fitted; F394 gates the Cargo Scoop
+/// Conversion on it.
+pub const FUEL_SCOOP_BIT: u32 = 1 << 20;
+/// `ship+0xc8` bit 1: the Auto Refueller (record code `0x11`). F929 burns a
+/// tonne of fuel for `0x2000_0000` energy when the pool empties.
+pub const AUTO_REFUELLER_BIT: u32 = 1 << 1;
+/// `ship+0xc8` bit 28: the Energy Booster Unit (record code `0x0c`). F938
+/// doubles the shield recharge rate when it is fitted.
+pub const ENERGY_BOOSTER_BIT: u32 = 1 << 28;
+/// `ship+0xc8` bit 31: the Hull Auto-Repair System (record code `0x0f`). F938
+/// adds `tics` hull points a frame up to the full hull.
+pub const HULL_AUTO_REPAIR_BIT: u32 = 1 << 31;
+
+/// The general-equipment record for a fitted bit (`(record[0x12] ^ 0x10) &
+/// 0x1f`), or `None` for the three unused bits. F444's damage rows and F933's
+/// random failure both label the item this way.
+pub fn general_for_bit(bit: u8) -> Option<&'static Equipment> {
+    EQUIPMENT
+        .iter()
+        .find(|item| item.category == Category::General && ((item.code ^ 0x10) & 0x1f) == bit)
+}
+
+/// The repair cost of a general record (`DATA_005303`): 2.5 times its price,
+/// truncated. The 32-entry table's dummy bits repeat the price formula, so the
+/// value is computed rather than embedded.
+pub fn repair_cost(item: &Equipment) -> u32 {
+    item.price.saturating_mul(5) / 2
+}
 
 /// The ECM equipment `F935` finds, in its test order: Naval first (`+0xca`
 /// bit 7, `DATA_008835 |= 0xc`), then the standard E.C.M. (`+0xca` bit 3,
@@ -265,6 +294,30 @@ impl Loadout {
     /// `ship+0xc8 & 1`: the laser cooling booster (`F938` doubles the cooling).
     pub fn cooling_booster(&self) -> bool {
         self.general & 1 != 0
+    }
+
+    /// `ship+0xc8` bit 20: the Fuel Scoop (general bit 20). F1033's scoop
+    /// branch and F394's cargo-scoop gate both test it.
+    pub fn fuel_scoop(&self) -> bool {
+        self.general & FUEL_SCOOP_BIT != 0
+    }
+
+    /// `ship+0xc8` bit 1: the Auto Refueller. F929 burns a tonne of hydrogen
+    /// (or military fuel) for `0x2000_0000` energy when the pool empties.
+    pub fn auto_refueller(&self) -> bool {
+        self.general & AUTO_REFUELLER_BIT != 0
+    }
+
+    /// `ship+0xc8` bit 28: the Energy Booster Unit. F938 doubles the shield
+    /// recharge when it is fitted.
+    pub fn energy_booster(&self) -> bool {
+        self.general & ENERGY_BOOSTER_BIT != 0
+    }
+
+    /// `ship+0xc8` bit 31: the Hull Auto-Repair System (F938 repairs `tics`
+    /// hull points a frame).
+    pub fn hull_auto_repair(&self) -> bool {
+        self.general & HULL_AUTO_REPAIR_BIT != 0
     }
 
     /// `ship+0xc8` bit 7: the Auto targetter, which arms the blinking

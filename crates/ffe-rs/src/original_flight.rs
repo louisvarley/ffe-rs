@@ -22,7 +22,7 @@ pub const TICS_PER_SECOND: f64 = 49_700.0;
 /// Millimetres per second per velocity unit (F1511: `v * t / 512`).
 pub const MM_PER_SECOND: f64 = TICS_PER_SECOND / 512.0;
 /// The Eagle's limits, for a cache without ship statistics.
-const FALLBACK_LIMITS: Limits = Limits {
+pub const FALLBACK_LIMITS: Limits = Limits {
     axes: [[4905, -4905], [4905, -4905], [16350, -4905]],
 };
 
@@ -83,7 +83,7 @@ impl OriginalFlight {
         let to_units = |v: f64| v * UNITS_PER_FLIGHT_UNIT / MM_PER_SECOND;
         let velocity = flight.velocity.map(|v| to_units(v) as i32);
         let forward_speed = dot(flight.velocity, axes[2]);
-        let limits = stats.map_or(FALLBACK_LIMITS, ShipStats::limits);
+        let limits = flight.limits(stats);
         let mut player = Player {
             motion: Motion {
                 orientation: axes.map(|row| row.map(to_q31)),
@@ -172,6 +172,20 @@ impl OriginalFlight {
     /// The set speed (`DATA_008918`) in the original's velocity units.
     pub fn set_speed_units(&self) -> i32 {
         self.player.set_speed
+    }
+
+    /// Replace the six thrust limits the flight step clamps against
+    /// (`ship+0xbc..+0xc6`): a damaged or failed thruster changes how much of
+    /// the request F598/F600 can deliver.
+    pub fn set_limits(&mut self, limits: Limits) {
+        self.player.limits = limits;
+        self.forward_limit = limits.axes[2][0];
+    }
+
+    /// The three thrust words F938 sums for the energy cost (`+0xb6`/`+0xb8`/
+    /// `+0xba`, the clamp's result written each step).
+    pub fn thrust_words(&self) -> [i16; 3] {
+        self.player.motion.thrust
     }
 
     /// Start the persistent three-body world of an open-air takeoff. The
