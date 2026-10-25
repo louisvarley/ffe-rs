@@ -120,3 +120,67 @@ draw (`DATA_007807`). `verify-intro.py` runs it twice, drives
 `crates/ffe-rs/tests/intro_reference.rs` (an `#[ignore]`d local test) and
 rejects altered tics, model, animation, version flag and each text field, and
 an empty trace. Trace SHA-256: `a9489bbe5d0a2765938c1d14f8ba70505c0726bcd110d492eb01959616eafc3d`.
+
+## Boot drawing and timing (2026-10-25)
+
+The boot now plays the intro instead of starting the game directly. The DOS
+`FIRSTENC.EXE` addresses below are file offsets (the executable is a PE image;
+its code disassembles with the same instructions as JJFFE's `F961`/`F962`).
+
+**Source map.**
+
+| Piece | DOS | JJFFE | Port |
+|---|---|---|---|
+| Boot loop: `GameTics=0x400`, timer add, key table, `F147` call | file `0x2c499`..`0x2c589` (`0x43c499`) | `ffe.asm:68405-68495` | `main.rs::run_intro` |
+| F961 model/bitmap/animation/loop | file `0x2f298` (`0x43e498`) | `ffe.asm:71649` | `front_end::IntroTimeline`, `screen::draw_intro` |
+| F962 credits and V | file `0x2f380` (`0x43e580`) | `ffe.asm:71724` | `front_end::INTRO_LINES`, `intro_text` |
+| F959 object: identity 0x7f000000 rows, origin `(0,0,0x14820)`, model 0xb0 | file `0x2e9d8` (`0x43e444`) | `ffe.asm:71516` | `screen::draw_intro` |
+| F960 default light/shades + `F1682` | file `0x2e970` | `ffe.asm:71624` | `ModelViewer::render_scene_with` |
+| F1682/F1683 display instance | file `0x5b678`/`0x5b69c` | `ffe.asm:102201/102221` | `model_viewer` |
+| F1399/F1398/F1587/F1589 text | file `0x4f7b7`/`0x4f6ac`/`0x555e8`/`0x557c8` | `ffe.asm:85259/85127/93822/94028` | `intro_text` |
+| Primary bitmap 0x42 | file `0x2f3a0` | `ffe.asm:71738` | `screen::intro_bitmap` |
+| V gate `0x719668` | file `0x2f6a1` | `ffe.asm:71765` | `front_end::INTRO_INPUT_FROM` |
+| New game `F147`/`F998` | file `0xa1ac` | `ffe.asm:14912` | `navigation::Navigator::new_game` |
+
+**Timeline.** `GameTics` starts at `0x400`; each frame adds
+`elapsed_ms * 0x3e2 / 20` (994 per 20 ms = 49,700/s). F961 draws model 177
+with global 0 = `tics >> 10` until `0x8276d`, then 176 with
+`(tics - 0x8276e) >> 10`. F962 blits primary bitmap `0x42` from
+`tics > 0x795cc` at `x = 160 - width/2` (5 for the 311-pixel strip), `y = 0x9e`.
+The 18 credits start at `0x8276e`, not at 0. At `tics >= 0x7e7b76` F961 clears,
+flips, clears and sets `GameTics=0`; the port models the reset in
+`IntroTimeline::advance`. `--skip-intro` bypasses the boot screens; scripted
+`--smoke-frames`/capture modes do the same. A normal run shows the intro.
+
+**Input.** The DOS loop reads the action every frame from `0x400`: keys 1-5
+start (table at 0x4ee8a0: 1 -> 1, 2/3 -> 0, 4 -> 6, 5 -> 5), V is a no-op, and
+any other key exits with `F147(0)`. F962 latches the DOS version line on V only
+from `0x719668`, at (10,60), wrap 310, colour 16, string
+`English Release 1.02 - 21/04/95`. The port keeps the verified type 1 for keys
+1-5 (2-5 with the existing notice) and maps the "any other key"/type 0 arm to
+type 1 with a notice; an owner decision is still needed for types 2-5.
+
+**Assets.** Cache v27 adds `base:text/intro-credits` (19 raw NUL-terminated
+strings from `0xbd361`: 18 credits + the DOS version, layout codes preserved)
+and `base:text/char-widths` (`DATA_007648`, 256 signed bytes from `0xe9998`).
+Model 176/177, the primary bitmap 0x42, the main font and the low palette were
+already in the cache. The credits are drawn from the cache, not from Rust
+strings; the old plain-text transcription and its `.text` field are gone.
+
+**Not reproduced.** The dynamic upper palette (`F1575`/`F1330_DPalBuild`) is not
+ported: F961's `(0,0,0)`/`(0,0,4)` start colours only change the runtime palette
+the original builds, while this port's model/bitmap path uses the fixed colours
+and the low palette directly. Model 176's late animation (for example at
+`0x77a7d8`, animation `0x1be0`) calls child 456 through a frame that copies a
+basis F1750 leaves as stale stack (`docs/notes/animation.md` §1.2); the port
+reports it once and keeps drawing the credits, so those frames have no ship.
+No music backend exists (song 0 `QQFRONT` is still not played).
+
+**Tests and frames.** `crates/ffe-rs/tests/front_end.rs` covers the thresholds,
+the `0x400` clock, the `0x7e7b76` reset, the DOS V gate, keys at any tics and
+the skip arm; `intro_text.rs` unit tests cover wrap, `0xfd`/`0xfe` positioning,
+the shadow and colour. `tests/intro_view.rs` (ignored; set
+`FFE_INTRO_CACHE=<v27 data.bin>`) renders the assembled screen at `0x795cc`,
+`0x8276e`, `0x181534`, `0x719668` and `0x77a7d8`. `--capture-intro DIR` writes
+that sample sequence plus the version frame without opening a window;
+`--skip-intro --smoke-frames N` presents the in-game frames.

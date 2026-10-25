@@ -7,14 +7,15 @@ coverage and `docs/notes/` for the feature records.
 
 ## Navigation aid
 
-The default boot is the original's new game (`ffe_rs::navigation::new_game`):
-Ross 154, the Eagle (model 23), 1000 CR, 1 Jan 3250 12:00 and player state 0x30
-on the starport's pad; `--start sol` keeps the Sol/Mars High development
-sandbox.
-The front end's logo/credit timeline is `ffe_rs::front_end` (the JJFFE legal
-splash is not part of it; `docs/notes/intro.md`). `L` takes off from the open-air
-starport pad through the original's F1013 `0x24` -> F1031 `0x26` -> `0x00` path
-(EXP-010); the earlier refusal is gone.
+The default boot plays the original's intro (`ffe_rs::front_end`/`Screen::draw_intro`,
+`docs/notes/intro.md`) and then starts the original's new game
+(`ffe_rs::navigation::new_game`): Ross 154, the Eagle (model 23), 1000 CR,
+1 Jan 3250 12:00 and player state 0x30 on the starport's pad; `--start sol`
+keeps the Sol/Mars High development sandbox and `--skip-intro` (or any scripted
+capture/smoke run) starts directly. The JJFFE legal splash is not part of the
+intro. `L` takes off from the open-air starport pad through the original's
+F1013 `0x24` -> F1031 `0x26` -> `0x00` path (EXP-010); the earlier refusal is
+gone.
 
 `docs/NAVIGATION.md`: system and galaxy maps (Tab, G) and an autopilot to planets
 and stations, for testing the generated systems. Not part of the original game.
@@ -91,7 +92,7 @@ scanner contacts and altitude units remain.
   console/HUD gap list, with the byte-validated DATA_005100 button and
   DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 137 items, 66 done and 71 left on
+  in `burndown.js`; 14 milestones, 137 items, 67 done and 70 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -234,14 +235,15 @@ capture produced by two repeat runs of the local reference.
 | v0.61 sound cues and scene music | `ffe_rs::sound::{GameAudio, Cue}`, F1906/F1907/F1908 dispatch, F1902-F1904 music rules, prefs `SoundFlags`, live wiring in `main.rs` | `sound_cues.rs` (2 + unit tests), `prefs.rs` (+2) | none (cue indices/levels and gates from `ffe.asm`/`w32sound.cpp`; no audio-device capture) | — | every effect cue the port can reach is posted (prefs, station/console, lock, messages, lasers, shield/hull, explosions, siren, docking/launch doors, engine/station beds, camera, hyperspace) and scene music follows F1902/F919/F750/F656/F1094/F232; the Sound Effects toggles apply at boot and on change. **The effect mixer/device is still missing** (`NullSampleSink`), so cues are recorded/no-op; music is audible through the HMP/WinMM player, but song 0 is unreachable until the intro draws. ECM/missile/wind cues are API+test only; `docs/notes/sound-cues.md` |
 | v0.62 equipment, loadout and player damage | `ffe_core::equipment` (66-record `DATA_005289`, F393/F383), `Flight::{loadout, ensure_damage, hit, destroyed}`, `Loadout`, console F991/F1120 icon state, `tools/gen-equipment-table.py` | `equipment.rs` (8 + unit tests), `combat.rs` (+7), `console_table.rs` (+), `dashboard_view.rs` (4, ignored) | none (the table bytes are checked against DOS `FIRSTENC.EXE`; no new oracle) | — | general bits, ten missile pylons and cabins in `Loadout`; F383 availability/prices (deterministic tech multiplier); F953's shields-then-hull order for the player over `laser::apply_damage`; F991/F1120 icons and lamps read the real state and the new-game's two `0x82` missiles draw their icons. Nothing fires at the player yet; `player+0xef`, F938 recharge/auto-repair, death/capsule and the station Upgrades rows (needs `DATA_008995` from F869) remain; `docs/notes/equipment.md` |
 | v0.63 NPC flight/combat AI, fire and player damage | `ffe_core::npc` (`DATA_006258`, F585/F601/F597/F931/F930, F674/F675/F680/F927, F697), `Navigator::{tick_ships, player_attack, legal, provoke}`, `Flight::take_damage` (reconciled with `ensure_damage`/`hit`), NPC/police messages, `--capture-traffic` | `npc.rs` (16), `npc_ai.rs` (3, ignored), `combat.rs` (9), frames in `docs/evidence/npc-ai/` | none (state table and constants from `ffe.asm`; JJFFE's disabled AI laser damage is a recorded DOS-vs-JJFFE difference) | — | the AI states transit/hold/attack/escort/pass/flee/dead/escaped with turn limits and statistics speeds, pirate fire through F931/F930, F953 player damage through one `take_damage` path, police/wanted (`legal`, `player_attack`, provoke, F697 bounty), jump persistence/recycle. Full docking AI, missiles, police spawns/fines/HUD badge and Thargoids remain; EXP-015 records the reconstruction; `docs/notes/npc.md` |
+| v0.64 intro playback and cache v27 | `ffe_rs::{front_end::IntroTimeline, intro_text::IntroText}`, `Screen::draw_intro`, `main::run_intro`, cache v27 (`base:text/intro-credits`, `base:text/char-widths`), `--capture-intro` | `front_end.rs` (9), `intro_view.rs` (2, ignored), `intro_text.rs` unit tests, `intro_reference.rs` (ignored) | `verify-intro.py` 76 cases unchanged (trace `a9489bbe…`); cache import verified by `verify-assets.py` | — | default boot plays F961/F962 (models 177/176, bitmap 0x42, the 18 DOS credits with layout codes, the `0x400` GameTics clock and the `0x7e7b76` reset), V's version gate and keys 1-5; scripted captures use `--skip-intro`; old v26 caches still load but the intro reports the missing assets. Model 176's stale-basis frames, the dynamic upper palette and an intro music backend remain; `docs/notes/intro.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 539 `#[test]` functions total; 127 are `#[ignore]`
+  `cargo clippy -D warnings`. 546 `#[test]` functions total; 129 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **411 runnable synthetic tests** (412 on Linux).
+  **416 runnable synthetic tests** (417 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
@@ -281,8 +283,8 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v26 (1794 assets, 462 of 466 models, 219 model strings,
-  3 glyph sets, the F650 pad tables); `.cache/data-v1..v5-backup.bin`,
+  `data.bin` is cache v27 (1796 assets, 462 of 466 models, 219 model strings,
+  3 glyph sets, the F650 pad tables and the intro credits/char widths); `.cache/data-v1..v5-backup.bin`,
   `data-v10-backup.bin`, `data-v12-backup.bin` and `data-v13-backup.bin` are
   retained.
 - The three glyph sets import with 95, 52 and 95 programs (3,008 / 874 / 624

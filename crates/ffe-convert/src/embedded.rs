@@ -1016,6 +1016,56 @@ pub fn decode_colour_map(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String
     })
 }
 
+/// The 18 intro credit strings plus the version line (`ffedat.asm`'s SysMenu entries `0x941b..0x942c`)
+/// as raw NUL-terminated bytes, with their `0x0d`/`0xfd`/`0xfe` layout codes
+/// intact. The 19th table entry (`0x942d`) is JJFFE's version line and is not
+/// imported here.
+pub const INTRO_CREDIT_COUNT: usize = 19;
+/// Bytes of `DATA_007648`, the signed character-width table F1398 wraps with.
+pub const CHARACTER_WIDTHS_BYTES: usize = 256;
+
+/// The intro credits: 18 consecutive NUL-terminated strings. The block is read
+/// from the first string to its terminator rather than from a fixed size, so a
+/// release whose strings differ still fails or imports consistently.
+pub fn decode_intro_credits(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, 1)?;
+    let mut out = Vec::new();
+    let mut start = source_offset;
+    for index in 0..INTRO_CREDIT_COUNT {
+        let rest = bytes
+            .get(start..)
+            .ok_or("an intro credit runs past the file")?;
+        let length = rest
+            .iter()
+            .take(4096)
+            .position(|byte| *byte == 0)
+            .ok_or("an intro credit is not terminated")?;
+        if length == 0 {
+            return Err(format!("intro credit {index} is empty"));
+        }
+        out.extend_from_slice(&rest[..=length]);
+        start += length + 1;
+    }
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: out,
+    })
+}
+
+/// The 256-byte signed character-width table `DATA_007648`. The intro's wrap
+/// (F1398) and the `0x3022` model-text path read it; the original keeps it in
+/// the data section as signed bytes.
+pub fn decode_character_widths(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let source_offset = section.offset(rva, CHARACTER_WIDTHS_BYTES)?;
+    let table = range(bytes, source_offset, CHARACTER_WIDTHS_BYTES)?;
+    Ok(EmbeddedTable {
+        source_offset,
+        bytes: table.to_vec(),
+    })
+}
+
 pub fn decode_font(bytes: &[u8], rva: u32) -> Result<EmbeddedFont, String> {
     let section = DataSection::parse(bytes)?;
     let source_offset = section.offset(rva, 1160)?;

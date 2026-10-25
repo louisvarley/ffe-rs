@@ -1,5 +1,14 @@
 # Intro: complete-implementation TODO
 
+> **Status 2026-10-25:** the drawing and timing slice is implemented: the boot
+> plays F961/F962 through the v27 cache, `--skip-intro` bypasses it,
+> `--capture-intro` writes the sample frames, and `front_end`/`intro_text`
+> tests cover the clock, thresholds, keys and text layout. See
+> `docs/notes/intro.md` §"Boot drawing and timing" for the source map and the
+> remaining items (music, start types 2-5, the dynamic upper palette, model
+> 176's late undefined-stack child basis). The checklist below is the original
+> plan and is kept for the slices not yet done.
+
 Planning note, 2026-10-24. **No code is changed by this note.** It is the
 work breakdown for the boot flow, not the feature record; no `docs/notes/intro.md`
 existed when this was written (the in-progress `verify-intro.py` docstring already

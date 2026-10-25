@@ -2,13 +2,14 @@ use crate::external::{output_destination, recorded_bytes};
 use crate::{inspect_game, read_bounded, Severity};
 use ffe_content::{Asset, AssetKind, Manifest, SourceFile};
 use ffe_convert::embedded::{
-    decode_bitmaps, decode_colour_map, decode_default_lighting, decode_dot_tables, decode_font,
-    decode_galaxy_tables, decode_gameplay_tables, decode_market_tables, decode_model_collision,
-    decode_model_commands, decode_model_descriptor, decode_model_names, decode_model_normals,
-    decode_model_record, decode_model_vertices, decode_name_text, decode_pad_tables,
-    decode_ship_stats, decode_sine_table, decode_star_point_tables, decode_star_shades,
-    decode_system_strings, decode_system_tables, decode_terrain_maps, decode_terrain_tables,
-    decode_texture_descriptors, BitmapLayout,
+    decode_bitmaps, decode_character_widths, decode_colour_map, decode_default_lighting,
+    decode_dot_tables, decode_font, decode_galaxy_tables, decode_gameplay_tables,
+    decode_intro_credits, decode_market_tables, decode_model_collision, decode_model_commands,
+    decode_model_descriptor, decode_model_names, decode_model_normals, decode_model_record,
+    decode_model_vertices, decode_name_text, decode_pad_tables, decode_ship_stats,
+    decode_sine_table, decode_star_point_tables, decode_star_shades, decode_system_strings,
+    decode_system_tables, decode_terrain_maps, decode_terrain_tables, decode_texture_descriptors,
+    BitmapLayout,
 };
 use ffe_convert::{decode_indexed_bmp, pcm16_mono_22050_wav};
 use std::fs;
@@ -118,6 +119,16 @@ pub(crate) fn gameplay_layout(profile: &str) -> Option<u32> {
 pub(crate) fn pad_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xde20c),
+        _ => None,
+    }
+}
+
+/// Intro credits and character widths (v27): the 18 raw credit strings and the
+/// version line at `0xbd361`, and `DATA_007648` at `0xe9998`, floppy 1.02 only.
+/// their layout codes; the widths are the signed 256-byte wrap table.
+pub(crate) fn intro_layout(profile: &str) -> Option<(u32, u32)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0xd3761, 0xffd98)),
         _ => None,
     }
 }
@@ -438,6 +449,27 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some((credits_rva, widths_rva)) = intro_layout(profile.id) {
+                let credits = decode_intro_credits(&bytes, credits_rva)?;
+                assets.push(Asset {
+                    id: "base:text/intro-credits".to_owned(),
+                    path: "text/intro-credits.bin".to_owned(),
+                    kind: AssetKind::IntroStrings {
+                        count: ffe_convert::embedded::INTRO_CREDIT_COUNT as u32,
+                        source_offset: credits.source_offset as u64,
+                    },
+                    bytes: credits.bytes,
+                });
+                let widths = decode_character_widths(&bytes, widths_rva)?;
+                assets.push(Asset {
+                    id: "base:text/char-widths".to_owned(),
+                    path: "text/char-widths.bin".to_owned(),
+                    kind: AssetKind::CharacterWidths {
+                        source_offset: widths.source_offset as u64,
+                    },
+                    bytes: widths.bytes,
+                });
+            }
             if let Some((tables_rva, maps_rva)) = terrain_layout(profile.id) {
                 let table = decode_terrain_tables(&bytes, tables_rva, maps_rva)?;
                 assets.push(Asset {
@@ -623,6 +655,11 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         + usize::from(system_strings_layout(profile.id).is_some())
         + usize::from(star_point_layout(profile.id).is_some())
         + usize::from(dot_table_layout(profile.id).is_some())
+        + if intro_layout(profile.id).is_some() {
+            2
+        } else {
+            0
+        }
         + 4;
     // Plus the v10 model descriptor table, the v12 ship statistics table and the
     // v16 model record table.
@@ -633,7 +670,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 26,
+        format: "ffe-content-cache".to_owned(), format_version: 27,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

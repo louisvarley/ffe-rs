@@ -4,6 +4,40 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Intro playback merged and the cache moves to v27 (v0.64)
+
+- Merged `intro` (b4cd65e): the default boot plays F961/F962 from the DOS
+  `FIRSTENC.EXE` (models 177/176, primary bitmap 0x42, the 18 credits with their
+  `0x0d`/`0xfd`/`0xfe`/`0x01` layout codes, the `0x400` GameTics clock, the
+  `0x7e7b76` reset), V's version line after `0x719668`, keys 1-5 and
+  `--capture-intro`. `--skip-intro` and the scripted capture/smoke modes bypass
+  the front end; `--start sol` is unchanged.
+- **Cache v27** adds `base:text/intro-credits` (19 NUL-terminated strings) and
+  `base:text/char-widths` (256 signed bytes): 1,796 assets, no other change.
+  Old v26 caches still load for the game, but the intro (and `--capture-intro`)
+  report the missing assets; the local data.bin was rebuilt for testing and is
+  ignored/untracked. `docs/FORMATS.md` records the versions.
+- Merge was conflict-free (`ort`). One stale local frame test needed a fixture
+  fix: `console_view`'s navigation-button check now fits F991's navigation
+  computer bit (general bit 5) before drawing, because the equipment merge made
+  F991 hide `0x11` without it. No code behaviour changed.
+- **Not reproduced:** the dynamic upper palette (`F1575`/`F1330_DPalBuild`), so
+  F961's start colours do not build the original's runtime palette; model 176's
+  late animation calls child 456 through a basis F1750 leaves on stale stack
+  (reported once, the credits keep drawing, those frames have no ship); and no
+  intro music backend exists, so song 0 (`QQFRONT`) is still silent.
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `cargo test -p ffe-rs --test front_end` (9); the cached
+  `intro_view` with `FFE_INTRO_CACHE=data.bin` (2); `--capture-intro` wrote the
+  nine sample frames; and the cached dashboard/combat/console/station/lift/
+  market/npc view suites pass with the v27 cache.
+- **Owner decisions:** start types 2-5 and the DOS type-0 arm are mapped to type
+  1 with a notice (needs the real F998 records); the dynamic upper palette;
+  which music backend should play song 0; and the first in-game frame's exact
+  hand-off (the intro leaves into the new game directly today).
+
+---
+
 ## 2026-10-25 - NPC flight/combat AI, fire and player damage merged (v0.63)
 
 - Merged `shipai` (dd573c2, 543f660): the encoded `DATA_006258` AI state table

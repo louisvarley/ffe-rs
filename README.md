@@ -11,7 +11,7 @@ the current experimental example is not that faithful renderer.
 > autopilot, and the galaxy map drawn the original's way (its dots match the
 > executed original pixel for pixel). Labels, 3D text, lines, curves, flat faces
 > and polygon spans use the original's rasterisers.
-> The **F12 model viewer** (cache v26) runs every imported ship, station and
+> The **F12 model viewer** (cache v27) runs every imported ship, station and
 > object program through the verified executor and draws its faces, textured
 > faces, complex polygons, lines, points, curves, text, labels and child models
 > in the original render order.
@@ -35,10 +35,10 @@ The Windows executable is built in this checkout. From the repository root:
 
 **Easiest on Windows:** double-click `play.bat`. It builds the release game and
 tools, creates or updates `data.bin` from your files in `.\game` when it is
-missing or older than this build needs (currently cache v26), and launches the
+missing or older than this build needs (currently cache v27), and launches the
 game; on any error the window stays open with the message. Rebuilding by hand:
 `cargo build --release --locked -p ffe-rs -p ffe-tools`.
-The root directory must contain your locally generated **v26** `data.bin` (build command
+The root directory must contain your locally generated **v27** `data.bin` (build command
 below, or let `play.bat` make it). The game verifies it before opening a window.
 Without `--root`, it looks beside its own executable and then up to four parent
 folders, so `target\release\ffe-rs.exe` finds the checkout's `data.bin`. If
@@ -320,7 +320,7 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v26** imports every model that decodes (462 of 466 on floppy 1.02) with
+**Cache v27** imports every model that decodes (462 of 466 on floppy 1.02) with
 its descriptor fields for child models, the original texture descriptor table and
 fixed-colour map, the original lighting tables (default light, shade tables), the
 original ship statistics, the full original string table (219 entries: model
@@ -330,15 +330,15 @@ font models' per-character glyph programs the 3D text runs.
 then replace your old `data.bin` with it:
 
 ```powershell
-.\target\release\ffe-tools.exe build-data --game .\game --out .\data-v26.bin
-Move-Item -Force .\data-v26.bin .\data.bin
+.\target\release\ffe-tools.exe build-data --game .\game --out .\data-new.bin
+Move-Item -Force .\data-new.bin .\data.bin
 ```
 
 The local cache has been generated on this checkout. It is ignored and must
 not be distributed. Unlike the reference smoke executable, the Rust importer
 does not need JJFFE sources, NASM, or execution of the original game.
 
-The versioned, deterministic ZIP now contains **1794 assets (cache v26)**:
+The versioned, deterministic ZIP now contains **1796 assets (cache v27)**:
 
 - 345 embedded indexed images, with original dimensions, signed drawing offsets,
   mask-zero flags, table/slot IDs and executable source offsets.
@@ -492,7 +492,7 @@ python ci\check_forbidden.py
 ```
 
 Automated Rust tests use synthetic data, not proprietary game files.
-Windows validation currently runs 411 synthetic tests; an additional
+Windows validation currently runs 416 synthetic tests; an additional
 case/link-handling test is enabled on Unix. CI is configured for Windows and
 Linux; remote CI has not been run by this local implementation session.
 

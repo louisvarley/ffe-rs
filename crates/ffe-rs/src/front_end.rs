@@ -24,8 +24,13 @@ pub const PRIMARY_BITMAP_Y: i32 = 0x9e;
 pub const PRIMARY_BITMAP_FROM: u32 = 0x795cc;
 /// F961 clears the buffer and restarts the clock at `0x7e7b76` tics.
 pub const INTRO_END: u32 = 0x7e7b76;
-/// The input ("V" for the version) is read from `0x8276e` tics on.
-pub const INTRO_INPUT_FROM: u32 = MODEL_SWITCH;
+/// F962 reads the input ("V" for the version) from `0x719668` tics on (DOS
+/// `FIRSTENC.EXE` 0x2f6a1). The version itself is the DOS line.
+pub const INTRO_INPUT_FROM: u32 = 0x719668;
+/// The boot clock's first value (DOS `0x43c499`, `[ebx] = 0x400`).
+pub const BOOT_TICS: u32 = 0x400;
+/// Tics the original's timer adds per 20 ms frame at 1x (`DATA_007706` 0x3e2).
+pub const TICS_PER_FRAME: u32 = 0x3e2;
 
 /// One credit line: the `GameTics` window F962 draws it in, and its text call's
 /// arguments. `first` is inclusive and `ends` (when present) exclusive; the
@@ -41,7 +46,9 @@ pub struct IntroLine {
     pub x: i32,
     pub y: i32,
     pub wrap: i32,
-    pub text: &'static str,
+    /// The raw string's index in `base:text/intro-credits` (F1397's SysMenu
+    /// table order; entry 18 is the version line).
+    pub string: usize,
 }
 
 impl IntroLine {
@@ -54,206 +61,206 @@ impl IntroLine {
 }
 
 /// F962's eighteen credit calls (`ffe.asm:71796-72058`, strings `0x941b..0x942c`),
-/// at their exact thresholds, positions and wrap widths. The strings are the
-/// original's, stripped to plain text: line breaks kept, the in-line font codes
-/// (0xfd/0xfe) become a space.
+/// at their exact thresholds, positions and wrap widths. `string` indexes the
+/// raw DOS bytes in `base:text/intro-credits` (cache v27); the renderer applies
+/// their layout codes (see [`crate::intro_text`]).
 pub static INTRO_LINES: [IntroLine; 18] = [
     IntroLine {
         code: 0x941b,
+        string: 0,
         first: MODEL_SWITCH,
         ends: Some(0xfbd3a),
         colour: 15,
         x: 90,
         y: 15,
         wrap: 0,
-        text: "A FRONTIER DEVELOPMENTS PRODUCTION Copyright @ David Braben 1995, all rights reserved.",
     },
     IntroLine {
         code: 0x941b + 1,
+        string: 1,
         first: 0x181534,
         ends: Some(0x1ee8d2),
         colour: 15,
         x: 2,
         y: 68,
         wrap: 0,
-        text: "Programming:\n  David Braben\n  Andrew Dunn\n  Mike Edie\n  Peter Elliot-Green\n  Peter Irvin\n  Ran Mokady\n  Jonathan Roach\n  Chris Sawyer",
     },
     IntroLine {
         code: 0x941b + 2,
+        string: 2,
         first: 0x212f5c,
         ends: Some(0x24fa42),
         colour: 15,
         x: 245,
         y: 20,
         wrap: 0,
-        text: "Shapes:\n  Aggy Finn\n  David Braben\n  Jonathan Griffiths\n  Peter Irvin",
     },
     IntroLine {
         code: 0x941b + 3,
+        string: 3,
         first: 0x2375e6,
         ends: Some(0x2740cc),
         colour: 15,
         x: 10,
         y: 115,
         wrap: 0,
-        text: "Story:\n  Manda Scott\n  David Braben",
     },
     IntroLine {
         code: 0x941b + 4,
+        string: 4,
         first: 0x2d523c,
         ends: Some(0x34e808),
         colour: 15,
         x: 240,
         y: 15,
         wrap: 0,
-        text: "Music:\n  The Quality Quartet\n  Dave Lowe",
     },
     IntroLine {
         code: 0x941b + 5,
+        string: 5,
         first: 0x32a17e,
         ends: Some(0x372e92),
         colour: 15,
         x: 5,
         y: 125,
         wrap: 0,
-        text: "Sound Drivers:\n  Human Machine Interfaces Inc\n  This product features the LoudMouth MegaPatch(tm) Sound Bank",
     },
     IntroLine {
         code: 0x941b + 6,
+        string: 6,
         first: 0x3bbba6,
         ends: Some(0x3f868c),
         colour: 15,
         x: 245,
         y: 15,
         wrap: 0,
-        text: "Intro Sequence:\n  Aggy Finn",
     },
     IntroLine {
         code: 0x941b + 7,
+        string: 7,
         first: 0x48a0b4,
         ends: Some(0x4d2dc8),
         colour: 15,
         x: 20,
         y: 20,
         wrap: 0,
-        text: "Ship Interiors:\n  Danny Flynn",
     },
     IntroLine {
         code: 0x941b + 8,
+        string: 8,
         first: 0x4ae73e,
         ends: Some(0x4f7452),
         colour: 15,
         x: 240,
         y: 115,
         wrap: 0,
-        text: "Planet Design:\n  Jonathan Roach\n  David Braben",
     },
     IntroLine {
         code: 0x941b + 9,
+        string: 9,
         first: 0x4d2dc8,
         ends: Some(0x50f8ae),
         colour: 15,
         x: 20,
         y: 20,
         wrap: 0,
-        text: "Other Graphics:\n  Aggy Finn\n  David Braben",
     },
     IntroLine {
         code: 0x941b + 10,
+        string: 10,
         first: 0x588e7a,
         ends: Some(0x5d1b8e),
         colour: 15,
         x: 5,
         y: 125,
         wrap: 0,
-        text: "Video Production:\n  Dave Jordan\n  Manda Scott",
     },
     IntroLine {
         code: 0x941b + 11,
+        string: 11,
         first: 0x5ad504,
         ends: Some(0x5e9fea),
         colour: 15,
         x: 245,
         y: 10,
         wrap: 0,
-        text: "Video Post Production:\n  Kathy Braben",
     },
     IntroLine {
         code: 0x9428,
+        string: 13,
         first: 0x626ad0,
         ends: Some(0x67ba12),
         colour: 15,
         x: 20,
         y: 100,
         wrap: 0,
-        text: "Journal Entries:\n   Manda Scott\n   Julian Flood\n   Jude Jones\n   S.L.A.M.\n Susannah Oliver\nTony Gallucci\nMartyn Taylor",
     },
     IntroLine {
         code: 0x9427,
+        string: 12,
         first: 0x657388,
         ends: Some(0x693e6e),
         colour: 15,
         x: 140,
         y: 10,
         wrap: 0,
-        text: "Representation:\n  Jacqui Lyons of Marjacq",
     },
     IntroLine {
         code: 0x941b + 14,
+        string: 14,
         first: 0x6b84f8,
         ends: Some(0x70d43a),
         colour: 15,
         x: 5,
         y: 20,
         wrap: 0,
-        text: "Video Actors:\n  Elizabeth Arbaud\n  Peter Edan\n  Tony Gallucci\n  Jason Graham\n  Steve Gorman\n  Sarah Johnson\n  Dave Jordan\n  Brendan Kavanaugh\n  Clyde Kellett\n  Susan Kelly\n  Dorian McFarland",
     },
     // The original tests this one with `jna` (<=), so it starts one tic later.
     IntroLine {
         code: 0x941b + 15,
+        string: 15,
         first: 0x6d0955,
         ends: Some(0x725896),
         colour: 15,
         x: 220,
         y: 20,
         wrap: 0,
-        text: "Michel Moalem\nJason Myers\nRob Patterson\nChris Paton\nPiers Pitcairn\nPooni\nPhil Purves\nMark Reading\nThomas Skinner\nRose Thomas\nKeith Vogel\nSimon Watkins",
     },
     IntroLine {
         code: 0x941b + 16,
+        string: 16,
         first: 0x77a7d8,
         ends: None,
         colour: 15,
         x: 5,
         y: 10,
         wrap: 310,
-        text: "\"First Encounters\" is the sequel to \"Frontier\" - the UK's best selling computer game of 1993.\n\n       \"Frontier\" in turn was the sequel to the best seller \"Elite\", first released in 1984.",
     },
     IntroLine {
         code: 0x941b + 17,
+        string: 17,
         first: 0x77a7d8,
         ends: None,
         colour: 15,
         x: 5,
         y: 68,
         wrap: 310,
-        text: " First Encounters @ David Braben 1995 Frontier @ David Braben 1993 Elite  @ David Braben and Ian Bell 1984",
     },
 ];
 
 /// The version line 'V' draws (`0x942d`): x 10, y 60, wrap 310, colour 16.
 /// **JJFFE-only:** the string is the mod's, so it is available to the reference
 /// oracle but is not part of the DOS front end the default boot shows.
-pub const VERSION_TEXT: &str = "English Release 1.1 (Remastered Version)";
+pub const VERSION_TEXT: &str = "English Release 1.02 - 21/04/95";
 pub const VERSION_LINE: IntroLine = IntroLine {
     code: 0x942d,
+    string: 18,
     first: INTRO_INPUT_FROM,
     ends: None,
     colour: 16,
     x: 10,
     y: 60,
     wrap: 310,
-    text: VERSION_TEXT,
 };
 
 /// The intro screen's draw state at one `GameTics`.
@@ -310,21 +317,41 @@ impl IntroTimeline {
     }
 
     /// Whether the version line is drawn: F962 reads the input only from
-    /// `0x8276e` and the action is 'V' (0x56).
+    /// `0x719668` and the action is 'V' (0x56). The string is the DOS line
+    /// (`0x942d` at file `0xbd951`).
     pub fn version(tics: u32, key: Option<char>) -> bool {
         tics >= INTRO_INPUT_FROM && key == Some('V')
+    }
+
+    /// Advance `GameTics` by a frame's elapsed milliseconds (F961's caller adds
+    /// `elapsed_ms * 0x3e2 / 20`). At `INTRO_END` the original clears, flips,
+    /// clears again and starts the next pass at 0.
+    pub fn advance(tics: u32, elapsed_ms: u32) -> u32 {
+        let delta = (u64::from(elapsed_ms) * u64::from(TICS_PER_FRAME) / 20) as u32;
+        let next = tics.saturating_add(delta);
+        if next >= INTRO_END {
+            0
+        } else {
+            next
+        }
     }
 }
 
 /// What an intro key did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntroAction {
-    /// 'V': show [`VERSION_LINE`] for this frame.
+    /// 'V': show [`VERSION_LINE`] for this frame (DOS gate `0x719668`).
     Version,
     /// A start choice. `requested` is the key's number; only 1 is implemented, so
     /// `chosen` is 1 and `notice` explains the substitution for 2..5.
     Start {
         requested: u8,
+        chosen: u8,
+        notice: Option<&'static str>,
+    },
+    /// The DOS boot loop's "any other key" arm: it leaves with the default start
+    /// (`F147(0)`). The port maps it to the verified type 1 with a notice.
+    Skip {
         chosen: u8,
         notice: Option<&'static str>,
     },
@@ -340,17 +367,12 @@ impl Intro {
         Self
     }
 
-    /// A key press at `tics`. The version key is F962's own test (at and after
-    /// `0x8276e`); the start choice belongs after the intro has restarted at
-    /// `0x7e7b76`. Keys 2-5 are the JJFFE mapping, not verified against the DOS
-    /// release, so they map to the verified start type 1 with a note.
+    /// A key press at `tics`. The start choice is read every frame from
+    /// `0x400` on (`ffe.asm:68443-68455`); it is not gated on the intro's loop
+    /// point. 'V' latches the version from `0x719668` and is otherwise a no-op.
+    /// Any other key is the DOS "start type 0" arm, which this port maps to the
+    /// verified type 1 with a notice because type 0 is not ported.
     pub fn key(&self, tics: u32, key: char) -> Option<IntroAction> {
-        if IntroTimeline::version(tics, Some(key)) {
-            return Some(IntroAction::Version);
-        }
-        if tics < INTRO_END {
-            return None;
-        }
         match key {
             '1'..='5' => {
                 let requested = key as u8 - b'0';
@@ -361,7 +383,11 @@ impl Intro {
                         .then_some("start types 2-5 are unverified; starting Ross 154 (type 1)"),
                 })
             }
-            _ => None,
+            'V' => IntroTimeline::version(tics, Some('V')).then_some(IntroAction::Version),
+            _ => Some(IntroAction::Skip {
+                chosen: 1,
+                notice: Some("DOS boots start type 0; starting the verified type 1 (Ross 154)"),
+            }),
         }
     }
 }

@@ -1,43 +1,47 @@
-//! The acceptance splash and the intro's deterministic timeline: the data the
-//! original's F961/F962 draw, checked against `ffe.asm` (docs/notes/intro.md).
+//! The intro's deterministic timeline and input: the data F961/F962 draw and
+//! the boot loop's `GameTics`/key rules, checked against DOS `FIRSTENC.EXE`
+//! (`docs/notes/intro.md`).
 use ffe_rs::front_end::{
-    Intro, IntroAction, IntroLine, IntroTimeline, INTRO_END, INTRO_LINES, MODEL_FIRST,
-    MODEL_SECOND, MODEL_SWITCH, PRIMARY_BITMAP_FROM, VERSION_LINE, VERSION_TEXT,
+    Intro, IntroAction, IntroLine, IntroTimeline, BOOT_TICS, INTRO_END, INTRO_INPUT_FROM,
+    INTRO_LINES, MODEL_FIRST, MODEL_SECOND, MODEL_SWITCH, PRIMARY_BITMAP_FROM, TICS_PER_FRAME,
+    VERSION_LINE, VERSION_TEXT,
 };
 
-/// The DOS source of truth: the front end has no JJFFE legal/acceptance page.
+/// The DOS release's front end has no JJFFE legal/acceptance page. The version
+/// line is the DOS one, not the mod's remastered string.
 #[test]
-fn the_front_end_has_no_jjffe_legal_splash() {
-    for line in INTRO_LINES.iter() {
-        assert!(!line.text.contains("JJFFE"));
-        assert!(!line.text.contains("replacement executable"));
-        assert!(!line.text.contains("reverse engineered"));
-        assert!(!line.text.contains("Press \"y\""));
-    }
+fn the_front_end_has_no_jjffe_splash_or_version() {
+    assert!(!INTRO_LINES.iter().any(|line| line.string > 18));
+    assert_eq!(VERSION_TEXT, "English Release 1.02 - 21/04/95");
+    assert!(!VERSION_TEXT.contains("Remastered"));
+    assert!(!VERSION_TEXT.contains("1.1"));
 }
 
 #[test]
-fn the_version_line_is_the_original_one() {
-    assert_eq!(VERSION_TEXT, "English Release 1.1 (Remastered Version)");
+fn the_dos_version_line_and_its_input_gate() {
     assert_eq!(
         (
             VERSION_LINE.x,
             VERSION_LINE.y,
             VERSION_LINE.wrap,
-            VERSION_LINE.colour
+            VERSION_LINE.colour,
+            VERSION_LINE.string
         ),
-        (10, 60, 310, 16)
+        (10, 60, 310, 16, 18)
     );
-    assert!(!IntroTimeline::version(MODEL_SWITCH - 1, Some('V')));
-    assert!(!IntroTimeline::version(MODEL_SWITCH, Some('v')));
-    assert!(IntroTimeline::version(MODEL_SWITCH, Some('V')));
+    assert_eq!(INTRO_INPUT_FROM, 0x719668);
+    assert!(!IntroTimeline::version(INTRO_INPUT_FROM - 1, Some('V')));
+    assert!(IntroTimeline::version(INTRO_INPUT_FROM, Some('V')));
+    assert!(!IntroTimeline::version(INTRO_INPUT_FROM, Some('v')));
 }
 
 #[test]
-fn start_choices_map_to_ross_154_with_a_notice() {
+fn start_choices_are_read_every_frame_and_skip_maps_to_the_verified_type() {
     let intro = Intro::new();
+    // The boot loop reads the action from the first frame (0x400), not only
+    // after the intro's loop point (DOS `0x43c4f4`..`0x43c51b`).
     assert_eq!(
-        intro.key(INTRO_END, '1'),
+        intro.key(BOOT_TICS, '1'),
         Some(IntroAction::Start {
             requested: 1,
             chosen: 1,
@@ -46,7 +50,7 @@ fn start_choices_map_to_ross_154_with_a_notice() {
     );
     for key in ['2', '3', '4', '5'] {
         assert_eq!(
-            intro.key(INTRO_END, key),
+            intro.key(BOOT_TICS, key),
             Some(IntroAction::Start {
                 requested: key as u8 - b'0',
                 chosen: 1,
@@ -54,23 +58,39 @@ fn start_choices_map_to_ross_154_with_a_notice() {
             })
         );
     }
-    assert_eq!(
+    // DOS accepts 1-5 at any tics, including the last frame of the loop.
+    assert!(matches!(
         intro.key(INTRO_END - 1, '1'),
-        None,
-        "the intro is still running"
+        Some(IntroAction::Start { .. })
+    ));
+    // Any other key is F147(0); the port uses the verified type 1.
+    assert_eq!(
+        intro.key(BOOT_TICS, '\0'),
+        Some(IntroAction::Skip {
+            chosen: 1,
+            notice: Some("DOS boots start type 0; starting the verified type 1 (Ross 154)")
+        })
     );
-    assert_eq!(intro.key(INTRO_END, '0'), None);
-    assert_eq!(intro.key(INTRO_END, '6'), None);
+    // V is a no-op before the DOS gate and latches the version after it.
+    assert_eq!(intro.key(BOOT_TICS, 'V'), None);
+    assert_eq!(intro.key(INTRO_INPUT_FROM, 'V'), Some(IntroAction::Version));
+    assert_eq!(
+        intro.key(BOOT_TICS, '0'),
+        Some(IntroAction::Skip {
+            chosen: 1,
+            notice: Some("DOS boots start type 0; starting the verified type 1 (Ross 154)")
+        })
+    );
 }
 
 #[test]
 fn the_model_bitmap_and_animation_follow_the_original_thresholds() {
-    let start = IntroTimeline::at(0);
-    assert_eq!((start.model, start.animation), (MODEL_FIRST, 0));
+    let start = IntroTimeline::at(BOOT_TICS);
+    assert_eq!((start.model, start.animation), (MODEL_FIRST, 1));
     assert!(!start.bitmap && !start.finished && start.lines.is_empty());
 
     // 10.0 s: 497,000 tics, just before F962's 0x795cc bitmap. The credits do
-    // not start until the model switch (F962 returns early before it).
+    // not start until the model switch.
     let ten = IntroTimeline::at(497_000);
     assert_eq!(ten.animation, 485);
     assert!(!ten.bitmap);
@@ -93,6 +113,21 @@ fn the_model_bitmap_and_animation_follow_the_original_thresholds() {
         1,
         "0x7ff tics after the switch is still animation 1"
     );
+}
+
+#[test]
+fn the_boot_clock_starts_at_0x400_and_loops_at_the_original_point() {
+    assert_eq!(BOOT_TICS, 0x400);
+    assert_eq!(TICS_PER_FRAME, 0x3e2);
+    // One 20 ms frame at 1x adds 994 tics (49,700/s).
+    assert_eq!(IntroTimeline::advance(BOOT_TICS, 20), BOOT_TICS + 994);
+    assert_eq!(IntroTimeline::advance(BOOT_TICS, 0), BOOT_TICS);
+    assert_eq!(
+        IntroTimeline::advance(INTRO_END - 1, 20),
+        0,
+        "the original restarts at 0 after the clear/flip/clear"
+    );
+    assert_eq!(IntroTimeline::advance(INTRO_END, 20), 0);
 }
 
 #[test]
@@ -152,12 +187,12 @@ fn every_credit_line_covers_exactly_its_threshold_window() {
             (5, 68, 310),
         ]
     );
+    let strings: Vec<usize> = INTRO_LINES.iter().map(|line| line.string).collect();
+    assert_eq!(
+        strings,
+        vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 12, 14, 15, 16, 17]
+    );
     for (index, line) in INTRO_LINES.iter().enumerate() {
-        assert!(line.text.is_ascii(), "line {index} is not plain ASCII");
-        assert!(!line
-            .text
-            .chars()
-            .any(|c| matches!(c, '\r' | '\u{fe}' | '\u{fd}')));
         assert!(
             line.visible(line.first),
             "line {index} not at its first tic"
@@ -215,10 +250,12 @@ fn overlapping_credits_both_draw() {
     assert_eq!(both.lines.len(), 2, "{:?}", both.lines);
     assert_eq!(both.lines[0].x, 20);
     assert_eq!(both.lines[1].x, 140);
+    assert_eq!(both.lines[0].code, 0x9428, "Journal Entries");
+    assert_eq!(both.lines[1].code, 0x9427, "Representation");
     let both = IntroTimeline::at(0x6d0955);
     assert_eq!(both.lines.len(), 2, "{:?}", both.lines);
-    assert_eq!(both.lines[0].text, INTRO_LINES[14].text);
-    assert_eq!(both.lines[1].text, INTRO_LINES[15].text);
+    assert_eq!(both.lines[0].code, 0x941b + 14);
+    assert_eq!(both.lines[1].code, 0x941b + 15);
 }
 
 #[test]

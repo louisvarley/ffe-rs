@@ -174,7 +174,7 @@ window.FFE_BURNDOWN = {
         { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "done", version: "v0.56" },
         { id: "ui-5", title: "Menu and text rendering for every screen", status: "in-progress", version: "v0.58" },
         { id: "ui-6", title: "Galaxy and system map screens", status: "done", version: "v0.48n" },
-        { id: "ui-7", title: "Intro and new-game flow", status: "in-progress", version: "v0.48p" },
+        { id: "ui-7", title: "Intro and new-game flow", status: "done", version: "v0.64" },
         { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
         { id: "ui-9", title: "Options, key bindings screen", status: "done", version: "v0.48p" },
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "todo" },
@@ -520,6 +520,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 71,
       note: "shipai merged (v0.63): the encoded DATA_006258 AI table and the transit/hold/attack/escort/pass/flee/dead/escaped states, F585's turn limits and statistics-based speeds replace the constant-speed placeholder; pirates fire through F931/F930 and F953 damages the player through one reconciled Flight::take_damage/ensure_damage/hit API. Police and wanted status (Navigator::legal, player_attack, provoke, F697 bounties) and F674/F675/F680 jump persistence/F927 recycle are in. JJFFE disables AI laser damage; the port follows DOS FFE and fires. Remaining: full docking AI, missiles, police spawns/fines/HUD badge, Thargoids; owner decisions open on the 25% flee trigger vs F737, MAX_SHIPS=5 and the no-generator two-hit player. One item added and completed (gameplay-18), so the remaining count is unchanged; gameplay-6/gameplay-7 stay in progress."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 70,
+      note: "Intro merged (v0.64): the default boot plays F961/F962 (models 177/176, bitmap 0x42, the DOS credits with their FD/FE/01 layout codes and the 0x400 GameTics clock), the V version gate, keys 1-5 and --capture-intro; cache v27 adds base:text/intro-credits and base:text/char-widths (1796 assets) with old v26 caches still loading but the intro reporting missing assets. Remaining: the dynamic upper palette, model 176's stale-basis frames, an intro music backend (song 0 not played), start types 2-5/type 0 mapping and the first in-game frame hand-off (ui-7 done)."
     }
   ]
 };

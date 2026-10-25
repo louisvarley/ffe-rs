@@ -7,6 +7,7 @@ use ffe_rs::console::{
 };
 use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Controls, Flight, STEP};
+use ffe_rs::front_end::{self, Intro, IntroAction, IntroTimeline};
 use ffe_rs::galaxy_map::GalaxyMap;
 use ffe_rs::hud::PlayerHud;
 use ffe_rs::input;
@@ -71,6 +72,9 @@ struct Options {
     /// Directory for one frame of every preference page plus a flight frame
     /// showing the selected space colour; exits without opening a window.
     capture_prefs: Option<PathBuf>,
+    /// Directory for the intro's sample frames at fixed `GameTics`; exits without
+    /// opening a window.
+    capture_intro: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -83,6 +87,7 @@ fn options() -> Result<Options, String> {
     let mut boot_given = false;
     let mut skip_intro = false;
     let mut capture_prefs = None;
+    let mut capture_intro = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
@@ -132,6 +137,10 @@ fn options() -> Result<Options, String> {
             capture_prefs = Some(PathBuf::from(
                 args.next().ok_or("--capture-prefs requires a directory")?,
             ));
+        } else if arg == "--capture-intro" && capture_intro.is_none() {
+            capture_intro = Some(PathBuf::from(
+                args.next().ok_or("--capture-intro requires a directory")?,
+            ));
         } else if arg == "--smoke-frames" && smoke_frames.is_none() {
             let frames = args
                 .next()
@@ -144,7 +153,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -172,6 +181,7 @@ fn options() -> Result<Options, String> {
         boot,
         skip_intro,
         capture_prefs,
+        capture_intro,
     })
 }
 
@@ -245,6 +255,109 @@ fn write_shot(dir: &Path, name: &str, screen: &Screen) {
     let _ = fs::write(dir.join(name), out);
 }
 
+/// The intro's sample `GameTics`: boot, the bitmap boundary, the model switch,
+/// the first credit's end, a mid-credit, the last two credits and the loop point.
+fn write_intro_capture(
+    screen: &mut Screen,
+    scene: Option<&ModelViewer>,
+    dir: &Path,
+) -> Result<(), String> {
+    for tics in [
+        front_end::BOOT_TICS,
+        0x795cc,
+        0x795cd,
+        front_end::MODEL_SWITCH,
+        0xfbd3a,
+        0x181534,
+        0x77a7d8,
+        front_end::INTRO_END - 1,
+    ] {
+        screen.draw_intro(scene, tics, false)?;
+        write_shot(dir, &format!("intro-{tics:08x}.ppm"), screen);
+    }
+    // The DOS version line latches on V from 0x719668.
+    screen.draw_intro(scene, front_end::INTRO_INPUT_FROM, true)?;
+    write_shot(dir, "intro-version.ppm", screen);
+    Ok(())
+}
+
+fn intro_key(key: Key) -> Option<char> {
+    match key {
+        Key::Key1 => Some('1'),
+        Key::Key2 => Some('2'),
+        Key::Key3 => Some('3'),
+        Key::Key4 => Some('4'),
+        Key::Key5 => Some('5'),
+        Key::V => Some('V'),
+        // Modifiers alone are not GUI actions in the original.
+        Key::LeftShift
+        | Key::RightShift
+        | Key::LeftCtrl
+        | Key::RightCtrl
+        | Key::LeftAlt
+        | Key::RightAlt
+        | Key::LeftSuper
+        | Key::RightSuper => None,
+        // DOS's "any other key" arm (F147(0)).
+        _ => Some('\0'),
+    }
+}
+
+/// F961/F962 in the original's boot loop: `GameTics` starts at 0x400, advances
+/// by the timer's tics, and the screen is redrawn every frame. A start key (1-5)
+/// leaves with that type; any other key is DOS `F147(0)` and this port maps it to
+/// the verified type 1. V latches the version line from 0x719668.
+fn run_intro(
+    window: &mut Window,
+    screen: &mut Screen,
+    scene: Option<&ModelViewer>,
+) -> Result<u8, String> {
+    let intro = Intro::new();
+    let mut tics = front_end::BOOT_TICS;
+    let mut version = false;
+    let mut last = Instant::now();
+    loop {
+        if !window.is_open() {
+            return Ok(1);
+        }
+        screen.draw_intro(scene, tics, version)?;
+        window
+            .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
+            .map_err(|e| format!("Window update: {e}"))?;
+        for key in window.get_keys_pressed(KeyRepeat::No) {
+            let Some(character) = intro_key(key) else {
+                continue;
+            };
+            let Some(action) = intro.key(tics, character) else {
+                continue;
+            };
+            match action {
+                IntroAction::Version => version = true,
+                IntroAction::Start {
+                    requested,
+                    chosen,
+                    notice,
+                } => {
+                    if let Some(notice) = notice {
+                        eprintln!("Intro start key {requested}: {notice}");
+                    }
+                    return Ok(chosen);
+                }
+                IntroAction::Skip { chosen, notice } => {
+                    if let Some(notice) = notice {
+                        eprintln!("{notice}");
+                    }
+                    return Ok(chosen);
+                }
+            }
+        }
+        let now = Instant::now();
+        let elapsed = now.duration_since(last).as_millis().min(100) as u32;
+        last = now;
+        tics = IntroTimeline::advance(tics, elapsed);
+    }
+}
+
 fn run() -> Result<(), String> {
     let options = options()?;
     let cache = ffe_content::read(&read_cache(&options.root.join("data.bin"))?)?;
@@ -284,6 +397,12 @@ fn run() -> Result<(), String> {
             );
             write_shot(dir, name, &screen);
         }
+        return Ok(());
+    }
+    if let Some(dir) = &options.capture_intro {
+        fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        let scene = ModelViewer::new(&cache).ok();
+        write_intro_capture(&mut screen, scene.as_ref(), dir)?;
         return Ok(());
     }
     let save_dir = options.root.join("saves");
@@ -360,6 +479,16 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // The original's boot shows the intro until a start key. Scripted captures and
+    // the smoke frame count skip it; --start sol is the development sandbox.
+    let scripts = options.smoke_frames.is_some()
+        || options.capture.is_some()
+        || options.capture_planet.is_some()
+        || options.capture_traffic.is_some();
+    let mut boot = options.boot;
+    if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(1)) {
+        boot = Boot::NewGame(run_intro(&mut window, &mut screen, scene.as_ref())?);
+    }
     // F569's scan needs the model collision streams and the terrain tables. They
     // are borrowed from the cache for the whole run.
     let landing_library = ffe_rs::navigation::Library(&cache);
@@ -384,7 +513,7 @@ fn run() -> Result<(), String> {
     // The systems, their bodies and the autopilot (Tab, G, Backspace). The default
     // boot is the original's new game at Ross 154; `--start sol` keeps the
     // development sandbox for the existing tests and screenshots.
-    let mut nav = match options.boot {
+    let mut nav = match boot {
         Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
         Boot::Sandbox => Navigator::new(&cache),
     }

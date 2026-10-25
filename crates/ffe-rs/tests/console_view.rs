@@ -52,6 +52,9 @@ fn the_labels_and_navigation_buttons_show_their_on_images() {
         console: ConsoleState::default(),
         ..ViewState::default()
     };
+    // F991 shows the 0x11 navigation button only with the navigation computer
+    // fitted (general-equipment bit 5); the fixture is otherwise an empty ship.
+    screen.systems.general |= 1 << 5;
 
     screen.draw(&state, views, None, false, false, "");
     let off = screen.logical_pixels().to_vec();

@@ -6,6 +6,7 @@ use crate::hud::{
     TURRET_POS,
 };
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
+use crate::intro_text::IntroText;
 use crate::messages::MessageLog;
 use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
@@ -280,6 +281,13 @@ pub struct Screen {
     /// The SysMenu's on/off icon bitmaps (primary 0x2c/0x2d), when cached.
     prefs_on: Option<IndexedImage>,
     prefs_off: Option<IndexedImage>,
+    /// F962's primary bitmap 0x42 (the "FIRST ENCOUNTERS" strip), cache v2+.
+    intro_bitmap: Option<IndexedImage>,
+    /// The raw credits and F1398 width table (cache v27).
+    intro_text: Option<IntroText>,
+    /// One-shot report for model 176's undefined-stack child basis (see
+    /// `docs/notes/animation.md` section 1.2).
+    intro_error_reported: bool,
     jitter: Jitter,
 }
 
@@ -295,6 +303,28 @@ struct Jitter {
     start: [u32; 2],
     /// State after the last drawn object, in draw order.
     cursor: [u32; 2],
+}
+
+fn indexed_bitmap(cache: &VerifiedCache, id: &str) -> Option<IndexedImage> {
+    let record = cache.manifest().files.iter().find(|r| r.id == id)?;
+    match record.asset {
+        AssetKind::IndexedBitmap {
+            width,
+            height,
+            offset_x,
+            offset_y,
+            masked_zero,
+            ..
+        } => IndexedImage::new(
+            width,
+            height,
+            [offset_x, offset_y],
+            masked_zero,
+            cache.asset(id)?,
+        )
+        .ok(),
+        _ => None,
+    }
 }
 
 impl Default for Jitter {
@@ -337,6 +367,9 @@ impl Screen {
             panel,
             palette_rgb6(asset("base:palette/low")?)?,
         )?;
+        // F962's primary bitmap 0x42 and the raw credit/width assets (cache v27).
+        screen.intro_bitmap = indexed_bitmap(cache, "base:bitmap/primary/066");
+        screen.intro_text = IntroText::new(cache).ok();
         // Console bitmap ids 96 and up are the secondary table; the table has 251
         // entries, so the equipment page's 0x3a (268) and the lamps (up to 287)
         // are loaded too.
@@ -647,6 +680,9 @@ impl Screen {
             dock_icons: [None, None, None],
             prefs_on: None,
             prefs_off: None,
+            intro_bitmap: None,
+            intro_text: None,
+            intro_error_reported: false,
             jitter: Jitter::default(),
         })
     }
@@ -1152,6 +1188,79 @@ impl Screen {
                 }
             }
         }
+    }
+
+    /// F961 + F962 at one `GameTics`: clear to black, draw model 177/176 through
+    /// F1682/F1683, blit primary bitmap 0x42 at y 158, then the applicable
+    /// credits (and the version line once V latches it). The dynamic upper
+    /// palette (`F1575`/`F1330_DPalBuild`) is not reproduced: the model path
+    /// emits the original's fixed colours directly, as the flight view does.
+    pub fn draw_intro(
+        &mut self,
+        scene: Option<&ModelViewer>,
+        tics: u32,
+        version: bool,
+    ) -> Result<(), String> {
+        use crate::front_end::{IntroTimeline, PRIMARY_BITMAP_Y, VERSION_LINE};
+        let intro = IntroTimeline::at(tics);
+        self.frame[..LOGICAL_WIDTH * LOGICAL_HEIGHT].fill(self.palette[0]);
+        if let Some(viewer) = scene {
+            if intro.model != 0 {
+                // F959's DATA_007235/DATA_007236: object origin (0, 0, 0x14820)
+                // and the 0x7f000000 row scale (127/128), with the F961 animation
+                // word as global 0, not a raw tic count.
+                let rows = [
+                    [127.0 / 128.0, 0.0, 0.0],
+                    [0.0, 127.0 / 128.0, 0.0],
+                    [0.0, 0.0, 127.0 / 128.0],
+                ];
+                let inputs = AnimationInputs::original(
+                    u32::from(intro.animation) << 10,
+                    0,
+                    &viewer.shades(),
+                );
+                let frame = viewer.render_scene_with(
+                    intro.model,
+                    rows,
+                    [0.0, 0.0, 0x14820 as f64],
+                    viewer.light_direction(),
+                    &inputs,
+                )?;
+                if let Some(error) = frame.children_error.as_deref() {
+                    // Model 176's late animation calls a child frame that copies
+                    // a basis F1750 leaves as stale stack (animation.md §1.2).
+                    // The original would draw whatever that stack held; the port
+                    // cannot reproduce it, so report once and keep the credits.
+                    if !self.intro_error_reported {
+                        eprintln!("Intro model {}: {error}", intro.model);
+                        self.intro_error_reported = true;
+                    }
+                }
+                self.draw_shapes(viewer, &frame.shapes);
+            }
+        }
+        if intro.bitmap {
+            let bitmap = self
+                .intro_bitmap
+                .as_ref()
+                .ok_or("Cache lacks base:bitmap/primary/066 (F962's bitmap 0x42).")?;
+            let (width, _) = bitmap.size();
+            let x = 160 - width as i32 / 2;
+            let palette = self.palette;
+            bitmap.blit_rgb(&mut self.frame, &palette, x, PRIMARY_BITMAP_Y);
+        }
+        let text = self
+            .intro_text
+            .as_ref()
+            .ok_or("Cache lacks the intro credits/widths (cache v27).")?;
+        for line in &intro.lines {
+            text.draw(line, &self.font, &self.palette, &mut self.frame)?;
+        }
+        if version && tics >= crate::front_end::INTRO_INPUT_FROM {
+            text.draw(&VERSION_LINE, &self.font, &self.palette, &mut self.frame)?;
+        }
+        self.present();
+        Ok(())
     }
 
     pub fn draw(
