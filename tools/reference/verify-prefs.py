@@ -162,11 +162,10 @@ def main() -> int:
     if result.returncode:
         raise RuntimeError(f"prefs unit tests failed:\n{output[-3000:]}")
     passed = re.findall(r"^test (\S+) \.\.\. ok$", output, re.MULTILINE)
-    # The seven unit tests include the sound-row toggles added with the soundfx
-    # merge, the captured space-colour ramp and the controls branch's immediate
-    # preset-route test.
-    if len(passed) != 7:
-        raise RuntimeError(f"expected 7 prefs tests, ran {len(passed)}: {passed}")
+    # The eight unit tests include the sound-row toggles (soundfx), the captured
+    # space-colour ramp, the controls preset-route test and the display page.
+    if len(passed) != 8:
+        raise RuntimeError(f"expected 8 prefs tests, ran {len(passed)}: {passed}")
     print(json.dumps({
         "scenario": "ffe-prefs-v1",
         "pages": {str(page): len(values) for page, values in page_runs.items()},

@@ -22,6 +22,8 @@ entries are the pages, in this order, shown in the main menu's left column:
 | 2 | Sound Effects | `Sound Effects:` / `Choose Music From:` | `DATA_004965` (4190) |
 | 3 | Others | `Other Options:` | `DATA_004966` (4210) |
 | 4 | Maps | `Map Options:` | `DATA_004967` (4218) |
+| 5 | Port Options (port-only) | - | none |
+| 6 | Display Options (port-only) | - | none |
 
 The main menu (`DATA_004963`), exactly as the string draws it:
 
@@ -60,6 +62,14 @@ top-left. Only the 8x8 icon square is a hot area.
   `Choose Music From:` at (60, 0); the 16 songs at x 160, y = 0, 9, ... 135.
 - Page 3: heading at (32, 18); rows y = 28..118; `Main Menu` at (48, 136).
 - Page 4: heading at (32, 18); rows y = 28..68; `Main Menu` at (48, 136).
+- Page 5 (port-only `Port Options`): heading (32, 18); `Controls:` (32, 28);
+  `Modern`/`Classic` rows at x 32, y 38/48; control help at (48, 62..92);
+  `Display Options` row at (32, 104); `Main Menu` at (48, 136).
+- Page 6 (port-only `Display Options`): heading (32, 18); `Window scale:` (32, 26)
+  and 1x..6x rows at x 32, y 36..86; `Fit:` (176, 26) and two rows at y 36/46;
+  `Filter:` (176, 60) and two rows at y 70/80; `Pixels:` (176, 94) and two rows
+  at y 104/114; `Fullscreen` at (32, 104); help at (32, 122); `Main Menu` at
+  (48, 136). The original main menu and pages 0-4 are unchanged.
 
 The text is white (15), headings and the two leaving actions red (16) and the
 commander line green (17); `0x2c` is a red square with a dark red body, `0x2d`
@@ -163,8 +173,14 @@ reproduce the intermediate pause step (`docs/DEVIATIONS.md`, EXP-012).
   keeps the original label, default and icon but is greyed and inert, with a
   page footnote.
 - Port additions (grey/yellow, documented): page 5 `Port Options` in the empty
-  row at y 68, with `Modern`/`Classic`; the label `Quit` instead of `Quit to
-  DOS`; keyboard navigation (arrow keys, Enter, Backspace) and a `>` marker.
+  row at y 68, with `Modern`/`Classic` and the `Display Options` entry; page 6
+  `Display Options` with window scale 1x-6x, pixel-perfect/fill-window fit,
+  nearest/linear filter, 4:3/square pixels and a full-screen toggle (see
+  `docs/notes/display.md`); the label `Quit` instead of `Quit to DOS`; keyboard
+  navigation (arrow keys, Enter, Backspace) and a `>` marker.
+- Persisted: `saves/controls.cfg` (Modern/Classic) and `saves/display.cfg`
+  (scale, fit, filter, pixels). Full-screen and the other page values are
+  session-only.
 - Not ported: commander rename (`0x8c`), Load/Save/Delete/New Game dialogs, the
   music list selection, shape-detail application, targeting tunnels, filename
   extensions, video, map toggles, and the original's runtime upper-palette lookup

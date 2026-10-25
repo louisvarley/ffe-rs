@@ -1,8 +1,11 @@
 //! The Escape preference pages: layout, hot areas, keys, the applied settings
 //! and the space colour in the drawn frame.
+use ffe_rs::display::{DisplaySettings, Filter, FitMode, PixelAspect};
 use ffe_rs::flight::Flight;
 use ffe_rs::indexed::IndexedImage;
-use ffe_rs::prefs::{self, Activate, Key, Prefs, GRAPHIC, MAIN, MAPS, OTHERS, PORT, SOUND};
+use ffe_rs::prefs::{
+    self, Activate, Key, Prefs, DISPLAY, GRAPHIC, MAIN, MAPS, OTHERS, PORT, SOUND,
+};
 use ffe_rs::screen::Screen;
 
 #[test]
@@ -145,6 +148,44 @@ fn the_f3_switch_flips_the_preset_and_the_page_shows_it() {
     // The page switches the same value back immediately.
     assert_eq!(prefs.click(34, 38), Activate::None);
     assert!(prefs.modern);
+}
+
+#[test]
+fn display_page_sets_the_port_only_presentation_options() {
+    let mut prefs = Prefs::default();
+    prefs.escape();
+    prefs.page = DISPLAY;
+    assert_eq!(prefs.display, DisplaySettings::default());
+    let labels: Vec<&str> = prefs.rows().iter().map(|row| row.label).collect();
+    assert!(labels.contains(&"4x"));
+    assert!(labels.contains(&"Pixel-perfect"));
+    assert!(labels.contains(&"Nearest"));
+    assert!(labels.contains(&"4:3 (DOS)"));
+    assert!(labels.contains(&"Fullscreen"));
+    // 3x, fill window, linear, square pixels.
+    prefs.click(34, 56);
+    prefs.click(178, 46);
+    prefs.click(178, 80);
+    prefs.click(178, 114);
+    assert_eq!(
+        prefs.display,
+        DisplaySettings {
+            scale: 3,
+            fit: FitMode::FillWindow,
+            filter: Filter::Linear,
+            aspect: PixelAspect::Square,
+        }
+    );
+    // Out-of-range scale rows do nothing.
+    assert_eq!(prefs.apply(prefs::Action::WindowScale(0)), Activate::None);
+    assert_eq!(prefs.display.scale, 3);
+    // The Main Menu row returns to the original page list.
+    assert_eq!(prefs.click(34, 136), Activate::None);
+    assert_eq!(prefs.page, MAIN);
+    // Port Options opens the display page from its port-only row at y 104.
+    prefs.page = PORT;
+    assert_eq!(prefs.click(34, 104), Activate::None);
+    assert_eq!(prefs.page, DISPLAY);
 }
 
 #[test]

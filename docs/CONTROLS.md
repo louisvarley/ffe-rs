@@ -108,6 +108,17 @@ the yaw keys/axis and the pitch keys/axis, and flips the mouse x and y.
   (`ffe_rs::settings`). A missing or malformed file falls back to Modern. The
   other preference values remain session-only.
 
+## Display (port extension)
+
+- **Alt+Enter** toggles a borderless full-screen window. The same toggle is the
+  `Fullscreen` row on `Escape` -> `Port Options` -> `Display Options`.
+- The display page also sets window scale 1x-6x, pixel-perfect or fill-window
+  fit, nearest or linear filtering and 4:3 or square pixels. Choices apply
+  immediately (the window is reopened because minifb 0.28 cannot resize live)
+  and are stored in `saves/display.cfg`. Full-screen is session-only.
+- These are presentation choices only: the 320x200 framebuffer, the simulation
+  and every capture are unchanged (`docs/notes/display.md`, `EXP-017`).
+
 ## Audit and fixes (2026-10-25)
 
 | Action | Before | Now |
@@ -144,8 +155,10 @@ the left-button pointer are intentionally shared.
   the radio marks on the page.
 - `crates/ffe-rs/src/settings.rs`: the `controls.cfg` round trip and malformed
   file fallback.
-
-Evidence: `docs/evidence/controls/README.md`.
+- `crates/ffe-rs/src/display.rs` and `tests/prefs.rs`: fit rectangles, nearest
+  and linear scaling, mouse mapping, the display page and the `display.cfg`
+  round trip (`docs/notes/display.md`).
+- Evidence: `docs/evidence/controls/README.md` and `docs/evidence/display/`.
 
 ## Remaining differences and owner decisions
 
@@ -158,5 +171,5 @@ Evidence: `docs/evidence/controls/README.md`.
 - Mouse sensitivity is one logical pixel per F1038 count. The original scales
   DirectInput mickeys, so this may need a sensitivity option after an owner
   playtest.
-- `saves/controls.cfg` is the only persisted preference; the original's
-  commander-file preference block is not imported.
+- `saves/controls.cfg` and the port-only `saves/display.cfg` are the persisted
+  preferences; the original's commander-file preference block is not imported.
