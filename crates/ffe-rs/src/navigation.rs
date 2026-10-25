@@ -1520,12 +1520,39 @@ impl Navigator {
     /// spawns on entering a system and restores the ships from the save; the
     /// port keeps a killed ship killed until the system is entered again. The
     /// ships F675 kept across the last jump are restored first (F680).
-    /// Returns whether traffic was spawned.
+    /// Returns whether traffic was spawned. `F35(0x16)` is zero here: the
+    /// mission scripts that set it are not ported, so normal systems have no
+    /// Thargoids (see [`Self::spawn_thargoid_traffic`]).
     pub fn spawn_traffic(
         &mut self,
         cache: &VerifiedCache,
         player: [i64; 3],
         forward: [f64; 3],
+    ) -> bool {
+        self.spawn_traffic_with(cache, player, forward, 0)
+    }
+
+    /// F690's Thargoid branch with an explicit `F35(0x16)` count: the hook a
+    /// ported mission script would use. The count is not a rate and is not set
+    /// by any system record; zero spawns nothing. Forces the F688 spawner to run
+    /// even when this system already has traffic.
+    pub fn spawn_thargoid_traffic(
+        &mut self,
+        cache: &VerifiedCache,
+        player: [i64; 3],
+        forward: [f64; 3],
+        count: usize,
+    ) -> bool {
+        self.spawned = None;
+        self.spawn_traffic_with(cache, player, forward, count)
+    }
+
+    fn spawn_traffic_with(
+        &mut self,
+        cache: &VerifiedCache,
+        player: [i64; 3],
+        forward: [f64; 3],
+        thargoids: usize,
     ) -> bool {
         if self.spawned == Some(self.current) {
             return false;
@@ -1538,6 +1565,7 @@ impl Navigator {
         };
         let code = self.entries[self.current].params.code;
         let details = tables.details(code);
+        let system = npc::System::new(details, thargoids);
         let allegiance = details.allegiance >> 6;
         let anchors: Vec<Anchor> = self
             .bodies
@@ -1560,7 +1588,7 @@ impl Navigator {
             player,
             forward,
             &anchors,
-            &details,
+            &system,
             allegiance,
             &mut rng,
             |model| crate::ships::npc_spec(cache, model),

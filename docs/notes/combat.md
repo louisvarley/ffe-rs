@@ -486,7 +486,10 @@ is the single F942 test.
   contain NPC traffic (`docs/notes/npc.md`), so F953's damage, F942's
   destruction, model 157's shield-hit flash and the `(235,1)` readout are
   reachable for a locked or hit ship. The ships fire and have the flight/combat
-  AI (see above); docking, NPC missile launches and Thargoids remain absent.
+  AI (see above); docking and NPC missile launches remain absent. Thargoid
+  traffic exists through F690/`Navigator::spawn_thargoid_traffic` but has no
+  system trigger (its `F35(0x16)` count is mission-script data); see
+  `docs/notes/npc.md`.
   F942's model 0x9b explosion, F939's hit particle and F926's debris are ported
   and drawn (see §7).
 - **Rear and turret lasers.** The new-game Eagle has one mount; the port has
