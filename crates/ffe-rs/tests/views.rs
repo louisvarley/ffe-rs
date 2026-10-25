@@ -279,14 +279,21 @@ fn object_labels_follow_f989_bounds_and_f1108_position() {
         name: name.to_owned(),
         centre,
     };
-    // Straight ahead: screen (160, 79), and F1108 draws one pixel to the right.
+    // Straight ahead: screen (160, 79); F989 passes x + 3, y - 4 to F1108 and
+    // F1108 adds one to x, so the text pen is (164, 75).
     assert_eq!(
         body_label_positions(&[label("MARS", [0.0, 0.0, 1000.0])], &camera),
-        vec![("MARS".to_owned(), 161, 79)]
+        vec![("MARS".to_owned(), 164, 75)]
     );
     assert_eq!(
         body_label_positions(&[label("OFF", [100.0, 0.0, 1000.0])], &camera),
-        vec![("OFF".to_owned(), 186, 79)]
+        vec![("OFF".to_owned(), 189, 75)]
+    );
+    // A label near the top edge keeps F989's positive y but F1584 clips the
+    // rows above the screen; the pen y is negative.
+    assert_eq!(
+        body_label_positions(&[label("TOP", [-636.0, 312.0, 1024.0])], &camera),
+        vec![("TOP".to_owned(), 5, -3)]
     );
     // Behind the eye, at the near plane, off the left or below F989's limit.
     for centre in [
@@ -294,6 +301,7 @@ fn object_labels_follow_f989_bounds_and_f1108_position() {
         [0.0, 0.0, 1.0],
         [-5000.0, 0.0, 1000.0],
         [0.0, -1000.0, 100.0],
+        [0.0, -296.0, 1024.0], // projected y 153: y - 4 >= 0x95
     ] {
         assert!(
             body_label_positions(&[label("NO", centre)], &camera).is_empty(),
@@ -301,8 +309,13 @@ fn object_labels_follow_f989_bounds_and_f1108_position() {
         );
     }
     // x + 3 >= 316 is the right-hand limit (F989), even though the point is on
-    // the 320-pixel screen.
-    assert!(body_label_positions(&[label("EDGE", [1245.0, 0.0, 1000.0])], &camera).is_empty());
+    // the 320-pixel screen; x + 3 = 315 is still labelled (F1108 writes at 316,
+    // where F1587 starts no glyph, so nothing shows).
+    assert!(body_label_positions(&[label("EDGE", [612.0, 0.0, 1024.0])], &camera).is_empty());
+    assert_eq!(
+        body_label_positions(&[label("EDGE", [608.0, 0.0, 1024.0])], &camera),
+        vec![("EDGE".to_owned(), 316, 75)]
+    );
 }
 
 #[test]

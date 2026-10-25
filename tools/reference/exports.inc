@@ -383,6 +383,12 @@ _ref_light equ DATA_008821
 _ref_star_light equ DATA_008827
 _ref_light_timer equ DATA_008830
 
+; Flight-object name labels (--labels): F989's walk and F1108's text write.
+GLOBAL _ref_labels_989
+GLOBAL _ref_labels_1108
+_ref_labels_989 equ FUNC_000989
+_ref_labels_1108 equ FUNC_001108
+
 GLOBAL _ref_surface_cmd
 _ref_surface_cmd equ FUNC_001874
 GLOBAL _ref_surface

@@ -6,11 +6,11 @@
 
 use ffe_core::laser;
 use ffe_core::npc::Role;
-use ffe_rs::camera::ViewState;
+use ffe_rs::camera::{Camera, ViewState};
 use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::navigation::{Navigator, NEW_GAME_SHIP};
-use ffe_rs::screen::{Screen, SystemShip};
+use ffe_rs::screen::{model_scale, BodyLabel, Screen, SystemShip};
 
 fn cache() -> ffe_content::VerifiedCache {
     ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
@@ -29,6 +29,24 @@ fn save(screen: &Screen, name: &str) {
 
 fn changed(before: &[u32], after: &[u32]) -> usize {
     before.iter().zip(after).filter(|(a, b)| a != b).count()
+}
+
+/// The bounding box `(x0, x1, y0, y1)` of the pixels that differ in the upper
+/// view (the label button's own image changes in the console below row 158).
+fn bounds(before: &[u32], after: &[u32]) -> Option<(i32, i32, i32, i32)> {
+    let mut boxed: Option<(i32, i32, i32, i32)> = None;
+    for y in 0..158 {
+        for x in 0..320 {
+            if before[y * 320 + x] != after[y * 320 + x] {
+                let (x, y) = (x as i32, y as i32);
+                boxed = Some(match boxed {
+                    None => (x, x, y, y),
+                    Some((x0, x1, y0, y1)) => (x0.min(x), x1.max(x), y0.min(y), y1.max(y)),
+                });
+            }
+        }
+    }
+    boxed
 }
 
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
@@ -110,6 +128,173 @@ fn setup(
     };
     state.axes = Some(look_at(from, target.map(|v| v as f64 / unit)));
     (nav, viewer, screen, state, ViewState::default(), index)
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn system_ship_label_sits_at_the_projected_centre_in_the_fixed_font() {
+    let cache = cache();
+    let (nav, viewer, mut screen, state, views, index) = setup(&cache);
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let name = nav.ships[index].name.clone();
+    let centre = nav.ships[index].position.map(|v| v as f64 / unit);
+    let labels_on = ViewState {
+        console: ffe_rs::console::ConsoleState {
+            labels: true,
+            ..ffe_rs::console::ConsoleState::default()
+        },
+        ..views
+    };
+
+    // The view without ships or labels, as the pixel reference.
+    ships(&mut screen, &nav);
+    screen.ships.clear();
+    screen.labels.clear();
+    screen.draw(&state, views, Some(&viewer), false, true, "");
+    let empty = screen.logical_pixels().to_vec();
+
+    // The ship's projected rect.
+    ships(&mut screen, &nav);
+    screen.draw(&state, views, Some(&viewer), false, true, "");
+    let ship_frame = screen.logical_pixels().to_vec();
+    let ship_box = bounds(&empty, &ship_frame).expect("the ship drew");
+    save(&screen, "label-ship.ppm");
+
+    // The label alone: with the model absent, none of its ink is overwritten.
+    screen.ships.clear();
+    screen.labels = vec![BodyLabel {
+        name: name.clone(),
+        centre,
+    }];
+    screen.draw(&state, labels_on, Some(&viewer), false, true, "");
+    let label_frame = screen.logical_pixels().to_vec();
+    let label_box = bounds(&empty, &label_frame).expect("the label drew");
+    save(&screen, "label-only.ppm");
+
+    let (sx, sy, _) = Screen::body_screen(&state, &views, Some(&viewer), centre, 0.0).unwrap();
+    // F989 gives F1108 (x + 3, y - 4) and F1108 adds one to x. The name begins
+    // with M, whose ink starts at glyph column 0, row 0.
+    assert_eq!((label_box.0, label_box.2), (sx + 4, sy - 4), "{name}");
+    let height = label_box.3 - label_box.2 + 1;
+    assert!(
+        (6..=9).contains(&height),
+        "label ink {height} rows is not the 9-row main font: {label_box:?}"
+    );
+    // The label's pen is at the ship's projected centre and its ink overlaps
+    // the ship's projected rect (it is not offset off the model).
+    assert!(
+        label_box.0 <= ship_box.1
+            && label_box.1 >= ship_box.0
+            && label_box.2 <= ship_box.3
+            && label_box.3 >= ship_box.2,
+        "label {label_box:?} does not meet the ship {ship_box:?}"
+    );
+
+    // Ten times farther: the label keeps the same fixed font size (F1108 does
+    // not scale with distance); only the projected point moves.
+    let mut far = state.clone();
+    far.position = std::array::from_fn(|k| centre[k] + (state.position[k] - centre[k]) * 10.0);
+    screen.labels.clear();
+    screen.draw(&far, views, Some(&viewer), false, true, "");
+    let far_empty = screen.logical_pixels().to_vec();
+    screen.labels = vec![BodyLabel { name, centre }];
+    screen.draw(&far, labels_on, Some(&viewer), false, true, "");
+    let far_frame = screen.logical_pixels().to_vec();
+    let far_box = bounds(&far_empty, &far_frame).expect("the far label drew");
+    let (fx, fy, _) = Screen::body_screen(&far, &views, Some(&viewer), centre, 0.0).unwrap();
+    assert_eq!((far_box.0, far_box.2), (fx + 4, fy - 4));
+    assert_eq!(far_box.3 - far_box.2, label_box.3 - label_box.2);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn several_ship_labels_and_a_label_at_the_view_edge() {
+    let cache = cache();
+    let (mut nav, viewer, mut screen, state, mut views, page) = setup(&cache);
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let stats = viewer.ship_stats(state.ship);
+    let scale = model_scale(&viewer).unwrap();
+    let camera = Camera::new(&state, &views, stats.as_ref(), scale);
+    // A world point whose projection is exactly (sx, sy) at view depth z.
+    let at_screen = |sx: f64, sy: f64, z: f64| -> [f64; 3] {
+        let v = [(sx - 160.0) * z / 256.0, (79.0 - sy) * z / 256.0, z];
+        std::array::from_fn(|i| {
+            camera.position[i]
+                + camera.axes[0][i] * v[0]
+                + camera.axes[1][i] * v[1]
+                + camera.axes[2][i] * v[2]
+        })
+    };
+    // Three traffic ships across the view, one of them the locked target.
+    let places = [
+        (104.0, 50.0, 40.0),
+        (160.0, 100.0, 30.0),
+        (232.0, 132.0, 55.0),
+    ];
+    let mut ships = Vec::new();
+    let mut labels = Vec::new();
+    for (k, ship) in nav.ships.iter_mut().enumerate().take(places.len()) {
+        let (sx, sy, z) = places[k];
+        ship.position = at_screen(sx, sy, z).map(|v| (v * unit).round() as i64);
+        ships.push(SystemShip {
+            model: ship.model,
+            centre: ship.position.map(|v| v as f64 / unit),
+            axes: ship.axes(),
+            flash: false,
+            dead: false,
+        });
+        labels.push(BodyLabel {
+            name: ship.name.clone(),
+            centre: ship.position.map(|v| v as f64 / unit),
+        });
+    }
+    // A name at the right edge (its pen is x 312, so the last glyphs clip) and
+    // one at the top edge (pen y -1: the first rows are clipped).
+    for (name, sx, sy) in [("RIGHT EDGE", 308.0, 60.0), ("TOP EDGE", 40.0, 3.0)] {
+        labels.push(BodyLabel {
+            name: name.to_owned(),
+            centre: at_screen(sx, sy, 35.0),
+        });
+    }
+    nav.lock_ship(nav.ships[page].id);
+    screen.ships = ships;
+    screen.labels = labels;
+    screen.target_hud = Some(ffe_rs::screen::TargetHud {
+        x: 104,
+        y: 50,
+        value: 2,
+        au: false,
+        behind: false,
+        offscreen: false,
+    });
+    screen.target_damage = None;
+    views.console.labels = true;
+    screen.draw(&state, views, Some(&viewer), false, true, "");
+    save(&screen, "labels-several.ppm");
+
+    // Every label's pen is F1108's projected point + (4, -4); the edge labels
+    // are accepted by F989's bounds and clipped by the text writer.
+    let positions = screen.label_positions(&camera);
+    assert_eq!(positions.len(), 5);
+    for (name, x, y) in &positions {
+        let centre = screen
+            .labels
+            .iter()
+            .find(|label| label.name == *name)
+            .map(|label| camera.project(label.centre, true).unwrap())
+            .unwrap();
+        assert_eq!((*x, *y), (centre.0 + 4, centre.1 - 4));
+    }
+    let top = positions
+        .iter()
+        .find(|(name, _, _)| name == "TOP EDGE")
+        .unwrap();
+    assert!(top.2 < 0, "the top-edge label pen is {}", top.2);
+    let right = positions
+        .iter()
+        .find(|(name, _, _)| name == "RIGHT EDGE")
+        .unwrap();
+    assert_eq!(right.1, 312);
 }
 
 #[test]

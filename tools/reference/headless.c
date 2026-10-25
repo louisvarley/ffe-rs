@@ -22,6 +22,8 @@ extern unsigned long ref_timer_last, ref_timer_next, ref_timer_min;
 extern unsigned char *ref_framebuffer;
 extern int ref_draw_char(int glyph, int colour, int x, int y, int min_y, int max_y);
 extern int ref_char_width(int code);
+extern void ref_labels_989(unsigned char *list, void (*callback)(unsigned char *, int, int));
+extern void ref_labels_1108(unsigned char *object, int x, int y);
 extern void *ref_blit_index(void *buffer, int index, int x, int y);
 extern unsigned long *ref_model(int index);
 extern long *ref_vertex(void *instance, int index);
@@ -789,6 +791,88 @@ static int vectors(void)
         }
     }
     if (fflush(stdout)) fail("cannot flush numeric vectors");
+    return 0;
+}
+
+/* --labels: F989's object walk and F1108's name write over synthetic objects.
+   The list has one flag byte per slot at list[i] and objects at
+   list + 0x74 + i * 0x152 (F1531). One live slot per case; the callback records
+   F989's screen arguments and calls the real F1108 into the frame buffer. */
+static int label_called;
+static int label_x, label_y;
+
+static void label_capture(unsigned char *object, int x, int y)
+{
+    label_called = 1;
+    label_x = x;
+    label_y = y;
+    ref_labels_1108(object, x, y);
+}
+
+static int labels_vectors(void)
+{
+    static const struct {
+        int x, y;
+        unsigned model, parent, flags;
+        const char *name;
+    } cases[] = {
+        {160, 79, 0, 0, 0x08, "MORAY"},
+        {1, 1, 0, 0, 0x08, "EDGE"},
+        {2, 4, 0, 0, 0x08, "TOP"},
+        {160, 3, 0, 0, 0x08, "NEARTOP"},
+        {312, 79, 0, 0, 0x08, "RIGHT"},
+        {313, 79, 0, 0, 0x08, "NO"},
+        {160, 152, 0, 0, 0x08, "LOW"},
+        {160, 153, 0, 0, 0x08, "NO"},
+        {0, 79, 0, 0, 0x08, "NO"},
+        {160, 0, 0, 0, 0x08, "NO"},
+        {160, 79, 0x9a, 0, 0x08, "POD"},
+        {160, 79, 0, 0, 0x28, "REMOVED"},
+        {160, 79, 0, 0, 0x00, "IDLE"}
+    };
+    static unsigned char list[0x74 + 0x73 * 0x152];
+    size_t index;
+    ref_framebuffer = pixels;
+    fprintf(stderr, "JJFFE labels-v1: executed F989's object walk and F1108's name text for synthetic objects; screen args, bbox and pixels.\n");
+    for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+        unsigned char *object;
+        int x0 = 320, x1 = -1, y0 = 200, y1 = -1, x, y;
+        size_t length = strlen(cases[index].name);
+        if (length > 31) length = 31;
+        memset(list, 0, sizeof(list));
+        memset(pixels, 3, sizeof(pixels));
+        list[0x72] = (unsigned char)cases[index].flags;
+        object = list + 0x74 + 0x72 * 0x152;
+        object[0x82] = (unsigned char)cases[index].model;
+        object[0x83] = (unsigned char)(cases[index].model >> 8);
+        object[0x56] = (unsigned char)cases[index].parent;
+        object[0x98] = (unsigned char)cases[index].x;
+        object[0x99] = (unsigned char)(cases[index].x >> 8);
+        object[0x9a] = (unsigned char)cases[index].y;
+        object[0x9b] = (unsigned char)(cases[index].y >> 8);
+        memcpy(object + 0x124, cases[index].name, length + 1);
+        label_called = 0;
+        label_x = -99;
+        label_y = -99;
+        ref_labels_989(list, label_capture);
+        for (y = 0; y < 200; ++y)
+            for (x = 0; x < 320; ++x)
+                if (pixels[y * 320 + x] != 3) {
+                    if (x < x0) x0 = x;
+                    if (x > x1) x1 = x;
+                    if (y < y0) y0 = y;
+                    if (y > y1) y1 = y;
+                }
+        printf("{\"case\":%lu,\"name\":\"%s\",\"model\":%u,\"flags\":%u,\"object\":[%d,%d],"
+               "\"callback\":[%d,%d],\"drawn\":%s,\"bbox\":[%d,%d,%d,%d],"
+               "\"pixels_fnv1a64\":\"%016llx\"}\n",
+               (unsigned long)index, cases[index].name, cases[index].model,
+               cases[index].flags, cases[index].x, cases[index].y,
+               label_called ? label_x : 0, label_called ? label_y : 0,
+               label_called ? "true" : "false", x0, x1, y0, y1,
+               (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+    }
+    if (fflush(stdout)) fail("cannot flush label vectors");
     return 0;
 }
 
@@ -5618,6 +5702,7 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--commands")) return command_vectors();
     if (argc == 2 && !strcmp(argv[1], "--vectors")) return vectors();
     if (argc == 2 && !strcmp(argv[1], "--font")) return font_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--labels")) return labels_vectors();
     if (argc == 2 && !strcmp(argv[1], "--blit")) return blit_vectors();
     if (argc == 2 && !strcmp(argv[1], "--models")) return model_vectors();
     if (argc == 2 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(-1);

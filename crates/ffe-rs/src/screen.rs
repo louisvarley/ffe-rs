@@ -1224,6 +1224,14 @@ impl Screen {
     }
 
     fn text(&mut self, x: usize, y: usize, message: &str, colour: u8) {
+        self.text_screen(x, y as i32, message, colour);
+    }
+
+    /// F1584's text writer (`FUNC_001587_TextWriteInternal` + `F1598_DrawChar`)
+    /// at a signed y, clipped to the logical screen: glyph ink is clipped to
+    /// x 0..320 and y 0..200, and no glyph is started at x >= 0x13c (F1587's
+    /// right-hand limit, which keeps DrawChar's row writes on the buffer).
+    fn text_screen(&mut self, x: usize, y: i32, message: &str, colour: u8) {
         let bytes: Vec<u8> = message
             .chars()
             .map(|character| {
@@ -1234,25 +1242,41 @@ impl Screen {
                 }
             })
             .collect();
-        self.text_bytes(x, y, &bytes, colour);
+        self.text_bytes_rows(x, y, &bytes, colour, 0, 200);
     }
 
-    fn text_bytes(&mut self, x: usize, y: usize, message: &[u8], colour: u8) {
-        let mut cursor = x;
+    /// [`Self::text_screen`] with F1586's y clip (`top..bottom`).
+    fn text_bytes_rows(
+        &mut self,
+        x: usize,
+        y: i32,
+        message: &[u8],
+        colour: u8,
+        top: i32,
+        bottom: i32,
+    ) {
+        let mut cursor = x as i32;
         for &code in message {
+            // F1587 stops calling DrawChar once the pen reaches x 0x13c.
+            if cursor >= 0x13c {
+                break;
+            }
             if let Some(glyph) = self.font.glyph(code) {
                 for (col, row) in glyph.pixels() {
-                    if cursor + col < 320 && y + row < 200 {
-                        self.frame[(y + row) * 320 + cursor + col] =
+                    let px = cursor + col as i32;
+                    let py = y + row as i32;
+                    if (0..320).contains(&px) && (top..bottom).contains(&py) && py < 200 {
+                        self.frame[py as usize * 320 + px as usize] =
                             self.palette[usize::from(colour)];
                     }
                 }
-                cursor += glyph.advance;
-            }
-            if cursor >= 320 {
-                break;
+                cursor += glyph.advance as i32;
             }
         }
+    }
+
+    fn text_bytes(&mut self, x: usize, y: usize, message: &[u8], colour: u8) {
+        self.text_bytes_rows(x, y as i32, message, colour, 0, 200);
     }
 
     fn present(&mut self) {
@@ -1274,7 +1298,7 @@ impl Screen {
 
     fn draw_body_labels(&mut self, camera: &Camera) {
         for (name, x, y) in self.label_positions(camera) {
-            self.text(x as usize, y as usize, &name, 15);
+            self.text_screen(x as usize, y, &name, 15);
         }
     }
 
@@ -1291,22 +1315,7 @@ impl Screen {
                 }
             })
             .collect();
-        let mut cursor = x;
-        for &code in &bytes {
-            if let Some(glyph) = self.font.glyph(code) {
-                for (col, row) in glyph.pixels() {
-                    let py = y + row as i32;
-                    if cursor + col < 320 && (0..200).contains(&py) && (top..bottom).contains(&py) {
-                        self.frame[py as usize * 320 + cursor + col] =
-                            self.palette[usize::from(colour)];
-                    }
-                }
-                cursor += glyph.advance;
-            }
-            if cursor >= 320 {
-                break;
-            }
-        }
+        self.text_bytes_rows(x, y, &bytes, colour, top, bottom);
     }
 
     /// `F272`'s message window at x 196, y 159: the date/time header and up to ten
@@ -1640,7 +1649,7 @@ impl Screen {
                 self.draw_beam(scene, state, &beam, &camera);
             }
             // Text labels (`l`): the original's F989 walks the live objects and
-            // F1108 draws each name at its screen position (font 15, colour 15).
+            // F1108 draws each name at its screen position (colour 15).
             if world && views.console.labels {
                 self.draw_body_labels(&camera);
             }
@@ -2640,14 +2649,17 @@ impl Screen {
 
 /// The labels the original's F989/F1108 would draw: each object's name at its
 /// screen position, skipping the ones F989's bounds reject (x <= 0,
-/// x + 3 >= 316, y <= 0, y - 4 >= 149) and anything behind the eye.
+/// x + 3 >= 316, y <= 0, y - 4 >= 149) and anything behind the eye. F1108
+/// writes the name at the object's projected point plus `(+4, -4)`: F989 hands
+/// the text writer `x + 3, y - 4`, and F1108 adds the final `+1` to x. The y
+/// may be negative near the top edge; F1584 clips those rows.
 pub fn body_label_positions(labels: &[BodyLabel], camera: &Camera) -> Vec<(String, i32, i32)> {
     labels
         .iter()
         .filter_map(|label| {
             let (x, y) = camera.project(label.centre, true)?;
             (x > 0 && x + 3 < 0x13c && y > 0 && y - 4 < 0x95)
-                .then(|| (label.name.clone(), x + 1, y))
+                .then(|| (label.name.clone(), x + 4, y - 4))
         })
         .collect()
 }

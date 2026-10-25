@@ -113,12 +113,12 @@ fn the_labels_toggle_draws_the_objects_name_in_the_flight_view() {
     save(&screen, "labels-text-on.ppm");
 
     let (x, y, _) = Screen::body_screen(&state, &views, None, centre, 0.0).unwrap();
-    assert!(changed(&off, &on, x + 1, x + 48, y, y + 9) > 10);
+    assert!(changed(&off, &on, x + 4, x + 51, y - 5, y + 6) > 10);
     // Behind the eye, or in the console strip, F989 rejects the label.
     screen.labels[0].centre = [0.0, 0.0, -1000.0];
     screen.draw(&state, views, None, false, false, "");
     assert_eq!(
-        changed(&off, screen.logical_pixels(), x + 1, x + 48, y, y + 9),
+        changed(&off, screen.logical_pixels(), x + 4, x + 51, y - 5, y + 6),
         0
     );
 }
