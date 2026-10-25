@@ -356,6 +356,7 @@ fn earth_shape_kinds() {
             Shape::Curve(..) => "curve",
             Shape::Point(..) => "point",
             Shape::Textured(..) => "textured",
+            Shape::TexturedUv(..) => "textured-uv",
             Shape::Glow(..) => "glow",
             Shape::Label(..) => "label",
             Shape::Spans(..) => "spans",
@@ -363,6 +364,32 @@ fn earth_shape_kinds() {
         *counts.entry(name).or_insert(0) += 1;
     }
     eprintln!("{counts:?} skipped {}", frame.skipped);
+    // The planet's F1805/F1807 (descriptor) and F1806/F1808 (explicit u/v)
+    // entries now draw the real bitmaps from the cache: the surface is solid
+    // texture, not a flat stand-in, and every surface bitmap is the original's
+    // land/sea (0x40/0x121) or the explicit-coordinate terrain block (0x5e).
+    let textured: Vec<&ffe_rs::model_viewer::Textured> = frame
+        .shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Textured(textured) | Shape::TexturedUv(textured, _) => Some(textured),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !textured.is_empty(),
+        "the planet surface must use the texture path"
+    );
+    assert!(
+        textured
+            .iter()
+            .all(|t| matches!(t.bitmap & 0xfff, 0x40 | 0x5e | 0x121)),
+        "invented surface bitmap: {:?}",
+        textured
+            .iter()
+            .map(|t| t.bitmap & 0xfff)
+            .collect::<Vec<_>>()
+    );
     let mut sizes: Vec<i32> = Vec::new();
     for shape in &frame.shapes {
         if let Shape::Fill(points, _) = shape {
@@ -394,7 +421,9 @@ fn earth_shape_kinds() {
         })
         .count();
     eprintln!("{inside} triangles within the view");
-    for model in [129u32, 120, 125] {
+    let mut explicit_total = 0usize;
+    // 445 is a surface whose entries are all explicit-coordinate (F1806/F1808).
+    for model in [129u32, 120, 125, 445] {
         let _ = viewer.render_scene(model, unit, [0.0, 0.0, 1.0e6], [0.0, 0.0, 1.0]);
         let r = viewer.surface_extent.get();
         for k in [1.2, 1.5, 2.0, 2.5, 3.0, 3.3] {
@@ -404,6 +433,13 @@ fn earth_shape_kinds() {
             };
             let (mut lo, mut hi) = (i32::MAX, i32::MIN);
             let mut widths: Vec<i32> = Vec::new();
+            let explicit = frame
+                .shapes
+                .iter()
+                .filter(|s| matches!(s, Shape::TexturedUv(..)))
+                .count();
+            eprintln!("model {model} k {k}: {explicit} explicit-coordinate textured shapes");
+            explicit_total += explicit;
             for shape in &frame.shapes {
                 if let Shape::Fill(points, _) = shape {
                     let xs: Vec<i32> = points.iter().map(|p| p.0).collect();
@@ -421,6 +457,10 @@ fn earth_shape_kinds() {
             );
         }
     }
+    assert!(
+        explicit_total > 0,
+        "the explicit-coordinate (F1806/F1808) path must draw"
+    );
 }
 
 /// Which models the stars of each system use, and what drawing them yields.
@@ -462,6 +502,7 @@ fn star_models() {
                                 Shape::Curve(..) => "curve",
                                 Shape::Point(..) => "point",
                                 Shape::Textured(..) => "textured",
+                                Shape::TexturedUv(..) => "textured-uv",
                                 Shape::Glow(..) => "glow",
                                 Shape::Label(..) => "label",
                                 Shape::Spans(..) => "spans",
@@ -829,11 +870,30 @@ fn surface_frame_shows_a_starport() {
         );
         let with = screen.logical_pixels().to_vec();
         let changed = with.iter().zip(&without).filter(|(a, b)| a != b).count();
+        // Solid faces, not just outlines: some row must hold a run of changed
+        // pixels several wide (F1604/F1607/F1560 fill the building's faces).
+        let mut longest_run = 0usize;
+        for y in 0..158 {
+            let mut run = 0usize;
+            for x in 0..320 {
+                let i = y * 320 + x;
+                if with[i] != without[i] {
+                    run += 1;
+                    longest_run = longest_run.max(run);
+                } else {
+                    run = 0;
+                }
+            }
+        }
         eprintln!(
-            "starport {} model {:#x} at {height} mm: {changed} pixels changed",
+            "starport {} model {:#x} at {height} mm: {changed} pixels changed, longest run {longest_run}",
             port.name, port.model
         );
         assert!(changed > 100, "the starport must draw ({changed} pixels)");
+        assert!(
+            longest_run >= 3,
+            "the starport must draw solid faces (longest run {longest_run})"
+        );
         if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
             let mut ppm = b"P6\n320 200\n255\n".to_vec();
             for p in &with {

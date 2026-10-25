@@ -50,6 +50,19 @@ the view) with the framebuffer pointer 300 rows into a 0xff-filled 320x800
 buffer. `fill_reference.rs` compares count, bounds and hash: 4096 compared, 0
 mismatched; tampered fields and an empty trace are rejected.
 
+## Texture fills on the span path (F1805-F1808)
+
+The queue's textured entries are the same span rasterisers with affine u/v
+stepping: F1807/F1805 (F1644/F1647) take the descriptor's corner table
+(`DATA_007791`/`007792`, `docs/notes/textures.md`), while F1808/F1806
+(F1645/F1648) carry explicit per-vertex coordinates. The planet's emitter uses
+the explicit form: `+0x10..` (quad: `+0x14..`) holds 3 (4) u/v word pairs, the
+next dword is `F1620`'s bitmap in bits 0-11 and the `DATA_009252` slot base in
+bits 16-31, then the colour word count and the F1326 colours in halfword pairs
+(`ffe.asm:112316-112553`; the surface entries themselves are in
+`docs/notes/terrain.md`). The renderer builds the slot table at that base, so
+the bitmap's texel values select the original's land/sea colours.
+
 ## Polygon spans (F1794 -> F1795/F1796/F1797 -> F1799)
 
 - **F1468** (F1794): a fresh table `DATA_009202`: 158 rows of 44 bytes (a count
@@ -98,3 +111,14 @@ including those crossing the near plane (previously skipped), draws its F1714
 outline with `fill_polygon` (`Shape::Polygon`), as do polygon entries
 (`model_polygon::edges`). The diagnostic even-odd fill is left only for faces
 with other point counts.
+
+`Screen::draw_shapes` consumes the same shapes in the playable (`Screen::draw`,
+`draw_discs`, `draw_station`, `draw_system_ships`/`_effects`): terrain and
+planet surfaces, station/starport and building models, and model 155's child
+fragments all go through `Shape::Flat`/`Shape::Polygon`/`Shape::Textured`.
+`Shape::TexturedUv(Textured, uv)` carries the planet's explicit coordinates
+(the descriptor `Shape::Textured` is unchanged) and `ModelViewer::rasterise_uv`
+runs the F1644/F1647 affine rasteriser with them, using the cache's bitmap 0x40
+(land), 0x121 (sea) or 0x5e (the explicit-coordinate terrain block) and the
+emitter's slot colours. Without a cache bitmap the old flat/Gouraud stand-in
+remains.

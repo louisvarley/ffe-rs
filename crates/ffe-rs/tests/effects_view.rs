@@ -192,6 +192,52 @@ fn hit_particle_explosion_and_frames() {
     );
 }
 
+/// A model-155 fragment (model 320, one of F942's twelve child calls) is an
+/// F1721 complex polygon. Drawn by the F6 viewer it must reach the F1560/F1559/
+/// F1613 span rasteriser and cover pixels, not only its outline. At 2,000 units
+/// the fragment is large enough to queue polygons rather than the textured path.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn explosion_fragment_polygons_fill() {
+    use ffe_core::model_fill::fill_polygon;
+    use ffe_rs::model_viewer::Shape;
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let frame = viewer
+        .render_scene_with(
+            320,
+            rows,
+            [0.0, 0.0, 2_000.0],
+            [0.0, 0.0, -1.0],
+            &AnimationInputs::original(0, 0, &viewer.shades()),
+        )
+        .unwrap();
+    let polygons: Vec<_> = frame
+        .shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Shape::Polygon(edges, _) => Some(edges),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !polygons.is_empty(),
+        "the model-155 fragment must queue polygons, got {:?}",
+        frame
+            .shapes
+            .iter()
+            .map(std::mem::discriminant)
+            .collect::<Vec<_>>()
+    );
+    let mut filled = 0usize;
+    for edges in polygons {
+        let before = filled;
+        fill_polygon(edges, |_, _| filled += 1).unwrap();
+        assert!(filled > before, "the polygon span fill wrote no pixels");
+    }
+}
+
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn model_155_fragments_are_gated_on_global_4() {
