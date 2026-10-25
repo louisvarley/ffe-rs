@@ -81,6 +81,9 @@ pub struct Body {
     /// The object's model and its `+0xa0` (the surface seed).
     pub model: u32,
     pub seed: u32,
+    /// The object's gravity word (`+0xa4`): F880/F881's ffp mass, which F603
+    /// reads for the body an object is parented to.
+    pub mass: u32,
     /// The object's slot in the physics list (`+0x18` of its system record): the
     /// index F1531/F1532 use to find the physics object.
     pub slot: usize,
@@ -353,6 +356,7 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
             parent: parent.checked_sub(1),
             model: list.dword(slot, 0x82),
             seed: list.dword(slot, 0xa0),
+            mass: list.dword(slot, 0xa4),
             slot,
             rows,
             class,
@@ -477,6 +481,7 @@ pub fn landing_body(body: &Body, model: &ffe_core::objects::ModelInfo) -> ffe_co
         }),
         outer_radius: body.radius,
         inner_radius: body.inner_radius,
+        mass: body.mass,
         shape: model.class(),
         model: body.model,
         seed: body.seed,
@@ -3096,6 +3101,7 @@ mod tests {
             parent: None,
             model: 0,
             seed: 0,
+            mass: 0x4000_0000,
             slot: 0,
             rows: [0; 9],
             class: 0,

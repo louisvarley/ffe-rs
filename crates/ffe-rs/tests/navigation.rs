@@ -320,17 +320,18 @@ fn new_game_default_is_the_saker_at_hope() {
 /// starport (`0x30`), `L` asks F654 and puts the ship in F1013's climb (`0x24`),
 /// F1013 hands over to `0x26` at the altitude/set-speed test, and F1031's
 /// contact scan clears the starport's effect region and releases the bay.
-#[test]
-#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
-fn new_game_takes_off_from_the_pad_into_free_flight() {
+fn takes_off_from_the_pad(start_type: u8) {
     use ffe_core::traffic::TakeoffStep;
     use ffe_rs::navigation::{landing_body, Library, Navigator};
     use ffe_rs::original_flight::Keys as OriginalKeys;
     let cache = cache();
-    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    let mut nav = Navigator::new_game(&cache, start_type).unwrap();
     let index = nav.docked.expect("landed at the start starport");
     let state = nav.new_game.unwrap();
     let body = nav.bodies[index].clone();
+    // F994 parents the player to the starport's parent planet (`+0x56`); the
+    // starport itself is a sibling.
+    let planet = nav.bodies[body.parent.expect("the starport orbits a planet")].clone();
     nav.begin_launch().unwrap();
     assert_eq!(nav.takeoff_state(), Some(ffe_core::traffic::state::TAKEOFF));
 
@@ -360,24 +361,35 @@ fn new_game_takes_off_from_the_pad_into_free_flight() {
                 detail: 0,
             },
         );
+    let planet_body = landing_body(
+        &planet,
+        &ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap(),
+    );
     let station_body = landing_body(
         &body,
         &ffe_core::objects::ModelInfo::read(records, stats, body.model).unwrap(),
     );
-    // The persistent two-body pad world, as the playable keeps it.
-    model.begin_pad_takeoff(&station_body, body.position, &info);
+    // The persistent three-body pad world, as the playable keeps it.
+    model.begin_pad_takeoff(
+        &planet_body,
+        planet.position,
+        &station_body,
+        body.position,
+        &info,
+    );
     // Frames for an eye check, as the other view tests save them.
     let shots = std::env::var_os("FFE_SHOT_DIR");
     let viewer = shots
         .as_ref()
         .and_then(|_| ffe_rs::model_viewer::ModelViewer::new(&cache).ok());
+    let prefix = format!("takeoff-{start_type}");
     let save = |name: &str, model: &mut OriginalFlight, nav: &Navigator| {
         if let (Some(dir), Some(viewer)) = (&shots, &viewer) {
-            let path = std::path::Path::new(dir).join(name);
+            let path = std::path::Path::new(dir).join(format!("{prefix}-{name}"));
             shot(&cache, viewer, nav, model, &path);
         }
     };
-    save("takeoff-0000-pad.ppm", &mut model, &nav);
+    save("0000-pad.ppm", &mut model, &nav);
     let mut seen = Vec::new();
     let mut cleared = false;
     for frame in 0..8_000 {
@@ -420,9 +432,11 @@ fn new_game_takes_off_from_the_pad_into_free_flight() {
             )
         });
         let before = nav.takeoff_state().unwrap();
-        // A complex starport shape leaves F1033's altitude at 0x7fffffff; the
-        // playable measures the climb from the pad for F1013's test.
-        let altitude = if contact.altitude() == i32::MAX {
+        // F1033's altitude on the port's terrain is the terrain's elevation,
+        // not the ship's height above it, so measure the climb from the pad
+        // seat along its up row (the source's 200,000 mm above the pad), as the
+        // playable does.
+        let altitude = if model.on_pad() {
             let at = model.absolute_position();
             (0..3)
                 .map(|k| (at[k] - state.seat[k]) as f64 * body.orientation[1][k])
@@ -438,12 +452,12 @@ fn new_game_takes_off_from_the_pad_into_free_flight() {
         match step {
             Some(TakeoffStep::HandOff) => {
                 model.set_mode(nav.takeoff_state().unwrap());
-                save("takeoff-0100-climb.ppm", &mut model, &nav);
+                save("0100-climb.ppm", &mut model, &nav);
             }
             Some(TakeoffStep::Cleared) => {
                 model.set_mode(ffe_core::traffic::state::FREE);
                 model.end_pad_takeoff();
-                save("takeoff-0200-clear.ppm", &mut model, &nav);
+                save("0200-clear.ppm", &mut model, &nav);
                 cleared = true;
                 break;
             }
@@ -453,7 +467,7 @@ fn new_game_takes_off_from_the_pad_into_free_flight() {
     }
     let moved = distance(model.absolute_position(), state.seat);
     eprintln!(
-        "takeoff modes {seen:?}, cleared {cleared}, moved {}, set speed {:.0} m/s, \
+        "takeoff start {start_type} modes {seen:?}, cleared {cleared}, moved {}, set speed {:.0} m/s, \
          mode {:#x}, docked {:?}",
         describe(moved),
         model.set_speed_metres(),
@@ -482,6 +496,129 @@ fn new_game_takes_off_from_the_pad_into_free_flight() {
     let port = nav.starport(index);
     assert_eq!(port.bay_of(ffe_rs::navigation::PLAYER), None);
     assert_eq!(port.mode, 1);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn new_game_takes_off_from_the_pad_into_free_flight() {
+    takes_off_from_the_pad(1);
+}
+
+/// The DOS default start (F829 record 0) on Hope: the same `0x30` -> `0x24` ->
+/// `0x26` -> `0x00` path, with F603's gravity from Hope and F1033's altitude
+/// from its terrain instead of the old pad-climb fallback.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn default_start_takes_off_from_hope() {
+    takes_off_from_the_pad(0);
+}
+
+/// Without input, F1013's climb hands over to `0x26` above the pad and Hope's
+/// F603 gravity (the planet is the ship's parent, as F994 sets `+0x56`) pulls
+/// it straight back down. This is the original's observed cycle: a pad takeoff
+/// is flown out with the set speed, not automatic. It pins the planet frame the
+/// pad world now builds and the altitude from the pad climb.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn pad_takeoff_hands_over_and_falls_back_under_gravity() {
+    use ffe_core::traffic::TakeoffStep;
+    use ffe_rs::navigation::{landing_body, Library, Navigator};
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let index = nav.docked.expect("landed at the start starport");
+    let state = nav.new_game.unwrap();
+    let body = nav.bodies[index].clone();
+    let planet = nav.bodies[body.parent.expect("a parent planet")].clone();
+    nav.begin_launch().unwrap();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let mut flight = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: state.ship,
+        ..Flight::default()
+    };
+    flight.position = state.seat.map(|v| v as f64 / unit);
+    flight.axes = Some(body.orientation);
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    model.begin_takeoff();
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = ffe_core::objects::ModelInfo::read(records, stats, state.ship).unwrap();
+    let library = Library(&cache);
+    let tools = cache
+        .asset("base:terrain/tables")
+        .zip(cache.asset("base:terrain/maps"))
+        .map(
+            |(terrain_table, terrain_maps)| ffe_core::surface::SurfaceTools {
+                shapes: &library,
+                terrain_table,
+                terrain_maps,
+                detail: 0,
+            },
+        );
+    let planet_body = landing_body(
+        &planet,
+        &ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap(),
+    );
+    let station_body = landing_body(
+        &body,
+        &ffe_core::objects::ModelInfo::read(records, stats, body.model).unwrap(),
+    );
+    model.begin_pad_takeoff(
+        &planet_body,
+        planet.position,
+        &station_body,
+        body.position,
+        &info,
+    );
+    let mut seen = Vec::new();
+    let mut altitudes = Vec::new();
+    let mut pad_flags = 0u8;
+    for _ in 0..4_000 {
+        if nav.takeoff.is_none() {
+            break;
+        }
+        let contact = model
+            .step_pad(0.02, &Default::default(), tools.as_ref())
+            .expect("the pad contact");
+        // The same pad-climb altitude the playable uses for F1013.
+        let at = model.absolute_position();
+        let altitude = (0..3)
+            .map(|k| (at[k] - state.seat[k]) as f64 * body.orientation[1][k])
+            .sum::<f64>()
+            .clamp(0.0, f64::from(i32::MAX)) as i32;
+        altitudes.push(altitude);
+        pad_flags = contact.flags;
+        let before = nav.takeoff_state().unwrap();
+        let step = nav.takeoff_step(altitude, model.set_speed_units(), contact.flags);
+        if nav.takeoff_state() != Some(before) {
+            seen.push(before);
+        }
+        if let Some(TakeoffStep::HandOff) = step {
+            model.set_mode(nav.takeoff_state().unwrap());
+        }
+    }
+    eprintln!(
+        "pad fallback modes {seen:?}, peak {:?}, last {:?}",
+        altitudes.iter().copied().max(),
+        altitudes.last()
+    );
+    // 0x24 -> 0x26 at F1013's altitude test, then F603 pulls the ship back.
+    assert_eq!(seen.first(), Some(&ffe_core::traffic::state::TAKEOFF));
+    assert_eq!(
+        nav.takeoff_state(),
+        Some(ffe_core::traffic::state::AFTER_TAKEOFF),
+        "{seen:?}"
+    );
+    let peak = altitudes.iter().copied().max().unwrap_or(0);
+    assert!(peak > ffe_core::traffic::TAKEOFF_ALTITUDE, "{peak}");
+    assert!(
+        *altitudes.last().unwrap() < peak,
+        "F603 pulled the ship back down"
+    );
+    // The starport's effect region is still reported at the pad (F1031 waits
+    // for it to clear before it frees the bay).
+    assert_ne!(pad_flags & 0x20, 0, "{pad_flags:#x}");
 }
 
 /// The map state the keys drive: open, choose, jump, fly.
@@ -1277,6 +1414,7 @@ fn the_place_list_is_stations_and_starports_in_system_order() {
         parent: None,
         model: 0,
         seed: 0,
+        mass: 0,
         slot: 0,
         rows: [0; 9],
         class: 0,

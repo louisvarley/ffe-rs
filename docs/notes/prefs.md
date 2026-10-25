@@ -158,14 +158,23 @@ off, on, off, on, on]`, maps all **on**. `FUNC_000219` also sets
 
 `DATA_007688` maps scancode 1 (Escape) to action 7; `DATA_004893` has 7 at
 entry 10, so `FUNC_000150` (15071) sends event 1 to module 10 (SysMenu).
-`FUNC_000224` (18314) first stops time if it is running (18549 `FUNC_000220`),
-and on the next Escape signals the flight module to return. `FUNC_000229`
-switches the video to the menu and clears the view to 3,3,3. The port opens the
-pages on the first Escape and closes them on the next, as requested; it does not
-reproduce the intermediate pause step (`docs/DEVIATIONS.md`, EXP-012).
+`FUNC_000224` (18314) first stops time if it is running (`FUNC_000220`, 18230),
+and on the next Escape opens the pages (`FUNC_000229`; it clears the upper view
+to 3,3,3). Escape in the pages calls `FUNC_000223` (the flight module's
+`FUNC_001003`) and stops time again, so the game comes back **paused**; the
+pause button or an acceleration step resumes it. The port implements that
+order: `ffe_rs::prefs::escape_action(open, paused)` returns `Pause`, `Open` or
+`Close`, and `main.rs` applies it. The reference frames
+`docs/evidence/start-flow/original-escape-{1,3}.png` and `original-prefs.png`
+show the three steps at Gateway/Hope; `verify-prefs.py` pins F224 and both
+tables.
 
 ## In the port
 
+- Escape follows F224: the first press pauses, the second opens the pages, and
+  Escape in the pages closes them (time stays stopped; P or the meter resumes).
+  The order is `prefs::escape_action` and is unit-tested; the frames are in
+  `docs/evidence/start-flow/`.
 - Pages 0-4 use the original labels, order, coordinates, colours, defaults and
   hot areas; the on/off icons are the original primary bitmaps.
 - Applied: space colour, background stars, lock external view to ship, reverse

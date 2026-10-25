@@ -13,6 +13,7 @@ fn station() -> Body {
         parent: None,
         model: 72,
         seed: 0,
+        mass: 0,
         slot: 1,
         rows: [0x7fff_ffff, 0, 0, 0, 0x7fff_ffff, 0, 0, 0, 0x7fff_ffff],
         class: 0,

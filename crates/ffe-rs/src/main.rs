@@ -40,7 +40,8 @@ const WINDOW_TITLE: &str = "FFE-RS 0.9 - Depth-order helpers, experimental fligh
 
 /// What the open-air launch tells the player: F1013/F1031 need thrust to climb
 /// out of the starport's effect region.
-const TAKEOFF_HINT: &str = "Lifting off: pitch up and raise the set speed to clear the ground.";
+const TAKEOFF_HINT: &str =
+    "Lifting off: raise the set speed (W or Enter) and pitch up (Up or A) to clear the starport.";
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
@@ -71,6 +72,10 @@ struct Options {
     /// beside a spawned pirate, labels and the target readout are on, and a
     /// shield hit and a kill are applied and saved.
     capture_traffic: Option<PathBuf>,
+    /// Directory for the scripted default-start flow: Escape (pause), Escape
+    /// (pages), Escape (back), P (resume), F4 (services), F1 (back) and L with
+    /// the set speed held (takeoff to free flight), saving every tenth frame.
+    capture_start: Option<PathBuf>,
     /// The boot: the original new game (default) or `--start sol`'s sandbox.
     boot: Boot,
     /// `--skip-intro`: the logo/intro screens are not shown. The front end is
@@ -95,6 +100,7 @@ fn options() -> Result<Options, String> {
     let mut capture = None;
     let mut capture_planet = None;
     let mut capture_traffic = None;
+    let mut capture_start = None;
     let mut boot = Boot::NewGame(ffe_rs::navigation::DEFAULT_START_TYPE);
     let mut boot_given = false;
     let mut skip_intro = false;
@@ -150,6 +156,10 @@ fn options() -> Result<Options, String> {
                 args.next()
                     .ok_or("--capture-traffic requires a directory")?,
             ));
+        } else if arg == "--capture-start" && capture_start.is_none() {
+            capture_start = Some(PathBuf::from(
+                args.next().ok_or("--capture-start requires a directory")?,
+            ));
         } else if arg == "--capture-prefs" && capture_prefs.is_none() {
             capture_prefs = Some(PathBuf::from(
                 args.next().ok_or("--capture-prefs requires a directory")?,
@@ -175,7 +185,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -200,6 +210,7 @@ fn options() -> Result<Options, String> {
         capture,
         capture_planet,
         capture_traffic,
+        capture_start,
         boot,
         skip_intro,
         capture_prefs,
@@ -586,6 +597,7 @@ fn run() -> Result<(), String> {
         || options.capture_traffic.is_some()
         || options.capture_prefs.is_some()
         || options.capture_intro.is_some()
+        || options.capture_start.is_some()
         || options.smoke_frames.is_some();
     let mut sound = if headless {
         GameAudio::silent(&options.root)
@@ -639,7 +651,8 @@ fn run() -> Result<(), String> {
     let scripts = options.smoke_frames.is_some()
         || options.capture.is_some()
         || options.capture_planet.is_some()
-        || options.capture_traffic.is_some();
+        || options.capture_traffic.is_some()
+        || options.capture_start.is_some();
     let mut boot = options.boot;
     if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(_)) {
         boot = Boot::NewGame(run_intro(
@@ -731,6 +744,12 @@ fn run() -> Result<(), String> {
         if let Some(nav) = nav.as_mut() {
             let _ = nav.begin_launch();
         }
+    }
+    // The default-start flow: the pad stays the landed view first, then the
+    // script presses Escape/Escape/Escape/P/F4/F1/L and holds the set speed.
+    let capture_start = options.capture_start.is_some();
+    if let Some(dir) = &options.capture_start {
+        fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
     }
     // A scripted approach to the nearest planet for screenshots: put the ship a
     // few radii out on the same side as the starting station, flying the same
@@ -826,11 +845,23 @@ fn run() -> Result<(), String> {
     // The station the ship has just left: its hull is not a wall to the ship
     // until it is clear of the slot (F1088 leaves the player at the station).
     let mut launch_grace: Option<usize> = None;
-    // The pad seat and its up row, for F1013's altitude while the starport's
-    // complex shape reports no distance (DATA_008867 = 0x7fffffff).
+    // The starport whose pad F1031 has just cleared: its hull and the planet's
+    // landing scan must not settle the ship back down for a short grace, while
+    // the takeoff's own F1033 contact scan says the pad is behind it.
+    let mut pad_grace = false;
+    let mut pad_grace_until = 0usize;
+    // The starport the current open-air takeoff started from (F994's pad).
+    let mut pad_station: Option<usize> = None;
+    // The pad seat and its up row, for F1013's altitude: the port's terrain
+    // contact reports the terrain's elevation rather than the height above it,
+    // so the climb from the seat is the source's 200,000 mm above the pad.
     let mut takeoff_climb: Option<([i64; 3], [f64; 3])> = None;
     // The station screen the commander is on (the services root by default).
     let mut dock = DockState::default();
+    // The services board opened from a starport pad's landed view (`0x30`):
+    // F4/F343 shows it over the view, and F1 (the console screen button) or the
+    // port's Backspace returns to `0x30` without launching.
+    let mut pad_board = false;
     let mut message = match nav.as_ref().and_then(|nav| {
         nav.docked
             .map(|index| (nav.bodies[index].name.as_str(), nav.bodies[index].kind))
@@ -852,6 +883,8 @@ fn run() -> Result<(), String> {
     let capture_takeoff =
         options.capture.is_some() && nav.as_ref().is_some_and(|nav| nav.takeoff.is_some());
     let mut takeoff_done_at: Option<usize> = None;
+    // The default-start capture stops a moment after F1031 clears the pad.
+    let mut start_clear_at: Option<usize> = None;
     let mut held_controls = input::HeldControls::default();
     while window.is_open() {
         let now = Instant::now();
@@ -1024,12 +1057,31 @@ fn run() -> Result<(), String> {
         } else {
             None
         };
-        // Escape opens the original's preference pages; Escape in the pages
-        // closes them again. The original reaches the same screen through a
-        // first Escape that stops time (FUNC_000224); this port opens the
-        // pages directly, as the owner asked.
-        if active && !death_control && pressed(Key::Escape) {
-            prefs.escape();
+        // F224: the first Escape stops time, the next opens the original's
+        // preference pages, and Escape in the pages returns to the game with
+        // the clock still stopped. This is the DOS order (the port used to open
+        // the pages on the first press).
+        if active
+            && !death_control
+            && (pressed(Key::Escape) || (capture_start && matches!(frames, 10 | 20 | 30)))
+        {
+            match ffe_rs::prefs::escape_action(prefs.open, paused) {
+                ffe_rs::prefs::Escape::Pause => {
+                    paused = true;
+                    message = "Paused. Escape again for the preference pages.".to_owned();
+                }
+                ffe_rs::prefs::Escape::Open => {
+                    prefs.escape();
+                }
+                ffe_rs::prefs::Escape::Close => {
+                    prefs.escape();
+                    message = if paused {
+                        "Returned to the game (paused). P or the meter resumes.".to_owned()
+                    } else {
+                        "Returned to the game.".to_owned()
+                    };
+                }
+            }
             sound.play(Cue::UiBeep);
             held_controls.disarm(&keys_down);
             last = now;
@@ -1076,6 +1128,11 @@ fn run() -> Result<(), String> {
             // loop returns before the flight loop's edge bookkeeping.
             mouse_was_down = mouse_down;
             screen.draw_prefs(&prefs);
+            if let Some(dir) = &options.capture_start {
+                if frames % 10 == 0 {
+                    write_shot(dir, &format!("start-{frames:04}.ppm"), &screen);
+                }
+            }
             presenter.present(&mut window, screen.logical_pixels(), &prefs.display)?;
             frames += 1;
             last = Instant::now();
@@ -1199,6 +1256,38 @@ fn run() -> Result<(), String> {
         if let Some(note) = console_click.and_then(Click::unported) {
             message = note.to_owned();
         }
+        // F4 is the original's station/comms action (F1056's action 0xf4,
+        // F343): from state 0x2a (docked) or 0x30 (landed at an open-air
+        // starport) it opens the services board, not a menu of its own. At the
+        // pad the landed view stays the default until F4 is pressed; F1 (the
+        // console's screen button) or Backspace returns to it.
+        if active
+            && !death_control
+            && !help
+            && !scenarios
+            && model_lab.is_none()
+            && model_viewer.is_none()
+            && (pressed(Key::F4)
+                || console_click == Some(Click::Screen(4))
+                || (capture_start && frames == 50))
+        {
+            match state.mode {
+                ffe_rs::flight::Mode::Flight if nav.as_ref().is_some_and(|nav| nav.on_pad()) => {
+                    state.mode = ffe_rs::flight::Mode::Docked;
+                    dock.open(StationScreen::Services);
+                    pad_board = true;
+                    message = station::SERVICES_HINT.to_owned();
+                }
+                ffe_rs::flight::Mode::Docked => {
+                    // F343 re-displays the root from any station screen.
+                    dock.open(StationScreen::Services);
+                    message = station::SERVICES_HINT.to_owned();
+                }
+                ffe_rs::flight::Mode::Flight => {
+                    message = "No station services here.".to_owned();
+                }
+            }
+        }
         if active && !death_control {
             // F1 is the original's view key; help moves to H.
             if pressed(Key::H) && nav.as_ref().is_none_or(|nav| nav.view != NavView::Galaxy) {
@@ -1295,7 +1384,7 @@ fn run() -> Result<(), String> {
                         nav.open(view);
                     }
                 };
-                if pressed(Key::Tab) {
+                if pressed(Key::Tab) && !nav.landed_view() {
                     toggle(nav, NavView::System);
                     held_controls.disarm(&keys_down);
                 }
@@ -1695,7 +1784,10 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
-            if pressed(Key::P) && model_lab.is_none() && model_viewer.is_none() {
+            if (pressed(Key::P) || (capture_start && frames == 40))
+                && model_lab.is_none()
+                && model_viewer.is_none()
+            {
                 paused = !paused;
                 held_controls.disarm(&keys_down);
             }
@@ -1808,14 +1900,18 @@ fn run() -> Result<(), String> {
                     }
                 }
                 if state.mode == ffe_rs::flight::Mode::Flight {
-                    // F1056's launch action (its action 9) from a landed state:
-                    // `0x34` goes straight to F1013's climb. The new game's
-                    // `0x30` open-air pad is the same view; L asks F654 and starts
-                    // the climb through the docked-to-flight setup below. In flight
-                    // `L` is the original's text-label toggle instead.
+                    // F1056's launch action (its action 9, Tab: scancode 0x0f
+                    // maps to action 0x09) from a landed state: `0x34` goes
+                    // straight to F1013's climb. The new game's `0x30` open-air
+                    // pad is the same view; the action asks F654 and starts the
+                    // climb through the docked-to-flight setup below. L is the
+                    // port's long-standing convenience for the same action; in
+                    // flight `L` is the original's text-label toggle instead.
                     let landed = nav.as_ref().and_then(|nav| nav.landed_state());
                     let pad_landed = nav.as_ref().is_some_and(|nav| nav.on_pad());
-                    if pressed(Key::L) && (landed.is_some() || pad_landed) {
+                    let launch =
+                        pressed(Key::L) || pressed(Key::Tab) || (capture_start && frames == 70);
+                    if launch && (landed.is_some() || pad_landed) {
                         if let Some(nav) = nav.as_mut() {
                             if landed.is_some() {
                                 // F1013's altitude comes from F1033; a complex
@@ -1974,6 +2070,31 @@ fn run() -> Result<(), String> {
                 }
                 let mut dock_action: Option<StationAction> = None;
                 let dock_before = dock;
+                // The landed view's way out of the services board: F1 is the
+                // console's screen button (action 0xf1, module 3's F1003 which
+                // returns to the flight view); Backspace is the port's
+                // convenience and only leaves from the root, so sub-screens
+                // still go back one level.
+                if pad_board
+                    && state.mode == ffe_rs::flight::Mode::Docked
+                    && (pressed(Key::F1)
+                        || (pressed(Key::Backspace) && dock.screen == StationScreen::Services)
+                        || (capture_start && frames == 60))
+                {
+                    pad_board = false;
+                    state.mode = ffe_rs::flight::Mode::Flight;
+                    // This is F1003's return to the landed view, not a launch:
+                    // do not run the docked-to-flight hand-off this frame.
+                    last_mode = ffe_rs::flight::Mode::Flight;
+                    if let Some(nav) = nav.as_ref() {
+                        let name = nav
+                            .docked
+                            .and_then(|index| nav.bodies.get(index))
+                            .map_or("the starport", |body| body.name.as_str());
+                        message = format!("Landed at {name}. F4 for services, L to launch.");
+                    }
+                    held_controls.disarm(&keys_down);
+                }
                 if state.mode == ffe_rs::flight::Mode::Docked
                     && !help
                     && !scenarios
@@ -2180,6 +2301,7 @@ fn run() -> Result<(), String> {
                                         acceleration = 0;
                                         state.mode = ffe_rs::flight::Mode::Flight;
                                         state.system_flight = true;
+                                        pad_board = false;
                                         // F1018's launch-transition beep.
                                         sound.stop_for_sequence();
                                         sound.play(Cue::UiBeep);
@@ -2270,6 +2392,7 @@ fn run() -> Result<(), String> {
                                     acceleration = 0;
                                     state.mode = ffe_rs::flight::Mode::Flight;
                                     state.system_flight = true;
+                                    pad_board = false;
                                     sound.stop_for_sequence();
                                     sound.play(Cue::UiBeep);
                                     message = TAKEOFF_HINT.to_owned();
@@ -2431,6 +2554,11 @@ fn run() -> Result<(), String> {
                     mouse_steer.held,
                     reverse,
                 );
+                // The default-start capture flies the manual takeoff: after the
+                // launch action (frame 70) it holds the set speed, as W does.
+                if capture_start && frames >= 80 {
+                    keys.faster = true;
+                }
                 // The scripted launch capture flies the takeoff itself: F1013's
                 // fixed up-thrust does the first climb, then it pitches and
                 // accelerates through F1031's 0x26 and the short free-flight
@@ -2519,7 +2647,15 @@ fn run() -> Result<(), String> {
                 // still run, and the ship's position is the one the contact
                 // settled it at.
                 let landed_state = nav.as_ref().and_then(|nav| nav.landed_state());
-                let landing = if model.on_pad() || landed_state.is_some() {
+                // The pad takeoff's own F1031 test has just put the starport's
+                // effect region behind the ship; give the port's approach scan a
+                // short grace so its terrain contact cannot re-settle the ship
+                // on the pad's frame in the same second.
+                let pad_takeoff_grace = pad_grace && frames < pad_grace_until;
+                if pad_grace && !pad_takeoff_grace {
+                    pad_grace = false;
+                }
+                let landing = if model.on_pad() || landed_state.is_some() || pad_takeoff_grace {
                     None
                 } else {
                     nav.as_ref()
@@ -2620,22 +2756,22 @@ fn run() -> Result<(), String> {
                         // word follows the contact scan and the set speed.
                         if let Some(contact) = contact {
                             if let Some(nav) = nav.as_mut().filter(|nav| nav.takeoff.is_some()) {
-                                // F1013 reads DATA_008867. A complex starport
-                                // shape leaves it at 0x7fffffff, so measure the
-                                // climb from the pad instead (the distance the
-                                // ship has risen along the pad's up row).
-                                let altitude = if contact.altitude() == i32::MAX {
-                                    takeoff_climb.map_or(i32::MAX, |(origin, up)| {
+                                // F1013 reads DATA_008867. The port's terrain
+                                // contact reports the terrain's elevation, not
+                                // the ship's height above it, so the pad's own
+                                // altitude cannot drive the hand-off; measure the
+                                // climb from the pad seat along its up row (the
+                                // source's 200,000 mm above the pad).
+                                let altitude =
+                                    takeoff_climb.map_or(contact.altitude(), |(origin, up)| {
                                         let at = model.absolute_position();
                                         (0..3)
                                             .map(|k| (at[k] - origin[k]) as f64 * up[k])
                                             .sum::<f64>()
                                             .clamp(0.0, f64::from(i32::MAX))
                                             as i32
-                                    })
-                                } else {
-                                    contact.altitude()
-                                };
+                                    });
+                                let station_index = nav.docked;
                                 match nav.takeoff_step(
                                     altitude,
                                     model.set_speed_units(),
@@ -2656,6 +2792,13 @@ fn run() -> Result<(), String> {
                                         }
                                         model.apply(&mut state);
                                         takeoff_climb = None;
+                                        // The starport is still below the ship;
+                                        // keep the approach/landing scan off it
+                                        // until the hull is behind (the pad
+                                        // contact is F1033's, not a re-landing).
+                                        pad_grace =
+                                            station_index.is_some() || pad_station.is_some();
+                                        pad_grace_until = frames + 120;
                                         message = "Clear of the surface: free flight.".to_owned();
                                     }
                                     Some(ffe_core::traffic::TakeoffStep::Retakeoff) => {
@@ -2669,6 +2812,12 @@ fn run() -> Result<(), String> {
                                     && takeoff_done_at.is_none()
                                 {
                                     takeoff_done_at = Some(frames);
+                                }
+                                if capture_start
+                                    && nav.takeoff.is_none()
+                                    && start_clear_at.is_none()
+                                {
+                                    start_clear_at = Some(frames);
                                 }
                             }
                         }
@@ -3026,19 +3175,40 @@ fn run() -> Result<(), String> {
             let player_info =
                 ffe_core::objects::ModelInfo::read(model_records, model_stats, state.ship);
             let radius = player_info.map_or(0, |info| info.radii().1 as i32);
-            if let Some((at, rows, station, parent_info)) = nav.as_ref().and_then(|nav| {
-                nav.docked.and_then(|index| {
-                    let body = &nav.bodies[index];
-                    let parent_info =
-                        ffe_core::objects::ModelInfo::read(model_records, model_stats, body.model)?;
-                    Some((
-                        nav.takeoff_seat(index, radius)?,
-                        body.orientation,
-                        body.clone(),
-                        parent_info,
-                    ))
+            if let Some((at, rows, station, station_info, planet, planet_info)) =
+                nav.as_ref().and_then(|nav| {
+                    nav.docked.and_then(|index| {
+                        let body = &nav.bodies[index];
+                        let station_info = ffe_core::objects::ModelInfo::read(
+                            model_records,
+                            model_stats,
+                            body.model,
+                        )?;
+                        // F994's parent: the starport's own parent, the planet it
+                        // stands on (`+0x56`). F603's gravity and F1033's altitude
+                        // come from that frame; the starport is the sibling whose
+                        // `0x20` region F1031 waits to clear.
+                        let planet = body
+                            .parent
+                            .and_then(|parent| nav.bodies.get(parent))
+                            .cloned()
+                            .unwrap_or_else(|| body.clone());
+                        let planet_info = ffe_core::objects::ModelInfo::read(
+                            model_records,
+                            model_stats,
+                            planet.model,
+                        )?;
+                        Some((
+                            nav.takeoff_seat(index, radius)?,
+                            body.orientation,
+                            body.clone(),
+                            station_info,
+                            planet,
+                            planet_info,
+                        ))
+                    })
                 })
-            }) {
+            {
                 state.position =
                     at.map(|v| v as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
                 state.velocity = [0.0; 3];
@@ -3046,14 +3216,23 @@ fn run() -> Result<(), String> {
                 state.axes = Some(rows);
                 state.system_flight = true;
                 takeoff_climb = Some((at, rows[1]));
+                pad_station = nav.as_ref().and_then(|nav| nav.docked);
                 let mut model = OriginalFlight::from_flight(&state, stats.as_ref())
                     .with_time_acceleration(acceleration);
                 if let Some(info) = player_info {
                     model.begin_takeoff();
                     // F570's frame switches persist while the ship is on the
-                    // pad: a two-body world of the ship and the starport.
-                    let parent_body = ffe_rs::navigation::landing_body(&station, &parent_info);
-                    model.begin_pad_takeoff(&parent_body, station.position, &info);
+                    // pad: a three-body world of the planet, the starport and
+                    // the ship, as F994 parents the player to the planet.
+                    let planet_body = ffe_rs::navigation::landing_body(&planet, &planet_info);
+                    let station_body = ffe_rs::navigation::landing_body(&station, &station_info);
+                    model.begin_pad_takeoff(
+                        &planet_body,
+                        planet.position,
+                        &station_body,
+                        station.position,
+                        &info,
+                    );
                 }
                 model.apply(&mut state);
                 original = Some(model);
@@ -4125,6 +4304,10 @@ fn run() -> Result<(), String> {
             if matches!(frames, 0 | 10 | 11 | 20 | 21 | 40 | 79) {
                 write_shot(dir, &format!("traffic-{frames:02}.ppm"), &screen);
             }
+        } else if let Some(dir) = &options.capture_start {
+            if frames % 10 == 0 {
+                write_shot(dir, &format!("start-{frames:04}.ppm"), &screen);
+            }
         }
         if let Some(viewer) = &model_viewer {
             screen.draw_model_viewer(viewer);
@@ -4220,6 +4403,8 @@ fn run() -> Result<(), String> {
             || takeoff_done_at.is_some_and(|done| frames >= done + 100)
             || (options.capture_planet.is_some() && (frames >= 6000 || arrived))
             || (options.capture_traffic.is_some() && frames >= 80)
+            || (capture_start
+                && (start_clear_at.is_some_and(|done| frames >= done + 40) || frames >= 1_500))
         {
             break;
         }

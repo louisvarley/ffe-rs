@@ -4,9 +4,23 @@ use ffe_rs::display::{DisplaySettings, Filter, FitMode, PixelAspect};
 use ffe_rs::flight::Flight;
 use ffe_rs::indexed::IndexedImage;
 use ffe_rs::prefs::{
-    self, Activate, Key, Prefs, DISPLAY, GRAPHIC, MAIN, MAPS, OTHERS, PORT, SOUND,
+    self, escape_action, Activate, Escape, Key, Prefs, DISPLAY, GRAPHIC, MAIN, MAPS, OTHERS, PORT,
+    SOUND,
 };
 use ffe_rs::screen::Screen;
+
+/// F224 at the default start: Escape 1 stops time (no page), Escape 2 opens
+/// the pages, Escape 3 returns to the game with the clock still stopped. The
+/// reference `--game-frame` captures `hope-esc1..3.png` show the same order.
+#[test]
+fn escape_pauses_then_opens_the_pages_then_returns() {
+    assert_eq!(escape_action(false, false), Escape::Pause);
+    assert_eq!(escape_action(false, true), Escape::Open);
+    assert_eq!(escape_action(true, true), Escape::Close);
+    // The pages cannot be open while time runs in this port, but the function
+    // still closes them if they are.
+    assert_eq!(escape_action(true, false), Escape::Close);
+}
 
 #[test]
 fn main_page_hot_areas_are_the_originals_icon_squares() {

@@ -47,8 +47,8 @@ right button is the steering hold. The left button remains the console pointer
 | Autopilot to the locked body (docks at a station) | **K** (or the AUTOPILOT button) |
 | Stop the autopilot | **Backspace** |
 | Request / cancel docking clearance | **D** |
-| Launch from a station or landed state / toggle labels in flight | **L** |
-| System map | **Tab** |
+| Launch from a station or landed state / toggle labels in flight | **L**, or the original action 9: **Tab** while landed |
+| System map | **Tab** (in flight only; on a pad or the surface Tab launches, as `F1056`'s action 9) |
 | Navigation computer (stations and starports) | **N** |
 | Galaxy map | **G** |
 | Re-centre the galaxy map | **C** |
@@ -59,12 +59,20 @@ right button is the steering hold. The left button remains the console pointer
 | External camera: turn / zoom | **arrows** / **+** **-** |
 | Status page | **F2** |
 | Original flight model on/off | **O** |
-| Preference pages | **Escape** |
+| Preference pages | **Escape** twice: the first press pauses, the second opens them; Escape again returns to the game with time still stopped (the original's `FUNC_000224` order) |
+| Starport services at a pad | **F4** (or the console's phone icon), as `F343`; **F1** or **Backspace** returns to the landed view |
 | Save / load newest snapshot | **F5** / **Shift+F5** |
 | Screenshot / model viewer / model lab | **F11** / **F12** / **Shift+F12** |
 | Change ship | **Page Up / Page Down** |
 | Docked rows / actions | **Up/Down**, **Enter**, **1**..**4**, **Backspace**, **B**/**N** trade |
 | Quit from the preference pages | click `Quit`, or select it and press Enter |
+
+An open-air takeoff is flown, not automatic: the launch action starts F1013's
+fixed up-thrust (`0x24`); above 200,000 mm it hands over to `0x26`, and the
+starport's `0x20` effect region only clears when the ship flies out of it. Raise
+the set speed (**W** Modern, **Enter** Classic) and pitch up (**Up** Modern,
+**A** Classic) to leave the pad; F1031 releases the bay when the region is
+behind.
 
 The mouse steering is relative, as F1038 is: while the right button is held each
 frame's movement adds to the ship's rates. Releasing the button stops the input

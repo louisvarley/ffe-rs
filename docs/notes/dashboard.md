@@ -159,7 +159,7 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 1 | Console panel (primary 43 at y158) | `F272` `ffe.asm:21021`; `F1439` `86138` | done | `screen.rs`; cache asset `base:bitmap/primary/043`; `verify-assets.py` | The original HUD and message window are drawn over it; the scanner globe and contacts are the original's now |
 | 2 | 0..157 / 158 split | `F1610/F1714` y<0x9e; `fills.md` | done | `screen.rs:14`; `camera.rs` projection | — |
 | 3 | Low palette / colour | `F1601` etc.; low palette asset | partial | `screen.rs:206-264`, `palette_rgb6` | Runtime upper palette and original text colours unknown (`STATUS.md` item 2) |
-| 4 | Screen buttons F4,F3,F2,F1 (0x0b-0x0e) | `DATA_005100` 0x0b-0x0e; `F261`; `F1439` | partial | `console.rs` table; `main.rs` F1/F2/F3 clicks; `tests/console_table.rs` | F1 views, F2 status page and F3 map are consumed; F4/F5 write "not ported" into the log. The DOS F2 key itself is not established; the console record is the original's |
+| 4 | Screen buttons F4,F3,F2,F1 (0x0b-0x0e) | `DATA_005100` 0x0b-0x0e; `F261`; `F1439` | partial | `console.rs` table; `main.rs` F1/F2/F3/F4 clicks; `tests/console_table.rs` | F1 views, F2 status page, F3 map and F4 services (`F343`, from `0x2a`/`0x30`) are consumed; F5 writes "not ported" into the log. The DOS F2 key itself is not established; the console record is the original's |
 | 5 | View buttons front/rear/turret/external (0x15-0x18) | `F1001/F1002/F1003`; `views.md` | done (4 of 6) | `screen.rs:198-203,732-743`; `tests/views.rs` | Missile (0x14) and combat (0x13) hidden by absent equipment; turret shown only >2 mounts as original |
 | 6 | Time-acceleration meter 0x26-0x2b | `F208` `ffe.asm:17066`; `F1439` | done | `console.rs:19-28`; `screen.rs:725-730`; `tests/console.rs:14-74` | 0x25 duplicate pause mark not drawn; `DATA_008808 -= 0xc22e` quirk not ported |
 | 7 | Right-hand buttons 0x0f-0x12 / 0x00-0x0a | `DATA_005100`; hot areas 0x6e/0x6c/0x48; `NAVIGATION.md` | done (drawing) | `console_table.rs`; `console.rs` table draw; `main.rs` H/labels/nav clicks | Table-driven icons; hyperspace/labels/navigation are consumed; capsule and other unported actions report in the log |
@@ -323,7 +323,7 @@ equipment icons; **23..37** = lamps.
 
 | Records | Role | Handler | Port |
 |---|---|---|---|
-| 0x0b-0x0e | screen buttons F4/F3/F2/F1 | `F1439` shows; `F1003`/screen callbacks | F1 views, F2 status, F3 map; F4/F5 report unported |
+| 0x0b-0x0e | screen buttons F4/F3/F2/F1 | `F1439` shows; `F1003`/screen callbacks | F1 views, F2 status, F3 map, F4 services (F343); F5 reports unported |
 | 0x15-0x18 | front/rear/turret/external | `F1001/F1002/F1003` | done |
 | 0x13/0x14 | combat/missile views | `F1002/F1056`, equipment | hidden (no equipment) |
 | 0x26-0x2b | time acceleration | `F208` | done |
@@ -332,9 +332,10 @@ equipment icons; **23..37** = lamps.
 | 0x3a-0x51 | engines-off systems page | `F1117/F1118/F1120` | done (F2) |
 | 0x10-0x19 | view-row equipment icons | `F991` | table-driven; 0x11-0x14 need equipment words |
 
-`Click::Screen(2)` (F2) opens the status page, `Screen(3)` (F3) the map, and
+`Click::Screen(2)` (F2) opens the status page, `Screen(3)` (F3) the map,
+`Screen(4)` (F4) the services board from `0x2a`/`0x30`, and
 `Click::Labels`, `Click::Navigation` and `Click::Hyperspace` are consumed.
-`F4/F5`, missile, combat and capsule clicks now write `Click::unported()`'s text
+`F5`, missile, combat and capsule clicks now write `Click::unported()`'s text
 into the message log; the console records themselves are all drawn from the
 table.
 
@@ -363,7 +364,7 @@ taken on the press edge (`DATA_007710/DATA_007708`).
 | 6 | 64,172-79,191 | 0xf1 | F1 | `CycleView` |
 | 7 | 74,166-89,185 | 0xf2 | F2 | `Screen(2)` (inert) |
 | 8 | 95,165-110,184 | 0xf3 | F3 | `Screen(3)` (map) |
-| 9 | 111,163-126,182 | 0xf4 | F4 | `Screen(4)` (inert) |
+| 9 | 111,163-126,182 | 0xf4 | F4 | `Screen(4)` (services from `0x2a`/`0x30`) |
 | 10 | 129,163-144,182 | 0xf5 | F5 | `Screen(5)` (inert) |
 | 11 | 146,163-161,182 | 0xf6 | F6 front | `Front` |
 | 12 | 166,163-181,182 | 0xf7 | F7 rear | `Rear` |
@@ -657,7 +658,8 @@ the user asked; the console record is the original's.
   `;`/Insert to ECM and adds numpad thrust (`jjffe28.txt`).
 - **Port key deviations**: F3 toggles modern/classic controls
   (`main.rs:513`) although the original F3 is the map; F10/F11/F12 are
-  repurposed; F2/F4/F5 are unused. F1/F6/F7/F9 and F8 match.
+  repurposed; F2/F5 are unused. F1/F6/F7/F9 and F8 match. Plain F4 is the
+  station/comms action (and launches on a pad via Tab/F1056 action 9).
 - **Redraw**: original `F262` changes an image, `F263/264` visibility,
   `F1439` hot areas, and `F1116`/`F991`/`F1120` re-derive state after mode,
   target, equipment or engine changes; pixels are redrawn by `F272` each
@@ -791,7 +793,7 @@ same importer that produced the primary/secondary tables rather than guessing.
 - **Size**: M.
 
 ### Slice H - Mode integration (L)
-- **What**: wire F2/F4/F5 screens, docked/landed UI, missile/combat views,
+- **What**: wire F2/F5 screens, docked/landed UI, missile/combat views,
   damage/death/capsule, hyperspace countdown, autopilot indicator.
 - **Files**: `main.rs` mode dispatch, `screen.rs`, `camera.rs`, `docking.rs`,
   `navigation.rs`.
