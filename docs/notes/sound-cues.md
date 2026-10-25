@@ -70,7 +70,7 @@ and shifts 63 right. The cue table keeps the original indices.
 | `Siren` | `0x1e` siren | `F750` 49579, `F941` 70530 | **yes** – first hit of a fight (`start_battle`) |
 | `Docking` | `0x13` airopen | `F1019` 75253, `F1024` 75757, `F1029` 76037, `F1088` 79847 | **yes** – auto-dock, `Traffic::Docked`, landing |
 | `Door` | `0x13` airopen | same family; `F1026` 75989 uses `0x12` | **yes** – traffic "opening/closing the door" stages, launch-out |
-| `Launch` | `0x20` launch | `F1098` 80465, `F941` 70557 (also `F291` 22850) | **yes** – station lift launch and `Traffic::LaunchDone` |
+| `Launch` | `0x20` launch | `F1098` 80465, `F941` 70557 (also `F291` 22850) | **yes** – `Traffic::LaunchDone` at the end of an undock |
 | `Hyperspace` | `0x21` hype | `F908` 67583 | **yes** – successful jump |
 | `Camera` | `0x27` camera | `F1125` 82748 | **yes** – view change (F1/F6/F7/F8/F9 and console view buttons) |
 | `Engine` | `0x0f` station | `F1092` 80089 (linvol 8) | **yes, one-shot** – `Traffic::LaunchDone`; the continuous envelope is the mixer's job |

@@ -1513,10 +1513,10 @@ fn run() -> Result<(), String> {
                                     }
                                     Ok(()) => {
                                         acceleration = 0;
-                                        // F1048 stops the song; F1098 plays
-                                        // the launch sample as the lift moves.
+                                        // F1048 stops the song; F1098's launch
+                                        // sample comes at the end of the lift
+                                        // sequence (`Traffic::LaunchDone`).
                                         sound.stop_for_sequence();
-                                        sound.play(Cue::Launch);
                                         message =
                                             "Launch permission granted: moving into the lift."
                                                 .to_owned();
@@ -1580,7 +1580,6 @@ fn run() -> Result<(), String> {
                                 Ok(()) => {
                                     acceleration = 0;
                                     sound.stop_for_sequence();
-                                    sound.play(Cue::Launch);
                                     message = "Launch permission granted: moving into the lift."
                                         .to_owned();
                                     None
