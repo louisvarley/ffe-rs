@@ -16,6 +16,16 @@
 //!   0x11), ships in station bays (F691), shuttles (F699, type 0xf) and patrol
 //!   groups (F698). `DATA_008997` (ships in the cache's ship-data table) is
 //!   zero in this port, so the bay branch is absent.
+//! - **The Thargoid count is `RND(F35(0x16))`** (`ffe.asm:45858`, a
+//!   global-variable read; F34/F35 are `ffe.asm:3507`/`3524`). `F35` is a
+//!   limit, not the exact count: F688 passes it to F922 like the trader counts.
+//!   It is not a system field: the only setter is the mission-script bytecode's
+//!   variable assignment (F37, `ffe.asm:3646`, calling F34), and the 71-dword
+//!   block is saved with the commander (`F65`, `ffe.asm:6898`). No ported system
+//!   loads a mission script, so the normal limit is zero; [`System::thargoids`]
+//!   carries it when a mission hook supplies one. F690 itself is F689 with the
+//!   type byte 0x11 and the model list `DATA_006197`; it has no military, system
+//!   or random (beyond the count draw) gate.
 //! - **F694/F695/F696/F693** (F698's four patrol choices) are the pirate
 //!   spawns: a lone type-0xa ship in state 5, a type-0xb leader with two
 //!   formation escorts in state 0xb (+0x102..+0x106 hold their offsets from the
@@ -55,7 +65,9 @@
 //! transcription of every state routine. The police response is a reconstruction
 //! from `DATA_008646/8647` (the wanted/alert words) because the original's
 //! police spawn path is the same F688 count as the traffic. Docking, station
-//! bays, missiles and Thargoids remain. Placement uses the original's rule (a
+//! bays, missiles and ECM remain. Thargoid traffic exists as the F690 rule and
+//! role, but the source's count variable is mission-script driven (see above),
+//! so no ordinary system spawns any. Placement uses the original's rule (a
 //! random phase on an orbit around an anchor) with a radius in the port's unit
 //! system that keeps the ships reachable. See `docs/notes/npc.md`.
 
@@ -989,7 +1001,7 @@ impl NpcShip {
             turn_rate: TURN_RATE / f64::from(turn_divisor(spec.model)),
             speed: 0.0,
             hostile,
-            laser: role.laser_code(spec),
+            laser: role.laser_code(spec, rng),
             guns: laser::State {
                 refire: 0,
                 heat: 0,
@@ -1860,21 +1872,86 @@ pub fn pirate_bounty(rng: &mut Random, grouped: bool) -> u32 {
     PIRATE_BOUNTIES[index]
 }
 
+/// `DATA_006264` (`ffedat.asm:10082`): the per-class laser-capacity proportion
+/// F774 adds to its `RND(0x33)` draw. The table has eighteen dwords; class
+/// 0x11 (a Thargoid) reads `0xb2` at offset `0x44`.
+pub const LASER_PROPORTION: [u16; 18] = [
+    0xb2, 0x0c, 0xb2, 0x0c, 0xb2, 0x0c, 0xb2, 0x0c, 0xb2, 0x0c, 0x66, 0x99, 0x99, 0x00, 0xb2, 0x07,
+    0x7f, 0xb2,
+];
+
+/// `DATA_006265` (`ffedat.asm:10092`): the laser type and tonnage table F774
+/// walks. These are the laser bytes F773 writes to the mount, not the
+/// equipment-shop codes; the shop's Thargoid Laser is
+/// [`crate::equipment::THARGOID_LASER`] (0xd5).
+pub const LASER_TONNAGE: [(u8, u32); 9] = [
+    (0x00, 0),
+    (0x88, 1),
+    (0x91, 3),
+    (0xa0, 5),
+    (0xa9, 20),
+    (0xb3, 75),
+    (0xbc, 200),
+    (0xc6, 500),
+    (0xcf, 900),
+];
+
+/// F774 (`ffe.asm:50765`): pick the laser a ship of `class` fits from its
+/// remaining equipment `budget`. `RND(0x33) + DATA_006264[class]` times the
+/// budget, shifted right eight, picks the largest `DATA_006265` tonnage that
+/// fits; the chosen tonnage is returned in the tuple with the laser byte.
+///
+/// The port has no equipment-budget loop, so a caller passes the model's cargo
+/// word as the budget. That is the same starting quantity F774 receives for
+/// these models (F1533's drive-mass subtraction is not modelled).
+pub fn f774_laser(class: u8, budget: u32, rng: &mut Random) -> Option<(u8, u32)> {
+    let proportion = u32::from(*LASER_PROPORTION.get(usize::from(class))?);
+    let draw = rng.bounded(0x33).saturating_add(proportion);
+    let capacity = ((u64::from(draw) * u64::from(budget)) >> 8) as u32;
+    let mut index = 1;
+    while index < LASER_TONNAGE.len() && capacity >= LASER_TONNAGE[index].1 {
+        index += 1;
+    }
+    // The original decrements after the loop, so a capacity below the first
+    // tonnage returns entry 0 (no laser).
+    Some(LASER_TONNAGE[index - 1])
+}
+
 impl Role {
     /// The front laser an NPC of this role carries. F773/F774 fit it from the
-    /// model's equipment budget; the port has no budget, so combat roles get one
-    /// front mount: pirates a 1MW pulse, police and military a 5MW pulse, and
-    /// Thargoids the Thargoid laser.
-    pub fn laser_code(self, spec: &Spec) -> Option<u8> {
+    /// model's equipment budget; the port has no budget loop, so pirates a 1MW
+    /// pulse, police and military a 5MW pulse, and Thargoids F774's selection
+    /// from their class proportion and cargo. The equipment shop's separate
+    /// Thargoid Laser (0xd5) is not one of F774's table entries.
+    pub fn laser_code(self, spec: &Spec, rng: &mut Random) -> Option<u8> {
         if spec.gun_mounts <= 0 {
             return None;
         }
         match self {
             Role::Pirate => Some(laser::PULSE_1MW),
             Role::Police | Role::Military => Some(laser::PULSE_5MW),
-            Role::Thargoid => Some(laser::THARGOID),
+            Role::Thargoid => f774_laser(self.ai_class(), u32::from(spec.cargo), rng)
+                .and_then(|(code, _)| (code != 0).then_some(code)),
             Role::Trader | Role::Shuttle => None,
         }
+    }
+}
+
+/// The F869 system report plus `F35(0x16)`, the mission-script Thargoid limit
+/// F688 passes to F922 before F690. A normal system has `thargoids == 0`: the
+/// port has no mission scripts, so nothing writes that global variable, and
+/// `RND(0)` spawns none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct System {
+    pub details: Details,
+    /// `F35(0x16)` (`ffe.asm:45858`): the exclusive limit of F688's Thargoid
+    /// draw, not the number of ships.
+    pub thargoids: usize,
+}
+
+impl System {
+    pub const fn new(details: Details, thargoids: usize) -> Self {
+        Self { details, thargoids }
     }
 }
 
@@ -1884,6 +1961,8 @@ impl Role {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Counts {
     pub traders: usize,
+    /// `RND(F35(0x16))`; F690's spawned count, before [`MAX_SHIPS`].
+    pub thargoids: usize,
     pub shuttles: usize,
     pub pirates: usize,
     pub police: usize,
@@ -1891,19 +1970,25 @@ pub struct Counts {
 
 /// The counts F688 draws from a system record, before [`MAX_SHIPS`]. `details`
 /// is F869's report: `bytes[3]` is `+8`, `bytes[1]` is `+6` and `bytes[2]` is
-/// `+7`.
+/// `+7`. The Thargoid limit is the separate `F35(0x16)` global, not a system
+/// field, and F688 draws `RND(limit)` for it just as it does for traders.
 ///
 /// The source's exact draws are: `RND(+8)` traders (F689), `RND(+8)` F699
 /// transport groups (only after F691's station-bay branch fired), `RND(+6*4)`
 /// F698 pirate-group attempts (each is a lone pirate, a group, F696, or a
-/// no-op) and the F690 Thargoid branch. The port keeps `RND(+8)` traders and
-/// shuttles, one pirate group per `+6` and a police group from a non-zero `+7`;
-/// the Thargoid and station-bay branches are omitted (their tables are not
-/// loaded). The pirate `+6` count without F698's `RND(*4)` is a port
+/// no-op) and F690's `RND(F35(0x16))` Thargoids. The port keeps `RND(+8)`
+/// traders and shuttles, one pirate group per `+6`, a police group from a
+/// non-zero `+7` and the mission-gated Thargoid count; the station-bay branch
+/// is omitted. The pirate `+6` count without F698's `RND(*4)` is a port
 /// simplification, not the source's count.
-pub fn counts(details: &Details, rng: &mut Random) -> Counts {
+pub fn counts(system: &System, rng: &mut Random) -> Counts {
+    // F688: RND(byte +8) traders, RND(F35(0x16)) Thargoids (F690), RND(byte
+    // +8) shuttles, byte +6 patrol groups, byte +7 police.
+    let details = &system.details;
+    let thargoid_limit = u32::try_from(system.thargoids).unwrap_or(u32::MAX);
     Counts {
         traders: rng.bounded(details.bytes[3]) as usize,
+        thargoids: rng.bounded(thargoid_limit) as usize,
         shuttles: rng.bounded(details.bytes[3]) as usize,
         pirates: details.bytes[1] as usize,
         police: (details.bytes[2] > 0) as usize,
@@ -1940,19 +2025,20 @@ impl SpawnOptions {
 /// models without a statistics block are skipped. The result is capped at
 /// [`MAX_SHIPS`] and is deterministic for a given `rng` state. [`SpawnOptions`]
 /// carries the port's capture-only guarantee; without it the counts are F688's
-/// (including zero) capped for legibility.
+/// (including zero) capped for legibility. `system.thargoids` is F35(0x16)'s
+/// limit; zero unless a mission script set it.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
     player: [i64; 3],
     forward: [f64; 3],
     anchors: &[Anchor],
-    details: &Details,
+    system: &System,
     allegiance: u32,
     rng: &mut Random,
     options: SpawnOptions,
     spec: impl Fn(u32) -> Option<Spec>,
 ) -> Vec<NpcShip> {
-    let mut counts = counts(details, rng);
+    let mut counts = counts(system, rng);
     let anchor = anchors.first().copied().unwrap_or(Anchor {
         position: player,
         radius: 1_000_000,
@@ -1968,6 +2054,7 @@ pub fn spawn(
         counts.traders = counts.traders.min(2);
         counts.pirates = counts.pirates.min(2);
     }
+    counts.thargoids = counts.thargoids.min(MAX_SHIPS);
     counts.shuttles = counts.shuttles.min(1);
     counts.police = counts.police.min(1);
 
@@ -2037,6 +2124,15 @@ pub fn spawn(
             if let Some(station) = anchor.station {
                 ship.begin_transit(station, anchor.position);
             }
+            ships.push(ship);
+        }
+    }
+    // F690: F689's setup with type 0x11 (DATA_006197's models). The source uses
+    // the same anchor/orbit placement and departure timer, then calls script
+    // event 0x17; the port starts them hostile (see `Role::hostile`).
+    for i in 0..counts.thargoids {
+        let position = spread(rng, 1.0 + i as f64 * 2.1, orbit);
+        if let Some(ship) = add(Role::Thargoid, 0x11, position, anchor.position, rng) {
             ships.push(ship);
         }
     }
@@ -2211,6 +2307,10 @@ mod tests {
             bytes: [128, 1, 2, 3, 0],
             allegiance: 134,
         }
+    }
+
+    fn system(thargoids: usize) -> System {
+        System::new(details(), thargoids)
     }
 
     fn spec(model: u32) -> Option<Spec> {
@@ -2484,7 +2584,7 @@ mod tests {
                 radius: 2_000_000,
                 station: None,
             }],
-            &details(),
+            &system(0),
             0,
             &mut rng,
             SpawnOptions::CAPTURE,
@@ -2516,10 +2616,15 @@ mod tests {
     #[test]
     fn f688_counts_come_from_the_system_record_and_are_capped() {
         let mut rng = Random::new(0x1234_5678, 0x4567_89ab);
-        let counts = counts(&details(), &mut rng);
-        assert!(counts.traders <= 3);
-        assert!(counts.pirates == 1);
-        assert_eq!(counts.police, 1);
+        let c = counts(&system(0), &mut rng);
+        assert!(c.traders <= 3);
+        assert!(c.pirates == 1);
+        assert_eq!(c.police, 1);
+        assert_eq!(c.thargoids, 0);
+        // F35(0x16) is an exclusive limit: F688 calls F922 on it exactly as it
+        // does for the trader counts, so the result is below the limit.
+        let c = counts(&system(3), &mut rng);
+        assert!(c.thargoids < 3);
         let ships = spawn(
             [0, 0, 0],
             [0.0, 0.0, 1.0],
@@ -2528,7 +2633,7 @@ mod tests {
                 radius: 4_500_000,
                 station: None,
             }],
-            &details(),
+            &system(0),
             2,
             &mut rng,
             SpawnOptions::CAPTURE,
@@ -2557,11 +2662,14 @@ mod tests {
     #[test]
     fn the_system_counts_alone_can_spawn_no_traffic() {
         let mut rng = Random::new(7, 8);
-        let empty = Details {
-            words: [0, 0],
-            bytes: [128, 0, 0, 0, 0],
-            allegiance: 0,
-        };
+        let empty = System::new(
+            Details {
+                words: [0, 0],
+                bytes: [128, 0, 0, 0, 0],
+                allegiance: 0,
+            },
+            0,
+        );
         let ships = spawn(
             [0, 0, 0],
             [0.0, 0.0, 1.0],
@@ -2597,6 +2705,141 @@ mod tests {
         assert!(ships.iter().any(|ship| ship.role == Role::Pirate));
     }
 
+    /// A Thargoid model's statistics: DATA_006197's models have 0x31's 232 t
+    /// hull/203 t cargo, 1-2 gun mounts and (except 0x45) the shared 0x800e
+    /// drive word.
+    fn thargoid_spec(model: u32, cargo: u16, guns: i8) -> Spec {
+        Spec {
+            model,
+            name: "Unknown".to_owned(),
+            radius: 90_000,
+            mass: 232,
+            shield_strength: 16_430,
+            thrust: 14_715,
+            drive: 14,
+            gun_mounts: guns,
+            cargo,
+        }
+    }
+
+    #[test]
+    fn f690_spawns_rnd_f35_0x16_thargoids_with_data_006197_models() {
+        assert_eq!(Role::Thargoid.type_code(), 0x11);
+        assert_eq!(Role::Thargoid.ai_class(), 0x11);
+        assert!(Role::Thargoid.hostile());
+        assert!(!Role::Thargoid.clean());
+        assert_eq!(
+            SHIP_TYPES[0x11],
+            &[0x45, 0x31, 0x31, 0x32, 0x32, 0x33, 0x33, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f][..]
+        );
+
+        let anchor = Anchor {
+            position: [0, 0, 0],
+            radius: 2_000_000,
+            station: None,
+        };
+        // The only source of the count is F35(0x16): zero spawns none.
+        let mut rng = Random::new(0x2345_6789, 0x3456_789a);
+        let none = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &[anchor],
+            &system(0),
+            0,
+            &mut rng,
+            SpawnOptions::default(),
+            spec,
+        );
+        assert!(none.iter().all(|ship| ship.role != Role::Thargoid));
+
+        // F688 draws RND(F35(0x16)); use a limit large enough that this seed's
+        // draw and the MAX_SHIPS cap still leave a Thargoid in the traffic.
+        let limit = 12;
+        let mut rng = Random::new(0x2345_6789, 0x3456_789a);
+        let ships = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &[anchor],
+            &system(limit),
+            0,
+            &mut rng,
+            SpawnOptions::default(),
+            spec,
+        );
+        let thargoids: Vec<&NpcShip> = ships
+            .iter()
+            .filter(|ship| ship.role == Role::Thargoid)
+            .collect();
+        assert!(!thargoids.is_empty(), "RND({limit}) drew no Thargoids");
+        assert!(
+            thargoids.len() < limit,
+            "the draw must stay below F35(0x16)"
+        );
+        for ship in thargoids {
+            assert!(
+                SHIP_TYPES[0x11].contains(&ship.model),
+                "model {:#x}",
+                ship.model
+            );
+            assert_eq!(ship.state, State::Attack);
+            assert_eq!(ship.role.ai_class(), 0x11);
+            assert!(ship.is_hostile());
+            assert_eq!(ship.bounty, 0);
+            // The test spec's cargo (8 t) reaches F774's 1MW beam entry.
+            assert_eq!(ship.laser, Some(laser::BEAM_1MW));
+        }
+    }
+
+    #[test]
+    fn f774_picks_the_thargoid_laser_from_class_and_cargo() {
+        let mut rng = Random::new(3, 4);
+        // DATA_006264[0x11] is 0xb2. 203 t of cargo always reaches the 75 t
+        // 20MW beam entry (0xb3), not the 900 t 0xcf entry.
+        for _ in 0..32 {
+            assert_eq!(
+                f774_laser(0x11, 203, &mut rng),
+                Some((laser::BEAM_20MW, 75))
+            );
+        }
+        // The Thargoid Transporter's 13,000 t cargo reaches 0xcf.
+        assert_eq!(
+            f774_laser(0x11, 13_000, &mut rng),
+            Some((laser::THARGOID, 900))
+        );
+        // No budget is DATA_006265[0], "no laser"; a class outside
+        // DATA_006264's eighteen entries has no proportion.
+        assert_eq!(f774_laser(0x11, 0, &mut rng), Some((0, 0)));
+        assert_eq!(f774_laser(0x1f, 100, &mut rng), None);
+        // A gun-less model gets no mount even when its cargo picks a laser.
+        let mut rng = Random::new(5, 6);
+        let unarmed = Role::Thargoid.laser_code(&thargoid_spec(0x45, 13_000, 0), &mut rng);
+        assert_eq!(unarmed, None);
+        let armed = Role::Thargoid.laser_code(&thargoid_spec(0x31, 203, 1), &mut rng);
+        assert_eq!(armed, Some(laser::BEAM_20MW));
+        let unarmed = Role::Thargoid.laser_code(&thargoid_spec(0x31, 0, 1), &mut rng);
+        assert_eq!(unarmed, None);
+    }
+
+    #[test]
+    fn a_thargoid_uses_the_model_shield_hull_and_drive_words() {
+        let ship = NpcShip::new(
+            &thargoid_spec(0x31, 203, 1),
+            Role::Thargoid,
+            [0, 0, 2_000_000],
+            [0; 3],
+            &mut Random::new(7, 8),
+        );
+        assert_eq!(ship.damage.shields, 0xb8); // 0x2e * 4
+        assert_eq!(ship.damage.shields_max, 0xb8);
+        assert_eq!(ship.damage.hull, 928); // 232 * 4
+        assert_eq!(ship.shield_strength, 16_430);
+        assert_eq!(ship.guns.energy, drive_energy(14));
+        assert_eq!(ship.guns.energy, 0);
+        // The source's 0x800e drive word has no DATA_006266 energy entry; the
+        // port keeps that zero rather than inventing a loadout.
+        assert_eq!(ship.laser, Some(laser::BEAM_20MW));
+    }
+
     #[test]
     fn an_escort_follows_its_leaders_formation() {
         let mut rng = Random::new(21, 22);
@@ -2605,11 +2848,14 @@ mod tests {
             [0, 0, 0],
             [0.0, 0.0, 1.0],
             &[],
-            &Details {
-                words: [0, 0],
-                bytes: [128, 2, 0, 3, 0],
-                allegiance: 0,
-            },
+            &System::new(
+                Details {
+                    words: [0, 0],
+                    bytes: [128, 2, 0, 3, 0],
+                    allegiance: 0,
+                },
+                0,
+            ),
             0,
             &mut rng,
             SpawnOptions::CAPTURE,
@@ -2630,7 +2876,7 @@ mod tests {
             [0, 0, 0],
             [0.0, 0.0, 1.0],
             &[],
-            &details(),
+            &system(0),
             0,
             &mut rng,
             SpawnOptions::CAPTURE,
@@ -2667,7 +2913,7 @@ mod tests {
                 radius: 2_000_000,
                 station: None,
             }],
-            &details(),
+            &system(0),
             0,
             &mut rng,
             SpawnOptions::CAPTURE,

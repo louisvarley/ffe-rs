@@ -1798,14 +1798,32 @@ impl Navigator {
     ///
     /// This is the source path: F688's own counts decide, so a system can spawn
     /// none. The port's capture/test guarantee belongs to
-    /// [`Self::respawn_traffic`] only.
+    /// [`Self::respawn_traffic`] only. `F35(0x16)` is zero here: the mission
+    /// scripts that set it are not ported, so normal systems have no Thargoids
+    /// (see [`Self::spawn_thargoid_traffic`]).
     pub fn spawn_traffic(
         &mut self,
         cache: &VerifiedCache,
         player: [i64; 3],
         forward: [f64; 3],
     ) -> bool {
-        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::default())
+        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::default(), 0)
+    }
+
+    /// F690's Thargoid branch with an explicit `F35(0x16)` limit: the hook a
+    /// ported mission script would use. The value is not a rate or an exact
+    /// count: F688 draws `RND(limit)` before F690, and no system record sets it,
+    /// so zero spawns nothing. Forces the F688 spawner to run even when this
+    /// system already has traffic.
+    pub fn spawn_thargoid_traffic(
+        &mut self,
+        cache: &VerifiedCache,
+        player: [i64; 3],
+        forward: [f64; 3],
+        count: usize,
+    ) -> bool {
+        self.spawned = None;
+        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::default(), count)
     }
 
     fn spawn_traffic_with(
@@ -1814,6 +1832,7 @@ impl Navigator {
         player: [i64; 3],
         forward: [f64; 3],
         options: npc::SpawnOptions,
+        thargoids: usize,
     ) -> bool {
         if self.spawned == Some(self.current) {
             return false;
@@ -1826,6 +1845,7 @@ impl Navigator {
         };
         let code = self.entries[self.current].params.code;
         let details = tables.details(code);
+        let system = npc::System::new(details, thargoids);
         let allegiance = details.allegiance >> 6;
         let anchors: Vec<Anchor> = self
             .bodies
@@ -1848,7 +1868,7 @@ impl Navigator {
             player,
             forward,
             &anchors,
-            &details,
+            &system,
             allegiance,
             &mut rng,
             options,
@@ -1880,7 +1900,7 @@ impl Navigator {
         forward: [f64; 3],
     ) -> bool {
         self.spawned = None;
-        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::CAPTURE)
+        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::CAPTURE, 0)
     }
 
     /// Advance F939/F942/F926's effects without running the traffic AI. The

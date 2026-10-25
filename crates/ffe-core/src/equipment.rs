@@ -27,6 +27,11 @@ use crate::equipment_table::EQUIPMENT;
 
 /// The original's 66 equipment records.
 pub const EQUIPMENT_COUNT: usize = 66;
+/// The equipment code of the Thargoid Laser (`DATA_005289` record 65,
+/// `ffedat.asm:8502`, `+0x12 = 0xd5`). This is the shop/fitted equipment code;
+/// F774's AI laser table uses the combat bytes 0x88..0xcf instead
+/// (`crate::npc::LASER_TONNAGE`).
+pub const THARGOID_LASER: u8 = 0xd5;
 /// Ten missile pylons: `ship+0xd6..+0xdf` (`F1120` shows one icon each).
 pub const MISSILE_SLOTS: usize = 10;
 /// `F1120`'s ten missile icons are at console records `0x3b..=0x44`; the low
@@ -289,6 +294,22 @@ mod tests {
         assert_eq!(equipment()[21].name, "1MW Pulse Laser");
         assert_eq!(equipment()[27].name, "Shield Generator");
         assert_eq!(equipment()[65].name, "Thargoid Laser");
+    }
+
+    #[test]
+    fn the_thargoid_laser_is_equipment_code_0xd5() {
+        let item = get(65).unwrap();
+        assert_eq!(item.name, "Thargoid Laser");
+        assert_eq!(item.category, Category::Laser);
+        assert_eq!(item.code, THARGOID_LASER);
+        assert_eq!(item.code, 0xd5);
+        assert_eq!(item.mass, 50);
+        assert_eq!(item.tech_level, 255);
+        assert!(is_laser_code(THARGOID_LASER));
+        // The code is the shop/fitted byte; F774's AI table ends at 0xcf, a
+        // different (Large Plasma Accelerator) record.
+        assert!(is_laser_code(0xcf));
+        assert_ne!(THARGOID_LASER, 0xcf);
     }
 
     #[test]

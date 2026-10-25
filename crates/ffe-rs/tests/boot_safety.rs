@@ -48,7 +48,7 @@ fn hope_system_record_details() {
     let mut rng = ffe_core::npc::Random::new(1, 2);
     println!(
         "F688 counts: {:?}",
-        ffe_core::npc::counts(&details, &mut rng)
+        ffe_core::npc::counts(&ffe_core::npc::System::new(details, 0), &mut rng)
     );
 }
 

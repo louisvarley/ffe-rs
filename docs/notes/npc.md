@@ -33,7 +33,13 @@ resume transit, instead of orbiting for ever.
 - **F688** (`ffe.asm:45818`) is the system traffic spawner. It asks **F869**
   for the galaxy record's fields and calls:
   - `RND(+8) Ã— F689`: traders (`F772(1)` â†’ F635 type 1 + `2*DATA_008996`);
-  - `F35(0x16) Ã— F690`: the type-0x11 branch (Thargoids; `F35` is not ported);
+  - `F35(0x16)` (global variable 22) -> F690: the type-0x11 branch. `F35`
+    (`ffe.asm:3524`) reads the global block `DATA_008548`; the only setter is
+    the mission script bytecode's assignment (F37, `ffe.asm:3646`, calling F34
+    at `3507`), and the 71-dword block is saved with the commander (F65,
+    `ffe.asm:6898`). There is no direct `F34(0x16, ...)` call in `ffe.asm`, so
+    no system field, government, allegiance or random draw sets it: F690 runs
+    only when a mission script has set that variable. See "Owner decisions".
   - `DATA_008997` Ã— F691: ships parked in station bays (the cache's ship-data
     table is not loaded, so the port has none);
   - `RND(+8) Ã— F699`: shuttles (`F772(0xf)`);
@@ -104,8 +110,15 @@ resume transit, instead of orbiting for ever.
   `Navigator::respawn_traffic` (the scripted capture/`npc_view` fixtures). A
   normal `Navigator::spawn_traffic` entry, including the new game's start, uses
   F688's counts as they are.
-- **Placement:** traders, shuttles and police use a random phase on an orbit
-  around the first station/starport (`Anchor`), radius
+- **The Thargoid limit** is `System::thargoids`, the caller's `F35(0x16)`.
+  `counts` draws `RND(limit)` into `Counts::thargoids` (F688 passes the limit to
+  F922, exactly like the trader count); `spawn` runs F690 after the traders in
+  F688's order. `System::new(details, 0)` is the normal case, and
+  `Navigator::spawn_thargoid_traffic(limit)` is the mission/script hook. There
+  is no rate, system test or other random gate: `RND(limit)` type-0x11 ships
+  are attempted, then the port's `MAX_SHIPS` cap applies.
+- **Placement:** traders, Thargoids, shuttles and police use a random phase on
+  an orbit around the first station/starport (`Anchor`), radius
   `clamp(1.2 * station radius, 2.5e6, 0.75 * laser range)` original units.
   The pirate group appears `PIRATE_DISTANCE = 3.5e6` ahead of the player (plus
   a side offset), inside F931's `0x7fffff` hit range, only for the scripted
@@ -128,10 +141,17 @@ resume transit, instead of orbiting for ever.
   `random * 16`; this is the port's simplification), hull is `mass * 4`, and
   current shields start full (the original's F938 recharge catches up in play).
 - The front laser (`+0xd2`) and its energy come from the equipment rules:
-  combat roles get one front mount (pirates 1MW pulse, police/military 5MW
-  pulse, Thargoids the Thargoid laser) and `+0x11e = DATA_006266[drive] << 24`
+  pirates get one 1MW pulse and police/military one 5MW pulse mount; Thargoids
+  use F774's own selection (`LASER_PROPORTION`/`LASER_TONNAGE`): class 0x11's
+  0xb2 proportion and the model's cargo pick the 20MW beam for the 0x31-0x33/
+  0x3f warships (203/149 t cargo) and 0xcf for the 0x45 transporter (13,000 t,
+  but it has no gun mount). `+0x11e = DATA_006266[drive] << 24`
   ([`drive_energy`]). Traders and shuttles carry none. F773/F774's budget
   (equipment `+0x119`, spent on lasers then missiles) is not modelled.
+  The equipment shop's separate **Thargoid Laser is 0xd5**
+  (`equipment::THARGOID_LASER`, 50 t, tech 255); it is not one of F774's
+  `DATA_006265` entries, whose last code 0xcf the equipment table calls the
+  Large Plasma Accelerator.
 - Names are the model-name table (cache v11) plus a serial, e.g.
   `Cobra Mk III 1`; the original's F703/F791 registration generator is not
   ported.
@@ -350,7 +370,7 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 
 ## 3. Tests and frames
 
-- `cargo test -p ffe-core npc`: twenty-one tests. The original sixteen cover the
+- `cargo test -p ffe-core npc`: twenty-four tests. The original sixteen cover the
   F635 table/counts, the allegiance shift, F922's determinism, F688 counts/cap,
   placement, the `DATA_006255` rows, F585's turn divisor, F601's thrust/mass
   speeds, the F697 bounty table, F931's gates and F930's damage, the braking
@@ -359,7 +379,11 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
   cycle: the bay request/approach/dock with the bay occupied, F747's 2-3 day
   interval, the door-open launch and F651 release with the next station, the
   full-station give-up (F655's Full and F762), and the F867 clearance timeout
-  recycling the ship.
+  recycling the ship. The Thargoid tests check F690's `RND(F35(0x16))` limit and
+  `DATA_006197` models, `Role::Thargoid`'s type/class/hostility, F774's
+  class/cargo laser choice (203 t -> 0x20MW beam, 13,000 t -> 0xcf), and the
+  model shield/hull/drive words. `cargo test -p ffe-core equipment` checks the
+  Thargoid Laser's equipment record (0xd5, 50 t, tech 255).
 - `cargo test -p ffe-rs combat`: adds the player's F953 words
   (`Flight::take_damage`) and their save defaults.
 - `cargo test -p ffe-rs --test npc_ai -- --ignored` with
@@ -383,6 +407,19 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
   `F735/F865 ... F651 frees bay 0`, `F761/F762`). The logged approach is
   128.7 s at `STATION_CRUISE_SPEED` (40,000 mm/s). The PNGs and the full log are
   in `docs/evidence/npc-docking/` (README.md).
+- `cargo test -p ffe-rs --test thargoid_view -- --ignored` with the same cache:
+  `Navigator::spawn_thargoid_traffic(..., 12)` runs F690 with `F35(0x16) = 12`
+  (F688 draws `RND(12)`; this checkpoint's seed produces one);
+  the test then asserts model 0x31's original statistics (232 t hull, 16,430
+  shield word, 14,715 thrust, drive 14, one mount, 203 t cargo, 90,000 mm
+  radius, 928 hull, 184 shields) and F774's 20MW-beam pick, pins the model for
+  a stable frame, and fires the new-game 1MW pulse at 60 Hz. Four shield hits
+  (184 -> 0) and nineteen hull hits (928 -> 0) kill it in 23 shots. Set
+  `FFE_SHOT_DIR` to keep `thargoid-before.ppm`,
+  `thargoid-hit-shields.ppm` (shield bubble, 72.8 %), `thargoid-hit-hull.ppm`
+  (98.2 % hull), `thargoid-kill.ppm` (0.0 % hull/shields) and
+  `thargoid-death.ppm` (F942's model-0x9b explosion); the PNGs and README are
+  in `docs/evidence/thargoids/`.
 - **Live frames:** `ffe-rs.exe --root <repo> --skip-intro --capture-traffic
   <dir>` shows the traffic, the locked `Moray Starboat 3` label and readout, the
   shield-bubble flash and the death frame from the earlier slice. Since the AI
@@ -418,8 +455,16 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
   escape-pod variants are not ported.
 - **Sound.** F953/F942's samples are not played (the audio layer is synthetic),
   though the sound cues from these paths are wired.
-- **Thargoids.** The F690 branch needs F35's random table; no Thargoid traffic
-  is spawned, so the port's Thargoid laser/role is only reachable in tests.
+- **Thargoids.** F690's rule, the type-0x11 model list and the role are
+  implemented, but the count is `RND(F35(0x16))`, whose limit only a mission
+  script writes; no ported system sets it, so ordinary traffic has none. The
+  source has no military/witchspace/random gate for F690 beyond that draw. The model statistics'
+  0x800e drive word maps to drive class 14 and `DATA_006266[14] = 0`, so the
+  port's Thargoids (like the source's) have no laser energy until a loadout
+  gives them some; they still chase and can be hit/killed. Their model names
+  are the original's (`Unknown`, `Transporter`, `Lion Transport`, `Tiercel
+  Freighter`, `Thargoid Transporter`), so the label is not literally
+  "Thargoid".
 - **Persistence of the player's own damage** is in `Flight`'s serde words; the
   NPC traffic itself is not saved (it is regenerated on entry, as F680 does).
 - **The original's deaths.** The player's destruction is a starport recovery,
@@ -430,6 +475,24 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 
 ## 5. Owner decisions
 
+- **Thargoid trigger.** F690's count is `RND(F35(0x16))`, a mission-script
+  global limit; the port has no mission scripts, so ordinary traffic is zero and
+  the `Navigator::spawn_thargoid_traffic` hook is the only caller that can set
+  it. Decide whether to port the mission bytecode/scripts that write 0x16,
+  expose a developer/system override, or leave Thargoids to scripted/evidence
+  runs. Do not add a government/tech/allegiance rule: none exists in F690.
+- **Thargoid armament and energy.** The port follows F774's class/cargo
+  selection, so the warships carry the 20MW beam and the transporter's 0xcf is
+  mountless. The model data's 0x800e drive word gives drive class 14 and
+  `DATA_006266[14] = 0`; the port therefore starts them with no laser energy.
+  Decide whether to give mission Thargoids the source's `+0x119` fuel tokens,
+  a shield/energy loadout, or leave them chase-only. The player-fitted
+  **Thargoid Laser 0xd5** is an equipment record, not an F774 entry; decide
+  whether the shop item should map to an AI laser code.
+- **Thargoid labels.** The original model-name table names 0x31 "Unknown" and
+  0x32-0x33/0x3f "Transporter"/"Lion Transport"/"Tiercel Freighter"; the port
+  keeps those names. Decide whether the readout should say "Thargoid" for
+  class 0x11 instead of inventing a name change in the cache.
 - **Player damage model.** The port runs F953 against the player's `Flight`
   shields/hull words; the new-game Eagle has no shield generator
   (`+0xe2 = 0`), so a pirate's 1MW pulse kills it in two hits. Decide whether
