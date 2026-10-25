@@ -203,7 +203,7 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
     // The marker's timer is what removes the slot (F927's recycle).
     screen.ships = Vec::new();
     for _ in 0..40 {
-        nav.tick_ships(0.02, from);
+        nav.tick_ships(0.02, 994, from, 10_000);
     }
     assert!(nav.ships.iter().all(|ship| ship.id != ship_id));
 }

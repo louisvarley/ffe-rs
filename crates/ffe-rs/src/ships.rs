@@ -123,6 +123,9 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
         radius: info.radii().0,
         mass: stats.mass,
         shield_strength: stats.shield_strength as u16,
+        thrust: stats.forward_thrust,
+        drive: stats.drive as u8,
+        gun_mounts: stats.gun_mounts,
     })
 }
 

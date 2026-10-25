@@ -328,6 +328,32 @@ impl Flight {
         }
         None
     }
+
+    /// F953 on the player: the shields absorb first (`+0xe0` against `+0xe2`),
+    /// then the hull (`+0xe4`, mass * 4). `mass` is the ship statistics' mass
+    /// word. The first hit records the full hull, so a save from before the
+    /// damage model (hull `[0, 0]`) still shows F1099's hull line.
+    pub fn take_damage(&mut self, damage: u32, mass: u16) -> ffe_core::laser::Damage {
+        let full = mass.max(1).saturating_mul(4);
+        if self.hull[1] == 0 {
+            self.hull = [full, full];
+        }
+        let mut state = ffe_core::laser::DamageState {
+            shields: self.shields[0].min(self.shields[1]),
+            shields_max: self.shields[1],
+            hull: self.hull[0].min(self.hull[1]),
+            mass,
+        };
+        let result = ffe_core::laser::apply_damage(&mut state, damage);
+        self.shields = [state.shields, state.shields_max];
+        self.hull = [state.hull, self.hull[1].max(full)];
+        result
+    }
+
+    /// Whether the player's hull has been used up (F942 destroys the object).
+    pub fn destroyed(&self) -> bool {
+        self.hull[1] != 0 && self.hull[0] == 0
+    }
 }
 
 fn length(vector: [f64; 3]) -> f64 {

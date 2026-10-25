@@ -2043,14 +2043,72 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        // The system's NPC traffic: its reduced F688/F635 state machine, ticked
-        // in game time like the stations' doors.
-        if active && !help && !paused && model_lab.is_none() && model_viewer.is_none() {
+        // The system's NPC traffic: the flight/combat AI (F752/F725/F585, F931),
+        // ticked in game time like the stations' doors. A hostile hit runs F953 on
+        // the player's shields and hull. Ships only fly and fire in flight: inside
+        // a station the player's object is not in the system.
+        if active
+            && !help
+            && !paused
+            && model_lab.is_none()
+            && model_viewer.is_none()
+            && state.mode == ffe_rs::flight::Mode::Flight
+        {
             if let Some(nav) = nav.as_mut() {
                 let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
                     / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
                 let player = ship_position(&original, &state);
-                nav.tick_ships(elapsed * factor, player);
+                let tics = (elapsed * ffe_rs::original_flight::TICS_PER_SECOND * factor) as u32;
+                let radius = scene
+                    .as_ref()
+                    .and_then(|scene| scene.model_radius(state.ship))
+                    .map_or(10_000, i64::from);
+                let events = nav.tick_ships(elapsed * factor, tics, player, radius);
+                let mass = scene
+                    .as_ref()
+                    .and_then(|scene| scene.ship_stats(state.ship))
+                    .map_or(25, |stats| stats.mass);
+                for event in events {
+                    match event {
+                        ffe_rs::navigation::ShipEvent::Hit {
+                            name, damage, beam, ..
+                        } => {
+                            let outcome = state.take_damage(damage, mass);
+                            let laser = if beam { "beam laser" } else { "pulse laser" };
+                            message = match outcome {
+                                ffe_core::laser::Damage::Shields => {
+                                    let percent = if state.shields[1] == 0 {
+                                        0
+                                    } else {
+                                        state.shields[0] as i32 * 100 / i32::from(state.shields[1])
+                                    };
+                                    format!(
+                                        "{name} hits with its {laser}: shields {percent}% left."
+                                    )
+                                }
+                                ffe_core::laser::Damage::Hull => {
+                                    let per_mille =
+                                        state.hull[0] as i32 * 250 / i32::from(mass.max(1));
+                                    format!(
+                                        "{name} hits with its {laser}: hull {}.{}%.",
+                                        per_mille / 10,
+                                        per_mille % 10
+                                    )
+                                }
+                                ffe_core::laser::Damage::Destroyed => {
+                                    playership_destroyed(&mut state, &mut original, nav, mass);
+                                    format!("{name} destroys your ship. Recovered at the starport.")
+                                }
+                            };
+                        }
+                        ffe_rs::navigation::ShipEvent::PoliceHostile { name } => {
+                            message = format!("{name} is police and turns on you. You are wanted.");
+                        }
+                        ffe_rs::navigation::ShipEvent::Escaped { name } => {
+                            message = format!("{name} jumps out.");
+                        }
+                    }
+                }
             }
         }
         // A new state (docking, a scenario, a load) ends the original flight model.
@@ -2251,23 +2309,36 @@ fn run() -> Result<(), String> {
                                     let id = ship.id;
                                     let name = ship.name.clone();
                                     nav.lock_ship(id);
-                                    let outcome = nav.damage_ship(id, shot.damage);
-                                    if let Some(ship) = nav.ships.iter().find(|ship| ship.id == id)
-                                    {
-                                        message = match outcome {
-                                            Some(ffe_core::laser::Damage::Shields) => format!(
-                                                "{name}: shields absorb the hit ({}% left).",
-                                                ship.shield_percent()
+                                    let outcome = nav.player_attack(id, shot.damage);
+                                    if let Some(attack) = outcome {
+                                        state.credits = state.credits.saturating_add(attack.bounty);
+                                        message = match attack.damage {
+                                            ffe_core::laser::Damage::Shields => format!(
+                                                "{name}: shields absorb the hit{}.",
+                                                if attack.crime { ". You are wanted" } else { "" }
                                             ),
-                                            Some(ffe_core::laser::Damage::Hull) => format!(
-                                                "{name}: hull {}%.",
-                                                ship.hull_per_mille() / 10
+                                            ffe_core::laser::Damage::Hull => format!(
+                                                "{name}: hull damaged.{}",
+                                                if attack.crime { " You are wanted." } else { "" }
                                             ),
-                                            Some(ffe_core::laser::Damage::Destroyed) => {
-                                                format!("{name} destroyed.")
+                                            ffe_core::laser::Damage::Destroyed => {
+                                                if attack.bounty > 0 {
+                                                    format!(
+                                                        "{name} destroyed. Bounty {} CR.",
+                                                        attack.bounty
+                                                    )
+                                                } else if attack.crime {
+                                                    format!(
+                                                        "{name} destroyed. You are wanted for murder."
+                                                    )
+                                                } else {
+                                                    format!("{name} destroyed.")
+                                                }
                                             }
-                                            None => format!("{name}: no damage."),
                                         };
+                                        if attack.police {
+                                            message.push_str(" Police are responding.");
+                                        }
                                     }
                                 }
                             }
@@ -2934,6 +3005,37 @@ fn ship_position(original: &Option<OriginalFlight>, state: &Flight) -> [i64; 3] 
         },
         |model| model.player().motion.position,
     )
+}
+
+/// F942 on the player, as far as this sandbox can present it: the hull is used
+/// up, so the ship is recovered at the nearest starport or station with a fresh
+/// hull. The original runs its game-over/escape-pod sequence (F942 destroys the
+/// player object and F924 notifies the flight state); that screen is not ported.
+fn playership_destroyed(
+    state: &mut Flight,
+    original: &mut Option<OriginalFlight>,
+    nav: &Navigator,
+    mass: u16,
+) {
+    let full = mass.max(1).saturating_mul(4);
+    state.hull = [full, full];
+    state.velocity = [0.0; 3];
+    state.thrust = 0.0;
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let station = nav.bodies.iter().find(|body| {
+        matches!(
+            body.kind,
+            ffe_rs::navigation::Kind::Starport | ffe_rs::navigation::Kind::Station
+        )
+    });
+    if let Some(body) = station {
+        let at = body.position.map(|value| value as f64 / unit);
+        let distance = ffe_rs::navigation::standoff(body) / unit;
+        state.position = [at[0], at[1], at[2] - distance];
+        if let Some(model) = original.as_mut() {
+            model.teleport(state.position.map(|value| (value * unit).round() as i64));
+        }
+    }
 }
 
 /// The ship axes looking from `from` at `to` (flight units), for the scripted
