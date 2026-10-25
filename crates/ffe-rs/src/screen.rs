@@ -2070,6 +2070,12 @@ impl Screen {
                         frame[y as usize * 320 + x as usize] = value(rgb);
                     });
                 }
+                Shape::TexturedUv(textured, uv) => {
+                    let frame = &mut self.frame;
+                    viewer.rasterise_uv(textured, uv, |x, y, rgb| {
+                        frame[y as usize * 320 + x as usize] = value(rgb);
+                    });
+                }
                 Shape::Label((x, y), text) => {
                     if *x >= 0 && *y >= 0 {
                         self.text_bytes(*x as usize, *y as usize, text, 15);

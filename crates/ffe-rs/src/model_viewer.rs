@@ -49,6 +49,9 @@ pub enum Shape {
     Curve([[i16; 2]; 4], [u8; 3]),
     Point((i32, i32), [u8; 3]),
     Textured(Textured),
+    /// An F1808/F1806 textured entry with explicit per-vertex coordinates
+    /// (F1645/F1648) rather than the descriptor's corner table.
+    TexturedUv(Textured, Vec<[i16; 2]>),
     /// A thruster glow (F1738's F1805 entry): drawn like [`Shape::Textured`] (F1647
     /// over bitmap 0x123 or 0x65), but left out of the viewer's fit so that the
     /// model keeps its size as the plume grows with thrust.
@@ -453,7 +456,27 @@ impl ModelViewer {
     /// Texels without a slot colour (7 and above, never written by face entries;
     /// stale `DATA_009252` contents in the original) are drawn black, the zeroed
     /// start-up value. Returns false when the bitmap is missing.
-    pub fn rasterise(&self, shape: &Textured, mut plot: impl FnMut(i32, i32, [u8; 3])) -> bool {
+    pub fn rasterise(&self, shape: &Textured, plot: impl FnMut(i32, i32, [u8; 3])) -> bool {
+        self.rasterise_with(shape, None, plot)
+    }
+
+    /// F1645/F1648: [`Self::rasterise`] with the entry's own texture coordinates
+    /// instead of F1643's descriptor corners.
+    pub fn rasterise_uv(
+        &self,
+        shape: &Textured,
+        uv: &[[i16; 2]],
+        plot: impl FnMut(i32, i32, [u8; 3]),
+    ) -> bool {
+        self.rasterise_with(shape, Some(uv), plot)
+    }
+
+    fn rasterise_with(
+        &self,
+        shape: &Textured,
+        uv: Option<&[[i16; 2]]>,
+        mut plot: impl FnMut(i32, i32, [u8; 3]),
+    ) -> bool {
         let Some(map) = self.textures.map(shape.bitmap & 0xfff) else {
             return false;
         };
@@ -469,13 +492,17 @@ impl ModelViewer {
         match shape.points.len() {
             3 => draw_triangle(
                 [point(0), point(1), point(2)],
-                triangle_uv(map.width),
+                uv.and_then(|uv| uv.get(..3))
+                    .map(|uv| [uv[0], uv[1], uv[2]])
+                    .unwrap_or_else(|| triangle_uv(map.width)),
                 map,
                 plot,
             ),
             4 => draw_quad(
                 [point(0), point(1), point(2), point(3)],
-                quad_uv(map.width, (shape.bitmap >> 12 & 7) as u8),
+                uv.and_then(|uv| uv.get(..4))
+                    .map(|uv| [uv[0], uv[1], uv[2], uv[3]])
+                    .unwrap_or_else(|| quad_uv(map.width, (shape.bitmap >> 12 & 7) as u8)),
                 map,
                 plot,
             ),
@@ -724,7 +751,9 @@ impl ModelViewer {
                     .map(|[x, y]| (i32::from(*x), i32::from(*y)))
                     .collect(),
                 Shape::Point(p, _) => vec![*p],
-                Shape::Textured(textured) => textured.points.clone(),
+                Shape::Textured(textured) | Shape::TexturedUv(textured, _) => {
+                    textured.points.clone()
+                }
                 Shape::Gouraud(points, _) => points.clone(),
                 Shape::Glow(_) => Vec::new(),
                 Shape::Label(_, _) => Vec::new(),
@@ -1168,9 +1197,85 @@ impl ModelViewer {
         Ok(frame)
     }
 
+    /// One F1805/F1807/F1806/F1808 queue entry as a textured shape. `at` is the
+    /// entry's header word (`at + 2` is its handler); `explicit` selects the
+    /// F1806/F1808 form with its own u/v pairs and a slot table written at a
+    /// base offset (`tex >> 16`), as F1645/F1648 and their entry handlers read
+    /// them. `None` when the words are short or the bitmap is not in the cache.
+    fn terrain_texture(
+        &self,
+        w: &[u32],
+        at: usize,
+        corners: usize,
+        explicit: bool,
+    ) -> Option<Shape> {
+        let entry = at + 2;
+        let words = match (corners, explicit) {
+            (3, false) => 12,
+            (4, false) => 13,
+            (3, true) => 20,
+            (4, true) => 22,
+            _ => return None,
+        };
+        w.get(entry..entry + words)?;
+        let (tex_at, uv_at, count_at, colours_at) = match (corners, explicit) {
+            (3, false) => (4, None, 5, 5),
+            (4, false) => (5, None, 6, 6),
+            (3, true) => (7, Some(4), 8, 9),
+            (4, true) => (9, Some(5), 10, 11),
+            _ => return None,
+        };
+        let points = (0..corners)
+            .map(|k| {
+                let word = w[entry + 1 + k];
+                (i32::from(word as i16), i32::from((word >> 16) as i16))
+            })
+            .collect::<Vec<_>>();
+        let tex = w[entry + tex_at];
+        let id = tex & 0xfff;
+        // F1620/F1643: a missing bitmap has nothing to draw.
+        self.textures.map(id)?;
+        let slots = if explicit {
+            let base = ((tex >> 16) as u16) as usize;
+            let count = (w[entry + count_at] & 0xffff) as usize;
+            let mut slots = vec![[0u8; 3]; base + count];
+            for k in 0..count {
+                let word = *w.get(entry + colours_at + k / 2)?;
+                let colour = if k % 2 == 0 { word } else { word >> 16 };
+                slots[base + k] = self.textures.rgb((colour & 0xffff) as u16);
+            }
+            slots
+        } else {
+            (0..7)
+                .map(|k| {
+                    self.textures
+                        .rgb((w[entry + colours_at + k] & 0xffff) as u16)
+                })
+                .collect()
+        };
+        let uv: Option<Vec<[i16; 2]>> = uv_at.map(|first| {
+            (0..corners)
+                .map(|k| {
+                    let word = w[entry + first + k];
+                    [word as i16, (word >> 16) as i16]
+                })
+                .collect()
+        });
+        let textured = Textured {
+            points,
+            bitmap: if explicit { id } else { tex },
+            slots,
+        };
+        Some(match uv {
+            Some(uv) => Shape::TexturedUv(textured, uv),
+            None => Shape::Textured(textured),
+        })
+    }
+
     /// Opcode 31: the curved surfaces through the ported F1876 and its emitter,
-    /// the queue drawn far to near as flat triangles (the textured entries take
-    /// their first colour; F1877's haze and the texture fills are not ported).
+    /// the queue drawn far to near. Flat entries are F1804 triangles; the rest are
+    /// F1805/F1807 descriptor textures or F1806/F1808 explicit-coordinate
+    /// textures, drawn by F1644/F1647. F1877's haze ring is drawn too.
     fn draw_surfaces(&self, result: &Execution, light: [i32; 3], frame: &mut Frame) {
         use ffe_core::terrain::Terrain;
         use ffe_core::terrain_draw::Scene;
@@ -1318,10 +1423,18 @@ impl ModelViewer {
                         (i32::from(word as i16), i32::from((word >> 16) as i16))
                     })
                     .collect();
+                // F1805/F1807 (descriptor coordinates) and F1806/F1808 (explicit
+                // coordinates, the planet surface) draw the real bitmap when the
+                // cache carries it. Without it, the old flat/gouraud stand-in runs.
+                let explicit = matches!(handler & 0xff, 6 | 8);
+                if let Some(texture) = self.terrain_texture(w, at, corners, explicit) {
+                    frame.shapes.push(texture);
+                    continue;
+                }
                 // The detail entries (F1808, F1806) colour each corner from the 22-step
                 // ramp by its height band and blend across the face; the textured
-                // ones (F1807, F1805) take the middle of their seven slots (the bitmap
-                // fills themselves are not drawn), the flat ones their colour.
+                // ones (F1807, F1805) take the middle of their seven slots, the flat
+                // ones their colour.
                 let ramp = |band: u32, first: usize| -> [u8; 3] {
                     let step = ((band.min(511) * 22) >> 9).min(21) as usize;
                     let word = w[at + 2 + first + step / 2];

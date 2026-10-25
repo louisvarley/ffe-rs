@@ -299,8 +299,9 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
   model and its slot is recycled after `DEATH_SECONDS` (0.6 s), like F927.
   Model 155's twelve fragment calls are gated on object global word 4
   (`+0xa4`): F942 writes `0xffffffff`, which selects none, so the port passes
-  FFP 1.0 (`0x4000`) to draw the fragment set; they stay wireframe until
-  F1560/F1613's fill lands.
+  FFP 1.0 (`0x4000`) to draw the fragment set. F1560/F1613's span fill is
+  ported and fills their F1721 polygons (`docs/notes/fills.md`); the remaining
+  line cloud is model 153's two-point face records.
 - The labels toggle (`l`) includes NPC ships at their `+0x124` name and the
   camera position; `F989`'s bounds and `F1108`'s font/colour are unchanged.
 - A click on a ship (or a laser hit) locks it (`Navigator::ship_lock`, a stable
@@ -377,9 +378,9 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 - **Exact F702 placement.** The raw ffp orbit is not used; see the deviation.
 - **F942's effects.** Ported 2026-10-25: the model-0x9b destruction object and
   F926's debris pods are in `ffe_core::effects` and drawn by `Screen`; F939's
-  hit particle is drawn at the hit point. The twelve fragment shapes render as
-  outlines until the F1560/F1613 polygon fill is ported. F942's messages,
-  bounty and escape-pod variants are not ported.
+  hit particle is drawn at the hit point. The twelve fragment shapes fill with
+  the ported F1560/F1613 span rasteriser. F942's messages, bounty and
+  escape-pod variants are not ported.
 - **Sound.** F953/F942's samples are not played (the audio layer is synthetic),
   though the sound cues from these paths are wired.
 - **Thargoids.** The F690 branch needs F35's random table; no Thargoid traffic

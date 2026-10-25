@@ -4,6 +4,39 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Textured fills and terrain textures merged (v0.74)
+
+- Merged `fills` (210d749): `Shape::TexturedUv` carries F1645/F1648's explicit
+  per-vertex u/v words into the F1644/F1647 affine span rasteriser
+  (`ModelViewer::rasterise_uv`), and `terrain_texture` reads the real
+  F1805/F1807/F1806/F1808 queue layouts and `DATA_009252` slot base instead of
+  the flat/gouraud stand-in. `Screen::draw_shapes` draws the new shape and the
+  cached `planet_view`/`effects_view` assertions cover it, with frames in
+  `docs/evidence/fills/`.
+- **Palette reconciliation:** fills call `Textures::rgb`/`ModelViewer::rgb`,
+  which resolve a colour through the palette branch's runtime entries first
+  (F1326/F1327) and fall back to the fixed low map only for words not yet built
+  (then the pre-palette nibble approximation). EXP-013 is untouched: the space
+  colour remains `#0c0c4c` (Black `#000000`). The API names/semantics the
+  `terrain` branch was told to use (`Shape::Flat`/`Polygon`/`TexturedUv`) are
+  unchanged and documented.
+- Evidence: F1876's Mars disc at two radii has 27 background pixels of 27,516
+  inside it (surface colour 0 is legitimate), and the starport fill covers
+  50,191 pixels with a 320-pixel horizontal run; `verify-fills.py` passes
+  (28.6 s).
+- Merge was conflict-free (`ort`); notes in `fills.md`, `textures.md`,
+  `surfaces.md`, `combat.md` and `npc.md` now say fills/textures are in and the
+  old "wireframe" statements are corrected.
+- **Owner decisions/remaining:** model 155's fragment placement and `+0x7e`
+  (the blue cloud is model 153 debris lines, not unfilled polygons); the
+  upper-palette approximation inside fills; shading fidelity; there is no pixel
+  oracle for F1806/F1808 yet; `EXPLOSION_MASS` and effect lifetimes as before.
+- Tests: workspace, clippy, fmt; `verify-fills.py`; cached `planet_view` (19),
+  `effects_view` (3), `scanner_view` (2), `dashboard_view` (4), `combat_view`
+  (6), `intro_view` (2) and `palette_reference` (5) on the v28 cache.
+
+---
+
 ## 2026-10-25 - Starport tech level, Upgrades and repairs merged (v0.73)
 
 - Merged `station-services` (13ae64c): F869/F622's starport tech level reaches

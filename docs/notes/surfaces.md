@@ -9,10 +9,12 @@ all 40 surfaces in 39 models against the original, 0 mismatched. Nothing curved
 is drawn yet.
 
 **Update (v0.53):** `ModelViewer::draw_surfaces` runs the ported F1876 and emitter for every
-surface and draws the queue far to near as flat triangles (textured entries take their
-first slot colour; no haze or texture fills). Seed 0, detail 2, zoom 0. Checked by eye
-on models 113 and 445 (`tests/planet_view.rs`, `FFE_SHOT_DIR` writes PPMs); models too
-large for the viewer's 32-bit view space still error.
+surface and draws the queue far to near. F1804 triangles use F1604; F1805/F1807 use the
+descriptor texture path and F1806/F1808 the explicit-coordinate path (F1645/F1648,
+bitmaps 0x40/0x121) added with the fills stream; F1877's haze ring, when present, uses a
+Gouraud quad. Seed 0, detail 2, zoom 0. Checked by eye on models 113 and 445
+(`tests/planet_view.rs`, `FFE_SHOT_DIR` writes PPMs); models too large for the viewer's
+32-bit view space still error.
 
 Rust: `ffe_core::model_commands::Surface` (decoded, cache independent),
 `model_execute::SurfaceEmission::{origin, axes}` (F1874). The viewer does not

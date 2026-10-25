@@ -150,7 +150,12 @@ with the F1693/F1691 colour for textured materials.
 - Real normal shading values (the oracle used synthetic normal colours).
 - Faces whose normal 0 colour is rewritten by F1762 mid-program are skipped by
   the queue oracle (per-face timing is not carried by the emissions).
-- F1806/F1808 (explicit-coordinate textures) and their callers F1840/F1841.
 - Block 95's user.
+- F1806/F1808 explicit-coordinate textures and their F1840/F1841 callers now
+  draw: the planet surface entries carry u/v pairs and a slot base in the
+  texture dword, and the viewer feeds them to F1645/F1648's rasterisers with the
+  cache's bitmaps 0x40/0x121 (see `docs/notes/fills.md`). The texture-queue
+  oracle does not compare these frames; `planet_view::earth_shape_kinds` checks
+  that every surface bitmap is one of those two and that the explicit path draws.
 - 21 model slots crash the original in the four synthetic views and are not
   compared (listed by `verify-textures.py`).

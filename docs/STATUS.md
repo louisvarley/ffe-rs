@@ -114,7 +114,7 @@ ECM.
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 143 items, 77 done and 66 left on
+  in `burndown.js`; 14 milestones, 143 items, 78 done and 65 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -144,10 +144,11 @@ galaxy map drawn the original's way (dots verified pixel for pixel, map frame
 
 What is *not* done is presentation and gameplay, in this order of readiness:
 
-1. Curved surfaces (opcode 31): F1874's geometry is ported and verified, and the
-   flat, line and curve rasterisers are now the original's; F1876's patch
-   emission (quads) is the remaining piece, before a planet can appear in the
-   flight scenario. **This is the current milestone step.**
+1. Curved surfaces (opcode 31): F1874's geometry, F1876's subdivision and
+   emitters, F1877's haze and the F1805-F1808 queue handlers (including the
+   explicit-coordinate texture path) are ported and draw; the remaining piece is
+   the whole-frame/pixel oracle for F1806/F1808 and the shading fidelity, not
+   the geometry. **This is the current milestone step.**
 2. The whole-frame pixel oracle (a framebuffer mode in the reference); sprites,
    particles beyond the dot path, and circles.
 3. The gameplay slice itself: combat, missions, starport services, planet
@@ -275,12 +276,13 @@ capture produced by two repeat runs of the local reference.
 | v0.71 faithful runtime palette | `ffe_rs::palette` (F1326/F1327/F1328/F1329/F1330/F1331: median-cut 64 boxes, odd representatives, two banks, fixed 128 low palette/map, bank toggle), `textures`/`model_viewer` registration/resolve, intro F1575 colours, `palette_reference.rs` | `palette_reference.rs` (5, ignored), palette unit tests; intro/scanner/galaxy-map/planet cached suites | `--palette` probe: intro switch frame upper entry (1,1,17); frame comparison in the cached test | — | the original's dynamic upper palette now builds the 64 median-cut boxes and resolves textured/model colours through it; the intro reproduces its single upper entry at the model switch. EXP-013 preserved: the drawn space colour is still the captured `#0c0c4c` (Black `#000000`). Terrain queue colours are not pre-registered, one build per model render, and the intro backdrop ramps more slowly than the original's; `docs/notes/palette.md` |
 | v0.72 NPC docking cycle | `ffe_core::npc` corrected `DATA_006255` rows (Approach/Docked/Launch/Depart), `DockRequest`, `tick_with_station`, bay occupancy, F747 door wait, F733-F736/F761/F762; `Navigator` station records; hidden docked ships; `npc_docking.rs` | `npc_docking.rs` (1, ignored), npc unit tests, evidence in `docs/evidence/npc-docking/` | none (the state rows are from `ffe.asm`/`DATA_006255`; approach/docked/launch frames) | — | traffic now flies approach/dock/launch/depart cycles, takes the station's bay slot and waits for F747's door; docked ships are not drawn and traders get destinations. Remaining owner decisions: the 2-3 day docked interval vs the shortened observation, the 30 s give-up/next-station vs endless retry, the cruise-speed floor and the despawn range. `docs/notes/npc.md` |
 | v0.73 starport tech level, Upgrades and repairs | `galaxy::Details/Tables::tech_level`, `Navigator::tech_level`, `ffe_rs::outfitting` (F387/F388, Fit/Remove, general/cabins/lasers/shields/missiles), `station::Upgrades/Repairs`, F394 fuel-scoop gate, F329 Remove button, `station_view` frames | `station.rs`/`outfitting.rs` unit tests, `galaxy.rs` (+), `station_view` (1, ignored) | none (the tables/prices are from `DATA_005289`/`ffedat.asm`; the frames check the rows) | — | Upgrades shows real rows for the starport's tech level with Fit/Remove prices/refunds, the fuel-scoop gate and F329's button; F444's repair rows show dates. Shipyard and the BBS keep their faithful empty states (price/BBS tables not imported). Owner decisions: drive/mining rows visible-but-disabled vs hidden, ship price/BBS imports later, repairs actions before thruster damage, and the price-multiplier behaviour; `docs/notes/station.md` |
+| v0.74 textured fills and terrain textures | `Shape::TexturedUv` (F1645/F1648 per-vertex UV through F1644/F1647), `ModelViewer::rasterise_uv`/`terrain_texture` (F1805/F1807/F1806/F1808 layouts and slots), `Screen::draw_shapes`, `planet_view`/`effects_view` frames, `docs/evidence/fills/` | `planet_view` (19, ignored), `effects_view` (3, ignored); `verify-fills.py` PASS | `verify-fills.py` PASS (28.6 s); frame evidence: 27 of 27,516 background pixels and the 50,191-pixel starport fill | — | textured terrain entries now use their explicit per-vertex coordinates and the real queue slots; colours resolve through the palette branch's runtime entries first (fixed map only for not-yet-built words), and EXP-013's `#0c0c4c` space colour is untouched. v0.48-6 done; v0.48-7 in progress. Remaining: model-155 fragment placement/`+0x7e` (the blue cloud is model 153 debris lines), upper-palette approximation, shading fidelity, no F1806/F1808 pixel oracle, EXPLOSION_MASS and effect lifetimes; `docs/notes/fills.md`/`textures.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 628 `#[test]` functions total; 143 are `#[ignore]`
+  `cargo clippy -D warnings`. 629 `#[test]` functions total; 144 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
   **484 runnable synthetic tests** (485 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's

@@ -353,10 +353,12 @@ point; a kill spawns F942's model-0x9b explosion and F926's model-0x99 debris
   calls (models 320..325). The branches read object **global word 4
   (`+0xa4`)**: they select no fragment for F942's `0xffffffff`, but all twelve
   for FFP 1.0 (`0x4000`). The port passes `EXPLOSION_MASS = 0x4000` in
-  `SystemEffect.mass`, so F942's fragment set draws. The twelve shapes are
-  F1721 complex polygons, which the port's renderer draws as outlines because
-  the F1560/F1559/F1613 span fill is still unported (`docs/notes/fills.md`);
-  the explosion is a wireframe cloud until that stream lands.
+  `SystemEffect.mass`, so F942's fragment set draws. The F1560/F1559/F1613 span
+  fill is ported and wired (`docs/notes/fills.md`), so F1721 polygon entries
+  fill in the playable, and `effects_view::explosion_fragment_polygons_fill`
+  checks a model-155 fragment's polygons cover pixels. The line cloud still
+  visible in `effects-kill.ppm` is model 153's two-point face records (F926's
+  debris pods); those are edges in the original too, not unfilled polygons.
 
 **The AI shoots back (2026-10-25).** Hostile ships run the flight/combat states
 and call F931 with their front laser (`NpcShip::fire`): heat, energy and refire
@@ -420,8 +422,9 @@ armed. For the effects, decide whether their lifetimes should follow the
 original's AI timers (F764/F769/F927) rather than the port's per-effect seconds,
 and whether the model-155 explosion keeps the `EXPLOSION_MASS` word `0x4000`
 that selects its twelve fragments or follows F942's literal `0xffffffff` (which
-selects none). Until F1560/F1613 fill the fragments, the explosion draws its
-wireframe.
+selects none). The fills now fill the fragments' polygons; the fragment anchors
+and the debris line records are separate questions (F942's distance word `+0x7e`
+is still not modelled).
 
 The player's F953 words have a save-compatible test
 (`crates/ffe-rs/tests/combat.rs`) and the AI sequence has its own cached test

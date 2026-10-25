@@ -84,8 +84,8 @@ window.FFE_BURNDOWN = {
         { id: "v0.48-3", title: "F1874 surface origin and axis resolution", status: "done", version: "v0.48c" },
         { id: "v0.48-4", title: "Surface helpers F1875 / F1824 / F1825", status: "done", version: "v0.48d" },
         { id: "v0.48-5", title: "F1823 entry map (replace the legacy hash arena)", status: "done", version: "v0.52a" },
-        { id: "v0.48-6", title: "F1833 flat/textured emitter dispatch", status: "in-progress", version: "v0.48e" },
-        { id: "v0.48-7", title: "F1834 / F1835 quad emission (with F1868-F1873)", status: "in-progress", version: "v0.52a" },
+        { id: "v0.48-6", title: "F1833 flat/textured emitter dispatch", status: "done", version: "v0.74" },
+        { id: "v0.48-7", title: "F1834 / F1835 quad emission (with F1868-F1873)", status: "in-progress", version: "v0.74" },
         { id: "v0.48-8", title: "Surface quad oracle at a planet-scale distance", status: "todo" },
         { id: "v0.48-9", title: "F1616 line rasteriser", status: "done", version: "v0.48f" },
         { id: "v0.48-10", title: "F1811 curve rasteriser", status: "done", version: "v0.48g" },
@@ -576,6 +576,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 66,
       note: "Station services merged (v0.73): F869/F622's starport tech level now reaches Navigators (Details/Tables::tech_level), the Upgrades screen builds real rows from equipment::outfitting with Fit/Remove across general/cabins/lasers/shields/missiles using F387/F388 prices and refunds, F394's fuel-scoop gate and F329's Remove button/hot area are in, and F444's repair rows show dates; shipyard and BBS keep their faithful empty states. One item added and completed (gameplay-20); gameplay-2/gameplay-3 and world-6 are in progress. Owner decisions: drive/mining rows visible-but-disabled vs hidden, ship price/BBS imports later, repairs actions before thruster damage, and the price-multiplier behaviour."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Textured fills merged (v0.74): Shape::TexturedUv (F1645/F1648 explicit per-vertex coordinates through the F1644/F1647 affine rasteriser), ModelViewer::rasterise_uv and terrain_texture (the real F1805/F1807/F1806/F1808 queue layouts and slot table), with Screen::draw_shapes support and frame evidence (27 background pixels of 27,516 inside the planet disc, a 50,191-pixel starport fill with a 320-pixel run). Colours resolve through the palette branch's runtime entries first and fall back to the fixed map only for not-yet-built words; EXP-013 space colour is untouched. v0.48-6 is done, v0.48-7 stays in progress. Remaining owner decisions: model-155 fragment placement/+0x7e (the blue cloud is model 153 debris lines), upper-palette approximation in fills, shading fidelity, no F1806/F1808 pixel oracle, EXPLOSION_MASS and effect lifetimes."
     }
   ]
 };
