@@ -310,6 +310,9 @@ pub struct Screen {
     pub systems: ShipSystems,
     /// The message log the console's text window shows (`F271/F272/F273`).
     pub messages: MessageLog,
+    /// Draw the log this frame. The navigation list / places screens can hide
+    /// it without touching the ring, as the original's console does.
+    pub messages_visible: bool,
     /// The game date and time header `F272` writes before the entries.
     pub clock: String,
     /// The console's mutable `DATA_005100` state, derived from the view and ship
@@ -724,6 +727,7 @@ impl Screen {
             hud: PlayerHud::default(),
             systems: ShipSystems::default(),
             messages: MessageLog::new(),
+            messages_visible: true,
             clock: String::new(),
             console: Console::new(),
             gauges: [None, None, None],
@@ -1310,28 +1314,43 @@ impl Screen {
         }
     }
 
-    /// `F272`'s message window at x 196, y 159: the date/time header and up to ten
-    /// stored entries, 8-pixel lines, a colour-4 shadow one pixel left and up,
-    /// clipped to the console (y 158..199). The scroll (`F273`) moves the text up
-    /// from the newest entry.
+    /// `F273`'s Page Up/Down: scroll the message log by `pixels` (`F273`'s
+    /// actions 0xe/0xf move in 8-pixel steps). Positive values reveal older
+    /// entries, negative return to the newest.
+    pub fn scroll_messages(&mut self, pixels: i32) -> bool {
+        let content =
+            self.messages.lines(&self.font, &self.clock).len() * crate::messages::LINE_HEIGHT;
+        let window = crate::messages::VISIBLE_ROWS * crate::messages::LINE_HEIGHT;
+        self.messages.scroll_by(pixels, content, window)
+    }
+
+    /// `F272`'s message window at x 196, y 159: the date/time header, the newest
+    /// entry and the older dated entries, 8-pixel lines, a colour-4 shadow one
+    /// pixel left and up, clipped to the console (y 158..199). `F273`'s scroll
+    /// moves the whole block up from the header (`ffe.asm:21075-21097`).
     fn draw_messages(&mut self) {
+        if !self.messages_visible {
+            return;
+        }
         let lines = self.messages.lines(&self.font, &self.clock);
         if lines.is_empty() {
             return;
         }
-        let rows = (200 - crate::messages::TEXT_Y) / crate::messages::LINE_HEIGHT;
-        let (start, offset) = self.messages.window_start(lines.len(), rows);
-        for (index, line) in lines.iter().enumerate().skip(start) {
-            let y = crate::messages::TEXT_Y as i32 - offset
-                + ((index - start) * crate::messages::LINE_HEIGHT) as i32;
-            if y >= 200 {
+        let scroll = self.messages.scroll();
+        for (index, line) in lines.iter().enumerate() {
+            let y = crate::messages::TEXT_Y as i32 - scroll
+                + (index * crate::messages::LINE_HEIGHT) as i32;
+            if y + crate::messages::LINE_HEIGHT as i32 <= crate::messages::CLIP_TOP as i32 {
+                continue;
+            }
+            if y >= crate::messages::CLIP_BOTTOM as i32 {
                 break;
             }
-            let colour = if index == 0 { 17 } else { HUD_COLOUR };
+            let colour = if line.header { 17 } else { HUD_COLOUR };
             self.text_clipped(
                 crate::messages::SHADOW_X,
                 y - 1,
-                line,
+                &line.text,
                 4,
                 crate::messages::CLIP_TOP as i32,
                 crate::messages::CLIP_BOTTOM as i32,
@@ -1339,7 +1358,7 @@ impl Screen {
             self.text_clipped(
                 crate::messages::TEXT_X,
                 y,
-                line,
+                &line.text,
                 colour,
                 crate::messages::CLIP_TOP as i32,
                 crate::messages::CLIP_BOTTOM as i32,
