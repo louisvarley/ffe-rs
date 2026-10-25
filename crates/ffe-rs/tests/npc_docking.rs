@@ -150,6 +150,11 @@ fn a_trader_approaches_docks_and_launches() {
     let mut nav = Navigator::new_game(&cache, 1).unwrap();
     let viewer = ModelViewer::new(&cache).unwrap();
     let mut screen = Screen::new(&cache).unwrap();
+    // F829/F998's new game has no traffic; this cycle needs F688's capture
+    // guarantee (a trader with a station) at the starport's launch point.
+    let at = nav.station().map(|(_, at)| at).expect("a start station");
+    let forward = nav.bodies[nav.docked.expect("docked")].orientation[2];
+    nav.respawn_traffic(&cache, at, forward);
     let station = nav.docked.expect("the new game is docked");
     let body = nav.bodies[station].clone();
     let trader = nav

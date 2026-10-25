@@ -86,9 +86,14 @@ fn stage(screen: &mut Screen, nav: &Navigator) {
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn hit_particle_explosion_and_frames() {
     let cache = cache();
-    let nav = Navigator::new_game(&cache, 1).unwrap();
+    let mut nav = Navigator::new_game(&cache, 1).unwrap();
     let viewer = ModelViewer::new(&cache).unwrap();
     let mut screen = Screen::new(&cache).unwrap();
+    // F829/F998's new game has no traffic; the capture asks F688 for the
+    // guaranteed pirate at the station's launch point.
+    let at = nav.station().map(|(_, at)| at).expect("a start station");
+    let forward = nav.bodies[nav.docked.expect("docked")].orientation[2];
+    nav.respawn_traffic(&cache, at, forward);
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
     let index = nav
         .ships
@@ -109,7 +114,6 @@ fn hit_particle_explosion_and_frames() {
     };
     state.axes = Some(look_at(from, target.map(|v| v as f64 / unit)));
     let views = ViewState::default();
-    let mut nav = nav;
     nav.lock_ship(nav.ships[index].id);
     stage(&mut screen, &nav);
     screen.draw(&state, views, Some(&viewer), false, true, "");

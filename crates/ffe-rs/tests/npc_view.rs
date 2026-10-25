@@ -104,9 +104,14 @@ fn ships(screen: &mut Screen, nav: &Navigator) {
 fn setup(
     cache: &ffe_content::VerifiedCache,
 ) -> (Navigator, ModelViewer, Screen, Flight, ViewState, usize) {
-    let nav = Navigator::new_game(cache, 1).unwrap();
+    let mut nav = Navigator::new_game(cache, 1).unwrap();
     let viewer = ModelViewer::new(cache).unwrap();
     let screen = Screen::new(cache).unwrap();
+    // The new game's pad has no traffic (F829/F998 do not call F688); this
+    // scripted frame asks F688 for the capture's guaranteed pirate.
+    let at = nav.station().map(|(_, at)| at).expect("a start station");
+    let forward = nav.bodies[nav.docked.expect("docked")].orientation[2];
+    nav.respawn_traffic(cache, at, forward);
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
     let index = nav
         .ships

@@ -1180,7 +1180,10 @@ impl Navigator {
                 .asset("base:gameplay/tables")
                 .ok_or("no gameplay tables")?,
         };
-        // The traffic spawner places ships on the starport's launch axis.
+        // The source path places the first system's traffic where F688 does:
+        // F687/F686 call it for the flight module's start, so the new game has
+        // the record's traders/police and (for Hope) one pirate group. The port
+        // puts a pirate group on the anchor orbit, not beside the pad.
         let launch_axis = body.orientation[2];
         // F994 copies the station's orientation to the ship and puts it on the
         // pad: F650's offset plus the ship's collision radius along its up row.
@@ -1221,6 +1224,8 @@ impl Navigator {
             bay: bay.index,
             seat,
         });
+        // F687/F686's start entry: the new game's system has its F688 traffic,
+        // but no capture guarantee and no pirate placed at the pad.
         nav.spawn_traffic(cache, seat, launch_axis);
         Ok(nav)
     }
@@ -1579,6 +1584,25 @@ impl Navigator {
         self.landed.as_ref().map(|landed| landed.index)
     }
 
+    /// F994's new-game state `0x30`: the ship is on the starport pad, still in
+    /// the flight view, and has not started F1013's climb. The original's
+    /// F1012 path runs no flight step here and F829/F998 spawn no traffic.
+    pub fn on_pad(&self) -> bool {
+        self.new_game.is_some()
+            && self.docked.is_some()
+            && self.takeoff.is_none()
+            && self.sequence.is_none()
+            && self.landed.is_none()
+    }
+
+    /// The player is in a landed view: a surface `0x34`/`0x32`, the open-air
+    /// `0x30`, or the new game's pad state. F1012/F1048 run the landed handlers
+    /// instead of the flight step, so the NPC traffic's AI/fire/damage does not
+    /// run against the player.
+    pub fn landed_view(&self) -> bool {
+        self.landed.is_some() || self.on_pad()
+    }
+
     /// F1056's launch action (its action 9) at a landed state: F1013's climb
     /// begins at `0x24`. F1031's contact scan then clears it into `0x00` (a
     /// planet's touch has no starport region `0x20`); see [`Self::takeoff_step`].
@@ -1632,11 +1656,25 @@ impl Navigator {
     /// port keeps a killed ship killed until the system is entered again. The
     /// ships F675 kept across the last jump are restored first (F680).
     /// Returns whether traffic was spawned.
+    ///
+    /// This is the source path: F688's own counts decide, so a system can spawn
+    /// none. The port's capture/test guarantee belongs to
+    /// [`Self::respawn_traffic`] only.
     pub fn spawn_traffic(
         &mut self,
         cache: &VerifiedCache,
         player: [i64; 3],
         forward: [f64; 3],
+    ) -> bool {
+        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::default())
+    }
+
+    fn spawn_traffic_with(
+        &mut self,
+        cache: &VerifiedCache,
+        player: [i64; 3],
+        forward: [f64; 3],
+        options: npc::SpawnOptions,
     ) -> bool {
         if self.spawned == Some(self.current) {
             return false;
@@ -1674,6 +1712,7 @@ impl Navigator {
             &details,
             allegiance,
             &mut rng,
+            options,
             |model| crate::ships::npc_spec(cache, model),
         ) {
             ship.id += base;
@@ -1692,7 +1731,9 @@ impl Navigator {
 
     /// Force the F688 spawner to run again for the current system, even when
     /// traffic was already spawned: the scripted traffic capture needs ships
-    /// beside the camera rather than around a station pad.
+    /// beside the camera rather than around a station pad. This is also the
+    /// only caller that asks for the port's guarantee of one trader and one
+    /// pirate group, so the capture always has a target.
     pub fn respawn_traffic(
         &mut self,
         cache: &VerifiedCache,
@@ -1700,7 +1741,7 @@ impl Navigator {
         forward: [f64; 3],
     ) -> bool {
         self.spawned = None;
-        self.spawn_traffic(cache, player, forward)
+        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::CAPTURE)
     }
 
     /// One frame of NPC traffic: the flight AI, F931's fire and F927's recycle of
