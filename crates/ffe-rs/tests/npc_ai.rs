@@ -341,7 +341,9 @@ fn firing_at_hope_is_fined_and_shows_f236s_message() {
     assert_eq!(report.offence.charged, 6_000);
     assert!(nav.legal.wanted);
     assert!(nav.legal.alert);
-    assert_eq!(nav.legal.fines[ordinal], 6_000);
+    // F236's ledger index is DATA_008996, the system's jurisdiction (not the
+    // witness ordinal used by the proximity check above).
+    assert_eq!(nav.legal.fines[nav.jurisdiction], 6_000);
     // F236 is a debt: cash is untouched (10,000 CR on the default start).
     assert_eq!(state.credits, u32::try_from(DEFAULT_CASH).unwrap());
     // The recorded offence turns the police and military ships hostile.

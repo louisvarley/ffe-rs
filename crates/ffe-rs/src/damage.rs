@@ -237,6 +237,7 @@ mod tests {
             name_code: 0,
             missiles: 2,
             drive: -10,
+            rating: 0,
             eye: [0; 2],
             front_gun: [0; 2],
             rear_gun: [0; 2],

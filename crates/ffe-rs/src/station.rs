@@ -36,6 +36,8 @@ pub enum Screen {
     Repairs,
     Ships,
     Bulletin,
+    /// F552's "Contact Local Police" conversation (the fines office).
+    Police,
 }
 
 /// What activating a row does.
@@ -68,6 +70,8 @@ pub enum Action {
     Repair {
         row: usize,
     },
+    /// F544: pay the local jurisdiction's fine from the police screen.
+    PayFine,
     /// The service exists but its data or routine is not ported. The text is
     /// reported on the console, never drawn into the station screen.
     NotPorted(&'static str),
@@ -342,7 +346,7 @@ pub const SHIPYARD: [Entry; 4] = [
     Entry {
         title: "Contact Local Police",
         detail: Some("(for paying fines, etc)"),
-        action: Action::NotPorted("Contact Local Police (fines) is not ported."),
+        action: Action::Open(Screen::Police),
     },
 ];
 
@@ -357,6 +361,8 @@ pub const SHIPS_EMPTY: &str = "We have no ship hulls for sale, at the moment.";
 pub const SHIPS_HINT: &str =
     "Select Buy to part exchange your ship for a ship with no extra equipment, or View to see the ship with suggested options fitted.";
 pub const REPAIRS_HINT: &str = "Select desired repair or service. Remember servicing AT LEAST once a year is a wise precaution.";
+/// F552's police contact opens with this console line until the officer speaks.
+pub const POLICE_HINT: &str = "Contact Local Police.";
 
 /// The visible entry area ends at y 148 (`F327`: `height + y < 0x94`).
 pub const LIST_BOTTOM: i32 = 148;
@@ -387,11 +393,11 @@ impl Layout {
 
 pub fn layout(screen: Screen) -> Layout {
     match screen {
-        Screen::Services | Screen::Shipyard | Screen::Bulletin => Layout {
+        Screen::Services | Screen::Shipyard | Screen::Bulletin | Screen::Police => Layout {
             pitch: 33,
             entry_x: 140,
             buttons: 1,
-            back: screen == Screen::Bulletin,
+            back: matches!(screen, Screen::Bulletin | Screen::Police),
         },
         Screen::Market => Layout {
             pitch: 10,
@@ -428,6 +434,7 @@ pub fn title(screen: Screen, station: &str) -> String {
         Screen::Shipyard | Screen::Upgrades | Screen::Repairs | Screen::Ships => "Shipyard",
         Screen::Market => "Stockmarket",
         Screen::Bulletin => "Bulletin Board",
+        Screen::Police => "Contact Local Police",
     };
     format!("{station} {name}")
 }
@@ -574,7 +581,7 @@ impl DockState {
     /// services root here; `Backspace` is the port's way out of them.
     pub fn back(&mut self) {
         self.open(match self.screen {
-            Screen::Upgrades | Screen::Repairs | Screen::Ships => Screen::Shipyard,
+            Screen::Upgrades | Screen::Repairs | Screen::Ships | Screen::Police => Screen::Shipyard,
             Screen::Services => Screen::Services,
             _ => Screen::Services,
         });
@@ -778,6 +785,7 @@ pub fn row_count(
         Screen::Upgrades => upgrade_rows,
         Screen::Repairs => repair_rows,
         Screen::Ships => ship_rows,
+        Screen::Police => 1,
     }
 }
 
@@ -795,6 +803,7 @@ pub fn hint(screen: Screen, bulletin_rows: usize, ship_rows: usize) -> &'static 
             }
         }
         Screen::Repairs => REPAIRS_HINT,
+        Screen::Police => POLICE_HINT,
         Screen::Bulletin => {
             if bulletin_rows == 0 {
                 BULLETIN_EMPTY
@@ -856,6 +865,24 @@ mod tests {
         assert_eq!(header(Screen::Market)[1], (213, "Price per t"));
         assert_eq!(header(Screen::Repairs)[2], (286, "Cost"));
         assert_eq!(header(Screen::Services), &[]);
+    }
+
+    #[test]
+    fn police_contact_is_f552s_fines_screen() {
+        assert_eq!(SHIPYARD[3].action, Action::Open(Screen::Police));
+        let layout = layout(Screen::Police);
+        assert_eq!((layout.pitch, layout.entry_x, layout.buttons), (33, 140, 1));
+        assert!(layout.back);
+        assert_eq!(
+            title(Screen::Police, "Sirocco Station"),
+            "Sirocco Station Contact Local Police"
+        );
+        assert_eq!(hint(Screen::Police, 0, 0), POLICE_HINT);
+        assert_eq!(row_count(Screen::Police, 0, 0, 0, 0, 0), 1);
+        let mut dock = DockState::default();
+        dock.open(Screen::Police);
+        dock.back();
+        assert_eq!(dock.screen, Screen::Shipyard);
     }
 
     #[test]

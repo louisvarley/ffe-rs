@@ -49,6 +49,9 @@ pub struct ShipStats {
     pub missiles: u16,
     /// +0x14, the hyperdrive word: negative means a drive of the class in its low byte.
     pub drive: i16,
+    /// +0x16, the Elite rating points F942 adds to `DATA_008911` when the
+    /// player destroys the ship.
+    pub rating: i16,
     /// +0x18/+0x1a, the cockpit eye: along the forward axis, along the up axis
     /// (FUNC_001054 front and rear views).
     pub eye: [i16; 2],
@@ -78,6 +81,7 @@ impl ShipStats {
             name_code: word(0xe),
             missiles: word(0x12),
             drive: word(0x14) as i16,
+            rating: word(0x16) as i16,
             eye: [word(0x18) as i16, word(0x1a) as i16],
             front_gun: [word(0x20) as i16, word(0x22) as i16],
             rear_gun: [word(0x24) as i16, word(0x26) as i16],
@@ -168,6 +172,7 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
         drive: stats.drive as u8,
         gun_mounts: stats.gun_mounts,
         cargo: u16::try_from(stats.cargo.max(0)).unwrap_or(0),
+        rating: stats.rating,
     })
 }
 

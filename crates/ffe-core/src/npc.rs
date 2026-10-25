@@ -602,6 +602,8 @@ pub struct Spec {
     pub drive: u8,
     /// The statistics' gun mounts (`+0x4`).
     pub gun_mounts: i8,
+    /// The statistics' `+0x16` word, added to `DATA_008911` by F942.
+    pub rating: i16,
     /// The cargo space (`+0x116`): F942 uses `min(4, cargo >> 1)` extra debris
     /// pods.
     pub cargo: u16,
@@ -908,6 +910,8 @@ pub struct NpcShip {
     /// The statistics' shield word (`+0xe`), which F1099 shows as
     /// "Shield Strength d".
     pub shield_strength: i16,
+    /// The statistics' `+0x16` word, F942's Elite rating points.
+    pub rating: i16,
     /// The ship's cargo space (`+0x116`), which F942 turns into debris pods.
     pub cargo: u16,
     pub state: State,
@@ -991,6 +995,7 @@ impl NpcShip {
                 mass: spec.mass,
             },
             shield_strength: spec.shield_strength as i16,
+            rating: spec.rating,
             cargo: spec.cargo,
             state: if hostile { State::Attack } else { State::Hold },
             anchor,
@@ -1668,18 +1673,23 @@ pub struct OffenceReport {
     pub message: String,
     /// The amount printed in the message (`+4`).
     pub fine: u32,
-    /// The amount added to the starport's ledger: ten times `fine` (F236's
+    /// The amount added to the jurisdiction's ledger: ten times `fine` (F236's
     /// `lea eax,[eax+eax*4]` after doubling `+4`).
     pub charged: u32,
-    /// A later offence at the same starport used the "extra" message.
+    /// A later offence in the same jurisdiction used the "extra" message.
     pub additional: bool,
 }
 
 /// The player's legal standing: the port's reconstruction of `DATA_008646` bit
 /// 0 (`wanted`), `DATA_008647` (`alert`, the police chase), `DATA_008860` bit 2
 /// (`illegal_fire`, F931/F941's once-only unlawful-discharge report), the
-/// offence count, and F236's per-starport fine ledger `DATA_009095` (six
-/// dwords indexed by the starport's ordinal, `DATA_008996`).
+/// offence count, F236's six-dword fine ledger `DATA_009095` and the six
+/// `DATA_009093` offence bitmasks.
+///
+/// The six ledger slots are F869's system allegiance (`DATA_008996`, the system
+/// word's `>> 6`), not the starport ordinal: 0 Interpol/Independent, 1 Imperial,
+/// 2 Federal, 3 Alliance, 4 Thargoid. F655 reads the current system's slot and
+/// F312 prints slots 2, 1 and 0 as Federal, Imperial and Interpol.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Legal {
     pub wanted: bool,
@@ -1687,6 +1697,25 @@ pub struct Legal {
     pub illegal_fire: bool,
     pub offences: u32,
     pub fines: [u32; 6],
+    /// `DATA_009093`: the offences recorded by each jurisdiction, one bit per
+    /// [`OFFENCES`] index.
+    pub records: [u32; 6],
+}
+
+/// F544/F545's outcome when the player tries to pay the local fine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FinePayment {
+    /// The fine the current jurisdiction asked for.
+    pub amount: u32,
+    /// The amount actually taken from the player's cash (0 on refusal).
+    pub paid: u32,
+}
+
+impl FinePayment {
+    /// F544 reached `sub [0x114], fine`.
+    pub fn ok(&self) -> bool {
+        self.paid == self.amount
+    }
 }
 
 impl Legal {
@@ -1704,6 +1733,9 @@ impl Legal {
         let additional = self.fines[slot] != 0;
         let charged = record.fine.saturating_mul(10);
         self.fines[slot] = self.fines[slot].saturating_add(charged);
+        if offence < 32 {
+            self.records[slot] |= 1 << offence;
+        }
         if record.flags & 1 != 0 {
             self.wanted = true;
         }
@@ -1731,17 +1763,18 @@ impl Legal {
     /// F931/F941: the player's shot or missile has passed F931's gates. The
     /// first shot in a system (`DATA_008860` bit 2 clear) is reported through
     /// F237(ship, 3); later shots are not. F236 needs a nearby starport (the
-    /// caller's `starport` index); without one it returns before the fine and
-    /// the wanted bit, leaving the flag set so the system's one report is spent.
+    /// caller's `witness`); without one it returns before the fine and the
+    /// wanted bit, leaving the flag set so the system's one report is spent.
     ///
-    /// `starport` is the ordinal of the nearest starport in F234's sense, used
-    /// as the `DATA_008996` ledger index. `None` means no starport is in range.
-    pub fn player_fired(&mut self, starport: Option<usize>) -> Option<OffenceReport> {
+    /// `witness` is `Some(DATA_008996)` when F234 found a starport in range; the
+    /// value is the current system's **allegiance**, the ledger slot F236 uses.
+    /// `None` means no starport is in range.
+    pub fn player_fired(&mut self, witness: Option<usize>) -> Option<OffenceReport> {
         if self.illegal_fire {
             return None;
         }
         self.illegal_fire = true;
-        self.record(UNLAWFUL_DISCHARGE, starport)
+        self.record(UNLAWFUL_DISCHARGE, witness)
     }
 
     /// F783: the police object (`+0x118 == 0xe`) has gone. It clears
@@ -1754,9 +1787,132 @@ impl Legal {
         was_set
     }
 
-    /// The fine ledger for a starport, as F655's `owes` argument.
-    pub fn owed(&self, starport: Option<usize>) -> u32 {
-        starport.map_or(0, |index| self.fines[index % self.fines.len()])
+    /// The fine ledger for a jurisdiction, as F655's `owes` argument. `None`
+    /// means no local starport, so nothing is owed.
+    pub fn owed(&self, jurisdiction: Option<usize>) -> u32 {
+        jurisdiction.map_or(0, |index| self.fines[index % self.fines.len()])
+    }
+
+    /// `DATA_009093`: the offence bits recorded by `jurisdiction`.
+    pub fn offence_bits(&self, jurisdiction: usize) -> u32 {
+        self.records[jurisdiction % self.records.len()]
+    }
+
+    /// F311's legal-status word for the jurisdiction's fine.
+    pub fn status(&self, jurisdiction: usize) -> &'static str {
+        crate::status::legal_status(self.owed(Some(jurisdiction)))
+    }
+
+    /// F544/F545: pay the current jurisdiction's fine if there is enough cash.
+    /// The cash is the caller's (`DATA_008888`) and is only touched here, as
+    /// F236 leaves it alone when the debt is recorded.
+    pub fn pay_fine(&mut self, cash: u32, jurisdiction: usize) -> FinePayment {
+        let slot = jurisdiction % self.fines.len();
+        let amount = self.fines[slot];
+        if amount > cash {
+            return FinePayment { amount, paid: 0 };
+        }
+        self.fines[slot] = 0;
+        FinePayment {
+            amount,
+            paid: amount,
+        }
+    }
+}
+
+/// The commander's standing beyond the law: `DATA_008911`'s Elite score,
+/// `DATA_008912`/`DATA_008913`'s Federal/Imperial military points and
+/// `DATA_009091`'s medal and permit bits.
+///
+/// F942 adds a destroyed ship's statistics `+0x16` word to the Elite score;
+/// F300's mission rewards call F304/F305, which add a signed amount to the
+/// military points and print F306's promotion or demotion notice when the rank
+/// word changes. `docs/notes/status.md` has the call sites.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Career {
+    pub federal: u32,
+    pub imperial: u32,
+    pub elite: u32,
+    pub medals: u32,
+}
+
+/// One rank-word change from a military reward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RankChange {
+    pub from: usize,
+    pub to: usize,
+}
+
+impl RankChange {
+    pub fn promoted(&self) -> bool {
+        self.to > self.from
+    }
+}
+
+impl Career {
+    /// F942: add a destroyed ship's rating word to `DATA_008911`. Returns
+    /// whether the high word changed, exactly as F942's `sar 0x10` comparison
+    /// does (the Elite Federation message's trigger).
+    pub fn award_kill(&mut self, rating: i16) -> bool {
+        let before = self.elite >> 16;
+        self.elite = if rating >= 0 {
+            self.elite.saturating_add(u32::from(rating as u16))
+        } else {
+            self.elite.saturating_sub(u32::from(rating.unsigned_abs()))
+        };
+        before != self.elite >> 16
+    }
+
+    /// F304/F306 for the Federal points. `points` is the signed reward F300's
+    /// row carries. Returns the rank-index change, if the word changed.
+    pub fn award_federal(&mut self, points: i32) -> Option<RankChange> {
+        let from = crate::status::military_rank_index(self.federal);
+        self.federal = add_signed(self.federal, points);
+        let to = crate::status::military_rank_index(self.federal);
+        (from != to).then_some(RankChange { from, to })
+    }
+
+    /// F305/F306 for the Imperial title.
+    pub fn award_imperial(&mut self, points: i32) -> Option<RankChange> {
+        let from = crate::status::military_rank_index(self.imperial);
+        self.imperial = add_signed(self.imperial, points);
+        let to = crate::status::military_rank_index(self.imperial);
+        (from != to).then_some(RankChange { from, to })
+    }
+
+    /// F307: award the medal or permit whose bit is `index`. `false` when the
+    /// bit was already set (the original's `DATA_009091` test).
+    pub fn award_medal(&mut self, index: usize) -> bool {
+        let Some(bit) = 1u32.checked_shl(index as u32) else {
+            return false;
+        };
+        if self.medals & bit != 0 {
+            return false;
+        }
+        self.medals |= bit;
+        true
+    }
+
+    pub fn federal_rank(&self) -> &'static str {
+        crate::status::federal_rank(self.federal)
+    }
+
+    pub fn imperial_title(&self) -> &'static str {
+        crate::status::imperial_title(self.imperial)
+    }
+
+    pub fn elite_rating(&self) -> &'static str {
+        crate::status::elite_rating(self.elite)
+    }
+}
+
+/// F306's signed add: positive values saturate at `0xffff`, negatives clamp at
+/// zero.
+fn add_signed(value: u32, delta: i32) -> u32 {
+    if delta >= 0 {
+        value.saturating_add(delta as u32).min(0xffff)
+    } else {
+        value.saturating_sub(delta.unsigned_abs()).min(0xffff)
     }
 }
 
@@ -1774,6 +1930,8 @@ pub struct Persisted {
     pub radius: i64,
     pub damage: DamageState,
     pub shield_strength: i16,
+    /// The statistics' `+0x16` word, kept for F942's rating on a later kill.
+    pub rating: i16,
     /// The statistics' cargo space (`+0x116`), kept for F942's debris on a
     /// later destruction.
     pub cargo: u16,
@@ -1811,6 +1969,7 @@ pub fn persist(ships: &[NpcShip], player: [i64; 3]) -> Vec<Persisted> {
             radius: ship.radius,
             damage: ship.damage,
             shield_strength: ship.shield_strength,
+            rating: ship.rating,
             cargo: ship.cargo,
             hostile: true,
             laser: ship.laser,
@@ -1846,6 +2005,7 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             radius: record.radius,
             damage: record.damage,
             shield_strength: record.shield_strength,
+            rating: record.rating,
             cargo: record.cargo,
             state: State::Attack,
             anchor: player,
@@ -2355,6 +2515,7 @@ mod tests {
             thrust: if model >= 0x35 { 3_270 } else { 13_625 },
             drive: 2,
             gun_mounts: 1,
+            rating: 10,
             cargo: 8,
         })
     }
@@ -2749,6 +2910,7 @@ mod tests {
             thrust: 14_715,
             drive: 14,
             gun_mounts: guns,
+            rating: 50,
             cargo,
         }
     }

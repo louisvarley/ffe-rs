@@ -44,6 +44,7 @@ pub mod sector;
 pub mod shipyard;
 mod shipyard_table;
 pub mod star_points;
+pub mod status;
 pub mod surface;
 pub mod sysgen;
 pub mod terrain;
