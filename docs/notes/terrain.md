@@ -203,11 +203,20 @@ queues word for word and the 47 faults (45 queue overflows, 2 divisions by zero)
 ## The close-range base sphere (ffe-rs flight view)
 
 `Screen::draw_discs` scales a planet's surface axes so their world radius is the body's
-**inner** radius (`+0x140`), not the outer atmosphere radius (`+0x138`). F879 places an
-open-air starport on the terrain at about 0.9 of the outer radius (Earth: 7,032 km against
-7,810 outer and 4,970 inner), so scaling to the outer radius put the eye inside the drawn
-base sphere at starport altitude; F1876 then dropped every triangle as a backface and the
-ground vanished. The inner radius also matches the surface model's base sphere in the
-starport frame (`surface-starport` in `tests/planet_view.rs`). The old `z > radius` disc
-filter is gone as well: it removed the body at exactly the range a landing approach reaches.
-The outer radius remains the collision/atmosphere radius, so the haze (F1877) still spans it.
+**outer** radius (`+0x138`, the model's radius word). That word is the surface model's
+bounding radius and the radius F1533 gives the object; the smaller `+0x140` is the
+collision radius. F581 queries the same terrain at the outer radius, so the drawn
+ground and a rough landing are now the same sphere: the old inner-radius scale left
+the eye thousands of kilometres above the drawn ground (a rough landing settled at
+0.90 outer against a 0.64-outer drawn base, and the view showed only sky). The
+starport frame confirms the direction: F879 places an open-air starport on the
+terrain at about 0.9 outer (Earth: 7,032 km against 7,810 outer and 4,970 inner).
+
+At a starport the eye is inside the outer base sphere but above the local terrain.
+F1876's shell has no depth buffer, so the far side would otherwise be painted over
+the sky; `terrain_draw` now drops a final triangle whose outward normal points away
+from an inside eye. F1877's haze ring and sky are also left out when the eye is
+inside the base (the original landed frame clears to the space colour), which keeps
+the ring from covering the landed ground. The old `z > radius` disc filter is gone:
+it removed the body at exactly the range a landing approach reaches. Outside the
+base the haze still spans the outer radius.

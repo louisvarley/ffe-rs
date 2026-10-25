@@ -14,7 +14,8 @@ use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::navigation::{
-    describe, distance, refusal, Kind as NavKind, Navigator, Traffic, View as NavView,
+    describe, distance, refusal, surface_radius, Kind as NavKind, Navigator, Traffic,
+    View as NavView,
 };
 use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
 use ffe_rs::prefs::{
@@ -2857,14 +2858,12 @@ fn run() -> Result<(), String> {
                     let light = b.position.map(|v| -(v as f64) / length.sqrt().max(1.0));
                     ffe_rs::screen::Disc {
                         centre: b.position.map(|v| v as f64 / unit),
-                        // The visible surface is the solid radius; the outer one
-                        // is the atmosphere's, and using it would put the eye
-                        // inside the rendered ground at a starport.
-                        radius: if b.kind == NavKind::Star {
-                            b.radius as f64 / unit
-                        } else {
-                            b.inner_radius as f64 / unit
-                        },
+                        // The surface's base sphere is the model's outer radius
+                        // (`+0x138`, the radius word); F1533's collision radius
+                        // (`+0x140`) is smaller. Both the terrain query and the
+                        // drawing use the outer radius, so a rough landing settles
+                        // on the drawn ground.
+                        radius: surface_radius(b),
                         light,
                         colours: match b.kind {
                             NavKind::Star => (17, 17),

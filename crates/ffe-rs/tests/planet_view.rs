@@ -787,7 +787,7 @@ fn surface_frame_shows_a_starport() {
     state.axes = Some([right, up_cam, forward]);
     let disc = Disc {
         centre: planet.position.map(|v| v as f64 / UNIT),
-        radius: planet.inner_radius as f64 / UNIT,
+        radius: ffe_rs::navigation::surface_radius(planet),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
@@ -960,6 +960,40 @@ fn landing_parent_chooses_the_surface_body() {
     assert!(distance(away, planet.position) < planet.radius as f64);
 }
 
+/// The drawn surface and the landing contact share one radius: the model's
+/// outer radius word (`+0x138`, `Body::radius`), not the smaller collision word
+/// (`+0x140`, `inner_radius`). The flight view divides by the same flight unit,
+/// and `landing_body` hands F575 the same outer radius, so a rough landing
+/// settles on the ground the view draws.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn surface_and_landing_use_one_radius() {
+    use ffe_rs::navigation::{Kind, Navigator};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let nav = Navigator::new_game(&cache, 1).unwrap();
+    let planet = nav.bodies.iter().find(|b| b.kind == Kind::Planet).unwrap();
+    let info = ffe_core::objects::ModelInfo::read(
+        cache.asset("base:model/records").unwrap(),
+        cache.asset("base:ship/stats").unwrap(),
+        planet.model,
+    )
+    .unwrap();
+    let contact = ffe_rs::navigation::landing_body(planet, &info);
+    assert_eq!(contact.outer_radius, planet.radius);
+    assert_eq!(contact.inner_radius, planet.inner_radius);
+    assert!(
+        planet.radius > planet.inner_radius,
+        "a planet's outer radius (drawn surface) is larger than its collision radius"
+    );
+    assert_eq!(
+        ffe_rs::navigation::surface_radius(planet) * UNIT,
+        planet.radius as f64
+    );
+}
+
 /// Level flight 100 km above a starport: the horizon and the ground under the
 /// eye stay drawn (the same surface path the flight view uses).
 #[test]
@@ -1015,7 +1049,7 @@ fn level_flight_near_the_surface_shows_the_horizon() {
     state.axes = Some([right, up_cam, forward]);
     screen.discs = vec![Disc {
         centre: planet.position.map(|v| v as f64 / UNIT),
-        radius: planet.inner_radius as f64 / UNIT,
+        radius: ffe_rs::navigation::surface_radius(planet),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
@@ -1172,7 +1206,7 @@ fn landing_reaches_the_surface_state_and_launches_again() {
     let mut screen = Screen::new(&cache).unwrap();
     screen.discs = vec![Disc {
         centre: planet.position.map(|v| v as f64 / UNIT),
-        radius: planet.inner_radius as f64 / UNIT,
+        radius: ffe_rs::navigation::surface_radius(&planet),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
@@ -1362,11 +1396,7 @@ fn new_game_landed_surface_view() {
             let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
             Disc {
                 centre: b.position.map(|v| v as f64 / UNIT),
-                radius: if b.kind == Kind::Star {
-                    b.radius as f64 / UNIT
-                } else {
-                    b.inner_radius as f64 / UNIT
-                },
+                radius: ffe_rs::navigation::surface_radius(b),
                 light: b.position.map(|v| -(v as f64) / length.sqrt().max(1.0)),
                 colours: (12, 4),
                 star: b.kind == Kind::Star,
@@ -1416,5 +1446,16 @@ fn new_game_landed_surface_view() {
     assert!(
         view.iter().filter(|p| **p != screen.sky).count() > 2_000,
         "the starport and its terrain are drawn"
+    );
+    // The ground below the horizon: the lower half of the view is the drawn
+    // surface, not the space colour. (The old inner-radius scale left the eye
+    // thousands of kilometres above the drawn ground and drew only sky here.)
+    let lower = view[320 * 100..320 * 158]
+        .iter()
+        .filter(|p| **p != screen.sky)
+        .count();
+    assert!(
+        lower > 8_000,
+        "the landed view must show ground below the horizon ({lower} pixels)"
     );
 }

@@ -4,7 +4,7 @@
 //! that flies the original flight model to a chosen body with the same keys a
 //! player presses. See `docs/NAVIGATION.md`.
 use crate::docking::{Contact, Port, CLEARANCE_RANGE};
-use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND};
+use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND, UNITS_PER_FLIGHT_UNIT};
 use ffe_content::VerifiedCache;
 use ffe_core::effects::{self, Effect};
 use ffe_core::galaxy::{tables, Tables};
@@ -472,6 +472,13 @@ pub fn describe(mm: f64) -> String {
     } else {
         format!("{:.1} km", mm / 1.0e6)
     }
+}
+
+/// The radius the flight view draws a body's surface at, in flight units: the
+/// model's outer radius word (`+0x138`), which is also the radius F1533 and the
+/// terrain contact use. One radius for the drawn ground and the landing.
+pub fn surface_radius(body: &Body) -> f64 {
+    body.radius as f64 / UNITS_PER_FLIGHT_UNIT
 }
 
 /// The standoff the autopilot stops at: just off the body's surface or station.
