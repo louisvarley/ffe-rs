@@ -13,9 +13,13 @@
 //! - **F688** (`ffe.asm:45818`) is the system traffic spawner. It reads the
 //!   four bytes and two words F869 returns from the galaxy record (`+5..+9`,
 //!   `+46`, `+50`) and spawns traders (F689, type 1), Thargoids (F690, type
-//!   0x11), ships in station bays (F691), shuttles (F699, type 0xf) and patrol
-//!   groups (F698). `DATA_008997` (ships in the cache's ship-data table) is
-//!   zero in this port, so the bay branch is absent.
+//!   0x11), ships in station bays (F691), auxiliary bulk carriers (F699, type
+//!   0xf) and patrol groups (F698). `DATA_008997` is **not** a cache ship-data
+//!   table: F617/F618 build it at system creation by walking the objects with
+//!   `+0x14c & 0x10` (the stations and starports) and copying their object
+//!   slots into the 18-record `DATA_008999` starport array. F700 draws one of
+//!   those records, so the F691 count is `RND(4 * places)` (capped 25) and the
+//!   port derives it from the generated system's place bodies. See §2.
 //! - **The Thargoid count is `RND(F35(0x16))`** (`ffe.asm:45858`, a
 //!   global-variable read; F34/F35 are `ffe.asm:3507`/`3524`). `F35` is a
 //!   limit, not the exact count: F688 passes it to F922 like the trader counts.
@@ -31,6 +35,22 @@
 //!   formation escorts in state 0xb (+0x102..+0x106 hold their offsets from the
 //!   leader), and two further variants. F697 fits the pirate equipment and
 //!   rolls `+0x11a`, the bounty, from `DATA_006268`.
+//! - **F691** (`ffe.asm:46113`) is the station-bay spawner: it creates a
+//!   type-1 trader (F772), draws a random place with F700, asks F650 for a bay
+//!   and, on success, copies the starport's position/orientation (the `0x20`
+//!   branch), adds the bay offset, marks the ship state 0x24 with F747's object
+//!   time (without the `+2` days F747 adds for an arriving ship) and the
+//!   station in `+0xfe`. On a full station it calls F940, which removes the
+//!   ship. The port spawns such a ship as `State::Docked` with a pending bay;
+//!   `Navigator` asks the station's traffic record for the bay when it installs
+//!   the ships.
+//! - **F699** (`ffe.asm:46729`) is F701 (a station must exist), F772(0xf), F702
+//!   on the `0x5000/0x18` orbit, state 0x0d and `+0x56` = the station's object
+//!   slot. Table row 0x0d has no control or movement routine (only F790's damage
+//!   response), so these ships hold; the source gives them no route, station
+//!   target or dock request. Its type-0xf model list is `DATA_006195`
+//!   (`Lynx Bulk Carrier`/`Long-range Cruiser`), not model 0x0f (the
+//!   `Interplanetary Shuttle`, which is table record 0xd).
 //! - **F702/F1507** (`ffe.asm:46868`, `89917`) place a spawned ship at a random
 //!   phase on an orbit of the raw ffp word `0x5000/0x33`.
 //! - **F773** (`ffe.asm:50526`) creates the ship: type byte `+0x118`, equipment,
@@ -513,12 +533,26 @@ impl Random {
         self.b = rotated;
         ((u64::from(self.a & 0xffff) * u64::from(limit)) >> 16) as u32
     }
+
+    /// F1530 (`ffe.asm:90913`): the object-time random word F747/F691 read from
+    /// `DATA_008818`. It advances the same `a`/`b` words as [`Self::bounded`]
+    /// with a different mixing step and returns the full new `a`; the original
+    /// returns its low word and callers such as F691 then read `[DATA_008818]`.
+    pub fn advance(&mut self) -> u32 {
+        let old_a = self.a;
+        let mixed = (self.b ^ 0x1234_567f).rotate_right(7);
+        self.a = self.a.wrapping_add(mixed);
+        self.b = old_a.rotate_left(13);
+        self.a
+    }
 }
 
 /// Which of the original's traffic roles a ship has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     Trader,
+    /// F699's auxiliary bulk carrier (`F772(0xf)`: Lynx Bulk Carrier/LRC). It
+    /// is state 0x0d, which has no control routine, so it holds on its orbit.
     Shuttle,
     Police,
     /// A lone pirate (F694, type 0xa in F772) or a group member (F695, 0xb).
@@ -532,7 +566,9 @@ impl Role {
     pub fn type_code(self) -> usize {
         match self {
             Role::Trader => 0x1,
-            Role::Shuttle => 0xd,
+            // F699 calls F772(0xf), the Lynx/LRC list. Do not confuse the table
+            // index 0xf with model 0x0f (the Interplanetary Shuttle, record 0xd).
+            Role::Shuttle => 0xf,
             Role::Police => 0xe,
             Role::Pirate => 0xa,
             Role::Military => 0x2,
@@ -541,8 +577,8 @@ impl Role {
     }
 
     /// F773 writes the role into `+0x118`; the values it uses for the traffic
-    /// roles are 1 (traders/station ships), 0xf (shuttles), 0x11 (the F690
-    /// branch) and 0xfb (the F697 equipment branch).
+    /// roles are 1 (traders/station ships), 0xf (F699 aux traders), 0x11 (the
+    /// F690 branch) and 0xfb (the F697 equipment branch).
     pub fn ai_class(self) -> u8 {
         match self {
             Role::Trader => 0x1,
@@ -665,8 +701,15 @@ pub const DESPAWN_RANGE: f64 = 30.0e6;
 pub const FLASH_SECONDS: f64 = 0.25;
 /// How long the port keeps a destroyed ship's marker before removing it.
 pub const DEATH_SECONDS: f64 = 0.6;
-/// The port caps the original's traffic count so a system stays legible.
-pub const MAX_SHIPS: usize = 5;
+/// The port caps the original's traffic count so a system stays legible. The
+/// original's F927 allocates slots from 0x72 down, which is far more than a
+/// player can follow. The cap now also has to hold the station's own traffic
+/// (F691's bay ships and F699's aux traders) alongside F689/F698's ships.
+pub const MAX_SHIPS: usize = 9;
+/// The port's cap on F691's docked traders (the source caps its `RND(4*places)`
+/// roll at 25). Three leaves room for the arriving traders, F699's aux trader
+/// and F698's patrol under [`MAX_SHIPS`].
+pub const MAX_BAY_SHIPS: usize = 3;
 /// Station traffic's cruise floor. [`Spec::top_speed`]'s thrust/mass ratio
 /// clamps a heavy freighter to 2,000 mm/s, which would put F745's five-kilometre
 /// approach half an hour away; FFE's own units do not scale to the port's
@@ -714,6 +757,17 @@ pub const PERSIST_RANGE: f64 = 2.0e6;
 pub const DOCKED_DAYS: f64 = 2.0;
 /// The day fraction F747 adds from `[D8818]` (tics in a day, 49,700 a second).
 pub const DOCKED_JITTER_SECONDS: f64 = 86_400.0;
+
+/// F691/F747's random object time from the F1530 word: the high nibble is whole
+/// days (`[+0xac]`) and the low 28 bits shifted left four are the day's tics
+/// (`[+0xa8]`). F747 adds the two days on top; F691 uses the word as it is, so
+/// an initial bay ship can launch within its first fraction of a day.
+pub fn docked_object_seconds(word: u32) -> f64 {
+    let days = f64::from(word >> 28);
+    let tics = word.wrapping_shl(4);
+    days * 86_400.0 + f64::from(tics) / TICS_PER_SECOND
+}
+
 /// How long a trader waits at a station for a bay before F762 picks another
 /// station: the source retries F745 every frame for ever, so this give-up is
 /// the port's (see `docs/notes/npc.md`, "Owner decisions").
@@ -956,6 +1010,10 @@ pub struct NpcShip {
     pub pad: Option<[i64; 3]>,
     /// F747's remaining docked object time in game seconds.
     pub dock_timer: f64,
+    /// F691's initial station-bay object time: `docked_object_seconds(F1530)`
+    /// without F747's extra two days. Kept on the ship so the caller can occupy
+    /// the bay and then start the countdown.
+    pub dock_span: f64,
     /// F745/F734's retry delay after traffic control said no.
     pub dock_retry: f64,
     /// Seconds spent waiting for a bay or clearance.
@@ -1022,6 +1080,7 @@ impl NpcShip {
             bay: None,
             pad: None,
             dock_timer: 0.0,
+            dock_span: 0.0,
             dock_retry: 0.0,
             dock_wait: 0.0,
         }
@@ -1065,14 +1124,37 @@ impl NpcShip {
     /// two-to-three day object time (F747's `+2` days and `[D8818]` fraction).
     /// The `phase` is the ship's spawn-time random draw, so the wait is stable.
     pub fn begin_docked(&mut self, seat: [i64; 3]) {
+        let fraction = self.phase / std::f64::consts::TAU;
+        let timer = DOCKED_DAYS * 86_400.0 + fraction * DOCKED_JITTER_SECONDS;
+        self.begin_docked_for(seat, timer);
+    }
+
+    /// [`Self::begin_docked`] with an explicit object time. F691's initial bay
+    /// ships use this with [`Self::dock_span`] (no F747 `+2` days).
+    pub fn begin_docked_for(&mut self, seat: [i64; 3], seconds: f64) {
         self.state = State::Docked;
         self.position = seat;
         self.velocity = [0.0; 3];
         self.speed = 0.0;
-        let fraction = self.phase / std::f64::consts::TAU;
-        self.dock_timer = DOCKED_DAYS * 86_400.0 + fraction * DOCKED_JITTER_SECONDS;
+        self.dock_timer = seconds.max(0.0);
         self.dock_retry = 0.0;
         self.dock_wait = 0.0;
+    }
+
+    /// F751 (state 0x0b): the leader has entered its attack state, so the
+    /// escort drops its formation offsets and attacks the leader's target. The
+    /// port's [`State::Attack`] always means the player, which is F751's
+    /// `+0x100` for the pirate group. It keeps the 0x0a/0x0b rows via
+    /// [`State::Escort`] until this hand-off fires.
+    pub fn join_attack(&mut self) -> bool {
+        if self.leader.is_none() || !matches!(self.state, State::Escort) {
+            return false;
+        }
+        self.state = State::Attack;
+        self.leader = None;
+        self.formation = [0; 3];
+        self.pass = 0.0;
+        true
     }
 
     /// F735: the door is open and the bay is free; fly out.
@@ -1838,6 +1920,7 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             bay: None,
             pad: None,
             dock_timer: 0.0,
+            dock_span: 0.0,
             dock_retry: 0.0,
             dock_wait: 0.0,
         })
@@ -1955,48 +2038,74 @@ impl System {
     }
 }
 
-/// F688's counts and roles with the port's cap. The original's `DATA_008997`
-/// (ships in station bays) branch is omitted because the cache's ship-data
-/// table is not loaded by the port.
+/// F688's counts and roles with the port's cap. The bay count is F691's
+/// `RND(4 * places)` (see [`counts_with_places`]); `aux_traders` is F699's
+/// count. F688 has no police draw; `police` is the port's one patrol group from
+/// the record's `+7` byte (the source's F238 police response is not ported as a
+/// spawn path, see `docs/notes/npc.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Counts {
     pub traders: usize,
     /// `RND(F35(0x16))`; F690's spawned count, before [`MAX_SHIPS`].
     pub thargoids: usize,
-    pub shuttles: usize,
+    /// F691: `min(RND(4 * places), 25)` docked traders.
+    pub bay_ships: usize,
+    /// F699's aux traders (`RND(+8)`), subject to the source's quirk below.
+    pub aux_traders: usize,
     pub pirates: usize,
     pub police: usize,
 }
 
 /// The counts F688 draws from a system record, before [`MAX_SHIPS`]. `details`
 /// is F869's report: `bytes[3]` is `+8`, `bytes[1]` is `+6` and `bytes[2]` is
-/// `+7`. The Thargoid limit is the separate `F35(0x16)` global, not a system
-/// field, and F688 draws `RND(limit)` for it just as it does for traders.
+/// `+7`. `places` is `DATA_008997`, the number of station/starport records
+/// F617/F618 collected (the port's generated place bodies, capped at the array's
+/// 18 records); pass 0 when the caller has no stations to offer.
 ///
-/// The source's exact draws are: `RND(+8)` traders (F689), `RND(+8)` F699
-/// transport groups (only after F691's station-bay branch fired), `RND(+6*4)`
-/// F698 pirate-group attempts (each is a lone pirate, a group, F696, or a
-/// no-op) and F690's `RND(F35(0x16))` Thargoids. The port keeps `RND(+8)`
-/// traders and shuttles, one pirate group per `+6`, a police group from a
-/// non-zero `+7` and the mission-gated Thargoid count; the station-bay branch
-/// is omitted. The pirate `+6` count without F698's `RND(*4)` is a port
-/// simplification, not the source's count.
+/// The source's exact draws are: `RND(+8)` traders (F689), `RND(F35(0x16))`
+/// Thargoids (F690), F691's `RND(4 * places)` capped at 25, F699's `RND(+8)`
+/// aux traders, `RND(+6*4)` F698 pirate-group attempts and no police draw. F688
+/// has one quirk preserved here: with places present, F699 runs only when the
+/// F691 roll was non-zero; when the F691 roll is zero the shuttle/aux branch is
+/// skipped entirely (and a system without places runs F699 but not F691). The
+/// port keeps its own trader/pirate caps; the pirate `+6` count without F698's
+/// `RND(*4)` remains a simplification.
 pub fn counts(system: &System, rng: &mut Random) -> Counts {
-    // F688: RND(byte +8) traders, RND(F35(0x16)) Thargoids (F690), RND(byte
-    // +8) shuttles, byte +6 patrol groups, byte +7 police.
+    counts_with_places(system, 0, rng)
+}
+
+/// F688's counts with `places` = `DATA_008997`. See [`counts`].
+pub fn counts_with_places(system: &System, places: usize, rng: &mut Random) -> Counts {
+    // F688: RND(byte +8) traders, RND(F35(0x16)) Thargoids (F690), then (with
+    // F686/F687's flag clear) F691's bay roll and F699's aux count, byte +6
+    // patrol groups and byte +7 police (the port's reconstruction).
     let details = &system.details;
     let thargoid_limit = u32::try_from(system.thargoids).unwrap_or(u32::MAX);
+    let traders = rng.bounded(details.bytes[3]) as usize;
+    let thargoids = rng.bounded(thargoid_limit) as usize;
+    let places_word = u32::try_from(places.min(18)).unwrap_or(18);
+    let bay_ships = if places_word == 0 {
+        0
+    } else {
+        (rng.bounded(places_word.saturating_mul(4)) as usize).min(0x19)
+    };
+    let aux_traders = if places_word == 0 || bay_ships > 0 {
+        rng.bounded(details.bytes[3]) as usize
+    } else {
+        0
+    };
     Counts {
-        traders: rng.bounded(details.bytes[3]) as usize,
-        thargoids: rng.bounded(thargoid_limit) as usize,
-        shuttles: rng.bounded(details.bytes[3]) as usize,
+        traders,
+        thargoids,
+        bay_ships,
+        aux_traders,
         pirates: details.bytes[1] as usize,
         police: (details.bytes[2] > 0) as usize,
     }
 }
 
 /// F688's spawn switches that are the port's rather than the source's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpawnOptions {
     /// Force at least one trader and one pirate group. This is the port's
     /// testability/capture guarantee, not F688: the original can roll zero
@@ -2011,19 +2120,40 @@ pub struct SpawnOptions {
     /// player's position: otherwise a real system's pirate group is forced
     /// beside the pad or the arrival point and attacks immediately.
     pub near_player: bool,
+    /// Run F688's station-traffic branches (F691 bay ships and F699 aux
+    /// traders). A normal system entry has them; the scripted combat/capture
+    /// fixtures turn them off so their frames keep the ships they were built
+    /// against.
+    pub station_traffic: bool,
+}
+
+impl Default for SpawnOptions {
+    fn default() -> Self {
+        Self {
+            guarantee: false,
+            near_player: false,
+            station_traffic: true,
+        }
+    }
 }
 
 impl SpawnOptions {
     /// The scripted traffic capture: something to shoot and a pirate in frame.
+    /// It does not add the station's own traffic, so the capture frames are not
+    /// crowded by F691/F699 ships unrelated to the fixture.
     pub const CAPTURE: Self = Self {
         guarantee: true,
         near_player: true,
+        station_traffic: false,
     };
 }
 
 /// Spawn one system's traffic. `spec` and `name` look models up in the cache;
 /// models without a statistics block are skipped. The result is capped at
-/// [`MAX_SHIPS`] and is deterministic for a given `rng` state. [`SpawnOptions`]
+/// [`MAX_SHIPS`] and is deterministic for a given `rng` state. F691's bay ships
+/// are returned in `State::Docked` with `station` set and no `bay`: the caller
+/// owns the traffic record and must ask it for a bay, then call
+/// [`NpcShip::begin_docked_for`] with [`NpcShip::dock_span`]. [`SpawnOptions`]
 /// carries the port's capture-only guarantee; without it the counts are F688's
 /// (including zero) capped for legibility. `system.thargoids` is F35(0x16)'s
 /// limit; zero unless a mission script set it.
@@ -2038,7 +2168,15 @@ pub fn spawn(
     options: SpawnOptions,
     spec: impl Fn(u32) -> Option<Spec>,
 ) -> Vec<NpcShip> {
-    let mut counts = counts(system, rng);
+    let place_count = if options.station_traffic {
+        anchors
+            .iter()
+            .filter(|anchor| anchor.station.is_some())
+            .count()
+    } else {
+        0
+    };
+    let mut counts = counts_with_places(system, place_count, rng);
     let anchor = anchors.first().copied().unwrap_or(Anchor {
         position: player,
         radius: 1_000_000,
@@ -2055,7 +2193,13 @@ pub fn spawn(
         counts.pirates = counts.pirates.min(2);
     }
     counts.thargoids = counts.thargoids.min(MAX_SHIPS);
-    counts.shuttles = counts.shuttles.min(1);
+    counts.bay_ships = counts.bay_ships.min(MAX_BAY_SHIPS);
+    if options.station_traffic {
+        counts.aux_traders = counts.aux_traders.min(1);
+    } else {
+        counts.bay_ships = 0;
+        counts.aux_traders = 0;
+    }
     counts.police = counts.police.min(1);
 
     let orbit = (anchor.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
@@ -2136,12 +2280,47 @@ pub fn spawn(
             ships.push(ship);
         }
     }
-    for i in 0..counts.shuttles {
+    // F691: station-bay ships. F700 draws a place (`RND(DATA_008997)`), F650
+    // allocates a bay on it and the ship starts in F747's state 0x24 with the
+    // bay's object time (F691 does not add F747's two days). One full station
+    // just loses that ship (F940), so the loop keeps going.
+    let places: Vec<Anchor> = if options.station_traffic {
+        anchors
+            .iter()
+            .copied()
+            .filter(|anchor| anchor.station.is_some())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    for _ in 0..counts.bay_ships {
+        let Some(place) = places
+            .get(rng.bounded(places.len() as u32) as usize)
+            .copied()
+        else {
+            break;
+        };
+        let Some(mut ship) = add(Role::Trader, 1, place.position, place.position, rng) else {
+            continue;
+        };
+        // The bay is granted by the caller's traffic record, which owns F650;
+        // `spawn` marks the ship and keeps F1530's object time.
+        ship.state = State::Docked;
+        ship.station = place.station;
+        ship.bay = None;
+        ship.pad = None;
+        ship.dock_span = docked_object_seconds(rng.advance());
+        ship.dock_timer = ship.dock_span;
+        ship.dock_retry = 0.0;
+        ship.dock_wait = 0.0;
+        ships.push(ship);
+    }
+    // F699: F701 requires a station, F772(0xf) creates the aux trader, F702 puts
+    // it on the 0x5000/0x18 orbit and state 0x0d is a hold row (no control or
+    // movement routine). The source gives it no station target or dock request.
+    for i in 0..counts.aux_traders {
         let position = spread(rng, 1.0 + i as f64 * 2.1, orbit * 0.8);
-        if let Some(mut ship) = add(Role::Shuttle, 0xd, position, anchor.position, rng) {
-            if let Some(station) = anchor.station {
-                ship.begin_transit(station, anchor.position);
-            }
+        if let Some(ship) = add(Role::Shuttle, 0xf, position, anchor.position, rng) {
             ships.push(ship);
         }
     }
@@ -2703,6 +2882,227 @@ mod tests {
         );
         assert!(ships.iter().any(|ship| ship.role == Role::Trader));
         assert!(ships.iter().any(|ship| ship.role == Role::Pirate));
+    }
+
+    /// F1530 (`ffe.asm:539f4`) is the object-time random word F747/F691 read:
+    /// the four steps below are the source's `rotl(b ^ 0x1234567f, 25)` add to
+    /// `a` and `rotl(old a, 13)` into `b`.
+    #[test]
+    fn f1530_advances_the_object_time_words() {
+        let mut rng = Random::new(0x1234_5678, 0x4567_89ab);
+        let expected = [
+            (0xbae2_fe37u32, 0x8acf_0246u32),
+            (0x2e14_f4df, 0x5fc6_f75c),
+            (0x74b0_da21, 0x9e9b_e5c2),
+            (0xefca_3988, 0x1b44_2e96),
+        ];
+        for (a, b) in expected {
+            assert_eq!(rng.advance(), a);
+            assert_eq!((rng.a, rng.b), (a, b));
+        }
+    }
+
+    /// F691's object time is `[D8818] << 4` tics plus `[D8818] >> 28` days. It
+    /// has no `+2` days (F747 adds those for an arriving ship), so the first
+    /// station-bay ship can launch within its first day.
+    #[test]
+    fn f691_object_time_is_the_f1530_word_without_f747s_two_days() {
+        assert_eq!(docked_object_seconds(0), 0.0);
+        assert_eq!(docked_object_seconds(1), 16.0 / TICS_PER_SECOND);
+        assert_eq!(docked_object_seconds(0x1000_0000), 86_400.0);
+        assert_eq!(
+            docked_object_seconds(0x1000_0040),
+            86_400.0 + 1024.0 / 49_700.0
+        );
+        assert_eq!(docked_object_seconds(0xf000_0000), 15.0 * 86_400.0);
+        // F747's two days are a separate `[+0xac] += 2`.
+        assert!(docked_object_seconds(u32::MAX) < 17.0 * 86_400.0);
+        // The port's regular F747 wait still starts at two days.
+        let ship = &mut spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &[anchor(0)],
+            &system(0),
+            0,
+            &mut Random::new(1, 2),
+            SpawnOptions::CAPTURE,
+            spec,
+        )
+        .pop()
+        .expect("a trader");
+        ship.begin_docked([1, 2, 3]);
+        assert!((2.0..3.0).contains(&(ship.dock_timer / 86_400.0)));
+    }
+
+    fn anchor(place: usize) -> Anchor {
+        Anchor {
+            position: [1_000_000 + place as i64 * 2_000_000, 0, 0],
+            radius: 4_500_000,
+            station: Some(place),
+        }
+    }
+
+    /// Find a seed whose F688 pass gives a non-zero F691 roll, returning the
+    /// seed and the counts. Scanning keeps the test independent of one lucky
+    /// constant while still exercising the real `RND(4 * places)` draw.
+    fn seed_with_bay(places: usize) -> (u32, u32, Counts) {
+        for a in 1..20_000u32 {
+            let b = a.wrapping_mul(0x9e37_79b9);
+            let mut rng = Random::new(a, b);
+            let counts = counts_with_places(&system(0), places, &mut rng);
+            if counts.bay_ships > 0 {
+                return (a, b, counts);
+            }
+        }
+        panic!("no seed drew a station-bay ship");
+    }
+
+    /// F691/F700: a non-zero `RND(4 * places)` spawns that many type-1 traders
+    /// in `State::Docked`, each with a random place as `+0xfe` and no bay yet
+    /// (F650 belongs to the traffic record). The port caps the branch at
+    /// [`MAX_BAY_SHIPS`].
+    #[test]
+    fn f691_spawns_docked_traders_from_the_place_table() {
+        let places = 2;
+        let (a, b, counts) = seed_with_bay(places);
+        let anchors = [anchor(4), anchor(7)];
+        let ships = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &anchors,
+            &system(0),
+            0,
+            &mut Random::new(a, b),
+            SpawnOptions::default(),
+            spec,
+        );
+        let docked: Vec<&NpcShip> = ships
+            .iter()
+            .filter(|ship| ship.state == State::Docked)
+            .collect();
+        assert_eq!(
+            docked.len(),
+            counts.bay_ships.min(MAX_BAY_SHIPS),
+            "F691 count {} with places {places}",
+            counts.bay_ships
+        );
+        for ship in docked {
+            assert_eq!(ship.role, Role::Trader);
+            assert_eq!(ship.role.type_code(), 1);
+            assert!(
+                matches!(ship.station, Some(4) | Some(7)),
+                "{:?}",
+                ship.station
+            );
+            assert_eq!(ship.bay, None);
+            assert_eq!(ship.pad, None);
+            assert!((0.0..16.0 * 86_400.0).contains(&ship.dock_span));
+            assert_eq!(ship.dock_timer, ship.dock_span);
+            assert!(SHIP_TYPES[1].contains(&ship.model));
+        }
+        // The capture fixture asks for no station traffic, so its frames keep
+        // only the trader/pirate group they were built against.
+        let capture = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &anchors,
+            &system(0),
+            0,
+            &mut Random::new(a, b),
+            SpawnOptions::CAPTURE,
+            spec,
+        );
+        assert!(capture
+            .iter()
+            .all(|ship| ship.state != State::Docked && ship.role != Role::Shuttle));
+    }
+
+    /// F688's station branch has a quirk: with places present, F699's aux draw
+    /// runs only when F691's roll was non-zero. A zero bay roll skips the aux
+    /// traders too.
+    #[test]
+    fn f691s_zero_roll_skips_f699_like_the_source() {
+        for a in 1..20_000u32 {
+            let b = a.wrapping_mul(0x9e37_79b9);
+            let mut rng = Random::new(a, b);
+            let counts = counts_with_places(&system(0), 2, &mut rng);
+            if counts.bay_ships == 0 {
+                assert_eq!(counts.aux_traders, 0, "seed {a:#x} skipped F699");
+                return;
+            }
+        }
+        panic!("no seed rolled a zero F691 count");
+    }
+
+    /// F699: F772(0xf) is the Lynx/LRC list, and state 0x0d has no control or
+    /// movement routine, so the aux trader holds with no station target.
+    #[test]
+    fn f699_aux_traders_use_the_lynx_table_and_hold() {
+        assert_eq!(Role::Shuttle.type_code(), 0xf);
+        assert_eq!(Role::Shuttle.ai_class(), 0xf);
+        assert_eq!(SHIP_TYPES[0xf], &[0x46, 0x46, 0x47][..]);
+        let mut found = None;
+        for a in 1..20_000u32 {
+            let b = a.wrapping_mul(0x9e37_79b9);
+            let mut rng = Random::new(a, b);
+            let counts = counts_with_places(&system(0), 1, &mut rng);
+            if counts.aux_traders > 0 {
+                found = Some((a, b));
+                break;
+            }
+        }
+        let (a, b) = found.expect("no seed drew an aux trader");
+        let ships = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &[anchor(4)],
+            &system(0),
+            0,
+            &mut Random::new(a, b),
+            SpawnOptions::default(),
+            spec,
+        );
+        let aux = ships
+            .iter()
+            .find(|ship| ship.role == Role::Shuttle)
+            .expect("F699 did not spawn");
+        assert_eq!(aux.state, State::Hold);
+        assert_eq!(aux.station, None);
+        assert!(SHIP_TYPES[0xf].contains(&aux.model));
+        assert!(aux.max_speed >= STATION_CRUISE_SPEED);
+    }
+
+    /// F751 hands the escort to the attack when its leader is in state 1/2; the
+    /// formation offsets are dropped and the leader link goes with it.
+    #[test]
+    fn f751_turns_a_formation_escort_into_an_attacker() {
+        // Two pirate groups are needed for F695's escort; the fixture's +6 byte
+        // is 1, so ask for 2 explicitly.
+        let mut details = details();
+        details.bytes[1] = 2;
+        let ships = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &[anchor(4)],
+            &System::new(details, 0),
+            0,
+            &mut Random::new(11, 12),
+            SpawnOptions::CAPTURE,
+            spec,
+        );
+        let mut escort = ships
+            .iter()
+            .find(|ship| ship.state == State::Escort)
+            .expect("F695's escort")
+            .clone();
+        assert!(escort.leader.is_some());
+        assert_ne!(escort.formation, [0; 3]);
+        assert!(escort.join_attack());
+        assert_eq!(escort.state, State::Attack);
+        assert_eq!(escort.leader, None);
+        assert_eq!(escort.formation, [0; 3]);
+        // Only an escort with a leader joins; a second call does nothing.
+        assert!(!escort.join_attack());
     }
 
     /// A Thargoid model's statistics: DATA_006197's models have 0x31's 232 t
