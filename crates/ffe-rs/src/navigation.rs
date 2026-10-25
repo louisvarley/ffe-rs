@@ -684,6 +684,14 @@ pub struct Navigator {
     traffic: HashMap<usize, Starport>,
     /// The NPC traffic of the current system (F688/F635), ticked in flight.
     pub ships: Vec<NpcShip>,
+    /// The player's legal standing (`DATA_008646` bit 0 / `DATA_008647`): the
+    /// police alert that makes police and military ships hostile.
+    pub legal: npc::Legal,
+    /// F675's carried ships: the pirates close enough to follow a hyperspace
+    /// jump, restored by F680 when the new system is entered.
+    persisted: Vec<npc::Persisted>,
+    /// The player's position at the last traffic tick, for F675's offsets.
+    player_at: [i64; 3],
     /// The id of the ship locked as the target (F1020's target byte for ships;
     /// the port keeps bodies in `locked` and ships here).
     pub ship_lock: Option<u32>,
@@ -778,6 +786,38 @@ pub enum Traffic {
     LaunchOut(usize),
     /// The door is open and the bay released: the launch is complete.
     LaunchDone(usize),
+}
+
+/// What a frame of NPC traffic changed.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ShipEvent {
+    /// F931/F930: an NPC laser hit the player for `damage` (F953).
+    Hit {
+        ship: u32,
+        name: String,
+        code: u8,
+        damage: u32,
+        beam: bool,
+    },
+    /// A police or military ship turned hostile because the player is wanted.
+    PoliceHostile { name: String },
+    /// F787/F738/F927: a ship jumped out and its slot was freed.
+    Escaped { name: String },
+}
+
+/// The result of one of the player's laser hits on an NPC ship.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Attack {
+    /// What F953 did.
+    pub damage: ffe_core::laser::Damage,
+    /// The ship was clean: the player is now wanted.
+    pub crime: bool,
+    /// F942's bounty for a destroyed pirate (`+0x11a`), else 0.
+    pub bounty: u32,
+    /// A police or military ship turned hostile because of this hit.
+    pub police: bool,
+    /// F942 destroyed the ship.
+    pub destroyed: bool,
 }
 
 /// Why traffic control said no (the original's 0x98b7..0x98b9 messages).
@@ -900,6 +940,9 @@ impl Navigator {
             docked: None,
             traffic: HashMap::new(),
             ships: Vec::new(),
+            legal: npc::Legal::default(),
+            persisted: Vec::new(),
+            player_at: [0; 3],
             ship_lock: None,
             spawned: None,
             sequence: None,
@@ -1343,7 +1386,8 @@ impl Navigator {
 
     /// F688/F635: spawn the current system's NPC traffic once. The original
     /// spawns on entering a system and restores the ships from the save; the
-    /// port keeps a killed ship killed until the system is entered again.
+    /// port keeps a killed ship killed until the system is entered again. The
+    /// ships F675 kept across the last jump are restored first (F680).
     /// Returns whether traffic was spawned.
     pub fn spawn_traffic(
         &mut self,
@@ -1375,7 +1419,10 @@ impl Navigator {
         let clock = clock_words(self.clock);
         let seed = code ^ clock[0] ^ (player[0] as u32) ^ (player[2] as u32).rotate_left(11);
         let mut rng = npc::Random::new(seed, clock[1] ^ 0x4567_89ab);
-        self.ships = npc::spawn(
+        let mut ships = npc::restore(&self.persisted, player, 0);
+        self.persisted.clear();
+        let base = ships.len() as u32;
+        for mut ship in npc::spawn(
             player,
             forward,
             &anchors,
@@ -1383,20 +1430,85 @@ impl Navigator {
             allegiance,
             &mut rng,
             |model| crate::ships::npc_spec(cache, model),
-        );
+        ) {
+            ship.id += base;
+            ships.push(ship);
+        }
+        ships.truncate(npc::MAX_SHIPS);
+        self.ships = ships;
+        self.player_at = player;
         self.ship_lock = None;
         self.spawned = Some(self.current);
         !self.ships.is_empty()
     }
 
-    /// One frame of NPC traffic: the reduced AI state machine, then F927's
-    /// recycle of ships that are dead or too far from the player.
-    pub fn tick_ships(&mut self, seconds: f64, player: [i64; 3]) {
+    /// One frame of NPC traffic: the flight AI, F931's fire and F927's recycle of
+    /// ships that are dead, fled or too far from the player. `tics` are the
+    /// frame's game tics and `player_radius` the player's interaction radius
+    /// (F817's box). The returned events are the shots that hit the player and
+    /// the police that turned hostile.
+    pub fn tick_ships(
+        &mut self,
+        seconds: f64,
+        tics: u32,
+        player: [i64; 3],
+        player_radius: i64,
+    ) -> Vec<ShipEvent> {
+        self.player_at = player;
+        let mut events = Vec::new();
         if self.ships.is_empty() {
-            return;
+            return events;
         }
+        // F695's escorts hold a station in their leader's frame: right*+0x102 +
+        // up*+0x104 + forward*+0x106 (F743's F610 target).
+        let leaders: Vec<(u32, [i64; 3], [[f64; 3]; 3])> = self
+            .ships
+            .iter()
+            .filter(|ship| ship.alive())
+            .map(|ship| (ship.id, ship.position, ship.axes()))
+            .collect();
         for ship in &mut self.ships {
-            ship.tick(seconds, player);
+            let escort = ship.leader.and_then(|id| {
+                let (_, position, axes) = leaders.iter().find(|(leader, _, _)| *leader == id)?;
+                let [right, up, forward] = ship.formation;
+                Some(std::array::from_fn(|axis| {
+                    position[axis]
+                        + (axes[0][axis] * right as f64
+                            + axes[1][axis] * up as f64
+                            + axes[2][axis] * forward as f64) as i64
+                }))
+            });
+            ship.tick(seconds, tics, player, escort);
+        }
+        // The police respond to a wanted player (the port's reconstruction of
+        // DATA_008647; F783 clears the alert when the chase ends).
+        if self.legal.wanted {
+            for ship in &mut self.ships {
+                if ship.provoke() {
+                    events.push(ShipEvent::PoliceHostile {
+                        name: ship.name.clone(),
+                    });
+                }
+            }
+        }
+        // F931: every hostile ship with a laser fires at the player's box.
+        for ship in &mut self.ships {
+            if let Some(shot) = ship.fire(tics, player, player_radius) {
+                events.push(ShipEvent::Hit {
+                    ship: shot.ship,
+                    name: shot.name,
+                    code: shot.code,
+                    damage: shot.damage,
+                    beam: shot.beam,
+                });
+            }
+        }
+        for ship in &self.ships {
+            if ship.state == ffe_core::npc::State::Escaped {
+                events.push(ShipEvent::Escaped {
+                    name: ship.name.clone(),
+                });
+            }
         }
         self.ships.retain(|ship| !ship.finished(player));
         if self
@@ -1405,6 +1517,41 @@ impl Navigator {
         {
             self.ship_lock = None;
         }
+        events
+    }
+
+    /// The player's laser hit on an NPC ship: F953/F942 plus the legal
+    /// consequences. A hit on a clean ship (a trader, shuttle, police or
+    /// military hull) makes the player wanted and the police hostile; a pirate's
+    /// destruction pays its `+0x11a` bounty (F942's F697 roll).
+    pub fn player_attack(&mut self, id: u32, damage: u32) -> Option<Attack> {
+        let ship = self.ships.iter_mut().find(|ship| ship.id == id)?;
+        let was_alive = ship.alive();
+        let crime = ship.role.clean() && was_alive;
+        let bounty = ship.bounty;
+        let result = ship.hit(damage);
+        let destroyed = was_alive && !ship.alive();
+        if crime {
+            self.legal.wanted = true;
+            self.legal.offences += 1;
+        }
+        let mut police = false;
+        if self.legal.wanted {
+            for ship in &mut self.ships {
+                police |= ship.provoke();
+            }
+        }
+        Some(Attack {
+            damage: result,
+            crime,
+            bounty: if destroyed && matches!(result, ffe_core::laser::Damage::Destroyed) {
+                bounty
+            } else {
+                0
+            },
+            police,
+            destroyed,
+        })
     }
 
     /// The locked NPC ship, if one is.
@@ -1533,6 +1680,16 @@ impl Navigator {
 
     pub fn system_name(&self) -> &str {
         &self.entries[self.current].name
+    }
+
+    /// How many systems the galaxy list holds.
+    pub fn system_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// The index of the system the ship is in.
+    pub fn current_system(&self) -> usize {
+        self.current
     }
 
     pub fn open(&mut self, view: View) {
@@ -1704,6 +1861,8 @@ impl Navigator {
         self.target = None;
         self.locked = None;
         self.ship_lock = None;
+        // F675: the pirates close to the player are carried through the jump.
+        self.persisted = npc::persist(&self.ships, self.player_at);
         self.ships.clear();
         self.spawned = None;
         self.docked = None;

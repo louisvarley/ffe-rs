@@ -4,6 +4,41 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - NPC flight/combat AI, fire and player damage merged (v0.63)
+
+- Merged `shipai` (dd573c2, 543f660): the encoded `DATA_006258` AI state table
+  and the transit/hold/attack/escort/pass/flee/dead/escaped states, F585's turn
+  limits, the statistics-based thrust/braking speeds (the constant-speed
+  placeholder is gone), NPC fire through F931/F930 with F953 player damage,
+  police/wanted (`Navigator::{legal, player_attack, provoke}`, F697 bounties)
+  and F674/F675/F680 jump persistence with F927's recycle.
+- **DOS vs JJFFE:** JJFFE's "Laser invulnerability" fix replaces F724's F931
+  call with just the fired flag, so JJFFE's AI ships do no damage. The port
+  follows DOS FFE and fires; recorded in `docs/notes/npc.md`/`combat.md`.
+- Conflicts: `npc.rs` module doc (kept shipai's state-machine text),
+  `flight.rs` and `tests/combat.rs`. **One damage API** reconciled:
+  `Flight::take_damage(damage, mass)` is the F953 path (fills the hull/shield
+  words on first use); `ensure_damage(hull_full)` still refreshes them each
+  frame from the statistics/Loadout; `hit(damage)` is kept for the equipment
+  slice's callers/tests and shares the same internal apply; `destroyed()` is
+  the single F942 test. Both branches' tests are kept (equipment save/loadout
+  and `ensure_damage`/`hit` cases, plus `take_damage` and its save test).
+  `main.rs` needed a hand fix: the player-hit message/sound block was merged
+  against `Navigator::player_attack`'s older `Option<Damage>` shape; it now
+  matches `Attack { damage, crime, bounty, police, destroyed }`.
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `cargo test -p ffe-core npc` (16);
+  `-p ffe-rs --test npc_ai -- --ignored` with the cache (3); `--test combat`
+  (9); cached `dashboard_view` (4), `combat_view` (6), `npc_view` (1) and
+  `station_view` (1) still pass.
+- Owner decisions raised by the agent and left open in `docs/notes/npc.md`
+  §5: the new-game Eagle has no shield generator (a 1MW pulse kills it in two
+  hits), the 25% flee trigger vs F737's position rule, `MAX_SHIPS = 5`, and
+  the full docking AI. Also left: missiles, police spawns/fines/HUD wanted
+  badge, Thargoids, F942's model-0x9b explosion and AI sounds.
+
+---
+
 ## 2026-10-25 - Equipment table, fitted loadout and player damage merged (v0.62)
 
 - Merged `equipment` (da4eb8c, f5a1d7d): `ffe-core::equipment` with the

@@ -254,6 +254,13 @@ or turret laser today. Do not give turrets a laser by invention.
   the executed original: one `0x88` front pulse laser, two `0x82` missiles, an
   Eagle (model 23), 1 t energy and no shields. The existing `--state` output is
   unchanged.
+- **NPC AI frames (2026-10-25):** `cargo test -p ffe-rs --test npc_ai -- --ignored`
+  with `FFE_WORLD_CACHE` puts the player in front of a pirate and ticks the real
+  AI until F931/F930/F953 damage arrives, kills a clean ship for the police
+  response and carries a pirate through a jump. With `FFE_SHOT_DIR` it keeps
+  `npc-ai-before.ppm`, `npc-ai-hit.ppm` (the labelled pirate and `Hull: 50.0%`),
+  `npc-ai-police.ppm` and `npc-ai-restored.ppm`. The player's own damage words
+  have a save-compatibility test in `tests/combat.rs`. See `docs/notes/npc.md`.
 - The hit/damage path has live ship targets now (the traffic above); the
   target-readout draw path also has a synthetic frame test. See §7.
 
@@ -275,13 +282,32 @@ F953's shields/hull damage and F942's destruction, and draws F1536's model 0x9d
 produces no shapes in the port's executor yet, so model 157 at a larger scale
 stands in) and is removed after `DEATH_SECONDS`.
 
+**The AI shoots back (2026-10-25).** Hostile ships run the flight/combat states
+and call F931 with their front laser (`NpcShip::fire`): heat, energy and refire
+are F930's and the damage is applied to the player's `Flight` shields/hull with
+F953 (`Flight::take_damage`). A 1MW pulse does 50, so a 25 t hull with no
+shields is two hits; the player is recovered at the nearest starport when the
+hull is used up. The original's F724 is the only AI fire call, and JJFFE
+replaced it with just the fired flag ("Laser invulnerability"); the port follows
+DOS FFE. A clean ship hit makes the player wanted and turns the police
+hostile.
+
+The player-damage entry points were reconciled with the equipment slice at
+integration: `Flight::take_damage(damage, mass)` is the F953 path the AI calls
+and fills the hull/shield words from the statistics on first use;
+`Flight::ensure_damage(hull_full)` still refreshes them from the ship/Loadout
+each frame, and `Flight::hit(damage)` (the equipment slice's name) is kept for
+its callers and tests and shares the same internal apply. `Flight::destroyed`
+is the single F942 test.
+
 **Not reachable in this build:**
 
 - **Ship targets and the target hull/shield readout.** The generated systems
   contain NPC traffic (`docs/notes/npc.md`), so F953's damage, F942's
   destruction, model 157's shield-hit flash and the `(235,1)` readout are
-  reachable for a locked or hit ship. The ships do not fire and have no full
-  combat AI; the death effect is a 157 stand-in for F942's 0x9b object.
+  reachable for a locked or hit ship. The ships now fire (see above); docking,
+  missiles and Thargoids remain absent, and the death effect is a 157 stand-in
+  for F942's 0x9b object.
 - **Rear and turret lasers.** The new-game Eagle has one mount; the port has
   no outfitting/save equipment. The firing paths (mount 1/2/3, turret axes and
   gun offsets) are implemented and tested, but no playable loadout reaches
@@ -299,7 +325,12 @@ stands in) and is removed after `DEATH_SECONDS`.
   muzzle cone and the target `Hull:` line would draw; the dashboard's retire-port-UI
   slice clears this.
 
-**Owner decisions:** NPC traffic is implemented at the traffic level (see
-`docs/notes/npc.md`); decide whether to port the full AI and ship fire, police
-response/wanted status, F942's model-155 explosion, the combat targeter, and
-missiles. The port's lock brackets remain a deviation from F1113/F1114.
+**Owner decisions:** NPC traffic and its flight/combat AI are implemented at the
+state-rules level (see `docs/notes/npc.md`); decide whether to port F942's
+model-155 explosion, the combat targeter, missiles, and a shield generator for
+the player (the AI's fire is lethal in two hits without one). The port's lock
+brackets remain a deviation from F1113/F1114.
+
+The player's F953 words have a save-compatible test
+(`crates/ffe-rs/tests/combat.rs`) and the AI sequence has its own cached test
+(`crates/ffe-rs/tests/npc_ai.rs`, `npc-ai-*.ppm`).

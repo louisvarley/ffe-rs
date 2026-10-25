@@ -354,15 +354,38 @@ impl Flight {
         }
     }
 
-    /// F953 (`ffe.asm:71190`) on the player: the shields absorb the hit first,
-    /// then the hull; a hit at least the remaining hull destroys the ship.
-    /// NPCs do not fire in the port yet, so this is the API the future AI/station
-    /// attack paths call; `ensure_damage` must have filled the hull first.
+    /// F953 (`ffe.asm:71190`) on the player: the shields absorb first (`+0xe0`
+    /// against `+0xe2`), then the hull (`+0xe4`, mass * 4). `mass` is the ship
+    /// statistics' mass word. The first hit records the full hull from it, so a
+    /// save from before the damage model (hull `[0, 0]`) still shows F1099's
+    /// hull line; a fitted shield generator fills the shield maximum when the
+    /// frame has not run [`Flight::ensure_damage`] yet.
+    pub fn take_damage(&mut self, damage: u32, mass: u16) -> ffe_core::laser::Damage {
+        let full = mass.max(1).saturating_mul(4);
+        if self.hull[1] == 0 {
+            self.hull = [full, full];
+        }
+        if self.shields[1] == 0 {
+            let shield_max = self.loadout.shield_max();
+            if shield_max != 0 {
+                self.shields = [shield_max, shield_max];
+            }
+        }
+        self.apply_hit(damage)
+    }
+
+    /// The equipment slice's entry point: [`Flight::ensure_damage`] has already
+    /// filled the words, so this applies one F953 hit to them. Kept for its
+    /// callers and tests; it shares [`Flight::take_damage`]'s path.
     pub fn hit(&mut self, damage: u32) -> ffe_core::laser::Damage {
+        self.apply_hit(damage)
+    }
+
+    fn apply_hit(&mut self, damage: u32) -> ffe_core::laser::Damage {
         let mut state = ffe_core::laser::DamageState {
-            shields: self.shields[0],
+            shields: self.shields[0].min(self.shields[1]),
             shields_max: self.shields[1],
-            hull: self.hull[0],
+            hull: self.hull[0].min(self.hull[1]),
             mass: self.hull[1] / 4,
         };
         let result = ffe_core::laser::apply_damage(&mut state, damage);
@@ -371,8 +394,7 @@ impl Flight {
         result
     }
 
-    /// The hull word is used up (F942's destruction); the port has no death or
-    /// escape-capsule screen yet, so callers only report it.
+    /// Whether the player's hull has been used up (F942 destroys the object).
     pub fn destroyed(&self) -> bool {
         self.hull[1] != 0 && self.hull[0] == 0
     }

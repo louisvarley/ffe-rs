@@ -175,3 +175,54 @@ fn a_new_game_hull_has_no_shields_until_a_generator_is_fitted() {
     assert_eq!(state.shields, [0x40, 0x40]);
     assert_eq!(state.hull, [4558, 4608], "damage survives the fit");
 }
+
+#[test]
+fn f953_damages_the_players_hull_and_records_the_full_value() {
+    use ffe_core::laser::Damage;
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    // The new-game Eagle has no shield generator and an untracked hull, so the
+    // first hit records `+0xe4 = mass * 4` and takes the damage from it.
+    assert_eq!(state.take_damage(50, 25), Damage::Hull);
+    assert_eq!(state.hull, [50, 100]);
+    assert!(!state.destroyed());
+    assert_eq!(state.take_damage(50, 25), Damage::Destroyed);
+    assert!(state.destroyed());
+    // With shields the hit is absorbed first (F953's `+0xe0` branch).
+    let mut shielded = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    shielded.shields = [100, 100];
+    assert_eq!(shielded.take_damage(50, 25), Damage::Shields);
+    assert_eq!(shielded.shields, [50, 100]);
+    assert_eq!(shielded.hull, [100, 100]);
+    assert_eq!(shielded.take_damage(50, 25), Damage::Shields);
+    assert_eq!(shielded.shields, [0, 100]);
+    assert_eq!(shielded.take_damage(60, 25), Damage::Hull);
+    assert_eq!(shielded.hull, [40, 100]);
+}
+
+#[test]
+fn player_damage_survives_a_save_and_old_saves_default() {
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    state.take_damage(50, 25);
+    state.shields = [10, 20];
+    let bytes = ffe_rs::saves::encode(&state).unwrap();
+    let loaded = ffe_rs::saves::decode(&bytes).unwrap();
+    assert_eq!(loaded.hull, state.hull);
+    assert_eq!(loaded.shields, state.shields);
+    // A save from before the damage model has no words: it loads untracked.
+    let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let object = json["state"].as_object_mut().unwrap();
+    object.remove("hull");
+    object.remove("shields");
+    let old = ffe_rs::saves::decode(&serde_json::to_vec(&json).unwrap()).unwrap();
+    assert_eq!(old.hull, [0, 0]);
+    assert_eq!(old.shields, [0, 0]);
+}

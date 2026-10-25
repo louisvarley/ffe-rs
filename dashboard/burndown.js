@@ -147,8 +147,8 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.62" },
         { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "done", version: "v0.57" },
         { id: "gameplay-5", title: "Missiles and countermeasures", status: "todo" },
-        { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "in-progress", version: "v0.60" },
-        { id: "gameplay-7", title: "Police, pirates and other encounters", status: "in-progress", version: "v0.60" },
+        { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "in-progress", version: "v0.63" },
+        { id: "gameplay-7", title: "Police, pirates and other encounters", status: "in-progress", version: "v0.63" },
         { id: "gameplay-8", title: "Combat scenario replay against the reference", status: "todo" },
         { id: "gameplay-9", title: "Bulletin board and missions (cbbs)", status: "todo" },
         { id: "gameplay-10", title: "Journal and mission state", status: "todo" },
@@ -158,7 +158,8 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-14", title: "Rank, reputation and legal status", status: "todo" },
         { id: "gameplay-15", title: "Time-driven events over a long run", status: "todo" },
         { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" },
-        { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" }
+        { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" },
+        { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "done", version: "v0.63" }
       ]
     },
     {
@@ -514,6 +515,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 71,
       note: "Equipment merged (v0.62): ffe-core::equipment carries the 66-record DATA_005289 table (DOS bytes verified; record 53 follows DOS), F393's general bits, F383's availability/prices and the Loadout (general bits, ten missile pylons, shields/cabins); Flight::loadout is saved with serde defaults and Flight::{ensure_damage, hit, destroyed} apply F953's shields-then-hull order. F991's view-row icons, F1120's missile icons and the lamps now read the real state, including the new-game's two 0x82 missiles. Still open: nothing fires at the player (the hit call site), F938 recharge/auto-repair, the death/capsule screens, and the station Upgrades rows, which need the starport tech level DATA_008995 from F869 (do not invent it). One item added and completed (gameplay-17), so the remaining count is unchanged; gameplay-2/gameplay-3 are in progress."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 71,
+      note: "shipai merged (v0.63): the encoded DATA_006258 AI table and the transit/hold/attack/escort/pass/flee/dead/escaped states, F585's turn limits and statistics-based speeds replace the constant-speed placeholder; pirates fire through F931/F930 and F953 damages the player through one reconciled Flight::take_damage/ensure_damage/hit API. Police and wanted status (Navigator::legal, player_attack, provoke, F697 bounties) and F674/F675/F680 jump persistence/F927 recycle are in. JJFFE disables AI laser damage; the port follows DOS FFE and fires. Remaining: full docking AI, missiles, police spawns/fines/HUD badge, Thargoids; owner decisions open on the 25% flee trigger vs F737, MAX_SHIPS=5 and the no-generator two-hit player. One item added and completed (gameplay-18), so the remaining count is unchanged; gameplay-6/gameplay-7 stay in progress."
     }
   ]
 };

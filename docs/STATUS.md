@@ -41,8 +41,14 @@ and damage rules (`docs/notes/combat.md`; hitscan, no laser projectile). Since
 2026-10-25 generated systems also carry NPC traffic (`docs/notes/npc.md`:
 traders, shuttles, police and pirates from F688/F635), so ships are drawn,
 labelled and lockable, take F953/F942 damage, and the target hull/shield
-readout and F1536's model-157 shield flash are reachable. The ships do not
-fire, and full AI, police response, missiles and persistence remain. Since
+readout and F1536's model-157 shield flash are reachable. Since 2026-10-25 the
+AI is the encoded `DATA_006258` state machine (transit/hold/attack/escort/pass/
+flee/dead/escaped) with F585's turn limits and statistics-based speeds; pirates
+fire through F931/F930 and F953's damage reaches the player through
+`Flight::take_damage`, police/wanted and F674/F675/F680 jump persistence are in,
+and the port follows DOS FFE in letting AI lasers damage the player where JJFFE
+disables it. Full docking AI, missiles, police spawns/fines/HUD badge and
+Thargoids remain (`docs/notes/npc.md`). Since
 2026-10-25 the game also posts the original's sound cues and scene music
 (`docs/notes/sound-cues.md`): F1906/F1907/F1908 dispatch and gates, F1902's
 song rules and the live event sites, with the Sound Effects page applied at
@@ -85,7 +91,7 @@ scanner contacts and altitude units remain.
   console/HUD gap list, with the byte-validated DATA_005100 button and
   DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 136 items, 65 done and 71 left on
+  in `burndown.js`; 14 milestones, 137 items, 66 done and 71 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -227,14 +233,15 @@ capture produced by two repeat runs of the local reference.
 | v0.60 NPC traffic and ship combat | `ffe_core::npc` (F688/F635/F1533/F953/F942/F1536/F922), `Navigator::{ships, spawn_traffic, tick_ships, lock_ship, damage_ship}`, `Screen::{draw_system_ships, SystemShip, TargetDamage}`, `--capture-traffic` | `npc.rs` (6), `npc_view.rs` (1, ignored), cached frames | none (F635's table and F688's counts from `ffe.asm`; the placement is the recorded deviation) | — | traders, shuttles, police and a pirate group spawn per system; ships are drawn, labelled, click/lock/T-targeted with F1100 range and F1099 hull/shields, take F953/F942 damage, show F1536's model-157 shield flash and a death marker; full AI, police response, ship fire, missiles, F942's explosion and persistence remain; `docs/notes/npc.md` |
 | v0.61 sound cues and scene music | `ffe_rs::sound::{GameAudio, Cue}`, F1906/F1907/F1908 dispatch, F1902-F1904 music rules, prefs `SoundFlags`, live wiring in `main.rs` | `sound_cues.rs` (2 + unit tests), `prefs.rs` (+2) | none (cue indices/levels and gates from `ffe.asm`/`w32sound.cpp`; no audio-device capture) | — | every effect cue the port can reach is posted (prefs, station/console, lock, messages, lasers, shield/hull, explosions, siren, docking/launch doors, engine/station beds, camera, hyperspace) and scene music follows F1902/F919/F750/F656/F1094/F232; the Sound Effects toggles apply at boot and on change. **The effect mixer/device is still missing** (`NullSampleSink`), so cues are recorded/no-op; music is audible through the HMP/WinMM player, but song 0 is unreachable until the intro draws. ECM/missile/wind cues are API+test only; `docs/notes/sound-cues.md` |
 | v0.62 equipment, loadout and player damage | `ffe_core::equipment` (66-record `DATA_005289`, F393/F383), `Flight::{loadout, ensure_damage, hit, destroyed}`, `Loadout`, console F991/F1120 icon state, `tools/gen-equipment-table.py` | `equipment.rs` (8 + unit tests), `combat.rs` (+7), `console_table.rs` (+), `dashboard_view.rs` (4, ignored) | none (the table bytes are checked against DOS `FIRSTENC.EXE`; no new oracle) | — | general bits, ten missile pylons and cabins in `Loadout`; F383 availability/prices (deterministic tech multiplier); F953's shields-then-hull order for the player over `laser::apply_damage`; F991/F1120 icons and lamps read the real state and the new-game's two `0x82` missiles draw their icons. Nothing fires at the player yet; `player+0xef`, F938 recharge/auto-repair, death/capsule and the station Upgrades rows (needs `DATA_008995` from F869) remain; `docs/notes/equipment.md` |
+| v0.63 NPC flight/combat AI, fire and player damage | `ffe_core::npc` (`DATA_006258`, F585/F601/F597/F931/F930, F674/F675/F680/F927, F697), `Navigator::{tick_ships, player_attack, legal, provoke}`, `Flight::take_damage` (reconciled with `ensure_damage`/`hit`), NPC/police messages, `--capture-traffic` | `npc.rs` (16), `npc_ai.rs` (3, ignored), `combat.rs` (9), frames in `docs/evidence/npc-ai/` | none (state table and constants from `ffe.asm`; JJFFE's disabled AI laser damage is a recorded DOS-vs-JJFFE difference) | — | the AI states transit/hold/attack/escort/pass/flee/dead/escaped with turn limits and statistics speeds, pirate fire through F931/F930, F953 player damage through one `take_damage` path, police/wanted (`legal`, `player_attack`, provoke, F697 bounty), jump persistence/recycle. Full docking AI, missiles, police spawns/fines/HUD badge and Thargoids remain; EXP-015 records the reconstruction; `docs/notes/npc.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 524 `#[test]` functions total; 124 are `#[ignore]`
+  `cargo clippy -D warnings`. 539 `#[test]` functions total; 127 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **399 runnable synthetic tests** (400 on Linux).
+  **411 runnable synthetic tests** (412 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
