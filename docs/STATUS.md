@@ -129,6 +129,16 @@ needs the player's own files, NASM and the MSVC x86 tools; none of it is public
 CI. Rebuild the reference after any change to `tools/reference/`, and note that
 the child oracle's trace SHA-256 changes with every rebuild (see below).
 
+**2026-10-25 re-run.** After the combat and NPC reference rebuilds, the full
+suite gave **46 of 47 passed** in 660 s; the only failure is
+`verify-world.py`'s `--worldgen` repeatability check, the known Windows ASLR
+nondeterminism (the same case recorded on 2026-10-24), not a regression. The
+recorded trace SHA-256 values in the table below were re-derived for every
+oracle that lists one (instance, order, point-line, text-submodel, colour,
+base-transform, station, station-queue, intro, collide, world-tick) and are
+**unchanged**, so the column is current; re-record an entry if its script's
+adaptor changes. No oracle exposed a behavioural regression.
+
 ## Milestone status
 
 "Code" = implemented in `crates/`. "Tests" = synthetic tests that run in `cargo
