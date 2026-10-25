@@ -245,7 +245,9 @@ fn f991_shows_the_equipment_icons_its_dword_bits_select() {
 #[test]
 fn f1120_draws_the_new_games_two_missile_icons() {
     let systems = ShipSystems::default().with_loadout(&ffe_core::equipment::Loadout::new_game());
-    assert_eq!(systems.general, 0x4024_0000);
+    // F998 type 0: scanner, autopilot, atmospheric shielding and the
+    // navigation computer (bit 5).
+    assert_eq!(systems.general, 0x4024_0020);
     let mut console = Console::new();
     console.apply_flight(
         ViewMode::Front,

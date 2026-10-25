@@ -254,10 +254,11 @@ Also verified against DOS, and matching:
   start type: type 1 uses ship 0x17, cash 0x3e8, hold loss 0x10, object state
   byte (`+0x56`) 0x6f, dock slot 0x6e; type 2 uses ship 0x17, cash 0x3e8, hold
   loss 0xc, state 0x60, slot 0x5f; type 3 uses ship 0x26, cash 0x3e8, hold loss
-  0x1f, state 0x70, slot 0x70; types 4/5 use ship 0x1f, cash 0x2710, hold loss
-  0x10, state 0x6c, slot 0x6a (`ffe.asm:74028-74230`). The port's
-  `NEW_GAME_*` constants are type 1 only (and `NEW_GAME_HOLD_LOSS` is F998's
-  type 2 value 0xc, not type 1's 0x10).
+  0x1f, state 0x70, slot 0x70; the **default arm** (types 0, 4, 5 and later)
+  uses ship 0x1f, cash 0x2710, hold loss 0x10, state 0x6c, slot 0x6a
+  (`ffe.asm:74028-74230`). The port's default is now that type-0 arm
+  (`DEFAULT_*`); `NEW_GAME_*` keep the type-1 Ross 154 values for `--start 1`
+  (and `NEW_GAME_HOLD_LOSS` is F998's type 2 value 0xc, not type 1's 0x10).
 
 ---
 
@@ -445,11 +446,11 @@ Every item has: **what**, **touch**, **depends**, **accept**, **size**
 - [ ] **D1. DOS RNG seed at `F147`.** Use `0x12345678`/`0x89abcdef`, not
   JJFFE's `0x456789ab`; if the port seeds the gameplay RNG at all. Add a
   comment naming the DOS source. **(S)**
-- [ ] **D2. Start types 2-5 constants.** Port `F998`'s branches: cash, ship,
-  hold loss, player state/class, dock slot and system. The current
-  `NEW_GAME_*` constants are type 1 only, and `NEW_GAME_HOLD_LOSS = 0xc` is
-  F998's **type 2** subtraction; type 1 subtracts 0x10. Fix type 1 first, then
-  the others. **(M)**
+- [ ] **D2. Start types 2-5 constants.** Port `F998`'s remaining branches:
+  cash, ship, hold loss, player state/class, dock slot and system. The DOS
+  default (type 0) is done; types 2-5 are still unverified and map to type 1.
+  `NEW_GAME_HOLD_LOSS = 0xc` is F998's **type 2** subtraction; type 1
+  subtracts 0x10. **(M)**
 - [ ] **D3. Verify types 2-5 in the reference.** Extend the headless adapter's
   state mode with a start selector (scan codes 0x02..0x06 for 1..5), record
   frame-161 invariants for each, and add a Rust test. Do not claim support from

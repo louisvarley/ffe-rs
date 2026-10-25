@@ -266,6 +266,56 @@ fn start_record_one_is_ross_154() {
     assert_eq!(nav.takeoff_seat(index, radius), Some(state.seat));
 }
 
+/// The DOS default start: F998's type 0, the Saker Mk III on Hope at Old
+/// Blackelk in Gateway [-1,4], with 10,000 CR and the observed 1 t hold.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn new_game_default_is_the_saker_at_hope() {
+    use ffe_rs::navigation::{
+        Navigator, DEFAULT_CARGO, DEFAULT_CASH, DEFAULT_SHIP, DEFAULT_STARPORT_SLOT,
+        DEFAULT_START_TYPE, NEW_GAME_CLOCK,
+    };
+    let cache = cache();
+    let nav = Navigator::new_game(&cache, DEFAULT_START_TYPE).unwrap();
+    assert_eq!(nav.system_name(), "Gateway");
+    assert!((nav.clock - NEW_GAME_CLOCK).abs() < 1e-6);
+    let state = nav.new_game.expect("a new-game state");
+    assert_eq!(state.start_type, 0);
+    assert_eq!(state.player_state, 0x30);
+    assert_eq!(state.player_index, 87);
+    assert_eq!(state.cash, DEFAULT_CASH);
+    assert_eq!(state.cash, 10_000);
+    assert_eq!(state.ship, DEFAULT_SHIP);
+    assert_eq!(state.ship, 0x1f, "the Saker Mk III");
+    assert_eq!(state.cargo, DEFAULT_CARGO);
+    assert_eq!(state.cargo, 1, "the executed F2 status page's free hold");
+    assert_eq!(nav.hold(&cache, state.ship), 1);
+    assert_eq!(state.acceleration, 994);
+    let index = nav.docked.expect("docked at the start starport");
+    let body = &nav.bodies[index];
+    assert_eq!(body.kind, Kind::Starport);
+    assert_eq!(body.slot, DEFAULT_STARPORT_SLOT);
+    assert_eq!(body.slot, 0x6a);
+    assert_eq!(body.name, "Old Blackelk");
+    assert!(body.open_air);
+    let parent = body.parent.expect("the starport is on a planet");
+    assert_eq!(nav.bodies[parent].name, "Hope");
+    assert_eq!(nav.date_text(), "1-Jan-3250 12:00:00");
+    // F1533's Saker statistics and F998's general-equipment dword.
+    let info = ffe_core::objects::ModelInfo::read(
+        cache.asset("base:model/records").unwrap(),
+        cache.asset("base:ship/stats").unwrap(),
+        state.ship,
+    )
+    .unwrap();
+    let stats = ffe_rs::ships::ShipStats::from_block(&info.stats.unwrap()).unwrap();
+    assert_eq!((stats.mass, stats.cargo, stats.gun_mounts), (28, 23, 2));
+    assert_eq!(stats.eye, [1800, 400]);
+    assert_eq!(stats.front_gun, [2200, 0]);
+    assert_eq!(stats.rear_gun, [1900, -200]);
+    assert_eq!((stats.missiles, stats.mass * 4), (2, 112));
+}
+
 /// The scripted takeoff: start record 1 begins landed on Ross 154's open-air
 /// starport (`0x30`), `L` asks F654 and puts the ship in F1013's climb (`0x24`),
 /// F1013 hands over to `0x26` at the altitude/set-speed test, and F1031's

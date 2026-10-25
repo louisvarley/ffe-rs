@@ -192,16 +192,18 @@ pub struct Loadout {
 }
 
 impl Loadout {
-    /// `F998` start type 1 (the port's new game): `ship+0xc8 = 0x40240000`
-    /// (scanner, automatic pilot, atmospheric shielding), two 0x82 missiles
-    /// (`KL760 Homing Missile`) and no shield generator (`+0xe2 = 0`). The front
-    /// laser is `Combat::new_game`'s 0x88.
+    /// The DOS default start (`F998`'s type-0 arm, the Saker Mk III):
+    /// `ship+0xc8 = 0x40240020` - scanner (bit 18), automatic pilot (bit 21),
+    /// atmospheric shielding (bit 30) and the navigation computer (bit 5) -
+    /// two 0x82 missiles (`KL760 Homing Missile`), no shield generator
+    /// (`+0xe2 = 0`) and no passenger cabins. The front laser is
+    /// `Combat::new_game`'s 0x88.
     pub fn new_game() -> Self {
         let mut missiles = [0; MISSILE_SLOTS];
         missiles[0] = 0x82;
         missiles[1] = 0x82;
         Self {
-            general: 0x4024_0000,
+            general: 0x4024_0020,
             missiles,
             shield_generators: 0,
             cabins: 0,
@@ -317,8 +319,27 @@ mod tests {
             .filter(|item| item.category == Category::General)
             .fold(0u32, |mask, item| mask | (1 << ((item.code ^ 0x10) & 0x1f)));
         assert_eq!(used, GENERAL_MASK);
-        // The new game's three bits are all real general bits.
+        // The default start's four bits are all real general bits.
         assert_eq!(Loadout::new_game().general & !GENERAL_MASK, 0);
+    }
+
+    #[test]
+    fn the_default_start_is_f998s_type_0_saker_loadout() {
+        let loadout = Loadout::new_game();
+        assert_eq!(loadout.general, 0x4024_0020);
+        assert_eq!(loadout.bytes(), [0x20, 0x00, 0x24, 0x40]);
+        assert!(loadout.has_general(16), "Navigation computer (bit 5)");
+        assert!(loadout.has_general(20), "Scanner (bit 18)");
+        assert!(loadout.has_general(24), "Automatic Pilot (bit 21)");
+        assert!(loadout.has_general(15), "Atmospheric Shielding (bit 30)");
+        assert!(!loadout.has_general(17), "no Combat Computer (bit 6)");
+        assert!(!loadout.has_general(22), "no Radar Mapper (bit 22)");
+        assert_eq!(loadout.missiles, [0x82, 0x82, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(loadout.shield_generators, 0);
+        assert_eq!(loadout.shield_max(), 0);
+        assert_eq!(loadout.cabins, 0);
+        assert!(!loadout.cooling_booster());
+        assert!(loadout.validate());
     }
 
     #[test]
@@ -370,13 +391,16 @@ mod tests {
     #[test]
     fn fitted_uses_the_category_handler_storage() {
         let mut loadout = Loadout::new_game();
-        // New game: scanner (bit 18), autopilot (21), atmospheric shielding (30),
-        // two 0x82 homing missiles, no shield generator.
+        // Default start: navigation computer (bit 5), scanner (18), autopilot
+        // (21), atmospheric shielding (30), two 0x82 homing missiles, no shield
+        // generator and no cabins.
+        assert!(loadout.fitted(16, &[0; 4]), "Navigation computer");
         assert!(loadout.fitted(20, &[0; 4]), "Scanner");
         assert!(loadout.fitted(24, &[0; 4]), "Automatic Pilot");
         assert!(loadout.fitted(15, &[0; 4]), "Atmospheric Shielding");
         assert!(loadout.fitted(2, &[0; 4]), "KL760 Homing Missile");
         assert!(!loadout.fitted(10, &[0; 4]), "Missile Viewer");
+        assert!(!loadout.fitted(25, &[0; 4]), "no passenger cabin");
         assert!(!loadout.fitted(27, &[0; 4]), "Shield Generator");
         assert_eq!(loadout.shield_max(), 0);
         loadout.shield_generators = 2;

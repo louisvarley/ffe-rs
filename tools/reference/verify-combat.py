@@ -6,7 +6,10 @@ Two layers:
   object's laser, missile, shield and energy words. Two runs must agree, and the
   start-type 1 record (F998, `ffe.asm:74028`) must be model 23 (Eagle long range
   fighter), one gun mount, front `0x88` (1MW pulse), rear/turrets empty, two
-  `0x82` missiles, drive 2, no shields, hull 100, 1 t energy and 1000 CR.
+  `0x82` missiles, drive 2, no shields, hull 100, 1 t energy and 1000 CR. The
+  DOS default arm is covered by the local probe build and
+  `docs/evidence/saker/`: model 31 (Saker Mk III), two mounts, front `0x88`,
+  two `0x82`, drive 2, no shields, hull 112 and 10,000 CR.
 * F931 (`ffe.asm:69550`) is checked for the hitscan structure the port follows:
   the gate words (`+0xe8`, `+0xea`, `+0x11e`), F802/F817's object scan, F930's
   damage, F953's apply and F939's effects; it must not call the missile or
@@ -54,7 +57,8 @@ COMBAT_TESTS = {
     "gunsight_is_f1111s_bitmap_97_in_laser_views_only",
     "velocity_marker_and_range_text_follow_f1112_f1100",
     "gauges_show_f270s_energy_and_heat_bars",
-    "new_game_hull_carries_f998s_one_front_pulse_laser",
+    "the_default_start_is_the_saker_with_f998s_front_pulse_laser",
+    "the_type_1_ross_154_hull_still_carries_its_front_pulse_laser",
     "target_damage_readout_draws_f1099s_text",
     "target_lock_uses_f1100s_green_and_three_decimal_au",
     "beam_is_model_156_at_the_gun_only_where_it_is_in_front",

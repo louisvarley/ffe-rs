@@ -367,7 +367,8 @@ fn earth_shape_kinds() {
     // The planet's F1805/F1807 (descriptor) and F1806/F1808 (explicit u/v)
     // entries now draw the real bitmaps from the cache: the surface is solid
     // texture, not a flat stand-in, and every surface bitmap is the original's
-    // land/sea (0x40/0x121) or the explicit-coordinate terrain block (0x5e).
+    // land/sea (0x40/0x121), the explicit-coordinate terrain block (0x5e) or
+    // F1879's atmosphere ring bitmap (0x43).
     let textured: Vec<&ffe_rs::model_viewer::Textured> = frame
         .shapes
         .iter()
@@ -383,7 +384,7 @@ fn earth_shape_kinds() {
     assert!(
         textured
             .iter()
-            .all(|t| matches!(t.bitmap & 0xfff, 0x40 | 0x5e | 0x121)),
+            .all(|t| matches!(t.bitmap & 0xfff, 0x40 | 0x43 | 0x5e | 0x121)),
         "invented surface bitmap: {:?}",
         textured
             .iter()

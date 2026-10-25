@@ -50,8 +50,8 @@ use std::time::Instant;
 /// Which game the boot starts: the original's new game or the development sandbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Boot {
-    /// Gateway, the Saker Mk III (model 0x1f), 10,000 CR, on Old Blackelk's pad
-    /// (`--start 0` default).
+    /// The DOS default: Hope in Gateway with F998's type-0 Saker Mk III
+    /// (model 0x1f), 10,000 CR. `--start 1` keeps Ross 154's Eagle.
     NewGame(u8),
     /// The existing Sol/Mars High sandbox (`--start sol`).
     Sandbox,
@@ -95,7 +95,7 @@ fn options() -> Result<Options, String> {
     let mut capture = None;
     let mut capture_planet = None;
     let mut capture_traffic = None;
-    let mut boot = Boot::NewGame(0);
+    let mut boot = Boot::NewGame(ffe_rs::navigation::DEFAULT_START_TYPE);
     let mut boot_given = false;
     let mut skip_intro = false;
     let mut capture_prefs = None;
@@ -673,8 +673,8 @@ fn run() -> Result<(), String> {
         .map(|scene| ShipList::from_cache(&cache, scene))
         .unwrap_or_default();
     // The systems, their bodies and the autopilot (Tab, G, Backspace). The default
-    // boot is the original's new game in Gateway; `--start sol` keeps the
-    // development sandbox for the existing tests and screenshots.
+    // boot is F998's type 0 at Hope in Gateway; `--start 1` keeps Ross 154 and
+    // `--start sol` the development sandbox for the existing screenshots.
     let mut nav = match boot {
         Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
         Boot::Sandbox => Navigator::new(&cache),
@@ -718,10 +718,11 @@ fn run() -> Result<(), String> {
     if nav.as_ref().is_some_and(|nav| nav.docked.is_some()) {
         sound.play(Cue::Station);
     }
-    // F998's new-game armament: one 1MW pulse laser in the front mount, a class-2
-    // drive and 1 t of energy on the start-type 1 hull, with that hull's general
-    // equipment bits and two 0x82 missiles (the equipment page's icons). The port
-    // has no outfitting yet, so the same original loadout arms the sandbox too.
+    // F998's new-game armament (the same four combat words in the type-0 and
+    // type-1 arms): one 1MW pulse laser in the front mount, a class-2 drive and
+    // 1 t of energy, plus the general equipment bits and two 0x82 missiles (the
+    // equipment page's icons). The port has no outfitting yet, so the same
+    // original loadout arms the sandbox too.
     state.combat = Combat::new_game();
     state.loadout = ffe_core::equipment::Loadout::new_game();
     // A scripted undock for screenshots: start the launch sequence immediately.

@@ -993,7 +993,7 @@ pub const START_SYSTEMS: [(i32, i32, i32, u32, u32); 5] = [
 /// The new game's clock: 1 Jan 3250, noon, in absolute GameTics
 /// (`0x121cf7.5` days at 86,400 seconds each).
 pub const NEW_GAME_CLOCK: f64 = 102_562_286_400.0;
-/// F998's starting cash (`DATA_008888`).
+/// F998's starting cash for the type-1 Ross 154 arm (`DATA_008888`).
 pub const NEW_GAME_CASH: i32 = 1000;
 /// F998's ship for start type 1 (`+0x17`).
 pub const NEW_GAME_SHIP: u32 = 23;
@@ -1003,22 +1003,31 @@ pub const NEW_GAME_PLAYER_STATE: u8 = 0x30;
 pub const NEW_GAME_PLAYER_INDEX: u8 = 107;
 /// F997's default time acceleration (`DATA_009012`).
 pub const NEW_GAME_ACCELERATION: u32 = 994;
-/// The tonnes the starting ship's equipment leaves out of its hold: the hull's
-/// 20 t statistic less this is the new game's 8 t.
+/// The tonnes F998's type-1 arm leaves out of the Eagle's hold (`0xc` in the
+/// ported arm; the type-0 Saker uses [`DEFAULT_HOLD_LOSS`]).
 pub const NEW_GAME_HOLD_LOSS: i32 = 0xc;
-/// The physics-list slot of the starting starport (`0x6e`): F994's `F1532(0x6e)`
-/// is the object the player's ship is placed at and docked with.
+/// The physics-list slot of the type-1 starting starport (`0x6e`).
 pub const NEW_GAME_STARPORT_SLOT: usize = 0x6e;
 
-/// F998's default arm (start types 0, 4, 5 and 6): the Saker Mk III on Old
-/// Blackelk, Gateway [-1,4], with 10,000 CR. The DOS boot's "any other key"
-/// starts this one (`docs/notes/intro.md`).
+/// F998's default arm (start types 0, 4, 5 and later): the Saker Mk III
+/// (model `0x1f`) at Old Blackelk on Hope in Gateway [-1,4], with 10,000 CR.
+/// The DOS boot's "any other key" starts this one (`docs/notes/intro.md`).
 pub const DEFAULT_START_TYPE: u8 = 0;
+/// The Saker Mk III fighter, model slot `0x1f`.
 pub const DEFAULT_SHIP: u32 = 0x1f;
-pub const DEFAULT_CASH: i32 = 0x2710;
-pub const DEFAULT_STARPORT_SLOT: usize = 0x6a;
-pub const DEFAULT_PLAYER_INDEX: u8 = 87;
+/// F998's `DATA_008888` for the default arm: `0x2710` (10,000 CR).
+pub const DEFAULT_CASH: i32 = 10_000;
+/// F998's default arm subtracts `0x10` t from the Saker's 23 t statistic.
 pub const DEFAULT_HOLD_LOSS: i32 = 0x10;
+/// The verified free hold on the executed original's F2 status page after the
+/// default start: the Saker's 23 t less F998's `0x10` allowance and the 6 t of
+/// fitted items (1MW laser 1, two KL760 2, Scanner 1, Automatic Pilot 1,
+/// Atmospheric Shielding 1; Navigation computer 0).
+pub const DEFAULT_CARGO: i32 = 1;
+/// F998's default starport: Old Blackelk, physics slot `0x6a`.
+pub const DEFAULT_STARPORT_SLOT: usize = 0x6a;
+/// F994's player index for the default arm (`DATA_008857`).
+pub const DEFAULT_PLAYER_INDEX: u8 = 87;
 
 /// F829/F832/F869/F830 for one record of `DATA_006820`: the system F830 names,
 /// generated from the record's coordinates and extra word with F878's inputs.
@@ -1170,11 +1179,11 @@ impl Navigator {
         })
     }
 
-    /// The original's new game (F829/F998): the default DOS start is record 0,
-    /// Gateway [-1,4] on the planet Hope at the starport Old Blackelk, with the
-    /// Saker Mk III (F998's default arm). Record 1 is Ross 154's Eagle; the menu's
-    /// types 2-5 are still the verified type 1 in this port. The bodies are placed
-    /// at the 3250 clock and the player is F994-positioned on the open-air pad.
+    /// The original's new game (F829/F998): the DOS default is record 0, Gateway
+    /// [-1,4] on Hope at Old Blackelk, with F998's type-0 Saker Mk III. Record 1
+    /// is Ross 154's Eagle; the menu's types 2-5 map to the checked type 1. The
+    /// bodies are placed at the 3250 clock and the player is F994-positioned on
+    /// the open-air pad.
     pub fn new_game(cache: &VerifiedCache, start_type: u8) -> Result<Self, String> {
         let (record_index, start_type) = match start_type {
             0 => (0usize, 0u8),
@@ -1182,31 +1191,13 @@ impl Navigator {
             2..=5 => (1, 1),
             _ => return Err(format!("start type {start_type} is not in DATA_006820")),
         };
+        let default_arm = start_type == DEFAULT_START_TYPE;
         let record = START_SYSTEMS[record_index];
-        let (default, ship, cash, starport_slot, player_index, hold_loss) = if start_type == 0 {
-            (
-                true,
-                DEFAULT_SHIP,
-                DEFAULT_CASH,
-                DEFAULT_STARPORT_SLOT,
-                DEFAULT_PLAYER_INDEX,
-                DEFAULT_HOLD_LOSS,
-            )
-        } else {
-            (
-                false,
-                NEW_GAME_SHIP,
-                NEW_GAME_CASH,
-                NEW_GAME_STARPORT_SLOT,
-                NEW_GAME_PLAYER_INDEX,
-                NEW_GAME_HOLD_LOSS,
-            )
-        };
         let code = (record.0 >> 16) as u32 & 0x1fff
             | ((record.1 >> 16) as u32 & 0x1fff) << 13
             | (record.3 & 0x3f) << 26;
         let mut entries = galaxy(cache)?;
-        let current = if start_type == 0 {
+        let current = if default_arm {
             // Record 0 is not one of the hand-coded systems: F829/F832 generate
             // it from the record's coordinates and extra word.
             let entry = start_entry(cache, record)?;
@@ -1221,6 +1212,21 @@ impl Navigator {
             index
         } else {
             return Err(format!("start system {code:#x} is not in the galaxy table"));
+        };
+        let (ship, cash, starport_slot, player_index) = if default_arm {
+            (
+                DEFAULT_SHIP,
+                DEFAULT_CASH,
+                DEFAULT_STARPORT_SLOT,
+                DEFAULT_PLAYER_INDEX,
+            )
+        } else {
+            (
+                NEW_GAME_SHIP,
+                NEW_GAME_CASH,
+                NEW_GAME_STARPORT_SLOT,
+                NEW_GAME_PLAYER_INDEX,
+            )
         };
         let bodies = bodies(cache, &entries[current], clock_words(NEW_GAME_CLOCK))?;
         let index = bodies
@@ -1269,14 +1275,12 @@ impl Navigator {
             radius,
             up,
         )?;
-        let cargo = if default {
-            // F998's default arm leaves the Saker with Cargo Space 1 t on the
-            // executed original's F2 status page (`--game-frame 400 0x3c` after
-            // the default start); the port uses that observed hold rather than
-            // subtracting the Eagle's 0xc.
-            1
+        let cargo = if default_arm {
+            // The executed original's F2 status page shows 1 t free after the
+            // default start; F998's `0x10` subtraction alone would leave 7 t.
+            DEFAULT_CARGO
         } else {
-            (models.cargo_space(ship).unwrap_or(0) - hold_loss).max(0)
+            (models.cargo_space(ship).unwrap_or(0) - NEW_GAME_HOLD_LOSS).max(0)
         };
         let mut nav = Self::assemble(cache, entries, current, bodies)?;
         nav.pads = Some(pads);
@@ -3027,7 +3031,7 @@ mod tests {
     /// word is the 16.16 -56832 the DOS start table holds, not the rounded -222
     /// an earlier transcription kept.
     #[test]
-    fn the_default_start_record_seed_is_f829s() {
+    fn the_default_start_record_is_f998s_and_f829s() {
         let (x, y, z, star, extra) = START_SYSTEMS[0];
         assert_eq!(
             (x, y, z, star, extra),
@@ -3041,6 +3045,10 @@ mod tests {
         assert_eq!(START_SYSTEMS[4], START_SYSTEMS[0]);
         assert_eq!(DEFAULT_START_TYPE, 0);
         assert_eq!(DEFAULT_STARPORT_SLOT, 0x6a);
+        assert_eq!(DEFAULT_SHIP, 0x1f);
+        assert_eq!(DEFAULT_CASH, 10_000);
+        assert_eq!(DEFAULT_CARGO, 1);
+        assert_eq!(DEFAULT_HOLD_LOSS, 0x10);
         assert_eq!(DEFAULT_PLAYER_INDEX, 87);
     }
 

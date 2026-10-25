@@ -365,7 +365,43 @@ fn gauges_show_f270s_energy_and_heat_bars() {
 
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
-fn new_game_hull_carries_f998s_one_front_pulse_laser() {
+fn the_default_start_is_the_saker_with_f998s_front_pulse_laser() {
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    // F998's default arm (`ffe.asm:74159`) creates model 0x1f. The cache's
+    // statistics block is F1533's DATA_002655: 2 gun mounts, 28 t hull, 23 t
+    // cargo, eye 1800/400, front gun 2200/0, rear 1900/-200.
+    let ship = ffe_rs::navigation::DEFAULT_SHIP;
+    assert_eq!(ship, 0x1f);
+    let stats = viewer.ship_stats(ship).unwrap();
+    assert_eq!(stats.gun_mounts, 2);
+    assert_eq!(stats.mass, 28);
+    assert_eq!(stats.cargo, 23);
+    assert_eq!(stats.eye, [1800, 400]);
+    assert_eq!(stats.front_gun, [2200, 0]);
+    assert_eq!(stats.rear_gun, [1900, -200]);
+    assert_eq!(stats.missiles, 2);
+    // Two mounts, but F998 fits only the front 0x88; the rear stays empty.
+    let combat = Combat::new_game();
+    assert_eq!(combat.lasers, [ffe_core::laser::PULSE_1MW, 0, 0, 0]);
+    assert_eq!(combat.drive, 2);
+    assert_eq!(combat.energy, 0x2000_0000);
+    assert_eq!(combat.missile_count(), 2);
+    // F1533's hull word is mass * 4 and F998 leaves +0xe2 zero: 112 and no
+    // shield line until a generator is fitted.
+    let loadout = ffe_core::equipment::Loadout::new_game();
+    let mut state = Flight {
+        loadout,
+        ..Flight::default()
+    };
+    state.ensure_damage(stats.mass * 4);
+    assert_eq!(state.hull, [112, 112]);
+    assert_eq!(state.shields, [0, 0]);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_type_1_ross_154_hull_still_carries_its_front_pulse_laser() {
     let cache = cache();
     let viewer = ModelViewer::new(&cache).unwrap();
     let stats = viewer
@@ -378,8 +414,6 @@ fn new_game_hull_carries_f998s_one_front_pulse_laser() {
     // The start-type 1 record (`FUNC_000998`, ffe.asm:74099) fits 0x88 in front.
     let combat = Combat::new_game();
     assert_eq!(combat.lasers, [ffe_core::laser::PULSE_1MW, 0, 0, 0]);
-    // Model 23 is the Eagle long range fighter (shipidx.txt); the old status
-    // note's "Sidewinder" for start type 1 is the one to correct.
     assert_eq!(ffe_rs::navigation::NEW_GAME_SHIP, 23);
 }
 

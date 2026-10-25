@@ -32,34 +32,30 @@ piece is called out below.
   `0x80000000`). `Navigator::new_game` starts there; the calendar subtracts
   that start, so the console shows 1 Jan 3250, noon. The development sandbox
   keeps a 0-based clock (`start_clock`), so the date stays right in both.
-- **F998's state for start type 1**: 1000 CR (`DATA_008888`), ship 23 (the
-  Eagle long range fighter, `0x17`), the hold is the ship's 20 t less `0xc`
-  (8 t), and time acceleration 994 (`DATA_009012`). F994 sets the player's state
-  byte to `0x30` (landed at an open-air starport's pad) and `DATA_008857` (the
-  player's object index) is 107.
-- **F998's default arm (types 0, 4, 5, 6)**: 10,000 CR (`0x2710`), ship `0x1f`
-  (the Saker Mk III), the hold less `0x10`, station slot `0x6a`, player index
-  87, state `0x30`. The intro's "any other key" arm is this default. Keys 1-5
-  remain the verified type 1 in this port except that `--start 0` and the
-  default boot select record 0.
-- **The pad**: F994 calls F650 with the player's ship and object `0x6e` (type
-  1) or `0x6a` (type 0); that object is the system's starport. Ross 154's
-  starport is `slot 0x6e`, model `0x55` (an open-air model: class `+0x14c` bit
-  `0x40`), bay 1. F650 turns the bay's pad `(-250, 0, 250)` by the station's
-  F1674 rows and shifts each component left ten. With the generated rows
+- **F998's default (type 0)**: 10,000 CR (`DATA_008888 = 0x2710`), ship 31
+  (the Saker Mk III fighter, `0x1f`), a 1 t free hold, time acceleration 994
+  (`DATA_009012`), player state `0x30` and `DATA_008857 = 87`. The F2 page
+  shows the Saker, Scanner/Automatic Pilot/Atmospheric Shielding/Navigation
+  computer, the 1MW pulse front mount, Cargo Space 1 t, no shield generators
+  and `--start` type 0's Gateway/Hope/Old Blackelk seat (`slot 0x6a`).
+  F998's type-1 arm is still available with `--start 1`: 1000 CR, ship 23
+  (the Eagle long range fighter, `0x17`), 8 t hold, player index 107 and
+  starport `slot 0x6e`. Types 2-5 are unverified and map to type 1.
+- **The pad**: F994 calls F650 with the player's ship and the chosen starport
+  object. The default arm uses `slot 0x6a` (Old Blackelk on Hope); the type-1
+  arm uses `slot 0x6e` (Ross 154's starport, model `0x55`, bay 1). F650 turns
+  the bay's pad `(-250, 0, 250)` by the station's F1674 rows and shifts each
+  component left ten. For Ross 154 the generated rows
   `[-906354405, 1945245414, 76650739, -1938310550, -909597149, 163923668,
-  180966058, 0, 2139827798]` the offset is `(126, -227, 240) << 10` =
-  `[129024, -232448, 245760]` mm in the station's frame. F994 then adds the
-  ship's collision radius (`+0x140`, 5,200 mm for the Eagle) along its second
-  row (the up row, copied from the station): `(-4694, -2203, 396)`, so the seat
-  is the station position plus `[124330, -234651, 246156]`. The local tests
-  (`new_game_starts_at_ross_154`, `new_game_starts_on_hope_in_gateway`) check
-  this and the date, hold and cash.
-- **Boot**: the default boot is F998's default (Gateway/Hope, state `0x30`).
-  `--start 1` keeps Ross 154 and `--start sol` the old Sol/Mars High
-  development sandbox (and `Navigator::new`, which the existing tests use).
-  `--skip-intro` is accepted for the eventual front-end wiring; the logo
-  drawing is not wired yet.
+  180966058, 0, 2139827798]` give `(126, -227, 240) << 10` =
+  `[129024, -232448, 245760]` mm; F994 adds the ship's collision radius
+  (`+0x140`, 5,200 mm for the Eagle) along its up row: `(-4694, -2203, 396)`,
+  so the seat is the station position plus `[124330, -234651, 246156]`. The
+  local tests (`new_game_default_is_the_saker_at_hope`,
+  `start_record_one_is_ross_154`) check the seat, date, hold and cash.
+- **Boot**: the default boot is F998's type 0. `--start 1` keeps Ross 154 and
+  `--start sol` the old Sol/Mars High development sandbox (`Navigator::new`).
+  `--skip-intro` bypasses the logo/credits; a normal run shows them.
 
 ## The intro screens (F961/F962)
 

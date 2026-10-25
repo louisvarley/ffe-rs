@@ -82,6 +82,30 @@ apply F386's cash (`F387`/`F388`) and space checks plus the category handlers
 (F390/F393, F399/F400, F428, F413/F415, F418/F421). Drives and mining machines
 are shown but not modelled.
 
+## The new game's fitted loadout (`F998`, `ffe.asm:74028`)
+
+The DOS default is F998's **type-0** arm: the Saker Mk III (model `0x1f`).
+
+- `ship+0xc8 = 0x40240020`: Scanner (bit 18), Automatic Pilot (21),
+  Atmospheric Shielding (30) and Navigation computer (5). Bit 5 is the only
+  general bit the type-1 Ross 154 arm does not set; there is no Combat
+  Computer, radar mapper, ECM, chaff or cargo life support.
+- `ship+0xd6/+0xd7 = 0x82` twice: two KL760 Homing Missiles, image 2 on F1120's
+  pylon records 0x3b/0x3c.
+- `ship+0xd2 = 0x88`: the 1MW pulse laser in the front mount (see
+  `docs/notes/combat.md` §4).
+- no shield generator (`+0xe2 = 0`), so `Loadout::shield_max()` is 0 and the HUD
+  shield line stays hidden; no passenger cabins (`cabins = 0`).
+- cash `DATA_008888 = 0x2710` (10,000 credit units). The F2 page's free hold is
+  1 t: the Saker's 23 t statistic less F998's `0x10` allowance and the 6 t of
+  fitted items (laser 1, missiles 2, Scanner 1, Automatic Pilot 1, Atmospheric
+  Shielding 1; Navigation computer 0).
+- The type-1 arm uses `0x40240000` (the same three bits without the navigation
+  computer) and the same missiles/combat words.
+
+`Loadout::new_game()` is the default type-0 record. Saves from before the field
+load with `Loadout::default()` (nothing fitted).
+
 ## The flags the console reads
 
 | asm | Rust | meaning |
@@ -150,7 +174,7 @@ control byte `+0x87 == 3` (player) or `0xb` (AI) take this path.
 
 None. The equipment table is 66 * 22 = 1,452 bytes of static data and is
 generated into `ffe-core`, like the console table. The market goods tables were
-already cached in v20; the cache stays **v26** and no asset count changes.
+already cached in v20; the cache is **v28** and the equipment table adds no assets.
 
 ## Differences and uncertainties
 
@@ -175,8 +199,8 @@ already cached in v20; the cache stays **v26** and no asset count changes.
 ## Tests
 
 - `crates/ffe-core/src/equipment.rs`: names/prices/mass/category/tech decoding,
-  the bit formula, `GENERAL_MASK`, fitted storage per category, icon nibbles,
-  availability/prices and validation.
+  the bit formula, `GENERAL_MASK`, the default type-0 loadout, fitted
+  storage per category, icon nibbles, availability/prices and validation.
 - `crates/ffe-rs/tests/combat.rs`: new/old save round-trips, F953 damage order,
   destruction, the no-generator new-game state, and a fitted generator keeping
   existing damage.

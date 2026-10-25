@@ -214,6 +214,84 @@ fn the_lamps_and_the_equipment_page_are_the_originals() {
 
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_default_start_draws_the_sakers_hull_and_equipment_page() {
+    use ffe_core::equipment::Loadout;
+    use ffe_rs::navigation::{DEFAULT_SHIP, DEFAULT_START_TYPE};
+
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut state = flight();
+    assert_eq!(DEFAULT_START_TYPE, 0);
+    state.ship = DEFAULT_SHIP;
+    state.loadout = Loadout::new_game();
+    state.combat = ffe_rs::combat::Combat::new_game();
+    // F1533: Saker's 28 t mass * 4; F998 leaves +0xe2 zero.
+    state.ensure_damage(28 * 4);
+    assert_eq!(state.hull, [112, 112]);
+    assert_eq!(state.shields, [0, 0]);
+    screen.hud = PlayerHud {
+        shields: state.shields,
+        hull: state.hull,
+        set_speed: Some(0),
+        actual_speed: 0,
+        altitude: Some(0),
+        registration: "Hope".to_owned(),
+        autopilot: false,
+        turret: None,
+    };
+    screen.systems = ShipSystems::default().with_loadout(&state.loadout);
+    assert_eq!(screen.systems.general, 0x4024_0020);
+    let views = ViewState {
+        console: ConsoleState {
+            status_page: true,
+            ..ConsoleState::default()
+        },
+        ..ViewState::default()
+    };
+    // The empty page/HUD baseline for the two checks.
+    let mut empty = Screen::new(&cache).unwrap();
+    empty.hud = PlayerHud {
+        set_speed: Some(0),
+        ..PlayerHud::default()
+    };
+    draw(&mut empty, &state, views);
+    let before = empty.logical_pixels().to_vec();
+
+    draw(&mut screen, &state, views);
+    let after = screen.logical_pixels().to_vec();
+    save(&screen, "dashboard-saker-default.ppm");
+
+    // F1099's hull row draws 100.0% from 112/112; the shields row stays clear
+    // because +0xe0 == +0xe2 (F1099 suppresses a pristine/absent shield).
+    assert!(
+        changed(&before, &after, 2, 150, 11, 20) > 20,
+        "the Saker's hull line did not draw"
+    );
+    assert_eq!(changed(&before, &after, 2, 150, 1, 10), 0);
+    // F1120's two missiles are KL760 0x82 words: image 2 on records 0x3b/0x3c.
+    let with_empty = {
+        let mut screen = Screen::new(&cache).unwrap();
+        screen.hud = PlayerHud {
+            shields: [0, 0],
+            hull: [112, 112],
+            set_speed: Some(0),
+            actual_speed: 0,
+            altitude: Some(0),
+            registration: "Hope".to_owned(),
+            autopilot: false,
+            turret: None,
+        };
+        screen.systems = ShipSystems::default();
+        draw(&mut screen, &state, views);
+        screen.logical_pixels().to_vec()
+    };
+    assert!(changed(&with_empty, &after, 14, 30, 165, 176) > 20);
+    assert!(changed(&with_empty, &after, 33, 50, 164, 175) > 20);
+    assert_eq!(changed(&with_empty, &after, 0, 10, 168, 178), 0);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn the_equipment_page_draws_the_new_games_real_missile_icons() {
     let cache = cache();
     let mut screen = Screen::new(&cache).unwrap();
@@ -230,8 +308,8 @@ fn the_equipment_page_draws_the_new_games_real_missile_icons() {
     draw(&mut screen, &state, views);
     let empty = screen.logical_pixels().to_vec();
     save(&screen, "dashboard-equipment-empty.ppm");
-    // F998's loadout: general bits 0x40240000 and two 0x82 missiles, which
-    // F1120 draws as image 2 (bitmap 346) on records 0x3b and 0x3c.
+    // F998's default loadout: general bits 0x40240020 and two 0x82 missiles,
+    // which F1120 draws as image 2 (bitmap 346) on records 0x3b and 0x3c.
     screen.systems = ShipSystems::default().with_loadout(&ffe_core::equipment::Loadout::new_game());
     draw(&mut screen, &state, views);
     let loaded = screen.logical_pixels().to_vec();
