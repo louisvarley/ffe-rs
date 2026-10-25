@@ -1711,8 +1711,8 @@ fn new_game_hope_landed_surface_view() {
         view.iter().filter(|p| **p != screen.sky).count() > 2_000,
         "the Hope terrain and Old Blackelk are drawn"
     );
-    // F1099's two columns: Set/Act under the view on the left, Alt/Hope on the
-    // right, both in the font's HUD colour (15).
+    // F1099's speed block: Set/Act, then Alt and the parent name below them
+    // in the font's HUD colour (15).
     let hud_colour = screen.palette()[usize::from(ffe_rs::hud::HUD_COLOUR)];
     let ink = |x0: usize, x1: usize, y0: usize, y1: usize| {
         (y0..y1)
@@ -1720,10 +1720,9 @@ fn new_game_hope_landed_surface_view() {
             .filter(|p| *p == hud_colour)
             .count()
     };
-    assert!(ink(2, 60, 148, 164) > 20, "Set/Act are drawn at (2,148)");
     assert!(
-        ink(266, 320, 139, 156) > 20,
-        "Alt and Hope are drawn at (266,139)"
+        ink(2, 60, 148, 180) > 20,
+        "Set/Act/Alt/Hope are drawn at (2,148)"
     );
     // The landing is not the services board (EXP-014): the docked screen is only
     // opened by the original's docking path (`Traffic::Docked`), and the board

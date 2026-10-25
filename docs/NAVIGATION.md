@@ -206,8 +206,14 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   ground, horizon, starport, scanner, gunsight, console and message log -- not the docked
   services board. The HUD is F1099's: Set/Act at (2,148) in F1393's km/h conversion
   (`*0x156/100` one decimal below `0x4705d`, `/0x69` two decimals above), Alt at
-  (266,139) and `DATA_009124`'s parent name (Hope) beneath it. `L` starts F381's F654 and
-  F1013's climb.
+  (266,139) and `DATA_009124`'s parent name (Hope) beneath it. The boot message
+  is only `Landed at {name}`: F687/F686's start entry spawns F688's traffic, but
+  the port does not force a pirate group beside the pad (a normal pirate group
+  uses the anchor orbit, not `PIRATE_DISTANCE`), so the stationary ship cannot
+  be attacked before launching. `L` starts F381's F654 and F1013's climb. The
+  same guard covers a surface landing: `Navigator::landed_view()` makes the main
+  loop skip F688's NPC tick (F1012/F1048 run no flight step), so a landed ship
+  takes no F953 fire even when the system still has traffic.
   A soft touch on a planet or moon takes the original's states: F1021 sets `0x32` for the
   frame of the touch (F1042 zeroes the speed, rates, thrust and set speed), and F1047's
   view frame makes it `0x34`, the guarded landed-rough state (`Navigator::land`,

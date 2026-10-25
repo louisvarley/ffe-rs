@@ -1704,10 +1704,16 @@ pub struct Counts {
 /// The counts F688 draws from a system record, before [`MAX_SHIPS`]. `details`
 /// is F869's report: `bytes[3]` is `+8`, `bytes[1]` is `+6` and `bytes[2]` is
 /// `+7`.
+///
+/// The source's exact draws are: `RND(+8)` traders (F689), `RND(+8)` F699
+/// transport groups (only after F691's station-bay branch fired), `RND(+6*4)`
+/// F698 pirate-group attempts (each is a lone pirate, a group, F696, or a
+/// no-op) and the F690 Thargoid branch. The port keeps `RND(+8)` traders and
+/// shuttles, one pirate group per `+6` and a police group from a non-zero `+7`;
+/// the Thargoid and station-bay branches are omitted (their tables are not
+/// loaded). The pirate `+6` count without F698's `RND(*4)` is a port
+/// simplification, not the source's count.
 pub fn counts(details: &Details, rng: &mut Random) -> Counts {
-    // F688: RND(byte +8) traders, RND(byte +8) shuttles, byte +6 patrol groups,
-    // byte +7 police (the F690/Thargoid branch is left out; F688's
-    // `F35(0x16)` is not ported, so no Thargoid traffic).
     Counts {
         traders: rng.bounded(details.bytes[3]) as usize,
         shuttles: rng.bounded(details.bytes[3]) as usize,
@@ -1716,11 +1722,38 @@ pub fn counts(details: &Details, rng: &mut Random) -> Counts {
     }
 }
 
+/// F688's spawn switches that are the port's rather than the source's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SpawnOptions {
+    /// Force at least one trader and one pirate group. This is the port's
+    /// testability/capture guarantee, not F688: the original can roll zero
+    /// traffic for a system. Only a scripted capture or a unit fixture should
+    /// set it; a real system entry must not, or a system the source leaves
+    /// empty gets a hostile group it should not have.
+    pub guarantee: bool,
+    /// Place the pirate group `PIRATE_DISTANCE` ahead of the player instead of
+    /// on the anchor orbit. This is the port's capture framing (it puts the
+    /// pirate in the camera and inside F931's range). F702 places a spawned
+    /// ship at a random system-wide point, so a normal entry must not use the
+    /// player's position: otherwise a real system's pirate group is forced
+    /// beside the pad or the arrival point and attacks immediately.
+    pub near_player: bool,
+}
+
+impl SpawnOptions {
+    /// The scripted traffic capture: something to shoot and a pirate in frame.
+    pub const CAPTURE: Self = Self {
+        guarantee: true,
+        near_player: true,
+    };
+}
+
 /// Spawn one system's traffic. `spec` and `name` look models up in the cache;
 /// models without a statistics block are skipped. The result is capped at
-/// [`MAX_SHIPS`], always has at least one trader when there is an anchor and at
-/// least one pirate group (the port's playability choice), and is deterministic
-/// for a given `rng` state.
+/// [`MAX_SHIPS`] and is deterministic for a given `rng` state. [`SpawnOptions`]
+/// carries the port's capture-only guarantee; without it the counts are F688's
+/// (including zero) capped for legibility.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn(
     player: [i64; 3],
     forward: [f64; 3],
@@ -1728,6 +1761,7 @@ pub fn spawn(
     details: &Details,
     allegiance: u32,
     rng: &mut Random,
+    options: SpawnOptions,
     spec: impl Fn(u32) -> Option<Spec>,
 ) -> Vec<NpcShip> {
     let mut counts = counts(details, rng);
@@ -1736,12 +1770,17 @@ pub fn spawn(
         radius: 1_000_000,
         station: None,
     });
-    // The original can roll zero traffic; the port keeps one trader so a fresh
-    // system has something to label and shoot, and one pirate group so the
-    // damage path is reachable.
-    counts.traders = counts.traders.clamp(1, 2);
+    if options.guarantee {
+        // The capture/test guarantee: a fresh system has something to label and
+        // shoot and the F953 damage path is reachable.
+        counts.traders = counts.traders.clamp(1, 2);
+        counts.pirates = counts.pirates.clamp(1, 2);
+    } else {
+        // F688 can roll zero of every kind. Keep only the port's per-kind caps.
+        counts.traders = counts.traders.min(2);
+        counts.pirates = counts.pirates.min(2);
+    }
     counts.shuttles = counts.shuttles.min(1);
-    counts.pirates = counts.pirates.clamp(1, 2);
     counts.police = counts.police.min(1);
 
     let orbit = (anchor.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
@@ -1828,28 +1867,40 @@ pub fn spawn(
             ships.push(ship);
         }
     }
-    // F694/F695: a pirate group appears near the player. The leader is F694's
-    // lone type-0xa ship in state 5; the escort uses F695's grouped type 0xb
-    // list, state 0xb, spawned at its leader's formation offset and carrying the
-    // group bounty (F697's offset 2).
+    // F694/F695: the pirate group. The leader is F694's lone type-0xa ship in
+    // state 5; the escort uses F695's grouped type 0xb list, state 0xb, spawned
+    // at its leader's formation offset and carrying the group bounty (F697's
+    // offset 2). A scripted capture puts the group `PIRATE_DISTANCE` ahead of
+    // the player; a real system entry uses the anchor orbit, the port's scaled
+    // stand-in for F702's system-wide random placement, so the source's pirate
+    // count cannot force a group beside the pad/arrival point.
     let right = normalise(cross([0.0, 1.0, 0.0], forward));
     let mut leader = None;
     for i in 0..counts.pirates {
         let (side, back) = if i == 0 { (1.0, 0.0) } else { (-1.0, 0.8e6) };
         let distance = PIRATE_DISTANCE + f64::from(rng.bounded(1_000_000));
-        let position = [
-            player[0]
-                + (forward[0] * distance + right[0] * side * 0.8e6 - forward[0] * back) as i64,
-            player[1]
-                + (forward[1] * distance + right[1] * side * 0.8e6 - forward[1] * back) as i64,
-            player[2]
-                + (forward[2] * distance + right[2] * side * 0.8e6 - forward[2] * back) as i64,
-        ];
+        let position = if options.near_player {
+            [
+                player[0]
+                    + (forward[0] * distance + right[0] * side * 0.8e6 - forward[0] * back) as i64,
+                player[1]
+                    + (forward[1] * distance + right[1] * side * 0.8e6 - forward[1] * back) as i64,
+                player[2]
+                    + (forward[2] * distance + right[2] * side * 0.8e6 - forward[2] * back) as i64,
+            ]
+        } else {
+            spread(rng, 3.6 + i as f64 * 2.1, orbit)
+        };
+        let holder = if options.near_player {
+            player
+        } else {
+            anchor.position
+        };
         let Some(mut ship) = add(
             Role::Pirate,
             if i == 0 { 0xa } else { 0xb },
             position,
-            player,
+            holder,
             rng,
         ) else {
             continue;
@@ -2248,6 +2299,7 @@ mod tests {
             &details(),
             0,
             &mut rng,
+            SpawnOptions::CAPTURE,
             spec,
         );
         let mut pirate = ships
@@ -2291,6 +2343,7 @@ mod tests {
             &details(),
             2,
             &mut rng,
+            SpawnOptions::CAPTURE,
             spec,
         );
         assert!((1..=MAX_SHIPS).contains(&ships.len()));
@@ -2309,6 +2362,53 @@ mod tests {
         assert!(police.laser.is_some());
     }
 
+    /// Without the port's capture guarantee, F688's own counts decide: a record
+    /// whose +6/+8 bytes are zero rolls no traffic at all. This is the rule the
+    /// new game and an ordinary system entry use, so a system the source leaves
+    /// empty cannot force a pirate group beside the player.
+    #[test]
+    fn the_system_counts_alone_can_spawn_no_traffic() {
+        let mut rng = Random::new(7, 8);
+        let empty = Details {
+            words: [0, 0],
+            bytes: [128, 0, 0, 0, 0],
+            allegiance: 0,
+        };
+        let ships = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &[Anchor {
+                position: [1_000_000, 0, 0],
+                radius: 4_500_000,
+                station: None,
+            }],
+            &empty,
+            0,
+            &mut rng,
+            SpawnOptions::default(),
+            spec,
+        );
+        assert!(ships.is_empty(), "{ships:?}");
+        // The capture guarantee is what adds the one trader/pirate group.
+        let mut rng = Random::new(7, 8);
+        let ships = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &[Anchor {
+                position: [1_000_000, 0, 0],
+                radius: 4_500_000,
+                station: None,
+            }],
+            &empty,
+            0,
+            &mut rng,
+            SpawnOptions::CAPTURE,
+            spec,
+        );
+        assert!(ships.iter().any(|ship| ship.role == Role::Trader));
+        assert!(ships.iter().any(|ship| ship.role == Role::Pirate));
+    }
+
     #[test]
     fn an_escort_follows_its_leaders_formation() {
         let mut rng = Random::new(21, 22);
@@ -2324,6 +2424,7 @@ mod tests {
             },
             0,
             &mut rng,
+            SpawnOptions::CAPTURE,
             spec,
         );
         let pirates: Vec<&NpcShip> = ships.iter().filter(|s| s.role == Role::Pirate).collect();
@@ -2344,6 +2445,7 @@ mod tests {
             &details(),
             0,
             &mut rng,
+            SpawnOptions::CAPTURE,
             spec,
         );
         let mut ship = ships.into_iter().next().unwrap();
@@ -2380,6 +2482,7 @@ mod tests {
             &details(),
             0,
             &mut rng,
+            SpawnOptions::CAPTURE,
             spec,
         );
         let mut trader = ships

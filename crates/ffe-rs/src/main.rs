@@ -1572,12 +1572,7 @@ fn run() -> Result<(), String> {
                     // the climb through the docked-to-flight setup below. In flight
                     // `L` is the original's text-label toggle instead.
                     let landed = nav.as_ref().and_then(|nav| nav.landed_state());
-                    let pad_landed = nav.as_ref().is_some_and(|nav| {
-                        nav.new_game.is_some()
-                            && nav.docked.is_some()
-                            && nav.takeoff.is_none()
-                            && nav.sequence.is_none()
-                    });
+                    let pad_landed = nav.as_ref().is_some_and(|nav| nav.on_pad());
                     if pressed(Key::L) && (landed.is_some() || pad_landed) {
                         if let Some(nav) = nav.as_mut() {
                             if landed.is_some() {
@@ -2583,10 +2578,14 @@ fn run() -> Result<(), String> {
         // The system's NPC traffic: the flight/combat AI (F752/F725/F585, F931),
         // ticked in game time like the stations' doors. A hostile hit runs F953 on
         // the player's shields and hull. Ships only fly and fire in flight: inside
-        // a station the player's object is not in the system.
+        // a station the player's object is not in the system, and F1012/F1048's
+        // landed handlers run no flight step, so a landed (or new-game pad)
+        // player is not a target.
+        let landed_view = nav.as_ref().is_some_and(|nav| nav.landed_view());
         if active
             && !help
             && !paused
+            && !landed_view
             && model_lab.is_none()
             && model_viewer.is_none()
             && state.mode == ffe_rs::flight::Mode::Flight
@@ -3606,10 +3605,6 @@ fn run() -> Result<(), String> {
             state.ensure_damage(hull_full);
         }
         let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
-        // F1099's speed words are the original's ~0.1 m/s units; the flight model
-        // reports m/s, so scale by `1000 / MM_PER_SECOND` before F1393.
-        let source_speed =
-            |metres: f64| (metres * 1000.0 / ffe_rs::original_flight::MM_PER_SECOND).round() as i32;
         // F1099 prints DATA_009124, the parent object's name: at the new game it
         // is Hope, the planet under Old Blackelk. A surface landing names the
         // body itself; in free flight the port falls back to the system.
@@ -3628,6 +3623,10 @@ fn run() -> Result<(), String> {
                 nav.as_ref()
                     .map_or(String::new(), |nav| nav.system_name().to_owned())
             });
+        // F1099's speed words are the original's ~0.1 m/s units; the flight model
+        // reports m/s, so scale by `1000 / MM_PER_SECOND` before F1393.
+        let source_speed =
+            |metres: f64| (metres * 1000.0 / ffe_rs::original_flight::MM_PER_SECOND).round() as i32;
         screen.hud = PlayerHud {
             shields: state.shields,
             hull: state.hull,

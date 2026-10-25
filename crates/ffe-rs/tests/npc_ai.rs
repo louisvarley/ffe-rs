@@ -93,10 +93,16 @@ fn frame(
 }
 
 fn setup(cache: &ffe_content::VerifiedCache) -> (Navigator, ModelViewer, Screen, Flight) {
-    let nav = Navigator::new_game(cache, 1).unwrap();
+    let mut nav = Navigator::new_game(cache, 1).unwrap();
     let viewer = ModelViewer::new(cache).unwrap();
     let screen = Screen::new(cache).unwrap();
-    assert!(!nav.ships.is_empty(), "the new game spawned no traffic");
+    // The new game's pad has no traffic (F829/F998 do not call F688). This
+    // fixture is the scripted flight capture, so ask F688 for the port's
+    // guaranteed trader/pirate group at the station's launch point.
+    let at = nav.station().map(|(_, at)| at).expect("a start station");
+    let forward = nav.bodies[nav.docked.expect("docked")].orientation[2];
+    nav.respawn_traffic(cache, at, forward);
+    assert!(!nav.ships.is_empty(), "the capture spawned no traffic");
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
     // The player sits 300 km in front of the pirate, looking back at it. The
     // pirate's default forward is +z, so it is already aimed at the player: its

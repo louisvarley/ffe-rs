@@ -96,17 +96,22 @@ resume transit, instead of orbiting for ever.
 - **F922** (`ffe.asm:68974`) as `Random::bounded`, so model and placement
   draws are the original generator's (`a = rotl16(a + b + rotl5(b))`,
   `b = rotl5(b_old)`, result `(a & 0xffff) * limit >> 16`).
-- F688's count fields (`Details::bytes[3]` for traders/shuttles,
-  `bytes[1]` for patrol groups, `bytes[2]` for police) with a cap of
-  `MAX_SHIPS = 5`; the port keeps at least one trader and one pirate group
-  (the original can roll zero) so a fresh system always has something to
-  label and shoot.
+- F688's count fields (`Details::bytes[3]` for traders/shuttles, `bytes[1]`
+  for patrol groups, `bytes[2]` for police) with a cap of `MAX_SHIPS = 5`. A
+  normal system entry asks F688 for its own counts and **can spawn none**: the
+  original may roll zero traffic. The port's old "at least one trader and one
+  pirate group" guarantee is now `SpawnOptions::CAPTURE`, used only by
+  `Navigator::respawn_traffic` (the scripted capture/`npc_view` fixtures). A
+  normal `Navigator::spawn_traffic` entry, including the new game's start, uses
+  F688's counts as they are.
 - **Placement:** traders, shuttles and police use a random phase on an orbit
   around the first station/starport (`Anchor`), radius
   `clamp(1.2 * station radius, 2.5e6, 0.75 * laser range)` original units.
   The pirate group appears `PIRATE_DISTANCE = 3.5e6` ahead of the player (plus
-  a side offset), inside F931's `0x7fffff` hit range. This is the deliberate
-  deviation from F702 described above; see "Owner decisions".
+  a side offset), inside F931's `0x7fffff` hit range, only for the scripted
+  capture (`SpawnOptions::near_player`). A normal system entry uses the anchor
+  orbit, as the port's scaled stand-in for F702's system-wide random point, so
+  the pad and the arrival point are not forced into a pirate encounter.
 - **F694/F695 pirate groups.** The leader is F694's type-0xa ship in state 5.
   The escort uses F695's grouped type-0xb list, spawns at its leader's
   formation offset and keeps station through `+0x102..+0x106` (the port scales
@@ -130,6 +135,25 @@ resume transit, instead of orbiting for ever.
 - Names are the model-name table (cache v11) plus a serial, e.g.
   `Cobra Mk III 1`; the original's F703/F791 registration generator is not
   ported.
+
+### Spawning only in flight (spawn-safety stream)
+
+F687/F686's start entry does call F688, so the new game has the record's traffic
+(the executed original's `--missile-probe` object list at frame 199 shows a
+docked trader and two orbiting traders at Ross 154; its `--state-combat` keeps
+hull 100 and shields `[0,0]` from frame 161 to 899). What it does **not** have is
+a pirate group beside the pad: F702 places a spawned ship at a system-wide point,
+so a normal entry uses the anchor orbit for the pirate group, not
+`PIRATE_DISTANCE` ahead of the player. Only the scripted capture
+(`SpawnOptions::CAPTURE`, used by `Navigator::respawn_traffic`) puts a pirate in
+front of the camera.
+
+`Navigator::on_pad()` names F994's `0x30` state and `Navigator::landed_view()`
+also covers a surface `0x32`/`0x34`; `ffe-rs`'s main loop skips the NPC
+`tick_ships`/missile step while it is true, following F1012/F1048's landed
+handler (no F1037/F1041/F601/F603/F1512 flight step). The stationary ship is
+then outside F817's box and cannot take F953 damage, even if the system's source
+traffic includes a pirate group.
 
 ### The AI state table (`AI_STATES`)
 
