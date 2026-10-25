@@ -4,6 +4,31 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Ship-label pen and clipping merged (v0.75)
+
+- Merged `labels` (653f539, 236b4a8): ship labels now use F1108's projected
+  point plus (4,−4), with F1584/F1598's signed top clipping and F1587's 0x13c
+  right limit through the shared clipped-text path; the label mask and pen now
+  match the original's walk and pixels.
+- New `--labels` reference adapter, `verify-labels.py` (13 cases, trace
+  SHA-256 `b08a9b62…`) and `labels_reference.rs`; `build-smoke.ps1`'s manifest
+  records `labels_adapter = 'labels-v1'`. `verify-all.py` now has **56
+  entries** (labels included; the existing suite is unchanged), so the suite is
+  55 PASS / 1 SKIP / 0 FAIL on Windows. Cached `npc_view` label frames and
+  `console_view`/`views` assertions accompany the images in
+  `docs/evidence/labels/`.
+- Merge was conflict-free (`ort`). The reference binary was rebuilt for the new
+  adapter before running the oracle.
+- **Owner decisions/remaining:** the original shows type registrations (for
+  example `AB-123`) rather than the port's model name + serial — port
+  F703/F791 or keep readable names; 3D hull text/decal scaling is separate; and
+  near-target suppression, overlap order and mission labels remain unported.
+- Tests: workspace, clippy, fmt; `verify-labels.py` (13 cases), cached
+  `npc_view` (3), `console_view` (4), `npc_ai` (3) and `views` on the v28
+  cache; `docs/notes/labels.md`.
+
+---
+
 ## 2026-10-25 - Textured fills and terrain textures merged (v0.74)
 
 - Merged `fills` (210d749): `Shape::TexturedUv` carries F1645/F1648's explicit

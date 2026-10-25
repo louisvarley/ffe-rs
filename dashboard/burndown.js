@@ -183,7 +183,8 @@ window.FFE_BURNDOWN = {
         { id: "ui-9", title: "Options, key bindings screen", status: "done", version: "v0.48p" },
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "in-progress", version: "v0.71" },
         { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "in-progress", version: "v0.68" },
-        { id: "ui-12", title: "Hit particles, explosions and debris (F939/F942/F926)", status: "done", version: "v0.66" }
+        { id: "ui-12", title: "Hit particles, explosions and debris (F939/F942/F926)", status: "done", version: "v0.66" },
+        { id: "ui-13", title: "Ship labels at F1108's pen with F1584/F1598 top clipping", status: "done", version: "v0.75" }
       ]
     },
     {
@@ -581,6 +582,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 65,
       note: "Textured fills merged (v0.74): Shape::TexturedUv (F1645/F1648 explicit per-vertex coordinates through the F1644/F1647 affine rasteriser), ModelViewer::rasterise_uv and terrain_texture (the real F1805/F1807/F1806/F1808 queue layouts and slot table), with Screen::draw_shapes support and frame evidence (27 background pixels of 27,516 inside the planet disc, a 50,191-pixel starport fill with a 320-pixel run). Colours resolve through the palette branch's runtime entries first and fall back to the fixed map only for not-yet-built words; EXP-013 space colour is untouched. v0.48-6 is done, v0.48-7 stays in progress. Remaining owner decisions: model-155 fragment placement/+0x7e (the blue cloud is model 153 debris lines), upper-palette approximation in fills, shading fidelity, no F1806/F1808 pixel oracle, EXPLOSION_MASS and effect lifetimes."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Ship-label pen and clipping merged (v0.75): labels now sit at F1108's projected point + (4,-4), with F1584/F1598 signed top clipping and F1587's 0x13c right limit through the shared clipped-text path; --labels/verify-labels (13 cases, trace b08a9b62...) pins the walk and pixels, and npc_view/console_view/views carry the cached assertions with docs/evidence/labels frames. One item added and completed (ui-13), so the remaining count is unchanged. Remaining owner decisions: registrations (AB-123) vs the port's model name + serial, 3D hull text/decal scaling, near-target suppression/overlap order/mission labels."
     }
   ]
 };

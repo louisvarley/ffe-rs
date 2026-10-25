@@ -33,6 +33,7 @@ ORACLES = [
     ("assets", "verify-assets.py", ["--tool", "{tool}", "--game", "{game}",
                                     "--reference", "{sources}"]),
     ("font", "verify-font.py", ["--reference", "{smoke}", "--data", "{cache}"]),
+    ("labels", "verify-labels.py", ["--reference", "{smoke}", "--data", "{cache}"]),
     ("models", "verify-models.py", ["--reference", "{smoke}", "--data", "{cache}"]),
     ("normals", "verify-normals.py", ["--reference", "{smoke}", "--data", "{cache}"]),
     ("transforms", "verify-transforms.py", ["--reference", "{smoke}", "--data", "{cache}"]),

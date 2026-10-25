@@ -71,6 +71,7 @@ $hashes = @($paths | ForEach-Object {
     state_adapter = 'bounded-new-game-v1'
     numeric_adapter = 'rng-timer-v1'
     font_adapter = 'font-v1'
+    labels_adapter = 'labels-v1'
     blit_adapter = 'blit-v1'
     model_adapter = 'model-vertices-v1'
     normal_adapter = 'normals-v1'

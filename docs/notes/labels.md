@@ -35,13 +35,20 @@ the bottom of the 320x200 screen.
   `FUNC_000989` with `FUNC_001108`.
 - `FUNC_000989` (**73373-73422**) walks object slots 0x72 down to 1, takes live
   objects (flag byte bit 0x8) that are not removed (bit 0x20), projects them
-  with `FUNC_001531`, and rejects labels outside x 1..315, y 1..152.
+  with `FUNC_001531`, and rejects labels outside x 1..315, y 1..152. Its callback
+  arguments are `(object, x + 3, y - 4)`.
 - `FUNC_001108` (**81602-81687**) draws the object's name at `+0x124` with
-  `FUNC_001584_TextWriteDefaultClip`: **font 15, colour 15, unshadowed**, at
-  screen x + 1, y. It skips the object whose model is 0x9a and, near the player,
-  ships with type byte 0x87 == 0xb and AI state 0x24 (a docked/landed state
-  pair). The port labels bodies and its NPC traffic; its traffic has no 0x24
-  state, so the near-target suppression is not reproduced.
+  `FUNC_001584_TextWriteDefaultClip`: **colour 15, unshadowed**, at
+  `(x + 3) + 1, y - 4` — the pen is `object screen + (4, -4)`. The 0xf
+  argument is the palette colour, not a font: F1584 always uses `F1598`'s
+  `DATA_007750` main font (9 glyph rows, 10-byte records), and F1587 starts no
+  glyph at pen x >= 0x13c. It skips the object whose model is 0x9a and, near
+  the player, ships with type byte 0x87 == 0xb and AI state 0x24 (a
+  docked/landed state pair). The port labels bodies and its NPC traffic; its
+  traffic has no 0x24 state, so the near-target suppression is not reproduced.
+- The y pen is signed: F989 accepts object y 1..152, so a label at y 1..3 has
+  its top rows above the screen and F1584 clips them. The port must not cast
+  that y to an unsigned screen row.
 - Older `srctools/cplayer.txt` says `b[D8871] & 4`, but that is a different
   address from the executed assembly's `player+0xe9`. The assembly is
   authoritative; the cplayer note belongs to an older address map.
@@ -81,10 +88,12 @@ the bottom of the 320x200 screen.
   always idle here.
 - `main.rs` maps `l` and the labels icon to `ConsoleState::labels`; the flag
   starts off, as the player flag does. `Screen::labels` carries the names and
-  camera positions; `Screen::draw_body_labels` applies F989's bounds and
-  F1108's position, font and colour. The port's "objects" are the navigator's
-  bodies plus its NPC ships (`docs/notes/npc.md`), so labels appear on stars,
-  planets, moons, stations, starports and traffic.
+  camera positions; `body_label_positions` applies F989's bounds and F1108's
+  `(+4, -4)` pen, and `Screen::draw_body_labels` writes the name with the main
+  font in colour 15, clipping a negative pen y to the screen rows. The port's
+  "objects" are the navigator's bodies plus its NPC ships
+  (`docs/notes/npc.md`), so labels appear on stars, planets, moons, stations,
+  starports and traffic.
 - `Navigator::places()`/`navigation::place_indices` use only station/starport
   bodies, in `bodies` order (the system generator's creation order, which F927's
   descending slots preserve). `View::Places` pages 18 at a time because a
@@ -114,3 +123,28 @@ the bottom of the 320x200 screen.
 - **F1108's near-target suppression** (type 0x87 == 0xb and AI state 0x24) is
   not reproduced: the port's traffic AI has no 0x24 docked/landed state pair
   (its ships in station bays are not modelled).
+- **Ship names.** The original writes F703/F791's generated registration into
+  object `+0x124` (types `DATA_006267`: mostly the 0x12-0x14 `AB-123` style
+  identifiers). The port still labels NPC ships with the model name and a
+  serial (`Moray Starboat 3`), so its labels are wider than the original's even
+  though the glyphs and pen are the same. Porting F703/F791 is the remaining
+  size difference a player sees on ship labels.
+- **Order.** F989 walks object slots 0x72 down to 1, so when labels overlap the
+  higher slot draws last (on top). The port draws bodies in navigator order and
+  then ships, which can change which of two coincident names is visible.
+
+## Verification
+
+- `jjffe-smoke --labels` (`tools/reference/headless.c`, adapter tag
+  `labels-v1`) feeds one live object per case to the real F989/F1108 and prints
+  F989's callback arguments, the label ink box and the frame hash. Cases cover
+  the centre, x 0/1/312/313, y 0/1/3/152/153, model 0x9a, and the idle/removed
+  flag bytes. `python tools/reference/verify-labels.py --reference
+  .cache/jjffe-reference/jjffe-smoke.exe --data data.bin` runs it twice and
+  drives `crates/ffe-rs/tests/labels_reference.rs`.
+- The executed reference draws `MORAY` at object (160, 79) with the pen at
+  (164, 75) and seven ink rows: no distance scaling, and the offset is +4/-4.
+- Cached frames and assertions:
+  `crates/ffe-rs/tests/npc_view.rs::system_ship_label_sits_at_the_projected_centre_in_the_fixed_font`
+  and `several_ship_labels_and_a_label_at_the_view_edge`. Evidence frames are
+  in `docs/evidence/labels/`.

@@ -114,7 +114,7 @@ ECM.
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 143 items, 78 done and 65 left on
+  in `burndown.js`; 14 milestones, 144 items, 79 done and 65 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -173,11 +173,12 @@ needs the player's own files, NASM and the MSVC x86 tools; none of it is public
 CI. Rebuild the reference after any change to `tools/reference/`, and note that
 the child oracle's trace SHA-256 changes with every rebuild (see below).
 
-**2026-10-25 final re-run.** After the oracle branch, the suite has **55
-entries: 54 PASS, 1 SKIP, 0 FAIL** in 708 s (`world-linux` skips on Windows:
-`--sysgen` needs a SIGALRM watchdog and `--surface-draw` needs POSIX fork).
-`verify-surface.py` reports `sky_matches: true` (header_close 0.9934, view
-coverage 0.589). The `--worldgen` repeatability failure is gone: the two-run
+**2026-10-25 final re-run.** After the oracle branch and the later streams, the
+suite has **56 entries: 55 PASS, 1 SKIP, 0 FAIL** (`world-linux` skips on
+Windows: `--sysgen` needs a SIGALRM watchdog and `--surface-draw` needs POSIX
+fork). `verify-surface.py` reports `sky_matches: true` (header_close 0.9934,
+view coverage 0.589) and `verify-labels.py` passes its 13-case walk
+(`b08a9b62…`). The `--worldgen` repeatability failure is gone: the two-run
 comparison now masks only the object-name ranges F877/F878 build from an
 uninitialised byte (0x26..0x3f and 0x124..0x138), keeps the raw first run for
 the Rust oracle and is byte-for-byte elsewhere. The new `ship-types` oracle
@@ -277,12 +278,13 @@ capture produced by two repeat runs of the local reference.
 | v0.72 NPC docking cycle | `ffe_core::npc` corrected `DATA_006255` rows (Approach/Docked/Launch/Depart), `DockRequest`, `tick_with_station`, bay occupancy, F747 door wait, F733-F736/F761/F762; `Navigator` station records; hidden docked ships; `npc_docking.rs` | `npc_docking.rs` (1, ignored), npc unit tests, evidence in `docs/evidence/npc-docking/` | none (the state rows are from `ffe.asm`/`DATA_006255`; approach/docked/launch frames) | — | traffic now flies approach/dock/launch/depart cycles, takes the station's bay slot and waits for F747's door; docked ships are not drawn and traders get destinations. Remaining owner decisions: the 2-3 day docked interval vs the shortened observation, the 30 s give-up/next-station vs endless retry, the cruise-speed floor and the despawn range. `docs/notes/npc.md` |
 | v0.73 starport tech level, Upgrades and repairs | `galaxy::Details/Tables::tech_level`, `Navigator::tech_level`, `ffe_rs::outfitting` (F387/F388, Fit/Remove, general/cabins/lasers/shields/missiles), `station::Upgrades/Repairs`, F394 fuel-scoop gate, F329 Remove button, `station_view` frames | `station.rs`/`outfitting.rs` unit tests, `galaxy.rs` (+), `station_view` (1, ignored) | none (the tables/prices are from `DATA_005289`/`ffedat.asm`; the frames check the rows) | — | Upgrades shows real rows for the starport's tech level with Fit/Remove prices/refunds, the fuel-scoop gate and F329's button; F444's repair rows show dates. Shipyard and the BBS keep their faithful empty states (price/BBS tables not imported). Owner decisions: drive/mining rows visible-but-disabled vs hidden, ship price/BBS imports later, repairs actions before thruster damage, and the price-multiplier behaviour; `docs/notes/station.md` |
 | v0.74 textured fills and terrain textures | `Shape::TexturedUv` (F1645/F1648 per-vertex UV through F1644/F1647), `ModelViewer::rasterise_uv`/`terrain_texture` (F1805/F1807/F1806/F1808 layouts and slots), `Screen::draw_shapes`, `planet_view`/`effects_view` frames, `docs/evidence/fills/` | `planet_view` (19, ignored), `effects_view` (3, ignored); `verify-fills.py` PASS | `verify-fills.py` PASS (28.6 s); frame evidence: 27 of 27,516 background pixels and the 50,191-pixel starport fill | — | textured terrain entries now use their explicit per-vertex coordinates and the real queue slots; colours resolve through the palette branch's runtime entries first (fixed map only for not-yet-built words), and EXP-013's `#0c0c4c` space colour is untouched. v0.48-6 done; v0.48-7 in progress. Remaining: model-155 fragment placement/`+0x7e` (the blue cloud is model 153 debris lines), upper-palette approximation, shading fidelity, no F1806/F1808 pixel oracle, EXPLOSION_MASS and effect lifetimes; `docs/notes/fills.md`/`textures.md` |
+| v0.75 ship-label pen and clipping | `Screen` label pen (F1108 projected point + (4,−4)), F1584/F1598 signed top clipping, F1587's 0x13c right limit, shared clipped-text path; `--labels` adapter/`verify-labels.py`, `labels_reference.rs`, `npc_view` label frames | `labels_reference.rs` (1, ignored; 13 cases), `npc_view` (3, ignored), `console_view` (4), `views` | `verify-labels.py` PASS (13 cases, trace `b08a9b62…`) | — | labels now sit at the original's pen and clip like F1584/F1587/F1598; ship-name text and the evidence frames (`docs/evidence/labels/`) match the projected point and clipping. Remaining owner decisions: registrations (`AB-123`) vs the port's model name + serial (F703/F791), 3D hull text/decal scaling, and near-target suppression/overlap order/mission labels; `docs/notes/labels.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 629 `#[test]` functions total; 144 are `#[ignore]`
+  `cargo clippy -D warnings`. 632 `#[test]` functions total; 147 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
   **484 runnable synthetic tests** (485 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
