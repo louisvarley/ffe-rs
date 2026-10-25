@@ -11,7 +11,7 @@ the current experimental example is not that faithful renderer.
 > autopilot, and the galaxy map drawn the original's way (its dots match the
 > executed original pixel for pixel). Labels, 3D text, lines, curves, flat faces
 > and polygon spans use the original's rasterisers.
-> The **F12 model viewer** (cache v28) runs every imported ship, station and
+> The **F12 model viewer** (cache v29) runs every imported ship, station and
 > object program through the verified executor and draws its faces, textured
 > faces, complex polygons, lines, points, curves, text, labels and child models
 > in the original render order.
@@ -19,8 +19,9 @@ the current experimental example is not that faithful renderer.
 > original command for command; the rest are slots the original itself cannot run.
 > Still unfinished: curved surfaces (F1876) and therefore a planet in the flight
 > scene, the runtime upper palette, combat, missions, starport services, planet
-> surfaces and landing, local-star lighting, legacy save import, audio and
-> graphics packs. `dashboard/` tracks the whole port to completion.
+> surfaces and landing, local-star lighting, legacy save import, continuous
+> engine/station/wind beds and graphics packs. `dashboard/` tracks the whole port
+> to completion.
 > [CLAUDE.MD](CLAUDE.MD) records the owner's answers and current plan.
 
 ## Play the experimental example
@@ -35,10 +36,10 @@ The Windows executable is built in this checkout. From the repository root:
 
 **Easiest on Windows:** double-click `play.bat`. It builds the release game and
 tools, creates or updates `data.bin` from your files in `.\game` when it is
-missing or older than this build needs (currently cache v28), and launches the
+missing or older than this build needs (currently cache v29), and launches the
 game; on any error the window stays open with the message. Rebuilding by hand:
 `cargo build --release --locked -p ffe-rs -p ffe-tools`.
-The root directory must contain your locally generated **v28** `data.bin` (build command
+The root directory must contain your locally generated **v29** `data.bin` (build command
 below, or let `play.bat` make it). The game verifies it before opening a window.
 Without `--root`, it looks beside its own executable and then up to four parent
 folders, so `target\release\ffe-rs.exe` finds the checkout's `data.bin`. If
@@ -326,12 +327,13 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v28** imports every model that decodes (462 of 466 on floppy 1.02) with
+**Cache v29** imports every model that decodes (462 of 466 on floppy 1.02) with
 its descriptor fields for child models, the original texture descriptor table and
 fixed-colour map, the original lighting tables (default light, shade tables), the
 original ship statistics, the full original string table (219 entries: model
-and ship names plus the markings the text and label commands draw) and the three
-font models' per-character glyph programs the 3D text runs.
+and ship names plus the markings the text and label commands draw), the three
+font models' per-character glyph programs the 3D text runs and all 17 original
+HMP songs.
 `build-data` refuses an existing destination, so build to a new file,
 then replace your old `data.bin` with it:
 
@@ -344,7 +346,7 @@ The local cache has been generated on this checkout. It is ignored and must
 not be distributed. Unlike the reference smoke executable, the Rust importer
 does not need JJFFE sources, NASM, or execution of the original game.
 
-The versioned, deterministic ZIP now contains **1797 assets (cache v28)**:
+The versioned, deterministic ZIP now contains **1813 assets (cache v29)**:
 
 - 345 embedded indexed images, with original dimensions, signed drawing offsets,
   mask-zero flags, table/slot IDs and executable source offsets.
@@ -356,9 +358,9 @@ The versioned, deterministic ZIP now contains **1797 assets (cache v28)**:
   lighting tables (the default light, the shade table and the six star tables).
 - Six lossless indexed cabin PNGs, preserving their separate 8-bit palettes,
   and 23 lossless WAV effects.
-- `MUSIC/QQFRONT.HMP` byte-for-byte as the cached intro song (`base:music/qqfront`),
-  so the boot's F919 theme no longer depends on the runtime `MUSIC` folder. The
-  other 16 HMPs stay player-supplied runtime files.
+- All 17 original `MUSIC/*.HMP` songs byte-for-byte (`base:music/<name>`,
+  `music/<name>.hmp`), so every scene cue works without the runtime `MUSIC`
+  folder. See `docs/notes/music.md` for the index/context table.
 - The main original bitmap font: 116 records, each nine MSB-first row masks
   plus one proportional advance byte. No copied font data is compiled into Rust.
 - The vertex programs, drawing-command streams and normal blocks of **462 of the
@@ -383,12 +385,14 @@ V7 to V14 add model, texture, lighting, ship-statistics, string-table and glyph-
 except for v4 the format did not change again, so a rebuilt cache from the same
 files holds more models than an older one. V11 and v12 held the first 209 model
 strings (JJFFE's declared count); **v13 scans the executable's table to its real
-end (219)** so every text and label code can resolve. V28 adds the intro song's
-HMP payload; the other 16 songs remain runtime files.
+end (219)** so every text and label code can resolve. V28 added the intro song's
+HMP payload; **v29 caches all 17 songs**, so playback no longer needs the runtime
+`MUSIC` folder. V28 caches still load: only song 0 is supplied from the cache and
+the other songs fall back to `MUSIC/`.
 
 This is **not a complete game cache**: the four model slots that do not decode,
-the gameplay tables, additional fonts and text control anchors, the journal,
-the other 16 HMP songs and optional CD media remain unconverted. Scope is explicit in
+the gameplay tables, additional fonts and text control anchors, the journal and
+optional CD media remain unconverted. Scope is explicit in
 the manifest (`complete_game_assets: false`). Automatic import/freshness checking/rebuild,
 the complete upscale export and replacement-pack loading are still planned.
 All build/inspection failures exit 2; existing outputs are never overwritten.

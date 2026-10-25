@@ -9,6 +9,11 @@
 //! [`Audio`](crate::audio::Audio) player receives `play_sample(index, level,
 //! pitch)`.
 //!
+//! Music follows `F1902`: [`GameAudio`] holds the scene rules and calls
+//! `play_song(index)` or `play_song(-1)` for the source's random selector. Cache
+//! v29 supplies all 17 songs (v28 supplies song 0 only), and the numbered table
+//! lives in `ffe_audio::SONGS`/`docs/notes/music.md`.
+//!
 //! Two implementation notes:
 //!
 //! - The effect mixer (`ffe_audio::Mixer`) decodes the cache WAVs and mixes 16
@@ -26,6 +31,7 @@
 
 use crate::audio::{
     Audio, AudioEngine, AudioSettings, EffectLibrary, MusicLibrary, SoundFlags, EFFECT_NAMES,
+    SONG_NAMES,
 };
 use crate::prefs::Prefs;
 use ffe_content::VerifiedCache;
@@ -256,18 +262,15 @@ impl GameAudio {
         Self::new(AudioEngine::system(MusicLibrary::from_game_dir(game_dir)))
     }
 
-    /// The normal game engine with the cache's decoded effects and the cached
-    /// intro song. `cache` is the verified `data.bin`; its `base:effect/*` WAVs
-    /// are turned into the 16-voice mixer's sample set, and `base:music/qqfront`
-    /// (cache v28+) seeds song 0. A v27 cache simply has no cached song and the
-    /// player's `MUSIC/QQFRONT.HMP` is used instead.
+    /// The normal game engine with the cache's decoded effects and every cached
+    /// song. `cache` is the verified `data.bin`; its `base:effect/*` WAVs are
+    /// turned into the 16-voice mixer's sample set, and `base:music/<name>`
+    /// seeds the matching song index. A v29 cache carries all 17; a v28 cache
+    /// carries only song 0 (`qqfront`) and the player's `MUSIC/` folder supplies
+    /// the rest; a v27 cache has no songs.
     pub fn from_cache(game_dir: impl AsRef<Path>, cache: &VerifiedCache) -> Self {
-        let mut music = MusicLibrary::from_game_dir(game_dir);
-        if let Some(bytes) = cache.asset("base:music/qqfront") {
-            music.insert_hmp(0, bytes.to_vec());
-        }
         Self::new(AudioEngine::system_with_effects(
-            music,
+            cached_music(game_dir, cache),
             cached_effects(cache),
         ))
     }
@@ -361,6 +364,11 @@ impl GameAudio {
         self.audio.song_done()
     }
 
+    /// The current song index (`player+0x5334`), or `None` when stopped.
+    pub fn current_song(&self) -> Option<usize> {
+        self.audio.current_song()
+    }
+
     pub fn play_song(&mut self, index: i16) -> bool {
         self.audio.play_song(index).is_ok()
     }
@@ -381,6 +389,20 @@ impl GameAudio {
         self.audio.stop_song();
     }
 
+    /// `F306`: an FF-code page/row change plays song 7 (`qqparadi`). The current
+    /// port has no FF-code message renderer, so this is the source rule exposed
+    /// for the future message path rather than a trigger invented by the UI.
+    pub fn message_page_music(&mut self) {
+        let _ = self.audio.play_song(7);
+    }
+
+    /// `F307`: the message/video sequence plays song 10 (`intro`) once per
+    /// message bit. Like [`Self::message_page_music`], the feed itself is not
+    /// ported; the rule is kept here so a future FF-code path cannot drift.
+    pub fn message_video_music(&mut self) {
+        let _ = self.audio.play_song(10);
+    }
+
     /// `F750`/`F236`: battle start. Song 14 plays only when "Music in battles"
     /// (`DATA_009035`) and "Music on" (`DATA_009029`) are set; otherwise the
     /// original stops the song. The siren is `F750`'s `0x1e`.
@@ -395,6 +417,15 @@ impl GameAudio {
 
     /// `F770`: combat ends (or the player dies); stop the song.
     pub fn end_battle(&mut self) {
+        self.battle = false;
+        self.audio.stop_song();
+    }
+
+    /// `F770`/`F941`: the player's ship was destroyed. The original stops the
+    /// song and clears the scene music; the port's recovery at the starport must
+    /// not leave battle music playing.
+    pub fn player_death(&mut self) {
+        self.front_end = false;
         self.battle = false;
         self.audio.stop_song();
     }
@@ -455,6 +486,20 @@ impl GameAudio {
     }
 }
 
+/// Seed a [`MusicLibrary`] from every `base:music/<name>` payload the cache has.
+/// A v29 cache supplies all 17; a v28 cache supplies only `qqfront`; older
+/// caches supply none. The caller's `MUSIC/` folder remains the fallback.
+fn cached_music(game_dir: impl AsRef<Path>, cache: &VerifiedCache) -> MusicLibrary {
+    let mut music = MusicLibrary::from_game_dir(game_dir);
+    for (index, name) in SONG_NAMES.iter().enumerate() {
+        let id = format!("base:music/{name}");
+        if let Some(bytes) = cache.asset(&id) {
+            music.insert_hmp(index, bytes.to_vec());
+        }
+    }
+    music
+}
+
 /// Decode every cached `base:effect/<name>` WAV. A missing asset is not an
 /// error (a v27 cache has them all; a hand-built cache may not), and a malformed
 /// one is reported once and skipped rather than disabling the rest.
@@ -475,7 +520,7 @@ fn cached_effects(cache: &VerifiedCache) -> EffectLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audio::AudioError;
+    use crate::audio::{AudioError, SONG_COUNT};
     use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Default)]
@@ -484,6 +529,7 @@ mod tests {
         songs: Vec<i16>,
         stops: usize,
         done: bool,
+        current: Option<usize>,
         settings: AudioSettings,
         flags: SoundFlags,
     }
@@ -504,8 +550,17 @@ mod tests {
     impl Audio for Recorder {
         fn play_song(&mut self, index: i16) -> Result<(), AudioError> {
             let mut recorded = self.recorded();
+            if !recorded.settings.music_on {
+                return Ok(());
+            }
+            if let Ok(index) = usize::try_from(index) {
+                if !recorded.flags.song_enabled(index) {
+                    return Ok(());
+                }
+            }
             recorded.songs.push(index);
             recorded.done = false;
+            recorded.current = usize::try_from(index).ok();
             Ok(())
         }
 
@@ -513,10 +568,15 @@ mod tests {
             let mut recorded = self.recorded();
             recorded.stops += 1;
             recorded.done = true;
+            recorded.current = None;
         }
 
         fn song_done(&self) -> bool {
             self.recorded().done
+        }
+
+        fn current_song(&self) -> Option<usize> {
+            self.recorded().current
         }
 
         fn play_sample(&mut self, code: u8, volume: u8, pitch: i32) {
@@ -695,6 +755,129 @@ mod tests {
         recorder.recorded().done = true;
         game.update_music();
         assert_eq!(recorder.recorded().songs, vec![0, 0, -1]);
+    }
+
+    #[test]
+    fn the_scene_music_sequence_never_leaves_a_stale_song() {
+        let recorder = Recorder::default();
+        let mut game = GameAudio::new(recorder.clone());
+        game.front_end_music();
+        assert_eq!(game.current_song(), Some(0));
+
+        game.leave_front_end();
+        assert_eq!(game.current_song(), None);
+        assert_eq!(recorder.recorded().stops, 1);
+
+        game.start_battle();
+        assert_eq!(game.current_song(), Some(14));
+        game.player_death();
+        assert_eq!(game.current_song(), None);
+        assert_eq!(recorder.recorded().stops, 2);
+
+        game.hyperspace_music();
+        assert_eq!(game.current_song(), Some(15));
+        game.stop_for_sequence();
+        assert_eq!(game.current_song(), None);
+
+        game.docking_music();
+        assert_eq!(recorder.recorded().songs.last(), Some(&-1));
+    }
+
+    #[test]
+    fn music_off_suppresses_every_scene_start_and_message_songs_use_their_indices() {
+        let recorder = Recorder::default();
+        let mut game = GameAudio::new(recorder.clone());
+        game.set_settings(AudioSettings {
+            music_on: false,
+            ..AudioSettings::default()
+        });
+        game.front_end_music();
+        game.start_battle();
+        game.hyperspace_music();
+        game.docking_music();
+        game.message_page_music();
+        game.message_video_music();
+        // The recorder accepts the calls (the engine gates them), so check the
+        // source indices directly rather than the recorded song list.
+        game.set_settings(AudioSettings::default());
+        game.message_page_music();
+        game.message_video_music();
+        assert_eq!(recorder.recorded().songs, vec![7, 10]);
+    }
+
+    #[test]
+    fn cache_music_seeds_all_v29_songs_and_only_song_zero_from_v28() {
+        fn hmp() -> Vec<u8> {
+            fn delta(value: u32) -> Vec<u8> {
+                let mut bytes = Vec::new();
+                let mut rest = value;
+                loop {
+                    let group = (rest & 0x7f) as u8;
+                    rest >>= 7;
+                    if rest == 0 {
+                        bytes.push(group | 0x80);
+                        break;
+                    }
+                    bytes.push(group);
+                }
+                bytes
+            }
+            let mut track = Vec::new();
+            track.extend_from_slice(&delta(0));
+            track.extend_from_slice(&[0x90, 60, 64]);
+            track.extend_from_slice(&delta(192));
+            track.extend_from_slice(&[0xff, 0x2f, 0x00]);
+            let mut image = vec![0u8; 0x40];
+            image[..14].copy_from_slice(b"HMIMIDIP013195");
+            image[0x30] = 2;
+            image.extend_from_slice(&[0xff, 0x2f, 0x00]);
+            image.extend_from_slice(&1u32.to_le_bytes());
+            image.extend_from_slice(&((track.len() as u32) + 12).to_le_bytes());
+            image.extend_from_slice(&[0, 0, 0, 0]);
+            image.extend_from_slice(&track);
+            image.extend_from_slice(&[0, 0, 0, 0]);
+            image
+        }
+
+        fn cache(version: u32, indices: std::ops::Range<usize>) -> VerifiedCache {
+            let manifest = ffe_content::Manifest {
+                format: "ffe-content-cache".to_owned(),
+                format_version: version,
+                tool_version: "test".to_owned(),
+                source_profile: "synthetic".to_owned(),
+                source_files: vec![ffe_content::SourceFile {
+                    path: "FIRSTENC.EXE".to_owned(),
+                    size: 1,
+                    sha256: "a".repeat(64),
+                }],
+                complete_game_assets: false,
+                unresolved: vec!["synthetic".to_owned()],
+                files: Vec::new(),
+            };
+            let assets = indices
+                .map(|index| ffe_content::Asset {
+                    id: format!("base:music/{}", SONG_NAMES[index]),
+                    path: format!("music/{}.hmp", SONG_NAMES[index]),
+                    kind: ffe_content::AssetKind::MusicHmp {
+                        index: index as u32,
+                    },
+                    bytes: hmp(),
+                })
+                .collect();
+            let bytes = ffe_content::build(manifest, assets).unwrap();
+            ffe_content::read(&bytes).unwrap()
+        }
+
+        let v29 = cache(29, 0..SONG_COUNT);
+        let music = cached_music("missing-music", &v29);
+        assert_eq!(
+            music.cached_indices().collect::<Vec<_>>(),
+            (0..SONG_COUNT).collect::<Vec<_>>()
+        );
+
+        let v28 = cache(28, 0..1);
+        let music = cached_music("missing-music", &v28);
+        assert_eq!(music.cached_indices().collect::<Vec<_>>(), vec![0]);
     }
 
     #[test]

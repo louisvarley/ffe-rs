@@ -456,6 +456,8 @@ fn run() -> Result<(), String> {
     let headless = options.capture.is_some()
         || options.capture_planet.is_some()
         || options.capture_traffic.is_some()
+        || options.capture_prefs.is_some()
+        || options.capture_intro.is_some()
         || options.smoke_frames.is_some();
     let mut sound = if headless {
         GameAudio::silent(&options.root)
@@ -2562,6 +2564,9 @@ fn run() -> Result<(), String> {
                                     )
                                 }
                                 ffe_core::laser::Damage::Destroyed => {
+                                    // F770/F941: the player's death stops the
+                                    // song before the sandbox recovers the ship.
+                                    sound.player_death();
                                     playership_destroyed(&mut state, &mut original, nav, mass);
                                     format!("{name} destroys your ship. Recovered at the starport.")
                                 }

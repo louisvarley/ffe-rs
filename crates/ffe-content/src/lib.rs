@@ -71,10 +71,14 @@ pub enum AssetKind {
         height: u32,
     },
     EffectWav,
-    /// The intro song `MUSIC/QQFRONT.HMP`, stored losslessly (v28). The other
-    /// 16 songs stay player-supplied runtime files; the intro needs its theme
-    /// as soon as the boot loop starts.
-    MusicHmp,
+    /// One original `MUSIC/<name>.HMP`, stored losslessly, with its song-table
+    /// index (v28 added song 0, `QQFRONT`; v29 adds the other sixteen). The
+    /// payload is byte-for-byte the player's file, never a converted `.mid`.
+    MusicHmp {
+        /// `ppSoundSongNames` index, 0..=16.
+        #[serde(default)]
+        index: u32,
+    },
     /// The original texture descriptor table `DATA_007811` (v8).
     TextureDescriptors {
         count: u32,
@@ -286,7 +290,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=28) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=29) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -361,8 +365,16 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         {
             return Err("The intro credits and character widths require cache v27.".to_owned());
         }
-        if manifest.format_version < 28 && matches!(record.asset, AssetKind::MusicHmp) {
+        if manifest.format_version < 28 && matches!(record.asset, AssetKind::MusicHmp { .. }) {
             return Err("The intro song asset requires cache v28.".to_owned());
+        }
+        if manifest.format_version < 29
+            && matches!(record.asset, AssetKind::MusicHmp { index } if index != 0)
+        {
+            return Err("The other sixteen songs require cache v29.".to_owned());
+        }
+        if matches!(record.asset, AssetKind::MusicHmp { index } if index >= 17) {
+            return Err("A music asset index must be in 0..=16.".to_owned());
         }
         if manifest.format_version < 24
             && matches!(
@@ -727,10 +739,15 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
                 return Err("invalid effect WAV descriptor/signature".to_owned());
             }
         }
-        AssetKind::MusicHmp => {
-            if bytes.len() < 0x40 || !bytes.starts_with(b"HMIMIDIP") {
-                return Err("invalid intro HMP signature".to_owned());
+        AssetKind::MusicHmp { index } => {
+            if *index >= 17 {
+                return Err("music asset index is out of range".to_owned());
             }
+            if bytes.len() < 0x40 || !bytes.starts_with(b"HMIMIDIP") {
+                return Err("invalid HMP signature".to_owned());
+            }
+            ffe_core::hmp::HmpSong::parse(bytes)
+                .map_err(|error| format!("invalid HMP song {index}: {error}"))?;
         }
     }
     Ok(())

@@ -74,6 +74,14 @@ pub trait Audio {
     /// True when no song is playing (`F1904`).
     fn song_done(&self) -> bool;
 
+    /// The current `player+0x5334` song index, for diagnostics and tests. The
+    /// original stores `-1` for none; the port uses `None` for a non-playing
+    /// player. The default `None` keeps lightweight test double implementations
+    /// source-compatible.
+    fn current_song(&self) -> Option<usize> {
+        None
+    }
+
     /// Play an effect by its original sample-table index. The code is the index
     /// from `w32sound.cpp` (`0x14` = bip, `0x1e` = siren, ...), not a file name.
     fn play_sample(&mut self, code: u8, volume: u8, pitch: i32);
@@ -270,6 +278,10 @@ impl Audio for AudioEngine {
 
     fn song_done(&self) -> bool {
         self.player.song_done()
+    }
+
+    fn current_song(&self) -> Option<usize> {
+        self.player.current_song()
     }
 
     fn play_sample(&mut self, code: u8, volume: u8, pitch: i32) {

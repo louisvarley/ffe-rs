@@ -67,7 +67,7 @@ fn model_command_payloads_require_v4_and_reject_invalid_boundaries_and_vertices(
         read(&bytes).unwrap().asset("base:model-commands/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 29] {
+    for version in [1, 2, 3, 30] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
 
@@ -104,7 +104,7 @@ fn normal_payloads_require_v5_and_validate_counts_and_anchor_bounds() {
         read(&bytes).unwrap().asset("base:model-normals/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 3, 4, 29] {
+    for version in [1, 2, 3, 4, 30] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for count in [0, 1, 3, 6, 258, u32::MAX] {
@@ -135,7 +135,7 @@ fn model_vertex_programs_require_v3_and_validate_before_exposing_payloads() {
         read(&bytes).unwrap().asset("base:model-vertices/074"),
         Some(good.as_slice())
     );
-    for version in [1, 2, 29] {
+    for version in [1, 2, 30] {
         assert!(read(&change_manifest(&bytes, |m| m["format_version"] = version.into())).is_err());
     }
     for (program, count, scale, index) in [
@@ -223,7 +223,7 @@ fn stored_cache_is_deterministic_sorted_and_loads_by_stable_id() {
 fn malformed_manifests_cannot_claim_complete_content_or_escape_paths() {
     let bytes = build(manifest(), assets()).unwrap();
     for (key, value) in [
-        ("format_version", serde_json::json!(29)),
+        ("format_version", serde_json::json!(30)),
         ("format", serde_json::json!("other")),
         ("complete_game_assets", serde_json::json!(true)),
         ("unresolved", serde_json::json!([])),
@@ -551,19 +551,85 @@ fn pad_tables_require_v26_and_the_five_tables_plus_the_overrun_window() {
 }
 
 #[test]
-fn intro_song_requires_v28_and_an_hmp_signature() {
-    let song = |bytes: Vec<u8>| Asset {
-        id: "base:music/qqfront".to_owned(),
-        path: "music/qqfront.hmp".to_owned(),
-        kind: AssetKind::MusicHmp,
+fn music_requires_v28_for_the_intro_and_v29_for_the_rest() {
+    let song = |index: u32, bytes: Vec<u8>| Asset {
+        id: format!("base:music/song{index}"),
+        path: format!("music/song{index}.hmp"),
+        kind: AssetKind::MusicHmp { index },
         bytes,
     };
-    let mut hmp = vec![0u8; 0x40];
-    hmp[..8].copy_from_slice(b"HMIMIDIP");
+    let hmp = synthetic_hmp();
     let mut m = manifest();
     m.format_version = 27;
-    assert!(build(m.clone(), vec![song(hmp.clone())]).is_err());
+    assert!(build(m.clone(), vec![song(0, hmp.clone())]).is_err());
     m.format_version = 28;
-    assert!(build(m.clone(), vec![song(hmp)]).is_ok());
-    assert!(build(m, vec![song(vec![0; 0x40])]).is_err());
+    assert!(build(m.clone(), vec![song(0, hmp.clone())]).is_ok());
+    // v28 only carries the intro; the other indices need v29.
+    assert!(build(m.clone(), vec![song(5, hmp.clone())]).is_err());
+    m.format_version = 29;
+    assert!(build(m.clone(), vec![song(5, hmp.clone())]).is_ok());
+    assert!(build(m.clone(), vec![song(17, hmp)]).is_err());
+    assert!(build(m, vec![song(0, vec![0; 0x40])]).is_err());
+}
+
+#[test]
+fn a_v28_manifest_with_the_unit_music_kind_still_loads() {
+    let mut m = manifest();
+    m.format_version = 28;
+    let bytes = build(
+        m,
+        vec![Asset {
+            id: "base:music/qqfront".to_owned(),
+            path: "music/qqfront.hmp".to_owned(),
+            kind: AssetKind::MusicHmp { index: 0 },
+            bytes: synthetic_hmp(),
+        }],
+    )
+    .unwrap();
+    let legacy = change_manifest(&bytes, |manifest| {
+        manifest["files"][0]["asset"] = serde_json::json!({ "kind": "music_hmp" });
+    });
+    let cache = read(&legacy).expect("v28 unit music asset must stay loadable");
+    assert_eq!(
+        cache.asset("base:music/qqfront"),
+        Some(synthetic_hmp().as_slice())
+    );
+}
+
+/// A minimal, structurally valid HMP: header, one chunk and a note event.
+fn synthetic_hmp() -> Vec<u8> {
+    fn delta(value: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut rest = value;
+        loop {
+            let group = (rest & 0x7f) as u8;
+            rest >>= 7;
+            if rest == 0 {
+                bytes.push(group | 0x80);
+                break;
+            }
+            bytes.push(group);
+        }
+        bytes
+    }
+
+    let mut track = Vec::new();
+    track.extend_from_slice(&delta(0));
+    track.extend_from_slice(&[0x90, 64, 90]);
+    track.extend_from_slice(&delta(192));
+    track.extend_from_slice(&[0x80, 64, 0]);
+    track.extend_from_slice(&delta(0));
+    track.extend_from_slice(&[0xff, 0x2f, 0x00]);
+
+    let mut image = vec![0u8; 0x40];
+    image[..14].copy_from_slice(b"HMIMIDIP013195");
+    image[0x30] = 2;
+    image[0x3c..0x40].copy_from_slice(&2u32.to_le_bytes());
+    image.extend_from_slice(&[0xff, 0x2f, 0x00]);
+    image.extend_from_slice(&1u32.to_le_bytes());
+    image.extend_from_slice(&((track.len() as u32) + 12).to_le_bytes());
+    image.extend_from_slice(&[0, 0, 0, 0]);
+    image.extend_from_slice(&track);
+    image.extend_from_slice(&[0, 0, 0, 0]);
+    image
 }

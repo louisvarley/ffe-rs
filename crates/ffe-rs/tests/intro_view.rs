@@ -26,7 +26,7 @@ fn non_black(screen: &Screen) -> usize {
 /// port has no second (substituted) logo and no label path for it. At animation
 /// 64 the letters are the fixed light grey `(192, 192, 192)`.
 #[test]
-#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v29 data.bin"]
 fn the_game_tek_logo_is_drawn_once_with_its_letters() {
     use ffe_rs::model_viewer::{AnimationInputs, Shape};
     let cache = cache();
@@ -88,7 +88,7 @@ fn the_game_tek_logo_is_drawn_once_with_its_letters() {
 /// viewer must collect child surfaces, and the palette must be stable after a
 /// long intro sequence (the cube is cleared before each frame's registration).
 #[test]
-#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v29 data.bin"]
 fn the_intro_planet_is_drawn_and_the_palette_is_stable() {
     let cache = cache();
     let mut screen = Screen::new(&cache).unwrap();

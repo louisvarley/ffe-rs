@@ -18,7 +18,10 @@ pub mod sink;
 mod waveout;
 
 pub use audio::{Audio, AudioEngine, AudioError};
-pub use library::{MusicLibrary, SONG_NAMES, SONG_TITLES};
+pub use library::{
+    random_pool, song_for_trigger, MusicLibrary, SongInfo, SongTrigger, SONGS, SONG_NAMES,
+    SONG_TITLES,
+};
 pub use mixer::{
     decode_wav, level_centibels, level_gain, sample_desc, EffectLibrary, EffectSample, Mixer,
     SampleDesc, WavError, EFFECT_NAMES, SAMPLE_RATE, SAMPLE_TABLE, VOICE_COUNT,

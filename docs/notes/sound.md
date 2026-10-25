@@ -4,7 +4,7 @@ Status: reference note for the `sound` stream. It documents the original
 DOS/JJFFE sound effects and music, the HMP format, the player in
 `ffe-core`/`ffe-audio`, the 16-voice effect mixer, and the exact interface the
 ESC/preferences page uses. The 23 cached effect WAVs are now decoded and mixed;
-the intro's song 0 (`QQFRONT`) starts with F919 and loops until the start key.
+all 17 original HMP songs are cached (v29) and the scene calls play them.
 
 **Cue wiring update:** `crates/ffe-rs/src/sound.rs` posts the original's
 effect cues and scene music from the game events, and the ESC Sound Effects
@@ -266,6 +266,16 @@ Only indices 0, 7, 10, 14 and 15 have explicit scene starts in `ffe.asm`. The
 other Quality Quartet tracks are reached through the random selector (or through
 a save/song-enable combination); the code does not attach them to individual
 scene names, so their titles describe the music rather than a hard-coded screen.
+Index 16 is explicit-only: the random selector's `FUNC_000922(0x10)` range is
+`0..=15`.
+
+The port's runtime table is `ffe_audio::SONGS`: each row carries the index,
+lower-case stem, title, direct `SongTrigger`s and random-pool membership.
+`docs/notes/music.md` has the full songs → indices → contexts table and the
+cache asset IDs. The direct triggers are `F919` front end (0), `F306` message
+page (7), `F307` message/video (10), `F750`/`F236` battle (14) and `F656`
+hyperspace (15); docking/launch (`F1094`) and continuous music (`F232`) choose a
+random enabled song, never 16.
 
 The `QQFRONT`/`QQSUSPEN` discrepancies: every other file's parsed duration is
 within ~1% of the header value. `QQFRONT` is 0.53x and `QQSUSPEN` is 1.26x.
@@ -626,7 +636,7 @@ use ffe_audio::{Audio, AudioEngine, AudioError, MusicLibrary};
 let library = MusicLibrary::from_game_dir(game_dir); // <game>/MUSIC
 let mut audio: Box<dyn Audio> = Box::new(AudioEngine::system(library));
 // In the game use `GameAudio::from_cache(&game_dir, &cache)`: it also opens the
-// wave device and installs the cache's `base:effect/*` WAVs and intro song.
+// wave device and installs the cache's `base:effect/*` WAVs and all cached songs.
 // Or: let mut audio = crate::audio::open_game_audio(game_dir);
 audio.set_settings(settings);
 audio.set_sound_flags(flags);
@@ -727,11 +737,15 @@ New code:
 
 - `crates/ffe-core/src/hmp.rs`: HMP parser, absolute-tick events, duration, SMF
   export, errors and unit tests.
-- `crates/ffe-audio`: `MusicLibrary` (17-name table, runtime `MUSIC/` load and a
-  cache HMP override), `MusicPlayer` (tick-driven MIDI scheduler, once/loop, CC7
-  scaling, all-notes-off), `AudioEngine`/`Audio` trait, WinMM MIDI sink,
-  `mixer` (WAV decode, sample table, 16 voices, centibel curve), WinMM `waveOut`
-  sink, recording/null sinks, settings/flags, and a runnable `examples/play.rs`.
+- `crates/ffe-audio`: `MusicLibrary` (17-song `SONGS` table, runtime `MUSIC/`
+  load, cache `base:music/*` override and numbered `song()` access),
+  `MusicPlayer` (tick-driven MIDI scheduler, once/loop, CC7 scaling,
+  all-notes-off), `AudioEngine`/`Audio` trait, WinMM MIDI sink, `mixer` (WAV
+  decode, sample table, 16 voices, centibel curve), WinMM `waveOut` sink,
+  recording/null sinks, settings/flags, and a runnable `examples/play.rs`.
+- `crates/ffe-rs/src/sound.rs` `GameAudio`: the scene director for F919, F750,
+  F770, F656, F1094, F1048/F1091, F232, F306/F307 and player death; cache v29
+  seeds all 17 songs and v28 falls back to `MUSIC/` for 1..16.
 - Workspace member `crates/ffe-audio`; no new external runtime dependencies
   (`winmm` is a system library; `serde` was already in the workspace).
 
@@ -739,10 +753,12 @@ Evidence (run on the reference checkout with the player's `MUSIC` folder):
 
 ```
 cargo test -p ffe-audio -p ffe-core
-  19 ffe-audio unit tests passed (mixer, WAV, voices, settings, player)
+  22 ffe-audio unit tests passed (song table, mixer, WAV, voices, settings, player)
   3 ffe-core hmp tests passed
   1 player_smoke test passed (null backend)
-  FFE_MUSIC_DIR=<game>/MUSIC: all 17 HMPs parsed; 2 asset tests passed
+  FFE_MUSIC_DIR=<game>/MUSIC: all 17 HMPs parsed from disk and from cache
+cargo test -p ffe-rs --test music_sequence
+  3 passed (intro → flight → combat → hyperspace/dock log, mute/volume, 17 loads)
 cargo test -p ffe-rs --test sound_mixer
   3 passed (real PCM mixed, mute stops voices, 50% volume curve)
 ```
@@ -771,11 +787,11 @@ Remaining work, in order:
    licensing decision (CLAUDE.MD §5).
 3. **`.mid` override.** If a user has `MUSIC/*.mid`, JJFFE prefers it. Add a
    small SMF reader and route it through the same `MidiSink`.
-4. **Cache asset decision.** V28 caches only `MUSIC/QQFRONT.HMP`
-   (`base:music/qqfront`, byte-for-byte) because the intro needs it at boot; the
-   other 16 stay player-supplied runtime files. Extending the same `music_hmp`
-   kind to all 17 would remove the runtime folder dependency but raise the cache
-   to 1813 assets. Do not commit the HMPs; they are copyrighted game data.
+4. **Cache assets.** V29 caches all 17 `MUSIC/*.HMP` files byte-for-byte
+   (`base:music/<name>`, with the song index on the `music_hmp` asset) and raises
+   the cache to 1813 assets. A v28 cache still loads: song 0 comes from the cache
+   and songs 1..16 fall back to the player's `MUSIC/` folder. Do not commit the
+   HMPs; they are copyrighted game data.
 5. **Timbre.** The system synth is not the HMI patch set. Notes/timing/volume
    are faithful; instrument sound is not. Record the synth/SoundFont identity in
    any future cache provenance.

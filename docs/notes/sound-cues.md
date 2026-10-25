@@ -4,10 +4,11 @@ Status: the game posts the original's effect cues and scene music, and the
 16-voice mixer now plays them. The cue table, the preference page switches, the
 music rules and the event sites are wired and tested. `AudioEngine`'s device
 engine owns a WinMM `waveOut` mixer fed by the cache's `base:effect/*` WAVs; the
-recording/headless sinks still see the original sample-table calls. Song 0
-(`QQFRONT`) starts with the intro per F919 and is cached in v28
-(`base:music/qqfront`). Captures and the smoke test construct a silent engine,
-so no test or capture path opens a device.
+recording/headless sinks still see the original sample-table calls. All 17 songs
+are cached in v29 (`base:music/<name>`); a v28 cache supplies song 0 and the
+player's `MUSIC/` folder supplies the rest. Song 0 (`QQFRONT`) starts with the
+intro per F919. Captures and the smoke test construct a silent engine, so no
+test or capture path opens a device.
 
 This note is the implementation record for `crates/ffe-rs/src/sound.rs` and the
 call sites in `crates/ffe-rs/src/main.rs`. The source of truth is the DOS
@@ -98,8 +99,10 @@ decides **when** to call it.
 | Scene | Original | Port call |
 |---|---|---|
 | Front end | `F919` 68420/68429 play song 0, replay when `F1904` says done | `front_end_music()` + `tick` replay in `run_intro`; `leave_front_end()` on the start key |
+| Message page | `F306` 24542 plays song 7 | `message_page_music()` (source rule; no FF-code renderer yet) |
+| Message/video | `F307` 24622 plays song 10 | `message_video_music()` (source rule; no FF-code renderer yet) |
 | Battle | `F750` 49585 / `F236` 18909 play song 14 if `DATA_009035 & DATA_009029`; otherwise stop (`49589`/`18913`) | `start_battle()` on the first ship hit |
-| Combat end / death | `F770` 50460 stops | `end_battle()` when the last pirate dies |
+| Combat end / death | `F770` 50460 stops; `F941` also stops on the player's destruction | `end_battle()` when the last pirate dies; `player_death()` when the player's ship is destroyed |
 | Hyperspace | `F656` 44749 plays song 15 if `DATA_009033` | `hyperspace_music()` after a successful jump |
 | Docking/launch end | `F1094` 80278 plays `-2` (random) if `player+0x3f5f` | `docking_music()` on `Traffic::Docked`/`LaunchDone` and a surface landing |
 | Docking/launch transition | `F1048` 77305, `F1091` 80056 stop | `stop_for_sequence()` on `begin_launch`/`begin_docking` |
@@ -162,9 +165,16 @@ Automated:
   the waveform: a cue produces its decoded PCM (not just a record), the mute
   stops active voices and suppresses new ones, and 50% effects volume produces
   `level_gain(31)` of full scale.
-- `crates/ffe-audio` unit tests: WAV decode/validation, one-shot/loop counts,
-  the `0x0f`/`0x10` repeat rules, the laser1 steal, and the exact centibel
-  values. `crates/ffe-content` tests cover the v28 `music_hmp` asset.
+- `crates/ffe-rs/tests/music_sequence.rs`: the real `AudioEngine` with a synthetic
+  17-song cache library and a recording MIDI sink, logging intro → replay →
+  leave → continuous flight → launch stop → combat → combat end → hyperspace →
+  dock → player death, plus the mute and 50% volume cases.
+- `crates/ffe-audio` unit tests: the song table/trigger mapping, WAV
+  decode/validation, one-shot/loop counts, the `0x0f`/`0x10` repeat rules, the
+  laser1 steal, and the exact centibel values. `crates/ffe-content` tests cover
+  the v28/v29 `music_hmp` assets.
+- `crates/ffe-audio/tests/hmp_assets.rs` with `FFE_MUSIC_DIR`: parses every one
+  of the 17 files both from disk and from an in-memory cache payload.
 - `crates/ffe-rs/tests/prefs.rs` and `src/prefs.rs`: the Sound page rows apply
   and toggle.
 
@@ -172,7 +182,7 @@ Manual check with a device (Windows):
 
 1. Put a `data.bin` built from a game folder and its `MUSIC/` under one root
    (`ffe-tools build-data --game <game> --out data.bin` writes `data.bin` there;
-   the 17 HMPs stay in `<game>/MUSIC`, although v28 also caches QQFRONT).
+   a v29 cache already contains all 17 HMPs, so the runtime folder is optional).
 2. `cargo run -p ffe-rs -- --root <game>`.
 3. The intro should play song 0 through the system MIDI synth and restart it
    after its 117.5 s event timeline ends; the start key stops it.
@@ -208,7 +218,7 @@ device and their output is unchanged.
    mapping/tests but no game event yet: the port has no ECM control, missile
    firing or atmosphere state. Player death (`F770`, `F941`) is not modelled;
    the only current `F770`-equivalent is the last pirate's death.
-3. **`.mid` override.** The port reads `MUSIC/*.HMP` (or the v28 cached song 0).
+3. **`.mid` override.** The port reads `MUSIC/*.HMP` (or the cached v29 song).
    JJFFE prefers a `.mid` next to the HMP; that is still the documented
    difference.
 4. **Volume UI.** The two port-extension volumes are API-only; the original
@@ -216,9 +226,9 @@ device and their output is unchanged.
 5. **Positional audio.** `F1759` exists but is not called by the DOS game. The
    mixer is mono and has no pan/distance attenuation; add it only if a caller
    needs it.
-6. **Other 16 songs in the cache.** Only QQFRONT is cached. The runtime `MUSIC/`
-   path still supplies the rest; caching all 17 would raise v28 to 1813 assets
-   and remove the folder dependency.
+6. **All songs in the cache.** V29 caches all 17 HMPs byte-for-byte and raises
+   v29 to 1813 assets. V28 caches remain loadable and use `MUSIC/` for songs
+   1..16.
 
 No dashboard, `docs/PORT_LOG.md`, `docs/STATUS.md` or
 `docs/notes/agent-streams.md` edits were made by this stream.
