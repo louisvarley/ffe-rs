@@ -220,6 +220,13 @@ clears to `#0c0c4c` and `space-black` to `#000000`. `landed-starport` changes
   collected from the child executions. The one failing descendant (456 -> 321,
   a mode-6 call whose basis is stale stack in the original) is reported and
   skipped without discarding the scene.
+- **The atmosphere ring is a palette texture.** F1879's F1805 ring quad
+  (bitmap `0x43` and its seven slot colours) used to be a two-colour Gouraud
+  stand-in; the software fill invented 268 RGB values that no palette entry
+  held (330 distinct colours in the `0x181534` view). It now takes the
+  F1805/F1647 textured path through the frame's registered colours, giving 71
+  distinct colours, the same as the executed original's 71
+  (`docs/evidence/visuals/intro-colour-stats.txt`).
 - **The non-default space colours** remain the owner's EXP-013 interpolation
   from the captured `#0c0c4c`; the runtime build is not used to derive the
   preference's four intermediate values.

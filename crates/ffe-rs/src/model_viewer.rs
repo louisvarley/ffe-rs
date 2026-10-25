@@ -77,8 +77,12 @@ pub struct Textured {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub shapes: Vec<Shape>,
+    /// The F1777 depth key of each shape, aligned with [`Self::shapes`], in the
+    /// original's far-to-near order. Curved-surface entries (F1840/F1841) are
+    /// merged into this order, so a ship draws over a planet it is in front of.
+    pub keys: Vec<u32>,
     /// Primitives the viewer does not draw yet: labels whose string is missing
-    /// from the cache, and every curved surface (F1876 is not ported).
+    /// from the cache, and surfaces whose bitmap is absent from it.
     pub skipped: usize,
     /// Opcode 10 text records the executor ran but the viewer does not draw yet
     /// (the glyph programs are not imported or executed).
@@ -171,6 +175,8 @@ struct SurfaceBatch {
 /// One textured surface entry before palette resolution: its screen points, the
 /// F1620 bitmap dword, and the slot table's raw F1326 colour words.
 struct TerrainTexture {
+    /// F1777 key of the queue entry's header (the group's key for ring entries).
+    key: u32,
     points: Vec<(i32, i32)>,
     bitmap: u32,
     slots: Vec<(usize, u16)>,
@@ -1302,7 +1308,10 @@ impl ModelViewer {
         for run in &text_runs {
             self.draw_primitives(run, &mut frame)?;
         }
-        self.draw_surface_batches(&surfaces, &mut frame);
+        // F1840/F1841 queue their entries into the same F1778 list as the model's
+        // faces; merge them by key so the planet is not painted over a nearer ship.
+        let surface_shapes = self.surface_shapes(&surfaces);
+        Self::merge_surface_shapes(&mut frame, surface_shapes);
         Ok(frame)
     }
 
@@ -1318,6 +1327,7 @@ impl ModelViewer {
         &self,
         w: &[u32],
         at: usize,
+        key: u32,
         corners: usize,
         explicit: bool,
     ) -> Option<TerrainTexture> {
@@ -1371,6 +1381,7 @@ impl ModelViewer {
                 .collect()
         });
         Some(TerrainTexture {
+            key,
             points,
             bitmap: if explicit { id } else { tex },
             slots,
@@ -1533,15 +1544,24 @@ impl ModelViewer {
     /// queues, before F1330 builds).
     fn register_surface_colours(&self, batch: &SurfaceBatch) {
         let w = &batch.words;
-        for (_, at) in &batch.order {
+        for (key, at) in &batch.order {
             let handler = w[*at + 2];
             if handler == GROUP_OPEN {
                 let mut pos = *at + 3;
                 while pos < w.len() && w[pos] != GROUP_CLOSE {
                     match w[pos] & 0xff {
                         5 => {
-                            self.textures.register_colour((w[pos + 6] & 0xfff) as u16);
-                            self.textures.register_colour((w[pos + 12] & 0xfff) as u16);
+                            // F1879's textured ring quad (bitmap 0x43 and its
+                            // seven slot colours) is drawn through the palette.
+                            if let Some(recipe) = self.terrain_texture(w, pos - 2, *key, 4, false) {
+                                for (_, word) in &recipe.slots {
+                                    self.textures.register_colour(*word);
+                                }
+                            } else {
+                                for k in 6..=12 {
+                                    self.textures.register_colour((w[pos + k] & 0xfff) as u16);
+                                }
+                            }
                             pos += 13;
                         }
                         10 => {
@@ -1559,7 +1579,7 @@ impl ModelViewer {
                 _ => continue,
             };
             let explicit = matches!(handler & 0xff, 6 | 8);
-            if let Some(recipe) = self.terrain_texture(w, *at, corners, explicit) {
+            if let Some(recipe) = self.terrain_texture(w, *at, *key, corners, explicit) {
                 for (_, word) in &recipe.slots {
                     self.textures.register_colour(*word);
                 }
@@ -1591,14 +1611,15 @@ impl ModelViewer {
         }
     }
 
-    /// Draw the surfaces' queues far to near after the palette build. Flat
-    /// entries are F1804 triangles; the rest are F1805/F1807 descriptor
-    /// textures or F1806/F1808 explicit-coordinate textures, drawn by
-    /// F1644/F1647. F1877's haze ring is drawn too.
-    fn draw_surface_batches(&self, batches: &[SurfaceBatch], frame: &mut Frame) {
+    /// The surfaces' queues as depth-keyed shapes, far to near after the palette
+    /// build. Flat entries are F1804 triangles; the rest are F1805/F1807
+    /// descriptor textures or F1806/F1808 explicit-coordinate textures, drawn by
+    /// F1644/F1647. F1877's haze ring entries keep the group's key.
+    fn surface_shapes(&self, batches: &[SurfaceBatch]) -> Vec<(u32, Shape)> {
+        let mut shapes = Vec::new();
         for batch in batches {
             let w = &batch.words;
-            for &(_, at) in &batch.order {
+            for &(key, at) in &batch.order {
                 let handler = w[at + 2];
                 if handler == GROUP_OPEN {
                     // The atmosphere ring: bare entries up to the close marker.
@@ -1611,24 +1632,44 @@ impl ModelViewer {
                         let colour = |value: u32| self.textures.rgb((value & 0xfff) as u16);
                         match w[pos] & 0xff {
                             5 => {
+                                // F1879's textured ring quad. Its words after the
+                                // handler are the regular F1805 layout: four
+                                // points, the descriptor dword (bitmap 0x43), then
+                                // the seven slot colours. Draw the real texture
+                                // through the palette; the old two-colour Gouraud
+                                // stand-in interpolated RGB and put colours on the
+                                // planet's limb that no palette entry held.
+                                if let Some(texture) =
+                                    self.terrain_texture(w, pos - 2, key, 4, false)
+                                {
+                                    shapes.push((key, self.texture_shape(&texture)));
+                                    pos += 13;
+                                    continue;
+                                }
                                 // Corners (outer, inner, inner, outer); the seven colours
                                 // run from the inner edge to the outer.
                                 let (inner, outer) = (colour(w[pos + 6]), colour(w[pos + 12]));
                                 let points = [point(1), point(2), point(3), point(4)];
                                 let colours = [outer, inner, inner, outer];
-                                frame.shapes.push(Shape::Gouraud(
-                                    vec![points[0], points[1], points[2]],
-                                    vec![colours[0], colours[1], colours[2]],
+                                shapes.push((
+                                    key,
+                                    Shape::Gouraud(
+                                        vec![points[0], points[1], points[2]],
+                                        vec![colours[0], colours[1], colours[2]],
+                                    ),
                                 ));
-                                frame.shapes.push(Shape::Gouraud(
-                                    vec![points[0], points[2], points[3]],
-                                    vec![colours[0], colours[2], colours[3]],
+                                shapes.push((
+                                    key,
+                                    Shape::Gouraud(
+                                        vec![points[0], points[2], points[3]],
+                                        vec![colours[0], colours[2], colours[3]],
+                                    ),
                                 ));
                                 pos += 13;
                             }
                             10 => {
                                 let points = vec![point(1), point(2), point(3), point(4)];
-                                frame.shapes.push(Shape::Fill(points, colour(w[pos + 5])));
+                                shapes.push((key, Shape::Fill(points, colour(w[pos + 5]))));
                                 pos += 6;
                             }
                             _ => break,
@@ -1651,8 +1692,8 @@ impl ModelViewer {
                 // coordinates, the planet surface) draw the real bitmap when the
                 // cache carries it. Without it, the old flat/gouraud stand-in runs.
                 let explicit = matches!(handler & 0xff, 6 | 8);
-                if let Some(texture) = self.terrain_texture(w, at, corners, explicit) {
-                    frame.shapes.push(self.texture_shape(&texture));
+                if let Some(texture) = self.terrain_texture(w, at, key, corners, explicit) {
+                    shapes.push((texture.key, self.texture_shape(&texture)));
                     continue;
                 }
                 // The detail entries (F1808, F1806) colour each corner from the 22-step
@@ -1667,27 +1708,50 @@ impl ModelViewer {
                             .into_iter()
                             .map(colour)
                             .collect::<Vec<_>>();
-                        frame.shapes.push(Shape::Gouraud(points, colours));
+                        shapes.push((key, Shape::Gouraud(points, colours)));
                     }
                     6 => {
                         let colours = self.surface_fallback_colours(w, at, 6);
-                        frame.shapes.push(Shape::Gouraud(
-                            vec![points[0], points[1], points[2]],
-                            vec![colour(colours[0]), colour(colours[1]), colour(colours[2])],
+                        shapes.push((
+                            key,
+                            Shape::Gouraud(
+                                vec![points[0], points[1], points[2]],
+                                vec![colour(colours[0]), colour(colours[1]), colour(colours[2])],
+                            ),
                         ));
-                        frame.shapes.push(Shape::Gouraud(
-                            vec![points[0], points[2], points[3]],
-                            vec![colour(colours[0]), colour(colours[2]), colour(colours[3])],
+                        shapes.push((
+                            key,
+                            Shape::Gouraud(
+                                vec![points[0], points[2], points[3]],
+                                vec![colour(colours[0]), colour(colours[2]), colour(colours[3])],
+                            ),
                         ));
                     }
                     other => {
                         let colours = self.surface_fallback_colours(w, at, other);
-                        frame
-                            .shapes
-                            .push(Shape::Fill(points, self.textures.rgb(colours[0])));
+                        shapes.push((key, Shape::Fill(points, self.textures.rgb(colours[0]))));
                     }
                 }
             }
+        }
+        shapes
+    }
+
+    /// Insert curved-surface shapes into a frame's far-to-near order (F1788's
+    /// descending key). Primitives and glyph faces are already in that order;
+    /// each surface entry goes just after every shape whose key is at least its
+    /// own, so a near ship draws over a far planet as the original's one queue
+    /// does. Equal keys keep the primitive before the surface, and surfaces in
+    /// their queue order.
+    fn merge_surface_shapes(frame: &mut Frame, shapes: Vec<(u32, Shape)>) {
+        for (key, shape) in shapes {
+            let at = frame
+                .keys
+                .iter()
+                .position(|value| *value < key)
+                .unwrap_or(frame.keys.len());
+            frame.keys.insert(at, key);
+            frame.shapes.insert(at, shape);
         }
     }
 
@@ -1782,7 +1846,9 @@ impl ModelViewer {
     fn draw_primitives(&self, result: &Execution, frame: &mut Frame) -> Result<(), String> {
         let point =
             |p: [i16; 2]| (p != NEAR_SENTINEL).then_some((i32::from(p[0]), i32::from(p[1])));
-        for primitive in &result.ordered {
+        for (index, primitive) in result.ordered.iter().enumerate() {
+            let key = result.ordered_keys.get(index).copied().unwrap_or_default();
+            let start = frame.shapes.len();
             match primitive {
                 Primitive::Face(emission) => {
                     let face = &emission.face;
@@ -2004,6 +2070,9 @@ impl ModelViewer {
                     Err(_) => frame.skipped += 1,
                 },
             }
+            frame
+                .keys
+                .extend(std::iter::repeat_n(key, frame.shapes.len() - start));
         }
         Ok(())
     }
@@ -2096,27 +2165,17 @@ impl ModelViewer {
                 instance.generation,
                 true,
             )?;
-            // F1740: frame mode 6 copies the parent basis; otherwise the record's
-            // word permutes it through F1739.
+            // F1740 picks the text frame (mode 6 copies the parent basis) and
+            // F1747 negates its first row when that frame is left-handed.
             let word = u32::from(text.frame);
-            let (mut matrix, handedness) = if word >> 8 & 7 == 6 {
-                (emission.context.basis, emission.context.handedness)
-            } else {
-                ffe_core::model_math::frame_rows(
-                    &emission.context.matrix,
-                    emission.context.base_handedness,
-                    word,
-                )
-                .map_err(|error| format!("{error} (text at {:#x})", text.offset))?
-            };
-            // F1747 negates the text frame's first row when F1740's handedness
-            // word is negative (`cmp [..+0xf8],0; jnl`, 5f64b-5f658). Without
-            // this the glyph geometry is seen mirrored through the frame.
-            if handedness != 0 {
-                for value in &mut matrix[0..3] {
-                    *value = value.wrapping_neg();
-                }
-            }
+            let (matrix, _) = ffe_core::model_math::text_frame(
+                &emission.context.matrix,
+                emission.context.base_handedness,
+                &emission.context.basis,
+                emission.context.handedness,
+                word,
+            )
+            .map_err(|error| format!("{error} (text at {:#x})", text.offset))?;
             let mut pen = position.view;
             let mut line = pen;
             // F1747 runs the glyphs in a nested instance whose operand scale (+0x148) is the

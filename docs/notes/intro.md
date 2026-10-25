@@ -207,12 +207,34 @@ ship, asteroids and galaxy at the same tics as `jjffe-smoke --intro-live`.
 PRESENTS/DAVID BRABEN'S. The text record's material `0x0888` is resolved
 through F1692/F1693 and passed to the glyph instance (F1747); without it the
 glyph faces were black holes in the slab. F1747 also negates the text frame's
-first row when F1740 leaves a left-handed frame (`ffe.asm:5f64b-5f658`): without
-that every glyph was mirrored (`GAME` read `ƎMAפ`), while the slab stayed
-symmetric. The letters are the original's fixed grey, matching the executed
-frame at animation 63 (`(192,192,192)` on `(64,64,64)`). The executed JJFFE
-reference draws its own `FRONTIER` string for this model (`intro-todo.md` D5);
-the port keeps the DOS cache's GAME!TEK. See `docs/evidence/visuals/`.
+first row when F1740 leaves a left-handed frame (`cmp [..+0xf8],0; jnl`,
+`ffe.asm:5f64b-5f658`): without that every glyph was mirrored (`GAME` read
+`ƎMAפ`), while the slab stayed symmetric. The logic is
+`ffe_core::model_math::text_frame`, shared by all three word children;
+`tests/model_math.rs` pins its mode-6 and permuted cases and
+`tests/intro_view.rs` pins the GAME!TEK, PRESENTS and DAVID BRABEN'S frames
+(`docs/evidence/visuals/intro-*-before/after.png`). The letters are the
+original's fixed grey, matching the executed frame at animation 63
+(`(192,192,192)` on `(64,64,64)`). The executed JJFFE reference draws its own
+`FRONTIER` string for this model (`intro-todo.md` D5); the port keeps the DOS
+cache's GAME!TEK.
+
+**Depth order (2026-10-25).** F1840/F1841 emit curved-surface entries through
+F1778 into the same queue as the model's faces, each with its F1777 key; F1788
+draws the whole list far to near. The port used to append every surface batch
+after every model primitive, so the intro planet covered the nearer ship.
+`Frame::keys` now carries each shape's effective key and
+`ModelViewer::merge_surface_shapes` inserts the surface shapes into that order.
+At `0x181534` no planet `TexturedUv` entry follows the ship's first `Glow`
+(`docs/evidence/visuals/intro-ship-order-before/after.png`).
+
+**Atmosphere ring (2026-10-25).** F1877/F1879 queue the haze ring as an F1805
+textured quad (bitmap `0x43`, seven slot colours) and an F1804 flat quad. The
+port approximated the textured quad with two Gouraud triangles, which invented
+268 RGB values on the planet's limb that no palette entry held. The ring entry
+now takes the regular F1805/F1647 texture path and its slot colours are
+registered before F1330; the intro view has 71 distinct colours, like the
+executed original's 71 (`docs/evidence/visuals/intro-colour-stats.txt`).
 
 Song 0 `QQFRONT` now plays during the intro:
 `run_intro` calls F919's `front_end_music()`, ticks F1904, and stops the song on

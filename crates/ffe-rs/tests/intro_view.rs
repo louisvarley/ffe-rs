@@ -146,6 +146,31 @@ fn the_intro_planet_uses_the_runtime_shape_detail() {
     assert_eq!(viewer.surface_detail(), 0);
 }
 
+/// The other two intro word faces are the same F1740/F1747 path in different
+/// children (362 PRESENTS, 363 DAVID BRABEN'S). They must read left-to-right
+/// too; without the handedness fix both were mirror images. The hashes pin the
+/// assembled frames at the animations where each word is upright and large.
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn the_presents_and_david_braben_text_is_not_mirrored() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    // Animation 248: PRESENTS. Animation 328: DAVID BRABEN'S.
+    screen.draw_intro(Some(&viewer), 248 << 10, false).unwrap();
+    assert_eq!(
+        frame_hash(&screen),
+        18_231_935_709_763_280_501,
+        "the PRESENTS frame changed; re-check the text orientation"
+    );
+    screen.draw_intro(Some(&viewer), 328 << 10, false).unwrap();
+    assert_eq!(
+        frame_hash(&screen),
+        8_448_037_671_976_705_893,
+        "the DAVID BRABEN'S frame changed; re-check the text orientation"
+    );
+}
+
 /// The GAME!TEK logo model 177 -> 361 draws one slab and its own text: the
 /// port has no second (substituted) logo and no label path for it. At animation
 /// 64 the letters are the fixed light grey `(192, 192, 192)`.
@@ -241,6 +266,109 @@ fn the_intro_planet_is_drawn_and_the_palette_is_stable() {
         &reference[..],
         &screen.logical_pixels()[..320 * 200],
         "the intro frame drifts after a long run"
+    );
+}
+
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn the_intro_ship_is_drawn_in_front_of_the_planet() {
+    use ffe_rs::model_viewer::{AnimationInputs, Shape};
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let rows = [
+        [127.0 / 128.0, 0.0, 0.0],
+        [0.0, 127.0 / 128.0, 0.0],
+        [0.0, 0.0, 127.0 / 128.0],
+    ];
+    let tics = 0x181534u32;
+    let anim = (tics - ffe_rs::front_end::MODEL_SWITCH) >> 10;
+    let inputs = AnimationInputs::original(anim << 10, 0, &viewer.shades());
+    let frame = viewer
+        .render_scene_with(
+            176,
+            rows,
+            [0.0, 0.0, 0x14820 as f64],
+            viewer.light_direction(),
+            &inputs,
+        )
+        .unwrap();
+    // One F1778/F1788 queue: far first, near last.
+    assert!(
+        frame.keys.windows(2).all(|pair| pair[0] >= pair[1]),
+        "the frame is not in the original's descending depth order"
+    );
+    // The planet is a curved surface (explicit-coordinate entries), the ship's
+    // engines are F1738 glows. If the surfaces were appended after the model
+    // primitives (the old path), the planet painted over the nearer ship.
+    let last_planet = frame
+        .shapes
+        .iter()
+        .rposition(|shape| matches!(shape, Shape::TexturedUv(..)))
+        .expect("the intro planet surface is missing");
+    let first_glow = frame
+        .shapes
+        .iter()
+        .position(|shape| matches!(shape, Shape::Glow(..)))
+        .expect("the intro ship's thruster glows are missing");
+    assert!(
+        last_planet < first_glow,
+        "the planet (last entry {last_planet}) draws over the ship's engines ({first_glow})"
+    );
+}
+
+/// The atmosphere ring's F1879 entries are F1805 textured quads (bitmap 0x43)
+/// and F1804 ring quads. They belong to the runtime palette like every other
+/// surface entry. The old stand-in interpolated the two edge colours with
+/// Gouraud, which put hundreds of RGB values on the planet's limb that no
+/// palette entry held; the DOS frame has 64 upper entries and the port must not
+/// invent more in the view.
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn the_intro_atmosphere_ring_uses_palette_colours() {
+    use ffe_rs::model_viewer::{AnimationInputs, Shape};
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let tics = 0x181534u32;
+    let anim = (tics - ffe_rs::front_end::MODEL_SWITCH) >> 10;
+    let inputs = AnimationInputs::original(anim << 10, 0, &viewer.shades());
+    let frame = viewer
+        .render_scene_with(
+            176,
+            [
+                [127.0 / 128.0, 0.0, 0.0],
+                [0.0, 127.0 / 128.0, 0.0],
+                [0.0, 0.0, 127.0 / 128.0],
+            ],
+            [0.0, 0.0, 0x14820 as f64],
+            viewer.light_direction(),
+            &inputs,
+        )
+        .unwrap();
+    assert!(
+        !frame
+            .shapes
+            .iter()
+            .any(|shape| matches!(shape, Shape::Gouraud(..))),
+        "a surface fell back to the port-only Gouraud stand-in"
+    );
+    assert!(
+        frame.shapes.iter().any(|shape| matches!(
+            shape,
+            Shape::Textured(texture) if texture.bitmap & 0xfff == 0x43
+        )),
+        "the atmosphere ring's F1805 textured quad is missing"
+    );
+
+    screen.draw_intro(Some(&viewer), tics, false).unwrap();
+    let colours = screen.logical_pixels()[..320 * 158]
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(
+        colours.len() <= 96,
+        "the view has {} colours; the original's palette holds 64 upper entries",
+        colours.len()
     );
 }
 

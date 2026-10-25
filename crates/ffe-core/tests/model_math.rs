@@ -175,3 +175,27 @@ fn square_root_length_and_vertex_basis_follow_the_original_integer_steps() {
         [0, -2126008811, 0, 2104959219, 0, 0, 0, 0, 2126221433]
     );
 }
+
+#[test]
+fn every_text_frame_uses_f1747s_handedness_fixup() {
+    use ffe_core::model_math::text_frame;
+    let frame = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let basis = [11, 12, 13, 21, 22, 23, 31, 32, 33];
+    // Frame mode 6 copies the parent basis and handedness (F1740). A
+    // right-handed parent keeps the basis; a left-handed one (0xffff_ffff, as
+    // F1739's `not` writes) negates exactly the first row (F1747).
+    let (rows, handed) = text_frame(&frame, 0, &basis, 0, 0x0600).unwrap();
+    assert_eq!(rows, basis);
+    assert_eq!(handed, 0);
+    let (rows, handed) = text_frame(&frame, 0, &basis, !0, 0x0600).unwrap();
+    assert_eq!(rows, [-11, -12, -13, 21, 22, 23, 31, 32, 33]);
+    assert_eq!(handed, !0);
+    // Other modes permute the frame through F1739; the handedness word it
+    // returns drives the same first-row fixup. A negated source row 1 (0x1000)
+    // toggles handedness, so destination row 0 (source row 1 here) is negated
+    // once by F1739 and once by F1747.
+    let word = 0x1000 | 1 << 8; // permutation 1: destinations [1, 2, 0]
+    let (rows, handed) = text_frame(&frame, 0, &basis, 0, word).unwrap();
+    assert_eq!(rows, [-7, -8, -9, 1, 2, 3, -4, -5, -6]);
+    assert_eq!(handed, !0);
+}
