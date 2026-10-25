@@ -191,8 +191,26 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   `+0x9e` is 0xffff. A slow, level touch (speed <= 0x258, dot >= 0x78000000) sets flag 0x40 and
   settles the ship on the surface; a faster one sets 0x80 and bounces it (damage from F953's
   amount is shown on the status line). Regression: `soft_touch_lands_and_fast_touch_bounces`.
-  The ship's mode is still the playable's `Mode::Flight`; the original's 0x32 -> 0x34 landed
-  state is not a separate screen yet (see "Known limits").
+- **The landed state (2026-10-25).** A soft touch on a planet or moon now takes the original's
+  states: F1021 sets `0x32` for the frame of the touch (F1042 zeroes the speed, rates, thrust
+  and set speed), and F1047's view frame makes it `0x34`, the guarded landed-rough state
+  (`Navigator::land`, `landing_frame`, `ffe_core::traffic::Landing`). The landed screen is
+  F1050/F1054: the ordinary flight view from the settled ship (the front view above the
+  console, no new HUD), the console and message log unchanged, and the world still turns around
+  it. F1012 runs no flight step while landed (no F1037/F1041/F601/F603/F1512), so the ship is
+  held still; `nav.follow` still carries it with its planet. `L` is F1056's launch action: F1013
+  starts at `0x24`, the fixed up thrust climbs, F1013 hands over to `0x26` and F1031 clears it
+  to `0x00` (the same `Takeoff` machine as the open-air pad, without the pad world). The
+  open-air starport's parallel `0x2e` -> `0x30` pair is in the machine too (`Landing::at_starport`);
+  the new game's `0x30` and its F381 launch are unchanged. Tests: `takeoff.rs` pins the
+  transitions; `planet_view.rs::landing_reaches_the_surface_state_and_launches_again` runs the
+  whole cached sequence with frames; `tools/reference/verify-surface.py` compares the new
+  game's landed-at-starport view with the executed original's (`--game-frame 500 0`).
+- **The landed background.** F1052 clears the upper view to the previous scene's
+  `DATA_008814..8817` colour and draws F1775's stars only while the flag is clear. At a
+  starport or in a rough landing above the haze surface the flag stays 0, so the sky is the
+  original's space colour; F1877's atmosphere colour is carried into the next frame when the
+  flag is set (`ModelViewer::haze_sky`, `Screen::surface_sky`).
 - **Not the original yet.** The pad hit when docking at an orbital station is this port's slot
   test, not the station's collision stream; the sounds and the ship's motion with the rotating
   station during the stages are not ported. The starport/planet scan does not yet draw the ship
@@ -209,10 +227,22 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
 - Planet surfaces draw their triangles, but the textured fills are flat colours or
   blends (see above), so the detail is blockier than the original's; the night side is
   drawn with the shade table and has no atmospheric glow except the ported haze ring.
-- A landing is F575's settled contact, not the original's 0x32 -> 0x34 landed state: the
-  ship is on the surface with the status line saying so and can thrust off again, but there is
-  no landed screen or takeoff gear sequence. The new game's open-air starport pad is the
-  exception: its takeoff is F1013/F1031's state path (`L`, `docs/notes/intro.md`).
+- **Terrain collision fidelity.** F581's terrain record tests the ship against the model's
+  surface at the body's `+0x138` (outer) radius, while `Screen::draw_discs` scales the drawn
+  surface to `+0x140` (inner, `docs/notes/terrain.md`). A rough landing away from a starport
+  therefore settles the ship at the collision sphere while the drawn terrain's base sphere is
+  up to ~1.4 times smaller: the ground under the eye can be thousands of kilometres below and
+  the view can show the space colour where the original shows the surface. F879's starports sit
+  on the high ground, which is why their frames (and the reference comparison) show the terrain
+  and buildings. Fixing this needs one radius for both (and a check that the starport does not
+  fall inside the drawn sphere), an owner decision.
+- **Starport landings from flight.** The machine has F1019/F1021's open-air `0x2e` -> `0x30`
+  pair, but the playable still gives a starport pad touch the in-flight contact (no `0x20`
+  effect-region flag is modelled) instead of the `0x30` services state. The new game's `0x30`
+  and its F381 launch are the working path (`docs/notes/intro.md`).
+- **Landed dressing.** F253's undercarriage word (`+0x9e`) animation, the sounds and the
+  player's AI mode byte (`player+0xff = 0x24`) are not modelled; the console is the flight one
+  F1116 selects, as the original's is.
 - Planet/station painter order has no depth test: a starport on the far side of its planet is
   drawn over it. A sphere line-of-sight test is the cheap fix; the original's queue is global.
 

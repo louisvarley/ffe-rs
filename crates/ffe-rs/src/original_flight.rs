@@ -138,6 +138,18 @@ impl OriginalFlight {
         self.player.mode = mode;
     }
 
+    /// F1021's landing: F1042 zeroes the velocity, the turn rates, the thrust
+    /// words and the set speed, and `DATA_008870` becomes the frame's `0x32`
+    /// (the caller's `Navigator::landing_frame` then sets `0x34`). The contact
+    /// scan has already settled the ship on the surface.
+    pub fn settle_landing(&mut self) {
+        self.player.mode = ffe_core::traffic::state::LANDING;
+        self.player.set_speed = 0;
+        self.player.motion.velocity = [0; 3];
+        self.player.motion.rate = [0; 3];
+        self.player.motion.thrust = [0; 3];
+    }
+
     /// The set speed (`DATA_008918`) in the original's velocity units.
     pub fn set_speed_units(&self) -> i32 {
         self.player.set_speed
