@@ -3529,6 +3529,10 @@ fn run() -> Result<(), String> {
             state.ensure_damage(hull_full);
         }
         let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
+        // F1099's speed words are the original's ~0.1 m/s units; the flight model
+        // reports m/s, so scale by `1000 / MM_PER_SECOND` before F1393.
+        let source_speed =
+            |metres: f64| (metres * 1000.0 / ffe_rs::original_flight::MM_PER_SECOND).round() as i32;
         // F1099 prints DATA_009124, the parent object's name: at the new game it
         // is Hope, the planet under Old Blackelk. A surface landing names the
         // body itself; in free flight the port falls back to the system.
@@ -3550,8 +3554,8 @@ fn run() -> Result<(), String> {
         screen.hud = PlayerHud {
             shields: state.shields,
             hull: state.hull,
-            set_speed: Some(views.console.set_speed.unwrap_or(0)),
-            actual_speed: state.speed().round() as i32,
+            set_speed: Some(source_speed(views.console.set_speed.unwrap_or(0) as f64)),
+            actual_speed: source_speed(state.speed()),
             altitude: Some(0),
             registration: parent_name,
             autopilot,
