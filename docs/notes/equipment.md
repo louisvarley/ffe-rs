@@ -89,7 +89,7 @@ rather than inventing rows.
 | `player+0xc6` word | `ShipSystems::status` | F1116's 0x45 condition: low byte 0x40, high byte bit 0 |
 | `player+0xe8/e9/ec/f0` | `ShipSystems` | engine/autopilot/target/GUI bytes |
 | `player+0xef` | `ShipSystems::ef` | missile-view byte (0x14 also needs general bit 9) |
-| `player+0x174` word | `ShipSystems::p174` | chaff count (`F1120`'s 0x51 and the F1058 launch) |
+| `player+0x174` word | `ShipSystems::p174` | chaff count (`F1120`'s 0x51 and the F1056 launch) |
 | `player+0x268` | `ShipSystems::p268` | GUI/docked state byte (0x45 and the station redraw) |
 | `player+0x511e` | `ShipSystems::p511e` | missiles in flight (F1120's 0x4e) |
 | `player+0x3fb6` bit 1 | `ShipSystems::b6` | the labels/0x48 image condition in F1116 |
