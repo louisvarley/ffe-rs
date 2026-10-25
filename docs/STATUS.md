@@ -165,15 +165,21 @@ needs the player's own files, NASM and the MSVC x86 tools; none of it is public
 CI. Rebuild the reference after any change to `tools/reference/`, and note that
 the child oracle's trace SHA-256 changes with every rebuild (see below).
 
-**2026-10-25 re-run.** After the combat and NPC reference rebuilds, the full
-suite gave **46 of 47 passed** in 660 s; the only failure is
-`verify-world.py`'s `--worldgen` repeatability check, the known Windows ASLR
-nondeterminism (the same case recorded on 2026-10-24), not a regression. The
-recorded trace SHA-256 values in the table below were re-derived for every
-oracle that lists one (instance, order, point-line, text-submodel, colour,
-base-transform, station, station-queue, intro, collide, world-tick) and are
-**unchanged**, so the column is current; re-record an entry if its script's
-adaptor changes. No oracle exposed a behavioural regression.
+**2026-10-25 re-run.** After the combat/NPC/missile/surface reference rebuilds and
+the v27 cache, the full suite (now **48** entries with `verify-surface.py`) gave
+**47 of 48 passed** in 608 s. `verify-surface.py` reports `sky_matches: true`
+(header_close 0.9934, view coverage 0.589). The only failure is `verify-world.py`'s
+`--worldgen` repeatability check, the known Windows ASLR nondeterminism (the same
+case recorded on 2026-10-24), not a regression. Two stale script expectations
+were fixed on the way: `verify-assets.py` now expects the v27 ZIP's 1,797 entries
+(1,796 assets + manifest) and `verify-intro.py` no longer tampers the trace's
+plain `text` field, which the port deliberately does not compare (it draws the
+cached DOS bytes and checks codes/colour/position/wrap). The recorded trace
+SHA-256 values in the table below were re-derived for every oracle that lists one
+(instance, order, point-line, text-submodel, colour, base-transform, station,
+station-queue, intro, collide, world-tick) and are **unchanged**, so the column is
+current; re-record an entry if its script's adaptor changes. No oracle exposed a
+behavioural regression.
 
 ## Milestone status
 

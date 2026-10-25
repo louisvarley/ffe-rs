@@ -143,7 +143,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1795:
+            if archive.testzip() is not None or len(archive.infolist()) != 1797:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])

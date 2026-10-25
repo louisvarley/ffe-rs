@@ -21,7 +21,12 @@ Running record of decisions, discrepancies and open questions. Newest entries at
   original's landed frame, drives `planet_view`'s `new_game_landed_surface_view`
   and reports `sky_matches: true`, `header_close: 0.9934`, `view_inside:
   0.9969`, `view_coverage: 0.589`, `ours_view_pixels: 25086` vs the real
-  42594, and rejects tampering. `verify-all.py --only surface` passes.
+  42594, and rejects tampering. The full suite is now **48 entries; 47 pass**,
+  the one failure being the known Windows `--worldgen` ASLR case. Two stale
+  expectations were fixed: `verify-assets.py` expects the v27 ZIP's 1,797
+  entries, and `verify-intro.py` no longer tampers the plain `text` field (the
+  port compares the cached DOS bytes' codes/colour/position/wrap, not the
+  trace's transcription).
 - **Owner decisions:** the `+0x138` collision radius vs the `+0x140` drawn
   radius mismatch can show space where the original shows ground; landing on a
   starport pad from flight is still not routed to 0x2e/0x30; 0x30 shows the
