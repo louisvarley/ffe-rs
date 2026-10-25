@@ -7,13 +7,26 @@ piece is called out below.
 
 ## New game (F829/F998/F994)
 
-- **Start-system table** `DATA_006820` (`ffedat.asm:14448`): five 20-byte
-  records of galaxy x, y, z (16.16), the star's number in its sector and one
-  dword beside them. `ffe_rs::navigation::START_SYSTEMS` keeps them:
-  records 0 and 4 are the same system (`0x17170200`, `0x15287600`, -222,
-  star 6); **record 1 is Ross 154** (`0x17176a00`, `0x15243200`, `-0x3400`,
-  star 1); records 2 (`0x17188000`, `0x1524a000`) and 3 (`0x1715e000`,
-  `0x151ee000`) are the other two.
+- **Start-system table** `DATA_006820` (`ffedat.asm:14448`, DOS file
+  `0xcf3f0`): five 20-byte records of galaxy x, y, z (16.16), the star's number
+  in its sector and one dword beside them. `ffe_rs::navigation::START_SYSTEMS`
+  keeps them: **record 0 is Gateway [-1,4]** (`0x17170200`, `0x15287600`,
+  `-56832`, star 6, extra 8), the DOS default start; **record 1 is Ross 154**
+  (`0x17176a00`, `0x15243200`, `-0x3400`, star 1, extra `0x88`); records 2
+  (`0x17188000`, `0x1524a000`) and 3 (`0x1715e000`, `0x151ee000`) are the other
+  two and record 4 repeats record 0.
+- **The default start is record 0, not record 1.** F147(0)/F829 select it and
+  F830 names it `Gateway`; F832/F869 generate the system from the record. The
+  executed original's `--state` probe after the DOS default arm reports the
+  F832 words `seed 0x8d17f528`, `mass 0x0a21fe80` (170,000,000), `stars 0`,
+  `code 0x1aa51717`, `population`/F869 byte `0xe6` (230) and the name
+  `Gateway`. The port derives those in
+  `navigation::start_entry`: `seed = (y >> 16) + (y << 16) + x - z`,
+  `stars = extra >> 8`, and `mass` from the `extra & 0xf` row of
+  `DATA_006803`/`DATA_006804` (`sector::Tables::start_mass`, offset 1468 of the
+  galaxy tables). F878 then makes the planet **Hope** and the starports Old
+  Curie and **Old Blackelk** (`slot 0x6a`), which is what the original's boot
+  frame shows (`bottom-right Alt:0 m / Hope`).
 - **Clock**: the game's day counter is absolute, `0x121cf7.5` days =
   `102,562,286,400` seconds (`0x121cf7` whole days and the half-day fraction
   `0x80000000`). `Navigator::new_game` starts there; the calendar subtracts
@@ -24,22 +37,29 @@ piece is called out below.
   (8 t), and time acceleration 994 (`DATA_009012`). F994 sets the player's state
   byte to `0x30` (landed at an open-air starport's pad) and `DATA_008857` (the
   player's object index) is 107.
-- **The pad**: F994 calls F650 with the player's ship and object `0x6e`; that
-  object is the system's starport. In this checkout Ross 154's starport is
-  `slot 0x6e`, model `0x55` (an open-air model: class `+0x14c` bit `0x40`),
-  bay 1. F650 turns the bay's pad `(-250, 0, 250)` by the station's F1674
-  rows and shifts each component left ten. With the generated rows
+- **F998's default arm (types 0, 4, 5, 6)**: 10,000 CR (`0x2710`), ship `0x1f`
+  (the Saker Mk III), the hold less `0x10`, station slot `0x6a`, player index
+  87, state `0x30`. The intro's "any other key" arm is this default. Keys 1-5
+  remain the verified type 1 in this port except that `--start 0` and the
+  default boot select record 0.
+- **The pad**: F994 calls F650 with the player's ship and object `0x6e` (type
+  1) or `0x6a` (type 0); that object is the system's starport. Ross 154's
+  starport is `slot 0x6e`, model `0x55` (an open-air model: class `+0x14c` bit
+  `0x40`), bay 1. F650 turns the bay's pad `(-250, 0, 250)` by the station's
+  F1674 rows and shifts each component left ten. With the generated rows
   `[-906354405, 1945245414, 76650739, -1938310550, -909597149, 163923668,
   180966058, 0, 2139827798]` the offset is `(126, -227, 240) << 10` =
   `[129024, -232448, 245760]` mm in the station's frame. F994 then adds the
   ship's collision radius (`+0x140`, 5,200 mm for the Eagle) along its second
   row (the up row, copied from the station): `(-4694, -2203, 396)`, so the seat
-  is the station position plus `[124330, -234651, 246156]`. The local test
-  (`new_game_starts_at_ross_154`) checks this and the date, hold and cash.
-- **Boot**: the default boot is this new game. `--start sol` keeps the old
-  Sol/Mars High development sandbox (and `Navigator::new`, which the existing
-  tests use). `--skip-intro` is accepted for the eventual front-end wiring; the
-  logo drawing is not wired yet.
+  is the station position plus `[124330, -234651, 246156]`. The local tests
+  (`new_game_starts_at_ross_154`, `new_game_starts_on_hope_in_gateway`) check
+  this and the date, hold and cash.
+- **Boot**: the default boot is F998's default (Gateway/Hope, state `0x30`).
+  `--start 1` keeps Ross 154 and `--start sol` the old Sol/Mars High
+  development sandbox (and `Navigator::new`, which the existing tests use).
+  `--skip-intro` is accepted for the eventual front-end wiring; the logo
+  drawing is not wired yet.
 
 ## The intro screens (F961/F962)
 
@@ -69,7 +89,8 @@ piece is called out below.
 - **Input**: F962 reads the GUI action only from `0x8276e`; `'V'` draws
   `0x942d` at x 10, y 60, wrap 310, colour 16. The start choice follows the
   intro. Keys 1-5 are the JJFFE mapping: only start type 1 is verified, and
-  2-5 map to 1 with a notice (no system or ship is invented for them).
+  2-5 map to 1 with a notice (no system or ship is invented for them). Any
+  other key is the DOS default arm, `F147(0)` -> record 0 (Gateway/Hope).
 
 ## JJFFE vs the DOS release
 
@@ -80,7 +101,7 @@ piece is called out below.
 | Start types 2-5 | F998's other branches | Unverified against DOS; mapped to 1 with a note. |
 | The 18 credit strings and their windows/positions | `ffedat.asm:4272-4332`, F962 | Agree with the DOS string table; verified by `--intro`. |
 | Model 177 then 176, the primary bitmap, the animation | F961/F962 | Data shared by the release; same oracle. |
-| New-game state (Ross 154, cash, ship, hold, clock, state 0x30) | F829/F998/F994 | Same as DOS; `--state` reports state 48, index 107, cash 1000, start type 1 and time 994. |
+| New-game state (Ross 154 or the Saker default, cash, ship, hold, clock, state 0x30) | F829/F998/F994 | Same as DOS; `--state` reports state 48, time 994, and for start type 1 index 107 / cash 1000; the default type 0 probes index 87 / cash 10000 / ship 0x1f. |
 
 ## Takeoff from the starport (F1013/F1031/F1032, 2026-10-25)
 
@@ -157,8 +178,9 @@ start (table at 0x4ee8a0: 1 -> 1, 2/3 -> 0, 4 -> 6, 5 -> 5), V is a no-op, and
 any other key exits with `F147(0)`. F962 latches the DOS version line on V only
 from `0x719668`, at (10,60), wrap 310, colour 16, string
 `English Release 1.02 - 21/04/95`. The port keeps the verified type 1 for keys
-1-5 (2-5 with the existing notice) and maps the "any other key"/type 0 arm to
-type 1 with a notice; an owner decision is still needed for types 2-5.
+1-5 (2-5 with the existing notice); the "any other key"/`F147(0)` arm is now
+the default start (record 0, Gateway/Hope). An owner decision is still needed
+for types 2-5.
 
 **Assets.** Cache v27 adds `base:text/intro-credits` (19 raw NUL-terminated
 strings from `0xbd361`: 18 credits + the DOS version, layout codes preserved)

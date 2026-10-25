@@ -137,6 +137,42 @@ fn systems_and_autopilot() {
     }
 }
 
+/// The DOS default new game (F829 record 0): Gateway [-1,4], the planet Hope and
+/// the starport Old Blackelk, with F998's default Saker Mk III, 10,000 CR and
+/// state 0x30. F832's seed/mass for the record are checked against the executed
+/// original's `--state` probe (seed `0x8d17f528`, mass 170,000,000, tech 230).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn new_game_starts_on_hope_in_gateway() {
+    use ffe_rs::navigation::{Navigator, NEW_GAME_CLOCK};
+    let cache = cache();
+    let nav = Navigator::new_game(&cache, 0).unwrap();
+    assert_eq!(nav.system_name(), "Gateway");
+    assert!((nav.clock - NEW_GAME_CLOCK).abs() < 1e-6);
+    let state = nav.new_game.expect("a new-game state");
+    assert_eq!(state.start_type, 0);
+    assert_eq!(state.player_state, 0x30);
+    assert_eq!(state.player_index, 87);
+    assert_eq!(state.cash, 10_000);
+    assert_eq!(state.ship, 0x1f);
+    assert_eq!(
+        state.cargo, 1,
+        "the Saker's F2 status page shows Cargo Space 1 t"
+    );
+    assert_eq!(state.acceleration, 994);
+    let index = nav.docked.expect("landed at the start starport");
+    let body = &nav.bodies[index];
+    assert_eq!(body.kind, Kind::Starport);
+    assert_eq!(body.name, "Old Blackelk");
+    assert_eq!(body.slot, 0x6a);
+    assert!(body.open_air);
+    let parent = body.parent.and_then(|p| nav.bodies.get(p)).unwrap();
+    assert_eq!(parent.name, "Hope");
+    // The record's body list is F878's, not a hand-coded template.
+    assert!(nav.bodies.iter().any(|b| b.name == "Old Curie"));
+    assert!(nav.bodies.iter().any(|b| b.name == "Dublin Citadel"));
+}
+
 /// The original's new game: Ross 154 at the 3250 start, docked at the open-air
 /// starport's allocated pad, with F998's cash, ship, hold and acceleration.
 #[test]

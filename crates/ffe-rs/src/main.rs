@@ -85,7 +85,7 @@ fn options() -> Result<Options, String> {
     let mut capture = None;
     let mut capture_planet = None;
     let mut capture_traffic = None;
-    let mut boot = Boot::NewGame(1);
+    let mut boot = Boot::NewGame(0);
     let mut boot_given = false;
     let mut skip_intro = false;
     let mut capture_prefs = None;
@@ -99,7 +99,7 @@ fn options() -> Result<Options, String> {
         } else if arg == "--start" && !boot_given {
             let value = args
                 .next()
-                .ok_or("--start requires 1..5 or sol")?
+                .ok_or("--start requires 0..5 or sol")?
                 .to_string_lossy()
                 .to_ascii_lowercase();
             boot_given = true;
@@ -108,17 +108,21 @@ fn options() -> Result<Options, String> {
             } else {
                 let start_type = value
                     .parse::<u8>()
-                    .map_err(|_| "start type must be 1..5 or sol")?;
-                if !(1..=5).contains(&start_type) {
-                    return Err("start type must be 1..5 or sol".to_owned());
+                    .map_err(|_| "start type must be 0..5 or sol")?;
+                if start_type > 5 {
+                    return Err("start type must be 0..5 or sol".to_owned());
                 }
-                if start_type != 1 {
+                if (2..=5).contains(&start_type) {
                     eprintln!(
                         "Start type {start_type} is the JJFFE mapping and is not verified; \
                          starting type 1 (Ross 154)."
                     );
                 }
-                Boot::NewGame(1)
+                Boot::NewGame(if (2..=5).contains(&start_type) {
+                    1
+                } else {
+                    start_type
+                })
             };
         } else if arg == "--skip-intro" && !skip_intro {
             skip_intro = true;
@@ -155,7 +159,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -511,7 +515,7 @@ fn run() -> Result<(), String> {
         || options.capture_planet.is_some()
         || options.capture_traffic.is_some();
     let mut boot = options.boot;
-    if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(1)) {
+    if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(_)) {
         boot = Boot::NewGame(run_intro(
             &mut window,
             &mut screen,
@@ -555,7 +559,18 @@ fn run() -> Result<(), String> {
         if let Some(new_game) = nav.new_game {
             state.credits = u32::try_from(new_game.cash).unwrap_or(0);
             state.ship = new_game.ship;
-            state.mode = ffe_rs::flight::Mode::Docked;
+            // F994's state 0x30 is the landed surface view (F1050/F1054), not the
+            // docked services board: the ship sits on the open-air pad in the
+            // flight view. F1050 draws it from the cockpit with the console below.
+            state.mode = ffe_rs::flight::Mode::Flight;
+            state.system_flight = nav.docked.is_some();
+            state.position = new_game
+                .seat
+                .map(|v| v as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
+            state.velocity = [0.0; 3];
+            if let Some(index) = nav.docked {
+                state.axes = Some(nav.bodies[index].orientation);
+            }
             eprintln!(
                 "New game: {} (start type {}), {} CR, ship {}, hold {} t, time accel {}.",
                 nav.system_name(),
@@ -677,6 +692,7 @@ fn run() -> Result<(), String> {
     if options.capture.is_some() && nav.as_ref().is_some_and(|nav| nav.takeoff.is_some()) {
         state.mode = ffe_rs::flight::Mode::Flight;
         state.system_flight = true;
+        last_mode = ffe_rs::flight::Mode::Docked;
     }
     // The station the ship has just left: its hull is not a wall to the ship
     // until it is clear of the slot (F1088 leaves the player at the station).
@@ -1550,23 +1566,43 @@ fn run() -> Result<(), String> {
                 }
                 if state.mode == ffe_rs::flight::Mode::Flight {
                     // F1056's launch action (its action 9) from a landed state:
-                    // `0x34` goes straight to F1013's climb. In flight `L` is the
-                    // original's text-label toggle instead.
+                    // `0x34` goes straight to F1013's climb. The new game's
+                    // `0x30` open-air pad is the same view; L asks F654 and starts
+                    // the climb through the docked-to-flight setup below. In flight
+                    // `L` is the original's text-label toggle instead.
                     let landed = nav.as_ref().and_then(|nav| nav.landed_state());
-                    if pressed(Key::L) && landed.is_some() {
+                    let pad_landed = nav.as_ref().is_some_and(|nav| {
+                        nav.new_game.is_some()
+                            && nav.docked.is_some()
+                            && nav.takeoff.is_none()
+                            && nav.sequence.is_none()
+                    });
+                    if pressed(Key::L) && (landed.is_some() || pad_landed) {
                         if let Some(nav) = nav.as_mut() {
-                            match nav.begin_surface_launch() {
-                                Ok(()) => {
-                                    acceleration = 0;
-                                    if let Some(model) = original.as_mut() {
-                                        model.set_time_acceleration(0);
-                                        // F1042's zero motion, then F1013's climb:
-                                        // the up thrust is F1041's `0x24` request.
-                                        model.begin_takeoff();
+                            if landed.is_some() {
+                                match nav.begin_surface_launch() {
+                                    Ok(()) => {
+                                        acceleration = 0;
+                                        if let Some(model) = original.as_mut() {
+                                            model.set_time_acceleration(0);
+                                            // F1042's zero motion, then F1013's climb:
+                                            // the up thrust is F1041's `0x24` request.
+                                            model.begin_takeoff();
+                                        }
+                                        message = TAKEOFF_HINT.to_owned();
                                     }
-                                    message = TAKEOFF_HINT.to_owned();
+                                    Err(why) => message = why,
                                 }
-                                Err(why) => message = why,
+                            } else {
+                                match nav.begin_launch() {
+                                    Ok(()) => {
+                                        acceleration = 0;
+                                        // The docked-to-flight block below builds
+                                        // F994's pad model and F1013's climb.
+                                        last_mode = ffe_rs::flight::Mode::Docked;
+                                    }
+                                    Err(why) => message = why,
+                                }
                             }
                         }
                     } else if pressed(Key::L) || console_click == Some(Click::Labels) {
@@ -3528,13 +3564,31 @@ fn run() -> Result<(), String> {
             state.ensure_damage(hull_full);
         }
         let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
+        // F1099 prints DATA_009124, the parent object's name: at the new game it
+        // is Hope, the planet under Old Blackelk. A surface landing names the
+        // body itself; in free flight the port falls back to the system.
+        let parent_name = nav
+            .as_ref()
+            .and_then(|nav| {
+                let index = nav.docked.or_else(|| nav.landed_body())?;
+                let body = &nav.bodies[index];
+                Some(
+                    body.parent
+                        .and_then(|p| nav.bodies.get(p))
+                        .map_or_else(|| body.name.clone(), |parent| parent.name.clone()),
+                )
+            })
+            .unwrap_or_else(|| {
+                nav.as_ref()
+                    .map_or(String::new(), |nav| nav.system_name().to_owned())
+            });
         screen.hud = PlayerHud {
             shields: state.shields,
             hull: state.hull,
             set_speed: original.as_ref().map(|model| model.set_speed_metres()),
             actual_speed: state.speed() * 9.7,
             altitude: Some(0),
-            registration: ships.name(state.ship).unwrap_or("").to_owned(),
+            registration: parent_name,
             autopilot,
             turret: views.mode.is_turret().then(|| {
                 (

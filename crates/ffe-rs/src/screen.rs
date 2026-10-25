@@ -1317,6 +1317,11 @@ impl Screen {
         &self.frame
     }
 
+    /// The expanded fixed low palette, for tests that check a drawn colour.
+    pub fn palette(&self) -> &[u32; 128] {
+        &self.palette
+    }
+
     /// The labels the original's F989/F1108 would draw this frame.
     pub fn label_positions(&self, camera: &Camera) -> Vec<(String, i32, i32)> {
         body_label_positions(&self.labels, camera)
