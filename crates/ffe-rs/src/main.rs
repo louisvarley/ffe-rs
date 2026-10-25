@@ -3624,10 +3624,11 @@ fn run() -> Result<(), String> {
                 ],
             );
         }
-        if let Some(nav) = nav
-            .as_ref()
-            .filter(|nav| nav.view != NavView::Closed && galaxy.is_none())
-        {
+        if let Some(nav) = nav.as_ref().filter(|nav| {
+            state.mode == ffe_rs::flight::Mode::Flight
+                && nav.view != NavView::Closed
+                && galaxy.is_none()
+        }) {
             let ship = original
                 .as_ref()
                 .map_or([0; 3], |model| model.player().motion.position);
