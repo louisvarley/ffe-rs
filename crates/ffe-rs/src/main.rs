@@ -1491,9 +1491,24 @@ fn run() -> Result<(), String> {
                     let landed = nav.as_ref().and_then(|nav| nav.landed_state());
                     if pressed(Key::L) && landed.is_some() {
                         if let Some(nav) = nav.as_mut() {
+                            // F1013's altitude comes from F1033; a complex
+                            // starport shape leaves it at 0x7fffffff, so measure
+                            // the climb from the pad's seat and up row instead.
+                            let climb = nav
+                                .landed_body()
+                                .and_then(|index| nav.bodies.get(index))
+                                .map(|body| {
+                                    (
+                                        original
+                                            .as_mut()
+                                            .map_or([0; 3], |model| model.absolute_position()),
+                                        body.orientation[1],
+                                    )
+                                });
                             match nav.begin_surface_launch() {
                                 Ok(()) => {
                                     acceleration = 0;
+                                    takeoff_climb = climb;
                                     if let Some(model) = original.as_mut() {
                                         model.set_time_acceleration(0);
                                         // F1042's zero motion, then F1013's climb:
