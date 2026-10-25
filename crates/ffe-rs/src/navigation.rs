@@ -1118,16 +1118,22 @@ impl Navigator {
             | ((record.1 >> 16) as u32 & 0x1fff) << 13
             | (record.3 & 0x3f) << 26;
         let mut entries = galaxy(cache)?;
-        let current =
-            if let Some(index) = entries.iter().position(|entry| entry.params.code == code) {
+        let current = if start_type == 0 {
+            // Record 0 is not one of the hand-coded systems: F829/F832 generate
+            // it from the record's coordinates and extra word.
+            let entry = start_entry(cache, record)?;
+            if let Some(index) = entries.iter().position(|e| e.params.code == code) {
+                entries[index] = entry;
                 index
             } else {
-                // Record 0 is not one of the hand-coded systems: F829/F832 generate
-                // it from the record's coordinates and extra word.
-                let entry = start_entry(cache, record)?;
                 entries.push(entry);
                 entries.len() - 1
-            };
+            }
+        } else if let Some(index) = entries.iter().position(|entry| entry.params.code == code) {
+            index
+        } else {
+            return Err(format!("start system {code:#x} is not in the galaxy table"));
+        };
         let bodies = bodies(cache, &entries[current], clock_words(NEW_GAME_CLOCK))?;
         let index = bodies
             .iter()
