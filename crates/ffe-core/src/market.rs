@@ -183,6 +183,18 @@ pub struct Entry {
     pub price: i32,
 }
 
+/// The tonnes of illegal goods in `cargo` (F233's event-5 sum): the stock
+/// string's bit 7 marks a commodity illegal, and the player's hold counts one
+/// tonne per word.
+pub fn illegal_tonnes(cargo: &[u16], flags: &[u8]) -> i32 {
+    cargo
+        .iter()
+        .zip(flags)
+        .filter(|(_, flag)| **flag & ILLEGAL != 0)
+        .map(|(tonnes, _)| i32::from(*tonnes))
+        .sum()
+}
+
 /// A system's market conditions: what F870 reports and the stock string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Conditions<'a> {
@@ -214,13 +226,17 @@ pub enum Refusal {
 }
 
 impl Refusal {
-    pub fn text(self) -> &'static str {
+    /// The original's `0x98e1..0x98e5` messages, with the commodity name the
+    /// `FF30` code inserts (`DATA_005879..005883`).
+    pub fn message(self, good: &str) -> String {
         match self {
-            Refusal::HoldFull => "Your cargo hold is full",
-            Refusal::OutOfStock => "None for sale",
-            Refusal::NoCash => "You cannot afford it",
-            Refusal::NothingToSell => "You have none to sell",
-            Refusal::CannotPayToSell => "You cannot afford to dump it",
+            Refusal::HoldFull => "Your cargo hold is full.".to_owned(),
+            Refusal::OutOfStock => format!("We have no {good} in stock."),
+            Refusal::NoCash => format!("You cannot afford {good}."),
+            Refusal::NothingToSell => format!("You have no {good} to sell."),
+            Refusal::CannotPayToSell => {
+                format!("You cannot afford the charge to \"sell\" (ie remove) {good}.")
+            }
         }
     }
 }

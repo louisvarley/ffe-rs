@@ -2,7 +2,36 @@
 //! message and fine (`DATA_005039`, `DATA_005040`), the wanted bit
 //! (`DATA_008646`), the per-starport ledger (`DATA_009095`) and F783's clear.
 
-use ffe_core::npc::{offence_message, Legal, OFFENCES, UNLAWFUL_DISCHARGE};
+use ffe_core::npc::{
+    offence_message, Legal, OFFENCES, POLICE_FINE, SMUGGLING, TRADING_ILLEGAL, UNLAWFUL_DISCHARGE,
+};
+
+/// Both illegal-trade offences (`DATA_005039[5]` and `[7]`): trading is
+/// `F542`'s fine-free record plus F543's 500.0 credit charge, smuggling is
+/// `F233`'s 2500 printed / 25000 ledger message with no wanted bit.
+#[test]
+fn the_illegal_goods_offences_record_their_own_words() {
+    let mut legal = Legal::default();
+    let trading = legal.record(TRADING_ILLEGAL, Some(2)).expect("recorded");
+    assert!(trading.message.is_empty(), "flags 0 shows no F236 message");
+    assert_eq!((trading.fine, trading.charged), (0, 0));
+    assert!(!legal.wanted, "flags 0 leaves the wanted bit clear");
+    assert_eq!(legal.offences, 1);
+    legal.charge(POLICE_FINE, Some(2));
+    assert_eq!(legal.fines[2], 5_000);
+    assert_eq!(POLICE_FINE, 0x1388);
+
+    let smuggling = legal.record(SMUGGLING, Some(1)).expect("recorded");
+    assert_eq!(smuggling.fine, 2_500);
+    assert_eq!(smuggling.charged, 25_000);
+    assert_eq!(
+        smuggling.message,
+        "Smuggling illegal goods is not permitted here. Pay a $2500 fine."
+    );
+    assert!(!legal.wanted, "offence 7's flags are 2, so no wanted bit");
+    assert_eq!(legal.fines[1], 25_000);
+    assert_eq!(legal.offences, 2);
+}
 
 #[test]
 fn the_offence_table_is_data_005039() {

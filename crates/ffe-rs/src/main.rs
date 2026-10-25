@@ -2422,8 +2422,10 @@ fn run() -> Result<(), String> {
                             .as_mut()
                             .and_then(|nav| nav.docked.map(|station| (nav, station)))
                         {
-                            Some((nav, station)) => trade::listing(nav, &cache, station, &state)
-                                .map_or(0, |rows| rows.len()),
+                            Some((nav, station)) => {
+                                trade::listing_with(nav, &cache, station, &state, dock.black_market)
+                                    .map_or(0, |rows| rows.len())
+                            }
                             None => 0,
                         }
                     } else {
@@ -2523,6 +2525,19 @@ fn run() -> Result<(), String> {
                             ));
                         } else if dock.screen == StationScreen::Ships {
                             dock_action = Some(StationAction::BuyShip { row: dock.selected });
+                        } else if dock.screen == StationScreen::Bulletin {
+                            let station = nav.as_ref().and_then(|nav| nav.docked);
+                            if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
+                                if let Some(text) = open_bulletin_post(
+                                    nav,
+                                    &cache,
+                                    station,
+                                    dock.selected,
+                                    &mut dock,
+                                ) {
+                                    message = text;
+                                }
+                            }
                         } else if let Some(entry) =
                             station::menu_entry(dock.screen, dock.selected, 0)
                         {
@@ -2548,18 +2563,18 @@ fn run() -> Result<(), String> {
                                             "Repairs and servicing actions are not ported.",
                                         ));
                                     } else if dock.screen == StationScreen::Bulletin {
-                                        // F453/F523: selecting an advertisement
-                                        // shows it in full; the mission reply
-                                        // actions are not ported.
+                                        // F453/F454/F523: a goods advertisement
+                                        // opens F454's black market; any other
+                                        // shows in full (the mission replies are
+                                        // not ported).
                                         let station = nav.as_ref().and_then(|nav| nav.docked);
                                         if let (Some(nav), Some(station)) = (nav.as_mut(), station)
                                         {
-                                            if let Ok(offers) = nav.station_offers(&cache, station)
-                                            {
-                                                if let Some(post) = offers.posts.get(index) {
-                                                    dock.selected = index;
-                                                    message = post.text.clone();
-                                                }
+                                            if let Some(text) = open_bulletin_post(
+                                                nav, &cache, station, index, &mut dock,
+                                            ) {
+                                                dock.selected = index;
+                                                message = text;
                                             }
                                         }
                                     } else if let Some(entry) =
@@ -2656,6 +2671,14 @@ fn run() -> Result<(), String> {
                     match station_action {
                         StationAction::Launch => {
                             if let Some(nav) = nav.as_mut() {
+                                // F233's event-5 customs scan runs before the
+                                // launch request (the original triggers it from
+                                // the special-slot write that enters flight).
+                                if let Some(report) = nav.smuggling_scan(&cache, &state.hold) {
+                                    if !report.message.is_empty() {
+                                        pending_log.add(Source::Legal, report.message);
+                                    }
+                                }
                                 match nav.begin_launch() {
                                     Ok(()) if nav.takeoff.is_some() => {
                                         // F381 leaves the open-air starport's
@@ -2738,9 +2761,20 @@ fn run() -> Result<(), String> {
                             let shift = window.is_key_down(Key::LeftShift)
                                 || window.is_key_down(Key::RightShift);
                             if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
-                                if let Some(good) = trade::listing(nav, &cache, station, &state)
-                                    .ok()
-                                    .and_then(|rows| rows.get(row).map(|line| line.good))
+                                if dock.fake_market {
+                                    // F554: on F640's fake advertisement a row
+                                    // action is F542/F543, not F555/F556.
+                                    let report = trade::police_sting(nav, station);
+                                    pending_log.add(Source::Legal, report.message);
+                                } else if let Some(good) = trade::listing_with(
+                                    nav,
+                                    &cache,
+                                    station,
+                                    &state,
+                                    dock.black_market,
+                                )
+                                .ok()
+                                .and_then(|rows| rows.get(row).map(|line| line.good))
                                 {
                                     match trade::trade(
                                         nav,
@@ -2767,6 +2801,13 @@ fn run() -> Result<(), String> {
                     sound.play(Cue::UiBeep);
                 }
                 let action = if pressed(Key::L) && state.mode == ffe_rs::flight::Mode::Docked {
+                    if let Some(nav) = nav.as_mut() {
+                        if let Some(report) = nav.smuggling_scan(&cache, &state.hold) {
+                            if !report.message.is_empty() {
+                                pending_log.add(Source::Legal, report.message);
+                            }
+                        }
+                    }
                     match nav.as_mut() {
                         Some(nav) if state.mode == ffe_rs::flight::Mode::Docked => {
                             match nav.begin_launch() {
@@ -2839,27 +2880,41 @@ fn run() -> Result<(), String> {
                                 && dock.screen == StationScreen::Market
                                 && nav.market_tables().is_some() =>
                         {
-                            let rows = trade::listing(nav, &cache, station, &state);
-                            match rows.map(|rows| rows.get(dock.selected).map(|row| row.good)) {
-                                Ok(Some(good)) => {
-                                    match trade::trade(
-                                        nav,
-                                        &cache,
-                                        &mut state,
-                                        station,
-                                        good,
-                                        buying,
-                                        if shift { 10 } else { 1 },
-                                    ) {
-                                        Ok(text) => pending_log.add(Source::Trade, text),
-                                        Err(error) => message = format!("Trade failed: {error}"),
+                            if dock.fake_market {
+                                let report = trade::police_sting(nav, station);
+                                pending_log.add(Source::Legal, report.message);
+                                None
+                            } else {
+                                let rows = trade::listing_with(
+                                    nav,
+                                    &cache,
+                                    station,
+                                    &state,
+                                    dock.black_market,
+                                );
+                                match rows.map(|rows| rows.get(dock.selected).map(|row| row.good)) {
+                                    Ok(Some(good)) => {
+                                        match trade::trade(
+                                            nav,
+                                            &cache,
+                                            &mut state,
+                                            station,
+                                            good,
+                                            buying,
+                                            if shift { 10 } else { 1 },
+                                        ) {
+                                            Ok(text) => pending_log.add(Source::Trade, text),
+                                            Err(error) => {
+                                                message = format!("Trade failed: {error}");
+                                            }
+                                        }
+                                        None
                                     }
-                                    None
-                                }
-                                Ok(None) => None,
-                                Err(error) => {
-                                    message = format!("Market unavailable: {error}");
-                                    None
+                                    Ok(None) => None,
+                                    Err(error) => {
+                                        message = format!("Market unavailable: {error}");
+                                        None
+                                    }
                                 }
                             }
                         }
@@ -4198,12 +4253,24 @@ fn run() -> Result<(), String> {
                     };
                     let station_name = nav.bodies[station].name.clone();
                     if dock.screen == StationScreen::Market && nav.market_tables().is_some() {
-                        if let Ok(rows) = trade::listing(nav, &cache, station, &state) {
+                        if let Ok(rows) =
+                            trade::listing_with(nav, &cache, station, &state, dock.black_market)
+                        {
                             let visible = station::layout(StationScreen::Market).visible();
                             dock.selected = dock.selected.min(rows.len().saturating_sub(1));
                             dock.scroll = dock.scroll.min(rows.len().saturating_sub(visible));
+                            // F454's title is 0x98d7 (the 0x920d company name),
+                            // not "Starport Stockmarket".
+                            let title = if dock.black_market {
+                                dock.company_seed
+                                    .and_then(|seed| nav.company_name(&cache, seed))
+                                    .filter(|name| !name.is_empty())
+                                    .unwrap_or_else(|| station_name.clone())
+                            } else {
+                                station_name.clone()
+                            };
                             screen.market = Some(ffe_rs::screen::MarketView {
-                                station: station_name,
+                                station: title,
                                 system: nav.system_name().to_owned(),
                                 rows: rows
                                     .into_iter()
@@ -4219,6 +4286,7 @@ fn run() -> Result<(), String> {
                                 cash: status.cash,
                                 used: status.cargo_used,
                                 capacity: status.cargo_capacity,
+                                black_market: dock.black_market,
                             });
                         }
                     } else if dock.screen == StationScreen::Upgrades {
@@ -5097,6 +5165,32 @@ fn fit_or_remove(
 
 /// The BBS and hull-list counts of the station the player is docked at, for the
 /// console hint (0/0 when there is no navigator).
+/// F453's bulletin-board row action, for a mouse click or Enter: F454 opens
+/// F536's black market when the advertisement is 0x9829 and the system has an
+/// illegal commodity; otherwise the advertisement's full text goes to the
+/// console. Returns the console line.
+fn open_bulletin_post(
+    nav: &mut Navigator,
+    cache: &ffe_content::VerifiedCache,
+    station: usize,
+    index: usize,
+    dock: &mut DockState,
+) -> Option<String> {
+    let illegal = trade::illegal_available(nav, cache).unwrap_or(false);
+    let post = nav
+        .station_offers(cache, station)
+        .ok()?
+        .posts
+        .get(index)?
+        .clone();
+    if post.code == 0x9829 && illegal {
+        dock.open_black_market(post.fake, ffe_core::bulletin::post_seed(&post));
+        Some(station::MARKET_HINT.to_owned())
+    } else {
+        Some(post.text)
+    }
+}
+
 fn station_offer_counts(
     nav: Option<&mut Navigator>,
     cache: &ffe_content::VerifiedCache,

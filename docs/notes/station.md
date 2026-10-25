@@ -182,8 +182,10 @@ anywhere while docked. These are called out as port conveniences in
 - **Stockmarket** (`F536`/`F538`): the cached legal goods in `trade::listing`
   order, 13 rows with the Buy and Sell buttons, the original's column header
   and the cargo/cash/cabins line. Buying and selling keep the verified F555/
-  F556 core. The market has no Go Back arrow in the original; `Backspace`
-  leaves it in the port.
+  F556 core. A `0x9829` bulletin advertisement opens `F454`'s black market
+  (all 33 commodities, the 0x98d7 company title), and F640's fake one is the
+  F542/F543 police trap. The market has no Go Back arrow in the original;
+  `Backspace` leaves it in the port.
 - **Bulletin Board** (`F453`/`F621`/`F622`/`F633`): the 18-entry `+0x132`
   board is generated on first use from `DATA_006170` (`F621`: 32 slots, 18
   stored) and the 0x981a..0x982d templates. F622 makes `population * 4 + 1`

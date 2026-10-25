@@ -1634,6 +1634,14 @@ pub const OFFENCES: [Offence; 11] = [
 /// The index of "Unlawful discharge of weapon" in [`OFFENCES`]: F931/F941's
 /// `F237(ship, 3)`.
 pub const UNLAWFUL_DISCHARGE: usize = 3;
+/// "Trading in illegal goods" (F542's `F237(5, station)` and the fake
+/// smuggler advertisement's row action).
+pub const TRADING_ILLEGAL: usize = 5;
+/// "Smuggling illegal goods" (F233's event-5 scan).
+pub const SMUGGLING: usize = 7;
+/// The police fine F543 adds for a fake smuggler advertisement (`0x1388` in
+/// tenths of a credit: 500.0 CR).
+pub const POLICE_FINE: u32 = 0x1388;
 
 /// F236's message (`DATA_005040`/`DATA_005041`, `ffedat.asm:4384/4386`). The
 /// first offence at a starport uses "is not permitted here"; a later one, when
@@ -1682,6 +1690,44 @@ pub struct Legal {
 }
 
 impl Legal {
+    /// F236 for any offence record: the points and fine go to the starport's
+    /// ledger (ten times the printed fine), flags bit 0 sets the wanted state
+    /// and bit 1 appends the message. A record whose flags ask for a starport
+    /// witness (bit 2) is left unrecorded when `starport` is `None`, exactly as
+    /// F234 returning 0 does.
+    pub fn record(&mut self, offence: usize, starport: Option<usize>) -> Option<OffenceReport> {
+        let record = OFFENCES.get(offence)?;
+        if record.flags & 4 != 0 && starport.is_none() {
+            return None;
+        }
+        let slot = starport.unwrap_or(0) % self.fines.len();
+        let additional = self.fines[slot] != 0;
+        let charged = record.fine.saturating_mul(10);
+        self.fines[slot] = self.fines[slot].saturating_add(charged);
+        if record.flags & 1 != 0 {
+            self.wanted = true;
+        }
+        self.offences += 1;
+        Some(OffenceReport {
+            message: if record.flags & 2 != 0 {
+                offence_message(offence, additional)
+            } else {
+                String::new()
+            },
+            fine: record.fine,
+            charged,
+            additional,
+        })
+    }
+
+    /// F543's extra charge on F542's police screen: the amount is already in
+    /// the cash unit (tenths of a credit) and goes straight into the starport's
+    /// ledger, as `[D9095 + 4*D8996] += 0x1388` does.
+    pub fn charge(&mut self, amount: u32, starport: Option<usize>) {
+        let slot = starport.unwrap_or(0) % self.fines.len();
+        self.fines[slot] = self.fines[slot].saturating_add(amount);
+    }
+
     /// F931/F941: the player's shot or missile has passed F931's gates. The
     /// first shot in a system (`DATA_008860` bit 2 clear) is reported through
     /// F237(ship, 3); later shots are not. F236 needs a nearby starport (the
@@ -1695,22 +1741,7 @@ impl Legal {
             return None;
         }
         self.illegal_fire = true;
-        let index = starport?;
-        let record = &OFFENCES[UNLAWFUL_DISCHARGE];
-        let slot = index % self.fines.len();
-        let additional = self.fines[slot] != 0;
-        let charged = record.fine.saturating_mul(10);
-        self.fines[slot] = self.fines[slot].saturating_add(charged);
-        if record.flags & 1 != 0 {
-            self.wanted = true;
-        }
-        self.offences += 1;
-        Some(OffenceReport {
-            message: offence_message(UNLAWFUL_DISCHARGE, additional),
-            fine: record.fine,
-            charged,
-            additional,
-        })
+        self.record(UNLAWFUL_DISCHARGE, starport)
     }
 
     /// F783: the police object (`+0x118 == 0xe`) has gone. It clears

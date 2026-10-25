@@ -117,6 +117,9 @@ pub struct MarketView {
     pub cash: i32,
     pub used: i32,
     pub capacity: i32,
+    /// F454's illegal-goods market: `station` holds the `0x98d7` company name
+    /// instead of the starport name, and the title is that name alone.
+    pub black_market: bool,
 }
 
 /// Rows of the market list shown at once (the original's 10-pixel rows from
@@ -2201,7 +2204,11 @@ impl Screen {
         let first = view.scroll.min(rows.len().saturating_sub(visible));
         let dock = DockView {
             screen: StationScreen::Market,
-            title: format!("{} Stockmarket", view.station),
+            title: if view.black_market {
+                view.station.clone()
+            } else {
+                format!("{} Stockmarket", view.station)
+            },
             rows: rows[first..].to_vec(),
             status: Status {
                 cargo_used: view.used,

@@ -94,6 +94,10 @@ pub struct Post {
     pub day: u32,
     pub vars: [Var; 5],
     pub text: String,
+    /// F640's fake smuggler advertisement (`+8 == -1`): the same `0x9829`
+    /// wording as F639's real one, but the police set the trap. The market it
+    /// opens applies F542's trading-in-illegal-goods fine on a row action.
+    pub fake: bool,
 }
 
 /// A system the F857 destination picker may choose.
@@ -304,6 +308,7 @@ fn post(code: u16, day: u32, vars: [Var; 5], world: &World<'_>) -> Post {
         day,
         vars,
         text,
+        fake: false,
     }
 }
 
@@ -323,6 +328,14 @@ fn goods(rng: &mut Random, world: &World<'_>, day: u32) -> Post {
         ],
         world,
     )
+}
+
+/// F640: the police's fake smuggler advertisement. The same `0x9829` template
+/// and company name, with the `+8 == -1` marker F454 turns into a trap.
+fn fake_goods(rng: &mut Random, world: &World<'_>, day: u32) -> Post {
+    let mut post = goods(rng, world, day);
+    post.fake = true;
+    post
 }
 
 /// F642: the military recruitment notice for the system's allegiance.
@@ -456,7 +469,7 @@ pub fn generate_one(
         Generator::Goods => goods(rng, world, day),
         Generator::GoodsRandom => {
             if rng.bounded(2) == 0 {
-                goods(rng, world, day)
+                fake_goods(rng, world, day)
             } else {
                 return None;
             }
@@ -508,6 +521,15 @@ pub fn daily(rng: &mut Random, posts: &mut [Post], world: &World<'_>, day: u32) 
 pub fn post_system(post: &Post) -> Option<u32> {
     match post.vars.get(2) {
         Some(Var::System(code)) => Some(*code),
+        _ => None,
+    }
+}
+
+/// The `F801` seed in a generated post's StrVars[3], used by `0x92xx` names.
+pub fn post_seed(post: &Post) -> Option<u32> {
+    match post.vars.get(3) {
+        Some(Var::Seed(seed)) => Some(*seed),
+        Some(Var::Int(seed)) => Some(*seed as u32),
         _ => None,
     }
 }
@@ -635,6 +657,21 @@ mod tests {
         // Nine population gives 37 attempts, enough for the cap with the
         // always-succeeding military/goods/crew slots.
         assert!(posts.len() > 4, "{}", posts.len());
+    }
+
+    #[test]
+    fn the_fake_smuggler_advertisement_keeps_the_goods_wording_and_marks_the_trap() {
+        let destinations = [];
+        let world = world(&destinations, None);
+        let mut rng = Random::new(7, 11);
+        let real = goods(&mut rng, &world, 1);
+        assert_eq!(real.code, 0x9829);
+        assert!(!real.fake);
+        let fake = fake_goods(&mut rng, &world, 1);
+        assert_eq!(fake.code, 0x9829);
+        assert!(fake.fake);
+        assert_eq!(fake.text, real.text, "both use the 0x9829 template");
+        assert!(post_seed(&fake).is_some());
     }
 
     #[test]

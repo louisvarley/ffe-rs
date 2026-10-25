@@ -4,7 +4,8 @@
 use crate::flight::Flight;
 use crate::navigation::Navigator;
 use ffe_content::VerifiedCache;
-use ffe_core::market::{Hold, Refusal, GOODS, ILLEGAL, NAMES};
+use ffe_core::market::{Hold, GOODS, ILLEGAL, NAMES};
+use ffe_core::npc::{self, OffenceReport};
 
 /// One line of the market screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,12 +52,26 @@ pub fn hold_of(state: &Flight, capacity: i32) -> Hold {
     hold
 }
 
-/// The market screen's lines for `station`: the legal goods, in the original's order.
+/// The market screen's lines for `station`: the legal goods, in the original's
+/// order. The black market (F454's `0x80` mask) uses [`listing_with`] instead.
 pub fn listing(
     nav: &mut Navigator,
     cache: &VerifiedCache,
     station: usize,
     state: &Flight,
+) -> Result<Vec<Listing>, String> {
+    listing_with(nav, cache, station, state, false)
+}
+
+/// [`listing`] with F538's illegal-goods mask: `show_illegal` is the `0x80`
+/// bit F454 passes to F537, so the fake/real smuggler advertisement's screen
+/// lists the bit-7 commodities as well.
+pub fn listing_with(
+    nav: &mut Navigator,
+    cache: &VerifiedCache,
+    station: usize,
+    state: &Flight,
+    show_illegal: bool,
 ) -> Result<Vec<Listing>, String> {
     let flags = nav.stock_flags(cache)?;
     let names: Vec<String> = {
@@ -67,7 +82,7 @@ pub fn listing(
     };
     let market = nav.market(cache, station)?;
     Ok((0..GOODS)
-        .filter(|good| flags[*good] & ILLEGAL == 0)
+        .filter(|good| show_illegal || flags[*good] & ILLEGAL == 0)
         .map(|good| Listing {
             good,
             name: names[good].clone(),
@@ -78,8 +93,45 @@ pub fn listing(
         .collect())
 }
 
+/// Whether this system's stock string marks any commodity illegal (F639/F640
+/// only place a smuggler advertisement when one exists).
+pub fn illegal_available(nav: &Navigator, cache: &VerifiedCache) -> Result<bool, String> {
+    Ok(nav
+        .stock_flags(cache)?
+        .iter()
+        .any(|flags| flags & ILLEGAL != 0))
+}
+
+/// F542/F543: a row action at F640's fake smuggler advertisement. The offence
+/// is F237(5) ("Trading in illegal goods") and F543 charges `0x1388` (500.0
+/// credits) to the starport's ledger; F554 returns before F555/F556, so no
+/// tonne moves.
+pub fn police_sting(nav: &mut Navigator, station: usize) -> OffenceReport {
+    let ordinal = nav.starport_ordinal(station);
+    let report = nav
+        .legal
+        .record(npc::TRADING_ILLEGAL, Some(ordinal))
+        .unwrap_or(OffenceReport {
+            message: String::new(),
+            fine: 0,
+            charged: 0,
+            additional: false,
+        });
+    nav.legal.charge(npc::POLICE_FINE, Some(ordinal));
+    OffenceReport {
+        message: format!(
+            "Trading in illegal goods is not permitted here. Pay a ${} fine.",
+            credits(npc::POLICE_FINE as i32)
+        ),
+        charged: report.charged.saturating_add(npc::POLICE_FINE),
+        ..report
+    }
+}
+
 /// Buy (or sell) up to `count` tonnes of `good` at `station`, stopping at the first
-/// refusal. Returns what to tell the player.
+/// refusal. Returns the original's console message (`0x98e1..0x98e7`): a refusal
+/// names the commodity, otherwise a completed trade says "Buying <good>." or
+/// "Selling <good>.".
 pub fn trade(
     nav: &mut Navigator,
     cache: &VerifiedCache,
@@ -99,7 +151,6 @@ pub fn trade(
         .ok_or("no market tables")?;
     let mut hold = hold_of(state, space);
     let mut cash = i32::try_from(state.credits).unwrap_or(i32::MAX);
-    let before = cash;
     let market = nav.market(cache, station)?;
     let mut done = 0;
     let mut refusal = None;
@@ -119,19 +170,10 @@ pub fn trade(
     }
     state.credits = u32::try_from(cash.clamp(0, 1_000_000_000)).unwrap_or(0);
     state.hold = hold.cargo[..NAMES].to_vec();
-    let paid = (i64::from(before) - i64::from(cash)).abs();
-    let paid = credits(paid as i32);
     Ok(match (done, refusal) {
-        (0, Some(why)) => format!("{}: {}.", name, why.text()),
-        (done, why) => {
-            let verb = if buying { "Bought" } else { "Sold" };
-            let tail = why.map_or(String::new(), |why: Refusal| {
-                format!(" Then: {}.", why.text())
-            });
-            format!(
-                "{verb} {done} t of {name} for {paid} CR (price {}).{tail}",
-                credits(nav.market(cache, station)?.market.entries[good].price)
-            )
-        }
+        (_, Some(why)) => why.message(&name),
+        (0, None) => String::new(),
+        (_, None) if buying => format!("Buying {name}."),
+        (_, None) => format!("Selling {name}."),
     })
 }

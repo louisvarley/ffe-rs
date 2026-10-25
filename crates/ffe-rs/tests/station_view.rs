@@ -172,6 +172,7 @@ fn docked_screens_draw_at_the_original_layout() {
         cash: 1000,
         used: 0,
         capacity: hold,
+        black_market: false,
     };
     let before = screen.logical_pixels().to_vec();
     draw(&mut screen, None, Some(market), station::MARKET_HINT);
