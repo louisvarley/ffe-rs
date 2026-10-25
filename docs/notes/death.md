@@ -4,9 +4,10 @@ Status (2026-10-25): the player's hull reaching zero now runs the DOS FFE
 sequence. The old substitute that recovered the ship at the nearest starport is
 gone. With the Escape Capsule (or the "Stowmaster" fighter) fitted, F1098 moves
 the player into the craft and the game continues; without one, F1104's
-external-view hold ends on the status page's `GAME OVER` / `COMMANDER <name>
-DIED` screen. Source: `jjffe-master/ffe.asm` / `ffedat.asm` (JJFFE 2.8a7 is the
-reference build, DOS FFE is the behaviour source).
+external-view hold ends on F917's spinning tombstone: the `GAME OVER` face and
+the `COMMANDER <name> DIED <date>` face. Source: `jjffe-master/ffe.asm` /
+`ffedat.asm` (JJFFE 2.8a7 is the reference build, DOS FFE is the behaviour
+source). The screen itself is `docs/notes/gameover.md`.
 
 ## 1. The source path
 
@@ -47,24 +48,26 @@ reference build, DOS FFE is the behaviour source).
    5.001 s at 49 700 tics/s), `DATA_008631 = 0`, clear the GUI hot areas, set
    `DATA_008835 |= 0x21`, and play sample `0x1f` again (`81507-81519`).
 
-The status page's first page is the game-over page. Its strings are in
-`ffedat.asm:5626-5634`:
+The GAME OVER strings are in `ffedat.asm:5626-5634`:
 
 ```text
 DATA_005129: "\rGAME\rOVER"
 DATA_005130: "\r\r\r\r\r\r\r  COMMANDER\r   %s\r     DIED\r  %s"
 ```
 
-`DATA_005104` (`ffedat.asm:5243`) points at them, and the `ff9c` string
-expansion reaches the array through **F277** (`ffe.asm:21602`; the `ff9c`
-entry is `ffedat.asm:23186`). **F286** (`22279`) dispatches the status page;
-its page 0 draws **F283** (`21870`), the equipment page.
+They are not a status page. **F1107** (`81557`, the second handler of the
+`0x2c` state entry in `DATA_007255`) subtracts the frame tics from
+`DATA_008884`; when it expires it calls **F1106**/F918(1), which runs **F917**
+(`68047`). F917 draws the tombstone model 0xac (172) — or 0xaf (175) when
+`DATA_008885 == 0xeb6973d` — and its model text records reach the strings
+through `DATA_005104` (`ffedat.asm:5243`) and the FF9C expansion `F277`
+(`ffe.asm:21602`; entry `ffedat.asm:23186`). F917 spins for 950,000 tics
+(about 19.1 s) and longjmps back to the front end. F286/F283 are the separate
+status/equipment pages and are not part of the death screen.
 
-**Uncertainty:** `DATA_008884` is set here but the code that decrements it in
-the death state is not F1068's state-transition helper (`79261`), whose callers
-are the launch/docking sequences. The port treats the constant as the
-external-view hold and shows the page at its end. The exact original trigger is
-left for an owner decision (see section 4).
+The `0x3cae6` timer is therefore F1104's 5.001 s external-view hold, consumed
+by F1107, and F917's loop is the screen. See `docs/notes/gameover.md` for the
+model, text codes and exact angle.
 
 ### 1.3 F1098: the escape craft
 
@@ -141,17 +144,19 @@ cleared.
     the fitted craft with sample `0x20`, or says `No escape capsule fitted.`
   - While `Flight::death` is set, the flight controls, NPC traffic and lasers
     are held; F942's effects still tick through `Navigator::tick_effects`.
-  - F1104's external view is set on death. At `GameOver`, `Screen::draw_game_over`
-    draws `DATA_005129`/`DATA_005130`; `N` starts a new game (the SysMenu path)
-    and `Q` quits.
+  - F1104's external view is set on death. When the 5.001 s hold expires,
+    `GameOver::tombstone` draws F917's model 172/175 and its engraved text;
+    there are no death-screen options. At the end the game returns to the
+    front end (the intro), whose 1-5 choices include the Commander Load screen.
 - `ffe_core::effects` needed no change; `Navigator::tick_effects` exposes its
   existing effect ticker to the death state.
 
 ## 3. Evidence
 
-- `cargo test -p ffe-rs --lib death` (3 tests): F1098's bit order and the
+- `cargo test -p ffe-rs --lib death` (6 tests): F1098's bit order and the
   equipment table's codes, the `0x40200000` field set and the craft model
-  numbers, and the `0x3cae6` hold (248 550 tics, 5.001 s).
+  numbers, the `0x3cae6` hold (248 550 tics, 5.001 s), and `gameover`'s phase
+  timing.
 - `cargo test -p ffe-rs --test death` (8 tests):
   - no craft -> `Exploding` -> `GameOver`;
   - Escape Capsule -> model 14, general `0x40200000`, no lasers/missiles/
@@ -172,18 +177,19 @@ cleared.
 
 ## 4. Deviations and remaining owner decisions
 
-- **No original screen art/layout.** The port draws the source's `GAME OVER` /
-  `COMMANDER` / `DIED` strings on a cleared 320x200 view. The original renders
-  them through the status page (F283), whose ship picture, equipment table and
-  console buttons the port does not draw. The `DATA_005130` trailing `%s` (its
-  meaning is not established) is omitted.
+- **Screen art/layout.** The port renders F917's real model 172/175 and its
+  model-text records; `docs/notes/gameover.md` records the one reconstruction
+  (the font's degenerate text normals make the face selection use the spin's
+  half-turn). The earlier text-page placeholder and its `N`/`Q` options are
+  gone.
 - **Commander name.** The port has no commander-name entry; it uses the
-  original's default `Jameson` (`DATA_004963`). Decide whether to add a name
-  field to `Flight`/saves and to the new-game front end.
-- **Hold trigger.** `DATA_008884 = 0x3cae6` is modelled as a 5.001 s
-  external-view hold. The code that would consume the timer in the original's
-  death state was not traced (see 1.2); if the owner wants a different hold or
-  a key-press page, this is the knob.
+  original's default `Jameson` (`DATA_004963`), uppercased on the tombstone as
+  the source's font does. Decide whether to add a name field to
+  `Flight`/saves and to the new-game front end.
+- **Hold trigger.** `DATA_008884 = 0x3cae6` is consumed by F1107 after the
+  external-view hold; the port models it as `Death::Exploding` and starts
+  `GameOver::tombstone` at 5.001 s. F917's own 950,000-tic spin ends with the
+  longjmp to the front end.
 - **Old ship derelict.** F1098 hands the old hull to the AI (`+0xff = 0x16`);
   the port shows F942's explosion and does not simulate the derelict's later
   states (no player-hull AI object exists in the port).
@@ -198,10 +204,10 @@ cleared.
   the old `Loadout::cabins`, matching the source. The Stowmaster sets two.
 - **Music.** F770's stop is applied to the no-craft branch. The source's
   escape branch keeps the current song; the port does too.
-- **Game-over options.** The original's page is part of the status screen with
-  its console buttons. The port offers `N` (new game) and `Q` (quit); there is
-  no load-game UI yet, so a saved commander must be restarted from the front
-  end/boot.
+- **Game-over options.** There are none in the original state: F917 is a timed
+  spin. The `N`/`Q` placeholder is gone; the original returns to the intro,
+  whose choice 5 is the Commander Load screen (the port's load UI is still not
+  complete).
 - **No cabin requirement.** There is no cabin or passenger check in F1098; the
   only requirement is the general-equipment bit. The task's "cabin/equipment
   requirement" is therefore the equipment bit (and, for the Stowmaster, the

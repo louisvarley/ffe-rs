@@ -14,7 +14,7 @@ the starport on the launch side, and drives the real `ffe_rs::death` state.
 | file | what it shows |
 |---|---|
 | `death-explosion.png` | F942/F1104: the external view (`DATA_008872 = 4`) with the model-0x9b (155) explosion and F926 debris at the player's ship during the 5.001 s hold. |
-| `death-gameover.png` | The status page's first page (`DATA_005129`/`DATA_005130`): `GAME`, `OVER`, `COMMANDER`, `Jameson`, `DIED`, and the port's `N NEW GAME   Q QUIT` line. |
+| `death-gameover.png` | F917's spinning tombstone (model 172): `GAME OVER` and the `COMMANDER JAMESON DIED 1-JAN-3250` face, replacing the earlier text-page placeholder. |
 | `death-capsule.png` | F1098's escape: the player's ship is now model 0x0e (14, Escape Capsule), with `ship+0xc8 = 0x40200000`, no guns or missiles, and the model's hull (mass 5 -> 20). The capsule is the small triangle in the external view. |
 
 The test also prints the source values it checks:

@@ -18,6 +18,42 @@ use crate::model_math::{angle_operand, SineTable};
 use crate::model_order::Order;
 use crate::model_polygon::{self, Outline};
 use crate::star_points::StarTables;
+use std::cell::Cell;
+
+thread_local! {
+    /// The logical view height F1715/F1716 and the on-screen test use. The flight
+    /// view is 158 rows; F917's tombstone covers the full 320x200 logical screen
+    /// and temporarily raises this to 200.
+    static VIEW_HEIGHT: Cell<i32> = const { Cell::new(158) };
+}
+
+/// Set the view height used by face queueing for the current thread. Callers
+/// must restore 158; [`ViewHeightGuard`] does that on drop.
+pub fn set_view_height(height: i32) {
+    VIEW_HEIGHT.with(|value| value.set(height));
+}
+
+pub fn view_height() -> i32 {
+    VIEW_HEIGHT.with(Cell::get)
+}
+
+/// Restore the flight view's 158-row clip after a full-screen model pass.
+pub struct ViewHeightGuard;
+
+impl ViewHeightGuard {
+    pub fn full_screen() -> Self {
+        set_view_height(200);
+        crate::model_texture::set_raster_height(200);
+        Self
+    }
+}
+
+impl Drop for ViewHeightGuard {
+    fn drop(&mut self) {
+        set_view_height(158);
+        crate::model_texture::set_raster_height(158);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Emission {
@@ -600,7 +636,7 @@ fn face_queue_key(
     if instance.textures && decoded.texture != 0 && guarded && perimeter >= 6 {
         return Ok(Some((key, projected, views)));
     }
-    let on_screen = |[x, y]: [i32; 2]| (x as u32) < 320 && (y as u32) < 158;
+    let on_screen = |[x, y]: [i32; 2]| (x as u32) < 320 && (y as u32) < view_height() as u32;
     if screens.iter().any(|s| on_screen(*s)) {
         return Ok(Some((key, projected, views)));
     }
@@ -616,7 +652,7 @@ fn face_queue_key(
         // DATA_007818 rejects all-left (1), all-right (4) and all-behind (8).
         matches!(combined, 1 | 4 | 8)
     };
-    Ok((!rejected(0, 320) && !rejected(1, 158)).then_some((key, projected, views)))
+    Ok((!rejected(0, 320) && !rejected(1, view_height())).then_some((key, projected, views)))
 }
 
 /// The point handler F1698 (and F1769's calls to F1699): the operand event, and with live

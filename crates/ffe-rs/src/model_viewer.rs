@@ -265,6 +265,15 @@ pub struct ModelViewer {
     /// word at +0x124, its registration). Empty falls back to the model's own
     /// name, so the viewer shows something instead of nothing.
     registration: Vec<u8>,
+    /// The tombstone's F1344 expansion for FF9C00..`03`: the commander name and
+    /// game date FFE's game-over models engrave on model 172/175.
+    commander: Vec<u8>,
+    game_date: Vec<u8>,
+    /// When drawing a tombstone, only this face's text records are drawn. FFE
+    /// selects them with the text record's normal (2 = RIP/obituary, 4 =
+    /// GAME OVER); the port's glyph normals are degenerate, so the model's own
+    /// spin angle decides the face instead (see `screen::draw_game_over`).
+    tombstone_face: Option<u8>,
     /// Global word 15 (the ship's forward thrust, object +0xba); `None` leaves it
     /// to the animation input. See [`ModelViewer::set_thrust`].
     thrust: Option<u16>,
@@ -611,6 +620,9 @@ impl ModelViewer {
             model_strings: Vec::new(),
             glyphs: Vec::new(),
             registration: Vec::new(),
+            commander: Vec::new(),
+            game_date: Vec::new(),
+            tombstone_face: None,
             thrust: None,
             jitter: JITTER_SEED,
             jitter_next: Cell::new(JITTER_SEED),
@@ -768,6 +780,21 @@ impl ModelViewer {
     /// `0x3016`/`0x3022` expand. Empty uses the model's own name.
     pub fn set_registration(&mut self, text: &[u8]) {
         self.registration = text.to_vec();
+    }
+
+    /// The commander name and short date FFE's game-over tombstone models
+    /// (172/175) engrave through FF9C00..`03`. Model 172 shows "GAME OVER" and
+    /// the obituary; model 175 shows the underlined name/date variant.
+    pub fn set_game_over_text(&mut self, commander: &[u8], date: &[u8]) {
+        self.commander = commander.to_vec();
+        self.game_date = date.to_vec();
+    }
+
+    /// Draw only the tombstone face whose text records name `normal` (2 for the
+    /// RIP/obituary face, 4 for the GAME OVER face). `None` draws every record
+    /// and applies the ordinary culling.
+    pub fn set_tombstone_face(&mut self, normal: Option<u8>) {
+        self.tombstone_face = normal;
     }
 
     /// Supply the glyph sets for synthetic viewers (index = font model slot).
@@ -2047,7 +2074,18 @@ impl ModelViewer {
         out: &mut Vec<Execution>,
     ) -> Result<(), String> {
         for emission in &result.texts {
-            if emission.culled {
+            let tombstone_text = matches!(emission.text.string, 0x9c00..=0x9c03 | 0x4085..=0x4089);
+            if let Some(face) = self.tombstone_face {
+                if tombstone_text && emission.text.normal != face {
+                    continue;
+                }
+                // The selected face's glyph records must be drawn even when the
+                // degenerate font normals cull them; the face was chosen by the
+                // model's spin angle in `Screen::draw_game_over`.
+                if !tombstone_text && emission.culled {
+                    continue;
+                }
+            } else if emission.culled {
                 continue;
             }
             let text = &emission.text;
@@ -2227,8 +2265,9 @@ impl ModelViewer {
     }
 
     /// F1344 expansion for the families the models' text commands use: the model
-    /// string table (`0x4000..0x8000`) and the drawn object's own string
-    /// (`0x3016`, and `0x3022` unwrapped — F1398's width table is not imported).
+    /// string table (`0x4000..0x8000`), the drawn object's own string
+    /// (`0x3016`, and `0x3022` unwrapped — F1398's width table is not imported),
+    /// and FFE's game-over templates `0x9c00..0x9c03` (models 172/175).
     fn expanded_text(&self, code: u16, model: u32) -> Result<Vec<u8>, String> {
         match code {
             0x3016 | 0x3022 => {
@@ -2241,6 +2280,35 @@ impl ModelViewer {
                     .ok_or_else(|| format!("Model {model} has no name string."))
             }
             0x4000..=0x7fff => self.model_string(code).map(<[u8]>::to_vec),
+            // DATA_005129..005132, the tombstone's four strings. 0x0d is the
+            // glyph font's new line; the strings are otherwise literal.
+            0x9c00 => Ok(b"\rGAME\rOVER".to_vec()),
+            0x9c01 => {
+                if self.commander.is_empty() || self.game_date.is_empty() {
+                    return Err("Game-over text needs a commander and date.".to_owned());
+                }
+                let mut text = b"\r\r\r\r\r\r\r  COMMANDER\r   ".to_vec();
+                text.extend_from_slice(&self.commander);
+                text.extend_from_slice(b"\r     DIED\r  ");
+                text.extend_from_slice(&self.game_date);
+                Ok(text)
+            }
+            0x9c02 => {
+                if self.commander.is_empty() {
+                    return Err("Game-over text needs a commander.".to_owned());
+                }
+                let mut text = b"\r_".to_vec();
+                text.extend_from_slice(&self.commander);
+                Ok(text)
+            }
+            0x9c03 => {
+                if self.game_date.is_empty() {
+                    return Err("Game-over text needs a date.".to_owned());
+                }
+                let mut text = b"\r\r\r\r____".to_vec();
+                text.extend_from_slice(&self.game_date);
+                Ok(text)
+            }
             _ => Err(format!("Unsupported text code {code:#06x}.")),
         }
     }

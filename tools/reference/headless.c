@@ -17,8 +17,12 @@ extern unsigned char *ref_pl_object_list;
 extern unsigned long ref_pl_frame_tics;
 extern void ref_laser_fire(unsigned char *object, int mount);
 extern void ref_launch_missile(void);
+extern void ref_damage(unsigned char *object, long damage, void *source);
 extern unsigned long ref_rng(void);
 extern void ref_timer_advance(void);
+extern void (*ref_intro_text_hook)(void);
+extern char *ref_expand_string(char *dest, long ffcode, void *vars);
+extern unsigned char ref_pl_mode;
 extern unsigned long ref_system_counter, ref_accel_counter, ref_time_accel;
 extern unsigned long ref_timer_last, ref_timer_next, ref_timer_min;
 extern unsigned char *ref_framebuffer;
@@ -493,6 +497,18 @@ static int game_frame_mode;
 static int no_intro_start;
 static unsigned long game_keys[16], game_key_count, game_key_next, game_key_frame = 200;
 
+/* --death-probe <frames>: the real game from the new game, the player's hull
+   destroyed by F953 at frame 250, then the post-destruction screen and state
+   logged every frame. Frames around the game-over stage are written as PPMs. */
+static int death_probe_mode;
+static int death_triggered;
+static int death_stage_seen;
+static unsigned long death_stage_frame;
+static unsigned long death_captures;
+static unsigned long death_trigger_frame = 250;
+static unsigned long death_trigger_at;
+static void (*death_text_original)(void);
+
 static unsigned long state_u32(size_t offset)
 {
     unsigned long value;
@@ -542,6 +558,39 @@ static void rectangle(long x, long y, long w, long h, long jump)
     if (x < 0 || y < 0 || w < 0 || h < 0 || x > 320 || y > 200 ||
         w > 320 - x || h > 200 - y || jump < 0 || jump > 1048576)
         fail("invalid blit rectangle");
+}
+
+static void write_ppm(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    long i;
+    if (!f) fail("cannot write frame");
+    fprintf(f, "P6\n320 200\n255\n");
+    for (i = 0; i < 320 * 200; ++i)
+        fwrite(palette + pixels[i] * 3, 1, 3, f);
+    fclose(f);
+}
+
+static long death_text_draw(long ffcode, void *vars, long colour, long x, long y, long wrap)
+{
+    static char expanded[2048];
+    memset(expanded, 0, sizeof expanded);
+    ref_expand_string(expanded, ffcode, vars);
+    printf("{\"text\":{\"frame\":%lu,\"code\":%ld,\"colour\":%ld,\"x\":%ld,\"y\":%ld,\"wrap\":%ld,\"value\":\"",
+           frames, ffcode, colour, x, y, wrap);
+    {
+        const unsigned char *p = (const unsigned char *)expanded;
+        while (*p) {
+            unsigned char c = *p++;
+            if (c == '"' || c == '\\') printf("\\%c", c);
+            else if (c == 0x0d) printf("\\n");
+            else if (c >= 0x20 && c < 0x7f) putchar(c);
+            else printf("\\u%04x", c);
+        }
+    }
+    printf("\"}}\n");
+    if (death_text_original) ((long (*)(long, void *, long, long, long, long))death_text_original)(ffcode, vars, colour, x, y, wrap);
+    return 1;
 }
 
 void SystemInit(void)
@@ -602,7 +651,7 @@ long InputKeybGetLastKey(void)
         sent_accept = 1;
         return 0x15;
     }
-    if ((state_mode || game_frame_mode) && !sent_start && !no_intro_start && frames >= 160) {
+    if ((state_mode || game_frame_mode || death_probe_mode) && !sent_start && !no_intro_start && frames >= 160) {
         sent_start = 1;
         return 0x02; /* Intro choice 1, after the 100-tick splash lockout. */
     }
@@ -611,8 +660,7 @@ long InputKeybGetLastKey(void)
         return (long)game_keys[game_key_next++];
     }
     return 0xff;
-}
-void InputKeybSetLastKey(long key) { (void)key; }
+}void InputKeybSetLastKey(long key) { (void)key; }
 ULONG TimerGetTimeStamp(void)
 {
     if (++clock_reads > 1000000) fail("clock-read bound exceeded");
@@ -629,6 +677,45 @@ void TimerFrameUpdate(void)
             printf("{\"frame\":%lu,\"tics\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, state_u32(0), (unsigned long long)fingerprint(pixels, sizeof(pixels)));
         else
             printf("{\"frame\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+    } else if (death_probe_mode) {
+        unsigned long player = state_u32(0xc0);
+        unsigned char *object = (unsigned char *)state_u32(0xc8);
+        if (!death_triggered && frames >= death_trigger_frame && player && object) {
+            death_triggered = 1;
+            death_trigger_at = frames;
+            death_text_original = (void (*)(void))ref_intro_text_hook;
+            ref_intro_text_hook = (void (*)(void))death_text_draw;
+            fprintf(stderr, "death-probe: player %lu object %p hull %u shields %u at frame %lu\n",
+                    player, (void *)object, *(unsigned short *)(object + 0xe4), *(unsigned short *)(object + 0xe0), frames);
+            ref_damage(object, 0x7fffffffL, 0);
+        }
+        if (death_triggered) {
+            printf("{\"frame\":%lu,\"tics\":%lu,\"mode\":%u,\"timeout\":%lu,\"player\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n",
+                   frames, state_u32(0), ref_pl_mode, *(unsigned long *)&ref_state[0x106], player,
+                   (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+            if (ref_pl_mode == 0x2c) {
+                unsigned long relative;
+                if (!death_stage_seen) {
+                    death_stage_seen = 1;
+                    death_stage_frame = frames;
+                    fprintf(stderr, "death-probe: mode 0x2c at frame %lu (%lu after the hit), timeout %lu\n",
+                            frames, frames - death_trigger_at, *(unsigned long *)&ref_state[0x106]);
+                }
+                relative = frames - death_stage_frame;
+                if (death_captures < 10 && (relative == 0 || relative == 5 || relative == 20 ||
+                                           relative == 100 || relative == 250 || relative == 550 ||
+                                           relative == 650 || relative == 740)) {
+                    char name[64];
+                    snprintf(name, sizeof name, "death-frame-%lu.ppm", frames);
+                    write_ppm(name);
+                    ++death_captures;
+                }
+            }
+        }
+        if (frames + 1 >= limit) {
+            if (death_text_original) ref_intro_text_hook = death_text_original;
+            exit(0);
+        }
     } else if (missile_probe_mode) {
         /* F1096/F941 from the executed game: set the pylon word and the combat
            target, call the launch, then print the object slots' model/control/
@@ -5743,6 +5830,13 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(-1);
     if (argc == 3 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--vertex-program")) return vertex_program_vector(atoi(argv[2]));
+    if (argc == 3 && !strcmp(argv[1], "--death-probe")) {
+        death_probe_mode = 1;
+        limit = strtoul(argv[2], 0, 0);
+        fprintf(stderr, "JJFFE death-probe-v1: the real game from the new game, F953 destroys the player, post-destruction state, text and frames.\n");
+        asmmain(0, NULL);
+        return 2;
+    }
     if (argc >= 4 && !strcmp(argv[1], "--game-frame")) {
         int k;
         game_frame_mode = 1; limit = strtoul(argv[2], 0, 0);

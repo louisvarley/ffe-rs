@@ -565,3 +565,5 @@ _ref_gui_set_last_action equ FUNC_001415_GuiSetLastAction
 ; Missile launch (F1096 -> F941), for the --missile-probe adapter mode.
 GLOBAL _ref_launch_missile
 _ref_launch_missile equ FUNC_001096
+GLOBAL _ref_damage
+_ref_damage equ FUNC_000953

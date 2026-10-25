@@ -8,6 +8,7 @@ use ffe_core::equipment::Loadout;
 use ffe_rs::camera::{ViewMode, ViewState};
 use ffe_rs::death::{self, DeathPhase, Outcome, ESCAPE_CAPSULE_BIT};
 use ffe_rs::flight::{Flight, Mode};
+use ffe_rs::gameover::{self, GameOver};
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::navigation::{Navigator, NEW_GAME_SHIP};
 use ffe_rs::screen::{Screen, SystemEffect};
@@ -105,10 +106,10 @@ fn stage_effects(screen: &mut Screen, nav: &Navigator) {
 
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
-fn f1104s_death_hold_and_game_over_page() {
+fn f1104s_death_hold_and_tombstone() {
     let cache = cache();
     let (mut nav, mut state, at) = start(&cache);
-    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut viewer = ModelViewer::new(&cache).unwrap();
     let mut screen = Screen::new(&cache).unwrap();
     let views = ViewState {
         mode: ViewMode::External,
@@ -151,25 +152,24 @@ fn f1104s_death_hold_and_game_over_page() {
         .map(|effect| effect.model);
     assert_eq!(model, Some(effects::EXPLOSION_MODEL));
 
-    // F1104's 0x3cae6 hold ends at the status page's GAME OVER/DIED headings.
+    // F1104's 0x3cae6 hold ends at F917's spinning tombstone (model 172).
     state.death.as_mut().unwrap().tick(death::GAME_OVER_SECONDS);
     assert!(state.death.unwrap().is_game_over());
-    screen.draw_game_over(death::COMMANDER_NAME, "N NEW GAME   Q QUIT");
+    let game = GameOver::tombstone(death::COMMANDER_NAME.to_ascii_uppercase(), "1-JAN-3250");
+    viewer.set_game_over_text(game.commander().as_bytes(), game.date().as_bytes());
+    screen
+        .draw_game_over(&mut viewer, gameover::TOMBSTONE_MODEL, 0)
+        .unwrap();
     save(&screen, "death-gameover.ppm");
     let game_over = screen.logical_pixels().to_vec();
     let ink = game_over.iter().filter(|pixel| **pixel != 0).count();
     assert!(changed(&explosion, &game_over) > 20);
-    assert!(ink > 500, "the GAME OVER/DIED text did not draw");
+    assert!(ink > 500, "the GAME OVER tombstone did not draw");
     println!(
         "death frame: F942 model {} + debris; hold {:.3} s; game over at {} changed pixels",
         effects::EXPLOSION_MODEL,
         death::GAME_OVER_SECONDS,
         changed(&explosion, &game_over)
-    );
-    // The status page's heading is the source string, not a port invention.
-    assert_eq!(
-        death::died_lines(death::COMMANDER_NAME),
-        ["COMMANDER", "   Jameson", "     DIED"]
     );
     // F1104 selects `DATA_008872 = 4`, the external view.
     assert_eq!(views.mode, ViewMode::External);

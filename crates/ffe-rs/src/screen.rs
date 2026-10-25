@@ -1818,33 +1818,6 @@ impl Screen {
         self.present();
     }
 
-    /// The status page's game-over headings (`DATA_005129`/`DATA_005130`):
-    /// `\rGAME\rOVER` and the commander block, followed by the port's two
-    /// options. The source reaches this page through the status screen's
-    /// `ff9c` expansion (F277/F286); the port has no status-page renderer, so
-    /// the same strings are drawn on the cleared 320x200 view.
-    pub fn draw_game_over(&mut self, commander: &str, hint: &str) {
-        self.frame.fill(self.palette[0]);
-        self.centered_text(28, "GAME", 15);
-        self.centered_text(40, "OVER", 15);
-        for (index, line) in crate::death::died_lines(commander).iter().enumerate() {
-            self.centered_text(88 + 12 * index as i32, line.trim(), 15);
-        }
-        self.centered_text(152, hint, 18);
-        self.present();
-    }
-
-    /// Centre a line on the 320-pixel logical view from its glyph advances.
-    fn centered_text(&mut self, y: i32, message: &str, colour: u8) {
-        let width: i32 = message
-            .bytes()
-            .filter_map(|code| self.font.glyph(code))
-            .map(|glyph| glyph.advance as i32)
-            .sum();
-        let x = ((320 - width) / 2).max(0);
-        self.text_screen(x as usize, y, message, colour);
-    }
-
     /// The Escape preference pages: `FUNC_000225_SysMenuDisplayNonFile`'s
     /// 320x158 upper view over the console. Background palette index 3 is the
     /// original's clear colour for (3,3,3) (`DATA_009222`), the icons are
@@ -2065,6 +2038,16 @@ impl Screen {
     /// F6: every imported model executed by the verified port, in original order.
     /// Draw executed-model shapes in order into the 320x158 view.
     fn draw_shapes(&mut self, viewer: &ModelViewer, shapes: &[Shape]) {
+        self.draw_shapes_in(viewer, shapes, VIEW_HEIGHT);
+    }
+
+    /// The same drawing without the flight view's y=158 clip, for the game-over
+    /// tombstone, whose slab reaches the bottom of the 320x200 logical screen.
+    fn draw_shapes_full(&mut self, viewer: &ModelViewer, shapes: &[Shape]) {
+        self.draw_shapes_in(viewer, shapes, LOGICAL_HEIGHT);
+    }
+
+    fn draw_shapes_in(&mut self, viewer: &ModelViewer, shapes: &[Shape], height: usize) {
         let value = |[r, g, b]: [u8; 3]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
         for shape in shapes {
             match shape {
@@ -2079,7 +2062,7 @@ impl Screen {
                     // reaches off the view, so every pixel lands in the view.
                     let frame = &mut self.frame;
                     let _ = fill_polygon(edges, |x, y| {
-                        if (0..320).contains(&x) && (0..VIEW_HEIGHT as i32).contains(&y) {
+                        if (0..320).contains(&x) && (0..height as i32).contains(&y) {
                             frame[y as usize * 320 + x as usize] = value(*rgb);
                         }
                     });
@@ -2098,7 +2081,7 @@ impl Screen {
                 }
                 Shape::Line(a, b, rgb) => {
                     let on_view = |(x, y): (i32, i32)| {
-                        (0..320).contains(&x) && (0..VIEW_HEIGHT as i32).contains(&y)
+                        (0..320).contains(&x) && (0..height as i32).contains(&y)
                     };
                     if on_view(*a) && on_view(*b) {
                         // F1616 on end points F1704 has already put on the view.
@@ -2117,7 +2100,7 @@ impl Screen {
                     // draws outside it (over the console), which is dropped here.
                     let frame = &mut self.frame;
                     let _ = draw_curve(*points, |x, y| {
-                        if (0..320).contains(&x) && (0..VIEW_HEIGHT as i32).contains(&y) {
+                        if (0..320).contains(&x) && (0..height as i32).contains(&y) {
                             frame[y as usize * 320 + x as usize] = value(*rgb);
                         }
                     });
@@ -2125,7 +2108,7 @@ impl Screen {
                 Shape::Spans(spans, rgb) => {
                     let frame = &mut self.frame;
                     for [x, y, width] in spans {
-                        if (0..VIEW_HEIGHT as i32).contains(y) {
+                        if (0..height as i32).contains(y) {
                             for column in *x..*x + *width {
                                 if (0..320).contains(&column) {
                                     frame[*y as usize * 320 + column as usize] = value(*rgb);
@@ -2588,6 +2571,57 @@ impl Screen {
             self.text(195, y, &line, 15);
             y += 8;
         }
+    }
+
+    /// The black frame `F1104`/`F915` leave after clearing the buffer.
+    pub fn clear_for_game_over(&mut self) {
+        self.frame[..320 * VIEW_HEIGHT].fill(0x00_00_00_00);
+        self.present();
+    }
+
+    /// The tombstone screen (`F917`): a black 320x200 frame with the spinning
+    /// model and its engraved FF9C text. `angle` is F1675's binary yaw; the
+    /// original starts it at `0x3d090 >> 1` and decreases it with the loop tics.
+    pub fn draw_game_over(
+        &mut self,
+        viewer: &mut ModelViewer,
+        model: u32,
+        angle: i32,
+    ) -> Result<(), String> {
+        self.frame[..320 * LOGICAL_HEIGHT].fill(0x00_00_00_00);
+        // F917 draws on the full 320x200 logical screen, not the 320x158 flight
+        // view: the tombstone's lower text would otherwise be clipped.
+        let _full_screen = ffe_core::model_execute::ViewHeightGuard::full_screen();
+        // FFE picks the tombstone face from the text record's normal (2 = the
+        // RIP/obituary face, 4 = GAME OVER). The port's font normals are not
+        // reliable, so use the spin's current half-turn instead.
+        viewer.set_tombstone_face(Some(if angle & 0x8000 != 0 { 2 } else { 4 }));
+        let matrix = viewer.matrix_yzt(angle, 0);
+        let model_rows: [[f64; 3]; 3] = std::array::from_fn(|k| {
+            std::array::from_fn(|j| f64::from(matrix[3 * k + j]) / 2_147_483_648.0)
+        });
+        // F917 inherits the external view's camera. The captured original looks
+        // at the slab about 30 degrees round and 20 down, not straight on.
+        let (yaw, pitch) = (30f64.to_radians(), (-20f64).to_radians());
+        let rotate = |[x, y, z]: [f64; 3]| {
+            let (rx, rz) = (x * yaw.cos() - z * yaw.sin(), x * yaw.sin() + z * yaw.cos());
+            [
+                rx,
+                y * pitch.cos() - rz * pitch.sin(),
+                y * pitch.sin() + rz * pitch.cos(),
+            ]
+        };
+        let rows = model_rows.map(rotate);
+        // The original draws the object at the camera origin with the current
+        // external-view camera; the frame at 320x200 fills about two thirds of
+        // the height. `model_radius` is in the same units as the vertex space.
+        let radius = viewer.model_radius(model).unwrap_or(0x10000) as f64;
+        let distance = (radius * 1.6).max(1.0);
+        let frame = viewer.render_scene(model, rows, [0.0, 0.0, distance], [0.0, 0.0, -1.0])?;
+        viewer.set_tombstone_face(None);
+        self.draw_shapes_full(viewer, &frame.shapes);
+        self.present();
+        Ok(())
     }
 
     pub fn draw_model_viewer(&mut self, viewer: &ModelViewer) {

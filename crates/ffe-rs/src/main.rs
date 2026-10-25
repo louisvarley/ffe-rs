@@ -10,6 +10,7 @@ use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Flight, STEP};
 use ffe_rs::front_end::{self, Intro, IntroAction, IntroTimeline};
 use ffe_rs::galaxy_map::GalaxyMap;
+use ffe_rs::gameover::GameOver;
 use ffe_rs::hud::PlayerHud;
 use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
@@ -78,6 +79,9 @@ struct Options {
     /// Directory for the intro's sample frames at fixed `GameTics`; exits without
     /// opening a window.
     capture_intro: Option<PathBuf>,
+    /// Directory for the F917 tombstone screen: starts the game-over state with
+    /// the new game's commander/date and saves frames through the spin.
+    capture_gameover: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -91,6 +95,7 @@ fn options() -> Result<Options, String> {
     let mut skip_intro = false;
     let mut capture_prefs = None;
     let mut capture_intro = None;
+    let mut capture_gameover = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
@@ -144,6 +149,11 @@ fn options() -> Result<Options, String> {
             capture_intro = Some(PathBuf::from(
                 args.next().ok_or("--capture-intro requires a directory")?,
             ));
+        } else if arg == "--capture-gameover" && capture_gameover.is_none() {
+            capture_gameover = Some(PathBuf::from(
+                args.next()
+                    .ok_or("--capture-gameover requires a directory")?,
+            ));
         } else if arg == "--smoke-frames" && smoke_frames.is_none() {
             let frames = args
                 .next()
@@ -156,7 +166,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-gameover DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -185,6 +195,7 @@ fn options() -> Result<Options, String> {
         skip_intro,
         capture_prefs,
         capture_intro,
+        capture_gameover,
     })
 }
 
@@ -457,6 +468,7 @@ fn run() -> Result<(), String> {
     let headless = options.capture.is_some()
         || options.capture_planet.is_some()
         || options.capture_traffic.is_some()
+        || options.capture_gameover.is_some()
         || options.smoke_frames.is_some();
     let mut sound = if headless {
         GameAudio::silent(&options.root)
@@ -496,6 +508,10 @@ fn run() -> Result<(), String> {
     // The last message pushed into the original's ten-entry log.
     let mut logged = String::new();
     let mut model_viewer: Option<ModelViewer> = None;
+    // F1104/F917: the game-over screen. The death stream starts it from its own
+    // destruction event; the current F953 path below uses the same API.
+    let mut gameover: Option<GameOver> = None;
+    let mut gameover_viewer: Option<ModelViewer> = None;
     // The flight view's station is the original model 74 when the cache has it;
     // otherwise the placeholder wireframe stays.
     let scene = match ModelViewer::new(&cache) {
@@ -505,12 +521,21 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    if let Some(dir) = &options.capture_gameover {
+        fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        gameover = Some(GameOver::tombstone(
+            "JAMESON",
+            ffe_rs::galaxy_map::date_short_text(0.0),
+        ));
+        gameover_viewer = ModelViewer::new(&cache).ok();
+    }
     // The original's boot shows the intro until a start key. Scripted captures and
     // the smoke frame count skip it; --start sol is the development sandbox.
     let scripts = options.smoke_frames.is_some()
         || options.capture.is_some()
         || options.capture_planet.is_some()
-        || options.capture_traffic.is_some();
+        || options.capture_traffic.is_some()
+        || options.capture_gameover.is_some();
     let mut boot = options.boot;
     if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(1)) {
         boot = Boot::NewGame(run_intro(
@@ -715,9 +740,87 @@ fn run() -> Result<(), String> {
         // world time in a minute of wall time.
         let elapsed = if options.capture_planet.is_some() {
             0.1
+        } else if options.capture_gameover.is_some() {
+            1.0 / 50.0
         } else {
             measured
         };
+        // F917's game-over screen owns the frame until its loop ends. The death
+        // stream starts it; the F953 path below is the current trigger. Input,
+        // flight and traffic stay frozen, as in the original's state 0x2c.
+        if let Some(mut game) = gameover.take() {
+            let tics = (elapsed * ffe_rs::original_flight::TICS_PER_SECOND) as i64;
+            game.tick(tics);
+            if game.is_finished() {
+                if options.capture_gameover.is_some() {
+                    break;
+                }
+                // F918(1)/F917 longjmps to the front end, which is the intro.
+                if !options.skip_intro && !scripts {
+                    boot = Boot::NewGame(run_intro(
+                        &mut window,
+                        &mut screen,
+                        scene.as_ref(),
+                        &mut sound,
+                    )?);
+                } else {
+                    boot = Boot::NewGame(1);
+                }
+                state = Flight::default();
+                nav = match boot {
+                    Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
+                    Boot::Sandbox => Navigator::new(&cache),
+                }
+                .map_err(|error| eprintln!("Navigation unavailable: {error}"))
+                .ok();
+                if let Some(nav) = nav.as_mut() {
+                    if let Some(new_game) = nav.new_game {
+                        state.credits = u32::try_from(new_game.cash).unwrap_or(0);
+                        state.ship = new_game.ship;
+                        state.mode = ffe_rs::flight::Mode::Docked;
+                    }
+                }
+                state.combat = Combat::new_game();
+                state.loadout = ffe_core::equipment::Loadout::new_game();
+                original = None;
+                views = ViewState::default();
+                dock = DockState::default();
+                gameover_viewer = None;
+                acceleration = 0;
+                status_page = false;
+                launch_grace = None;
+                takeoff_climb = None;
+                galaxy = None;
+                paused = false;
+                labels = false;
+                held_controls.disarm(&window.get_keys());
+                last_mode = state.mode;
+                message = "New game.".to_owned();
+                if nav.as_ref().is_some_and(|nav| nav.docked.is_some()) {
+                    sound.play(Cue::Station);
+                }
+            } else {
+                if let Some(viewer) = gameover_viewer.as_mut() {
+                    game.draw(&mut screen, viewer)?;
+                }
+                if let Some(dir) = &options.capture_gameover {
+                    if frames % 20 == 0 {
+                        write_shot(dir, &format!("gameover-{frames:04}.ppm"), &screen);
+                    }
+                }
+                gameover = Some(game);
+            }
+            window
+                .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
+                .map_err(|e| format!("Window update: {e}"))?;
+            frames += 1;
+            if options.smoke_frames.is_some_and(|limit| frames >= limit)
+                || (options.capture_gameover.is_some() && frames >= 700)
+            {
+                break;
+            }
+            continue;
+        }
         // F1904/F232/F919: advance the song and restart the front-end theme or
         // the continuous-music selection when the current song is done.
         sound.tick(std::time::Duration::from_secs_f64(elapsed));
@@ -776,52 +879,29 @@ fn run() -> Result<(), String> {
             }
         }
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
-        // F1104's death sequence: the external-view hold, then the status page's
-        // GAME OVER/DIED headings. N starts a new game (the SysMenu path) and Q
-        // quits; the flight controls and the traffic AI are held while it runs.
+        // F1104's death sequence: the external-view hold, then F917's spinning
+        // tombstone. Flight controls and traffic stay held throughout; F1107's
+        // timeout starts the screen. There are no game-over options here: the
+        // tombstone ends by returning to the front end (the intro's choices).
         if let Some(value) = state.death.as_mut() {
             value.tick(elapsed);
         }
-        let mut death_control = state.death.is_some();
-        if active
-            && state
-                .death
-                .as_ref()
-                .is_some_and(|death| death.is_game_over())
+        let death_control = state.death.is_some();
+        if state
+            .death
+            .as_ref()
+            .is_some_and(|death| death.is_game_over())
+            && gameover.is_none()
         {
-            if pressed(Key::Q) {
-                return Ok(());
-            }
-            if pressed(Key::N) {
-                let new_nav = match boot {
-                    Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
-                    Boot::Sandbox => Navigator::new(&cache),
-                };
-                if let Ok(new_nav) = new_nav {
-                    nav = Some(new_nav);
-                    state = Flight::default();
-                    if let Some(new_game) = nav.as_ref().and_then(|nav| nav.new_game) {
-                        state.credits = u32::try_from(new_game.cash).unwrap_or(0);
-                        state.ship = new_game.ship;
-                        state.mode = ffe_rs::flight::Mode::Docked;
-                    }
-                    state.combat = Combat::new_game();
-                    state.loadout = ffe_core::equipment::Loadout::new_game();
-                    original = None;
-                    views = ViewState::default();
-                    dock = DockState::default();
-                    status_page = false;
-                    launch_grace = None;
-                    takeoff_climb = None;
-                    galaxy = None;
-                    paused = false;
-                    acceleration = 0;
-                    labels = false;
-                    held_controls.disarm(&keys_down);
-                    death_control = true;
-                    message = "New game.".to_owned();
-                }
-            }
+            let date = nav.as_ref().map_or_else(
+                || ffe_rs::galaxy_map::date_short_text(0.0),
+                |nav| ffe_rs::galaxy_map::date_short_text(nav.elapsed()),
+            );
+            gameover = Some(GameOver::tombstone(
+                death::COMMANDER_NAME.to_ascii_uppercase(),
+                date,
+            ));
+            gameover_viewer = ModelViewer::new(&cache).ok();
         }
         // A console click on the mouse-down edge, in flight (client pixels against
         // the client size: get_mouse_pos divides by the creation scale only, which
@@ -3796,15 +3876,6 @@ fn run() -> Result<(), String> {
         } else {
             screen.draw(&state, views, scene.as_ref(), help, prefs.modern, &message);
         }
-        if state
-            .death
-            .as_ref()
-            .is_some_and(|death| death.is_game_over())
-        {
-            // `DATA_005129`/`DATA_005130`: the status page's GAME OVER and
-            // COMMANDER <name> DIED headings.
-            screen.draw_game_over(death::COMMANDER_NAME, "N NEW GAME   Q QUIT");
-        }
         if let Some(dir) = &options.capture {
             if frames % 10 == 0 {
                 write_shot(dir, &format!("shot-{frames:04}.ppm"), &screen);
@@ -3992,7 +4063,7 @@ fn ship_position(original: &Option<OriginalFlight>, state: &Flight) -> [i64; 3] 
 /// F942/F1104 on the player: spawn the destruction object at the old position,
 /// then run F1104's F1098 test. With an escape craft fitted the player is moved
 /// into it (F1098) and keeps flying; otherwise the external-view death hold
-/// starts and [`Flight::death`] carries it to the game-over page.
+/// starts and [`Flight::death`] carries it to the game-over tombstone.
 ///
 /// This replaces the earlier substitute that recovered the player at the
 /// nearest starport.
