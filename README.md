@@ -84,20 +84,25 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | Viewer: previous / next model; turn; zoom; test input | Page Up / Page Down; arrows; + / -; 0 / 5 / 9 |
 | Viewer: original animation clock / landing gear or door / time rate / engines off, half, full | C / G / T / E |
 | Launch / request or cancel docking | L / D |
-| Classic-like thrust / reverse; yaw; pitch | Enter / Left Shift; comma / period; A / Z |
-| Modern thrust / reverse; yaw; pitch | W / S; Left / Right; Up / Down |
+| Classic thrust / reverse; yaw; pitch; roll | Enter / Shift; `.` `,`; A / Z; `]` `[` |
+| Classic steering by mouse | hold the right button and move the mouse |
+| Modern thrust / reverse; yaw; pitch; roll | W / S; Right / Left; Up / Down; E / Q |
 | Brake / pause | X / P |
 | Quit (in the preference pages) | click `Quit`, or select it and press Enter |
 | Buy / sell one unit of food (docked only) | B / N |
 | New save snapshot / load newest snapshot | F5 / Shift+F5 |
 
-Modern input (W/S and arrows) is the initial preset on every launch. F3 switches
-to the optional Classic-like preset, and Escape → `Port Options` exposes the same
-choice; these are **not yet verified original bindings** and remapping/settings
-persistence are not implemented. F3 changes input only. Help, scenario menus,
-the model lab, pause, the preference pages and focus loss stop the simulation;
-refocus and press controls afresh. No audio, combat, planets, hyperspace,
-time acceleration, old-save import or Enhanced/HD-pack toggle is implemented.
+Modern input (W/S and arrows) is the initial preset. F3 switches to Classic,
+which follows the original's scheme: hold the **right mouse button** and move the
+mouse to steer, Enter raises the set speed and Shift lowers it, and the keyboard
+steering is `,` `.` yaw, A/Z pitch, `[`/`]` roll. Escape → `Port Options` exposes
+the same choice. The preset takes effect immediately, disarms held keys, and is
+persisted in `saves/controls.cfg` (`docs/CONTROLS.md` has the full table and the
+routing audit). Remapping and the other preference values are not persisted.
+Help, scenario menus, the model lab, pause, the preference pages and focus loss
+stop the simulation; refocus and press controls afresh. No audio, combat,
+planets, hyperspace, time acceleration, old-save import or Enhanced/HD-pack
+toggle is implemented.
 
 ### Current work: point/line emission and composed-order oracle (v0.13)
 
@@ -141,7 +146,7 @@ and game primitive allocation/rasterization remain unimplemented. F4 and flight
 visuals are unchanged; Modern input remains the default and cache v6 does not
 need rebuilding.
 
-V0.8 makes Modern input the default, retaining F3 for Classic-like input. Held
+V0.8 makes Modern input the default, retaining F3 for the Classic input preset. Held
 controls must be released and pressed afresh after pause, overlays, focus loss
 or preset changes; input latched while an overlay is open cannot leak into flight.
 The real-window regression checks W/S, all four arrow directions, both presets,
@@ -205,7 +210,8 @@ The gameplay cube stays labelled synthetic until those are implemented.
    Look for the original proportional text and grey/red console at the bottom.
 2. **Launch and fly:** L launches. Briefly hold W (about 0.4 seconds) to
    reach roughly **12 units/s**; release to coast. Try the arrow keys,
-   then X to brake. F3 selects Classic-like controls; F1 lists both presets.
+   then X to brake. F3 selects Classic controls (hold the right mouse button and
+   move to steer; Enter raises thrust). F1 lists both presets.
 3. **Easy docking check:** F2, then **2** resets to **Approach**. Press D and
    do not thrust/turn: it docks in about **20 seconds**. This reset discards
    unsaved progress. The real launch route is also flyable: from L, face the
@@ -708,6 +714,7 @@ proposals. Technical approval does not resolve source or derived-art rights.
 | `docs/GAME_FILES.md` | The oracle copy: every file, size and SHA-256, version detection and floppy/CD notes. |
 | `docs/LEGAL.md`, `docs/TAKEDOWN.md` | Copyright status, project stance, rights-holder process. |
 | `docs/KNOWN_ISSUES.md` | Known original/reference issues and the bug policy. |
+| `docs/CONTROLS.md` | The Modern and Classic flight bindings, the Classic right-button mouse scheme and the per-preset routing audit. |
 | `docs/DEVIATIONS.md` | Every intentional deviation, including the gameplay-affecting group. |
 | `docs/PORT_LOG.md` | Decisions, discrepancies, open questions. |
 | `docs/STATUS.md` | Current milestone status, trace hashes, and handoff entry point. |

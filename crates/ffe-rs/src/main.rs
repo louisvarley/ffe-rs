@@ -6,7 +6,7 @@ use ffe_rs::console::{
     acceleration_for_digit, Click, ConsoleState, ShipSystems, ACCELERATION_NAMES,
 };
 use ffe_rs::docking::Contact;
-use ffe_rs::flight::{Controls, Flight, STEP};
+use ffe_rs::flight::{Flight, STEP};
 use ffe_rs::front_end::{self, Intro, IntroAction, IntroTimeline};
 use ffe_rs::galaxy_map::GalaxyMap;
 use ffe_rs::hud::PlayerHud;
@@ -25,6 +25,7 @@ use ffe_rs::prefs::{
 use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
+use ffe_rs::settings;
 use ffe_rs::ships::ShipList;
 use ffe_rs::sound::{Cue, GameAudio};
 use ffe_rs::station::{self, Action as StationAction, DockState, Screen as StationScreen};
@@ -440,9 +441,15 @@ fn run() -> Result<(), String> {
     .map_err(|e| format!("Cannot open game window: {e}"))?;
     window.set_target_fps(60);
     let mut state = Flight::default();
-    // The Escape pages, including the modern/classic control preset the top
-    // bar's button and F3 also toggle.
+    // The Escape pages, including the Modern/Classic control preset that F3 and
+    // the `Port Options` rows toggle. The preset is the one persisted setting:
+    // saves/controls.cfg keeps the choice across launches.
     let mut prefs = Prefs::default();
+    let controls_file = save_dir.join(settings::CONTROLS_FILE);
+    if let Some(modern) = settings::load_controls(&controls_file) {
+        prefs.modern = modern;
+    }
+    let mut stored_modern = prefs.modern;
     // Sound effects and music. The original's cues (`F1906`/`F1907`) and songs
     // (`F1902`..`F1904`) are posted from the events below; captures and the
     // smoke test never open a device.
@@ -475,6 +482,12 @@ fn run() -> Result<(), String> {
     // held-key ramp.
     let mut held_since: HashMap<Key, Instant> = HashMap::new();
     let mut mouse_was_down = false;
+    // The Classic preset's right-button steering. The point is the logical
+    // 320x200 pointer, kept even while the button is up so the press itself
+    // cannot produce a jump; the accumulator is `DATA_009188`.
+    let mut mouse_point: Option<(i32, i32)> = None;
+    let mut right_was_down = false;
+    let mut mouse_accumulator = input::MouseAccumulator::default();
     // The console's time acceleration step (0 = 1x .. 4 = 10000x).
     let mut acceleration = 0usize;
     // F2's status/equipment page (`F1120`, `DATA_008871 & 8`).
@@ -709,17 +722,57 @@ fn run() -> Result<(), String> {
         sound.tick(std::time::Duration::from_secs_f64(elapsed));
         let active = window.is_active();
         let keys_down = window.get_keys();
+        let controls_enabled = active
+            && !prefs.open
+            && !help
+            && !scenarios
+            && !paused
+            && model_lab.is_none()
+            && model_viewer.is_none()
+            && nav.as_ref().is_none_or(|nav| nav.view == NavView::Closed);
         held_controls.update(
             &keys_down,
             &window.get_keys_pressed(KeyRepeat::No),
-            active
-                && !help
-                && !scenarios
-                && !paused
-                && model_lab.is_none()
-                && model_viewer.is_none()
-                && nav.as_ref().is_none_or(|nav| nav.view == NavView::Closed),
+            controls_enabled,
         );
+        // Mouse steering: only the Classic preset's right-button hold moves the
+        // ship (`docs/CONTROLS.md`); the left button stays the console pointer.
+        let raw_point = if active {
+            window
+                .get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+        } else {
+            None
+        };
+        let (mouse_dx, mouse_dy) = match (raw_point, mouse_point) {
+            (Some(now), Some(before)) => (now.0 - before.0, now.1 - before.1),
+            _ => (0, 0),
+        };
+        // A pointer on the letterbox or outside the window restarts the delta so
+        // re-entering cannot snap the ship.
+        mouse_point = raw_point;
+        let right_down = controls_enabled && window.get_mouse_down(MouseButton::Right);
+        let mouse_pressed = right_down && !right_was_down;
+        if mouse_pressed {
+            // The press frame's delta is discarded: a fresh hold starts at zero.
+            mouse_accumulator.reset();
+        }
+        right_was_down = right_down;
+        let mouse_steer = input::MouseSteer {
+            held: right_down && !prefs.modern,
+            dx: if mouse_pressed { 0 } else { mouse_dx },
+            dy: if mouse_pressed { 0 } else { mouse_dy },
+        };
+        mouse_accumulator.update(mouse_steer);
+        // Apply a preset change once, as it happens, and persist it.
+        if prefs.modern != stored_modern {
+            stored_modern = prefs.modern;
+            mouse_accumulator.reset();
+            held_controls.disarm(&keys_down);
+            if let Err(error) = settings::save_controls(&controls_file, prefs.modern) {
+                eprintln!("CONTROLS SETTING: {error}");
+            }
+        }
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
         // A console click on the mouse-down edge, in flight (client pixels against
         // the client size: get_mouse_pos divides by the creation scale only, which
@@ -964,8 +1017,15 @@ fn run() -> Result<(), String> {
                 }
             }
             if pressed(Key::F3) {
-                prefs.modern = !prefs.modern;
+                prefs.toggle_modern();
                 held_controls.disarm(&keys_down);
+                mouse_accumulator.reset();
+                message = if prefs.modern {
+                    "Modern controls: W/S thrust, arrows steer, Q/E roll."
+                } else {
+                    "Classic controls: hold right mouse to steer, Enter/Shift thrust."
+                }
+                .to_owned();
             }
             // The hyperdrive's view of the ship and its fuel (the galaxy list and the jump).
             if let Some(nav) = nav.as_mut() {
@@ -1480,9 +1540,12 @@ fn run() -> Result<(), String> {
                         if let Some(model) = original.as_mut() {
                             model.set_time_acceleration(acceleration);
                         }
-                        message =
-                            "Original flight: Enter/Shift set speed; Z/A pitch, ,/. yaw, [ ] roll."
-                                .to_owned();
+                        message = if prefs.modern {
+                            "Original flight: W/S set speed; arrows pitch and yaw, Q/E roll."
+                        } else {
+                            "Original flight: hold right mouse to steer; Enter/Shift set speed; Z/A pitch, ,/. yaw, [ ] roll."
+                        }
+                        .to_owned();
                     }
                 }
                 if state.mode == ffe_rs::flight::Mode::Flight {
@@ -1566,13 +1629,19 @@ fn run() -> Result<(), String> {
                 };
                 let elapsed_ms = (elapsed * 1000.0) as u32;
                 if views.mode.is_turret() && original.is_none() {
-                    // FUNC_001038: A/Z and comma/period aim the turret (the arrows
-                    // too, in either control scheme); the ship holds its course.
+                    // FUNC_001038: the preset's steering keys aim the turret;
+                    // Classic also aims with the right-button mouse. The ship
+                    // holds its course.
+                    let preset = input::Preset::from_modern(prefs.modern);
+                    let [up, down, left, right] = input::turret_keys(preset);
                     let amount = |held| key_amount(elapsed_ms, held) as i16;
-                    let pitch = amount(held(&[Key::A, Key::Up]))
-                        .wrapping_sub(amount(held(&[Key::Z, Key::Down])));
-                    let yaw = amount(held(&[Key::Comma, Key::Left]))
-                        .wrapping_sub(amount(held(&[Key::Period, Key::Right])));
+                    let (mouse_pitch, mouse_yaw) = input::turret_mouse(preset, mouse_steer);
+                    let pitch = amount(held(&[up]))
+                        .wrapping_sub(amount(held(&[down])))
+                        .wrapping_add(mouse_pitch as i16);
+                    let yaw = amount(held(&[left]))
+                        .wrapping_sub(amount(held(&[right])))
+                        .wrapping_add(mouse_yaw as i16);
                     views.mode = views.turret.step(views.mode, pitch, yaw, gun_mounts);
                 }
                 if views.mode == ViewMode::External {
@@ -2023,74 +2092,26 @@ fn run() -> Result<(), String> {
         }
         if active && !help && !scenarios && !paused && model_lab.is_none() && model_viewer.is_none()
         {
-            let axis = |positive, negative| {
-                f64::from(u8::from(held_controls.contains(&positive)))
-                    - f64::from(u8::from(held_controls.contains(&negative)))
-            };
             // The original's "Reverse left-right controls" and "Reverse up-down
             // controls" (DATA_009021/DATA_009022, toggled by FUNC_000216).
-            let reverse_lr = prefs.others[3];
-            let reverse_ud = prefs.others[4];
-            let flip = |value: f64, reverse: bool| if reverse { -value } else { value };
-            // In the external view the arrows move the camera, so Modern steering
-            // falls back to the Classic-like keys there.
-            let external_view = views.mode == ViewMode::External;
-            let input = if views.mode.is_turret() {
-                // The steering keys aim the turret (FUNC_001038).
-                Controls {
-                    thrust: if prefs.modern {
-                        axis(Key::W, Key::S)
-                    } else {
-                        axis(Key::Enter, Key::LeftShift)
-                    },
-                    yaw: 0.0,
-                    pitch: 0.0,
-                    brake: held_controls.contains(&Key::X),
-                }
-            } else if prefs.modern && !external_view {
-                Controls {
-                    thrust: axis(Key::W, Key::S),
-                    yaw: flip(axis(Key::Right, Key::Left), reverse_lr),
-                    pitch: flip(axis(Key::Up, Key::Down), reverse_ud),
-                    brake: held_controls.contains(&Key::X),
-                }
-            } else if prefs.modern {
-                Controls {
-                    thrust: axis(Key::W, Key::S),
-                    yaw: flip(axis(Key::Period, Key::Comma), reverse_lr),
-                    pitch: flip(axis(Key::A, Key::Z), reverse_ud),
-                    brake: held_controls.contains(&Key::X),
-                }
-            } else {
-                Controls {
-                    thrust: axis(Key::Enter, Key::LeftShift),
-                    yaw: flip(axis(Key::Period, Key::Comma), reverse_lr),
-                    pitch: flip(axis(Key::A, Key::Z), reverse_ud),
-                    brake: held_controls.contains(&Key::X),
-                }
-            };
+            let reverse = [prefs.others[3], prefs.others[4]];
+            let preset = input::Preset::from_modern(prefs.modern);
+            let input = input::flight_controls(
+                preset,
+                input::View::of(views.mode),
+                held_controls.keys(),
+                mouse_steer,
+                reverse,
+            );
             if let Some(model) = original.as_mut() {
-                let down = |keys: &[Key]| keys.iter().any(|key| held_controls.contains(key));
-                // Classic: the original's keys. Modern adds W/S for the set speed, the arrows
-                // for pitch (up is nose up, which is Z) and yaw, Q/E for roll.
-                let both =
-                    |classic: &[Key], extra: &[Key]| down(classic) || (prefs.modern && down(extra));
-                let mut keys = OriginalKeys {
-                    faster: both(&[Key::Enter], &[Key::W]),
-                    slower: both(&[Key::LeftShift, Key::RightShift], &[Key::S]),
-                    pitch_down: both(&[Key::Z], &[Key::Up]),
-                    pitch_up: both(&[Key::A], &[Key::Down]),
-                    left: both(&[Key::Comma], &[Key::Left]),
-                    right: both(&[Key::Period], &[Key::Right]),
-                    roll_left: both(&[Key::LeftBracket], &[Key::Q]),
-                    roll_right: both(&[Key::RightBracket], &[Key::E]),
-                };
-                if reverse_lr {
-                    std::mem::swap(&mut keys.left, &mut keys.right);
-                }
-                if reverse_ud {
-                    std::mem::swap(&mut keys.pitch_down, &mut keys.pitch_up);
-                }
+                let mut keys = input::original_keys(
+                    preset,
+                    input::View::of(views.mode),
+                    held_controls.keys(),
+                    mouse_accumulator,
+                    mouse_steer.held,
+                    reverse,
+                );
                 // The scripted launch capture flies the takeoff itself: F1013's
                 // fixed up-thrust does the first climb, then it pitches and
                 // accelerates through F1031's 0x26 and the short free-flight
@@ -2685,7 +2706,7 @@ fn run() -> Result<(), String> {
             message = if prefs.modern {
                 "Launched. W/S speed, arrows pitch and yaw, Q/E roll; the map icons list systems."
             } else {
-                "Launched. Enter/Shift speed, Z/A pitch, comma/period yaw, [ ] roll."
+                "Launched. Hold right mouse to steer; Enter/Shift speed, Z/A pitch, comma/period yaw, [ ] roll."
             }
             .to_owned();
         }

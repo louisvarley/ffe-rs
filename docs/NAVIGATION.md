@@ -63,7 +63,7 @@ The game starts docked at the first station of Sol (L launches, which puts the s
   Gateway frame from the manual).
 - The labels icon or L toggles the original's text labels: the names of the system's bodies over the flight view
   (colour 15, at the object's screen position). The console icon lights while they are on.
-- The top bar's button changes between modern and classic controls (modern by default; F3 too). Classic is the original's keys: Enter/Shift set speed, Z/A pitch, comma/period yaw, [ ] roll. Modern adds W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll).
+- F3 (and Escape → `Port Options`) changes between Modern and Classic controls. Classic is the original's scheme: hold the right mouse button and move the mouse to steer, Enter/Shift raise/lower the set speed, A/Z pitch, comma/period yaw, [ ] roll. Modern uses W/S (set speed), Up/Down (pitch), Left/Right (yaw) and Q/E (roll). The presets do not share steering keys; `docs/CONTROLS.md` has the full binding table.
 - **Target and autopilot buttons** (below the view, beside SYSTEMS and THIS SYSTEM): a click on a planet, moon or station in the
   view locks it (green corner brackets and a `TARGET:` line with its range); **TARGET** (or T, Shift+T the previous; the
   console's `t` icon too) locks the next body by range, nearest first. **AUTOPILOT** (or K) flies to the locked body: at a

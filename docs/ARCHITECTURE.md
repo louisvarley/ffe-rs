@@ -74,7 +74,8 @@ executor still stops at point/text, submodels, other transform forms and colour;
 see `docs/MODEL_EXECUTION_PLAN.md` §8 for the next task.
 Experimental input now uses a release-to-rearm latch: blocked keys cannot become
 flight controls merely because focus or a modal state changes. Modern is the
-owner-selected startup input preset; F3 retains the Classic-like alternative.
+owner-selected startup input preset; F3 retains the Classic alternative
+(right-button mouse steering, Enter/Shift set speed; `docs/CONTROLS.md`).
 The actual v1/v2/v3/v4/v5/v6 partial cache
 contract and its incomplete scope are in
 [FORMATS.md](FORMATS.md). Full content, startup conversion and the remaining crates below are

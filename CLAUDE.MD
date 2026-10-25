@@ -86,9 +86,9 @@ For agents working on this project:
   reference only. Fix verified bugs with regression tests and a recorded
   deviation; default fixes are allowed. Do not inherit unreviewed Aniso changes.
 - Target Windows x64 first; original visuals by default. Owner updated the
-  development input default to Modern (W/S and arrows); retain optional Classic-like
-  input via F3. Original mouse/keyboard fidelity is not yet verified.
-  Offer a Modern control preset separately from graphics settings.
+  development input default to Modern (W/S and arrows); retain the original-key
+  Classic preset via F3 (hold the right mouse button to steer, Enter/Shift set
+  speed). Offer the preset separately from graphics settings.
 - V1 customization is image-only graphics packs. Meshes, gameplay mods,
   scripting and modernized gameplay are deferred.
 - Record approved deviations in [DEVIATIONS.md](docs/DEVIATIONS.md) and decisions
@@ -525,8 +525,8 @@ An experimental playable build now exists: run `tools/play.ps1`, or
 `target/release/ffe-rs.exe --root .`, from the checkout. [README.md](README.md)
 contains its actual controls and four short tests. It is an explicitly isolated
 prototype, not completion of the faithful slice. At the owner's request its default
-input is Modern (W/S and arrows), with optional Classic-like via F3; neither is
-asserted to match JJFFE. Named F2 scenarios are Docked,
+input is Modern (W/S and arrows), with the original's Classic scheme via F3
+(right-button mouse steering, Enter/Shift set speed; see `docs/CONTROLS.md`). Named F2 scenarios are Docked,
 Approach and Free Flight; F1 shows help. F5 creates a numbered native experimental
 snapshot; F9 loads the newest. No legacy save import, audio, remapping, HD packs
 or auto-conversion yet. Do not request tests for those absent features.
@@ -785,13 +785,13 @@ the four diagnostic catalogue views; flight remains synthetic. Cache stays v6.
 Strict lint/format/release build, actual native-window full regression, fresh
 cache provenance/repeat/corruption checks and earlier core/startup hashes pass.
 
-V0.8 is verified: Modern W/S + arrows is the startup default; F3 retains optional
-Classic-like controls, independently of original graphics. A release-to-rearm
+V0.8 is verified: Modern W/S + arrows is the startup default; F3 retains the
+Classic control preset, independently of original graphics. A release-to-rearm
 latch prevents held keys leaking across pause, overlays, focus loss and preset
 changes. Synthetic tests cover held/released/new presses, disabled input,
 spurious repeat press reports and explicit mode transitions. The native-window
-test checks both thrust directions/all four arrows, optional Classic-like
-controls, held-W isolation across lab/pause exit and the full gameplay/save loop.
+test checks both thrust directions/all four arrows, Classic controls, held-W
+isolation across lab/pause exit and the full gameplay/save loop.
 103 synthetic Rust tests, strict formatting/clippy and release build pass.
 
 `ffe-core::model_depth::key` matches original F1777 for 17,303 point/scale
