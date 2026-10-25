@@ -11,11 +11,15 @@ state traces and executed numeric vectors; `ffe-tools verify-reference` compares
 them to Rust. These are not a full flight/gameplay oracle.
 The `ffe-rs` crate now provides an isolated experimental playable loop: synthetic
 flight/market in `flight`, bounded versioned snapshots in `saves`, software
-presentation in `screen`, and minifb window/input/fixed-step scheduling in `main`.
+presentation in `screen`, a presentation scaler in `display`, and minifb
+window/input/fixed-step scheduling in `main`.
 V0.2 adds `indexed` with original proportional glyph masks/advances and
 bounds-safe indexed blits. `screen` reads cabin0, main font, low palette and
 console panel via `ffe-content`, composes a 320x200 logical frame and presents
-nearest-scaled 4:3 output. Cabin RGB and low-palette content compose in RGB;
+nearest-scaled 4:3 output. `display` fits that finished frame to the window
+(integer pixel-perfect or aspect-preserving, nearest or linear, 4:3 or square
+pixels) and reopens the window for `Alt+Enter` full-screen; it never changes the
+320x200 frame. Cabin RGB and low-palette content compose in RGB;
 the original runtime upper palette (`F1326`/`F1327`/`F1330`/`F1331`) is built
 by `palette` and resolves the model/scene colours to RGB
 (`docs/notes/palette.md`).
@@ -165,7 +169,7 @@ content.rs      ContentRegistry trait (read-only lookups)
 - All RNG calls explicit and traced (seed1/seed2, call site/tag).
 - Integer operations use explicit widths and `wrapping_*`/`saturating_*`; no accidental `usize` math on serialized data.
 - FFP/fixed-point newtypes; no f32/f64 in simulation except where the reference is known to use them, and then with an explicit precision policy.
-- No `unsafe` unless justified and documented; `cargo clippy -- -D warnings`, `cargo fmt`.
+- No `unsafe` unless justified and documented; `cargo clippy -- -D warnings`, `cargo fmt`. The sole current exception outside `ffe-audio` is `ffe-rs::display`: `GetSystemMetrics`/`GetAsyncKeyState` (Windows only) supply the monitor size for borderless full-screen and the physical Alt state that minifb 0.28 does not report. Both take scalar arguments and hold no pointers; non-Windows builds have safe fallbacks.
 - The 50 Hz loop drives `tick(dt_tics, input)`; rendering is a separate consumer of `RenderFrame`.
 
 ### 2.3 Trace hooks

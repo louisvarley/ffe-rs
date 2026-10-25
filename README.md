@@ -46,9 +46,14 @@ startup fails, the console waits for Enter so the error can be read. No original
 assets, reference source or x86 executable are linked into the native game
 binary. Do not distribute the cache or captures.
 
-Build ID: **0.9 experimental**. Resizable 1280x960 initial window. Rendering
-uses a **320x200 logical canvas**, with 320x158 view plus console starting at
-row 158, nearest sampling and 4:3 non-square-pixel correction (640x480 output).
+Build ID: **0.9 experimental**. Resizable 1280x960 initial window (4x, pixel-perfect, 1:1
+nearest, original 4:3 pixels). Rendering uses a **320x200 logical canvas**, with
+320x158 view plus console starting at row 158, nearest sampling and 4:3
+non-square-pixel correction (640x480 output). The window can show that frame at
+1x-6x with black bars, fill the window by aspect, use a linear filter or square
+pixels, and go borderless full-screen with Alt+Enter; these are **port
+presentation extensions** and never change the 320x200 framebuffer, the
+simulation or a capture (`docs/notes/display.md`).
 The original 116-glyph proportional font, fixed low palette and console
 bitmap (primary slot 43) are imported from your executable. Cabin0 remains
 the docked backdrop with its own original palette. The diagnostic labels,
@@ -71,6 +76,8 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 |---|---|
 | Help / named reset scenarios / input preset | H / F2 / F3 |
 | Preference pages (graphic detail, space colour, sound, others, maps, port options) | Escape |
+| Display options (window scale 1x-6x, fit, filter, pixels, fullscreen) | Escape -> Port Options -> Display Options |
+| Fullscreen (port extension) | Alt+Enter |
 | Views (as the original): cycle / front / rear / turret / external; or click the console view icons (any window size) | F1 / F6 / F7 / F8 / F9 |
 | External view: turn camera; zoom out / in (both of a pair resets) | arrows; + / - |
 | Change ship (the original's named craft) | Page Up / Page Down |
@@ -98,11 +105,34 @@ mouse to steer, Enter raises the set speed and Shift lowers it, and the keyboard
 steering is `,` `.` yaw, A/Z pitch, `[`/`]` roll. Escape → `Port Options` exposes
 the same choice. The preset takes effect immediately, disarms held keys, and is
 persisted in `saves/controls.cfg` (`docs/CONTROLS.md` has the full table and the
-routing audit). Remapping and the other preference values are not persisted.
+routing audit). The port-only display choices are persisted in
+`saves/display.cfg`; full-screen is session-only so a launch always starts in a
+window. Remapping and the other preference values are not persisted.
 Help, scenario menus, the model lab, pause, the preference pages and focus loss
 stop the simulation; refocus and press controls afresh. No audio, combat,
 planets, hyperspace, time acceleration, old-save import or Enhanced/HD-pack
 toggle is implemented.
+
+### Display options (port extension)
+
+The original DOS release has no resolution menu: it draws 320x200 and the video
+mode shows it with non-square 4:3 pixels. The port keeps that 320x200 frame
+authoritative (`screen::Screen::logical_pixels`) and scales the finished frame
+for the window. The page is port-only and marked yellow; nothing here changes
+the game, its saves or a `--capture*` file.
+
+| Option | Values | Default | Effect |
+|---|---|---|---|
+| Window scale | 1x, 2x, 3x, 4x, 5x, 6x | 4x | initial client size (still resizable) |
+| Fit | pixel-perfect / fill window | pixel-perfect | integer multiples centred with black bars, or the whole frame fitted by aspect |
+| Filter | nearest / linear | nearest | linear only differs in a fractional fit |
+| Pixels | 4:3 (DOS) / square | 4:3 | original non-square pixels, or a square 16:10 image |
+| Fullscreen | Alt+Enter | off | borderless monitor-sized window, same fit rules |
+
+`docs/notes/display.md` has the fit maths and the presenter design;
+`docs/evidence/display/` has real 2x/3x/full-screen window captures plus
+deterministic scaled frames. `--capture-display DIR` writes those scaled PNGs
+without opening a window; the existing capture commands are unchanged.
 
 ### Current work: point/line emission and composed-order oracle (v0.13)
 
@@ -502,7 +532,7 @@ python ci\check_forbidden.py
 ```
 
 Automated Rust tests use synthetic data, not proprietary game files.
-Windows validation currently runs 510 synthetic tests; an additional
+Windows validation currently runs 524 synthetic tests; an additional
 case/link-handling test is enabled on Unix. CI is configured for Windows and
 Linux; remote CI has not been run by this local implementation session.
 

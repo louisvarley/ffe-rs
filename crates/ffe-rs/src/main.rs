@@ -5,6 +5,7 @@ use ffe_rs::combat::{self, Combat};
 use ffe_rs::console::{
     acceleration_for_digit, Click, ConsoleState, ShipSystems, ACCELERATION_NAMES,
 };
+use ffe_rs::display::{self, DisplaySettings, Presenter};
 use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Flight, STEP};
 use ffe_rs::front_end::{self, Intro, IntroAction, IntroTimeline};
@@ -30,8 +31,11 @@ use ffe_rs::ships::ShipList;
 use ffe_rs::sound::{Cue, GameAudio};
 use ffe_rs::station::{self, Action as StationAction, DockState, Screen as StationScreen};
 use ffe_rs::trade;
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, Window};
 use minifb::{MouseButton, MouseMode};
+
+/// The window title, shared by every reopen.
+const WINDOW_TITLE: &str = "FFE-RS 0.9 - Depth-order helpers, experimental flight";
 
 /// What the open-air launch tells the player: F1013/F1031 need thrust to climb
 /// out of the starport's effect region.
@@ -77,6 +81,10 @@ struct Options {
     /// Directory for the intro's sample frames at fixed `GameTics`; exits without
     /// opening a window.
     capture_intro: Option<PathBuf>,
+    /// Directory for the presentation evidence: one game frame and the Display
+    /// Options page scaled with the real presenter maths at 2x, 3x, square
+    /// pixels and a simulated 1920x1080 full-screen fit. No window is opened.
+    capture_display: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -90,6 +98,7 @@ fn options() -> Result<Options, String> {
     let mut skip_intro = false;
     let mut capture_prefs = None;
     let mut capture_intro = None;
+    let mut capture_display = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
@@ -143,6 +152,11 @@ fn options() -> Result<Options, String> {
             capture_intro = Some(PathBuf::from(
                 args.next().ok_or("--capture-intro requires a directory")?,
             ));
+        } else if arg == "--capture-display" && capture_display.is_none() {
+            capture_display = Some(PathBuf::from(
+                args.next()
+                    .ok_or("--capture-display requires a directory")?,
+            ));
         } else if arg == "--smoke-frames" && smoke_frames.is_none() {
             let frames = args
                 .next()
@@ -155,7 +169,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -184,6 +198,7 @@ fn options() -> Result<Options, String> {
         skip_intro,
         capture_prefs,
         capture_intro,
+        capture_display,
     })
 }
 
@@ -257,6 +272,112 @@ fn write_shot(dir: &Path, name: &str, screen: &Screen) {
     let _ = fs::write(dir.join(name), out);
 }
 
+/// Write an RGB PNG from packed 0x00RRGGBB pixels.
+fn write_png(path: &Path, pixels: &[u32], width: usize, height: usize) -> Result<(), String> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let mut rgb = Vec::with_capacity(width * height * 3);
+        for pixel in pixels.iter().take(width * height) {
+            rgb.extend([(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8]);
+        }
+        writer
+            .write_image_data(&rgb)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    fs::write(path, bytes).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// The presentation evidence: the same 320x200 frame through the real display
+/// scaler at the supported sizes. `display.cfg` and the window's live size do
+/// not affect these images, and no capture (`--capture*`) is touched.
+fn write_display_capture(dir: &Path, cache: &ffe_content::VerifiedCache) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|error| format!("Cannot create {}: {error}", dir.display()))?;
+    let mut screen = Screen::new(cache)?;
+    let scene = ModelViewer::new(cache).ok();
+    let state = Flight::free_flight();
+    screen.sky = prefs::space_colour_rgb(4);
+    screen.draw(
+        &state,
+        ViewState::default(),
+        scene.as_ref(),
+        false,
+        true,
+        "DISPLAY EVIDENCE: THE 320x200 FRAME IS UNCHANGED",
+    );
+    let logical = screen.logical_pixels().to_vec();
+    let default = DisplaySettings::default();
+    let mut target = Vec::new();
+    for (name, width, height, settings) in [
+        ("display-default-4x.png", 1280, 960, default),
+        (
+            "display-2x.png",
+            640,
+            480,
+            DisplaySettings {
+                scale: 2,
+                ..default
+            },
+        ),
+        (
+            "display-3x.png",
+            960,
+            720,
+            DisplaySettings {
+                scale: 3,
+                ..default
+            },
+        ),
+        ("display-fullscreen-1080p.png", 1920, 1080, default),
+        (
+            "display-square-3x.png",
+            960,
+            600,
+            DisplaySettings {
+                scale: 3,
+                aspect: ffe_rs::display::PixelAspect::Square,
+                ..default
+            },
+        ),
+        (
+            "display-linear-fit.png",
+            1000,
+            600,
+            DisplaySettings {
+                fit: ffe_rs::display::FitMode::FillWindow,
+                filter: ffe_rs::display::Filter::Linear,
+                ..default
+            },
+        ),
+    ] {
+        display::compose(&logical, &settings, width, height, &mut target);
+        write_png(&dir.join(name), &target, width, height)?;
+    }
+    // The port-only page itself, at 2x.
+    let shown = Prefs {
+        open: true,
+        page: ffe_rs::prefs::DISPLAY,
+        ..Default::default()
+    };
+    screen.draw_prefs(&shown);
+    display::compose(
+        screen.logical_pixels(),
+        &DisplaySettings {
+            scale: 2,
+            ..default
+        },
+        640,
+        480,
+        &mut target,
+    );
+    write_png(&dir.join("display-options-2x.png"), &target, 640, 480)
+}
+
 /// The intro's sample `GameTics`: boot, the bitmap boundary, the model switch,
 /// the first credit's end, a mid-credit, the last two credits and the loop point.
 fn write_intro_capture(
@@ -315,6 +436,8 @@ fn intro_key(key: Key) -> Option<char> {
 /// 68419-68428 and 68484).
 fn run_intro(
     window: &mut Window,
+    presenter: &mut Presenter,
+    display: &DisplaySettings,
     screen: &mut Screen,
     scene: Option<&ModelViewer>,
     sound: &mut GameAudio,
@@ -330,9 +453,7 @@ fn run_intro(
             return Ok(1);
         }
         screen.draw_intro(scene, tics, version)?;
-        window
-            .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
-            .map_err(|e| format!("Window update: {e}"))?;
+        presenter.present(window, screen.logical_pixels(), display)?;
         for key in window.get_keys_pressed(KeyRepeat::No) {
             let Some(character) = intro_key(key) else {
                 continue;
@@ -390,6 +511,7 @@ fn run() -> Result<(), String> {
             (OTHERS, "prefs-others.ppm"),
             (MAPS, "prefs-maps.ppm"),
             (PORT, "prefs-port.ppm"),
+            (ffe_rs::prefs::DISPLAY, "prefs-display.ppm"),
         ] {
             shown.page = page;
             shown.selected = 0;
@@ -418,6 +540,10 @@ fn run() -> Result<(), String> {
         write_intro_capture(&mut screen, scene.as_ref(), dir)?;
         return Ok(());
     }
+    if let Some(dir) = &options.capture_display {
+        write_display_capture(dir, &cache)?;
+        return Ok(());
+    }
     let save_dir = options.root.join("saves");
     if save_dir.exists() {
         let meta = fs::symlink_metadata(&save_dir).map_err(|e| e.to_string())?;
@@ -427,29 +553,25 @@ fn run() -> Result<(), String> {
     } else {
         fs::create_dir(&save_dir).map_err(|e| format!("Cannot create saves directory: {e}"))?;
     }
-    let mut window = Window::new(
-        "FFE-RS 0.9 - Depth-order helpers, experimental flight",
-        WIDTH,
-        HEIGHT,
-        WindowOptions {
-            resize: true,
-            scale: minifb::Scale::X2,
-            scale_mode: minifb::ScaleMode::AspectRatioStretch,
-            ..WindowOptions::default()
-        },
-    )
-    .map_err(|e| format!("Cannot open game window: {e}"))?;
-    window.set_target_fps(60);
     let mut state = Flight::default();
     // The Escape pages, including the Modern/Classic control preset that F3 and
-    // the `Port Options` rows toggle. The preset is the one persisted setting:
-    // saves/controls.cfg keeps the choice across launches.
+    // the `Port Options` rows toggle, and the port-only display choices. Both
+    // sidecars live in `saves` and are loaded before the window so the display
+    // options apply from the first frame.
     let mut prefs = Prefs::default();
     let controls_file = save_dir.join(settings::CONTROLS_FILE);
     if let Some(modern) = settings::load_controls(&controls_file) {
         prefs.modern = modern;
     }
+    let display_file = save_dir.join(settings::DISPLAY_FILE);
+    if let Some(display) = settings::load_display(&display_file) {
+        prefs.display = display;
+    }
     let mut stored_modern = prefs.modern;
+    let mut stored_display = prefs.display;
+    let mut request = display::window_request(&prefs.display, prefs.fullscreen);
+    let mut window = display::open_window(WINDOW_TITLE, request)?;
+    let mut presenter = Presenter::new();
     // Sound effects and music. The original's cues (`F1906`/`F1907`) and songs
     // (`F1902`..`F1904`) are posted from the events below; captures and the
     // smoke test never open a device.
@@ -514,6 +636,8 @@ fn run() -> Result<(), String> {
     if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(1)) {
         boot = Boot::NewGame(run_intro(
             &mut window,
+            &mut presenter,
+            &prefs.display,
             &mut screen,
             scene.as_ref(),
             &mut sound,
@@ -720,6 +844,22 @@ fn run() -> Result<(), String> {
         // F1904/F232/F919: advance the song and restart the front-end theme or
         // the continuous-music selection when the current song is done.
         sound.tick(std::time::Duration::from_secs_f64(elapsed));
+        // Port extension: a display change (a page row, a saved value or
+        // Alt+Enter) reopens the window because minifb 0.28 has no live resize
+        // or full-screen call. The old window is dropped only after the new one
+        // opens, so a failure leaves the game running.
+        let wanted = display::window_request(&prefs.display, prefs.fullscreen);
+        if wanted != request {
+            let fresh = display::open_window(WINDOW_TITLE, wanted)?;
+            drop(window);
+            window = fresh;
+            request = wanted;
+            presenter.reset();
+            held_controls.disarm(&window.get_keys());
+            mouse_point = None;
+            mouse_was_down = false;
+            right_was_down = false;
+        }
         let active = window.is_active();
         let keys_down = window.get_keys();
         let controls_enabled = active
@@ -740,7 +880,7 @@ fn run() -> Result<(), String> {
         let raw_point = if active {
             window
                 .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
         } else {
             None
         };
@@ -773,7 +913,34 @@ fn run() -> Result<(), String> {
                 eprintln!("CONTROLS SETTING: {error}");
             }
         }
+        // Persist the port-only display options as they change. Full-screen is
+        // session-only and is deliberately not written.
+        if prefs.display != stored_display {
+            stored_display = prefs.display;
+            if let Err(error) = settings::save_display(&display_file, prefs.display) {
+                eprintln!("DISPLAY SETTING: {error}");
+            }
+        }
         let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
+        // Port extension: Alt+Enter toggles the borderless full-screen window.
+        // The reopen happens at the top of the next frame; this frame's input is
+        // skipped so Enter does not also activate a page row, thrust or launch.
+        if active
+            && pressed(Key::Enter)
+            && (display::alt_held()
+                || window.is_key_down(Key::LeftAlt)
+                || window.is_key_down(Key::RightAlt)
+                || window.is_key_down(Key::Menu))
+        {
+            prefs.fullscreen = !prefs.fullscreen;
+            sound.play(Cue::UiBeep);
+            message = if prefs.fullscreen {
+                "Fullscreen (Alt+Enter returns).".to_owned()
+            } else {
+                "Windowed (Alt+Enter is fullscreen).".to_owned()
+            };
+            continue;
+        }
         // A console click on the mouse-down edge, in flight (client pixels against
         // the client size: get_mouse_pos divides by the creation scale only, which
         // breaks after a resize).
@@ -781,7 +948,7 @@ fn run() -> Result<(), String> {
         let edge_point = if active && mouse_down && !mouse_was_down {
             window
                 .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
         } else {
             None
         };
@@ -837,9 +1004,7 @@ fn run() -> Result<(), String> {
             // loop returns before the flight loop's edge bookkeeping.
             mouse_was_down = mouse_down;
             screen.draw_prefs(&prefs);
-            window
-                .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
-                .map_err(|e| format!("Window update: {e}"))?;
+            presenter.present(&mut window, screen.logical_pixels(), &prefs.display)?;
             frames += 1;
             last = Instant::now();
             continue;
@@ -855,7 +1020,7 @@ fn run() -> Result<(), String> {
         {
             window
                 .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
         } else {
             None
         };
@@ -870,7 +1035,7 @@ fn run() -> Result<(), String> {
         {
             window
                 .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
                 .and_then(|(x, y)| Screen::console_click(x, y))
         } else {
             None
@@ -887,7 +1052,7 @@ fn run() -> Result<(), String> {
         {
             window
                 .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()))
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
         } else {
             None
         };
@@ -1109,9 +1274,12 @@ fn run() -> Result<(), String> {
                     if pressed(Key::C) {
                         map.recentre();
                     }
-                    let point = window
-                        .get_unscaled_mouse_pos(MouseMode::Pass)
-                        .and_then(|(x, y)| Screen::logical_point(x, y, window.get_size()));
+                    let point =
+                        window
+                            .get_unscaled_mouse_pos(MouseMode::Pass)
+                            .and_then(|(x, y)| {
+                                display::logical_point(&prefs.display, x, y, window.get_size())
+                            });
                     if active && mouse_down {
                         if let (Some(before), Some(now)) = (map_drag, point) {
                             map.rotate((now.0 - before.0) as i16, (now.1 - before.1) as i16);
@@ -3748,9 +3916,7 @@ fn run() -> Result<(), String> {
                 );
             }
         }
-        window
-            .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
-            .map_err(|e| format!("Window update: {e}"))?;
+        presenter.present(&mut window, screen.logical_pixels(), &prefs.display)?;
         frames += 1;
         let arrived = options.capture_planet.is_some()
             && nav.as_ref().is_some_and(|nav| nav.target.is_none());

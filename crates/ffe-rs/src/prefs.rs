@@ -22,19 +22,23 @@
 //! same rectangles and adds keyboard navigation (a port addition).
 //!
 //! Port additions, clearly marked in the UI and in `docs/DEVIATIONS.md`:
-//! the `Port Options` page (page 5, modern/classic controls) and the `Quit`
+//! the `Port Options` page (page 5, modern/classic controls), the
+//! `Display Options` page (page 6, presentation only) and the `Quit`
 //! label where the original says `Quit to DOS`. The settings this port cannot
 //! apply keep the original's labels and defaults but are drawn grey and do not
 //! change (the page footer says so).
 
-/// Pages, in the original's order, plus the port-only options page.
+use crate::display::{DisplaySettings, Filter, FitMode, PixelAspect, MAX_SCALE, MIN_SCALE};
+
+/// Pages, in the original's order, plus the port-only options pages.
 pub const MAIN: usize = 0;
 pub const GRAPHIC: usize = 1;
 pub const SOUND: usize = 2;
 pub const OTHERS: usize = 3;
 pub const MAPS: usize = 4;
 pub const PORT: usize = 5;
-pub const PAGES: usize = 6;
+pub const DISPLAY: usize = 6;
+pub const PAGES: usize = 7;
 
 /// The original's "Level of Shape Detail" values (`DATA_004964`).
 pub const SHAPE_DETAIL: [&str; 4] = ["Low", "Medium", "High", "Very High"];
@@ -65,6 +69,13 @@ pub const OTHER_LABELS: [&str; 10] = [
 
 /// The original's "Map Options" rows (`DATA_004967`).
 pub const MAP_LABELS: [&str; 5] = ["Stalks", "Grid", "Trade routes", "Names text", "Orbits"];
+
+/// The port-only Display Options page's rows. The original has no display page
+/// and no resolution choice; these are presentation extensions.
+pub const WINDOW_SCALE_LABELS: [&str; 6] = ["1x", "2x", "3x", "4x", "5x", "6x"];
+pub const FIT_LABELS: [&str; 2] = ["Pixel-perfect", "Fill window"];
+pub const FILTER_LABELS: [&str; 2] = ["Nearest", "Linear"];
+pub const ASPECT_LABELS: [&str; 2] = ["4:3 (DOS)", "Square"];
 
 /// The original's "Sound Effects" rows (`DATA_004965`).
 pub const SOUND_LABELS: [&str; 10] = [
@@ -138,6 +149,13 @@ pub enum Action {
     Map(usize),
     Sound(usize),
     Modern(bool),
+    /// Port-only display choices (window scale 1..=6).
+    WindowScale(usize),
+    DisplayFit(FitMode),
+    DisplayFilter(Filter),
+    DisplayAspect(PixelAspect),
+    /// `Alt+Enter`'s borderless full-screen toggle (session-only).
+    Fullscreen,
     /// "Return to Game": close the pages.
     Close,
     /// The port's Quit (the original's "Quit to DOS").
@@ -224,6 +242,11 @@ pub struct Prefs {
     pub maps: [bool; 5],
     pub sound: [bool; 10],
     pub modern: bool,
+    /// Port-only presentation choices; persisted in `saves/display.cfg`.
+    pub display: DisplaySettings,
+    /// Borderless full-screen. Session-only: a saved full-screen launch would
+    /// surprise the next start, and `Alt+Enter` restores a window at once.
+    pub fullscreen: bool,
 }
 
 impl Default for Prefs {
@@ -240,6 +263,8 @@ impl Default for Prefs {
             maps: [true; 5],
             sound: [true; 10],
             modern: true,
+            display: DisplaySettings::default(),
+            fullscreen: false,
         }
     }
 }
@@ -454,6 +479,89 @@ impl Prefs {
                     true,
                     15,
                 ));
+                // Port addition: the presentation page. The original has no
+                // resolution option; this row and page are port extensions.
+                rows.push(row(
+                    32,
+                    104,
+                    "Display Options",
+                    Action::Page(DISPLAY),
+                    Mark::Action,
+                    true,
+                    18,
+                ));
+                rows.push(main_menu(32, 136));
+            }
+            DISPLAY => {
+                for (index, label) in WINDOW_SCALE_LABELS.iter().enumerate() {
+                    let scale = index + 1;
+                    rows.push(row(
+                        32,
+                        36 + 10 * index as i32,
+                        label,
+                        Action::WindowScale(scale),
+                        Mark::Radio(self.display.scale as usize == scale),
+                        true,
+                        15,
+                    ));
+                }
+                for (index, label) in FIT_LABELS.iter().enumerate() {
+                    let fit = if index == 0 {
+                        FitMode::PixelPerfect
+                    } else {
+                        FitMode::FillWindow
+                    };
+                    rows.push(row(
+                        176,
+                        36 + 10 * index as i32,
+                        label,
+                        Action::DisplayFit(fit),
+                        Mark::Radio(self.display.fit == fit),
+                        true,
+                        15,
+                    ));
+                }
+                for (index, label) in FILTER_LABELS.iter().enumerate() {
+                    let filter = if index == 0 {
+                        Filter::Nearest
+                    } else {
+                        Filter::Linear
+                    };
+                    rows.push(row(
+                        176,
+                        70 + 10 * index as i32,
+                        label,
+                        Action::DisplayFilter(filter),
+                        Mark::Radio(self.display.filter == filter),
+                        true,
+                        15,
+                    ));
+                }
+                for (index, label) in ASPECT_LABELS.iter().enumerate() {
+                    let aspect = if index == 0 {
+                        PixelAspect::Dos43
+                    } else {
+                        PixelAspect::Square
+                    };
+                    rows.push(row(
+                        176,
+                        104 + 10 * index as i32,
+                        label,
+                        Action::DisplayAspect(aspect),
+                        Mark::Radio(self.display.aspect == aspect),
+                        true,
+                        15,
+                    ));
+                }
+                rows.push(row(
+                    32,
+                    104,
+                    "Fullscreen",
+                    Action::Fullscreen,
+                    Mark::Toggle(self.fullscreen),
+                    true,
+                    15,
+                ));
                 rows.push(main_menu(32, 136));
             }
             _ => {}
@@ -606,6 +714,50 @@ impl Prefs {
                     colour: 18,
                 });
             }
+            DISPLAY => {
+                texts.push(Text {
+                    x: 32,
+                    y: 18,
+                    text: "Display options:",
+                    colour: 18,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 26,
+                    text: "Window scale:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 176,
+                    y: 26,
+                    text: "Fit:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 176,
+                    y: 60,
+                    text: "Filter:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 176,
+                    y: 94,
+                    text: "Pixels:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 122,
+                    text: "Alt+Enter: fullscreen. Choices apply at once.",
+                    colour: 15,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 146,
+                    text: "Port extension; the 320x200 game screen is unchanged.",
+                    colour: 18,
+                });
+            }
             _ => {}
         }
         texts
@@ -639,6 +791,26 @@ impl Prefs {
                 self.modern = modern;
                 Activate::None
             }
+            Action::WindowScale(scale) if (MIN_SCALE..=MAX_SCALE).contains(&(scale as u32)) => {
+                self.display.scale = scale as u32;
+                Activate::None
+            }
+            Action::DisplayFit(fit) => {
+                self.display.fit = fit;
+                Activate::None
+            }
+            Action::DisplayFilter(filter) => {
+                self.display.filter = filter;
+                Activate::None
+            }
+            Action::DisplayAspect(aspect) => {
+                self.display.aspect = aspect;
+                Activate::None
+            }
+            Action::Fullscreen => {
+                self.fullscreen = !self.fullscreen;
+                Activate::None
+            }
             Action::Close => {
                 self.open = false;
                 Activate::Close
@@ -650,6 +822,7 @@ impl Prefs {
             | Action::Other(_)
             | Action::Map(_)
             | Action::Sound(_)
+            | Action::WindowScale(_)
             | Action::Ignored => Activate::None,
         }
     }
@@ -818,5 +991,36 @@ mod tests {
         // An out-of-range row does nothing.
         prefs.apply(Action::Sound(99));
         assert_eq!(prefs.sound, [true; 10]);
+    }
+
+    #[test]
+    fn display_page_sets_the_port_only_presentation_choices() {
+        let mut prefs = Prefs::default();
+        prefs.escape();
+        prefs.page = DISPLAY;
+        assert_eq!(prefs.display, DisplaySettings::default());
+        // Scale rows at x 32, y 36..86; 3x is the third row.
+        prefs.click(34, 56);
+        assert_eq!(prefs.display.scale, 3);
+        // Fit/filter/aspect rows at x 176.
+        prefs.click(178, 46);
+        assert_eq!(prefs.display.fit, FitMode::FillWindow);
+        prefs.click(178, 80);
+        assert_eq!(prefs.display.filter, Filter::Linear);
+        prefs.click(178, 114);
+        assert_eq!(prefs.display.aspect, PixelAspect::Square);
+        // Fullscreen is a session-only toggle.
+        prefs.click(34, 104);
+        assert!(prefs.fullscreen);
+        prefs.click(34, 104);
+        assert!(!prefs.fullscreen);
+        // The main page keeps its original rows; the Port Options page opens
+        // the display page from the port-only row at y 104.
+        prefs.page = PORT;
+        assert_eq!(prefs.click(34, 104), Activate::None);
+        assert_eq!(prefs.page, DISPLAY);
+        // The Main Menu row returns.
+        prefs.click(34, 136);
+        assert_eq!(prefs.page, MAIN);
     }
 }
