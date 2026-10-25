@@ -111,8 +111,8 @@ fn the_player_hud_texts_are_at_f1099s_positions() {
     screen.hud = PlayerHud {
         shields: [128, 256],
         hull: [2304, 4608],
-        set_speed: Some(250.0),
-        actual_speed: 180.0,
+        set_speed: Some(250),
+        actual_speed: 180,
         altitude: Some(1200),
         registration: "EAGLE".to_owned(),
         autopilot: false,

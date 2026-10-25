@@ -1602,3 +1602,138 @@ fn new_game_landed_surface_view() {
         "the landed view must show ground below the horizon ({lower} pixels)"
     );
 }
+
+/// The DOS default new game (F829 record 0): Gateway's starport Old Blackelk on
+/// Hope, the Saker Mk III, state 0x30. The boot frame is the landed surface view
+/// (F1050/F1054), with Set/Act at (2,148), Alt at (266,139) and the parent name
+/// `Hope` beneath it, as the executed original's boot frame shows.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn new_game_hope_landed_surface_view() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::hud::PlayerHud;
+    use ffe_rs::indexed::BitmapFont;
+    use ffe_rs::navigation::{Kind, Navigator};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::{Disc, SystemStation};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let nav = Navigator::new_game(&cache, 0).unwrap();
+    let start = nav.new_game.as_ref().unwrap();
+    assert_eq!(nav.system_name(), "Gateway");
+    assert_eq!(start.start_type, 0);
+    assert_eq!(start.player_state, 0x30);
+    assert_eq!(start.player_index, 87);
+    assert_eq!(start.cash, 10_000);
+    assert_eq!(start.ship, 0x1f);
+    let index = nav.docked.expect("landed at the start starport");
+    let body = nav.bodies[index].clone();
+    assert_eq!(body.name, "Old Blackelk");
+    assert_eq!(body.slot, 0x6a);
+    assert!(body.open_air);
+    let parent = body
+        .parent
+        .and_then(|p| nav.bodies.get(p))
+        .expect("the pad's planet");
+    assert_eq!(parent.name, "Hope");
+
+    let mut state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: start.ship,
+        position: start.seat.map(|v| v as f64 / UNIT),
+        ..Flight::default()
+    };
+    state.axes = Some(body.orientation);
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.discs = nav
+        .bodies
+        .iter()
+        .filter(|b| matches!(b.kind, Kind::Star | Kind::Planet | Kind::Moon))
+        .map(|b| {
+            let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
+            Disc {
+                centre: b.position.map(|v| v as f64 / UNIT),
+                radius: if b.kind == Kind::Star {
+                    b.radius as f64 / UNIT
+                } else {
+                    b.inner_radius as f64 / UNIT
+                },
+                light: b.position.map(|v| -(v as f64) / length.sqrt().max(1.0)),
+                colours: (12, 4),
+                star: b.kind == Kind::Star,
+                model: Some((b.model, b.seed)),
+                orientation: b.orientation,
+            }
+        })
+        .collect();
+    let tics = ffe_core::model_animation::START_TICS;
+    screen.stations = nav
+        .bodies
+        .iter()
+        .filter(|b| matches!(b.kind, Kind::Station | Kind::Starport))
+        .map(|b| SystemStation {
+            model: b.model,
+            centre: b.position.map(|v| v as f64 / UNIT),
+            orientation: b.orientation,
+            speed: b.spin,
+            door: 0xffff,
+            tics,
+        })
+        .collect();
+    screen.sky = ffe_rs::prefs::space_colour_rgb(4);
+    screen.hud = PlayerHud {
+        set_speed: Some(0),
+        actual_speed: 0,
+        altitude: Some(0),
+        registration: parent.name.clone(),
+        ..PlayerHud::default()
+    };
+    let font = BitmapFont::new(cache.asset("base:font/main").unwrap()).unwrap();
+    let (left, right) = screen.hud.speed_columns(&font);
+    assert_eq!(left, ["Set:0.0 km{", "Act:0.0 km{"]);
+    assert_eq!(right, ["Alt:0 m", "Hope"]);
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        let mut ppm = b"P6\n320 200\n255\n".to_vec();
+        for p in screen.logical_pixels() {
+            ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+        }
+        std::fs::write(std::path::Path::new(&dir).join("hope-landed.ppm"), ppm).unwrap();
+    }
+    let pixels = screen.logical_pixels();
+    let view = &pixels[..320 * 158];
+    assert!(
+        view.iter().filter(|p| **p != screen.sky).count() > 2_000,
+        "the Hope terrain and Old Blackelk are drawn"
+    );
+    // F1099's two columns: Set/Act under the view on the left, Alt/Hope on the
+    // right, both in the font's HUD colour (15).
+    let hud_colour = screen.palette()[usize::from(ffe_rs::hud::HUD_COLOUR)];
+    let ink = |x0: usize, x1: usize, y0: usize, y1: usize| {
+        (y0..y1)
+            .flat_map(|y| (x0..x1).map(move |x| pixels[y * 320 + x]))
+            .filter(|p| *p == hud_colour)
+            .count()
+    };
+    assert!(ink(2, 60, 148, 164) > 20, "Set/Act are drawn at (2,148)");
+    assert!(
+        ink(266, 320, 139, 156) > 20,
+        "Alt and Hope are drawn at (266,139)"
+    );
+    // The landing is not the services board (EXP-014): the docked screen is only
+    // opened by the original's docking path (`Traffic::Docked`), and the board
+    // itself still renders from the port's `DockState`.
+    assert!(
+        screen.dock.is_none(),
+        "the landed view does not draw services"
+    );
+    let mut dock = ffe_rs::station::DockState::default();
+    dock.open(ffe_rs::station::Screen::Services);
+    assert_eq!(dock.screen, ffe_rs::station::Screen::Services);
+    assert_eq!(ffe_rs::station::SERVICES.len(), 4);
+}

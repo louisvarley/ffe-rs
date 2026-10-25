@@ -16,7 +16,7 @@ use ffe_core::npc::{self, Anchor, NpcShip};
 use ffe_core::objects::Models as ShipModels;
 use ffe_core::objects::{Models, PhysList, Placement};
 use ffe_core::pads::Pads;
-use ffe_core::sector::{distance as star_distance, Drive, Tables as GalaxyTables};
+use ffe_core::sector::{distance as star_distance, Drive, Strings, Tables as GalaxyTables};
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
 use ffe_core::traffic::{
@@ -908,14 +908,15 @@ pub fn clock_words(seconds: f64) -> [u32; 2] {
 /// F829's start-system table (`DATA_006820`): five 20-byte records of galaxy x, y
 /// and z (16.16), the star's number in its sector, and one dword the original
 /// keeps beside them (`0x88` for the playable starts, `8` for the first and last).
-/// Record 1 is Ross 154 (`0x17176a00`, `0x15243200`, -0x3400, star 1); records 0
-/// and 4 are the same system (`0x17170200`, `0x15287600`, -222, star 6).
+/// Record 0 is the DOS default, Gateway [-1,4] (`0x17170200`, `0x15287600`,
+/// -56832, star 6, extra 8); record 1 is Ross 154 (`0x17176a00`, `0x15243200`,
+/// -0x3400, star 1).
 pub const START_SYSTEMS: [(i32, i32, i32, u32, u32); 5] = [
-    (0x1717_0200, 0x1528_7600, -222, 6, 8),
+    (0x1717_0200, 0x1528_7600, -56_832, 6, 8),
     (0x1717_6a00, 0x1524_3200, -0x3400, 1, 0x88),
     (0x1718_8000, 0x1524_a000, -0x6c00, 0, 0x88),
     (0x1715_e000, 0x151e_e000, 0, 0, 0x88),
-    (0x1717_0200, 0x1528_7600, -222, 6, 8),
+    (0x1717_0200, 0x1528_7600, -56_832, 6, 8),
 ];
 
 /// The new game's clock: 1 Jan 3250, noon, in absolute GameTics
@@ -937,6 +938,72 @@ pub const NEW_GAME_HOLD_LOSS: i32 = 0xc;
 /// The physics-list slot of the starting starport (`0x6e`): F994's `F1532(0x6e)`
 /// is the object the player's ship is placed at and docked with.
 pub const NEW_GAME_STARPORT_SLOT: usize = 0x6e;
+
+/// F998's default arm (start types 0, 4, 5 and 6): the Saker Mk III on Old
+/// Blackelk, Gateway [-1,4], with 10,000 CR. The DOS boot's "any other key"
+/// starts this one (`docs/notes/intro.md`).
+pub const DEFAULT_START_TYPE: u8 = 0;
+pub const DEFAULT_SHIP: u32 = 0x1f;
+pub const DEFAULT_CASH: i32 = 0x2710;
+pub const DEFAULT_STARPORT_SLOT: usize = 0x6a;
+pub const DEFAULT_PLAYER_INDEX: u8 = 87;
+pub const DEFAULT_HOLD_LOSS: i32 = 0x10;
+
+/// F829/F832/F869/F830 for one record of `DATA_006820`: the system F830 names,
+/// generated from the record's coordinates and extra word with F878's inputs.
+/// Record 0 is the DOS default start (Gateway [-1,4], the planet Hope and the
+/// starport Old Blackelk); record 1 is Ross 154, whose hand-coded template the
+/// galaxy list already holds.
+pub fn start_entry(
+    cache: &VerifiedCache,
+    record: (i32, i32, i32, u32, u32),
+) -> Result<Entry, String> {
+    let (x, y, z, star, extra) = record;
+    let code = (x >> 16) as u32 & 0x1fff | ((y >> 16) as u32 & 0x1fff) << 13 | (star & 0x3f) << 26;
+    let galaxy = cache
+        .asset("base:world/galaxy-tables")
+        .ok_or("no galaxy tables (cache v21)")?;
+    let tables = GalaxyTables::new(galaxy)?;
+    let strings = Strings::new(
+        cache
+            .asset("base:text/system-strings")
+            .ok_or("no system strings (cache v22)")?,
+    )?;
+    let name = tables
+        .system_name(&strings, code)
+        .ok_or_else(|| format!("F830 has no name for system {code:#x}"))?;
+    // F869's first byte is `DATA_008995`: F832 leaves it where F855 reads the
+    // generator's population-like parameter.
+    let details = Tables::new(
+        cache
+            .asset("base:world/system-tables")
+            .ok_or("no system tables")?,
+    )?
+    .details(code);
+    // F832: `seed = (y >> 16) + (y << 16) + x - z`, `stars` is the high extra
+    // byte's low three bits, and the total mass is the `extra & 0xf` row of
+    // DATA_006803 scaled by `stars & 0xf8`.
+    let seed = (y >> 16)
+        .wrapping_add(y << 16)
+        .wrapping_add(x)
+        .wrapping_sub(z) as u32;
+    let stars = extra >> 8;
+    let mass = tables.start_mass((extra & 0xf) as usize, stars as u8);
+    let mut name_field = [0u8; 20];
+    let length = name.len().min(name_field.len());
+    name_field[..length].copy_from_slice(&name[..length]);
+    Ok(Entry {
+        name: String::from_utf8_lossy(&name).trim().to_owned(),
+        params: Params {
+            seed,
+            mass,
+            stars: stars & 7,
+            code,
+            population: details.bytes[0] as i32,
+            name: name_field,
+        },
+    })
+}
 
 /// The original's new-game state, kept for the local comparison with `--state`
 /// and the new-game oracle. The playable uses the navigator's own fields.
@@ -1032,29 +1099,65 @@ impl Navigator {
         })
     }
 
-    /// The original's new game (F829/F998 for start type `start_type`): Ross 154 at
-    /// the 3250 start, the bodies placed at that clock, and the player docked at the
-    /// open-air starport's pad. `start_type` is the `DATA_006820` record (1 is
-    /// Ross 154, the default); the original's menu only offers 1 in this port.
+    /// The original's new game (F829/F998): the default DOS start is record 0,
+    /// Gateway [-1,4] on the planet Hope at the starport Old Blackelk, with the
+    /// Saker Mk III (F998's default arm). Record 1 is Ross 154's Eagle; the menu's
+    /// types 2-5 are still the verified type 1 in this port. The bodies are placed
+    /// at the 3250 clock and the player is F994-positioned on the open-air pad.
     pub fn new_game(cache: &VerifiedCache, start_type: u8) -> Result<Self, String> {
-        let record = *START_SYSTEMS
-            .get(usize::from(start_type))
-            .ok_or_else(|| format!("start type {start_type} is not in DATA_006820"))?;
+        let (record_index, start_type) = match start_type {
+            0 => (0usize, 0u8),
+            1 => (1, 1),
+            2..=5 => (1, 1),
+            _ => return Err(format!("start type {start_type} is not in DATA_006820")),
+        };
+        let record = START_SYSTEMS[record_index];
+        let (default, ship, cash, starport_slot, player_index, hold_loss) = if start_type == 0 {
+            (
+                true,
+                DEFAULT_SHIP,
+                DEFAULT_CASH,
+                DEFAULT_STARPORT_SLOT,
+                DEFAULT_PLAYER_INDEX,
+                DEFAULT_HOLD_LOSS,
+            )
+        } else {
+            (
+                false,
+                NEW_GAME_SHIP,
+                NEW_GAME_CASH,
+                NEW_GAME_STARPORT_SLOT,
+                NEW_GAME_PLAYER_INDEX,
+                NEW_GAME_HOLD_LOSS,
+            )
+        };
         let code = (record.0 >> 16) as u32 & 0x1fff
             | ((record.1 >> 16) as u32 & 0x1fff) << 13
             | (record.3 & 0x3f) << 26;
-        let entries = galaxy(cache)?;
-        let current = entries
-            .iter()
-            .position(|entry| entry.params.code == code)
-            .ok_or_else(|| format!("start system {code:#x} is not in the galaxy table"))?;
+        let mut entries = galaxy(cache)?;
+        let current = if start_type == 0 {
+            // Record 0 is not one of the hand-coded systems: F829/F832 generate
+            // it from the record's coordinates and extra word.
+            let entry = start_entry(cache, record)?;
+            if let Some(index) = entries.iter().position(|e| e.params.code == code) {
+                entries[index] = entry;
+                index
+            } else {
+                entries.push(entry);
+                entries.len() - 1
+            }
+        } else if let Some(index) = entries.iter().position(|entry| entry.params.code == code) {
+            index
+        } else {
+            return Err(format!("start system {code:#x} is not in the galaxy table"));
+        };
         let bodies = bodies(cache, &entries[current], clock_words(NEW_GAME_CLOCK))?;
         let index = bodies
             .iter()
-            .position(|body| body.kind == Kind::Starport && body.slot == NEW_GAME_STARPORT_SLOT)
+            .position(|body| body.kind == Kind::Starport && body.slot == starport_slot)
             .ok_or_else(|| {
                 format!(
-                    "{} has no starport in slot {NEW_GAME_STARPORT_SLOT:#x}",
+                    "{} has no starport in slot {starport_slot:#x}",
                     entries[current].name
                 )
             })?;
@@ -1082,7 +1185,7 @@ impl Navigator {
         // F994 copies the station's orientation to the ship and puts it on the
         // pad: F650's offset plus the ship's collision radius along its up row.
         let up = [body.rows[3], body.rows[4], body.rows[5]];
-        let radius = models.info(NEW_GAME_SHIP).radii().1 as i32;
+        let radius = models.info(ship).radii().1 as i32;
         let seat = pads.seat(
             body.position,
             body.model,
@@ -1092,7 +1195,15 @@ impl Navigator {
             radius,
             up,
         )?;
-        let cargo = (models.cargo_space(NEW_GAME_SHIP).unwrap_or(0) - NEW_GAME_HOLD_LOSS).max(0);
+        let cargo = if default {
+            // F998's default arm leaves the Saker with Cargo Space 1 t on the
+            // executed original's F2 status page (`--game-frame 400 0x3c` after
+            // the default start); the port uses that observed hold rather than
+            // subtracting the Eagle's 0xc.
+            1
+        } else {
+            (models.cargo_space(ship).unwrap_or(0) - hold_loss).max(0)
+        };
         let mut nav = Self::assemble(cache, entries, current, bodies)?;
         nav.pads = Some(pads);
         nav.clock = NEW_GAME_CLOCK;
@@ -1102,9 +1213,9 @@ impl Navigator {
         nav.new_game = Some(NewGameState {
             start_type,
             player_state: NEW_GAME_PLAYER_STATE,
-            player_index: NEW_GAME_PLAYER_INDEX,
-            cash: NEW_GAME_CASH,
-            ship: NEW_GAME_SHIP,
+            player_index,
+            cash,
+            ship,
             cargo,
             acceleration: NEW_GAME_ACCELERATION,
             bay: bay.index,
@@ -2636,5 +2747,32 @@ impl Navigator {
                 )
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F829/F832's default record (Gateway [-1,4], star 6, extra 8) gives the
+    /// seed the executed original reports in `--state` (`0x8d17f528`). The z
+    /// word is the 16.16 -56832 the DOS start table holds, not the rounded -222
+    /// an earlier transcription kept.
+    #[test]
+    fn the_default_start_record_seed_is_f829s() {
+        let (x, y, z, star, extra) = START_SYSTEMS[0];
+        assert_eq!(
+            (x, y, z, star, extra),
+            (0x1717_0200, 0x1528_7600, -56_832, 6, 8)
+        );
+        let seed = (y >> 16)
+            .wrapping_add(y << 16)
+            .wrapping_add(x)
+            .wrapping_sub(z) as u32;
+        assert_eq!(seed, 0x8d17_f528);
+        assert_eq!(START_SYSTEMS[4], START_SYSTEMS[0]);
+        assert_eq!(DEFAULT_START_TYPE, 0);
+        assert_eq!(DEFAULT_STARPORT_SLOT, 0x6a);
+        assert_eq!(DEFAULT_PLAYER_INDEX, 87);
     }
 }

@@ -87,7 +87,7 @@ fn multi_entry_log_frame() {
     screen.clock = "1-Jan-3250 12:30:16".to_owned();
     for (index, text) in [
         "Docked.",
-        "Set:855.0 km/h Act:615.6 km/h",
+        "Set:900.0 km{ Act:648.0 km{",
         "Autopilot to Olympus Village.",
         "Landed at Olympus Village.",
         "Launch.",
