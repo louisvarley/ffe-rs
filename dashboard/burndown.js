@@ -205,7 +205,8 @@ window.FFE_BURNDOWN = {
         { id: "ui-17", title: "Classic/Modern presets, RMB steer and controls.cfg persistence", status: "done", version: "v0.81" },
         { id: "ui-18", title: "Presentation display scaling, Display Options and Alt+Enter fullscreen", status: "done", version: "v0.87" },
         { id: "ui-19", title: "F917 tombstone screen, obituary and timed return to the front end", status: "done", version: "v0.96" },
-        { id: "ui-20", title: "Source-tagged event log, F271 replace/NULL-clear/ring semantics", status: "done", version: "v0.97" }
+        { id: "ui-20", title: "Source-tagged event log, F271 replace/NULL-clear/ring semantics", status: "done", version: "v0.97" },
+        { id: "ui-21", title: "Remove port-only help/scenarios/debug keys; dev-gated tools and source F1/F11/F12", status: "done", version: "v0.98" }
       ]
     },
     {
@@ -718,6 +719,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 64,
       note: "Events merged (v0.97): one source-tagged log writer (12 Source variants), port-only entries removed or rerouted (unported clicks, view names, pause/accel/HUD/save/takeoff notices), F271's replace/NULL-clear/ring/scroll semantics, message_log scan and messages_view evidence. Escape/pause messages stay off the log and the places list still wins. Owner decisions: the DOS start-line string inference, target-lock wording, unported-click feedback and DATA_008810/scroll actions remain. One item added and completed (ui-20), so the remaining count is unchanged."
+    },,
+    {
+      date: "2026-10-25",
+      remaining: 64,
+      note: "Cleanup merged (v0.98): the port-only full-screen help page and scenario selector/debug labels are gone, F11/F12/O moved behind --dev/FFE_DEV=1 (Ctrl+F11 screenshot, Ctrl+F12 viewer, Ctrl+Shift+F12 lab), and F1/F11/F12 are back to the source view cycle/combat-computer note/escape capsule. input::view_command/dev_command tests, views/playable coverage and cleanup evidence are in. Owner decisions: F3 still toggles Modern/Classic although source F3 is the map (candidate for Port Options), F5 snapshots remain, --start sol stays CLI-only, and tools/test-playable.ps1 still carries help/scenario assumptions. One item added and completed (ui-21), so the remaining count is unchanged."
     },
   ]
 };

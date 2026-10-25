@@ -4,6 +4,28 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Player-build cleanup
+
+- Merged `cleanup` (`fcc2ec9` as `80b7507`) conflict-free: the port-only
+  full-screen help page, scenario selector and debug labels are gone; F11, F12
+  and O moved behind `--dev`/`FFE_DEV=1` (Ctrl+F11 screenshot, Ctrl+F12 model
+  viewer, Ctrl+Shift+F12 lab); F1 is the source view cycle again, F11 shows the
+  source combat-computer note (view 6 is not ported) and F12 is the escape
+  capsule/Stowmaster action. `input::view_command`/`dev_command` tests, the
+  views/playable coverage and `docs/evidence/cleanup/` are in.
+- No conflicts: the branch was based on the current `main` and the
+  start-flow/events/hyperspace/prefs paths were already on both sides.
+- Checks: workspace tests, clippy `-D warnings`, fmt; `views` (13), `playable`
+  (13), input unit tests (11); `--smoke-frames 30`, `--dev --smoke-frames 10`,
+  `--capture-start` and `--capture-prefs` all completed. Affected oracles
+  `prefs/takeoff/surface/galaxy-map` pass.
+- Owner decisions: F3 still toggles Modern/Classic although source F3 is the
+  galaxy map (candidate to move to the Port Options page), F5 snapshots remain,
+  `--start sol` stays CLI-only, and `tools/test-playable.ps1` still carries the
+  old help/scenario assumptions.
+
+---
+
 ## 2026-10-25 - Final batch: Thargoids, hyperspace, shipyard, ECM, game-over and events
 
 - Merged, one at a time, each green and pushed: `thargoids` (04b65d1),

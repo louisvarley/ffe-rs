@@ -118,7 +118,7 @@ ECM.
   byte-validated DATA_005100 button and DATA_007684 hot-area tables). The port's
   own key bindings are in `docs/CONTROLS.md`.
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 165 items, 101 done and 64 left on
+  in `burndown.js`; 14 milestones, 166 items, 102 done and 64 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -305,14 +305,15 @@ capture produced by two repeat runs of the local reference.
 | v0.95 ECM and missile view | ECM/naval ECM (F935, F718 5/6 and 7/9/10), F719 effect, F1057 decoy, F989/F1061 arming, F10 camera/HUD, console 0x14 | `ecm_view` (1), `missile_view` (1), `combat_view` (8), `scanner_view` (2), `npc_view` (3); `verify-combat/npc/surface/prefs/fills/textures` PASS | six affected oracles PASS | - | chaff ammo source, NPC launches absent, ECM/F719 rendering, T fallback, E/roll conflict, target split; `docs/evidence/ecm/` |
 | v0.96 game-over tombstone | F1104-F1107-F917 tombstone (model 172, rare 175), no menu, timed spin to the front end, `--capture-gameover`, `--death-probe`; death placeholders removed | `gameover_view` (2, FFE_GAMEOVER_CACHE), `death_view` (2), `boot_safety` (5), `npc_ai` (4); capture path; `verify-combat/surface/prefs/intro/npc` PASS | five affected oracles PASS | - | commander name source, load UI, model 175 trigger and obituary scale/face selection; `docs/notes/gameover.md`, `docs/evidence/gameover/` |
 | v0.97 source-tagged event log | one `Source`-tagged writer (12 variants), port-only entries removed/rerouted, F271 replace/NULL-clear/ring/scroll semantics, `message_log` scan, `messages_view` evidence | `message_log` (4), `messages_view` (4), `console_view` (7), `dashboard_view` (5), `boot_safety` (5); `verify-prefs/surface/takeoff/intro` PASS | four affected oracles PASS | - | DOS start-line inference, target-lock wording, unported-click feedback and DATA_008810/scroll actions remain; `docs/notes/message-log.md` |
+| v0.98 cleanup of port-only help and debug keys | removed the help page, scenario selector/debug labels; `--dev`/`FFE_DEV=1` gates Ctrl+F11 screenshot, Ctrl+F12 viewer/lab and O; F1/F11/F12 return to the source view/combat-computer/escape-capsule bindings; `input::view_command`/`dev_command` tests | `views` (13), `playable` (13), input unit (11), workspace; `--smoke-frames 30`, `--dev --smoke-frames 10`, `--capture-start`, `--capture-prefs`; `verify-prefs/takeoff/surface/galaxy-map` PASS | four affected oracles PASS | - | owner decisions: F3 still toggles Modern/Classic though source F3 is the map (Port Options candidate), F5 snapshots remain, `--start sol` is CLI-only, and `tools/test-playable.ps1` still has help/scenario assumptions; `docs/evidence/cleanup/` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 797 `#[test]` functions total; 189 are `#[ignore]`
+  `cargo clippy -D warnings`. 800 `#[test]` functions total; 189 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **607 runnable synthetic tests** (608 on Linux).
+  **610 runnable synthetic tests** (611 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
@@ -493,10 +494,10 @@ values.
   v0.48b were repaired: `verify-assets.py` now expects cache v14 with 1,781
   files, and the child-model oracle masks the surface events 50-54 and 60/61,
   which the whole-table oracle covers).
-- `README.md`'s playtest/controls sections still describe the prototype slice
-  (food trading, F2 scenarios, M for the viewer, Modern/Classic presets); the
-  system slice, the market and the current keys are in `docs/NAVIGATION.md` and
-  the executable's help.
+- `README.md`'s playtest/controls sections follow the current player build
+  after the cleanup (no help page, scenario selector or model viewer); the
+  system slice, market and current keys are in `docs/NAVIGATION.md`,
+  `docs/CONTROLS.md` and the executable's help text.
 - `README.md` and the executable title still say "0.9" because the product
   version label has not been bumped (cosmetic).
 - `README.md` still describes cache v11 and "26 oracles" in places; the figures
