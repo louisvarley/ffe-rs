@@ -60,8 +60,8 @@ current `player+0x5334`. A negative index makes up to ten random attempts over
 | Scene | Rule | Port call |
 |---|---|---|
 | Boot/title/front end | `F919` plays 0 and replays it when `F1904` reports done; leaving stops it | `GameAudio::front_end_music`, `tick` replay, `leave_front_end` |
-| Message page | `F306` starts 7 | `GameAudio::message_page_music` (not triggered yet: no FF-code renderer) |
-| Message/video | `F307` starts 10 once per `DATA_009091` message bit | `GameAudio::message_video_music` (not triggered yet) |
+| Message page | `F306` starts 7 | `GameAudio::message_page_music` on a military rank page (`PageKind::Rank`) |
+| Message/video | `F307` starts 10 once per `DATA_009091` message bit | `GameAudio::message_video_music` on a military medal page (`PageKind::Medal`) |
 | Battle | `F750`/`F236` start 14 when "Music in battles" and "Music on" are set; otherwise stop | `start_battle` |
 | Combat end / player death | `F770` stops; `F941` stops on the player's destruction | `end_battle`, `player_death` |
 | Hyperspace exit | `F656` starts 15 when "Music after hyperspace" is set and the current song is not 15 | `hyperspace_music` |

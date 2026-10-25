@@ -99,8 +99,8 @@ decides **when** to call it.
 | Scene | Original | Port call |
 |---|---|---|
 | Front end | `F919` 68420/68429 play song 0, replay when `F1904` says done | `front_end_music()` + `tick` replay in `run_intro`; `leave_front_end()` on the start key |
-| Message page | `F306` 24542 plays song 7 | `message_page_music()` (source rule; no FF-code renderer yet) |
-| Message/video | `F307` 24622 plays song 10 | `message_video_music()` (source rule; no FF-code renderer yet) |
+| Message page | `F306` 24542 plays song 7 | `message_page_music()` on a military rank page (`missions::PageKind::Rank`, `docs/notes/missions.md`) |
+| Message/video | `F307` 24622 plays song 10 | `message_video_music()` on a military medal page (`missions::PageKind::Medal`) |
 | Battle | `F750` 49585 / `F236` 18909 play song 14 if `DATA_009035 & DATA_009029`; otherwise stop (`49589`/`18913`) | `start_battle()` on the first ship hit |
 | Combat end / death | `F770` 50460 stops; `F941` also stops on the player's destruction | `end_battle()` when the last pirate dies; `player_death()` when the player's ship is destroyed |
 | Hyperspace | `F656` 44749 plays song 15 if `DATA_009033` | `hyperspace_music()` after a successful jump |

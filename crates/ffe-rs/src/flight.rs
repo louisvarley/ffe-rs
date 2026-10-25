@@ -95,6 +95,10 @@ pub struct Flight {
     /// craft launched. Saves from before the sequence load alive.
     #[serde(default)]
     pub death: Option<crate::death::Death>,
+    /// The accepted BBS contracts, the journal and the comms pages (F290/
+    /// F303/F306/F307). Saves from before the mission slice load empty.
+    #[serde(default)]
+    pub missions: ffe_core::missions::State,
 }
 
 fn default_rng() -> Random {
@@ -141,6 +145,7 @@ impl Default for Flight {
             scoop_cooldown: 0.0,
             rng: default_rng(),
             death: None,
+            missions: ffe_core::missions::State::default(),
         }
     }
 }
@@ -202,6 +207,7 @@ impl Flight {
                 .missiles
                 .iter()
                 .any(|code| *code != 0 && ffe_core::missile::model(*code).is_none())
+            || !self.missions.validate()
         {
             return Err("save contains out-of-range prototype state".to_owned());
         }

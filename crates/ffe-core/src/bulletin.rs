@@ -124,7 +124,9 @@ pub struct World<'a> {
 }
 
 impl World<'_> {
-    fn system_name(&self, code: u32) -> String {
+    /// The system name for a code: the board's own system for 0, otherwise the
+    /// matching destination. F1343's `0x85ff` handler.
+    pub fn system_name(&self, code: u32) -> String {
         if code == 0 {
             return self.name.to_owned();
         }
@@ -140,7 +142,7 @@ impl World<'_> {
     /// F857(1, current): a neighbouring system with a population, avoiding the
     /// one the board is in. The original perturbs the grid coordinates; the
     /// port picks from the navigator's neighbourhood list.
-    fn neighbour(&self, rng: &mut Random, minimum_population: u32) -> Option<&Destination> {
+    pub fn neighbour(&self, rng: &mut Random, minimum_population: u32) -> Option<&Destination> {
         let choices: Vec<&Destination> = self
             .destinations
             .iter()
@@ -166,6 +168,7 @@ pub fn template(code: u16) -> Option<&'static [u8]> {
 fn embedded(code: u16) -> Option<&'static [u8]> {
     table::STRINGS
         .iter()
+        .chain(table::COMPLETION.iter())
         .find(|(candidate, _)| *candidate == code)
         .map(|(_, bytes)| *bytes)
 }
@@ -251,6 +254,17 @@ fn expand(bytes: &[u8], world: &World<'_>, vars: &[Var; 5], depth: usize) -> Str
         let code = u16::from(bytes[index]) << 8 | u16::from(bytes[index + 1]);
         index += 2;
         match code {
+            // FF30WriteDateV1..V3/DateYearV1..V3: the variable is a day count
+            // (F1358's `StringConvertDate`). The military mission template
+            // 0x9854 uses 0x300e for its "by midnight on ..." date.
+            0x300d..=0x300f => {
+                let slot = usize::from((code & 0xff) - 0x0d);
+                let days = match vars.get(slot) {
+                    Some(Var::Int(value)) => (*value).max(0) as u32,
+                    _ => 0,
+                };
+                out.push_str(&date_day_text(days));
+            }
             0x3001..=0x3006 | 0x3019..=0x301d => {
                 let slot = var_index(code & 0x3f);
                 let var = vars.get(slot).unwrap_or(&Var::Int(0));
@@ -279,7 +293,12 @@ fn expand(bytes: &[u8], world: &World<'_>, vars: &[Var; 5], depth: usize) -> Str
                     out.push_str(&var_text(var, world));
                 }
             }
+            // 0x85ff is the destination system name. 0x85fe is the same
+            // system-name handler with a different table selector; in the
+            // templates that use it (0x991d, 0x9854) the name is already
+            // written by 0x85ff, so this code contributes no text.
             0x85ff => out.push_str(&world.system_name(system_code(vars))),
+            0x85fe => {}
             0x9200..=0x92ff => out.push_str(&name_code(world, code, vars, depth)),
             0x9000..=0x9fff => {
                 // A nested 0x99xx string from DATA_005299 (passage/charity
@@ -299,6 +318,57 @@ fn expand(bytes: &[u8], world: &World<'_>, vars: &[Var; 5], depth: usize) -> Str
 /// uses. Unknown codes are left visible in brackets rather than invented.
 pub fn render(code: u16, vars: &[Var; 5], world: &World<'_>) -> String {
     template(code).map_or_else(String::new, |bytes| expand(bytes, world, vars, 0))
+}
+
+/// Expand one raw string of `DATA_005299`/`DATA_005104`, the tables F1343's
+/// `ff98`/`ff9c` handlers read. This is the entry point the mission reply and
+/// completion pages use (`missions::text`); an unknown code returns `None`.
+pub fn render_code(code: u16, vars: &[Var; 5], world: &World<'_>) -> Option<String> {
+    embedded(code).map(|bytes| expand(bytes, world, vars, 0))
+}
+
+/// Expand a raw string table entry. The mission module keeps its source text in
+/// `bulletin_table` and expands it through the same F1348 subset as the ads.
+pub fn render_bytes(bytes: &[u8], vars: &[Var; 5], world: &World<'_>) -> String {
+    expand(bytes, world, vars, 0)
+}
+
+/// F1358's date without the time, for FF30's date codes: day 0 is 1-Jan-3250
+/// and the game's calendar uses the fixed `DATA_007650` month lengths (no leap
+/// years), matching `galaxy_map::date_text`'s year loop.
+pub fn date_day_text(days: u32) -> String {
+    const MONTHS: [(&str, u32); 12] = [
+        ("Jan", 31),
+        ("Feb", 28),
+        ("Mar", 31),
+        ("Apr", 30),
+        ("May", 31),
+        ("Jun", 30),
+        ("Jul", 31),
+        ("Aug", 31),
+        ("Sep", 30),
+        ("Oct", 31),
+        ("Nov", 30),
+        ("Dec", 31),
+    ];
+    let mut rest = days;
+    let mut year = 3250u32;
+    while rest >= 365 {
+        rest -= 365;
+        year += 1;
+    }
+    let mut month = 0usize;
+    while rest >= MONTHS[month].1 {
+        rest -= MONTHS[month].1;
+        month += 1;
+    }
+    format!("{}-{}-{year}", rest + 1, MONTHS[month].0)
+}
+
+/// Whether a code is one of the mission reply/completion pages (0x9833..0x983f,
+/// 0x991d..0x9930, 0x9c29..0x9c3a, 0x9c67..0x9c70).
+pub fn mission_text(code: u16) -> Option<&'static [u8]> {
+    embedded(code)
 }
 
 fn post(code: u16, day: u32, vars: [Var; 5], world: &World<'_>) -> Post {
@@ -362,6 +432,13 @@ fn military(world: &World<'_>, day: u32) -> Option<Post> {
 /// F638: a passenger or parcel job. The reward is `(random(3) + 3) * the
 /// DATA_006171 multiplier`, plus `DATA_006173`'s extra and times the
 /// `DATA_006174` danger multiplier, exactly as the asm computes it.
+///
+/// The fifth variable is F646's arg6, the BBS entry's `data2` (StrVars[4]):
+/// the low three bits are the passenger count minus one, bits 9..12 the
+/// mission additive, and bit 13 marks the "small package" passage (F534's
+/// `test ah,0x20`). F638 picks the passage index and the additive from the
+/// same stream; the port keeps that layout so [`crate::missions`] can accept
+/// the post without inventing a second record.
 fn ship_job(rng: &mut Random, world: &World<'_>, day: u32) -> Option<Post> {
     let destination = world.neighbour(rng, 3)?;
     let index = rng.bounded(8) as usize;
@@ -373,6 +450,12 @@ fn ship_job(rng: &mut Random, world: &World<'_>, day: u32) -> Option<Post> {
     money = money.saturating_mul(DANGER_MULTIPLIER[danger_index.min(15)]);
     let code = if rng.bounded(2) == 0 { 0x981a } else { 0x981b };
     let seed = rng.bounded(0x1_0000);
+    let package = index == 7;
+    // F638's `edx`: `random & 7` is the passenger count minus one (or the
+    // package passage's 7), `| 0x2000` for the package, plus `(bits >> 9) &
+    // 0xf` of the squared draw for the mission additive.
+    let additive = rng.bounded(16);
+    let basic_data = (index as u32 & 7) | (additive << 9) | if package { 0x2000 } else { 0 };
     Some(post(
         code,
         day,
@@ -381,7 +464,7 @@ fn ship_job(rng: &mut Random, world: &World<'_>, day: u32) -> Option<Post> {
             Var::Text(text(embedded(description).unwrap_or(b""))),
             Var::System(destination.code),
             Var::Seed(seed),
-            Var::Int(0),
+            Var::Int(i64::from(basic_data)),
         ],
         world,
     ))
@@ -612,6 +695,39 @@ mod tests {
     }
 
     #[test]
+    fn ff30_date_codes_use_fixed_day_and_month_lengths() {
+        assert_eq!(date_day_text(0), "1-Jan-3250");
+        assert_eq!(date_day_text(30), "31-Jan-3250");
+        assert_eq!(date_day_text(31), "1-Feb-3250");
+        assert_eq!(date_day_text(364), "31-Dec-3250");
+        assert_eq!(date_day_text(365), "1-Jan-3251");
+        // 0x9854's `by midnight on` slot: 0x0e = FF30WriteDateYearV2, var 1.
+        let destinations = [Destination {
+            code: 7,
+            name: "Hope".to_owned(),
+            population: 4,
+            danger: 0,
+        }];
+        let world = world(&destinations, None);
+        let rendered = render_code(
+            0x9854,
+            &[
+                Var::Int(350),
+                Var::Int(31),
+                Var::System(7),
+                Var::Seed(0),
+                Var::Text("a message".to_owned()),
+            ],
+            &world,
+        )
+        .unwrap();
+        assert_eq!(
+            rendered,
+            "Deliver a message to the Hope system by midnight on 1-Feb-3250. You will be paid $350."
+        );
+    }
+
+    #[test]
     fn the_generator_dispatch_table_is_the_originals_shape() {
         assert_eq!(GENERATORS.len(), 32);
         assert_eq!(GENERATORS[0], Generator::Goods);
@@ -638,6 +754,32 @@ mod tests {
         assert!(post.text.starts_with("WANTED:") || post.text.starts_with("SHIP REQUIRED:"));
         assert_eq!(post_system(&post), Some(0x1234_5678));
         assert!(post.vars[0] != Var::Int(0));
+    }
+
+    #[test]
+    fn a_ship_job_encodes_the_passenger_count_and_package_bit() {
+        let destinations = [Destination {
+            code: 0x1234_5678,
+            name: "Sol".to_owned(),
+            population: 12,
+            danger: 1,
+        }];
+        let world = world(&destinations, None);
+        let mut rng = Random::new(0x0bad, 0xf00d);
+        // Every draw is a valid F638 job; the fifth variable is the contract's
+        // basic_data, not part of the rendered advertisement.
+        for _ in 0..64 {
+            let post = ship_job(&mut rng, &world, 0).unwrap();
+            let basic = match post.vars[4] {
+                Var::Int(value) => value as u32,
+                _ => panic!("F638 must set StrVars[4]"),
+            };
+            if basic & 0x2000 != 0 {
+                assert_eq!(basic & 7, 7, "the package passage's low bits");
+            } else {
+                assert!((1..=7).contains(&((basic & 7) + 1)));
+            }
+        }
     }
 
     #[test]

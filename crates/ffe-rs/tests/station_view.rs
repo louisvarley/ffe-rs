@@ -715,6 +715,261 @@ fn repair_rows_show_damage_and_clear_after_repair() {
     }
 }
 
+/// A generated mission offer, the journal after accepting it, and the comms
+/// page it wrote. Local-only: needs the content cache; set `FFE_SHOT_DIR` to
+/// keep `MissionOffer-ours.ppm`, `Journal-ours.ppm` and `Comms-ours.ppm`.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn mission_offer_journal_and_comms_frames() {
+    use ffe_core::missions::{self, Kind};
+
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let station = nav.docked.expect("docked at the start");
+    let name = nav.bodies[station].name.clone();
+    let posts = nav
+        .station_offers(&cache, station)
+        .expect("F622's BBS")
+        .posts
+        .clone();
+    let (row, post) = posts
+        .iter()
+        .enumerate()
+        .find(|(_, post)| matches!(post.code, 0x981a | 0x981b | 0x981f..=0x9822))
+        .map(|(index, post)| (index, post.clone()))
+        .expect("the generated board has a contract offer");
+    assert!(
+        matches!(post.code, 0x981a | 0x981b | 0x981f..=0x9822),
+        "{:#06x}",
+        post.code
+    );
+    let offer = nav
+        .mission_offer(&cache, station, row)
+        .unwrap()
+        .expect("a contract offer");
+    assert!(offer.reward > 0);
+    assert!(!offer.destination_name.is_empty());
+
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.system = nav.system_name().to_owned();
+    let status = station::Status {
+        cargo_used: 0,
+        cargo_capacity: 1,
+        cash: 1000,
+        ..station::Status::default()
+    };
+    let offer_view = DockView {
+        screen: StationScreen::Bulletin,
+        title: station::title(StationScreen::Bulletin, &name),
+        rows: vec![DockRow {
+            main: post.text.clone(),
+            detail: None,
+            columns: Vec::new(),
+            fitted: false,
+        }],
+        status,
+        scroll: 0,
+        selected: 0,
+        total: 1,
+    };
+    let before = screen.logical_pixels().to_vec();
+    let mut state = Flight {
+        mode: Mode::Docked,
+        ..Flight::default()
+    };
+    screen.dock = Some(offer_view);
+    screen.draw(&state, ViewState::default(), None, false, &post.text);
+    // The offer's text starts at (140, 16), under the title at (4,6).
+    assert_ne!(
+        &before[16 * 320 + 140..16 * 320 + 300],
+        &screen.logical_pixels()[16 * 320 + 140..16 * 320 + 300],
+        "mission offer text"
+    );
+    save(&screen, "MissionOffer-ours.ppm");
+
+    let accepted = state
+        .missions
+        .accept(
+            &offer,
+            nav.day(),
+            nav.current_system_code(),
+            nav.system_name(),
+        )
+        .unwrap();
+    assert_eq!(
+        state.missions.missions[0].kind, offer.kind,
+        "the contract keeps the offer's type"
+    );
+    let journal = state.missions.journal.last().unwrap().clone();
+    let journal_view = DockView {
+        screen: StationScreen::Journal,
+        title: station::title(StationScreen::Journal, &name),
+        rows: vec![DockRow {
+            main: journal.text.clone(),
+            detail: None,
+            columns: Vec::new(),
+            fitted: false,
+        }],
+        status,
+        scroll: 0,
+        selected: 0,
+        total: 1,
+    };
+    let before = screen.logical_pixels().to_vec();
+    screen.dock = Some(journal_view);
+    screen.draw(
+        &state,
+        ViewState::default(),
+        None,
+        false,
+        station::hint(StationScreen::Journal, 0, 0),
+    );
+    assert_ne!(
+        &before[6 * 320 + 4..6 * 320 + 160],
+        &screen.logical_pixels()[6 * 320 + 4..6 * 320 + 160],
+        "journal title"
+    );
+    assert_ne!(
+        &before[16 * 320 + 4..16 * 320 + 316],
+        &screen.logical_pixels()[16 * 320 + 4..16 * 320 + 316],
+        "journal entry"
+    );
+    save(&screen, "Journal-ours.ppm");
+
+    let page = state.missions.pages.last().unwrap().clone();
+    let comms_view = DockView {
+        screen: StationScreen::Comms,
+        title: station::title(StationScreen::Comms, &name),
+        rows: vec![DockRow {
+            main: page.text.clone(),
+            detail: None,
+            columns: Vec::new(),
+            fitted: false,
+        }],
+        status,
+        scroll: 0,
+        selected: 0,
+        total: 1,
+    };
+    let before = screen.logical_pixels().to_vec();
+    screen.dock = Some(comms_view);
+    screen.draw(
+        &state,
+        ViewState::default(),
+        None,
+        false,
+        station::hint(StationScreen::Comms, 0, 0),
+    );
+    assert_ne!(
+        &before[6 * 320 + 4..6 * 320 + 160],
+        &screen.logical_pixels()[6 * 320 + 4..6 * 320 + 160],
+        "comms title"
+    );
+    // The acceptance page is the same source text the journal just drew, so
+    // the row pixels are expected to match; the title above is the change the
+    // screen makes.
+    assert!(!page.text.is_empty());
+    save(&screen, "Comms-ours.ppm");
+
+    // The acceptance page is 0x992a's source text and names the destination.
+    assert!(accepted.text.contains(&offer.destination_name));
+    assert_eq!(page.kind, missions::PageKind::Message);
+    assert_eq!(state.missions.missions[0].status, missions::Status::Active);
+    assert_eq!(Kind::Passenger, offer.kind);
+
+    // F493's military list (the 0x9827/0x9828 ad's target page). The tier-0
+    // row is F632's 0x9854 description.
+    let offers = nav
+        .military_offers(&cache, station, 0)
+        .expect("F493's list");
+    assert_eq!(offers.len(), 1);
+    let military = DockView {
+        screen: StationScreen::Military,
+        title: station::title(StationScreen::Military, &name),
+        rows: offers
+            .iter()
+            .map(|offer| DockRow {
+                main: offer.text.clone(),
+                detail: None,
+                columns: Vec::new(),
+                fitted: false,
+            })
+            .collect(),
+        status,
+        scroll: 0,
+        selected: 0,
+        total: offers.len(),
+    };
+    let before = screen.logical_pixels().to_vec();
+    draw(
+        &mut screen,
+        Some(military),
+        None,
+        station::hint(StationScreen::Military, offers.len(), 0),
+    );
+    assert_ne!(
+        &before[16 * 320 + 140..16 * 320 + 310],
+        &screen.logical_pixels()[16 * 320 + 140..16 * 320 + 310],
+        "military mission text"
+    );
+    save(&screen, "Military-ours.ppm");
+
+    // F306's rank page after a military package delivery: 0x9c39's source text
+    // with the new rank name (the medal page is skipped because F509's package
+    // basic_data has no medal code).
+    let military_offer = offers[0].clone();
+    let accepted = state
+        .missions
+        .accept(
+            &military_offer,
+            nav.day(),
+            nav.current_system_code(),
+            nav.system_name(),
+        )
+        .unwrap();
+    let outcome = state
+        .missions
+        .settle(accepted.id, nav.day() + 1, military_offer.destination)
+        .unwrap();
+    assert_eq!(outcome.status, missions::Status::Complete);
+    let rank = state
+        .missions
+        .pages
+        .iter()
+        .find(|page| page.kind == missions::PageKind::Rank)
+        .expect("F306's rank page")
+        .clone();
+    let comms_rank = DockView {
+        screen: StationScreen::Comms,
+        title: station::title(StationScreen::Comms, &name),
+        rows: vec![DockRow {
+            main: rank.text.clone(),
+            detail: None,
+            columns: Vec::new(),
+            fitted: false,
+        }],
+        status,
+        scroll: 0,
+        selected: 0,
+        total: 1,
+    };
+    let before = screen.logical_pixels().to_vec();
+    screen.dock = Some(comms_rank);
+    screen.draw(
+        &state,
+        ViewState::default(),
+        None,
+        false,
+        station::hint(StationScreen::Comms, 0, 0),
+    );
+    assert_ne!(
+        &before[16 * 320 + 4..16 * 320 + 316],
+        &screen.logical_pixels()[16 * 320 + 4..16 * 320 + 316],
+        "rank page text"
+    );
+    save(&screen, "Comms-rank.ppm");
+}
+
 /// The default DOS start (Gateway/Hope, record 0) is landed at Old Blackelk in
 /// state `0x30`. F4 at the pad is F343: the services board is the same screen
 /// as a docked station's, titled with the starport. The reference capture

@@ -31,10 +31,21 @@ OUT = pathlib.Path(
 
 TEMPLATES = list(range(0x981A, 0x982E))
 STRINGS = (
-    list(range(0x9918, 0x991D))
+    # The mission reply menu (0x9833..0x983f) and the reply/completion pages
+    # F521/F534/F303/F306/F307 expand (0x991d..0x9930). They live in the same
+    # DATA_005299 table as the advertisements.
+    list(range(0x9833, 0x9840))
+    + list(range(0x9854, 0x9858))
+    + list(range(0x9918, 0x991D))
+    + list(range(0x991D, 0x9931))
+    + list(range(0x996E, 0x997E))
     + list(range(0x99B4, 0x99C4))
     + list(range(0x99D7, 0x99DF))
 )
+
+# DATA_005104 is the 0x9cxx table F1343's ff9c handler expands: the civilian
+# and military completion pages F303/F306/F307 write.
+COMPLETION = list(range(0x9C29, 0x9C3B)) + list(range(0x9C67, 0x9C71))
 
 GENERATOR_NAMES = {
     "FUNC_000639": "Goods",
@@ -50,19 +61,26 @@ GENERATOR_NAMES = {
 }
 
 
-def main():
-    lines = ASM.read_text(encoding="latin-1").splitlines()
-    start = next(i for i, line in enumerate(lines) if line.strip().startswith("DATA_005299:"))
-    pointers = []
+def pointers(lines, label):
+    start = next(i for i, line in enumerate(lines) if line.strip().startswith(label + ":"))
+    out = []
     for line in lines[start + 1:]:
         text = line.strip()
         if text.startswith("dd "):
-            pointers.append(text.split()[1].split(";")[0].strip())
+            out.append(text.split()[1].split(";")[0].strip())
         elif text == "":
             continue
         else:
             break
-    assert len(pointers) == 0x1E8 or len(pointers) >= 0x1DF, len(pointers)
+    return out
+
+
+def main():
+    lines = ASM.read_text(encoding="latin-1").splitlines()
+    pointers_5299 = pointers(lines, "DATA_005299")
+    pointers_5104 = pointers(lines, "DATA_005104")
+    assert len(pointers_5299) == 0x1E8 or len(pointers_5299) >= 0x1DF, len(pointers_5299)
+    assert len(pointers_5104) >= 0x71, len(pointers_5104)
     labels = {}
     for i, line in enumerate(lines):
         name = line.strip()
@@ -76,15 +94,24 @@ def main():
             text = line.strip()
             if not text.startswith("db"):
                 break
-            for token in text[2:].split(";")[0].split(","):
+            body = text[2:].split(";")[0]
+            # Quoted strings may contain commas ("permit, and if so ..."), so
+            # split with the quote groups as single tokens rather than on every
+            # comma.
+            for token in re.findall(r"'[^']*'|\"[^\"]*\"|0x[0-9A-Fa-f]+|\d+", body):
                 token = token.strip()
-                if token.startswith("'"):
-                    out.extend(token.strip("'").encode("latin-1"))
-                elif token.startswith("0x"):
+                if token.startswith("'") or token.startswith('"'):
+                    out.extend(token[1:-1].encode("latin-1"))
+                elif token.lower().startswith("0x"):
                     value = int(token, 16)
                     if value == 0:
                         return bytes(out)
                     out.append(value)
+                elif token:
+                    value = int(token)
+                    if value == 0:
+                        return bytes(out)
+                    out.append(value & 0xFF)
         return bytes(out)
 
     def rust_bytes(data):
@@ -139,13 +166,19 @@ def main():
         "pub const TEMPLATES: [(u16, &[u8]); %d] = [" % len(TEMPLATES),
     ]
     for code in TEMPLATES:
-        out.append(f"    (0x{code:04x}, {rust_bytes(raw(pointers[code & 0x1FF]))}),")
+        out.append(f"    (0x{code:04x}, {rust_bytes(raw(pointers_5299[code & 0x1FF]))}),")
     out.append("];")
     out.append("")
     out.append("/// The embedded ff80 strings the advertisement templates use.")
     out.append("pub const STRINGS: [(u16, &[u8]); %d] = [" % len(STRINGS))
     for code in STRINGS:
-        out.append(f"    (0x{code:04x}, {rust_bytes(raw(pointers[code & 0x1FF]))}),")
+        out.append(f"    (0x{code:04x}, {rust_bytes(raw(pointers_5299[code & 0x1FF]))}),")
+    out.append("];")
+    out.append("")
+    out.append("/// `DATA_005104`: the 0x9cxx completion/message pages (F303/F306/F307).")
+    out.append("pub const COMPLETION: [(u16, &[u8]); %d] = [" % len(COMPLETION))
+    for code in COMPLETION:
+        out.append(f"    (0x{code:04x}, {rust_bytes(raw(pointers_5104[code & 0x1FF]))}),")
     out.append("];")
     out.append("")
     out.append("/// `DATA_006170`: the generator F621 selects for each of its 32 slots.")

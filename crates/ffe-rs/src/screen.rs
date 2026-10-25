@@ -2332,7 +2332,22 @@ impl Screen {
                     icon.blit_rgb(&mut self.frame, &palette, x, y);
                 }
             }
-            if view.screen == StationScreen::Bulletin {
+            if matches!(view.screen, StationScreen::Journal | StationScreen::Comms) {
+                // The journal/comms page is a paragraph list: each entry wraps
+                // across the 320-pixel width (x 4..317) in three 10-pixel
+                // lines, as F1399's journal viewer does.
+                for (line, text) in self.wrap_text(&row.main, 312).iter().take(3).enumerate() {
+                    self.text(
+                        layout.entry_x as usize,
+                        (y + 1 + 10 * line as i32) as usize,
+                        text,
+                        0x7d,
+                    );
+                }
+            } else if matches!(
+                view.screen,
+                StationScreen::Bulletin | StationScreen::Military
+            ) {
                 // F1399 wraps the entry at the screen table's text x: 320 -
                 // 140 - 3 = 177 pixels. A 33-pixel row holds three lines.
                 for (line, text) in self.wrap_text(&row.main, 177).iter().take(3).enumerate() {
@@ -2373,7 +2388,11 @@ impl Screen {
             }
             self.text(210, 147, "Go Back...", 0x7d);
         }
-        // F558's cargo/cash/cabins line (0x98e8).
+        // F558's cargo/cash/cabins line (0x98e8). The journal/comms text pages
+        // use the space, so they omit it.
+        if matches!(view.screen, StationScreen::Journal | StationScreen::Comms) {
+            return;
+        }
         let money = format!("${}", crate::trade::credits(view.status.cash));
         let money_x = (station::STATUS_CASH_RIGHT as usize)
             .saturating_sub(self.font.width(&money).unwrap_or(0));
