@@ -588,3 +588,7 @@ _ref_danger equ DATA_009010
 _ref_cash equ DATA_008888
 _ref_msglog equ DATA_008681
 _ref_msgindex equ DATA_005099
+
+; Game-over probe: F953's damage routine.
+GLOBAL _ref_damage
+_ref_damage equ FUNC_000953

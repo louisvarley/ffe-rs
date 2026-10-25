@@ -40,15 +40,13 @@
 //! - The old ship is not exploded by F1098; it is handed to the AI as state
 //!   `0x16`. The port shows F942's explosion at the old position and does not
 //!   simulate the derelict's later AI states.
-//! - The game-over page is the status screen's first page: the strings are
+//! - The game-over screen is F917's spinning tombstone (model 172, or 175 when
+//!   `DATA_008885 == 0xeb6973d`). Its model text records expand
 //!   `DATA_005129` (`"\rGAME\rOVER"`) and `DATA_005130`
-//!   (`"\r\r\r\r\r\r\r  COMMANDER\r   %s\r     DIED\r  %s"`) in
-//!   `ffedat.asm:5626-5634`, reached through the `ff9c` array expansion
-//!   (`F277`, `21602`, and `DATA_007649`'s `ff9c` entry, `ffedat.asm:23186`).
-//!   F286 (`22279`) dispatches the status page; page 0 draws F283's equipment
-//!   page (`21870`). The port draws the two headings and the commander line as
-//!   the death screen; it has no status-page renderer or commander-name entry,
-//!   so the source's default name (`Jameson`) is used.
+//!   (`"\r\r\r\r\r\r\r  COMMANDER\r   %s\r     DIED\r  %s"`) through the
+//!   `ff9c` array expansion (`F277`, `21602`, and `DATA_007649`'s `ff9c`
+//!   entry, `ffedat.asm:23186`). F286/F283 are the separate status/equipment
+//!   pages, not the death screen. See `docs/notes/gameover.md`.
 //! - **Music:** F770 stops the song when the player is killed
 //!   (`50345`/`50460`, `F1903`). The port's [`GameAudio::end_battle`] is that
 //!   stop. The escape launch does not stop the song (F1098 does not call it).
@@ -58,8 +56,9 @@
 //!   report/note).
 //!
 //! The port's old substitute (recover at the nearest starport) is gone; a
-//! player without a capsule now stays dead and the game-over page is shown
-//! after the external-view hold, with `N` starting a new game and `Q` quitting.
+//! player without a capsule stays dead through the external-view hold and then
+//! enters [`crate::gameover::GameOver`]'s tombstone, which ends by returning to
+//! the front end. There are no game-over options.
 
 use serde::{Deserialize, Serialize};
 
@@ -166,7 +165,7 @@ pub fn escape_craft(loadout: &ffe_core::equipment::Loadout) -> Option<EscapeCraf
 }
 
 /// The death sequence's phases. `Exploding` is F1104's external view for the
-/// `0x3cae6` tics; `GameOver` is the status page's GAME OVER/DIED headings.
+/// `0x3cae6` tics; `GameOver` is F917's spinning tombstone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeathPhase {
     Exploding,
@@ -321,7 +320,8 @@ pub fn play_destroyed_escape_audio(audio: &mut crate::sound::GameAudio) {
     audio.play(crate::sound::Cue::Launch);
 }
 
-/// The status page's `DATA_005130` lines: `COMMANDER`, the name, `DIED`.
+/// The `DATA_005130` template split into lines, retained for the source check;
+/// the tombstone expands the same strings through its model text records.
 pub fn died_lines(name: &str) -> [String; 3] {
     [
         "COMMANDER".to_owned(),

@@ -412,3 +412,17 @@ pub fn date_text(seconds: f64) -> String {
         rest % 60
     )
 }
+
+/// F1358's date without the clock, as the tombstone engraves it:
+/// `1-JAN-3250` (F1356 uses the current day count and uppercases the month).
+pub fn date_short_text(seconds: f64) -> String {
+    let full = date_text(seconds);
+    let date = full.split(' ').next().unwrap_or("");
+    let mut parts = date.split('-');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(day), Some(month), Some(year)) => {
+            format!("{day}-{}-{year}", month.to_ascii_uppercase())
+        }
+        _ => date.to_owned(),
+    }
+}

@@ -270,10 +270,24 @@ pub fn quad_uv(width: u32, orientation: u8) -> [[i16; 2]; 4] {
     ORDER[usize::from(orientation & 7)].map(|i| c[i])
 }
 
-/// Rows the span routines draw (`y < 0x9e`) and the screen width (`0x140`).
+/// Rows the span routines draw by default (`y < 0x9e`) and the screen width (`0x140`).
 pub const RASTER_HEIGHT: i32 = 158;
 pub const RASTER_WIDTH: i32 = 320;
 
+thread_local! {
+    /// F917's tombstone covers the full 320x200 logical screen; the flight view's
+    /// textured spans stop at 158. [`ViewHeightGuard`](crate::model_execute::ViewHeightGuard)
+    /// raises this with the face-queue height.
+    static CURRENT_HEIGHT: std::cell::Cell<i32> = const { std::cell::Cell::new(RASTER_HEIGHT) };
+}
+
+pub fn set_raster_height(height: i32) {
+    CURRENT_HEIGHT.with(|value| value.set(height));
+}
+
+pub fn raster_height() -> i32 {
+    CURRENT_HEIGHT.with(std::cell::Cell::get)
+}
 /// The span-routine state: per side 16.16 x, u, v and their per-row steps
 /// (`DATA_009236..DATA_009247`), and the current row (`DATA_009248`).
 struct Raster<'a, F: FnMut(i32, i32, u8)> {
@@ -327,7 +341,7 @@ impl<F: FnMut(i32, i32, u8)> Raster<'_, F> {
     /// F1650-F1653: draw `rows` rows from the current row (any count, including
     /// zero or negative, which only moves the edges).
     fn spans(&mut self, mut rows: i32) {
-        if rows <= 0 || self.y >= RASTER_HEIGHT || self.y.wrapping_add(rows) <= 0 {
+        if rows <= 0 || self.y >= raster_height() || self.y.wrapping_add(rows) <= 0 {
             self.advance(rows);
             return;
         }
@@ -341,7 +355,7 @@ impl<F: FnMut(i32, i32, u8)> Raster<'_, F> {
             rows += self.y;
             self.y = 0;
         }
-        while rows != 0 && self.y < RASTER_HEIGHT {
+        while rows != 0 && self.y < raster_height() {
             let (left, right) = if self.x[0] < self.x[1] {
                 (0, 1)
             } else {
