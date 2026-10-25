@@ -222,16 +222,16 @@ fn invalid_controls_are_atomic_and_docked_clock_stays_still() {
 #[test]
 fn save_rejects_corruption_version_unknown_fields_and_invalid_state() {
     let original = saves::encode(&Flight::default()).unwrap();
-    assert!(saves::decode(&original[..original.len() - 1]).is_err());
+    assert!(saves::decode(&original[..original.len() - 2]).is_err());
     for (from, to) in [
-        ("\"version\": 1", "\"version\": 99"),
+        ("\"version\": 2", "\"version\": 99"),
         ("\"credits\": 1000", "\"credits\": 1000000001"),
         ("\"cargo\": 0", "\"cargo\": 11"),
         ("\"credits\": 1000", "\"credits\": -1"),
         ("\"credits\": 1000", "\"credits\": 1000, \"credits\": 1000"),
         ("\"stock\": 50", "\"stock\": 1001"),
         ("\"ticks\": 0", "\"surprise\": 0"),
-        ("ffe-rs-experimental", "other-format"),
+        ("ffe-rs-save", "other-format"),
     ] {
         let changed = String::from_utf8(original.clone())
             .unwrap()

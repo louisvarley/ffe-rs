@@ -204,5 +204,8 @@ prototype flight. The CLI `--capture*`, `--smoke-frames`, `--skip-intro` and
 - Mouse sensitivity is one logical pixel per F1038 count. The original scales
   DirectInput mickeys, so this may need a sensitivity option after an owner
   playtest.
-- `saves/controls.cfg` and the port-only `saves/display.cfg` are the persisted
-  preferences; the original's commander-file preference block is not imported.
+- `saves/config.cfg` (version 2) is the persisted preference file; it holds the
+  preset, display choices and the other applied pages. `saves/controls.cfg` and
+  `saves/display.cfg` are read once as a migration. The original's commander-file
+  preference block is not imported. `bind.*` keys are reserved for the still
+  unported remapping screen (`docs/notes/persistence.md`).

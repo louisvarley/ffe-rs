@@ -94,6 +94,7 @@
 use crate::galaxy::Details;
 use crate::laser::{self, Damage, DamageState};
 use crate::model_animation::TICS_PER_FRAME;
+use serde::{Deserialize, Serialize};
 
 /// The original's ship-type table, `DATA_006199`/`DATA_006180..6198`: nineteen
 /// records of a count and a model list, in table order.
@@ -1972,7 +1973,7 @@ pub struct OffenceReport {
 /// word's `>> 6`), not the starport ordinal: 0 Interpol/Independent, 1 Imperial,
 /// 2 Federal, 3 Alliance, 4 Thargoid. F655 reads the current system's slot and
 /// F312 prints slots 2, 1 and 0 as Federal, Imperial and Interpol.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Legal {
     pub wanted: bool,
     pub alert: bool,

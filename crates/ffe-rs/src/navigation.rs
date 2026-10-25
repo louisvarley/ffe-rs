@@ -27,6 +27,7 @@ use ffe_core::traffic::{
     begin_exit, finish_touch, state, Landing, Reply, Stages, Starport, Takeoff, TakeoffStep,
 };
 use ffe_core::RandomState;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// One leader's frame for F695/F751's escorts: its id, system position, axes
@@ -738,7 +739,7 @@ pub fn autopilot(
 }
 
 /// Which map is showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum View {
     Closed,
     /// The ffe-rs system map (Tab): every body, as a navigation aid.
@@ -870,7 +871,7 @@ pub struct Navigator {
 
 /// The player's ship as the hyperdrive sees it: its mass, drive class and the fuel on
 /// board (hydrogen, or military fuel for class 10 and up), set by the caller each frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveState {
     pub mass: i32,
     pub class: i32,
@@ -881,7 +882,7 @@ pub struct DriveState {
 /// (`+0x27c`) and its F856 position (`+0x25c..0x264`). It is a jump destination, not
 /// a body lock. Its distance is measured from the player's current system when asked,
 /// as F832 does when the selection changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Destination {
     /// The system code: sector x/y and the star's number in bits 26..31.
     pub code: u32,
@@ -1321,7 +1322,7 @@ pub fn start_entry(
 
 /// The original's new-game state, kept for the local comparison with `--state`
 /// and the new-game oracle. The playable uses the navigator's own fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewGameState {
     /// The start-system record F829 selected (`DATA_008881`).
     pub start_type: u8,
@@ -1340,6 +1341,156 @@ pub struct NewGameState {
     /// The bay F650 allocated and the pad position it gives (system frame, mm).
     pub bay: u16,
     pub seat: [i64; 3],
+}
+
+/// The navigator's serialisable state: where the commander is, what system,
+/// which chart is open, the legal record and the landing/docking stage.
+///
+/// The bodies themselves are not stored: they are regenerated from the system
+/// code and the saved clock, exactly as the original regenerates a system's
+/// orbit positions from the game date. `index` fields therefore refer to the
+/// regenerated body list, and [`Navigator::from_save`] checks every one.
+///
+/// Not stored: the NPC traffic, missiles and short-lived effects. The source
+/// saves its object array; the port respawns traffic deterministically from the
+/// system and clock when the live game first needs it. See
+/// `docs/notes/persistence.md`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NavigatorSave {
+    pub system_code: u32,
+    pub clock: f64,
+    pub start_clock: f64,
+    #[serde(default)]
+    pub new_game: Option<NewGameState>,
+    pub page: usize,
+    pub view: View,
+    pub selected: usize,
+    #[serde(default)]
+    pub target: Option<usize>,
+    #[serde(default)]
+    pub locked: Option<usize>,
+    #[serde(default)]
+    pub destination: Option<Destination>,
+    pub altitude: i32,
+    #[serde(default)]
+    pub docked: Option<usize>,
+    pub legal: ffe_core::npc::Legal,
+    #[serde(default)]
+    pub ship_lock: Option<u32>,
+    #[serde(default)]
+    pub missile_lock: Option<u32>,
+    #[serde(default)]
+    pub missile_view: Option<u32>,
+    #[serde(default)]
+    pub sequence: Option<SequenceSave>,
+    #[serde(default)]
+    pub takeoff: Option<u8>,
+    #[serde(default)]
+    pub landed: Option<LandedSave>,
+    #[serde(default)]
+    pub final_leg: bool,
+    #[serde(default)]
+    pub spawned: Option<usize>,
+}
+
+/// A mid-docking or mid-launch stage (F1067-F1088).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SequenceSave {
+    pub station: usize,
+    pub state: u8,
+    pub timeout: i32,
+    #[serde(default)]
+    pub drawn: Option<(u8, i32)>,
+    pub launching: bool,
+}
+
+/// A landed state (`0x30`/`0x34`) and the body it is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LandedSave {
+    pub state: u8,
+    pub index: usize,
+}
+
+impl NavigatorSave {
+    /// Scalar checks that do not need the generated body list. The caller
+    /// checks indices against the regenerated system.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.clock.is_finite() || !self.start_clock.is_finite() {
+            return Err("Save has a non-finite navigation clock.".to_owned());
+        }
+        if !(0.0..=1.0e12).contains(&self.clock) || !(0.0..=1.0e12).contains(&self.start_clock) {
+            return Err("Save has an out-of-range navigation clock.".to_owned());
+        }
+        if self.page > 1_000_000
+            || self.selected > 1_000_000
+            || self
+                .target
+                .into_iter()
+                .chain(self.locked)
+                .chain(self.docked)
+                .chain(self.spawned)
+                .any(|index| index > 1_000_000)
+        {
+            return Err("Save has an out-of-range navigation index.".to_owned());
+        }
+        if self.altitude < 0 {
+            return Err("Save has a negative altitude.".to_owned());
+        }
+        if let Some(sequence) = &self.sequence {
+            if sequence.station > 1_000_000
+                || !matches!(
+                    sequence.state,
+                    state::ALIGN
+                        | state::STARPORT_ALIGN
+                        | state::OPEN_DOOR
+                        | state::INTO_LIFT
+                        | state::TURN
+                        | state::CLOSE_DOOR
+                        | state::WAIT_IN_LIFT
+                        | state::OPEN_INNER
+                        | state::INTO_BAY
+                        | state::DOCKED
+                        | state::DOCKED_THARGOID
+                        | state::LAUNCH_INTO_LIFT
+                        | state::LAUNCH_CLOSE
+                        | state::LAUNCH_WAIT
+                        | state::LAUNCH_OPEN
+                        | state::LAUNCH_OUT
+                        | state::LAUNCHING_STATION
+                        | state::LAUNCHING_STARPORT
+                )
+            {
+                return Err("Save has an invalid docking/launch stage.".to_owned());
+            }
+        }
+        if let Some(takeoff) = self.takeoff {
+            if !matches!(
+                takeoff,
+                state::LANDED | state::LANDED_ROUGH | state::TAKEOFF | state::AFTER_TAKEOFF
+            ) {
+                return Err("Save has an invalid takeoff state.".to_owned());
+            }
+        }
+        if let Some(landed) = self.landed {
+            if landed.index > 1_000_000
+                || !matches!(
+                    landed.state,
+                    state::LANDED | state::LANDED_ROUGH | state::LANDING | state::STARPORT_LANDING
+                )
+            {
+                return Err("Save has an invalid landed state.".to_owned());
+            }
+        }
+        if let Some(new_game) = &self.new_game {
+            if new_game.start_type > 5 || new_game.cargo < 0 || new_game.cash < 0 {
+                return Err("Save has an invalid new-game record.".to_owned());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Navigator {
@@ -1549,6 +1700,150 @@ impl Navigator {
         // F687/F686's start entry: the new game's system has its F688 traffic,
         // but no capture guarantee and no pirate placed at the pad.
         nav.spawn_traffic(cache, seat, launch_axis);
+        Ok(nav)
+    }
+
+    /// This navigator's serialisable state. The system is identified by its
+    /// galaxy code, not by the vector index, and the clock replaces the object
+    /// positions.
+    pub fn save_state(&self) -> NavigatorSave {
+        NavigatorSave {
+            system_code: self.entries[self.current].params.code,
+            clock: self.clock,
+            start_clock: self.start_clock,
+            new_game: self.new_game,
+            page: self.page,
+            view: self.view,
+            selected: self.selected,
+            target: self.target,
+            locked: self.locked,
+            destination: self.destination,
+            altitude: self.altitude,
+            docked: self.docked,
+            legal: self.legal,
+            ship_lock: self.ship_lock,
+            missile_lock: self.missile_lock,
+            missile_view: self.missile_view,
+            sequence: self.sequence.map(|sequence| SequenceSave {
+                station: sequence.station,
+                state: sequence.stages.state,
+                timeout: sequence.stages.timeout,
+                drawn: sequence.stages.drawn,
+                launching: sequence.launching,
+            }),
+            takeoff: self.takeoff.map(|takeoff| takeoff.state),
+            landed: self.landed.map(|landed| LandedSave {
+                state: landed.landing.state,
+                index: landed.index,
+            }),
+            final_leg: self.final_leg,
+            // Ephemeral: the traffic is regenerated on load, so the save does
+            // not claim the system already has its ships.
+            spawned: None,
+        }
+    }
+
+    /// Rebuild a navigator from a save. The system's bodies come from the cache
+    /// at the saved clock; every stored index is checked against that list.
+    pub fn from_save(cache: &VerifiedCache, save: &NavigatorSave) -> Result<Self, String> {
+        save.validate()?;
+        let mut nav = if let Some(new_game) = save.new_game {
+            Self::new_game(cache, new_game.start_type)?
+        } else {
+            Self::new(cache)?
+        };
+        if nav.entries[nav.current].params.code != save.system_code {
+            let index = nav
+                .entries
+                .iter()
+                .position(|entry| entry.params.code == save.system_code)
+                .ok_or_else(|| {
+                    format!(
+                        "Save's system code {:#x} is not generated by this cache.",
+                        save.system_code
+                    )
+                })?;
+            nav.current = index;
+        }
+        nav.bodies = bodies(cache, &nav.entries[nav.current], clock_words(save.clock))?;
+        nav.clock = save.clock;
+        nav.start_clock = save.start_clock;
+        nav.new_game = save.new_game;
+        nav.page = save.page;
+        nav.view = save.view;
+        nav.selected = save.selected;
+        nav.target = save.target;
+        nav.locked = save.locked;
+        nav.destination = save.destination;
+        nav.altitude = save.altitude;
+        nav.docked = save.docked;
+        nav.legal = save.legal;
+        nav.ship_lock = save.ship_lock;
+        nav.missile_lock = save.missile_lock;
+        nav.missile_view = save.missile_view;
+        nav.final_leg = save.final_leg;
+        nav.spawned = save.spawned;
+        nav.sequence = save.sequence.map(|sequence| Sequence {
+            station: sequence.station,
+            stages: Stages {
+                state: sequence.state,
+                timeout: sequence.timeout,
+                drawn: sequence.drawn,
+            },
+            launching: sequence.launching,
+        });
+        nav.takeoff = save.takeoff.map(|state| Takeoff { state });
+        nav.landed = save.landed.map(|landed| Landed {
+            landing: Landing {
+                state: landed.state,
+            },
+            index: landed.index,
+        });
+        // Traffic, missiles and effects are regenerated rather than restored.
+        nav.ships.clear();
+        nav.persisted.clear();
+        nav.missiles = crate::missile::MissileField::default();
+        nav.effects.clear();
+        nav.spawned = None;
+        nav.refreshed = 0.0;
+        nav.drift = [0; 3];
+        nav.skips = 0;
+        nav.carry = 0.0;
+        nav.frame = None;
+        // A restored docked/sequence station needs its bay record for a launch.
+        for index in [nav.docked, nav.sequence.map(|sequence| sequence.station)]
+            .into_iter()
+            .flatten()
+        {
+            let Some(body) = nav.bodies.get(index) else {
+                return Err(format!(
+                    "Save's station index {index} is not in the system."
+                ));
+            };
+            if !matches!(body.kind, Kind::Station | Kind::Starport) {
+                return Err(format!("Save's docking body {index} is not a station."));
+            }
+            let bays = body.bays;
+            nav.traffic
+                .entry(index)
+                .or_insert_with(|| Starport::new(bays));
+        }
+        // Every stored body index must exist after regeneration.
+        if nav.target.is_some_and(|index| index >= nav.bodies.len())
+            || nav.locked.is_some_and(|index| index >= nav.bodies.len())
+            || nav.docked.is_some_and(|index| index >= nav.bodies.len())
+            || nav
+                .landed
+                .is_some_and(|landed| landed.index >= nav.bodies.len())
+            || nav
+                .sequence
+                .is_some_and(|sequence| sequence.station >= nav.bodies.len())
+        {
+            return Err("Save refers to a body that is not in its system.".to_owned());
+        }
+        if nav.page >= nav.pages() || nav.selected >= nav.listed().len() {
+            return Err("Save's navigation selection is out of range.".to_owned());
+        }
         Ok(nav)
     }
 
