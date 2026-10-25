@@ -4,6 +4,36 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Scanner contacts and the combat targeter merged (v0.65)
+
+- Merged `scanner` (7a82070, eda3790): `ffe_rs::scanner` implements F275's
+  contacts (live bodies and NPC ships, parent-frame relative positions, the
+  19-colour `DATA_008683` table indexed by the mass word, stalk geometry and the
+  8-frame orientation overlay gated on `ship+0xca & 4`); `ffe_rs::targeter`
+  implements F1113's four-box tunnels, F1114's edges, F1612's circle and F1100's
+  size rule. `main` feeds scanner input from `Navigator.bodies` and live ships;
+  the targeter tunnels are gated by the preference and the target flags, and the
+  screen draw order is fixed to the source order.
+- Conflicts: `console.rs` (`ShipSystems`), `combat.md` and `dashboard.md`.
+  `ShipSystems` now keeps the equipment slice's `status`/`general` as canonical
+  and adds only `ca` (F272's scanner gate, `& 4`; default 0x04 for every flyable
+  ship) rather than the scanner branch's overlapping `c6..cb` copies. Docs were
+  combined: contact colours are done, the targeter is drawn, and the remaining
+  owner decision is the auto-targeter *arming* (target-computer bit and
+  F1010/F1060/F1062; `T` still cycles locks).
+- Cache: the branch predates v27, so the local `data.bin` (v27, 1,796 assets,
+  ignored/untracked) was rebuilt and all cached suites ran against it.
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `--test scanner_view -- --ignored` (2); cached
+  dashboard/combat/console/station/lift/market/npc/intro/npc_ai suites all
+  pass.
+- Left: auto-targeter arming/equipment, F1100's per-target text colour (nav
+  0x11/combat 0x10/missile 0x5f) and its arrow forms; two simultaneous targets
+  (`+0xec`/`+0xed`) are collapsed to one display (JJFFE-vs-DOS candidate recorded
+  in `eda3790`).
+
+---
+
 ## 2026-10-25 - Intro playback merged and the cache moves to v27 (v0.64)
 
 - Merged `intro` (b4cd65e): the default boot plays F961/F962 from the DOS

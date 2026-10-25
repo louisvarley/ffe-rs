@@ -168,7 +168,7 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "ui-0", title: "Console buttons: time acceleration meter and screen buttons", status: "done", version: "v0.49i" },
-        { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "in-progress", version: "v0.58" },
+        { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "done", version: "v0.65" },
         { id: "ui-2", title: "Crosshair, targeting and the HUD overlay", status: "done", version: "v0.58" },
         { id: "ui-3", title: "Missile, combat and external camera views", status: "todo" },
         { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "done", version: "v0.56" },
@@ -525,6 +525,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 70,
       note: "Intro merged (v0.64): the default boot plays F961/F962 (models 177/176, bitmap 0x42, the DOS credits with their FD/FE/01 layout codes and the 0x400 GameTics clock), the V version gate, keys 1-5 and --capture-intro; cache v27 adds base:text/intro-credits and base:text/char-widths (1796 assets) with old v26 caches still loading but the intro reporting missing assets. Remaining: the dynamic upper palette, model 176's stale-basis frames, an intro music backend (song 0 not played), start types 2-5/type 0 mapping and the first in-game frame hand-off (ui-7 done)."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 69,
+      note: "Scanner and targeter merged (v0.65): F275's contacts (bodies and live ships, parent frames, the 19-colour table, stalks and the 8-frame orientation overlay) and F1113/F1114's four-box tunnels, F1614 edges and F1612 circle with F1100's size rule are drawn, gated by the scanner `+0xca & 4` and the targeting-tunnel preference. Remaining: auto-targeter arming/equipment, F1100's per-target colours/arrows, and collapsing two simultaneous targets. ui-1 is done."
     }
   ]
 };

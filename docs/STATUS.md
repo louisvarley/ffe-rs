@@ -60,15 +60,19 @@ real too (`docs/notes/equipment.md`): the 66-record table (DOS bytes), F393's
 general bits, ten missile pylons, cabins, shield generators and F383's
 availability/prices; the flight state carries the loadout and applies F953's
 shields-then-hull damage to the player, and F991/F1120's icons and lamps read
-it. Nothing fires at the player yet, so the `hit` call site, recharge/repair,
-death/capsule and the station Upgrades rows (which need the starport tech level
-from F869) remain. Since 2026-10-25 the console is
+it. NPC fire now calls `Flight::take_damage`, so the shields/hull lines move in
+play; F938 recharge/auto-repair, the death/capsule screens and the station
+Upgrades rows (which need the starport tech level from F869) remain. Since
+2026-10-25 the console is
 the original's: a ten-entry dated message log and clock, the shields/hull,
 Set/Act/Alt and turret readouts, the F1116 status lamps and F1120's engines-off
 page (F2), and the 82-record `DATA_005100` button table driving the flight page;
 the port's own top bar, speed line and status block are retired
-(`docs/notes/dashboard.md`). Player damage, equipment words beyond the lasers,
-scanner contacts and altitude units remain.
+(`docs/notes/dashboard.md`). Since 2026-10-25 the scanner draws F275's contacts
+(bodies and NPC ships, the 19-colour table, stalks and the orientation globe)
+and the combat/navigation targeter tunnels (`docs/notes/scanner.md`). Still
+open: auto-targeter arming/equipment, per-target range colours, altitude units,
+and F1104/F1098's death/capsule screens.
 
 ## How to read this repo
 
@@ -88,11 +92,11 @@ scanner contacts and altitude units remain.
   docking, station screens (`station.md`), market, hyperspace, navigation, the
   galaxy map, the front end/new game (`intro.md`), combat (`combat.md`), NPC
   traffic (`npc.md`), sound cues (`sound-cues.md`), equipment (`equipment.md`),
-  and the **ship dashboard audit** (`dashboard.md`: the complete original
-  console/HUD gap list, with the byte-validated DATA_005100 button and
-  DATA_007684 hot-area tables).
+  scanner and targeter (`scanner.md`), and the **ship dashboard audit**
+  (`dashboard.md`: the complete original console/HUD gap list, with the
+  byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 137 items, 67 done and 70 left on
+  in `burndown.js`; 14 milestones, 137 items, 68 done and 69 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -236,14 +240,15 @@ capture produced by two repeat runs of the local reference.
 | v0.62 equipment, loadout and player damage | `ffe_core::equipment` (66-record `DATA_005289`, F393/F383), `Flight::{loadout, ensure_damage, hit, destroyed}`, `Loadout`, console F991/F1120 icon state, `tools/gen-equipment-table.py` | `equipment.rs` (8 + unit tests), `combat.rs` (+7), `console_table.rs` (+), `dashboard_view.rs` (4, ignored) | none (the table bytes are checked against DOS `FIRSTENC.EXE`; no new oracle) | — | general bits, ten missile pylons and cabins in `Loadout`; F383 availability/prices (deterministic tech multiplier); F953's shields-then-hull order for the player over `laser::apply_damage`; F991/F1120 icons and lamps read the real state and the new-game's two `0x82` missiles draw their icons. Nothing fires at the player yet; `player+0xef`, F938 recharge/auto-repair, death/capsule and the station Upgrades rows (needs `DATA_008995` from F869) remain; `docs/notes/equipment.md` |
 | v0.63 NPC flight/combat AI, fire and player damage | `ffe_core::npc` (`DATA_006258`, F585/F601/F597/F931/F930, F674/F675/F680/F927, F697), `Navigator::{tick_ships, player_attack, legal, provoke}`, `Flight::take_damage` (reconciled with `ensure_damage`/`hit`), NPC/police messages, `--capture-traffic` | `npc.rs` (16), `npc_ai.rs` (3, ignored), `combat.rs` (9), frames in `docs/evidence/npc-ai/` | none (state table and constants from `ffe.asm`; JJFFE's disabled AI laser damage is a recorded DOS-vs-JJFFE difference) | — | the AI states transit/hold/attack/escort/pass/flee/dead/escaped with turn limits and statistics speeds, pirate fire through F931/F930, F953 player damage through one `take_damage` path, police/wanted (`legal`, `player_attack`, provoke, F697 bounty), jump persistence/recycle. Full docking AI, missiles, police spawns/fines/HUD badge and Thargoids remain; EXP-015 records the reconstruction; `docs/notes/npc.md` |
 | v0.64 intro playback and cache v27 | `ffe_rs::{front_end::IntroTimeline, intro_text::IntroText}`, `Screen::draw_intro`, `main::run_intro`, cache v27 (`base:text/intro-credits`, `base:text/char-widths`), `--capture-intro` | `front_end.rs` (9), `intro_view.rs` (2, ignored), `intro_text.rs` unit tests, `intro_reference.rs` (ignored) | `verify-intro.py` 76 cases unchanged (trace `a9489bbe…`); cache import verified by `verify-assets.py` | — | default boot plays F961/F962 (models 177/176, bitmap 0x42, the 18 DOS credits with layout codes, the `0x400` GameTics clock and the `0x7e7b76` reset), V's version gate and keys 1-5; scripted captures use `--skip-intro`; old v26 caches still load but the intro reports the missing assets. Model 176's stale-basis frames, the dynamic upper palette and an intro music backend remain; `docs/notes/intro.md` |
+| v0.65 scanner contacts and targeter | `ffe_rs::scanner` (F275 filters, `DATA_008683` colours, stalk geometry, orientation), `ffe_rs::targeter` (F1113 tunnels, F1114 edges, F1612 circle, F1100 size), `ShipSystems::ca`, `Screen::draw_scanner`; main feeds bodies and ships | `scanner_view.rs` (2, ignored), `scanner.rs`/`targeter.rs` unit tests (8), cached frames | none (the geometry/colour table are from `ffe.asm`; no new oracle) | — | contacts for the system's bodies and NPC ships (starports filtered), 19-colour mass table, up/down stalk clipping and the 8-frame globe; the combat/navigation targeter tunnels and circle draw when the preference/flags allow. Auto-targeter arming/equipment, per-target range colours and two simultaneous targets remain; `docs/notes/scanner.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 546 `#[test]` functions total; 129 are `#[ignore]`
+  `cargo clippy -D warnings`. 561 `#[test]` functions total; 131 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **416 runnable synthetic tests** (417 on Linux).
+  **429 runnable synthetic tests** (430 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

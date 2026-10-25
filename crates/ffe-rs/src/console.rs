@@ -248,6 +248,9 @@ pub struct ShipSystems {
     /// four bytes are `ship+0xc8..+0xcb`. The bit from a record is
     /// `(record[0x12] ^ 0x10) & 0x1f` (F393).
     pub general: u32,
+    /// `ship+0xca`: F272's scanner gate (`& 4`). The new-game Eagle carries the
+    /// standard scanner, as every flyable ship does.
+    pub ca: u8,
     /// `player+0xef`: the missile-view equipment byte.
     pub ef: u8,
     /// `ship+0xd6..+0xdf`: ten missile pylons; the low nibble selects the icon
@@ -280,6 +283,7 @@ impl Default for ShipSystems {
             f0: 0,
             status: 0,
             general: 0,
+            ca: 0x04,
             ef: 0,
             slots: [0; 10],
             p174: 0,
