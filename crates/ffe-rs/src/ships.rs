@@ -26,6 +26,10 @@ pub struct ShipStats {
     /// +0x4, gun mounts (object +0xd1, compared as a signed byte); F1 offers the
     /// turret views above 2, and the bottom turret from 4.
     pub gun_mounts: i8,
+    /// +0x5 bit 0: the model has a fuel-scoop mounting. `F394` tests
+    /// `word[+4] & 0x100` before fitting the Fuel Scoop ("Your ship does not
+    /// have a fuel scoop mounting."); the Saker Mk III has none.
+    pub fuel_scoop_mounting: bool,
     /// +0x6, hull mass in tonnes (object +0xe4 holds it times 4).
     pub mass: u16,
     /// +0x8, the cargo space (tonnes, signed word) before the hyperdrive's mass.
@@ -64,6 +68,7 @@ impl ShipStats {
             forward_thrust: word(0) as i16,
             reverse_thrust: word(2) as i16,
             gun_mounts: block[4] as i8,
+            fuel_scoop_mounting: block[5] & 1 != 0,
             mass: word(6),
             cargo: word(8) as i16,
             price_mass: word(0xa),

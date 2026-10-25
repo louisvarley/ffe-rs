@@ -34,6 +34,11 @@ pub const EQUIPMENT_COUNT: usize = 66;
 pub const THARGOID_LASER: u8 = 0xd5;
 /// Ten missile pylons: `ship+0xd6..+0xdf` (`F1120` shows one icon each).
 pub const MISSILE_SLOTS: usize = 10;
+/// Ten mining machine slots: `DATA_009104` is the list count and `F423` refuses
+/// an eleventh ("Mining Machine list full", `0x99d6`). Each record in the list is
+/// 52 bytes (`FUNC_000248`, `ffedat.asm` `DATA_009106`); the port keeps only the
+/// fitted equipment codes and the count.
+pub const MINING_SLOTS: usize = 10;
 /// `F1120`'s ten missile icons are at console records `0x3b..=0x44`; the low
 /// nibble of a slot byte selects the image (`slot & 0xf`).
 pub const ICON_RECORDS: std::ops::RangeInclusive<usize> = 0x3b..=0x44;
@@ -208,8 +213,10 @@ pub fn outfitting(tech_level: u16, loadout: &Loadout, lasers: &[u8; 4]) -> Vec<O
 ///
 /// `general` is `ship+0xc8` (the `Category::General` bitfield), `missiles` is
 /// `ship+0xd6..+0xdf`, `shield_generators` is the count behind `F413`'s
-/// `ship+0xe2`, and `cabins` is the extra-cabin count. Lasers live in
-/// `ffe-rs`'s `Combat` (`ship+0xd2..+0xd5`) so there is one source for them.
+/// `ship+0xe2`, `cabins`/`occupied_cabins` are `DATA_008890`/`DATA_008892`,
+/// `drive` is `ship+0xd0` and `mining` is `DATA_009104`'s ten machine records.
+/// Lasers live in `ffe-rs`'s `Combat` (`ship+0xd2..+0xd5`) so there is one
+/// source for them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Loadout {
     #[serde(default)]
@@ -220,14 +227,28 @@ pub struct Loadout {
     pub shield_generators: u8,
     #[serde(default)]
     pub cabins: u16,
+    /// `DATA_008892`: the cabins carrying passengers. `F401` refuses to remove a
+    /// cabin while every one is occupied ("You cannot remove an occupied
+    /// cabin."). The port has no passenger missions yet, so saves load with 0.
+    #[serde(default)]
+    pub occupied_cabins: u16,
+    /// `ship+0xd0`: one drive class byte, 0 = no drive. `F409` refuses a second
+    /// drive and `F410`/`F411` remove the one fitted.
+    #[serde(default)]
+    pub drive: u8,
+    /// `DATA_009104`'s ten machine records; a zero slot is empty. `F423` appends
+    /// and `FUNC_000251`/`FUNC_000249` remove the last idle machine.
+    #[serde(default)]
+    pub mining: [u8; MINING_SLOTS],
 }
 
 impl Loadout {
     /// The DOS default start (`F998`'s type-0 arm, the Saker Mk III):
     /// `ship+0xc8 = 0x40240020` - scanner (bit 18), automatic pilot (bit 21),
     /// atmospheric shielding (bit 30) and the navigation computer (bit 5) -
-    /// two 0x82 missiles (`KL760 Homing Missile`), no shield generator
-    /// (`+0xe2 = 0`) and no passenger cabins. The front laser is
+    /// two 0x82 missiles (`KL760 Homing Missile`), drive class 2 (`ship+0xd0`,
+    /// `F998`'s `mov byte [ebx+0xd0],0x2`), no shield generator (`+0xe2 = 0`),
+    /// no passenger cabins and no mining machines. The front laser is
     /// `Combat::new_game`'s 0x88.
     pub fn new_game() -> Self {
         let mut missiles = [0; MISSILE_SLOTS];
@@ -238,6 +259,9 @@ impl Loadout {
             missiles,
             shield_generators: 0,
             cabins: 0,
+            occupied_cabins: 0,
+            drive: 2,
+            mining: [0; MINING_SLOTS],
         }
     }
 
@@ -246,8 +270,10 @@ impl Loadout {
         self.general.to_le_bytes()
     }
 
-    /// `F392`: is record `index` fitted? Lasers are checked against the
-    /// passed mount words; drives and mining machines are not modelled yet.
+    /// `F392`: is record `index` fitted? Lasers are checked against the passed
+    /// mount words. `F412` compares the one drive byte, and `F427` returns the
+    /// mining machine count for **every** mining record (the two records share
+    /// the list), so any machine makes both rows read as fitted.
     pub fn fitted(&self, index: usize, lasers: &[u8; 4]) -> bool {
         let Some(item) = get(index) else {
             return false;
@@ -258,8 +284,133 @@ impl Loadout {
             Category::Laser => lasers.contains(&item.code),
             Category::Shield => self.shield_generators != 0,
             Category::Missile => self.missiles.contains(&item.code),
-            Category::Drive | Category::Mining => false,
+            Category::Drive => self.drive != 0 && self.drive == item.code,
+            Category::Mining => self.mining_count() != 0,
         }
+    }
+
+    /// The fitted drive record (`ship+0xd0`), when a drive is fitted.
+    pub fn drive_record(&self) -> Option<&'static Equipment> {
+        equipment()
+            .iter()
+            .find(|item| item.category == Category::Drive && item.code == self.drive)
+    }
+
+    /// The fitted drive class, 0 when there is no drive.
+    pub fn drive_class(&self) -> u8 {
+        self.drive
+    }
+
+    /// `F903`'s military branch: class 10 and up burn military fuel and use the
+    /// military tank (`crate::hyperspace::MILITARY_CLASS`).
+    pub fn military_drive(&self) -> bool {
+        i32::from(self.drive) >= crate::hyperspace::MILITARY_CLASS
+    }
+
+    /// The number of fitted mining machines (`DATA_009104`/`DATA_009105`).
+    pub fn mining_count(&self) -> usize {
+        self.mining.iter().filter(|code| **code != 0).count()
+    }
+
+    /// The fitted machine codes, oldest first.
+    pub fn mining_machines(&self) -> impl Iterator<Item = u8> + '_ {
+        self.mining.iter().copied().filter(|code| *code != 0)
+    }
+
+    /// `FUNC_000248`: append one machine to `DATA_009104`'s list. False when the
+    /// ten-entry list is full (`F423`/`F424`'s "Mining Machine list full").
+    pub fn add_mining(&mut self, code: u8) -> bool {
+        let Some(slot) = self.mining.iter_mut().find(|slot| **slot == 0) else {
+            return false;
+        };
+        *slot = code;
+        true
+    }
+
+    /// `FUNC_000251`/`FUNC_000249`: remove the last idle machine. The source
+    /// scans the list from the end and does not test the record's code, so a
+    /// removal row takes whichever machine is last.
+    pub fn remove_mining(&mut self) -> Option<u8> {
+        let slot = self.mining.iter().rposition(|code| *code != 0)?;
+        let code = self.mining[slot];
+        self.mining[slot] = 0;
+        Some(code)
+    }
+
+    /// The passenger capacity (`DATA_008890`): one per fitted Extra Passenger
+    /// Cabin.
+    pub fn cabin_capacity(&self) -> u16 {
+        self.cabins
+    }
+
+    /// The cabins without passengers (`DATA_008890 - DATA_008892`).
+    pub fn free_cabins(&self) -> u16 {
+        self.cabins.saturating_sub(self.occupied_cabins)
+    }
+
+    /// The mass of every fitted item in tonnes, the quantity `F390`/`F391` move
+    /// between the hold and `DATA_008889`. `lasers` is `ship+0xd2..+0xd5`; the
+    /// drive is included (fitting one subtracts its record's `+0x8` mass).
+    pub fn mass(&self, lasers: &[u8; 4]) -> u32 {
+        let mut total = 0u32;
+        for item in equipment()
+            .iter()
+            .filter(|item| item.category == Category::General)
+        {
+            if self.general & (1 << ((item.code ^ 0x10) & 0x1f)) != 0 {
+                total = total.saturating_add(item.mass);
+            }
+        }
+        if let Some(cabin) = equipment()
+            .iter()
+            .find(|item| item.category == Category::Cabin)
+        {
+            total = total.saturating_add(cabin.mass.saturating_mul(u32::from(self.cabins)));
+        }
+        for code in lasers.iter().copied().filter(|code| *code != 0) {
+            if let Some(item) = equipment()
+                .iter()
+                .find(|item| item.category == Category::Laser && item.code == code)
+            {
+                total = total.saturating_add(item.mass);
+            }
+        }
+        if let Some(shield) = equipment()
+            .iter()
+            .find(|item| item.category == Category::Shield)
+        {
+            total = total.saturating_add(
+                shield
+                    .mass
+                    .saturating_mul(u32::from(self.shield_generators)),
+            );
+        }
+        for code in self.missiles.iter().copied().filter(|code| *code != 0) {
+            if let Some(item) = missile_by_code(code) {
+                total = total.saturating_add(item.mass);
+            }
+        }
+        if let Some(drive) = self.drive_record() {
+            total = total.saturating_add(drive.mass);
+        }
+        for code in self.mining.iter().copied().filter(|code| *code != 0) {
+            if let Some(item) = equipment()
+                .iter()
+                .find(|item| item.category == Category::Mining && item.code == code)
+            {
+                total = total.saturating_add(item.mass);
+            }
+        }
+        total
+    }
+
+    /// `F386`'s free hold as F390/F391 leave it: `base` is the ship's delivered
+    /// capacity (a new game's `Navigator::hold`, or the cargo statistic of a
+    /// hull bought later) and `delivered` is the loadout already priced into it.
+    /// Fitting subtracts the item's mass; removing gives it back.
+    pub fn capacity(&self, base: i32, delivered: &Loadout, lasers: &[u8; 4]) -> i32 {
+        let extra = i64::from(self.mass(lasers)) - i64::from(delivered.mass(lasers));
+        (i64::from(base) - extra).clamp(0, i64::from(i32::MAX)) as i32
     }
 
     /// `ship+0xc8 & 1`: the laser cooling booster (`F938` doubles the cooling).
@@ -313,15 +464,26 @@ impl Loadout {
     }
 
     /// A loadout the save validator accepts: only real general bits, missile
-    /// codes and laser codes; small cabin/generator counts.
+    /// codes, drive/mining codes the table has, and consistent cabin counts.
     pub fn validate(&self) -> bool {
         self.general & !GENERAL_MASK == 0
             && self
                 .missiles
                 .iter()
                 .all(|code| *code == 0 || is_missile_code(*code))
+            && (self.drive == 0
+                || equipment()
+                    .iter()
+                    .any(|item| item.category == Category::Drive && item.code == self.drive))
+            && self.mining.iter().all(|code| {
+                *code == 0
+                    || equipment()
+                        .iter()
+                        .any(|item| item.category == Category::Mining && item.code == *code)
+            })
             && self.shield_generators <= 10
             && self.cabins <= 100
+            && self.occupied_cabins <= self.cabins
     }
 
     /// True when record `index` is a general record whose bit is set.
@@ -412,8 +574,22 @@ mod tests {
         assert_eq!(loadout.shield_generators, 0);
         assert_eq!(loadout.shield_max(), 0);
         assert_eq!(loadout.cabins, 0);
+        assert_eq!(loadout.occupied_cabins, 0);
+        assert_eq!(loadout.drive, 2, "F998's ship+0xd0 = 2");
+        assert_eq!(loadout.drive_class(), 2);
+        assert!(!loadout.military_drive());
+        assert_eq!(loadout.mining_count(), 0);
         assert!(!loadout.cooling_booster());
         assert!(loadout.validate());
+        // F390/F391's mass: the four general bits (Scanner, Autopilot,
+        // Atmospheric Shielding; the navigation computer is 0 t), the two
+        // missiles and the delivered Class 1 drive.
+        assert_eq!(loadout.mass(&[0x88, 0, 0, 0]), 1 + 1 + 1 + 1 + 2 + 10);
+        // The F998 hold letter is already the delivered loadout's capacity.
+        assert_eq!(
+            loadout.capacity(1, &Loadout::new_game(), &[0x88, 0, 0, 0]),
+            1
+        );
     }
 
     #[test]
@@ -520,6 +696,23 @@ mod tests {
         loadout.cabins = 1;
         assert!(loadout.fitted(25, &[0; 4]), "Extra Passenger Cabin");
         assert!(loadout.fitted(21, &[0x88, 0, 0, 0]), "front 1MW pulse");
+        // F412: only the one drive byte's class is fitted.
+        assert!(loadout.fitted(34, &[0; 4]), "Class 1 Hyperdrive (code 2)");
+        assert!(!loadout.fitted(44, &[0; 4]), "Class 2 Hyperdrive (code 3)");
+        loadout.drive = 3;
+        assert!(loadout.fitted(44, &[0; 4]));
+        // F427 returns the mining count for both records.
+        assert!(!loadout.fitted(32, &[0; 4]), "no MB4 machine");
+        assert!(!loadout.fitted(64, &[0; 4]), "no Vaccine machine");
+        assert!(loadout.add_mining(0x11));
+        assert_eq!(loadout.mining_count(), 1);
+        assert!(loadout.fitted(32, &[0; 4]), "MB4 row sees the shared list");
+        assert!(
+            loadout.fitted(64, &[0; 4]),
+            "Vaccine row sees the same list"
+        );
+        assert_eq!(loadout.remove_mining(), Some(0x11));
+        assert_eq!(loadout.mining_count(), 0);
     }
 
     #[test]
@@ -551,5 +744,93 @@ mod tests {
             ..Loadout::default()
         }
         .validate());
+        assert!(!Loadout {
+            drive: 0x7f, // no drive record
+            ..Loadout::default()
+        }
+        .validate());
+        assert!(!Loadout {
+            mining: [0x7f, 0, 0, 0, 0, 0, 0, 0, 0, 0], // no mining record
+            ..Loadout::default()
+        }
+        .validate());
+        assert!(!Loadout {
+            cabins: 1,
+            occupied_cabins: 2,
+            ..Loadout::default()
+        }
+        .validate());
+    }
+
+    #[test]
+    fn f423s_mining_list_is_ten_machines_and_removes_the_last() {
+        let mut loadout = Loadout::default();
+        for _ in 0..MINING_SLOTS {
+            assert!(loadout.add_mining(0x11));
+        }
+        assert_eq!(loadout.mining_count(), MINING_SLOTS);
+        // F423/F424: the eleventh record is refused ("Mining Machine list full").
+        assert!(!loadout.add_mining(0x12));
+        assert_eq!(loadout.mining_count(), MINING_SLOTS);
+        // A Vaccine machine behind the MB4 machines: FUNC_000251 removes the
+        // last list entry, not the row's code.
+        loadout.mining[MINING_SLOTS - 1] = 0x12;
+        assert_eq!(loadout.remove_mining(), Some(0x12));
+        assert_eq!(loadout.mining_count(), MINING_SLOTS - 1);
+        assert!(loadout.add_mining(0x11));
+        assert_eq!(loadout.mining_count(), MINING_SLOTS);
+        assert_eq!(
+            loadout.mining_machines().collect::<Vec<_>>(),
+            vec![0x11; MINING_SLOTS]
+        );
+    }
+
+    #[test]
+    fn mass_and_capacity_follow_f390_and_f391() {
+        let mut loadout = Loadout::new_game();
+        let lasers = [0x88, 0, 0, 0];
+        let delivered = Loadout::new_game();
+        assert_eq!(loadout.mass(&lasers), 16);
+        // A new game's 1 t hold is the delivered loadout's capacity.
+        assert_eq!(loadout.capacity(1, &delivered, &lasers), 1);
+        // F390: a 4 t shield generator, a 5 t cabin and a 30 t mining machine.
+        loadout.shield_generators = 1;
+        loadout.cabins = 1;
+        loadout.occupied_cabins = 1;
+        assert_eq!(loadout.free_cabins(), 0);
+        loadout.add_mining(0x12);
+        assert_eq!(loadout.mass(&lasers), 16 + 4 + 5 + 20);
+        assert_eq!(loadout.capacity(1, &delivered, &lasers), 0);
+        // F391: removing restores exactly what fitting took.
+        loadout.remove_mining();
+        loadout.shield_generators = 0;
+        loadout.cabins = 0;
+        loadout.occupied_cabins = 0;
+        assert_eq!(loadout.mass(&lasers), 16);
+        assert_eq!(loadout.capacity(1, &delivered, &lasers), 1);
+        // A hull bought later has no delivered equipment in its cargo word.
+        let empty = Loadout::default();
+        assert_eq!(empty.capacity(23, &Loadout::default(), &[0; 4]), 23);
+        let mut fitted = empty;
+        fitted.drive = 2;
+        assert_eq!(fitted.capacity(23, &Loadout::default(), &[0; 4]), 13);
+    }
+
+    #[test]
+    fn a_fitted_drive_is_one_class_and_counts_as_military_from_ten() {
+        let mut loadout = Loadout::default();
+        assert_eq!(loadout.drive_record(), None);
+        assert!(!loadout.military_drive());
+        loadout.drive = 2;
+        assert_eq!(loadout.drive_record().unwrap().name, "Class 1 Hyperdrive");
+        assert_eq!(loadout.drive_record().unwrap().mass, 10);
+        assert!(!loadout.military_drive());
+        loadout.drive = 0x0a;
+        assert!(loadout.military_drive());
+        assert_eq!(
+            loadout.drive_record().unwrap().name,
+            "Class 1 Military Drive"
+        );
+        assert_eq!(loadout.drive_record().unwrap().mass, 6);
     }
 }

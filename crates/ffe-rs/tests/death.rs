@@ -61,6 +61,7 @@ fn the_escape_capsule_launches_and_keeps_cash_cargo_and_motion() {
         cabins: 4,
         missiles: [0x82, 0x82, 0, 0, 0, 0, 0, 0, 0, 0],
         shield_generators: 1,
+        ..Loadout::default()
     };
     state.combat = ffe_rs::combat::Combat::new_game();
     state.shields = [0x40, 0x40];
@@ -82,6 +83,7 @@ fn the_escape_capsule_launches_and_keeps_cash_cargo_and_motion() {
     // F1533 only replaces `+0xd0` for a negative model drive word; model 14's
     // positive word leaves the old drive in place.
     assert_eq!(state.combat.drive, 2);
+    assert_eq!(state.loadout.drive, 2, "the fitted drive follows the craft");
     assert_eq!(state.shields, [0, 0]);
     assert_eq!(state.hull, [20, 20], "model mass 5 * 4");
     // The commander's cash, hold and motion survive F1098.

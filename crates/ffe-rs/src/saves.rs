@@ -33,8 +33,15 @@ pub fn decode(bytes: &[u8]) -> Result<Flight, String> {
             "Unsupported save format/version; original commanders are not imported yet.".to_owned(),
         );
     }
-    save.state.validate()?;
-    Ok(save.state)
+    let mut state = save.state;
+    // Saves from before `Loadout::drive` kept the one drive byte only in
+    // `Combat` (the drive was not removable through the Upgrades screen then, so
+    // the combat byte is authoritative).
+    if state.loadout.drive == 0 {
+        state.loadout.drive = state.combat.drive;
+    }
+    state.validate()?;
+    Ok(state)
 }
 
 pub fn load(path: &Path) -> Result<Flight, String> {

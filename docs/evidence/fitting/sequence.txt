@@ -1,0 +1,29 @@
+# Equipment fitting: scripted fit -> effect -> remove
+
+`cargo test -p ffe-rs --test fitting scripted -- --nocapture` (2026-10-25).
+State: F998's Saker Mk III loadout (drive class 2, 1 t hold, 16 t of fitted
+equipment), tech level 0xfd (Ross 154/Sirocco's `DATA_008995`), 1,000,000
+tenths of a credit. The script grants a synthetic roomy hold
+(`Limits.free_space = 1000`) so the 25 t Class 2 drive passes F386's space
+check; the real Saker's 1 t hold plus the 10 t its delivered drive frees would
+refuse it, which is what the source's `DATA_008889` check does.
+
+    remove Class 1 -> Removing Class 1 Hyperdrive.
+    fit Class 2 -> Fitting Class 2 Hyperdrive.
+    effect -> drive 3, mass 31 t, hold 0, energy gauge 65504 -> 32736
+    remove Class 2 -> Removing Class 2 Hyperdrive.
+    fit Class 1 -> Fitting Class 1 Hyperdrive.
+
+Source effects checked at each step:
+
+* F410/F411 remove the one `ship+0xd0` byte, clear `ship+0x11e` (energy) and
+  F391 adds the record's mass back to `DATA_008889`.
+* F409 fits one drive only; F390 subtracts the Class 2 drive's 25 t, so the
+  16 t delivered loadout becomes 31 t and the 1 t hold reaches 0.
+* F270's `DATA_005089` energy scale changes from class 2's 0x7ff to class 3's
+  0x3ff for the same 0x20000000 energy pool: 65504 -> 32736 in the gauge.
+* Putting the Class 1 drive back restores the delivered 16 t and 1 t hold.
+
+The Upgrades frames are `upgrades-drive.png`, `upgrades-mining.png` and
+`upgrades-cabin.png`, produced by the ignored `tests/station_view.rs` run with
+`FFE_WORLD_CACHE` and `FFE_SHOT_DIR` (Sirocco/Mars High's tech 0xfd rows).

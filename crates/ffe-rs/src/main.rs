@@ -4188,13 +4188,13 @@ fn run() -> Result<(), String> {
         if state.mode == ffe_rs::flight::Mode::Docked {
             if let Some(nav) = nav.as_mut() {
                 if let Some(station) = nav.docked {
-                    let hold = trade::hold_of(&state, nav.cargo_space(&cache, state.ship));
+                    let hold = trade::hold_of(&state, trade::capacity(nav, &cache, &state));
                     let status = station::Status {
                         cargo_used: hold.used,
                         cargo_capacity: hold.capacity,
                         cash: i32::try_from(state.credits).unwrap_or(i32::MAX),
-                        cabins_used: 0,
-                        cabins_total: 0,
+                        cabins_used: i32::from(state.loadout.occupied_cabins),
+                        cabins_total: i32::from(state.loadout.cabin_capacity()),
                     };
                     let station_name = nav.bodies[station].name.clone();
                     if dock.screen == StationScreen::Market && nav.market_tables().is_some() {
@@ -4931,7 +4931,14 @@ fn drive_state(
     state: &ffe_rs::flight::Flight,
 ) -> Option<ffe_rs::navigation::DriveState> {
     let stats = scene?.ship_stats(state.ship)?;
-    let class = if stats.drive < 0 {
+    // F408/F410 store the fitted drive at `ship+0xd0`; a model's statistics word
+    // only supplies the delivered class (F1533/F441), and old saves before the
+    // Loadout drive field kept it in the combat word.
+    let class = if state.loadout.drive != 0 {
+        i32::from(state.loadout.drive)
+    } else if state.combat.drive != 0 {
+        i32::from(state.combat.drive)
+    } else if stats.drive < 0 {
         i32::from(stats.drive as u16 & 0xff)
     } else {
         0
@@ -5059,7 +5066,12 @@ fn fit_or_remove(
             usize::try_from(stats.gun_mounts.max(0)).unwrap_or(0)
         }),
         pylons: stats.map_or(10, |stats| usize::from(stats.missiles)),
-        free_space: nav.cargo_space(cache, state.ship) - used,
+        free_space: trade::capacity(nav, cache, state) - used,
+        // F394 reads the statistics' +5 bit 0; no statistics means no refusal.
+        fuel_scoop_mounting: stats.is_none_or(|stats| stats.fuel_scoop_mounting),
+        // F410/F411 refuse to remove a drive whose statistics word is negative
+        // (the integral part of the hull).
+        drive_removable: stats.is_none_or(|stats| stats.drive >= 0),
     };
     let result = if remove {
         outfitting::remove(
@@ -5068,6 +5080,7 @@ fn fit_or_remove(
             &mut state.loadout,
             &mut state.combat,
             &mut state.credits,
+            limits,
         )
     } else {
         outfitting::fit(
@@ -5124,6 +5137,9 @@ fn buy_ship(
             state.credits = u32::try_from(purchase.cash_tenths).unwrap_or(0);
             state.ship = purchase.model;
             state.loadout = ffe_core::equipment::Loadout::default();
+            // The new hull's hold is no longer F998's new-game 1 t: F441 clears
+            // the equipment and F2 quotes the new model's cargo statistic.
+            nav.new_game = None;
             state.combat = Combat::default();
             state.hull = [0, 0];
             state.shields = [0, 0];

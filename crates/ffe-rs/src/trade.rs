@@ -23,6 +23,24 @@ pub fn credits(value: i32) -> String {
     format!("{sign}{}.{}", value / 10, value % 10)
 }
 
+/// F390/F391's hold capacity: the ship's delivered capacity less the mass of
+/// the equipment fitted after delivery. A new game's `Navigator::hold` is
+/// F998's 1 t with the delivered loadout already priced in (`F998` does not run
+/// F390 for its own equipment); a hull bought later uses the cargo statistic and
+/// all of the fitted mass.
+pub fn capacity(nav: &Navigator, cache: &VerifiedCache, state: &Flight) -> i32 {
+    let base = nav.hold(cache, state.ship);
+    let delivered = if nav.new_game.is_some() {
+        ffe_core::equipment::Loadout::new_game()
+    } else {
+        ffe_core::equipment::Loadout::default()
+    };
+    state
+        .loadout
+        .capacity(base, &delivered, &state.combat.lasers)
+        .max(0)
+}
+
 /// The player's hold as the market code sees it.
 pub fn hold_of(state: &Flight, capacity: i32) -> Hold {
     let mut hold = Hold::new(capacity);
@@ -74,12 +92,12 @@ pub fn trade(
     if good >= GOODS {
         return Err("no such commodity".to_owned());
     }
-    let capacity = nav.cargo_space(cache, state.ship);
+    let space = capacity(nav, cache, state);
     let name = nav
         .market_tables()
         .and_then(|tables| tables.name(good).map(str::to_owned))
         .ok_or("no market tables")?;
-    let mut hold = hold_of(state, capacity);
+    let mut hold = hold_of(state, space);
     let mut cash = i32::try_from(state.credits).unwrap_or(i32::MAX);
     let before = cash;
     let market = nav.market(cache, station)?;
