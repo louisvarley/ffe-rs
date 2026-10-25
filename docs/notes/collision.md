@@ -89,6 +89,56 @@ that finds the body inside the planet's inner radius (`DATA_008707 = 1`) leaves
 the altitude at whatever the previous terrain record wrote, so the scan carries
 it as world state (`Bodies::altitude`), exactly like the stale `DATA_008704`.
 
+## F953 on a crash, F942's destruction and F1104 (2026-10-25)
+
+The contact tail's crash branch does not merely report the bounce: for the
+player's body (`+0x86 == DATA_008857`) it calls **F953** with the bounce's amount
+(`JUMP_002424`, `ffe.asm:71190`). `Contact.damage` is that amount (`Tally` adds
+every `Touch::Crash`), and `Flight::take_contact_damage` now applies it:
+
+- **F953** raises a negative amount to `0x7fffffff`, stores the craft index and
+  the amount in the scratch words (`DATA_008548`), and damages kind 3 (ships)
+  and kind 0xb (missiles, when their statistics exist) only; stations and
+  planets play the sample and return. The shields (`+0xe0`) take the amount
+  first; the rest comes off the hull (`+0xe4`, mass * 4). A hit at or above the
+  remaining hull calls **F942**, which plays `0x05`, makes the model-0x9b
+  explosion and its debris and removes the object (F924). The sound is `0x1c`
+  for a shield hit and `0x1d` for the hull.
+- **F942** on the player's object raises the object event that **F1104**
+  (`81458`) consumes: F1098's escape-craft test first (the Stowmaster, then the
+  Escape Capsule), else the `DATA_008870 = 0x2c` death state and the
+  `0x3cae6`-tic external-view hold that ends at F917's GAME OVER tombstone.
+- **No message.** F575's crash tail, F953 and F942 print nothing; the source's
+  only feedback is the sample and the HUD's shield/hull words. The port's old
+  `Crash: damage N. The ship bounced off the surface.` line was invented and is
+  removed. The bounce itself is the source's: the velocity is reflected as
+  `2v/3 - 10(up·v)up/12` and the craft is left on the surface; only its damage
+  was missing.
+- **Thresholds.** The soft-landing test is `speed <= 0x258 && +0x9e == 0xffff &&
+  dot >= 0x78000000`; everything else is a crash. The bounce's damage is
+  `mass*4 * speed_lost / 0x708`, at least the mass word. For the default Saker
+  (mass 28, hull 112, no shield generator) the floor is 28; a level impact needs
+  about 2,100 velocity units (about 205 m/s) to use the hull up. The atmosphere
+  is a strong brake below the outer radius (F1014), so a long dive arrives
+  slowly: the damage is about the *arrival* speed, as in the source.
+- **The pad scan too.** `step_pad`'s three-body scan (the planet parent and the
+  starport sibling) can report the same crash; the playable applies the amount
+  in one place for both `step_landing` and `step_pad`.
+
+**Launch placement (2026-10-25).** Reproducing the default start on Hope shows
+F994's seat is correct: F650's pad offset plus the ship's `+0x140` radius along
+the station's up row, 288,734 mm from Old Blackelk's centre, 5,929,748,040 mm
+from Hope's centre (1,660,242,539 mm above the `+0x140` collision radius and
+780,089,784 mm below the `+0x138` outer/atmosphere radius). The first frames are
+mode `0x24` with F1041's fixed `(0, 0xcc6, 0)` up thrust; F1013 hands over at
+`0x30d40` (frame 164, altitude 200,802 mm) and F1031 clears the starport's
+`0x20` region at frame 338 with the set speed (the ship is 311 m/s forward and
+still at pad altitude, because the hand-off has no lift: FFE's flight model
+needs the player to pitch up or fly out). Nothing places the ship inside the
+surface; a level flight from there reaches the local terrain (680 m below the
+seat on this line) and is a real crash that F953 now charges. Flight after a
+launch scripted to pitch up clears without a contact.
+
 `--collide` runs the original on 4096 seven-body trees with the player last
 (random radii, rotating bytes, orientations, stale `DATA_008704`, positions
 aimed at 0.4 to 2.5 times the radius sum so many pairs touch): **all 4,096
