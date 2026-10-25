@@ -9,6 +9,7 @@ use ffe_rs::combat::{self, Combat};
 use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::screen::{Screen, TargetHud};
+use ffe_rs::targeter;
 
 fn cache() -> ffe_content::VerifiedCache {
     ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
@@ -178,17 +179,20 @@ fn velocity_marker_and_range_text_follow_f1112_f1100() {
     screen.target_hud = Some(TargetHud {
         x: 160,
         y: 79,
-        value: 100,
-        au: false,
+        value: 540,
+        au: true,
         behind: false,
         offscreen: false,
+        colour: ffe_rs::targeter::NAVIGATION_COLOUR,
     });
     draw(&mut screen, &state, views, None);
     let ranged = screen.logical_pixels().to_vec();
     save(&screen, "combat-range.ppm");
+    // The original's leading newline puts "5.40AU" one 10-row line below the
+    // target's -5 origin: x=155, y=84.
     assert!(
-        changed(&right, &ranged, 150, 190, 70, 82) > 5,
-        "the range text did not draw at the target"
+        changed(&right, &ranged, 150, 190, 82, 94) > 5,
+        "the range text did not draw under the target"
     );
     // Off-screen: F1100's fixed (50,50) with the Out of Range string.
     screen.target_hud = Some(TargetHud {
@@ -198,11 +202,126 @@ fn velocity_marker_and_range_text_follow_f1112_f1100() {
         au: false,
         behind: false,
         offscreen: true,
+        colour: ffe_rs::targeter::NAVIGATION_COLOUR,
     });
     draw(&mut screen, &state, views, None);
     let offscreen = screen.logical_pixels().to_vec();
     save(&screen, "combat-range-offscreen.ppm");
     assert!(changed(&ranged, &offscreen, 50, 200, 45, 70) > 20);
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn target_lock_uses_f1100s_green_and_two_decimal_au() {
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut state = flight();
+    // F1112's velocity marker would sit over the lock; keep it out of this frame.
+    state.velocity = [0.0, 0.0, -100.0];
+    let views = ViewState::default();
+    screen.lasers = [0; 4];
+
+    let palette = ffe_rs::indexed::palette_rgb6(cache.asset("base:palette/low").unwrap()).unwrap();
+    let green = palette[usize::from(targeter::NAVIGATION_COLOUR)];
+    let red = palette[usize::from(targeter::COMBAT_COLOUR)];
+    let orange = palette[usize::from(targeter::MISSILE_VIEW_COLOUR)];
+    // The original's fixed low palette: 0x11 is green, 0x10 red, 0x5f the
+    // missile-view amber. The target display must not use the latter here.
+    assert_eq!(green, 0xf0 << 8);
+    assert_eq!(red, 0xf0 << 16);
+    assert_eq!(orange, (0xf0 << 16) | (0xa8 << 8) | 0x10);
+    assert_ne!(green, orange);
+
+    // F1327's fixed path reaches the same low entries from the colour words
+    // (F1326's cube is not involved; these are not dynamic colours).
+    let runtime = ffe_rs::palette::RuntimePalette::new(
+        cache.asset("base:palette/fixed-map").unwrap().to_vec(),
+        cache.asset("base:palette/low").unwrap().to_vec(),
+    );
+    assert_eq!(
+        runtime.resolve(targeter::NAVIGATION_WORD),
+        Some([0, 240, 0])
+    );
+    assert_eq!(runtime.resolve(targeter::COMBAT_WORD), Some([240, 0, 0]));
+
+    draw(&mut screen, &state, views, None);
+    let base = screen.logical_pixels().to_vec();
+
+    // F1100/F1113 for a navigation target: the four tunnel boxes and the range
+    // text share colour 0x11. The text is the original's "5.40AU", one line
+    // under the target (x 155, y 84).
+    screen.target_hud = Some(TargetHud {
+        x: 160,
+        y: 79,
+        value: 540,
+        au: true,
+        behind: false,
+        offscreen: false,
+        colour: targeter::NAVIGATION_COLOUR,
+    });
+    screen.tunnels = Some(targeter::Tunnels {
+        x: 200,
+        y: 119,
+        base: 127,
+        colour: targeter::NAVIGATION_COLOUR,
+    });
+    draw(&mut screen, &state, views, None);
+    let nav = screen.logical_pixels().to_vec();
+    save(&screen, "combat-lock-nav-green.ppm");
+    assert!(
+        changed(&base, &nav, 150, 195, 82, 94) > 5,
+        "the green 5.40AU text did not draw under the target"
+    );
+    for y in 82..94 {
+        for x in 150..195 {
+            let at = y * 320 + x;
+            if base[at] != nav[at] {
+                assert_eq!(nav[at], green, "range pixel ({x},{y}) is not green");
+            }
+        }
+    }
+    assert!(
+        changed(&base, &nav, 0, 320, 0, 158) > 200,
+        "the navigation target's four tunnels did not draw"
+    );
+
+    // The navigation auto-targetter box is the same green (F1111's outer box).
+    screen.lasers = [ffe_core::laser::PULSE_1MW, 0, 0, 0];
+    screen.targeter = Some(targeter::Cursor::Navigation);
+    screen.blink = true;
+    draw(&mut screen, &state, views, None);
+    save(&screen, "combat-lock-nav-cursor.ppm");
+    let cursor = screen.logical_pixels().to_vec();
+    assert!(
+        changed(&nav, &cursor, 156, 165, 75, 84) > 5,
+        "F1111's navigation cursor box did not draw"
+    );
+    for y in 75..84 {
+        for x in 156..165 {
+            let at = y * 320 + x;
+            if nav[at] != cursor[at] {
+                assert_eq!(cursor[at], green, "cursor pixel ({x},{y}) is not green");
+            }
+        }
+    }
+
+    // The combat target's range text is 0x10 red in normal views. F1100 draws
+    // the combat tunnels only in the missile view, which the port has none of.
+    screen.lasers = [0; 4];
+    screen.tunnels = None;
+    screen.targeter = None;
+    screen.target_hud.as_mut().unwrap().colour = targeter::COMBAT_COLOUR;
+    draw(&mut screen, &state, views, None);
+    save(&screen, "combat-lock-combat-red.ppm");
+    let combat = screen.logical_pixels().to_vec();
+    for y in 82..94 {
+        for x in 150..195 {
+            let at = y * 320 + x;
+            if nav[at] != combat[at] {
+                assert_eq!(combat[at], red, "combat range pixel ({x},{y}) is not red");
+            }
+        }
+    }
 }
 
 #[test]

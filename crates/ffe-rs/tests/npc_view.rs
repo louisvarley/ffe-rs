@@ -266,6 +266,7 @@ fn several_ship_labels_and_a_label_at_the_view_edge() {
         au: false,
         behind: false,
         offscreen: false,
+        colour: ffe_rs::targeter::NAVIGATION_COLOUR,
     });
     screen.target_damage = None;
     views.console.labels = true;
@@ -329,6 +330,7 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
         au: false,
         behind: false,
         offscreen: false,
+        colour: ffe_rs::targeter::COMBAT_COLOUR,
     });
     screen.lasers = [laser::PULSE_1MW, 0, 0, 0];
     ships(&mut screen, &nav);

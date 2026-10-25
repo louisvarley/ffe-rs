@@ -155,11 +155,35 @@ exponent and normalises (`F1496`). The displayed number is:
 - exponent <= 0x1d: `mantissa * 0xd1d0 >> (0x1d - exponent)` km (`0x8604`);
 - else: `mantissa * 0xeb54 >> (0x35 - exponent)` AU (`0x8605`).
 
-It is drawn at the target's screen position minus 5; an off-view target moves
-to `(50,50)` (the navigation target to `(50,60)`) and uses `0x8606/07`
-("Target d km/AU Behind"), `0x8608/09` ("Target Out of Range (d km/AU)") or
-the other arrow variants. `F1100`'s combat-target colour is 0x5f (95); the
-navigation target's is 0x11 (17).
+The value is in **hundredths**: `0x8604/05` expand through FF80 index 3
+(`F1115`) to `DATA_007282/283`, whose FF30 index 7 is
+`FUNC_001381_FF30Write2dpFracV1` / `FUNC_001377_StringConvertFraction` with
+two places. The suffix is concatenated with no space, and trailing zeros stay:
+`540` AU is `5.40AU`, `5` AU is `0.05AU`, `100` km is `1.00km`
+(`ffedat.asm:18889-18915`). The on-view string starts with an ignored 0x81
+byte and a newline (`0x0d`), so the text sits 10 rows below F1100's
+`target - 5` origin: `(x-5, y+5)`. The off-view strings are
+`Target <n>km/AU Behind` (`0x8606/07`) and
+`Target Out of Range (<n>km/AU)` (`0x8608/09`). With the target in front but
+outside the view, `0x860a..0x8611` pick a left/right arrow, or the
+below-target 0x7f/0x80 variants when the target's `+0x9a` is greater than 79:
+
+| code | string |
+|---|---|
+| `0x860a/b` | `}` (0x7d, left arrow) ` Target <n>km/AU` |
+| `0x860c/d` | `Target <n>km/AU ~` (0x7e, right arrow) |
+| `0x860e/f` | 0x7f, ` Target <n>km/AU` (below, left) |
+| `0x8610/11` | `Target <n>km/AU ` 0x80 (below, right) |
+
+The colour is the caller's COLPAL, not a 12-bit palette word. `F1099` calls
+`F1100` for the combat target (`player+0xed`) with **0x10** (0x5f = 95 in the
+missile view, `ship+0xea == 5`) and for the navigation target (`player+0xec`)
+with **0x11** (`ffe.asm:80555-80595`). `F1587` uses that byte directly as a
+video index; the fixed low palette (`F1641`'s `DATA_007769`) makes 0x11 green
+`(0,60,0)` = `#00f000` and 0x10 red `(60,0,0)` = `#f00000`. The fixed map
+reaches the same entries through `F1327` (`DATA_007770[0x0f0] = 17`,
+`[0xf00] = 16`); the dynamic upper half is not involved. Entry 95 is amber
+`#f0a810`, which is why the old hard-coded 95 was wrong.
 
 ### 2.6 Gauges (`F270`, `ffe.asm:20554`)
 
@@ -405,8 +429,10 @@ is the single F942 test.
   target computer, F1010/F1060/F1062) are not wired because the port has no
   target-computer equipment; the missile lock sets `DATA_007247` and draws
   F1114's circle, and `T` still cycles locks (an existing deviation).
-- **Upper-palette colour.** F1100 uses colour 95 and the HUD uses the runtime
-  upper palette, which the port approximates with the fixed low palette.
+- **Target colour.** F1100's colour is a COLPAL low index (0x11 navigation /
+  0x10 combat, 0x5f in the missile view), not the runtime upper palette; the
+  port resolves it through the imported low palette (`F1641`/`base:palette/low`).
+  Entry 95 is only the missile-view colour, not the normal target colour.
 - The port's own status block at y119..157 covers the lower centre where the
   muzzle cone and the target `Hull:` line would draw; the dashboard's retire-port-UI
   slice clears this.
@@ -416,9 +442,9 @@ state-rules level (see `docs/notes/npc.md`); decide whether to port the
 target-computer equipment and the auto-targeter arming that switches
 F1113/F1114's tunnels on (the port draws them only when the targeter flags are
 set), missiles, and a shield generator for the player (the AI's fire is lethal in
-two hits without one). F1100's per-target text colour and arrow forms remain a
-small deviation; the port's own lock brackets stand in when the targeter is not
-armed. For the effects, decide whether their lifetimes should follow the
+two hits without one). F1100's per-target text colour, two-decimal km/AU format
+and off-view arrow forms are ported; the port's own lock brackets are gone. For
+the effects, decide whether their lifetimes should follow the
 original's AI timers (F764/F769/F927) rather than the port's per-effect seconds,
 and whether the model-155 explosion keeps the `EXPLOSION_MASS` word `0x4000`
 that selects its twelve fragments or follows F942's literal `0xffffffff` (which

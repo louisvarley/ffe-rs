@@ -3420,11 +3420,28 @@ fn run() -> Result<(), String> {
                 ];
                 let behind =
                     forward[0] * toward[0] + forward[1] * toward[1] + forward[2] * toward[2] <= 0.0;
-                // The navigation target (player+0xec) takes F1100's (50,50);
-                // the combat target (player+0xed) (50,60).
-                let navigation = ship.is_none() && locked_ship.is_none() && engaged.is_some();
-                let (x, y, offscreen) = match screen.target_mark {
-                    Some(mark) => (mark.x, mark.y, false),
+                // F1100 reads the target's unclipped screen words
+                // (`object+0x98/+0x9a`), not just the pixels inside the view: an
+                // off-view target still picks an arrow form from them.
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                let projection = ffe_rs::screen::Screen::body_projection(
+                    &state,
+                    &views,
+                    scene.as_ref(),
+                    position.map(|component| component as f64 / unit),
+                );
+                // The navigation target (player+0xec, a body) takes F1100's
+                // (50,50) and colour 0x11; the combat target (player+0xed, a
+                // ship) (50,60) and colour 0x10. The port has no missile view,
+                // so the combat 0x5f variant is not reachable.
+                let navigation = ship.is_none();
+                let colour = if navigation {
+                    ffe_rs::targeter::NAVIGATION_COLOUR
+                } else {
+                    ffe_rs::targeter::COMBAT_COLOUR
+                };
+                let (x, y, offscreen) = match projection {
+                    Some((sx, sy)) => (sx, sy, false),
                     None => (50, if navigation { 50 } else { 60 }, !behind),
                 };
                 screen.target_hud = Some(ffe_rs::screen::TargetHud {
@@ -3434,27 +3451,28 @@ fn run() -> Result<(), String> {
                     au,
                     behind,
                     offscreen,
+                    colour,
                 });
                 // F1100/F1113's targeting tunnels: "Show targeting tunnels"
-                // (DATA_009024) and, for a ship with a statistics block,
-                // "Allow targeting tunnels for ships" (DATA_009025). The nav
-                // target (player+0xec) is colour 0x11, the combat target
-                // (player+0xed) 0x10. External view (4) and the combat computer
-                // (6) skip them; the port has no combat view.
+                // (DATA_009024), "Allow targeting tunnels for ships"
+                // (DATA_009025), and the target's screen words within ±1000
+                // (`ffe.asm:81165-81250`). The navigation target draws them in
+                // every view but external (4)/combat computer (6); the combat
+                // target only in the missile view (5), which the port does not
+                // have.
                 if prefs.others[6]
                     && (ship.is_none() || prefs.others[7])
                     && views.mode != ViewMode::External
+                    && navigation
                 {
-                    if let Some(mark) = screen.target_mark {
+                    if let Some((sx, sy)) = projection
+                        .filter(|(sx, sy)| (-1000..1000).contains(sx) && (-1000..1000).contains(sy))
+                    {
                         screen.tunnels = Some(ffe_rs::targeter::Tunnels {
-                            x: mark.x,
-                            y: mark.y,
+                            x: sx,
+                            y: sy,
                             base: ffe_rs::targeter::tunnel_base(mantissa),
-                            colour: if navigation {
-                                ffe_rs::targeter::NAVIGATION_COLOUR
-                            } else {
-                                ffe_rs::targeter::COMBAT_COLOUR
-                            },
+                            colour,
                         });
                     }
                 }

@@ -50,9 +50,12 @@ the real assets:
 | `0xfff` | 15 | `(60,60,60)` | `#f0f0f0` |
 | `0x004` | 95 | `(60,42,4)` | `#f0a810` |
 
-The last row is the port's target-HUD colour 95: text/UI colours are low
-indices, so they never go through the dynamic half. The scanner's contact
-table (`DATA_008683`) and the console art are also low indices.
+The last row is the fixed-map word for low entry 95 (amber): text/UI colours
+are low indices, so they never go through the dynamic half. F1100's target
+display is such an index: 0x11 is low entry 17 (green `#00f000`) and 0x10 is
+16 (red `#f00000`), which the fixed map reaches from `0x0f0`/`0xf00`. The
+scanner's contact table (`DATA_008683`) and the console art are also low
+indices.
 
 ## 3. The builder
 

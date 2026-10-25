@@ -144,9 +144,11 @@ pub struct TargetMark {
     pub engaged: bool,
 }
 
-/// F1100's target readout: the target's screen position, the converted range
-/// (`DATA_008882/3`), and the off-screen state. The range number is in km or AU
-/// according to [`TargetHud::au`].
+/// F1100's target readout: the target's screen position (`object+0x98/+0x9a`,
+/// unclipped where possible), the converted range (`DATA_008882/3`), and the
+/// off-screen state. The range number is in km or AU according to
+/// [`TargetHud::au`]; `colour` is the COLPAL index F1099 passes (0x11 for the
+/// navigation target's green, 0x10 for the combat target's red).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TargetHud {
     pub x: i32,
@@ -155,8 +157,13 @@ pub struct TargetHud {
     pub au: bool,
     /// The target is behind the camera (F1100's 0x8000 screen words).
     pub behind: bool,
-    /// The target is in front but off the view (F1100's out-of-range branch).
+    /// The target is in front but has no valid screen words (F1100's
+    /// out-of-range branch). Off-view targets with a projection use the arrow
+    /// forms instead.
     pub offscreen: bool,
+    /// F1099's COLPAL: [`crate::targeter::NAVIGATION_COLOUR`] or
+    /// [`crate::targeter::COMBAT_COLOUR`] (0x5f in the missile view).
+    pub colour: u8,
 }
 
 /// F1099's target shields/hull readout (`0x8625`/`0x8626`), when a ship target
@@ -599,6 +606,35 @@ impl Screen {
         centre: [f64; 3],
         radius: f64,
     ) -> Option<(i32, i32, i32)> {
+        let (sx, sy, pixels) = Self::body_projection_pixels(state, views, scene, centre, radius)?;
+        ((-20.0..340.0).contains(&sx) && (-20.0..178.0).contains(&sy)).then_some((
+            sx as i32,
+            sy as i32,
+            pixels as i32,
+        ))
+    }
+
+    /// F1100's target screen words (`object+0x98/+0x9a`) without F989's view
+    /// bounds: where the body projects even when it is outside the 320x158 view.
+    /// `None` when it is behind the eye. The range readout uses these to pick
+    /// the off-view arrow form.
+    pub fn body_projection(
+        state: &Flight,
+        views: &ViewState,
+        scene: Option<&ModelViewer>,
+        centre: [f64; 3],
+    ) -> Option<(i32, i32)> {
+        let (sx, sy, _) = Self::body_projection_pixels(state, views, scene, centre, 0.0)?;
+        Some((sx as i32, sy as i32))
+    }
+
+    fn body_projection_pixels(
+        state: &Flight,
+        views: &ViewState,
+        scene: Option<&ModelViewer>,
+        centre: [f64; 3],
+        radius: f64,
+    ) -> Option<(f64, f64, f64)> {
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
         let camera = Camera::new(state, views, stats.as_ref(), scale);
@@ -608,11 +644,7 @@ impl Screen {
         }
         let (sx, sy) = (160.0 + 256.0 * x / z, 79.0 - 256.0 * y / z);
         let pixels = (radius * 256.0 / z).clamp(10.0, 120.0);
-        ((-20.0..340.0).contains(&sx) && (-20.0..178.0).contains(&sy)).then_some((
-            sx as i32,
-            sy as i32,
-            pixels as i32,
-        ))
+        Some((sx, sy, pixels))
     }
 
     /// The logical 320x200 pixel under a mouse position in window client pixels
@@ -822,9 +854,10 @@ impl Screen {
         }
         self.draw_targeter_cursor(view);
         // F1111: the combat target (`DATA_007247`) draws F1114's circle at
-        // (0x9f,0x4f), radius 0x10, colour 0xc, while F1113's blink is on.
+        // (0x9f,0x4f) with F1612's radius word 0xc (halved to 6) in colour
+        // 0x10, while F1113's blink is on (`ffe.asm:81967-81991`).
         if self.missile_lock && self.missile_blink {
-            self.circle(0x9f, 0x4f, 0x10, 0x0c);
+            self.circle(0x9f, 0x4f, 0x0c, targeter::COMBAT_COLOUR);
         }
     }
 
@@ -950,40 +983,29 @@ impl Screen {
     }
 
     /// F1100's range text, and F1099's target shields/hull (when a ship target
-    /// carries them). Off-view targets use the original's fixed (50,50) spot and
-    /// its "Behind"/"Out of Range" strings.
+    /// carries them). The on-view number sits at the target minus 5; the original
+    /// string's leading newline moves it one 10-row line down, so the glyphs are
+    /// at `x-5, y+5`. Off-view targets use the caller's fixed spot ((50,50) for
+    /// the navigation target, (50,60) for combat) and the Behind / Out of Range
+    /// / arrow strings.
     fn draw_target_hud(&mut self) {
         if let Some(target) = self.target_hud {
-            let unit = if target.au { "AU" } else { "km" };
-            // F1100's fixed spot for an off-view target is the caller's X/Y
-            // (50,50 for the navigation target, 50,60 for the combat target);
-            // the on-view number sits at the target minus 5.
-            let (x, y, text) = if target.behind {
-                (
-                    target.x,
-                    target.y,
-                    format!("Target {} {} Behind", target.value, unit),
-                )
-            } else if target.offscreen {
-                (
-                    target.x,
-                    target.y,
-                    format!("Target Out of Range ({} {})", target.value, unit),
-                )
-            } else {
-                (
-                    target.x - 5,
-                    target.y - 5,
-                    format!("{} {}", target.value, unit),
-                )
-            };
-            // F1100's on-view bounds; anything else goes to the fixed spot.
-            let (x, y) = if (0..0x138).contains(&x) && (0..0x8e).contains(&y) {
-                (x, y)
-            } else {
+            let form = targeter::range_form(target.behind, target.offscreen, target.x, target.y);
+            // F1100's fixed spot: the navigation caller's (50,50), the combat
+            // caller's (50,60). The colour is the same selector F1099 uses.
+            let fixed = if target.colour == targeter::NAVIGATION_COLOUR {
                 (50, 50)
+            } else {
+                (50, 60)
             };
-            self.text(x.max(0) as usize, y.max(0) as usize, &text, 95);
+            let (x, y) = if matches!(form, targeter::RangeForm::OnView) {
+                // The leading newline in 0x8604/05 moves the text down 10 rows.
+                (target.x - 5, target.y - 5 + 10)
+            } else {
+                fixed
+            };
+            let text = targeter::range_text(form, target.value, target.au);
+            self.text_bytes(x.max(0) as usize, y.max(0) as usize, &text, target.colour);
         }
         if let Some(damage) = self.target_damage {
             let hull = damage.hull;
@@ -1106,9 +1128,11 @@ impl Screen {
         self.line_value(start, end, value);
     }
 
-    /// `FUNC_001612_DrawCircle`: a 32-segment circle, used by F1114's combat
-    /// target mark.
+    /// `FUNC_001612_DrawCircle`: a 32-segment circle, used by F1111's combat
+    /// target mark. Its radius argument is halved (`sar ecx,1`,
+    /// `ffe.asm:96466`), so F1111's 0xc is a radius of 6.
     fn circle(&mut self, x: i32, y: i32, radius: i32, colour: u8) {
+        let radius = radius / 2;
         let mut previous = (x + radius, y);
         for step in 1..=32 {
             let angle = step as f64 / 32.0 * std::f64::consts::TAU;

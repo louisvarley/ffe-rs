@@ -494,6 +494,10 @@ mod tests {
         assert!(exponent > 0x1d, "{exponent}");
         assert!(range_value(mantissa, exponent).1);
         assert!(range_value(mantissa, exponent).0 > 0);
+        // F1100's threshold is `exponent <= 0x1d` for km, else AU
+        // (`ffe.asm:81263-81281`); the branch ignores the mantissa.
+        assert!(!range_value(0x4000, 0x1d).1);
+        assert!(range_value(0x4000, 0x1e).1);
     }
 
     #[test]
