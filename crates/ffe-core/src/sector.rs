@@ -34,6 +34,10 @@ const DRIVES: usize = VECTORS_BYTES + SECTOR_BYTES;
 pub const SPECIAL_SECTORS: usize = 49;
 /// The most stars a generated sector holds (`F841` clamps at `0x3e`).
 pub const MAX_STARS: usize = 0x3e;
+/// Offset of the star mass table (`DATA_006803`/`DATA_006804`) in the block:
+/// twelve 4-byte rows of minimum and maximum total mass, read as overlapping
+/// dwords one byte apart as F829/F832 do.
+pub const STAR_MASS: usize = 1468;
 
 /// A star's position record: byte 0 is always 9; bytes 2 to 4 give its place in the sector.
 pub type Vector = [u8; 6];
@@ -213,6 +217,22 @@ impl<'a> Tables<'a> {
                 ]),
             })
             .collect()
+    }
+
+    /// F832's total mass for a start-system record: row `row` (`extra & 0xf`)
+    /// of `DATA_006803` and the row's second dword one byte on, scaled by the
+    /// record's high extra byte (`stars & 0xf8`). A zero star field returns the
+    /// row's minimum exactly, which is what the new game's records use.
+    pub fn start_mass(&self, row: usize, stars: u8) -> u32 {
+        let at = STAR_MASS + 4 * row;
+        if at + 5 > self.bytes.len() {
+            return 0;
+        }
+        let low = dword(self.bytes, at) as i32;
+        let high = dword(self.bytes, at + 1) as i32;
+        let base = high.wrapping_sub(low) >> 16;
+        let scale = i32::from(stars & 0xf8) << 8;
+        base.wrapping_mul(scale).wrapping_add(low) as u32
     }
 
     /// The drive record of a class (0 to 14).

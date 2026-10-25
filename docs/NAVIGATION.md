@@ -191,21 +191,36 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   `+0x9e` is 0xffff. A slow, level touch (speed <= 0x258, dot >= 0x78000000) sets flag 0x40 and
   settles the ship on the surface; a faster one sets 0x80 and bounces it (damage from F953's
   amount is shown on the status line). Regression: `soft_touch_lands_and_fast_touch_bounces`.
-- **The landed state (2026-10-25).** A soft touch on a planet or moon now takes the original's
-  states: F1021 sets `0x32` for the frame of the touch (F1042 zeroes the speed, rates, thrust
-  and set speed), and F1047's view frame makes it `0x34`, the guarded landed-rough state
-  (`Navigator::land`, `landing_frame`, `ffe_core::traffic::Landing`). The landed screen is
-  F1050/F1054: the ordinary flight view from the settled ship (the front view above the
-  console, no new HUD), the console and message log unchanged, and the world still turns around
-  it. F1012 runs no flight step while landed (no F1037/F1041/F601/F603/F1512), so the ship is
-  held still; `nav.follow` still carries it with its planet. `L` is F1056's launch action: F1013
-  starts at `0x24`, the fixed up thrust climbs, F1013 hands over to `0x26` and F1031 clears it
-  to `0x00` (the same `Takeoff` machine as the open-air pad, without the pad world). The
-  open-air starport's parallel `0x2e` -> `0x30` pair is in the machine too (`Landing::at_starport`);
-  the new game's `0x30` and its F381 launch are unchanged. Tests: `takeoff.rs` pins the
-  transitions; `planet_view.rs::landing_reaches_the_surface_state_and_launches_again` runs the
-  whole cached sequence with frames; `tools/reference/verify-surface.py` compares the new
-  game's landed-at-starport view with the executed original's (`--game-frame 500 0`).
+- **The landed state (2026-10-25).** The DOS default new game is record 0 of F829's
+  start table: Gateway [-1,4] on the planet **Hope**, at the starport **Old Blackelk**
+  (`slot 0x6a`), with F998's default Saker Mk III, 10,000 CR and state `0x30`. (Record 1
+  is Ross 154's Eagle, `slot 0x6e`; `--start 1` keeps it.) The boot's state `0x30` is
+  F1050/F1054's landed surface view -- the flight view from F994's pad seat with the
+  ground, horizon, starport, scanner, gunsight, console and message log -- not the docked
+  services board. The HUD is F1099's: Set/Act at (2,148) in F1393's km/h conversion
+  (`*0x156/100` one decimal below `0x4705d`, `/0x69` two decimals above), Alt at
+  (266,139) and `DATA_009124`'s parent name (Hope) beneath it. `L` starts F381's F654 and
+  F1013's climb.
+  A soft touch on a planet or moon takes the original's states: F1021 sets `0x32` for the
+  frame of the touch (F1042 zeroes the speed, rates, thrust and set speed), and F1047's
+  view frame makes it `0x34`, the guarded landed-rough state (`Navigator::land`,
+  `landing_frame`, `ffe_core::traffic::Landing`). The landed screen is F1050/F1054: the
+  ordinary flight view from the settled ship, the console and message log unchanged, and
+  the world still turns around it. F1012 runs no flight step while landed (no
+  F1037/F1041/F601/F603/F1512), so the ship is held still; `nav.follow` still carries it
+  with its planet. `L` is F1056's launch action: F1013 starts at `0x24`, the fixed up
+  thrust climbs, F1013 hands over to `0x26` and F1031 clears it to `0x00` (the same
+  `Takeoff` machine as the open-air pad, without the pad world). The open-air starport's
+  parallel `0x2e` -> `0x30` pair is in the machine too (`Landing::at_starport`). Tests:
+  `takeoff.rs` pins the transitions;
+  `planet_view.rs::landing_reaches_the_surface_state_and_launches_again` runs the whole
+  cached sequence with frames; `planet_view.rs::new_game_hope_landed_surface_view` pins
+  the default start, its Hope HUD strings and the landed frame;
+  `tools/reference/verify-surface.py` compares the type-1 new game's landed-at-starport
+  view with the executed original's (`--game-frame 500 0`).
+- **Services.** The docked services board remains the original's state `0x2a`, opened by a
+  completed docking (`Traffic::Docked`) and by the docked screen's own navigation; the
+  new game's `0x30` no longer opens it at boot (EXP-014).
 - **The landed background.** F1052 clears the upper view to the previous scene's
   `DATA_008814..8817` colour and draws F1775's stars only while the flag is clear. At a
   starport or in a rough landing above the haze surface the flag stays 0, so the sky is the

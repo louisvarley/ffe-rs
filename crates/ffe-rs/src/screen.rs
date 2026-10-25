@@ -2,8 +2,8 @@ use crate::camera::{ship_axes, Camera, ViewMode, ViewState};
 use crate::console::{Console, ShipSystems};
 use crate::flight::{Flight, Mode};
 use crate::hud::{
-    PlayerHud, AUTOPILOT_POS, HUD_COLOUR, HULL_POS, SHIELDS_POS, SPEED_POS, TURRET_COLOUR,
-    TURRET_POS,
+    PlayerHud, AUTOPILOT_POS, HUD_COLOUR, HULL_POS, SHIELDS_POS, SPEED_POS, SPEED_RIGHT_POS,
+    TURRET_COLOUR, TURRET_POS,
 };
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::intro_text::IntroText;
@@ -1268,6 +1268,11 @@ impl Screen {
         &self.frame
     }
 
+    /// The expanded fixed low palette, for tests that check a drawn colour.
+    pub fn palette(&self) -> &[u32; 128] {
+        &self.palette
+    }
+
     /// The labels the original's F989/F1108 would draw this frame.
     pub fn label_positions(&self, camera: &Camera) -> Vec<(String, i32, i32)> {
         body_label_positions(&self.labels, camera)
@@ -1362,10 +1367,19 @@ impl Screen {
         if hud.autopilot {
             self.text(AUTOPILOT_POS.0, AUTOPILOT_POS.1, "Autopilot", HUD_COLOUR);
         }
-        for (index, line) in hud.speed_lines(&self.font).iter().enumerate() {
+        let (left, right) = hud.speed_columns(&self.font);
+        for (index, line) in left.iter().enumerate() {
             self.text(
                 SPEED_POS.0,
                 SPEED_POS.1 + index * crate::messages::LINE_HEIGHT,
+                line,
+                HUD_COLOUR,
+            );
+        }
+        for (index, line) in right.iter().enumerate() {
+            self.text(
+                SPEED_RIGHT_POS.0,
+                SPEED_RIGHT_POS.1 + index * crate::messages::LINE_HEIGHT,
                 line,
                 HUD_COLOUR,
             );

@@ -366,7 +366,8 @@ pub enum IntroAction {
         notice: Option<&'static str>,
     },
     /// The DOS boot loop's "any other key" arm: it leaves with the default start
-    /// (`F147(0)`). The port maps it to the verified type 1 with a notice.
+    /// (`F147(0)`), which is the Saker Mk III on Hope in Gateway. The port keeps
+    /// that verified default rather than substituting Ross 154.
     Skip {
         chosen: u8,
         notice: Option<&'static str>,
@@ -386,8 +387,9 @@ impl Intro {
     /// A key press at `tics`. The start choice is read every frame from
     /// `0x400` on (`ffe.asm:68443-68455`); it is not gated on the intro's loop
     /// point. 'V' latches the version from `0x719668` and is otherwise a no-op.
-    /// Any other key is the DOS "start type 0" arm, which this port maps to the
-    /// verified type 1 with a notice because type 0 is not ported.
+    /// Any other key is the DOS default start (`F147(0)`): the Saker Mk III on
+    /// Hope in Gateway. '1' is the verified Ross 154 start; 2-5 are unverified
+    /// and still map to the checked type 1.
     pub fn key(&self, tics: u32, key: char) -> Option<IntroAction> {
         match key {
             '1'..='5' => {
@@ -401,8 +403,8 @@ impl Intro {
             }
             'V' => IntroTimeline::version(tics, Some('V')).then_some(IntroAction::Version),
             _ => Some(IntroAction::Skip {
-                chosen: 1,
-                notice: Some("DOS boots start type 0; starting the verified type 1 (Ross 154)"),
+                chosen: 0,
+                notice: None,
             }),
         }
     }
