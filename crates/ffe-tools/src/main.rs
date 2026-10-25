@@ -256,7 +256,7 @@ fn run() -> Result<u8, String> {
                 .map_err(|error| error.to_string())?;
             writeln!(output).map_err(|error| error.to_string())?;
         } else {
-            writeln!(output, "Verified content cache v{}: {}\nAssets: {}; source fingerprints: {}\nPartial content only; not a complete game cache. Runtime upper palette, full model-command execution/submodels, gameplay tables, other fonts, journal, the other 16 songs and CD media remain unresolved.",
+            writeln!(output, "Verified content cache v{}: {}\nAssets: {}; source fingerprints: {}\nPartial content only; not a complete game cache. Runtime upper palette, full model-command execution/submodels, gameplay tables, other fonts, journal and CD media remain unresolved.",
                 manifest.format_version, manifest.source_profile, manifest.files.len(), manifest.source_files.len()).map_err(|error| error.to_string())?;
         }
         return Ok(0);

@@ -615,11 +615,22 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                 },
                 bytes: image.indexed_png()?,
             });
-        } else if record.path == "MUSIC/QQFRONT.HMP" {
+        } else if record.path.starts_with("MUSIC/") && record.path.ends_with(".HMP") {
+            let name = record
+                .path
+                .trim_start_matches("MUSIC/")
+                .trim_end_matches(".HMP");
+            let index = crate::SONGS
+                .iter()
+                .position(|song| *song == name)
+                .ok_or_else(|| format!("{}: song is not in the song table", record.path))?;
+            let lower = name.to_ascii_lowercase();
             assets.push(Asset {
-                id: "base:music/qqfront".to_owned(),
-                path: "music/qqfront.hmp".to_owned(),
-                kind: AssetKind::MusicHmp,
+                id: format!("base:music/{lower}"),
+                path: format!("music/{lower}.hmp"),
+                kind: AssetKind::MusicHmp {
+                    index: index as u32,
+                },
                 bytes: recorded_bytes(&root, record)?,
             });
         } else if record.path.starts_with("FX/") && record.path.ends_with(".RAW") {
@@ -668,17 +679,26 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             0
         }
         + 4;
-    // Plus the v10 model descriptor table, the v12 ship statistics table and the
-    // v16 model record table, and v28's one intro HMP.
-    let intro_song = usize::from(assets.iter().any(|asset| asset.id == "base:music/qqfront"));
-    if models < 2 || assets.len() != 382 + tables + 3 * models + intro_song {
+    // Plus the v10 model descriptor table, the v12 ship statistics table, the
+    // v16 model record table, and the v29 music assets (all 17 HMPs).
+    let music_songs = assets
+        .iter()
+        .filter(|asset| matches!(asset.kind, AssetKind::MusicHmp { .. }))
+        .count();
+    if music_songs != crate::SONGS.len() {
+        return Err(format!(
+            "expected all {} songs in the cache, found {music_songs}; no cache written",
+            crate::SONGS.len()
+        ));
+    }
+    if models < 2 || assets.len() != 382 + tables + 3 * models + music_songs {
         return Err(format!(
             "unexpected imported asset count {} ({models} models); no cache written",
             assets.len()
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 28,
+        format: "ffe-content-cache".to_owned(), format_version: 29,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,
@@ -697,7 +717,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             } else {
                 "Lighting tables are not imported: their RVAs are verified for floppy 1.02 only.".to_owned()
             },
-            "Station commands are structurally decoded, not fully executed; submodels, other fonts, gameplay tables, journal, the other 16 HMP songs and optional CD media remain unconverted.".to_owned(),
+            "Station commands are structurally decoded, not fully executed; submodels, other fonts, gameplay tables, journal and optional CD media remain unconverted.".to_owned(),
             "Not a playable game cache or installable graphics pack; patch-output layouts are unsupported.".to_owned(),
         ],
         files: Vec::new(),

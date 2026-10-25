@@ -123,3 +123,29 @@ fn the_cached_intro_song_parses_without_the_music_folder() {
     assert_eq!(song.division, 192);
     assert!(song.duration_seconds() > 100.0);
 }
+
+#[test]
+fn every_song_parses_from_a_cache_payload_without_the_music_folder() {
+    let Some(directory) = music_dir() else {
+        eprintln!("skipping the all-cache test: set FFE_MUSIC_DIR");
+        return;
+    };
+    let mut library = MusicLibrary::new("missing-music");
+    for (index, name) in SONG_NAMES.iter().enumerate() {
+        let bytes =
+            std::fs::read(directory.join(format!("{}.HMP", name.to_ascii_uppercase()))).unwrap();
+        library.insert_hmp(index, bytes);
+    }
+    assert_eq!(
+        library.cached_indices().collect::<Vec<_>>(),
+        (0..17).collect::<Vec<_>>()
+    );
+    for index in 0..SONG_COUNT {
+        let song = library
+            .load(index)
+            .unwrap_or_else(|error| panic!("cached song {index} failed: {error}"));
+        assert!(song.data_track_count() > 0, "song {index}");
+        assert!(song.event_count() > 0, "song {index}");
+        assert!(song.duration_seconds() > 1.0, "song {index}");
+    }
+}

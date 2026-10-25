@@ -462,6 +462,8 @@ fn run() -> Result<(), String> {
     let headless = options.capture.is_some()
         || options.capture_planet.is_some()
         || options.capture_traffic.is_some()
+        || options.capture_prefs.is_some()
+        || options.capture_intro.is_some()
         || options.smoke_frames.is_some();
     let mut sound = if headless {
         GameAudio::silent(&options.root)

@@ -199,18 +199,21 @@ contract, not the full schema/examples in sections 2.1 onward.
   `docs/notes/intro.md`.
 - V28 adds `base:music/qqfront` (`music/qqfront.hmp`, type `music_hmp`): the
   player's `MUSIC/QQFRONT.HMP` byte-for-byte, so the boot's F919 song 0 is
-  available from the cache. The other 16 HMPs stay player-supplied runtime files.
-  See `docs/notes/sound.md`.
+  available from the cache.
+- V29 adds `base:music/<name>` (`music/<name>.hmp`, type `music_hmp` with the
+  song-table `index`) for all 17 original HMPs, byte-for-byte. A v28 cache keeps
+  loading: its unit `music_hmp` record defaults to index 0, and songs 1..16 fall
+  back to the player's `MUSIC/` folder. See `docs/notes/music.md`.
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
-  v10); v26 1794; v27 1796; v28 1797. Tools read every version. The playable requires v2 font content;
+  v10); v26 1794; v27 1796; v28 1797; v29 1813. Tools read every version. The playable requires v2 font content;
   F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps
   points-only inspection; v4 adds declared-face inspection. The lab requires
   matching command/vertex model indices, counts and descriptor offsets.
   V5 adds a fourth, normal-filtered outline view, requiring matching normal/vertex
   model indices, vertex counts and descriptor offsets.
   No submodels, gameplay tables, other font data,
-  journal, the other 16 HMP songs, CD media or replacement art. No version can
+  journal, CD media or replacement art. No version can
   label any archive as complete game content.
 - Reader limits: 64 MiB archive/aggregate payload, 2048 assets, 4 MiB manifest.
   Unsafe/duplicate/unsorted paths, duplicate IDs, symlinks, extra/missing entries,
@@ -592,7 +595,11 @@ Two representations per model:
 ### 2.6 Audio
 
 - Effects: `audio/fx/<id>.wav`, PCM 16-bit signed little-endian, mono, 22,050 Hz, canonical 44-byte RIFF header, no extra chunks. This is a lossless representation of `FX/*.RAW` (which is headerless PCM in the same format).
-- Music: `audio/music/<id>.mid`, Standard MIDI File type 1, 480 PPQN (or the HMP’s native division if it is musically meaningful; document the choice), track names preserved. Conversion from HMP via `hmp.cpp` semantics is deterministic; the converter is tested by re-parsing the SMF and comparing events to the HMP track data.
+- Music: `music/<name>.hmp`, the original HMI song byte-for-byte, with the song
+  index in the asset manifest (v29). Parsing uses the original 192-tick division
+  and 1,605,632 us tempo grid from `hmp.cpp`; no SMF conversion is stored. A
+  future alternate format could still export a type-1 SMF, but the cache keeps
+  the source bytes lossless.
 - Optional Enhanced audio (e.g. OGG) would be a separate pack/feature; Classic uses WAV/MIDI.
 - No game audio is committed; `data.bin` is generated from the player's files.
 - Initial Windows playback may synthesize the MIDI locally. If pre-rendered
