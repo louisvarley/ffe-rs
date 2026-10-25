@@ -35,6 +35,10 @@ Implemented on this branch (all positions re-read from `ffe.asm`):
   meter, labels and systems. The 22 hot areas are unchanged. A click whose
   handler is still absent now writes `Click::unported()` into the log instead of
   doing nothing.
+- **Scanner and targeter** (11/12/13/41, `scanner` branch): `scanner.rs` and
+  `targeter.rs` implement `F274/F275`'s contact scan/projection/stalks and the
+  `DATA_008683` colours, the 254..261 globe, and `F1100/F1113/F1114/F1111`'s
+  targeting tunnels and blinking cursor (`docs/notes/scanner.md`).
 - **Port-only UI retired** (8/39, slice I): the top bar, controls button,
   `SPEED` line and the 119..157 status/map/autopilot block are gone. The
   original HUD owns those rows; the lift's lower rows are no longer cleared.
@@ -141,7 +145,7 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 
 | # | Element | Original source (asm refs) | Port state | Evidence | Gap |
 |---|---|---|---|---|---|
-| 1 | Console panel (primary 43 at y158) | `F272` `ffe.asm:21021`; `F1439` `86138` | done | `screen.rs`; cache asset `base:bitmap/primary/043`; `verify-assets.py` | The original HUD and message window are drawn over it; scanner contacts/orientation still the port's |
+| 1 | Console panel (primary 43 at y158) | `F272` `ffe.asm:21021`; `F1439` `86138` | done | `screen.rs`; cache asset `base:bitmap/primary/043`; `verify-assets.py` | The original HUD and message window are drawn over it; the scanner globe and contacts are the original's now |
 | 2 | 0..157 / 158 split | `F1610/F1714` y<0x9e; `fills.md` | done | `screen.rs:14`; `camera.rs` projection | — |
 | 3 | Low palette / colour | `F1601` etc.; low palette asset | partial | `screen.rs:206-264`, `palette_rgb6` | Runtime upper palette and original text colours unknown (`STATUS.md` item 2) |
 | 4 | Screen buttons F4,F3,F2,F1 (0x0b-0x0e) | `DATA_005100` 0x0b-0x0e; `F261`; `F1439` | partial | `console.rs` table; `main.rs` F1/F2/F3 clicks; `tests/console_table.rs` | F1 views, F2 status page and F3 map are consumed; F4/F5 write "not ported" into the log. The DOS F2 key itself is not established; the console record is the original's |
@@ -151,16 +155,16 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 8 | Autopilot/STOP/TARGET buttons | none (port addition) | removed | — | The port block that held them is retired; the autopilot indication is the original F1099 line and lamp 0x47 |
 | 9 | Button table/state engine (82 records, radios, visibility) | `DATA_005100` `ffedat.asm:4601`; `F261/262/263/264` `ffe.asm:20336-20490` | done | `console_table.rs` (82 records, generated), `console.rs` (`F261` draw, `F262` radio reset, `F263/264`), `tests/console_table.rs` | Byte-exact table; flight-page visibility derived from view/meter/labels/systems |
 | 10 | Three bar gauges | `F270` `ffe.asm:20554-20622` | done | `combat.rs` (`GAUGE_BITMAPS`), `screen.rs` `draw_gauges`, `laser::gauge_height`; `combat_view` local frames | Energy (`+0x11e`), heat (`+0xea`) and the third (`DATA_008921`, always zero) drawn at x249/242/237; the original art is secondary 179/178/177 |
-| 11 | Scanner background/range rings | panel 43 art; `F272` | partial | `screen.rs:711` (panel art) | Rings are only the static art; no computed contacts/rings |
-| 12 | Scanner contacts | `F274/F275` `ffe.asm:21239-21526`; `F1569` `93327` | **partial / placeholder** | `screen.rs:907-915` draws one 3-pixel station blip | No object list scan, filter, stalk length, colour table, or scale |
-| 13 | Scanner orientation | `F273` `ffe.asm:21114-21118`; secondary 254-261 | **missing** | none | 8-frame overlay at (101,175) not drawn |
+| 11 | Scanner background/range rings | panel 43 art; `F272` | done (art) | `screen.rs` panel blit; cache asset `base:bitmap/primary/043` | Rings are the original panel art; the code does not compute range marks |
+| 12 | Scanner contacts | `F274/F275` `ffe.asm:21239-21526`; `F1569` `93327` | done | `scanner.rs`, `screen.rs` `draw_scanner_contacts`; `scanner_view` cached frames | Object scan/frame filter, 28-bit cut, 305 divisor, rotation, near/far scaling, stalk lengths, `DATA_008683` colours and the 0x28..0x2b mask; starports skipped |
+| 13 | Scanner orientation | `F273` `ffe.asm:21114-21118`; secondary 254-261 | done | `screen.rs` `draw_scanner_overlay`; `scanner_view` cached frame | 8-frame globe at (101,175), `(DATA_008933 >> 9) & 7`; `DATA_008933` is minus the port's yaw |
 | 14 | Message log (10 dated entries, wrap, scroll) | `F271/272/273`; `DATA_008681` `ffedat.asm:27851` | done | `messages.rs`, `screen.rs` `draw_messages`; `dashboard_view` local frames | Ten dated entries, 124-pixel wrap, shadow/text at (195/196), y 158 clip and F273 scroll/auto-scroll; the log on/off flag and scroll keys are not wired |
 | 15 | Date/clock in flight | `F272` date/time header; `StringConvertDate/Time` | done | `messages.rs`, `screen.rs`, `main.rs` (`nav.date_text`) | Port date format from the navigator; the original's exact string routine is not re-derived |
 | 16 | Speed / set speed / altitude | `F1099` string 0x8620/22, x2,y148 | partial | `hud.rs` `speed_lines`, `screen.rs`; `dashboard_view` local frames | Set/Act/Alt drawn at (2,148) with the original positions and wrap; values still the flight model's m/s, F1393's conversion/suffixes and a real altitude are not modelled |
 | 17 | Shields % | `F1099` `ffe.asm:80780-80820`, 0x8624 at (2,1) | partial | `hud.rs` `shield_text`, `screen.rs`; `dashboard_view` local frames | Formula and position are the original's; the player has no damage state, so the words stay equal and the line is hidden |
 | 18 | Hull % | `F1099` `ffe.asm:80821-80855`, 0x8638 at (2,11) | partial | `hud.rs` `hull_text`, `screen.rs`; `dashboard_view` local frames | Drawn at (2,11), reads 100.0% from the ship mass; no damage state behind the words |
 | 19 | Target range / reticle / off-screen text | `F1100` `ffe.asm:81021-81344`; 0x8604/05, 0x8606-11 | done (range) | `laser::{range_words, range_value}`, `screen.rs` `draw_target_hud`; `combat_view` local frames | Range at the target and the (50,50) "Behind"/"Out of Range" text draw; the exact arrow variants are port wording. Bitmap 98 is the velocity marker, not a target reticle (row 23) |
-| 20 | Target shields/hull readout | `F1099` `ffe.asm:80856-80900`, 0x8625/26 at (235,1) | done | `laser::damage`, `screen.rs` `draw_target_hud`, `npc.rs`; `npc_view` cached frame | Live NPC ships now carry shields/hull, so the readout and model 157's shield flash are reachable; the combat targeter boxes remain the port's brackets |
+| 20 | Target shields/hull readout | `F1099` `ffe.asm:80856-80900`, 0x8625/26 at (235,1) | done | `laser::damage`, `screen.rs` `draw_target_hud`, `npc.rs`; `npc_view` cached frame | Live NPC ships now carry shields/hull, so the readout and model 157's shield flash are reachable; the combat targeter tunnels/cursor are ported (`scanner.md`) |
 | 21 | Target warnings: Hyp.Analyser, bounty, clouds | `F1099` `ffe.asm:80900-80990`; 0x862f/30/31/32/34 | **missing** | none | No equipment/cloud/mission state |
 | 22 | Gunsight / fixed crosshair | `F1111` `ffe.asm:81954`; bitmap 97 at (129,48) | done | `screen.rs` `draw_gunsight`, `combat.rs` `GUNSIGHT_BITMAP`; `combat_view` local frames | Original bitmap at the original position; drawn in front/rear/turret views when that mount has a laser, never external; the port has no combat-computer view |
 | 23 | Velocity / prograde marker | `F1112` `ffe.asm:81996`; bitmap 98 | done | `screen.rs` `draw_velocity_marker`, `combat.rs` `velocity_marker`; `combat_view` local frames | Bitmap 98 is the velocity marker (front view only), **not** a target X; the offset (-19,-18) and clip rule are the original's |
@@ -175,13 +179,13 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 32 | Galaxy/system maps | `F840` etc.; `galaxy-map.md`; `NAVIGATION.md` | done (scene), partial (console) | `galaxy_map.rs`, `screen.rs` | Map scene verified; the clock is now the original's, the rest of the map text is the port's |
 | 33 | Damage/death/escape capsule | `F1104` death; `F1098` capsule; `F12` | **missing** | `console.rs` unported message | No player damage/death/capsule; the HUD hull line reads 100.0% until damage exists; F12 is the model viewer |
 | 34 | Hyperspace countdown | `F908-F910`; `DEVIATIONS.md` EXP-007 | **missing** | `main.rs` immediate jump | No countdown UI/scene |
-| 35 | Autopilot indicator | `F1099` 0x8618 at (2,139); `F1116` 0x47 | done | `hud.rs`, `screen.rs`, `main.rs`; `dashboard_view` local frames | "Autopilot" at (2,139) and lamp 0x47 when the autopilot targets; the targeter boxes are still the port's brackets |
+| 35 | Autopilot indicator | `F1099` 0x8618 at (2,139); `F1116` 0x47 | done | `hud.rs`, `screen.rs`, `main.rs`; `dashboard_view` local frames | "Autopilot" at (2,139) and lamp 0x47 when the autopilot targets; the nav target's tunnels are F1100/F1113's |
 | 36 | Text metrics / clipping | `F1586` `ffe.asm:93785`; font asset 9 rows | partial | `indexed.rs`, `messages.rs` wrap; `dashboard_view` local frames | The console log uses the 124-pixel wrap and y 158 clip; other port text still wraps by 308 px at x3 with 9/10 px spacing |
 | 37 | Hot areas | `DATA_007684` `ffedat.asm:23641`; `F1439`; mouse poll `ffe.asm:86045-86070` | done (22/22) | `console.rs`; `tests/console.rs` | Exact coordinates/order; clicks without a handler now write into the message log |
 | 38 | Keys | `F1056`; `DATA_007688`; JJFFE 6-0 | partial | `views.md`; `main.rs` | F2 (status page) added, but its DOS mapping is unverified; F3 still toggles Modern/Classic (the original F3 is the map, available by click); F10 unused; F11/F12 repurposed |
 | 39 | Port-only top bar/status block/map buttons | none | retired | `screen.rs` | Removed in the HUD merge; the original HUD, message window and scanner own those rows |
 | 40 | Radio groups | `F262` `ffe.asm:20369-20413`; table | done | `console.rs` `F262`, `tests/console_table.rs` | Set-image-with-radio-reset implemented over the 82-record table |
-| 41 | Contact colours | `DATA_008683` `ffedat.asm:27855`; `F275` | **missing** | none | 19-colour contact table not imported |
+| 41 | Contact colours | `DATA_008683` `ffedat.asm:27855`; `F275` | done | `scanner.rs` `CONTACT_COLOURS`, unit test | 19-colour table from F259, indexed by the mass word `>> 4`; default 0x0f |
 | 42 | Button redraw/state updates | `F1116` `82223`; `F991`; `F1120`; `F1003` | **missing** | `screen.rs` redraws constants every frame | No per-mode visibility/image state or update-on-change |
 
 ---
@@ -412,9 +416,11 @@ screen position minus 5 px. Off-screen/behind/out-of-range targets move to
 Port: `laser::range_words`/`range_value` implement the conversion, and
 `main.rs` feeds `screen.target_hud` from the locked body (the original model's
 player position, else the prototype state). `screen.rs` `draw_target_hud` draws
-the range at the target mark or the (50,50) "Target ... Behind" /
-"Target Out of Range (...)" text. `TargetMark` still carries the port's own
-brackets; they are not `F1113/F1114`.
+the range at the target mark, or F1100's fixed spot with the "Target ...
+Behind" / "Target Out of Range (...)" text ((50,50) for the navigation target,
+(50,60) for the combat target). `TargetMark` carries the projected position and
+pick radius; the visible lock is F1100/F1113's tunnels and F1111's cursor
+(`docs/notes/scanner.md`).
 
 ### 6.3b The velocity marker (`F1112`) — bitmap 98
 
@@ -479,21 +485,25 @@ build. The original art is secondary 179/178/177 (ids 275/274/273).
 ### 6.7 Scanner (`F274/F275`, `F1569`, orientation 254-261)
 
 - `FUNC_000274` (`ffe.asm:21239`) runs when `ship+0xca & 4`. It walks live
-  object slots `0x72..1`, taking those whose presence byte is non-zero and
-  whose scanner flag bit 0x10 is set, and calls `F275` for each.
-- `F275` (`ffe.asm:21296`) computes the relative position, applies the scanner
-  rotation and the range scaling, places the contact at `x = 0x93 + dx`,
-  `y = 0xbb - (dz * 10 / 45)`, picks a colour from `DATA_008683`
-  (`descriptor[+6] >> 4`), and calls `F1569_DrawScannerStalk`
-  (`ffe.asm:93327`) to draw one or two vertical stalks.
+  object slots `0x72..1`, keeping those whose presence byte has bit 0x8 set and
+  0x20 clear, and calls `F275` for each.
+- `F275` (`ffe.asm:21296`) applies the same-frame and starport
+  (`+0x14c & 0x20`) filters, computes the relative position (F1678), cuts it to
+  28 bits (F1658), divides by 0x131, rotates it into the ship's frame (F1670),
+  scales it into the 0x3333..0x10000 radius band, places the contact at
+  `x = 0x93 + dx`, `y = 0xbb - (dz * 10 / 45)`, picks a colour from
+  `DATA_008683` (statistics `+0x6 >> 4`) and calls `F1569_DrawScannerStalk`
+  (`ffe.asm:93327`) for the two bars.
 - The scanner's **orientation** is the 92x30 overlay 254..261 at (101,175),
   selected by `(DATA_008933 >> 9) & 7` (`F273`, `ffe.asm:21114-21118`);
-  `DATA_008933` is the scanner rotation word (`docs/notes/physics.md`).
+  `DATA_008933` is the scanner rotation word (`docs/notes/physics.md`), decreased
+  when the ship yaws right, so it is minus the port's yaw.
 - Range rings are part of panel 43's art; the code does not compute them.
 
-Port: the panel art (rings) only, plus one 3-pixel station blip at
-`screen.rs:907-915` using port-only math. No contacts, no stalk length, no
-colour table, no orientation overlay.
+Port: implemented in `crates/ffe-rs/src/scanner.rs` and `screen.rs`
+(`docs/notes/scanner.md`): the contact scan from the navigator's bodies and NPC
+ships, the original projection/stalk/colour maths, the 8-frame globe in F272's
+order and the downward-stalk grid mask.
 
 ### 6.8 Message log and date/clock (`F271/F272/F273`)
 
@@ -525,16 +535,19 @@ log; the docked screens keep their own two-line note. The original's
 
 - Fixed gunsight: `F1111` (`ffe.asm:81954`) blits **bitmap 97** (61x61 circled
   X) at (129,48), i.e. centred on the view, when the current view's equipment
-  byte `ship+0xd2+view` is non-zero. It also draws the locked-target box/circle
-  when `DATA_007246/247` and the blink flag are set. Ported: `draw_gunsight`
-  draws the original art at the original position in the views with a mount
-  laser (front/rear/turret), never external; the port has no combat-computer
-  view. The targeter box/circle is still the port's own brackets.
+  byte `ship+0xd2+view` is non-zero. It also draws the blinking auto-targetter
+  cursor when `DATA_007246/247` and the blink flag are set. Ported:
+  `draw_gunsight` draws the original art at the original position in the views
+  with a mount laser (front/rear/turret), never external; the port has no
+  combat-computer view. The cursor (F1113 box / F1612 circle) is ported; the
+  arming rules need the target-computer equipment (`docs/notes/scanner.md`).
 - Velocity/prograde marker: **bitmap 98** via `F1112` (front view only, above).
   It is **not** a target X; the port draws it with `draw_velocity_marker`.
-- Target brackets: `F1113/F1114` (`ffe.asm:82024-82192`) draw four lines of a
-  square around the target with the size from its distance/shift; the port's
-  brackets are its own.
+- Target tunnels: `F1100`/`F1113`/`F1114` (`ffe.asm:81021-82201`) draw four
+  nested squares from the view centre toward the locked target, sized from the
+  range mantissa and gated by `DATA_009024`/`DATA_009025`; ported in
+  `targeter.rs` (`docs/notes/scanner.md`). They replace the port's own
+  corner brackets around the target.
 - Bitmaps 99/100 (64x64 frame, 62x62 dashed frame) are imported but no
   constant-index flight draw site was found; treat them as unused/unknown
   until a reference frame shows them.
@@ -601,7 +614,7 @@ original's.
 
 | Mode | Original | Port |
 |---|---|---|
-| **Flight / front** | `F1099` HUD, console, scanner contacts, message log | original HUD readouts, message log + clock, gunsight 97, velocity marker 98, gauges, target range and the port's scanner blip |
+| **Flight / front** | `F1099` HUD, console, scanner contacts, message log | original HUD readouts, message log + clock, gunsight 97, velocity marker 98, gauges, target range and tunnels, scanner contacts and globe |
 | **Rear** | same console; own ship hidden only in front; target range text still drawn (tunnels skip views 4/6) | same console; own ship drawn; gunsight 97 when the rear mount has a laser (the new-game Eagle has none) |
 | **Turrets** | same console; turret eye; `0x8636` declination/rotation text | view + eye; gunsight per mount; Decn/Rotn at (5,76); arrows/A-Z aim |
 | **External** | same console; crosshair not drawn (views 4/6); ship drawn | view + camera; no gunsight or velocity marker |
@@ -612,7 +625,7 @@ original's.
 | **Map** | F3 galaxy map, system list, console date/name/type/fuel (`galaxy-map.md`, `NAVIGATION.md`) | galaxy scene + system list ported; the console clock is the original's, the rest of the map text is the port's |
 | **Damage/death** | hull/shield %, `F1104` death to external view, `F1098` escape capsule (F12) | no player damage; hull reads 100.0%, shields hidden; F12 is the model viewer |
 | **Hyperspace** | `F908-F910` countdown/scene; console | immediate jump (`main.rs`, EXP-007) |
-| **Autopilot** | `0x8618` at (2,139), lamp `0x47`, targeter boxes | `0x8618` at (2,139) when the autopilot targets; lamp 0x47; targeter still the port's brackets |
+| **Autopilot** | `0x8618` at (2,139), lamp `0x47`, targeter boxes | `0x8618` at (2,139) when the autopilot targets; lamp 0x47; nav tunnels in colour 0x11 |
 
 ---
 
@@ -802,9 +815,10 @@ As of 2026-10-25 the list below has shrunk: the message log, gauges, HUD text,
 reticles, lamps, the table import, `Click::unported()` and the retirement of the
 port block are **done** (`hud`, `combat` and earlier rounds). What remains:
 
-1. **Scanner contacts** (`F274/F275`). Needs a read-only object scan; can use
-   `Navigator.bodies` first, then live objects. The panel art and the port's
-   station blip are there; stalks, colours and orientation overlay are not.
+1. **Scanner contacts and targeter** (`F274/F275`, `F1113/F1114`) — **done**
+   on the `scanner` branch (`docs/notes/scanner.md`). The remaining piece is
+   the auto-targetter *arming*: the target-computer equipment (`ship+0xc8 &
+   0x80`) and F1010/F1060/F1062, which the port's `T`-cycles-locks stands in for.
 2. **Player damage, equipment and ship systems.** Add `ship+0xe0/e2/e4` damage,
    `+0xc8..+0xcb`/`+0xef` equipment words, `+0x268`, `player+0x174`, `+0x511e`
    so shields/hull stop reading defaults, the view-row `0x11-0x14` icons can

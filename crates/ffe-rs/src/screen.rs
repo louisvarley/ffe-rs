@@ -10,7 +10,9 @@ use crate::messages::MessageLog;
 use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
 use crate::prefs::{self, Mark, Prefs};
+use crate::scanner;
 use crate::station::{self, DockRow, DockView, Screen as StationScreen, Status};
+use crate::targeter;
 use ffe_content::{AssetKind, VerifiedCache};
 use ffe_core::model::JITTER_SEED;
 use ffe_core::model_fill::{fill_polygon, fill_quad, fill_triangle};
@@ -236,6 +238,14 @@ pub struct Screen {
     pub lock: String,
     /// Where the locked body shows in the view (set by the caller each frame).
     pub target_mark: Option<TargetMark>,
+    /// F274/F275's scanner contacts and the player's frame, when in flight.
+    pub scanner: Option<scanner::View>,
+    /// F1100's targeting tunnels for the locked target (`DATA_009024`/`025`).
+    pub tunnels: Option<targeter::Tunnels>,
+    /// F1111's blinking auto-targetter cursor (`DATA_007246`/`247`).
+    pub targeter: Option<targeter::Cursor>,
+    /// `DATA_007252`: the game second's parity, which blinks the targetter.
+    pub blink: bool,
     /// The names the labels toggle draws over the view (the original's F1108).
     pub labels: Vec<BodyLabel>,
     /// The galaxy map to draw instead of the flight view, when it is open.
@@ -623,6 +633,10 @@ impl Screen {
             lift: None,
             station_view: false,
             target_mark: None,
+            scanner: None,
+            tunnels: None,
+            targeter: None,
+            blink: false,
             labels: Vec::new(),
             galaxy: None,
             has_lock: false,
@@ -707,19 +721,131 @@ impl Screen {
     /// F1111's fixed gunsight: secondary bitmap 1 (id 97) at (129,48), drawn
     /// only in the views F1099 does not skip (not external or combat) and only
     /// when that view's mount has a laser (`ship+0xd2+view`).
-    fn draw_gunsight(&mut self, view: ViewMode) {
+    fn gunsight_mount(&self, view: ViewMode) -> Option<usize> {
         let mount = match view {
             ViewMode::Front => 0,
             ViewMode::Rear => 1,
             ViewMode::TopTurret => 2,
             ViewMode::BottomTurret => 3,
-            ViewMode::External => return,
+            ViewMode::External => return None,
         };
-        if self.lasers[mount] == 0 {
+        (self.lasers[mount] != 0).then_some(mount)
+    }
+
+    fn draw_gunsight(&mut self, view: ViewMode) {
+        if self.gunsight_mount(view).is_none() {
             return;
         }
         if let Some(Some(icon)) = self.icons.get(crate::combat::GUNSIGHT_BITMAP as usize) {
             icon.blit_colours(&mut self.frame, &self.palette, 129, 48);
+        }
+        self.draw_targeter_cursor(view);
+    }
+
+    /// F1111's auto-targetter cursor, drawn after the gunsight: `DATA_007246`'s
+    /// navigation box or `DATA_007247`'s combat circle, both only while
+    /// `DATA_007252`'s blink phase is on.
+    fn draw_targeter_cursor(&mut self, view: ViewMode) {
+        if !self.blink || self.gunsight_mount(view).is_none() {
+            return;
+        }
+        let Some(cursor) = self.targeter else {
+            return;
+        };
+        match cursor {
+            targeter::Cursor::Navigation => {
+                let value = self.palette[usize::from(targeter::NAVIGATION_COLOUR)];
+                let ((x, y), half) = targeter::CURSOR_BOX;
+                for (from, to) in targeter::box_edges(x, y, half) {
+                    self.line_value(from, to, value);
+                }
+            }
+            targeter::Cursor::Combat => {
+                let value = self.palette[usize::from(targeter::COMBAT_COLOUR)];
+                let ((x, y), radius) = targeter::CURSOR_CIRCLE;
+                for (px, py) in targeter::circle((x, y), radius) {
+                    if (0..320).contains(&px) {
+                        self.frame[py as usize * 320 + px as usize] = value;
+                    }
+                }
+            }
+        }
+    }
+
+    /// F1100/F1113's targeting tunnels: four nested squares on the line from the
+    /// view centre to the locked target, in the target's colour.
+    fn draw_target_tunnels(&mut self) {
+        let Some(tunnels) = self.tunnels else {
+            return;
+        };
+        let value = self.palette[usize::from(tunnels.colour)];
+        for boxed in targeter::tunnels(tunnels) {
+            for (from, to) in targeter::box_edges(boxed.x, boxed.y, boxed.half) {
+                self.line_value(from, to, value);
+            }
+        }
+    }
+
+    /// F272's scanner orientation overlay: secondary 254..261 at (101,175),
+    /// selected by `(DATA_008933 >> 9) & 7`. The console panel's rings are the
+    /// background; the contacts are drawn over this globe.
+    fn draw_scanner_overlay(&mut self) {
+        let orientation = self.scanner.as_ref().map_or(0, |view| view.orientation & 7);
+        if let Some(Some(overlay)) = self.icons.get(254 + orientation) {
+            overlay.blit(&mut self.indexed, 101, 175);
+        }
+    }
+
+    /// F274/F275's contacts. The console is composed before the view, so the
+    /// stalks are painted into the finished frame here: an up stalk may cross
+    /// y 158 into the view, which the original allows while the ship module is
+    /// active (`DATA_008630` negative, clip flag 0).
+    fn draw_scanner_contacts(&mut self) {
+        // F272 only calls F274 when `ship+0xca & 4`: the scanner is fitted.
+        if self.systems.ca & 4 == 0 {
+            return;
+        }
+        let Some(view) = self.scanner.clone() else {
+            return;
+        };
+        for mark in view.marks() {
+            self.draw_scan_mark(mark);
+        }
+    }
+
+    /// F1569's stalk: two 2-pixel-wide bars above (positive `stalk`, F1570) or
+    /// below (negative, F1571) the contact. The downward bars use F1628, which
+    /// leaves the scanner grid's colours 0x28..0x2b untouched.
+    fn draw_scan_mark(&mut self, mark: scanner::Mark) {
+        let (x, y) = (mark.x, mark.y);
+        // Both stalk directions clamp the bottom to row 198 (0xc6).
+        let bottom = |value: i32| value.min(0xc6);
+        if mark.stalk >= 0 {
+            let (top, low) = (y - mark.stalk - 1, bottom(y));
+            self.scan_box(x - 1, top, x, low, mark.colour, false);
+            self.scan_box(x + 1, top, x + 2, low, mark.colour, false);
+        } else {
+            let (top, low) = (y, bottom(y - mark.stalk + 1));
+            self.scan_box(x - 1, top, x, low, mark.colour, true);
+            self.scan_box(x + 1, top, x + 2, low, mark.colour, true);
+        }
+    }
+
+    /// F1627/F1628's box fill: inclusive, clipped to the logical screen, with
+    /// F1628's grid mask when `masked`.
+    fn scan_box(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, colour: u8, masked: bool) {
+        if y0 > y1 {
+            return;
+        }
+        let value = self.palette[usize::from(colour)];
+        for y in y0.max(0)..=y1.min(199) {
+            for x in x0.max(0)..=x1.min(319) {
+                let at = y as usize * 320 + x as usize;
+                if masked && self.indexed[at] & 0xfc == 0x28 {
+                    continue;
+                }
+                self.frame[at] = value;
+            }
         }
     }
 
@@ -743,12 +869,19 @@ impl Screen {
     fn draw_target_hud(&mut self) {
         if let Some(target) = self.target_hud {
             let unit = if target.au { "AU" } else { "km" };
+            // F1100's fixed spot for an off-view target is the caller's X/Y
+            // (50,50 for the navigation target, 50,60 for the combat target);
+            // the on-view number sits at the target minus 5.
             let (x, y, text) = if target.behind {
-                (50, 50, format!("Target {} {} Behind", target.value, unit))
+                (
+                    target.x,
+                    target.y,
+                    format!("Target {} {} Behind", target.value, unit),
+                )
             } else if target.offscreen {
                 (
-                    50,
-                    50,
+                    target.x,
+                    target.y,
                     format!("Target Out of Range ({} {})", target.value, unit),
                 )
             } else {
@@ -1167,13 +1300,14 @@ impl Screen {
         self.panel.blit(&mut self.indexed, 0, 158);
         let mut views = views;
         views.lock_external = self.lock_external;
-        if state.mode != Mode::Docked {
-            self.draw_gauges();
-        }
         let view = views.mode;
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
         if state.mode != Mode::Docked {
+            // F272's order: primary 43 panel, the scanner globe (secondary
+            // 254..261), then F261's buttons, then F270's gauges. F274's
+            // contacts come last, after the view (see `draw_scanner_contacts`).
+            self.draw_scanner_overlay();
             // F261: the visible `DATA_005100` records in index order. The page
             // (screen buttons, meter, view row, lamps or the F1120 equipment
             // page) is derived first; nothing outside the table is drawn.
@@ -1190,6 +1324,7 @@ impl Screen {
                     icon.blit(&mut self.indexed, button.x, button.y);
                 }
             }
+            self.draw_gauges();
         }
         for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
             *pixel = self.palette[usize::from(*index)];
@@ -1336,34 +1471,17 @@ impl Screen {
             } else {
                 self.text(8, 16, "STATION BEHIND / OFF VIEW", 18);
             }
-            // F1111's fixed gunsight (bitmap 97) and F1112's velocity marker
-            // (bitmap 98, front view only). The port's own lock brackets stay.
+            // F1100's targeting tunnels (F1113/F1114), then F1111's fixed
+            // gunsight (bitmap 97) and its blinking targetter cursor, then
+            // F1112's velocity marker (bitmap 98, front view only).
+            self.draw_target_tunnels();
             self.draw_gunsight(view);
             if view == ViewMode::Front {
                 self.draw_velocity_marker(state, &camera);
             }
-            // The locked body: corner brackets around it, yellow while the autopilot is
-            // flying to it.
-            if let Some(mark) = self.target_mark {
-                let (x, y, r) = (mark.x, mark.y, mark.radius.min(40));
-                let colour = if mark.engaged { 18 } else { 17 };
-                let arm = (r / 2).max(4);
-                for (sx, sy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
-                    let corner = (x + sx * r, y + sy * r);
-                    self.line(corner, (corner.0 - sx * arm, corner.1), colour);
-                    self.line(corner, (corner.0, corner.1 - sy * arm), colour);
-                }
-            }
-            // Prototype contact on the original scanner artwork, not original scanner math.
-            if !state.system_flight {
-                let relative = station_relative(state);
-                let scale = state.distance().max(200.0);
-                let sx = (153.0 + relative[0] / scale * 38.0) as i32;
-                let sy = (188.0 - relative[2] / scale * 6.0) as i32;
-                self.pixel(sx, sy, 17);
-                self.pixel(sx - 1, sy, 17);
-                self.pixel(sx + 1, sy, 17);
-            }
+            // F274/F275's scanner contacts own the console's scanner area and
+            // may reach over its top row into the view.
+            self.draw_scanner_contacts();
         }
         // The original HUD now owns the top rows and the lower left: the port's
         // top bar, controls button, SPEED line and status/map/autopilot block are
@@ -2347,15 +2465,6 @@ pub fn body_label_positions(labels: &[BodyLabel], camera: &Camera) -> Vec<(Strin
                 .then(|| (label.name.clone(), x + 1, y))
         })
         .collect()
-}
-
-fn station_relative(state: &Flight) -> [f64; 3] {
-    let p = state.position.map(|v| -v);
-    [
-        p[0] * state.yaw.cos() - p[2] * state.yaw.sin(),
-        p[1],
-        p[0] * state.yaw.sin() + p[2] * state.yaw.cos(),
-    ]
 }
 
 /// Original model table slot drawn as the flight station.

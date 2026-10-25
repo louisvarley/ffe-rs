@@ -1837,6 +1837,13 @@ impl Navigator {
         (drift != [0; 3]).then(|| std::array::from_fn(|k| ship[k] + drift[k]))
     }
 
+    /// The body whose frame the ship is in (F1678's `player+0x56`), as chosen by
+    /// the last [`Navigator::follow`]. The scanner's same-frame filter and the
+    /// player's frame body use it.
+    pub fn frame(&self) -> Option<usize> {
+        self.frame
+    }
+
     fn choose_frame(&self, ship: [i64; 3]) -> Option<usize> {
         if let Some(t) = self.target {
             if let Some(body) = self.bodies.get(t) {

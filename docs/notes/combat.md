@@ -20,11 +20,12 @@ the 320x158 view centre (160,79) one pixel off. It is the original's art and low
 palette, not four port lines. It draws in front, rear and both turret views when
 that view has a laser; **never** in external or combat.
 
-`F1111` then draws the locked-target box (`F1113`, when `DATA_007246` and
-`DATA_007252` are set) and a circle at `(0x9f, 0x4f)`
-(`FUNC_001612_DrawCircle`, when `DATA_007247` and `DATA_007252`). Those are the
-targeter/combat-computer marks, not the fixed gunsight; the port's own lock
-brackets stand in for them (they need the combat targeter and blink state).
+`F1111` then draws the blinking auto-targetter cursor while `DATA_007252` is
+set: `DATA_007246` (navigation, colour 0x11) is a 9x9 box at (160,79) drawn by
+`F1113` with size 4; `DATA_007247` (combat, colour 0x10) is a circle of radius
+six at (159,79) (`FUNC_001612_DrawCircle`). They are armed targetter modes, not
+lock marks; the locked target's display is `F1100`'s targeting tunnels
+(`docs/notes/scanner.md`).
 
 ### 1.2 The velocity marker (`FUNC_001112`, `ffe.asm:81996`) — not a target X
 
@@ -291,8 +292,11 @@ stands in) and is removed after `DEATH_SECONDS`.
 - **Hit effects/explosions.** `F939`'s particles, `F942`'s death effect and
   the `F952` explosion are not ported; only the model 156 muzzle cone is drawn.
 - **Sound cues** (0x0a/0x0b/0x1c/0x1d/0x14) are not played.
-- **The combat targeter** (`DATA_007246/247`, F1113/F1114 boxes and circle,
-  blink `DATA_007252`) is not ported; the port's autopilot brackets remain.
+- **The combat targeter** is ported (`docs/notes/scanner.md`): F1100/F1113's
+  targeting tunnels, F1114's boxes, F1111's blinking F1612 circle/box cursor
+  and the `DATA_007252` game-second blink. The *arming* rules (`t` with the
+  target computer, F1010/F1060/F1062) are not wired because the port has no
+  target-computer equipment; `T` still cycles locks (an existing deviation).
 - **Upper-palette colour.** F1100 uses colour 95 and the HUD uses the runtime
   upper palette, which the port approximates with the fixed low palette.
 - The port's own status block at y119..157 covers the lower centre where the
@@ -301,5 +305,6 @@ stands in) and is removed after `DEATH_SECONDS`.
 
 **Owner decisions:** NPC traffic is implemented at the traffic level (see
 `docs/notes/npc.md`); decide whether to port the full AI and ship fire, police
-response/wanted status, F942's model-155 explosion, the combat targeter, and
-missiles. The port's lock brackets remain a deviation from F1113/F1114.
+response/wanted status, F942's model-155 explosion, the target-computer
+equipment and auto-targetter arming, and missiles. F1100's per-target text
+colour and the arrow forms remain a small deviation.

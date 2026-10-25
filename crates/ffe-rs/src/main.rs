@@ -2603,6 +2603,64 @@ fn run() -> Result<(), String> {
                     })
                 })
         };
+        // F272/F274/F275: the scanner's contacts and globe. Bodies are the
+        // original's live objects (absolute system millimetres, with their
+        // parent frame); NPC traffic is in the player's frame by construction.
+        // F275 skips starports (`+0x14c` bit 0x20) and draws each contact's
+        // colour from the model statistics' mass word.
+        let mass = |model: u32| {
+            scene
+                .as_ref()
+                .and_then(|scene| scene.ship_stats(model))
+                .map(|stats| stats.mass)
+        };
+        screen.scanner = Some(match nav.as_ref() {
+            Some(nav) => {
+                let mut contacts: Vec<ffe_rs::scanner::Contact> = nav
+                    .bodies
+                    .iter()
+                    .enumerate()
+                    .map(|(index, body)| ffe_rs::scanner::Contact {
+                        position: body.position,
+                        frame: body.parent,
+                        body: Some(index),
+                        starport: body.kind == NavKind::Starport,
+                        mass: mass(body.model),
+                    })
+                    .collect();
+                contacts.extend(nav.ships.iter().filter(|ship| ship.alive()).map(|ship| {
+                    ffe_rs::scanner::Contact {
+                        position: ship.position,
+                        frame: nav.frame(),
+                        body: None,
+                        starport: false,
+                        mass: Some(ship.damage.mass),
+                    }
+                }));
+                ffe_rs::scanner::View {
+                    position: player_at,
+                    axes: ship_axes(&state),
+                    frame: nav.frame(),
+                    orientation: ffe_rs::scanner::orientation(state.yaw),
+                    contacts,
+                }
+            }
+            // The prototype's station at the origin (the sandbox has no
+            // navigator): the same contact F275 would project.
+            None => ffe_rs::scanner::View {
+                position: player_at,
+                axes: ship_axes(&state),
+                frame: None,
+                orientation: ffe_rs::scanner::orientation(state.yaw),
+                contacts: vec![ffe_rs::scanner::Contact {
+                    position: [0; 3],
+                    frame: None,
+                    body: None,
+                    starport: false,
+                    mass: None,
+                }],
+            },
+        });
         // The Graphic Detail page's space colour and the Others page's stars
         // option (the original's DATA_008815..817 / DATA_009019).
         screen.sky = prefs::space_colour_rgb(prefs.space_colour);
@@ -2613,6 +2671,7 @@ fn run() -> Result<(), String> {
         // and takes the fixed (50,50) text, as F1100 does.
         screen.target_hud = None;
         screen.target_damage = None;
+        screen.tunnels = None;
         if state.mode == ffe_rs::flight::Mode::Flight {
             let target = if let Some(ship) = locked_ship {
                 Some((ship.position, Some(ship)))
@@ -2636,9 +2695,12 @@ fn run() -> Result<(), String> {
                 ];
                 let behind =
                     forward[0] * toward[0] + forward[1] * toward[1] + forward[2] * toward[2] <= 0.0;
+                // The navigation target (player+0xec) takes F1100's (50,50);
+                // the combat target (player+0xed) (50,60).
+                let navigation = ship.is_none() && locked_ship.is_none() && engaged.is_some();
                 let (x, y, offscreen) = match screen.target_mark {
                     Some(mark) => (mark.x, mark.y, false),
-                    None => (50, 50, !behind),
+                    None => (50, if navigation { 50 } else { 60 }, !behind),
                 };
                 screen.target_hud = Some(ffe_rs::screen::TargetHud {
                     x,
@@ -2648,6 +2710,29 @@ fn run() -> Result<(), String> {
                     behind,
                     offscreen,
                 });
+                // F1100/F1113's targeting tunnels: "Show targeting tunnels"
+                // (DATA_009024) and, for a ship with a statistics block,
+                // "Allow targeting tunnels for ships" (DATA_009025). The nav
+                // target (player+0xec) is colour 0x11, the combat target
+                // (player+0xed) 0x10. External view (4) and the combat computer
+                // (6) skip them; the port has no combat view.
+                if prefs.others[6]
+                    && (ship.is_none() || prefs.others[7])
+                    && views.mode != ViewMode::External
+                {
+                    if let Some(mark) = screen.target_mark {
+                        screen.tunnels = Some(ffe_rs::targeter::Tunnels {
+                            x: mark.x,
+                            y: mark.y,
+                            base: ffe_rs::targeter::tunnel_base(mantissa),
+                            colour: if navigation {
+                                ffe_rs::targeter::NAVIGATION_COLOUR
+                            } else {
+                                ffe_rs::targeter::COMBAT_COLOUR
+                            },
+                        });
+                    }
+                }
                 if let Some(ship) = ship {
                     screen.target_damage = Some(ffe_rs::screen::TargetDamage {
                         hull: ship.hull_per_mille(),
@@ -2657,6 +2742,10 @@ fn run() -> Result<(), String> {
                 }
             }
         }
+        // DATA_007252: F1023 takes `DATA_008799 / 0xc22e` (accelerated game
+        // tics / tics per second) and keeps its low bit, so the targetter cursor
+        // blinks once per game second.
+        screen.blink = ((nav.as_ref().map_or(elapsed, |nav| nav.clock).max(0.0) as u64) & 1) == 1;
         // F1099's player text and the console's lamp/equipment inputs. The
         // equipment bytes have no model yet (they stay zero); the hull falls back
         // to the ship's full mass word and the altitude is the port's explicit

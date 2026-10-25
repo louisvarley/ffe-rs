@@ -74,9 +74,9 @@ ones: help F1 -> H, model viewer F6 -> M, load F9 -> Shift+F5.
 The fixed gunsight now follows F1111 exactly (`docs/notes/combat.md`): bitmap
 97 at (129,48), drawn in any view but external/combat whose mount
 (`ship+0xd2+view`) has a laser. Bitmap 98 is F1112's **velocity marker** in the
-front view, not a target X. The port's autopilot target stays marked with its
-own brackets; the original's targeter boxes (`DATA_007246/247`) are still
-unported.
+front view, not a target X. The locked target is now marked by F1100/F1113's
+targeting tunnels and F1111's blinking auto-targetter cursor, not by the port's
+own brackets (`docs/notes/scanner.md`).
 
 The right-hand console buttons (hyperspace 0x0f, text labels 0x10 and the
 navigation computer 0x11) are recorded in `labels.md`; they share the console

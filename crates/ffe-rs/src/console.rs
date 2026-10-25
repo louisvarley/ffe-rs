@@ -281,7 +281,9 @@ impl Default for ShipSystems {
             c7: 0,
             c8: 0,
             c9: 0,
-            ca: 0,
+            // Bit 2 is F272's scanner gate (`ship+0xca & 4`); the new-game
+            // Eagle carries the standard scanner, as every flyable ship does.
+            ca: 0x04,
             cb: 0,
             ef: 0,
             slots: [0; 10],
