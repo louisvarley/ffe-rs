@@ -35,13 +35,27 @@ mass 16) reaches 18.75 light years.
 
 ## The playable
 
-- The galaxy list (G) shows each system's distance and the fuel it needs, `TOO FAR` or `NEEDS n T`; H or Enter jumps. The
-  jump checks range and fuel, burns the fuel, moves the game clock by the jump time (markets drift, planets move) and
-  arrives off the new system's first planet. A new game has no fuel: buy military fuel at the station's market.
+- The galaxy map (G) shows each star's distance and the fuel it needs, `TOO FAR` or `NEEDS n T`; H or Enter jumps. The
+  map's selection (`F840`'s nearest star to the centre, `F832`'s `+0x25c..0x264`/`+0x27c`) is stored in
+  `Navigator::destination`, **not** a body lock, and survives closing the map: F908's event 1 is the console's
+  hyperspace record **0x0f**, key **H** (`docs/notes/labels.md`), so H jumps with the map open or closed.
+- F908's gates are the port's: mode 0/0x24 (not landed, no take-off in progress), `DATA_008867 >= 0xb71b00` (the
+  `Navigator::altitude` floor), and F903's range/fuel/class. A refusal uses the map's own strings
+  (`Fuel Required: n`, `Insufficient Fuel (n required)`, `Out of Range`, `DATA_007004..7006`).
+- The jump checks range and fuel, burns the fuel (F901's hydrogen, or military fuel leaving radioactive waste), moves the
+  game clock by the jump time (markets drift, planets move) and arrives off the new system's first planet. F909 clears
+  the old system's target and combat locks, missiles, hit particles/explosions/debris, traffic, station markets, docking
+  and take-off state, then F905 regenerates the system's bodies; the scanner and the next map are rebuilt from those.
+  A new game has no fuel: buy military fuel at the station's market.
 - The test systems (Test-1 to Test-4) now have codes of real sectors near Sol, so they have positions of their own.
-- Not here: the hyperspace sequence itself (F908-F910: the countdown, the jump scene, misjumps (F910, the 1 in 256
-  chance) and the arrival procedure), the galaxy map screen, and the systems beyond the 12 hand-coded ones and four test
-  ones: their positions are known (`system_position`) but the playable lists only those 16.
+- Not here: the jump scene itself (F908's module mode 4, the `+0x106` visual timeout and F909's F148/F912 drawing),
+  misjumps (F910, the 1 in 256 chance), the galaxy map's mouse hover pick, and the systems beyond the 12 hand-coded
+  ones and four test ones: their positions are known (`system_position`) but the playable lists only those 16. F909
+  switches the world immediately, so the port's arrival is the same state without the drawn jump.
+- Verification: `the_map_destination_survives_the_map_and_jumps` (destination survives the map, altitude/range/fuel
+  gates, arrival locks/effects cleared), `f901_burns_the_hold_and_leaves_military_waste`, and
+  `the_map_destination_and_jump_frames` (cached map frame, fuel line, jump and arrival frame/series under
+  `FFE_SHOT_DIR`). `verify-hyperspace.py` still matches all 8,192 `--hyperspace` cases.
 
 ## System names (F830, cache v22)
 

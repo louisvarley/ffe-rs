@@ -50,7 +50,8 @@ right button is the steering hold. The left button remains the console pointer
 | Launch from a station or landed state / toggle labels in flight | **L** |
 | System map | **Tab** |
 | Navigation computer (stations and starports) | **N** |
-| Galaxy map | **G** |
+| Galaxy map: choose the star at the centre as the jump destination | **G** |
+| Hyperspace to the chosen destination (also after G closes) | **H** |
 | Re-centre the galaxy map | **C** |
 | Time acceleration 1x/10x/100x/1000x/10000x | **6 7 8 9 0** (or the meter) |
 | Pause | **P** (or the meter) |
@@ -60,6 +61,7 @@ right button is the steering hold. The left button remains the console pointer
 | Status page | **F2** |
 | Original flight model on/off | **O** |
 | Preference pages | **Escape** |
+| Help page | **?** |
 | Save / load newest snapshot | **F5** / **Shift+F5** |
 | Screenshot / model viewer / model lab | **F11** / **F12** / **Shift+F12** |
 | Change ship | **Page Up / Page Down** |
@@ -87,7 +89,7 @@ only, right button held, ship or external view).
 | Mouse steering | none (the right button does not steer) |
 
 Every other action in the Classic table above is shared: Space, M, T/Shift+T,
-K, Backspace, D, L, Tab, N, G, C, 6-0, P, F1/F6-F9, F2, O, Escape, F5,
+K, Backspace, D, L, Tab, N, G, H, C, 6-0, P, F1/F6-F9, F2, O, Escape, F5,
 F11/F12, Page Up/Down, the docked keys and the left-button console pointer.
 In the external view the arrows belong to the camera in both presets; Modern has
 no ship steering there, while Classic's keys and right-button mouse still steer.

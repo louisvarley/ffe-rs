@@ -954,8 +954,9 @@ fn run() -> Result<(), String> {
             message = note.to_owned();
         }
         if active {
-            // F1 is the original's view key; help moves to H.
-            if pressed(Key::H) && nav.as_ref().is_none_or(|nav| nav.view != NavView::Galaxy) {
+            // F1 is the original's view key and H is the hyperspace key, so the
+            // port's help page is `?` (Slash).
+            if pressed(Key::Slash) {
                 help = !help;
                 scenarios = false;
                 model_lab = None;
@@ -1121,9 +1122,30 @@ fn run() -> Result<(), String> {
                         map_drag = None;
                     }
                 }
+                // F840/F832: the star nearest the map's centre is the jump
+                // destination. It is stored in the navigator (the original's
+                // `+0x25c..0x264`/`+0x27c`), not as a body lock, so `H` still jumps
+                // after the map closes. A centre with no star clears it (F837).
+                if let (Some(map), Some(tables)) = (galaxy.as_mut(), sector_tables.as_ref()) {
+                    map.update_selection(tables);
+                    match map.selected.as_ref() {
+                        Some(selected) => nav.set_destination(selected.code, selected.position),
+                        None => nav.clear_destination(),
+                    }
+                } else if nav.view == NavView::Galaxy {
+                    // No 3D map (a cache without the sector tables): the systems
+                    // list's selected row is the destination.
+                    match (
+                        nav.system_code(nav.selected),
+                        nav.system_position(nav.selected),
+                    ) {
+                        (Some(code), Some(position)) => nav.set_destination(code, position),
+                        _ => nav.clear_destination(),
+                    }
+                }
                 let mut hyperspace = false;
                 if console_click == Some(Click::Hyperspace) {
-                    if nav.view == NavView::Galaxy {
+                    if nav.destination.is_some() {
                         hyperspace = true;
                     } else {
                         message =
@@ -1169,8 +1191,16 @@ fn run() -> Result<(), String> {
                             }
                         }
                     }
-                    if pressed(Key::H) && nav.view == NavView::Galaxy {
-                        hyperspace = true;
+                    // F908's event 1 / console record 0x0f: `H` jumps to the stored
+                    // destination at any flight time, with or without the map open.
+                    if pressed(Key::H) {
+                        if nav.destination.is_some() {
+                            hyperspace = true;
+                        } else {
+                            message =
+                                "No hyperspace destination: open the map (G) and choose a system."
+                                    .to_owned();
+                        }
                     }
                     if nav.view == NavView::Galaxy && enter && click_point.is_none() {
                         hyperspace = true;
@@ -1189,29 +1219,17 @@ fn run() -> Result<(), String> {
                                     .with_time_acceleration(acceleration),
                             );
                         }
-                        if hyperspace && galaxy.is_some() {
-                            // The map's selection must be a system the game has bodies for.
-                            let entry = galaxy
-                                .as_ref()
-                                .and_then(|map| map.selected.as_ref())
-                                .and_then(|selected| nav.entry_for_code(selected.code));
-                            match entry {
-                                Some(index) => nav.selected = index,
-                                None => {
-                                    hyperspace = false;
-                                    message = "Unexplored system: only the systems on offer can be entered (centre one of them)."
-                                        .to_owned();
-                                }
-                            }
-                        }
                         if hyperspace {
-                            let index = nav.selected;
-                            match nav.hyperspace(&cache, index) {
+                            match nav.hyperspace_to_destination(&cache) {
                                 Ok(jumped) => {
                                     if let Some(model) = original.as_mut() {
                                         model.teleport(jumped.arrival);
                                     }
-                                    burn_fuel(&mut state, nav.drive, jumped.fuel);
+                                    ffe_rs::navigation::burn_fuel(
+                                        &mut state.hold,
+                                        nav.drive,
+                                        jumped.fuel,
+                                    );
                                     let forward = ship_axes(&state)[2];
                                     nav.spawn_traffic(&cache, jumped.arrival, forward);
                                     // F908's `0x21`; F656's song 15 when the
@@ -2256,6 +2274,12 @@ fn run() -> Result<(), String> {
                 match step_result {
                     Ok(contact) => {
                         model.apply(&mut state);
+                        // F1033's `DATA_008867`: the altitude F908 tests before a
+                        // hyperspace jump. With no contact (free space) the port
+                        // leaves it at the original's "no surface" maximum.
+                        if let Some(nav) = nav.as_mut() {
+                            nav.altitude = contact.as_ref().map_or(i32::MAX, |c| c.altitude());
+                        }
                         // F1021's rough landing (`0x32`) then F1047's view frame
                         // (`0x34`): the ship is settled, its motion is F1042's
                         // zero and the surface view is the flight view from there.
@@ -3682,7 +3706,7 @@ fn run() -> Result<(), String> {
             screen.overlay(
                 "PAUSED",
                 &[
-                    "P RESUMES. H HELP. F2 STATUS PAGE.",
+                    "P RESUMES. ? HELP. F2 STATUS PAGE.",
                     "FOCUS LOSS PAUSES WITHOUT CATCH-UP.",
                 ],
             );
@@ -3791,27 +3815,6 @@ fn drive_state(
         class,
         fuel: i32::from(state.hold.get(slot).copied().unwrap_or(0)),
     })
-}
-
-/// Burn the fuel of a jump from the hold: hydrogen, or military fuel which leaves the same
-/// tonnes of radioactive waste (F903).
-fn burn_fuel(
-    state: &mut ffe_rs::flight::Flight,
-    drive: Option<ffe_rs::navigation::DriveState>,
-    tonnes: i32,
-) {
-    let Some(drive) = drive else { return };
-    state.hold.resize(ffe_core::market::NAMES, 0);
-    let tonnes = u16::try_from(tonnes).unwrap_or(0);
-    if drive.class >= ffe_core::hyperspace::MILITARY_CLASS {
-        let slot = &mut state.hold[ffe_core::hyperspace::MILITARY_FUEL];
-        *slot = slot.saturating_sub(tonnes);
-        let waste = &mut state.hold[ffe_core::hyperspace::RADIOACTIVES];
-        *waste = waste.saturating_add(tonnes);
-    } else {
-        let slot = &mut state.hold[ffe_core::hyperspace::HYDROGEN];
-        *slot = slot.saturating_sub(tonnes);
-    }
 }
 
 /// The models a generated station can have (F892's tables): their docking faces

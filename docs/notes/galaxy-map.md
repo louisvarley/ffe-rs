@@ -72,8 +72,15 @@ offset in 512 units), within 32; it is looked for again when the centre moves.
 
 The console shows the date (green), then `name Dist. d light years`, a line break, the star's type text (`0x8488 + class`, with
 `0x8498 + n` before it for multiple stars) and `: ` and the system's description (F869's first dword, a `0x84xx` string); the
-corner shows `Sector: x,y` (relative to Sol's `0x1718, 0x1524`) and the fuel line (F828: `Fuel Required: n`, `Insufficient Fuel`,
-`Out of Range`).
+corner shows `Sector: x,y` (relative to Sol's `0x1718, 0x1524`) and the fuel line (F828's strings `DATA_007004..7006`:
+`Fuel Required: n` when the drive can reach it, `Insufficient Fuel (n required)` when the hold is short, `Out of Range` when
+the drive cannot). `GalaxyMap::fuel_text` picks them from `Report::{result, fuel_needed}` exactly as F828's sign tests do.
+
+The selection is the hyperspace destination: F832 stores its position, code and F833 distance (`+0x25c..0x264`, `+0x27c`,
+`+0x26c`), and F908's console record 0x0f (key `H`) jumps to it. It is not a body lock; the port stores it as
+`Navigator::destination` and clears it when F840 finds no star near the centre or when F909 arrives. The marker (`0xa9`) is
+only its display. A click on the map is not a selection in the original (the centre picks), so the port ignores it; `H` works
+after the map closes, when the original's console button is still live.
 
 ## Verification
 
@@ -88,5 +95,6 @@ corner shows `Sector: x,y` (relative to Sol's `0x1718, 0x1524`) and the fuel lin
 
 ## Not done
 
-The hyperspace jump sequence (F908-F910), the details page (F842) and picture mode (F844-F849), the string engine's templates
-(the fuel line's number is plain), the textured text colour, the mouse's hover pick of a star, and the lit-sphere branch of F1700.
+The drawn hyperspace jump scene (F908's mode 4/F909's F148/F912; the destination, gates and arrival are ported), the details
+page (F842) and picture mode (F844-F849), the string engine's templates (the fuel line's number is plain), the textured text
+colour, the mouse's hover pick of a star, and the lit-sphere branch of F1700.

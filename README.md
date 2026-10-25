@@ -69,7 +69,8 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 
 | Action | Binding |
 |---|---|
-| Help / named reset scenarios / input preset | H / F2 / F3 |
+| Help / named reset scenarios / input preset | ? / F2 / F3 |
+| Systems map (choose a star with the centre) / hyperspace to the chosen star | G / H |
 | Preference pages (graphic detail, space colour, sound, others, maps, port options) | Escape |
 | Views (as the original): cycle / front / rear / turret / external; or click the console view icons (any window size) | F1 / F6 / F7 / F8 / F9 |
 | External view: turn camera; zoom out / in (both of a pair resets) | arrows; + / - |
@@ -205,7 +206,7 @@ The gameplay cube stays labelled synthetic until those are implemented.
 
 ### Short owner playtest (about 3 minutes)
 
-1. **Start and trade:** run the command above; F1 closes Help. Press B:
+1. **Start and trade:** run the command above; ? closes Help. Press B:
    credits **1000 -> 990**, cargo **0 -> 1**. Press N: **999**, cargo **0**.
    Look for the original proportional text and grey/red console at the bottom.
 2. **Launch and fly:** L launches. Briefly hold W (about 0.4 seconds) to
@@ -219,7 +220,7 @@ The gameplay cube stays labelled synthetic until those are implemented.
    Alignment must be within about 18 degrees; unsafe close approaches reset
    the ship with an explicit warning, not damage/death.
 4. **Persistence:** while docked, B buys one; F5 saves. Quit, launch again,
-   F1 closes Help, F9 restores the saved credits/cargo. F2 then 1/2/3 resets
+   ? closes Help, F9 restores the saved credits/cargo. F2 then 1/2/3 resets
    the live scenario, never deletes saves.
 
 Saves are immutable numbered JSON snapshots under local `saves/`. F9 loads the

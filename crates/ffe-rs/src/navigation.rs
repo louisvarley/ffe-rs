@@ -706,6 +706,13 @@ pub struct Navigator {
     /// The body the player has locked on (clicked in the view or cycled to): what the
     /// autopilot button flies to.
     pub locked: Option<usize>,
+    /// The system the galaxy map has chosen (the original's `+0x268` selection and
+    /// `+0x27c` system code). It is a hyperspace destination, not a body lock: `H`
+    /// jumps there, even after the map closes.
+    pub destination: Option<Destination>,
+    /// The player's altitude above the nearest body (`DATA_008867`, millimetres).
+    /// F908 refuses a jump below [`HYPERSPACE_ALTITUDE`].
+    pub altitude: i32,
     /// The station the player is docked at (or last docked at).
     pub docked: Option<usize>,
     /// Each station's traffic record (F654 and friends), made when first needed.
@@ -779,6 +786,22 @@ pub struct DriveState {
     pub fuel: i32,
 }
 
+/// The star the galaxy map has selected, as the original stores it: the system code
+/// (`+0x27c`) and its F856 position (`+0x25c..0x264`). It is a jump destination, not
+/// a body lock. Its distance is measured from the player's current system when asked,
+/// as F832 does when the selection changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Destination {
+    /// The system code: sector x/y and the star's number in bits 26..31.
+    pub code: u32,
+    /// The star's position, 16.16 fixed point (F856).
+    pub position: [i32; 3],
+}
+
+/// F908's altitude floor (`DATA_008867 >= 0xb71b00`): a ship deeper than this in a
+/// planet's atmosphere cannot hyperspace.
+pub const HYPERSPACE_ALTITUDE: i32 = 0x00b7_1b00;
+
 /// A hyperspace jump made: where the ship arrives and what it cost.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Jumped {
@@ -789,6 +812,24 @@ pub struct Jumped {
     pub fuel: i32,
     /// Game days the jump took.
     pub days: f64,
+}
+
+/// Burn the fuel of a jump from the hold, as F901 does: hydrogen for a normal
+/// drive, military fuel for class 10 and up, which leaves the same tonnes of
+/// radioactive waste. The caller passes the hold and the drive the jump used.
+pub fn burn_fuel(hold: &mut Vec<u16>, drive: Option<DriveState>, tonnes: i32) {
+    let Some(drive) = drive else { return };
+    hold.resize(ffe_core::market::NAMES, 0);
+    let tonnes = u16::try_from(tonnes).unwrap_or(0);
+    if drive.class >= ffe_core::hyperspace::MILITARY_CLASS {
+        let slot = &mut hold[ffe_core::hyperspace::MILITARY_FUEL];
+        *slot = slot.saturating_sub(tonnes);
+        let waste = &mut hold[ffe_core::hyperspace::RADIOACTIVES];
+        *waste = waste.saturating_add(tonnes);
+    } else {
+        let slot = &mut hold[ffe_core::hyperspace::HYDROGEN];
+        *slot = slot.saturating_sub(tonnes);
+    }
 }
 
 /// A station's market with the stream its daily drift draws from and the game day it
@@ -995,6 +1036,8 @@ impl Navigator {
             selected: 0,
             target: None,
             locked: None,
+            destination: None,
+            altitude: i32::MAX,
             docked: None,
             traffic: HashMap::new(),
             ships: Vec::new(),
@@ -2197,6 +2240,42 @@ impl Navigator {
         self.entries.iter().position(|e| e.params.code == code)
     }
 
+    /// The system code of an entry (the galaxy list's row as a destination).
+    pub fn system_code(&self, index: usize) -> Option<u32> {
+        Some(self.entries.get(index)?.params.code)
+    }
+
+    /// The galaxy map has chosen a star: store it as F832 stores the destination in
+    /// `+0x25c..0x264`/`+0x27c`. This does not lock a body of the current system.
+    pub fn set_destination(&mut self, code: u32, position: [i32; 3]) {
+        self.destination = Some(Destination { code, position });
+    }
+
+    /// The map found no star near its centre (F840 clears `+0x268`): no jump target.
+    pub fn clear_destination(&mut self) {
+        self.destination = None;
+    }
+
+    /// The system the destination code names, when the playable has its bodies.
+    pub fn destination_entry(&self) -> Option<usize> {
+        self.entry_for_code(self.destination?.code)
+    }
+
+    /// The distance to the stored destination in the drive's units (F832's `+0x26c`),
+    /// measured from the current system so it is right after a jump.
+    pub fn destination_distance(&self) -> Option<i32> {
+        let destination = self.destination?;
+        Some(star_distance(
+            self.system_position(self.current)?,
+            destination.position,
+        ))
+    }
+
+    /// F899 for the stored destination: the map's fuel line.
+    pub fn destination_report(&self) -> Option<Report> {
+        self.report_for(self.destination_distance()?)
+    }
+
     /// What the hyperdrive says about a jump of `distance` (F899: nothing is burnt).
     pub fn report_for(&self, distance: i32) -> Option<Report> {
         let drive = self.drive?;
@@ -2261,6 +2340,11 @@ impl Navigator {
         {
             return Err("Launch before a hyperspace jump.".to_owned());
         }
+        // F908: `DATA_008867` must be at least 0xb71b00; a ship in a planet's
+        // atmosphere cannot jump.
+        if self.altitude < HYPERSPACE_ALTITUDE {
+            return Err("Too low for a hyperspace jump.".to_owned());
+        }
         let Some((distance, report)) = self.jump_report(index) else {
             return Err("No hyperdrive data for this ship or system.".to_owned());
         };
@@ -2268,14 +2352,12 @@ impl Navigator {
             return Err("You are already in this system.".to_owned());
         }
         if report.result < 0 {
+            // The galaxy map's own strings (DATA_007005/7006): a fuel shortfall
+            // and a distance beyond the drive are different messages.
             return Err(if report.fuel_needed < 0 {
-                format!(
-                    "Out of range: {} against the drive's {}.",
-                    range_text(distance),
-                    range_text(report.max_range)
-                )
+                "Out of Range".to_owned()
             } else {
-                format!("Not enough fuel: the jump needs {} t.", report.fuel_needed)
+                format!("Insufficient Fuel ({} required)", report.fuel_needed)
             });
         }
         let days = f64::from(report.jump_time.unwrap_or(0)) / 65_536.0;
@@ -2287,6 +2369,21 @@ impl Navigator {
             fuel: report.fuel_needed,
             days,
         })
+    }
+
+    /// F908/F901 for the galaxy map's stored destination. `Err` carries the map's
+    /// own message when the star is not one of the systems on offer.
+    pub fn hyperspace_to_destination(&mut self, cache: &VerifiedCache) -> Result<Jumped, String> {
+        let destination = self
+            .destination
+            .ok_or_else(|| "No hyperspace destination: choose a system on the map.".to_owned())?;
+        match self.entry_for_code(destination.code) {
+            Some(index) => self.hyperspace(cache, index),
+            None => Err(
+                "Unexplored system: only the systems on offer can be entered (centre one of them)."
+                    .to_owned(),
+            ),
+        }
     }
 
     /// Enter system `index` at once (no fuel, no time): the bodies are rebuilt and the arrival
@@ -2301,6 +2398,9 @@ impl Navigator {
         self.target = None;
         self.locked = None;
         self.ship_lock = None;
+        self.missile_lock = None;
+        self.destination = None;
+        self.altitude = i32::MAX;
         // F675: the pirates close to the player are carried through the jump.
         self.persisted = npc::persist(&self.ships, self.player_at);
         self.ships.clear();
@@ -2315,6 +2415,13 @@ impl Navigator {
         self.frame = None;
         self.drift = [0; 3];
         self.memory = Memory::default();
+        // F909 clears the system's objects: ships, missiles, hit particles,
+        // explosions and debris belong to the system that was left.
+        self.effects.clear();
+        self.missiles.clear();
+        self.notice = None;
+        self.carry = 0.0;
+        self.skips = 0;
         let anchor = self
             .bodies
             .iter()
@@ -2322,11 +2429,14 @@ impl Navigator {
             .or_else(|| self.bodies.first())
             .ok_or("empty system")?;
         let off = (standoff(anchor) * 4.0) as i64;
-        Ok([
+        let arrival = [
             anchor.position[0],
             anchor.position[1],
             anchor.position[2] - off,
-        ])
+        ];
+        // F909's F606 places the ship in the new system before its traffic spawns.
+        self.player_at = arrival;
+        Ok(arrival)
     }
 
     /// The bodies the navigation computer lists: 18 a page (two columns of nine, as the
