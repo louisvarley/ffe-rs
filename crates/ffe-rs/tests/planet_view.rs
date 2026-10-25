@@ -787,7 +787,7 @@ fn surface_frame_shows_a_starport() {
     state.axes = Some([right, up_cam, forward]);
     let disc = Disc {
         centre: planet.position.map(|v| v as f64 / UNIT),
-        radius: ffe_rs::navigation::surface_radius(planet),
+        radius: ffe_rs::navigation::surface_radius(planet, false),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
@@ -960,11 +960,11 @@ fn landing_parent_chooses_the_surface_body() {
     assert!(distance(away, planet.position) < planet.radius as f64);
 }
 
-/// The drawn surface and the landing contact share one radius: the model's
-/// outer radius word (`+0x138`, `Body::radius`), not the smaller collision word
-/// (`+0x140`, `inner_radius`). The flight view divides by the same flight unit,
-/// and `landing_body` hands F575 the same outer radius, so a rough landing
-/// settles on the ground the view draws.
+/// The flight view draws the inner (base-sphere) radius, and a settled ship
+/// draws the outer radius word (`+0x138`, `Body::radius`) - the same radius
+/// `landing_body` hands F575. A rough landing therefore settles on the ground
+/// the landed view draws. The approach keeps the inner base so the eye stays
+/// outside the shell.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn surface_and_landing_use_one_radius() {
@@ -989,8 +989,14 @@ fn surface_and_landing_use_one_radius() {
         "a planet's outer radius (drawn surface) is larger than its collision radius"
     );
     assert_eq!(
-        ffe_rs::navigation::surface_radius(planet) * UNIT,
-        planet.radius as f64
+        ffe_rs::navigation::surface_radius(planet, false) * UNIT,
+        planet.inner_radius as f64,
+        "in flight the base sphere is the inner radius"
+    );
+    assert_eq!(
+        ffe_rs::navigation::surface_radius(planet, true) * UNIT,
+        planet.radius as f64,
+        "a settled ship draws the same outer radius the contact uses"
     );
 }
 
@@ -1049,7 +1055,7 @@ fn level_flight_near_the_surface_shows_the_horizon() {
     state.axes = Some([right, up_cam, forward]);
     screen.discs = vec![Disc {
         centre: planet.position.map(|v| v as f64 / UNIT),
-        radius: ffe_rs::navigation::surface_radius(planet),
+        radius: ffe_rs::navigation::surface_radius(planet, false),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
@@ -1206,7 +1212,7 @@ fn landing_reaches_the_surface_state_and_launches_again() {
     let mut screen = Screen::new(&cache).unwrap();
     screen.discs = vec![Disc {
         centre: planet.position.map(|v| v as f64 / UNIT),
-        radius: ffe_rs::navigation::surface_radius(&planet),
+        radius: ffe_rs::navigation::surface_radius(&planet, true),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
@@ -1396,7 +1402,7 @@ fn new_game_landed_surface_view() {
             let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
             Disc {
                 centre: b.position.map(|v| v as f64 / UNIT),
-                radius: ffe_rs::navigation::surface_radius(b),
+                radius: ffe_rs::navigation::surface_radius(b, true),
                 light: b.position.map(|v| -(v as f64) / length.sqrt().max(1.0)),
                 colours: (12, 4),
                 star: b.kind == Kind::Star,

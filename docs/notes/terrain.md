@@ -202,21 +202,20 @@ queues word for word and the 47 faults (45 queue overflows, 2 divisions by zero)
 
 ## The close-range base sphere (ffe-rs flight view)
 
-`Screen::draw_discs` scales a planet's surface axes so their world radius is the body's
-**outer** radius (`+0x138`, the model's radius word). That word is the surface model's
-bounding radius and the radius F1533 gives the object; the smaller `+0x140` is the
-collision radius. F581 queries the same terrain at the outer radius, so the drawn
-ground and a rough landing are now the same sphere: the old inner-radius scale left
-the eye thousands of kilometres above the drawn ground (a rough landing settled at
-0.90 outer against a 0.64-outer drawn base, and the view showed only sky). The
-starport frame confirms the direction: F879 places an open-air starport on the
-terrain at about 0.9 outer (Earth: 7,032 km against 7,810 outer and 4,970 inner).
+In flight `Screen::draw_discs` scales a planet's surface axes so their world radius is the
+body's **inner** radius (`+0x140`): that is the surface model's base sphere, and it keeps
+the eye outside the shell on an approach (Earth: 4,970 km against 7,810 outer). Once the
+ship is settled, `navigation::surface_radius` switches to the **outer** radius (`+0x138`),
+which is the radius F1533 and F581's terrain contact use and where F879 places an open-air
+starport (about 0.9 outer). A rough landing therefore sits on the ground the landed view
+draws; before this, the contact used outer while the view used inner, leaving the eye
+thousands of kilometres above the drawn ground and showing only sky.
 
-At a starport the eye is inside the outer base sphere but above the local terrain.
-F1876's shell has no depth buffer, so the far side would otherwise be painted over
-the sky; `terrain_draw` now drops a final triangle whose outward normal points away
-from an inside eye. F1877's haze ring and sky are also left out when the eye is
-inside the base (the original landed frame clears to the space colour), which keeps
-the ring from covering the landed ground. The old `z > radius` disc filter is gone:
-it removed the body at exactly the range a landing approach reaches. Outside the
-base the haze still spans the outer radius.
+At a starport the eye is inside the outer base sphere but above the local terrain. F1876's
+shell has no depth buffer, so the far side would otherwise be painted over the sky;
+`terrain_draw` drops a final triangle whose outward normal points away from an inside eye
+and skips the low-level horizon cull. F1877's haze ring and sky are also left out when the
+eye is inside the base (the original landed frame clears to the space colour), which keeps
+the ring from covering the landed ground. The old `z > radius` disc filter is gone: it
+removed the body at exactly the range a landing approach reaches. Outside the base the
+haze still spans the outer radius.

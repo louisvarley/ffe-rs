@@ -2848,6 +2848,7 @@ fn run() -> Result<(), String> {
             let length = toward.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0);
             Some(toward.map(|v| v / length))
         });
+        let landed_view = nav.as_ref().is_some_and(|nav| nav.landed.is_some());
         screen.discs = nav.as_ref().map_or_else(Vec::new, |nav| {
             let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
             nav.bodies
@@ -2858,12 +2859,10 @@ fn run() -> Result<(), String> {
                     let light = b.position.map(|v| -(v as f64) / length.sqrt().max(1.0));
                     ffe_rs::screen::Disc {
                         centre: b.position.map(|v| v as f64 / unit),
-                        // The surface's base sphere is the model's outer radius
-                        // (`+0x138`, the radius word); F1533's collision radius
-                        // (`+0x140`) is smaller. Both the terrain query and the
-                        // drawing use the outer radius, so a rough landing settles
-                        // on the drawn ground.
-                        radius: surface_radius(b),
+                        // The approach draws the base sphere (inner); a settled
+                        // ship draws the outer radius the landing contact uses,
+                        // so it sits on the ground. See `surface_radius`.
+                        radius: surface_radius(b, landed_view),
                         light,
                         colours: match b.kind {
                             NavKind::Star => (17, 17),

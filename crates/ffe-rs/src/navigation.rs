@@ -474,11 +474,21 @@ pub fn describe(mm: f64) -> String {
     }
 }
 
-/// The radius the flight view draws a body's surface at, in flight units: the
-/// model's outer radius word (`+0x138`), which is also the radius F1533 and the
-/// terrain contact use. One radius for the drawn ground and the landing.
-pub fn surface_radius(body: &Body) -> f64 {
-    body.radius as f64 / UNITS_PER_FLIGHT_UNIT
+/// The radius the flight view draws a body's surface at, in flight units.
+///
+/// In flight the surface model's base sphere is the inner radius word
+/// (`+0x140`); it is what keeps the eye outside the shell on an approach. Once
+/// the ship is settled on the ground the view draws the outer radius word
+/// (`+0x138`), the same radius F1533 and the terrain contact use, so a rough
+/// landing sits on the drawn ground. F879's starports are on the terrain at
+/// about 0.9 of the outer radius.
+pub fn surface_radius(body: &Body, landed: bool) -> f64 {
+    let radius = if landed {
+        body.radius
+    } else {
+        body.inner_radius
+    };
+    radius as f64 / UNITS_PER_FLIGHT_UNIT
 }
 
 /// The standoff the autopilot stops at: just off the body's surface or station.
