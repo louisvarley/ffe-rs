@@ -14,7 +14,7 @@ use ffe_rs::input;
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::navigation::{
-    describe, distance, refusal, Kind as NavKind, Navigator, Traffic, View as NavView,
+    describe, distance, range_label, refusal, Kind as NavKind, Navigator, Traffic, View as NavView,
 };
 use ffe_rs::original_flight::{Keys as OriginalKeys, OriginalFlight};
 use ffe_rs::outfitting::{self, Limits};
@@ -1215,17 +1215,14 @@ fn run() -> Result<(), String> {
                                 message = format!(
                                     "Locked on {} {}. Space fires; a ship cannot be flown to.",
                                     ship.name,
-                                    describe(distance(
-                                        ship_position(&original, &state),
-                                        ship.position
-                                    ))
+                                    range_label(ship_position(&original, &state), ship.position)
                                 );
                             }
                         } else if let Some(body) = nav.cycle_lock(ship, if back { -1 } else { 1 }) {
                             message = format!(
                                 "Locked on {} {}. K or AUTOPILOT flies there.",
                                 body.name,
-                                describe(distance(ship, body.position))
+                                range_label(ship, body.position)
                             );
                         }
                     }
@@ -1264,7 +1261,7 @@ fn run() -> Result<(), String> {
                                     message = format!(
                                         "Locked on {} {}. K or AUTOPILOT flies there.",
                                         body.name,
-                                        describe(distance(ship, body.position))
+                                        range_label(ship, body.position)
                                     );
                                 }
                             } else {
@@ -1275,10 +1272,10 @@ fn run() -> Result<(), String> {
                                     message = format!(
                                         "Locked on {} {}. Space fires.",
                                         ship.name,
-                                        describe(distance(
+                                        range_label(
                                             ship_position(&original, &state),
                                             ship.position
-                                        ))
+                                        )
                                     );
                                 }
                             }
@@ -2125,15 +2122,17 @@ fn run() -> Result<(), String> {
                                 message = format!("Arrived at {}.", body.name);
                                 nav.target = None;
                             } else if nav.docking() {
-                                let range = distance(model.player().motion.position, body.position);
                                 message = format!(
                                     "Autopilot: docking at {} {}.",
                                     body.name,
-                                    describe(range)
+                                    range_label(model.player().motion.position, body.position)
                                 );
                             } else {
-                                let range = distance(model.player().motion.position, body.position);
-                                message = format!("Autopilot: {} {}.", body.name, describe(range));
+                                message = format!(
+                                    "Autopilot: {} {}.",
+                                    body.name,
+                                    range_label(model.player().motion.position, body.position)
+                                );
                             }
                         }
                     }
@@ -2223,11 +2222,6 @@ fn run() -> Result<(), String> {
                         .map(|contact| {
                             if contact.flags & 0x40 != 0 {
                                 landed_at = Some(index);
-                                message = "Landed. The ship is settled on the surface.".to_owned();
-                                // F1088's docking/landing transition, then
-                                // F1094's docking music.
-                                sound.play(Cue::Docking);
-                                sound.docking_music();
                             } else if contact.flags & 0x80 != 0 {
                                 message = format!(
                                     "Crash: damage {}. The ship bounced off the surface.",
@@ -2247,17 +2241,45 @@ fn run() -> Result<(), String> {
                         // (`0x34`): the ship is settled, its motion is F1042's
                         // zero and the surface view is the flight view from there.
                         if let Some(index) = landed_at {
+                            let starport = nav
+                                .as_ref()
+                                .and_then(|nav| nav.bodies.get(index))
+                                .is_some_and(|body| body.kind == NavKind::Starport);
                             if let Some(nav) = nav.as_mut() {
-                                if nav.land(index) {
-                                    model.settle_landing();
+                                let landed = if starport {
+                                    // F1019/F1048: the open-air pad's `0x2e`
+                                    // then the view function's `0x30`. F1048
+                                    // also stops the song (F1903); the rough
+                                    // landing F1047 changes no music.
+                                    let landed = nav.land_at_starport(index);
+                                    if landed {
+                                        sound.landed(true);
+                                    }
+                                    landed
+                                } else {
+                                    nav.land(index)
+                                };
+                                if landed {
+                                    if starport {
+                                        model.settle_starport_landing();
+                                    } else {
+                                        model.settle_landing();
+                                    }
                                     if let Some(mode) = nav.landing_frame() {
                                         model.set_mode(mode);
                                     }
                                     model.apply(&mut state);
-                                    message = format!(
-                                        "Landed on {}. The surface view is ahead; L launches.",
-                                        nav.bodies[index].name
-                                    );
+                                    message = if starport {
+                                        format!(
+                                            "Landed at {}. L asks for launch clearance.",
+                                            nav.bodies[index].name
+                                        )
+                                    } else {
+                                        format!(
+                                            "Landed on {}. The surface view is ahead; L launches.",
+                                            nav.bodies[index].name
+                                        )
+                                    };
                                 }
                             }
                         }
@@ -2340,9 +2362,9 @@ fn run() -> Result<(), String> {
                                             if nav.begin_docking(index) {
                                                 acceleration = 0;
                                                 model.set_time_acceleration(0);
-                                                // F1019/F1048: the airlock cue and
-                                                // the sequence stops the song.
-                                                sound.stop_for_sequence();
+                                                // F1019/F1024: the airlock cue
+                                                // (`0x13`). The song stops at the
+                                                // docked state (F1091).
                                                 sound.play(Cue::Docking);
                                                 message = format!(
                                                     "{name}: docking, aligning with the lift."
@@ -2450,11 +2472,10 @@ fn run() -> Result<(), String> {
                             state.thrust = 0.0;
                             state.docking_requested = false;
                             dock.open(StationScreen::Services);
-                            // F1088/F1094: the docking cue, the station bed and
-                            // a random docking song.
-                            sound.play(Cue::Docking);
+                            // F1091: the docked state stops the song; F1092's
+                            // station bed follows.
                             sound.play(Cue::Station);
-                            sound.docking_music();
+                            sound.stop_song();
                             message = station::SERVICES_HINT.to_owned();
                         }
                         Traffic::LaunchOut(index) => {
@@ -2470,11 +2491,11 @@ fn run() -> Result<(), String> {
                             state.docking_requested = false;
                             state.system_flight = true;
                             launch_grace = Some(index);
-                            // F1098's `0x20` launch, F1092's engine bed and
-                            // F1094's random launch music.
+                            // F1098's `0x20` launch, F1092's engine bed. F1088/
+                            // F1089 change no song: the random song is F1094's,
+                            // after a hyperspace exit.
                             sound.play(Cue::Launch);
                             sound.play(Cue::Engine);
-                            sound.docking_music();
                             message = format!("Clear of {}.", nav.bodies[index].name);
                             // F688 spawns the system traffic on entering it;
                             // the sandbox has no new game, so the launch is its

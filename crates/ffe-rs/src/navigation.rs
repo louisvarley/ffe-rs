@@ -484,6 +484,22 @@ pub fn describe(mm: f64) -> String {
     }
 }
 
+/// F1100's target range text: the km form below its exponent threshold and the
+/// AU form above it. The two strings (`0x8604`/`0x8605`) use the original's
+/// fixed-point formats `0x3007` (two decimals, value / 100) and `0x300a` (three
+/// decimals, value / 1000); the exponent switch is F1100's `0x1d` band, i.e.
+/// 2^44 mm (17,592,186 km).
+pub fn range_label(from: [i64; 3], to: [i64; 3]) -> String {
+    let (mantissa, exponent) = ffe_core::laser::range_words(from, to);
+    let (value, au) = ffe_core::laser::range_value(mantissa, exponent);
+    let value = value.max(0);
+    if au {
+        format!("{}.{:03} AU", value / 1000, value % 1000)
+    } else {
+        format!("{}.{:02} km", value / 100, value % 100)
+    }
+}
+
 /// The standoff the autopilot stops at: just off the body's surface or station.
 pub fn standoff(body: &Body) -> f64 {
     match body.kind {
@@ -565,13 +581,21 @@ pub fn autopilot(
     let dir = offset.map(|v| v / range.max(1.0));
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let (right, up, forward) = (dot(dir, rows[0]), dot(dir, rows[1]), dot(dir, rows[2]));
+    let velocity = motion
+        .velocity
+        .iter()
+        .map(|v| f64::from(*v).powi(2))
+        .sum::<f64>()
+        .sqrt()
+        * MM_PER_SECOND
+        / 1000.0;
     let mut keys = Keys::default();
     if range <= stop {
         keys.slower = true;
         return Command {
             keys,
             acceleration: 0,
-            arrived: flight.set_speed_metres() < 1.0,
+            arrived: velocity < 1.0,
             aligned: forward,
             face: None,
             skip: None,
@@ -612,26 +636,18 @@ pub fn autopilot(
     let limit = f64::from(i32::MAX) * MM_PER_SECOND / 1000.0; // the largest set speed
     let envelope = (2.0 * BRAKING * 0.4 * metres).sqrt().min(limit);
     let current = flight.set_speed_metres();
-    if forward > 0.9995 {
-        if current < envelope * 0.8 {
-            keys.faster = true;
-        } else if current > envelope {
-            keys.slower = true;
-        }
-    } else if forward < 0.98 && current > envelope {
+    let actual = velocity.max(current);
+    if actual > envelope {
+        // Brake on the real speed, not only on the set speed: the set speed
+        // steps at the keys' fixed rate and lags the curve over the last
+        // hundred metres.
         keys.slower = true;
+    } else if forward > 0.9995 && current < envelope * 0.8 {
+        keys.faster = true;
     }
     // Time acceleration while the nose is on the target; never so much that one
     // frame covers more than a twentieth of what is left (or the braking is missed).
-    let velocity = motion
-        .velocity
-        .iter()
-        .map(|v| f64::from(*v).powi(2))
-        .sum::<f64>()
-        .sqrt()
-        * MM_PER_SECOND
-        / 1000.0;
-    let per_frame = velocity.max(current) * 0.05;
+    let per_frame = actual * 0.05;
     let factors = [1.0, 10.0, 100.0, 1000.0, 10000.0];
     let angle = (right * right + up * up).sqrt().atan2(forward);
     let drift = memory.angle.map_or(0.0, |last| (angle - last).abs());
@@ -871,8 +887,12 @@ pub fn refusal(reply: Reply) -> &'static str {
     }
 }
 
-/// Distance to a station's approach point on its docking axis, beyond the face.
-const STATION_APPROACH: f64 = 20.0e6;
+/// F741's station approach offset: `[0, 0, 0xfa0]` words of `0x400` mm,
+/// 4,096,000 mm out along the docking axis from the station's centre.
+const STATION_APPROACH: f64 = 0xfa0 as f64 * 1024.0;
+/// F741's open-air starport approach: `[0, 0x1770, 0]` in the port's frame, whose
+/// words F593 scales by `0x400` (1024 mm), so 6,144,000 mm above its centre.
+const STARPORT_APPROACH: f64 = 0x1770 as f64 * 1024.0;
 /// How close to the approach point the autopilot's first leg stops.
 const APPROACH_STOP: f64 = 1.0e6;
 /// Within this of a station, its motion carries the ship (200 km).
@@ -1124,6 +1144,26 @@ impl Navigator {
         let body = self.bodies.get(index).filter(|b| b.kind == Kind::Station)?;
         let (front, radius) = self.ports.get(&body.model).copied().unwrap_or((None, None));
         Some(Port::new(body, front, radius))
+    }
+
+    /// F741's autopilot approach point at an open-air starport: `0x1770` words
+    /// of `0x400` mm along the port's up row (the face that carries the pads),
+    /// 6,144,000 mm above its centre.
+    pub fn starport_approach_point(&self, index: usize) -> Option<[i64; 3]> {
+        let body = self
+            .bodies
+            .get(index)
+            .filter(|b| b.kind == Kind::Starport)?;
+        let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
+        Some(std::array::from_fn(|k| {
+            body.position[k] + (up[k] * STARPORT_APPROACH).round() as i64
+        }))
+    }
+
+    /// F650's pad point for the granted bay of an open-air starport, in the
+    /// port's frame (`Pads::position`).
+    pub fn starport_pad_point(&self, index: usize, bay: u16) -> Option<[i64; 3]> {
+        self.pad_point(index, bay)
     }
 
     /// The nearest station within clearance range of `ship`.
@@ -1434,6 +1474,30 @@ impl Navigator {
         true
     }
 
+    /// F1019's open-air starport touch (`0x2e`): the port's pad. F1048's view
+    /// function then turns it into `0x30` and resets the traffic record. A station
+    /// hull or a planet is not this state.
+    pub fn land_at_starport(&mut self, index: usize) -> bool {
+        if self.landed.is_some() || self.takeoff.is_some() || self.sequence.is_some() {
+            return false;
+        }
+        let Some(body) = self.bodies.get(index) else {
+            return false;
+        };
+        if body.kind != Kind::Starport {
+            return false;
+        }
+        // F1048 calls F653: the traffic record is reset (the bay stays allocated).
+        self.starport(index).reset();
+        self.target = None;
+        self.final_leg = false;
+        self.landed = Some(Landed {
+            landing: Landing::at_starport(),
+            index,
+        });
+        true
+    }
+
     /// The frame after a landing: F1047 turns `0x32` into `0x34` (and F1048
     /// `0x2e` into `0x30`). Returns the guarded state once.
     pub fn landing_frame(&mut self) -> Option<u8> {
@@ -1461,6 +1525,19 @@ impl Navigator {
         };
         if self.sequence.is_some() || self.takeoff.is_some() {
             return Err("Already launching.".to_owned());
+        }
+        let starport = self
+            .bodies
+            .get(landed.index)
+            .is_some_and(|body| body.kind == Kind::Starport);
+        if starport {
+            // F381: an open-air starport's launch asks F654 first. The bay is
+            // the one the landing's F650 allocated, so mark the port as the
+            // docked one for F1032's release.
+            if !self.starport(landed.index).request(PLAYER) {
+                return Err("Launch refused: traffic control is busy.".to_owned());
+            }
+            self.docked = Some(landed.index);
         }
         let takeoff = landed
             .landing
@@ -2469,19 +2546,43 @@ impl Navigator {
         let body = self.bodies.get(index)?.clone();
         // A station is flown to in two legs, as the original's autopilot docks: to
         // a point out on the docking axis, then (with clearance) into the slot.
+        // An open-air starport is F741's approach: above the port. The pad touch
+        // is the original's thruster-level AI (F741/F745/F746 with F599/F600),
+        // which is not ported, so the autopilot hands off there with clearance.
         let port = self.port(index);
-        let (offset, stop) = match port {
-            Some(port) if self.final_leg => ([0.0; 3], port.front * 0.92),
-            Some(port) => (
-                port.axis.map(|a| a * (port.front + STATION_APPROACH)),
-                APPROACH_STOP,
-            ),
-            None => ([0.0; 3], standoff(&body)),
+        let starport = body.kind == Kind::Starport;
+        let (offset, stop) = if starport {
+            let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
+            (up.map(|v| v * STARPORT_APPROACH), APPROACH_STOP)
+        } else {
+            match port {
+                Some(port) if self.final_leg => ([0.0; 3], port.front * 0.92),
+                Some(port) => (
+                    port.axis.map(|a| a * (port.front + STATION_APPROACH)),
+                    APPROACH_STOP,
+                ),
+                None => ([0.0; 3], standoff(&body)),
+            }
         };
         let aim = |at: [i64; 3]| -> [i64; 3] {
             std::array::from_fn(|k| at[k] + offset[k].round() as i64)
         };
         let mut command = autopilot(flight, aim(body.position), stop, &mut self.memory);
+        if starport && command.arrived {
+            // F745: at the approach the autopilot runs F655 and gets a pad.
+            self.memory = Memory::default();
+            self.notice = Some(
+                match self.starport(index).request_docking(PLAYER, true, 0) {
+                    Reply::Granted(bay) => format!(
+                        "{}: clearance granted (bay {}). The pad approach is manual: \
+                     the original's thruster autopilot (F745/F746) is not ported.",
+                        body.name,
+                        bay.index + 1
+                    ),
+                    other => format!("{}: {}.", body.name, refusal(other)),
+                },
+            );
+        }
         if port.is_some() && command.arrived && !self.final_leg {
             // The approach point: ask for clearance and fly in.
             self.memory = Memory::default();
@@ -2619,5 +2720,29 @@ impl Navigator {
                 )
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_label_uses_f1100s_km_au_band_and_fixed_point_formats() {
+        // 1e6 mm is 1 km; F1100's value is 100 in the two-decimal km form.
+        assert_eq!(range_label([0; 3], [1_000_000, 0, 0]), "1.00 km");
+        // The band boundary: below 2^44 mm the km form, at it the AU form.
+        assert!(range_label([0; 3], [(1i64 << 44) - 1, 0, 0]).ends_with("km"));
+        assert!(range_label([0; 3], [1i64 << 44, 0, 0]).ends_with("AU"));
+        // 1 AU (1.495978707e14 mm) is the original's 1.000 AU (three decimals).
+        let au = range_label([0; 3], [149_597_870_700_000, 0, 0]);
+        assert!(au.ends_with("AU"), "{au}");
+        let value: f64 = au.trim_end_matches(" AU").parse().unwrap();
+        assert!((value - 1.0).abs() < 0.001, "{au}");
+    }
+
+    #[test]
+    fn starport_approach_is_f741s_1770_words_of_1024_mm() {
+        assert_eq!(STARPORT_APPROACH, 6_144_000.0);
     }
 }

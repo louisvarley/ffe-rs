@@ -739,6 +739,67 @@ fn body_counts() {
     }
 }
 
+/// F741/F745's open-air starport hand-off and the pad's landing states. The
+/// autopilot flies to the approach point (6,144,000 mm above the port) and runs
+/// F655; the F1019/F1048 `0x2e` → `0x30` states and F381/F654 launch are then
+/// exercised directly (the pad's F569/F576 scan is the outstanding model issue).
+/// Local-only: needs the content cache.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn starport_autopilot_hands_off_at_the_approach_and_the_pad_reaches_0x30() {
+    use ffe_rs::navigation::{Navigator, PLAYER};
+    let cache = cache();
+    // Ross 154's new-game starport: the takeoff test exercises its pad scan, so
+    // its collision stream is known to decode.
+    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    let index = nav.docked.expect("the starting starport");
+    assert_eq!(nav.bodies[index].kind, Kind::Starport);
+    let body = nav.bodies[index].clone();
+    let approach = nav.starport_approach_point(index).expect("F741's approach");
+
+    // F741/F745: at the approach the autopilot asks F655. (The pad descent is
+    // the original's thruster-level AI, F745/F746/F599/F600, not ported.)
+    let mut flight = OriginalFlight::from_flight(
+        &Flight {
+            mode: Mode::Flight,
+            system_flight: true,
+            ..Flight::default()
+        },
+        None,
+    );
+    flight.teleport(approach);
+    flight.face(body.position);
+    nav.lock(index);
+    nav.engage_locked().expect("the starport is listed");
+    let command = nav.command(&cache, &flight).expect("an engaged target");
+    assert!(command.0.arrived, "the approach point is reached");
+    let notice = nav.notice.clone().expect("F655 ran at the approach");
+    assert!(notice.contains("clearance granted"), "{notice}");
+    assert!(
+        nav.starport(index).bay_of(PLAYER).is_some(),
+        "F650 gave the player a pad"
+    );
+
+    // The pad touch itself is F1019's `0x2e` (the F569/F576 stream at the pad is
+    // the outstanding model issue below); F1048's frame makes it `0x30`.
+    assert!(nav.land_at_starport(index), "F1019's 0x2e");
+    assert_eq!(
+        nav.landed_state(),
+        Some(ffe_core::traffic::state::STARPORT_LANDING)
+    );
+    assert_eq!(
+        nav.landing_frame(),
+        Some(ffe_core::traffic::state::LANDED),
+        "F1048's 0x30"
+    );
+    assert_eq!(nav.landed_state(), Some(0x30));
+    // F381/F654: the launch request from 0x30, then F1013's climb.
+    nav.begin_surface_launch().expect("F654 grants the launch");
+    assert_eq!(nav.takeoff_state(), Some(ffe_core::traffic::state::TAKEOFF));
+    assert_eq!(nav.docked, Some(index));
+    assert!(nav.starport(index).bay_of(PLAYER).is_some());
+}
+
 /// From the launch point of the starting station, the autopilot flies to stations
 /// of different models (a trading post, an orbital city, an orbital station),
 /// takes clearance at the approach point and enters the slot.

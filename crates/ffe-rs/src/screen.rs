@@ -159,6 +159,19 @@ pub struct TargetHud {
     pub offscreen: bool,
 }
 
+impl TargetHud {
+    /// F1100's number as its string formats it: two decimals in the km form
+    /// (`0x3007`, value / 100) and three in the AU form (`0x300a`, value / 1000).
+    pub fn range_text(&self) -> String {
+        let value = self.value.max(0);
+        if self.au {
+            format!("{}.{:03}", value / 1000, value % 1000)
+        } else {
+            format!("{}.{:02}", value / 100, value % 100)
+        }
+    }
+}
+
 /// F1099's target shields/hull readout (`0x8625`/`0x8626`), when a ship target
 /// carries them (`docs/notes/npc.md`). Stations and planets have no such state,
 /// so this stays `None` for a body target.
@@ -951,27 +964,23 @@ impl Screen {
     fn draw_target_hud(&mut self) {
         if let Some(target) = self.target_hud {
             let unit = if target.au { "AU" } else { "km" };
+            // The original's strings `0x8604`/`0x8605` use the fixed-point
+            // formats `0x3007` (two decimals, value / 100) and `0x300a` (three
+            // decimals, value / 1000): F1100's value is scaled, not plain.
+            let number = target.range_text();
             // F1100's fixed spot for an off-view target is the caller's X/Y
             // (50,50 for the navigation target, 50,60 for the combat target);
             // the on-view number sits at the target minus 5.
             let (x, y, text) = if target.behind {
-                (
-                    target.x,
-                    target.y,
-                    format!("Target {} {} Behind", target.value, unit),
-                )
+                (target.x, target.y, format!("Target {number} {unit} Behind"))
             } else if target.offscreen {
                 (
                     target.x,
                     target.y,
-                    format!("Target Out of Range ({} {})", target.value, unit),
+                    format!("Target Out of Range ({number} {unit})"),
                 )
             } else {
-                (
-                    target.x - 5,
-                    target.y - 5,
-                    format!("{} {}", target.value, unit),
-                )
+                (target.x - 5, target.y - 5, format!("{number} {unit}"))
             };
             // F1100's on-view bounds; anything else goes to the fixed spot.
             let (x, y) = if (0..0x138).contains(&x) && (0..0x8e).contains(&y) {
@@ -2744,4 +2753,39 @@ pub fn model_radius(scene: &ModelViewer, model: u32) -> Option<f64> {
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TargetHud;
+
+    #[test]
+    fn target_range_uses_f1100s_fixed_point_strings() {
+        let hud = TargetHud {
+            x: 0,
+            y: 0,
+            value: 100,
+            au: false,
+            behind: false,
+            offscreen: false,
+        };
+        assert_eq!(hud.range_text(), "1.00");
+        let hud = TargetHud {
+            value: 123_456,
+            ..hud
+        };
+        assert_eq!(hud.range_text(), "1234.56");
+        let hud = TargetHud {
+            value: 1000,
+            au: true,
+            ..hud
+        };
+        assert_eq!(hud.range_text(), "1.000");
+        let hud = TargetHud {
+            value: 117,
+            au: true,
+            ..hud
+        };
+        assert_eq!(hud.range_text(), "0.117");
+    }
 }

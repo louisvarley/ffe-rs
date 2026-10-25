@@ -494,6 +494,21 @@ mod tests {
         assert!(exponent > 0x1d, "{exponent}");
         assert!(range_value(mantissa, exponent).1);
         assert!(range_value(mantissa, exponent).0 > 0);
+        // F1100's band boundary is 2^44 mm (17,592,186.04 km): the km form
+        // holds the exponent at 0x1d, one unit higher takes the AU form.
+        let (mantissa, exponent) = range_words([0; 3], [(1i64 << 44) - 1, 0, 0]);
+        assert_eq!(exponent, 0x1d);
+        let (value, au) = range_value(mantissa, exponent);
+        assert!(!au);
+        // 17,592,186 km (the ffp cut rounds it a little high) in the original's
+        // fixed-point, two decimals.
+        assert!((value / 100 - 17_592_186).abs() < 10_000, "{value}");
+        let (mantissa, exponent) = range_words([0; 3], [1i64 << 44, 0, 0]);
+        assert_eq!(exponent, 0x1e);
+        let (value, au) = range_value(mantissa, exponent);
+        assert!(au);
+        // 0.117 AU in the original's fixed-point (three decimals).
+        assert!((value - 117).abs() <= 1, "{value}");
     }
 
     #[test]

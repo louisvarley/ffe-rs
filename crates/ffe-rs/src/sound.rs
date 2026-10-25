@@ -423,6 +423,14 @@ impl GameAudio {
         }
     }
 
+    /// `F1047`/`F1048`: a rough landing changes no music; an open-air starport's
+    /// F1048 stops the song (F1903) before F1049/F1050 draw the landed view.
+    pub fn landed(&mut self, starport: bool) {
+        if starport {
+            self.audio.stop_song();
+        }
+    }
+
     /// `F1048`/`F1091`: a docking or launch transition stops the song.
     pub fn stop_for_sequence(&mut self) {
         self.front_end = false;
@@ -675,6 +683,16 @@ mod tests {
         game.hyperspace_music();
         game.docking_music();
         assert_eq!(recorder.recorded().songs.len(), before);
+    }
+
+    #[test]
+    fn a_starport_landing_stops_the_song_and_a_rough_landing_leaves_it() {
+        let recorder = Recorder::default();
+        let mut game = GameAudio::new(recorder.clone());
+        game.landed(false);
+        assert_eq!(recorder.recorded().stops, 0);
+        game.landed(true);
+        assert_eq!(recorder.recorded().stops, 1);
     }
 
     #[test]

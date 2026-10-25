@@ -150,6 +150,17 @@ impl OriginalFlight {
         self.player.motion.thrust = [0; 3];
     }
 
+    /// F1019/F1048's open-air starport touch: F1042 zeroes the motion and the
+    /// mode is the frame's `0x2e` (the caller's `Navigator::landing_frame` then
+    /// sets `0x30`).
+    pub fn settle_starport_landing(&mut self) {
+        self.player.mode = ffe_core::traffic::state::STARPORT_LANDING;
+        self.player.set_speed = 0;
+        self.player.motion.velocity = [0; 3];
+        self.player.motion.rate = [0; 3];
+        self.player.motion.thrust = [0; 3];
+    }
+
     /// The set speed (`DATA_008918`) in the original's velocity units.
     pub fn set_speed_units(&self) -> i32 {
         self.player.set_speed

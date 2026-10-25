@@ -174,11 +174,13 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   (about 20 s) before the ship is put out on the docking axis, facing away; the door then opens, and
   the bay is released. The lift scenes are the original's (`ffe_core::lift`): the cage, shaft and bay models in the
   front view, over the outside view when docking and alone when launching; the status line also names each stage.
-- **Autopilot.** A station target is flown in two legs: to a point 20 km out on the docking
-  axis (stopping within 1 km), then, with clearance taken there, toward the centre braking
-  for a stop just inside the face, which the contact turns into docking. Sol's Daedalus,
-  Abraham Lincoln and Galileo dock from the start (`tests/navigation.rs`,
-  `autopilot_docks_at_stations`; `FFE_SHOT_DIR` saves frames on the way in).
+- **Autopilot.** A station target is flown in two legs: to F741's point 4,096,000 mm
+  out on the docking axis (stopping within 1 km), then, with clearance taken there, toward the
+  centre braking for a stop just inside the face, which the contact turns into docking. Sol's
+  Daedalus, Abraham Lincoln and Galileo dock from the start (`tests/navigation.rs`,
+  `autopilot_docks_at_stations`; `FFE_SHOT_DIR` saves frames on the way in). An open-air
+  starport target is flown to F741's point 6,144,000 mm above the port and asks F655 there; the
+  final pad descent is not ported (see the limits below).
 - **Frames.** Bodies move between the navigator's refreshes; the ship is carried with the
   body it is near (the engaged target on its final approach, else a station within 200 km,
   else a planet or moon within 50 radii), so a station stays where the ship left it.
@@ -212,8 +214,10 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   original's space colour; F1877's atmosphere colour is carried into the next frame when the
   flag is set (`ModelViewer::haze_sky`, `Screen::surface_sky`).
 - **Not the original yet.** The pad hit when docking at an orbital station is this port's slot
-  test, not the station's collision stream; the sounds and the ship's motion with the rotating
-  station during the stages are not ported. The starport/planet scan does not yet draw the ship
+  test, not the station's collision stream; the effect sounds and the ship's motion with the
+  rotating station during the stages are not ported. Music is now the original's: F1091 and
+  F1048 stop the song, F1047 changes none, and F1094's random song is the hyperspace-exit cue
+  rather than a docking one. The starport/planet scan does not yet draw the ship
   in the rotating frame between ticks (it is flattened to the parent's linear frame each frame),
   and starports on the far side of their planet are not hidden by it (there is no depth buffer
   between the planet surface and the station models).
@@ -222,8 +226,9 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
 
 - The orientation the physics integrates drifts off orthonormal (rows 0.985 long after a
   while); the autopilot orthonormalises before steering.
-- Docking entry speeds through the autopilot are 110-170 m/s: the set speed steps down at the
-  keys' fixed rate, so it lags the braking curve over the last few hundred metres.
+- Docking entry speeds through the autopilot are 35-110 m/s: the set speed steps down at the
+  keys' fixed rate, so the real speed is braked against the curve (the test's three stations
+  enter at 35, 107 and 37 m/s) and stays under the 250 m/s slot limit.
 - Planet surfaces draw their triangles, but the textured fills are flat colours or
   blends (see above), so the detail is blockier than the original's; the night side is
   drawn with the shade table and has no atmospheric glow except the ported haze ring.
@@ -236,10 +241,14 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   on the high ground, which is why their frames (and the reference comparison) show the terrain
   and buildings. Fixing this needs one radius for both (and a check that the starport does not
   fall inside the drawn sphere), an owner decision.
-- **Starport landings from flight.** The machine has F1019/F1021's open-air `0x2e` -> `0x30`
-  pair, but the playable still gives a starport pad touch the in-flight contact (no `0x20`
-  effect-region flag is modelled) instead of the `0x30` services state. The new game's `0x30`
-  and its F381 launch are the working path (`docs/notes/intro.md`).
+- **Starport landings from flight.** The F1019/F1021 open-air `0x2e` -> `0x30` pair is now
+  routed (`Navigator::land_at_starport`, F1048's frame, F654's launch request), and F1047/F1048
+  follow the source's music rules. Two pieces remain: the autopilot only flies to F741's
+  approach point and asks F655; the original's final pad descent is its thruster-level AI
+  (F741/F745/F746 with F599/F600), which is not ported; and the F569/F576 scan at the exact pad
+  returns "needs the models' records" for the tested starport models (its stream references a
+  surface the decoded model lacks), so the pad touch is not reachable from ordinary flight there.
+  The new game's `0x30` and its F381 launch are the working path (`docs/notes/intro.md`).
 - **Landed dressing.** F253's undercarriage word (`+0x9e`) animation, the sounds and the
   player's AI mode byte (`player+0xff = 0x24`) are not modelled; the console is the flight one
   F1116 selects, as the original's is.
