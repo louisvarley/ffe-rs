@@ -92,6 +92,20 @@ pub struct PointEmission {
     pub scale: i32,
 }
 
+/// An F1766 vertex-pair chain (opcode 24) as F1814 queues it: one material
+/// colour, an F1474 size scaled by the instance and the depth, and the
+/// projected screen points (x - 1, y - 1) of every vertex that reaches the
+/// view. F1814 draws one F1611 particle at each point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChainEmission {
+    pub chain: crate::model_commands::Chain,
+    pub context: VertexContext,
+    /// The particle size after F1474, the instance scale and F1666's divide.
+    pub size: i32,
+    /// Screen points in F1766's pair order (high byte then low byte).
+    pub points: Vec<[i16; 2]>,
+}
+
 /// A line operand event. This is the original handler's decoded input, not a
 /// clipped/rasterized line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,6 +295,8 @@ pub enum QueueEvent {
     Thruster(u32),
     /// An F1803 line queued by F1704 for a narrow thruster.
     ThrusterLine(u32),
+    /// An F1814 particle chain (F1766).
+    Chain(u32),
 }
 
 /// One render-order entry.
@@ -294,6 +310,7 @@ pub enum Primitive {
     Label(LabelEmission),
     SystemLabel(SystemLabelEmission),
     Thruster(crate::model_thruster::Entry),
+    Chain(ChainEmission),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,6 +323,8 @@ pub struct Execution {
     pub points: Vec<PointEmission>,
     /// Line emissions in command order.
     pub lines: Vec<LineEmission>,
+    /// Vertex-pair chain emissions (F1766) in command order.
+    pub chains: Vec<ChainEmission>,
     /// Text operand events in command order; never in [`Self::ordered`].
     pub texts: Vec<TextEmission>,
     /// Child-model call operand events in command order; never in [`Self::ordered`].
@@ -1056,6 +1075,7 @@ fn run(
         emissions: Vec::new(),
         points: Vec::new(),
         lines: Vec::new(),
+        chains: Vec::new(),
         texts: Vec::new(),
         submodels: Vec::new(),
         colours: Vec::new(),
@@ -1404,9 +1424,73 @@ fn run(
                 result.blocks.push(BlockEmission { offset, key });
                 Some(command.size as i32)
             }
-            // Beams (17) and vertex-pair chains (24): operand records only; their
-            // drawing is not ported and they are absent from `ordered`.
-            17 | 24 => Some(command.size as i32),
+            // Beams (17): operand records only; their drawing is not ported and
+            // they are absent from `ordered`.
+            17 => Some(command.size as i32),
+            24 => {
+                for chain in program.chains.iter().filter(|c| c.offset == offset) {
+                    let mut emission = ChainEmission {
+                        chain: chain.clone(),
+                        context: working.clone(),
+                        size: 0,
+                        points: Vec::new(),
+                    };
+                    if let Some(live) = vertices.as_deref_mut() {
+                        // F1474 then the instance-scale adjustment: a negative
+                        // (0x8000) value is an absolute 0..0x7fff size; any
+                        // other is shifted by +0x148 - 7.
+                        let mut size = angle_operand(chain.size as i16, working);
+                        if size & 0x8000 != 0 {
+                            size &= 0x7fff;
+                        } else {
+                            let shift = instance.operand_scale.wrapping_sub(7);
+                            size = if shift < 0 {
+                                ((size as u32) >> (shift.wrapping_neg() as u32 & 31)) as i32
+                            } else {
+                                size.wrapping_shl(shift as u32 & 31)
+                            };
+                        }
+                        // F1766 skips the whole chain when the instance is at or
+                        // behind the eye; otherwise F1666 divides by its depth.
+                        if instance.position[2] > 0 {
+                            let key = model_depth::key(instance.position, instance.key_scale);
+                            let size =
+                                crate::model_thruster::special_divide(size, instance.position[2])?;
+                            // F1766 runs each pair's high byte and then its low
+                            // byte, stopping before a pair holding 0x7f.
+                            for pair in &chain.pairs {
+                                if pair[1] == 0x7f || pair[0] == 0x7f {
+                                    break;
+                                }
+                                for index in [pair[1], pair[0]] {
+                                    let point = live.resolve(
+                                        index as i8,
+                                        working,
+                                        instance.position,
+                                        instance.generation,
+                                        true,
+                                    )?;
+                                    if point.view[2] < 0x40 {
+                                        continue;
+                                    }
+                                    let x = i32::from(point.screen[0]) - 1;
+                                    let y = i32::from(point.screen[1]) - 1;
+                                    if (x as u16) < 0x140 && (y as u16) < 0x9e {
+                                        emission.points.push([x as i16, y as i16]);
+                                    }
+                                }
+                            }
+                            emission.size = size;
+                            if let Some(queue) = shared.order.as_mut() {
+                                queue.push(key, Primitive::Chain(emission.clone()))?;
+                                shared.queue.push(QueueEvent::Chain(key));
+                            }
+                        }
+                    }
+                    result.chains.push(emission);
+                }
+                Some(command.size as i32)
+            }
             25 => {
                 if code & 0x8000 != 0 {
                     // F1770 resets the current basis to identity.

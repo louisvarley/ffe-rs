@@ -20,3 +20,10 @@ drew every surface after every primitive. See intro-ship-order-before/after.png.
 Text frames: the GAME!TEK (animation 200), PRESENTS (248) and DAVID BRABEN'S
 (328) frames are in intro-game-tek/presents/david-before/after.png. "Before"
 removes F1747's first-row negation only; every other input is identical.
+
+Nebula and stars: at 0x181534 the old key alignment put model 315's nebula
+(group key 0xffffffff) after the planet's surface entries; the before/after
+frames differ in 3,682 pixels on the planet's limb and nebula. At 0xef9c4 the
+F1766/F1814 chains put the chain-grey stars at (15,11) and (59,35) on the
+screen; before the opcode-24 port they were absent. The executed original has
+the same star positions but more chain particles; see the note in intro.md.

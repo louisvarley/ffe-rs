@@ -14,7 +14,7 @@ use ffe_core::model_animation::{
     door_step, time_word, top_level_locals, START_TICS, TICS_PER_FRAME,
 };
 use ffe_core::model_commands::{material, VisibilityContext};
-use ffe_core::model_dot::{point_dot, DotShape, DotTables};
+use ffe_core::model_dot::{particle_clipped, point_dot, DotShape, DotTables};
 use ffe_core::model_execute::{
     execute_live, execute_scene, resolve_colour, ChildEnvironment, ChildModel, ChildModels,
     ChildOutcome, ChildRun, Execution, InstanceContext, Primitive,
@@ -1853,6 +1853,11 @@ impl ModelViewer {
                     ));
                 }
                 Primitive::Spline(spline) => self.register_frame_colour(spline.colour),
+                Primitive::Chain(chain) => self.register_frame_colour(resolve_colour(
+                    chain.chain.material,
+                    chain.context.colour,
+                    [0; 3],
+                )),
                 Primitive::Polygon(polygon) => {
                     let colour = if material(polygon.polygon.material).texture != 0 {
                         [5; 3]
@@ -1892,7 +1897,14 @@ impl ModelViewer {
             |p: [i16; 2]| (p != NEAR_SENTINEL).then_some((i32::from(p[0]), i32::from(p[1])));
         for (index, primitive) in result.ordered.iter().enumerate() {
             let key = result.ordered_keys.get(index).copied().unwrap_or_default();
-            let start = frame.shapes.len();
+            // Every shape keeps its key with it: a `continue` below must not
+            // shift the alignment between `shapes` and `keys`.
+            macro_rules! push {
+                ($shape:expr) => {{
+                    frame.shapes.push($shape);
+                    frame.keys.push(key);
+                }};
+            }
             match primitive {
                 Primitive::Face(emission) => {
                     let face = &emission.face;
@@ -1946,7 +1958,7 @@ impl ModelViewer {
                         let edges: Vec<[[i16; 2]; 2]> =
                             outline.windows(2).map(|pair| [pair[0], pair[1]]).collect();
                         if !edges.is_empty() {
-                            frame.shapes.push(Shape::Polygon(edges, rgb));
+                            push!(Shape::Polygon(edges, rgb));
                         }
                         continue;
                     }
@@ -1959,7 +1971,7 @@ impl ModelViewer {
                     if let Some(table) = descriptors.filter(|_| points.len() >= 3) {
                         if textured_path(true, face.material, &screens) {
                             let entry = textured_colours(face.material, colour, shade, table)?;
-                            frame.shapes.push(Shape::Textured(Textured {
+                            push!(Shape::Textured(Textured {
                                 points,
                                 bitmap: entry.bitmap,
                                 slots: entry
@@ -1971,7 +1983,7 @@ impl ModelViewer {
                             continue;
                         }
                     }
-                    frame.shapes.push(if points.len() == 2 {
+                    push!(if points.len() == 2 {
                         Shape::Line(points[0], points[1], rgb)
                     } else if on_view && matches!(points.len(), 3 | 4) {
                         Shape::Flat(points, rgb)
@@ -1984,7 +1996,7 @@ impl ModelViewer {
                     // F1803: F1704's clipped, stored end points, drawn by F1616.
                     if let Some([a, b]) = line.screen {
                         let point = |[x, y]: [i16; 2]| (i32::from(x), i32::from(y));
-                        frame.shapes.push(Shape::Line(point(a), point(b), rgb));
+                        push!(Shape::Line(point(a), point(b), rgb));
                     }
                 }
                 Primitive::Point(emitted) => {
@@ -2031,14 +2043,14 @@ impl ModelViewer {
                                     .into_iter()
                                     .map(|s| [s.x, s.y, s.width])
                                     .collect();
-                                frame.shapes.push(Shape::Spans(spans, self.rgb(colour)));
+                                push!(Shape::Spans(spans, self.rgb(colour)));
                             }
                         }
                         // Off the view or too near: nothing.
                         Some(None) => {}
                         None => {
                             if let Some(p) = emitted.screen.and_then(point) {
-                                frame.shapes.push(Shape::Point(p, rgb));
+                                push!(Shape::Point(p, rgb));
                             }
                         }
                     }
@@ -2046,9 +2058,21 @@ impl ModelViewer {
                 Primitive::Spline(spline) => {
                     // F1811: the entry's four points, drawn by F1546.
                     if let Some(points) = spline.points {
-                        frame
-                            .shapes
-                            .push(Shape::Curve(points, self.rgb(spline.colour)));
+                        push!(Shape::Curve(points, self.rgb(spline.colour)));
+                    }
+                }
+                Primitive::Chain(chain) => {
+                    // F1814: one F1611 particle of the entry's size at each
+                    // point F1766 projected (the 0x7f terminator never reaches
+                    // `points`).
+                    let rgb = resolve_colour(chain.chain.material, chain.context.colour, [0; 3]);
+                    let colour = self.rgb(rgb);
+                    for [x, y] in &chain.points {
+                        let spans = particle_clipped(*x, *y, chain.size)
+                            .into_iter()
+                            .map(|s| [s.x, s.y, s.width])
+                            .collect();
+                        push!(Shape::Spans(spans, colour));
                     }
                 }
                 Primitive::Polygon(polygon) => {
@@ -2062,7 +2086,7 @@ impl ModelViewer {
                         } else {
                             polygon.colour
                         };
-                        frame.shapes.push(Shape::Polygon(edges, self.rgb(colour)));
+                        push!(Shape::Polygon(edges, self.rgb(colour)));
                     }
                 }
                 Primitive::Thruster(entry) => match &entry.shape {
@@ -2077,7 +2101,7 @@ impl ModelViewer {
                     } => {
                         let mut slots = vec![[0; 3]];
                         slots.extend(colours.iter().map(|c| self.rgb(*c)));
-                        frame.shapes.push(Shape::Glow(Textured {
+                        push!(Shape::Glow(Textured {
                             points: points
                                 .iter()
                                 .map(|[x, y]| (i32::from(*x), i32::from(*y)))
@@ -2094,12 +2118,12 @@ impl ModelViewer {
                             None => *colour,
                         };
                         let [a, b] = points.map(|[x, y]| (x, y));
-                        frame.shapes.push(Shape::Line(a, b, self.rgb(colour)));
+                        push!(Shape::Line(a, b, self.rgb(colour)));
                     }
                 },
                 // A star's system name (F1812 with the 0x84xx string), in the bitmap font.
                 Primitive::SystemLabel(label) => match self.system_name(label.code) {
-                    Some(name) if label.key.is_some() => frame.shapes.push(Shape::Label(
+                    Some(name) if label.key.is_some() => push!(Shape::Label(
                         (i32::from(label.screen[0]), i32::from(label.screen[1])),
                         name,
                     )),
@@ -2107,16 +2131,13 @@ impl ModelViewer {
                     None => frame.skipped += 1,
                 },
                 Primitive::Label(label) => match self.model_string(label.label.string) {
-                    Ok(text) => frame.shapes.push(Shape::Label(
+                    Ok(text) => push!(Shape::Label(
                         (i32::from(label.screen[0]), i32::from(label.screen[1])),
                         text.to_vec(),
                     )),
                     Err(_) => frame.skipped += 1,
                 },
             }
-            frame
-                .keys
-                .extend(std::iter::repeat_n(key, frame.shapes.len() - start));
         }
         Ok(())
     }
