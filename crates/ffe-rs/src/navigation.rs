@@ -406,6 +406,51 @@ pub fn distance(from: [i64; 3], to: [i64; 3]) -> f64 {
         .sqrt()
 }
 
+/// The source's near-starport threshold: `cmp byte [object+0x88],0x13`
+/// (`ffe.asm:26918`, `ffed3d-master/win/ffemisc.cpp` `IsCloseToStarport` uses
+/// `dist_cam < 0x13`). `+0x88` is F1680's exponential distance byte, not a
+/// linear radius.
+pub const JURISDICTION_DISTANCE: u8 = 0x13;
+
+/// F1680's `+0x88` exponential distance byte: `max(0, msb(distance) - 0xd)`
+/// minus the object's `+0x7e` scale. F1680 stores `log2`-of-distance in a byte,
+/// so each unit is a doubling; `0xa` is "maximum distance about 20km"
+/// (`ffed3d-master/ffe.asm:72033`). The body's model scale is omitted here,
+/// which makes
+/// the byte larger (a stricter test) for a large object.
+pub fn distance_byte(distance: f64) -> u8 {
+    if distance <= 0.0 || !distance.is_finite() {
+        return 0;
+    }
+    let msb = distance.log2().floor() as i32;
+    (msb - 0xd).clamp(0, i32::from(u8::MAX)) as u8
+}
+
+/// F234/F235: the nearest starport whose exponential distance byte is below
+/// [`JURISDICTION_DISTANCE`], as its ordinal among the system's starports (the
+/// `DATA_008996` ledger index). The original's witness roll also uses the
+/// system danger and a random draw; this is FFED3D's deterministic
+/// `IsCloseToStarport` form.
+pub fn starport_witness(bodies: &[Body], at: [i64; 3]) -> Option<usize> {
+    let mut best: Option<(u8, f64, usize)> = None;
+    let mut ordinal = 0usize;
+    for body in bodies {
+        if body.kind != Kind::Starport {
+            continue;
+        }
+        let away = distance(at, body.position);
+        let byte = distance_byte(away);
+        let closer = best.is_none_or(|(best_byte, best_away, _)| {
+            byte < best_byte || (byte == best_byte && away < best_away)
+        });
+        if byte < JURISDICTION_DISTANCE && closer {
+            best = Some((byte, away, ordinal));
+        }
+        ordinal += 1;
+    }
+    best.map(|(_, _, index)| index)
+}
+
 /// A unit vector, for the docking axis.
 fn unit(v: [f64; 3]) -> [f64; 3] {
     let length = v.iter().map(|c| c * c).sum::<f64>().sqrt();
@@ -859,8 +904,19 @@ pub enum ShipEvent {
     },
     /// A police or military ship turned hostile because the player is wanted.
     PoliceHostile { name: String },
+    /// F783: the police object (`+0x118 == 0xe`) was removed and its alert
+    /// cleared the wanted state.
+    AlertCleared,
     /// F787/F738/F927: a ship jumped out and its slot was freed.
     Escaped { name: String },
+}
+
+/// F931/F941's unlawful-discharge report: F236's message plus whether a police
+/// or military ship answered it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegalReport {
+    pub offence: ffe_core::npc::OffenceReport,
+    pub police: bool,
 }
 
 /// The result of one of the player's laser hits on an NPC ship.
@@ -1439,7 +1495,9 @@ impl Navigator {
     /// (F655): traffic control may be busy with another ship, or have no bay.
     pub fn request_clearance(&mut self, ship: [i64; 3]) -> Option<(usize, Reply)> {
         let index = self.nearest_station(ship)?;
-        let reply = self.starport(index).request_docking(PLAYER, true, 0);
+        // F655: the player's outstanding fine at this starport (0x2710 refuses).
+        let owes = self.fine_at(index);
+        let reply = self.starport(index).request_docking(PLAYER, true, owes);
         Some((index, reply))
     }
 
@@ -1804,7 +1862,16 @@ impl Navigator {
         for (station, ship) in leaving {
             self.starport(station).release(npc::traffic_id(ship));
         }
+        // F783: a removed police object (`+0x118 == 0xe`) clears
+        // DATA_008647 and DATA_008646 bit 0.
+        let police_removed = self
+            .ships
+            .iter()
+            .any(|ship| ship.role == ffe_core::npc::Role::Police && ship.finished(player));
         self.ships.retain(|ship| !ship.finished(player));
+        if police_removed && self.legal.clear_alert() {
+            events.push(ShipEvent::AlertCleared);
+        }
         if self.ship_lock.is_some_and(|id| {
             !self
                 .ships
@@ -1961,6 +2028,56 @@ impl Navigator {
             .position(|index| *index == current)
             .unwrap_or(0);
         Some(places[(at + 1) % places.len()])
+    }
+
+    /// F234/F235 as `IsCloseToStarport`: the ordinal of the nearest starport
+    /// whose `+0x88` exponential distance is below [`JURISDICTION_DISTANCE`]
+    /// (`0x13`), or `None` outside a starport's region. The ordinal is the
+    /// `DATA_008996` index into the `DATA_009095` fine ledger.
+    pub fn starport_in_range(&self, at: [i64; 3]) -> Option<usize> {
+        starport_witness(&self.bodies, at)
+    }
+
+    /// The fine ledger for the starport at `body`: F655's `owes` argument, read
+    /// from F236's per-starport `DATA_009095` array. A station uses the nearest
+    /// starport's ledger, as `DATA_008996` is the system's starport index.
+    pub fn fine_at(&self, body: usize) -> u32 {
+        let Some(target) = self.bodies.get(body) else {
+            return 0;
+        };
+        let mut ordinal = 0usize;
+        let mut nearest: Option<(f64, usize)> = None;
+        for candidate in &self.bodies {
+            if candidate.kind == Kind::Starport {
+                let away = distance(target.position, candidate.position);
+                if nearest.is_none_or(|(best, _)| away < best) {
+                    nearest = Some((away, ordinal));
+                }
+                ordinal += 1;
+            }
+        }
+        nearest.map_or(0, |(_, index)| self.legal.owed(Some(index)))
+    }
+
+    /// F931/F941's player branch: the first shot in a system reports the
+    /// unlawful-discharge offence through F237(ship, 3). F236 records it only
+    /// with a nearby starport witness (F234); otherwise the shot spends the
+    /// system's one report without a fine or the wanted bit. A recorded offence
+    /// makes the police and military ships hostile (the port's `DATA_008647`
+    /// response; F783 clears it when the chase ends).
+    pub fn player_fired(&mut self, at: [i64; 3]) -> Option<LegalReport> {
+        let starport = self.starport_in_range(at);
+        let offence = self.legal.player_fired(starport)?;
+        let mut police = false;
+        if self.legal.wanted {
+            for ship in &mut self.ships {
+                police |= ship.provoke();
+            }
+        }
+        if police {
+            self.legal.alert = true;
+        }
+        Some(LegalReport { offence, police })
     }
 
     /// The player's laser hit on an NPC ship: F953/F942 plus the legal
@@ -2412,6 +2529,11 @@ impl Navigator {
         self.target = None;
         self.locked = None;
         self.ship_lock = None;
+        // F931/F941's DATA_008860 bit 2 is the *system's* single report. The
+        // DOS listing only zeroes the word in F1000's reset; the port resets it
+        // on a system entry so the offence can happen once per system, as the
+        // FFED3D once-per-system check intends.
+        self.legal.illegal_fire = false;
         // F675: the pirates close to the player are carried through the jump.
         self.persisted = npc::persist(&self.ships, self.player_at);
         self.ships.clear();
@@ -2613,7 +2735,8 @@ impl Navigator {
         if port.is_some() && command.arrived && !self.final_leg {
             // The approach point: ask for clearance and fly in.
             self.memory = Memory::default();
-            match self.starport(index).request_docking(PLAYER, true, 0) {
+            let owes = self.fine_at(index);
+            match self.starport(index).request_docking(PLAYER, true, owes) {
                 Reply::Granted(_) => {
                     self.final_leg = true;
                     command.arrived = false;
@@ -2774,5 +2897,53 @@ mod tests {
         assert_eq!(DEFAULT_START_TYPE, 0);
         assert_eq!(DEFAULT_STARPORT_SLOT, 0x6a);
         assert_eq!(DEFAULT_PLAYER_INDEX, 87);
+    }
+
+    #[test]
+    fn the_exponential_distance_byte_is_f1680s_log2() {
+        // 8.4e6 mm is the pad's order of distance in the executed original
+        // (dist_cam ~0xa, "maximum distance about 20km" at 0xa).
+        assert_eq!(distance_byte(8.4e6), 10);
+        // Byte 0x12 is inside the source's 0x13 threshold, 0x13 is not.
+        assert_eq!(distance_byte(2f64.powi(0x12 + 0xd)), 0x12);
+        assert_eq!(distance_byte(2f64.powi(0x13 + 0xd)), 0x13);
+        assert!(distance_byte(2f64.powi(0x12 + 0xd)) < JURISDICTION_DISTANCE);
+        assert!(!(distance_byte(2f64.powi(0x13 + 0xd)) < JURISDICTION_DISTANCE));
+        assert_eq!(distance_byte(0.0), 0);
+        // A system-scale distance is far outside the starport's region.
+        assert!(distance_byte(1.0e12) > JURISDICTION_DISTANCE);
+    }
+
+    fn body(kind: Kind, position: [i64; 3]) -> Body {
+        Body {
+            name: format!("{kind:?}"),
+            kind,
+            position,
+            radius: 1_000_000,
+            inner_radius: 1_000_000,
+            parent: None,
+            model: 0,
+            seed: 0,
+            slot: 0,
+            rows: [0; 9],
+            class: 0,
+            open_air: false,
+            orientation: [[0.0; 3]; 3],
+            spin: 0,
+            bays: 0,
+        }
+    }
+
+    #[test]
+    fn only_a_starport_inside_the_0x13_byte_is_a_witness() {
+        let bodies = [
+            body(Kind::Planet, [0; 3]),
+            body(Kind::Starport, [1_000_000, 0, 0]),
+            body(Kind::Starport, [1_000_000_000_000, 0, 0]),
+        ];
+        // The first starport (ordinal 0) is the witness; the planet is not.
+        assert_eq!(starport_witness(&bodies, [0; 3]), Some(0));
+        let far = [body(Kind::Starport, [1_000_000_000_000, 0, 0])];
+        assert_eq!(starport_witness(&far, [0; 3]), None);
     }
 }

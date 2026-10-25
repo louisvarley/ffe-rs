@@ -1721,7 +1721,10 @@ fn new_game_hope_landed_surface_view() {
             .filter(|p| *p == hud_colour)
             .count()
     };
-    assert!(ink(2, 60, 148, 180) > 20, "Set/Act/Alt/Hope are drawn at (2,148)");
+    assert!(
+        ink(2, 60, 148, 180) > 20,
+        "Set/Act/Alt/Hope are drawn at (2,148)"
+    );
     // The landing is not the services board (EXP-014): the docked screen is only
     // opened by the original's docking path (`Traffic::Docked`), and the board
     // itself still renders from the port's `DockState`.

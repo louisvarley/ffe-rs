@@ -1520,13 +1520,201 @@ pub struct Shot {
     pub distance: f64,
 }
 
-/// The player's legal standing, the port's reconstruction of `DATA_008646` bit
-/// 0 and `DATA_008647` (F783, F233, F238): `wanted` is the police alert,
-/// `offences` the number of clean ships the player has attacked.
+/// One record of F236's offence table `DATA_005039` (`ffedat.asm:4362-4382`):
+/// eleven 14-byte records. `points` is `+0` (added to the per-starport
+/// `DATA_008908` word), `fine` is `+4` (the number F236 prints in the message),
+/// `witness` is `+8` (the base of F234's starport-witness roll) and `flags`
+/// `+0xc`: bit 0 sets the wanted state, bit 1 shows the message and bit 2 asks
+/// F234 for a nearby starport before the offence is recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Offence {
+    pub name: &'static str,
+    pub points: u32,
+    pub fine: u32,
+    pub witness: u8,
+    pub flags: u8,
+}
+
+/// `DATA_005039`, in the original's order. The fines are the `+4` words; F236
+/// charges ten times the printed amount into the starport's ledger
+/// (`0x50f8 + 4*starport`), while the message shows `fine` itself (the executed
+/// original prints "$600" for unlawful discharge and records 6000).
+pub const OFFENCES: [Offence; 11] = [
+    Offence {
+        name: "Failure to obey Traffic Control",
+        points: 5,
+        fine: 1000,
+        witness: 0,
+        flags: 3,
+    },
+    Offence {
+        name: "Launching without clearance",
+        points: 8,
+        fine: 500,
+        witness: 0,
+        flags: 2,
+    },
+    Offence {
+        name: "Evading payment of fine",
+        points: 15,
+        fine: 2000,
+        witness: 0,
+        flags: 3,
+    },
+    Offence {
+        name: "Unlawful discharge of weapon",
+        points: 20,
+        fine: 600,
+        witness: 8,
+        flags: 7,
+    },
+    Offence {
+        name: "Illegal Mining",
+        points: 20,
+        fine: 200,
+        witness: 16,
+        flags: 7,
+    },
+    Offence {
+        name: "Trading in illegal goods",
+        points: 20,
+        fine: 0,
+        witness: 8,
+        flags: 0,
+    },
+    Offence {
+        name: "Attempted bribery",
+        points: 25,
+        fine: 0,
+        witness: 0,
+        flags: 0,
+    },
+    Offence {
+        name: "Smuggling illegal goods",
+        points: 30,
+        fine: 2500,
+        witness: 0,
+        flags: 2,
+    },
+    Offence {
+        name: "Unlawful dumping",
+        points: 40,
+        fine: 3000,
+        witness: 22,
+        flags: 7,
+    },
+    Offence {
+        name: "Permit Violation",
+        points: 80,
+        fine: 4000,
+        witness: 99,
+        flags: 7,
+    },
+    Offence {
+        name: "Piracy and murder",
+        points: 300,
+        fine: 10_000,
+        witness: 20,
+        flags: 7,
+    },
+];
+
+/// The index of "Unlawful discharge of weapon" in [`OFFENCES`]: F931/F941's
+/// `F237(ship, 3)`.
+pub const UNLAWFUL_DISCHARGE: usize = 3;
+
+/// F236's message (`DATA_005040`/`DATA_005041`, `ffedat.asm:4384/4386`). The
+/// first offence at a starport uses "is not permitted here"; a later one, when
+/// that starport's ledger is already non-zero, uses "can't be tolerated ...
+/// Pay an extra".
+pub fn offence_message(offence: usize, additional: bool) -> String {
+    let record = &OFFENCES[offence];
+    if additional {
+        format!(
+            "{} can't be tolerated. Pay an extra ${} fine.",
+            record.name, record.fine
+        )
+    } else {
+        format!(
+            "{} is not permitted here. Pay a ${} fine.",
+            record.name, record.fine
+        )
+    }
+}
+
+/// What F236 did for one offence, for the caller's message log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OffenceReport {
+    pub message: String,
+    /// The amount printed in the message (`+4`).
+    pub fine: u32,
+    /// The amount added to the starport's ledger: ten times `fine` (F236's
+    /// `lea eax,[eax+eax*4]` after doubling `+4`).
+    pub charged: u32,
+    /// A later offence at the same starport used the "extra" message.
+    pub additional: bool,
+}
+
+/// The player's legal standing: the port's reconstruction of `DATA_008646` bit
+/// 0 (`wanted`), `DATA_008647` (`alert`, the police chase), `DATA_008860` bit 2
+/// (`illegal_fire`, F931/F941's once-only unlawful-discharge report), the
+/// offence count, and F236's per-starport fine ledger `DATA_009095` (six
+/// dwords indexed by the starport's ordinal, `DATA_008996`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Legal {
     pub wanted: bool,
+    pub alert: bool,
+    pub illegal_fire: bool,
     pub offences: u32,
+    pub fines: [u32; 6],
+}
+
+impl Legal {
+    /// F931/F941: the player's shot or missile has passed F931's gates. The
+    /// first shot in a system (`DATA_008860` bit 2 clear) is reported through
+    /// F237(ship, 3); later shots are not. F236 needs a nearby starport (the
+    /// caller's `starport` index); without one it returns before the fine and
+    /// the wanted bit, leaving the flag set so the system's one report is spent.
+    ///
+    /// `starport` is the ordinal of the nearest starport in F234's sense, used
+    /// as the `DATA_008996` ledger index. `None` means no starport is in range.
+    pub fn player_fired(&mut self, starport: Option<usize>) -> Option<OffenceReport> {
+        if self.illegal_fire {
+            return None;
+        }
+        self.illegal_fire = true;
+        let index = starport?;
+        let record = &OFFENCES[UNLAWFUL_DISCHARGE];
+        let slot = index % self.fines.len();
+        let additional = self.fines[slot] != 0;
+        let charged = record.fine.saturating_mul(10);
+        self.fines[slot] = self.fines[slot].saturating_add(charged);
+        if record.flags & 1 != 0 {
+            self.wanted = true;
+        }
+        self.offences += 1;
+        Some(OffenceReport {
+            message: offence_message(UNLAWFUL_DISCHARGE, additional),
+            fine: record.fine,
+            charged,
+            additional,
+        })
+    }
+
+    /// F783: the police object (`+0x118 == 0xe`) has gone. It clears
+    /// `DATA_008647` and `DATA_008646` bit 0. The illegal-fire flag
+    /// (`DATA_008860` bit 2) is not cleared by F783.
+    pub fn clear_alert(&mut self) -> bool {
+        let was_set = self.wanted || self.alert;
+        self.wanted = false;
+        self.alert = false;
+        was_set
+    }
+
+    /// The fine ledger for a starport, as F655's `owes` argument.
+    pub fn owed(&self, starport: Option<usize>) -> u32 {
+        starport.map_or(0, |index| self.fines[index % self.fines.len()])
+    }
 }
 
 /// F675/F680's carried ship: a hostile ship close to the player survives a jump.

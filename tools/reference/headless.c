@@ -21,6 +21,11 @@ extern unsigned long ref_rng(void);
 extern void ref_timer_advance(void);
 extern unsigned long ref_system_counter, ref_accel_counter, ref_time_accel;
 extern unsigned long ref_timer_last, ref_timer_next, ref_timer_min;
+extern unsigned short ref_illegal_fire;
+extern unsigned char ref_wanted, ref_alert;
+extern unsigned long ref_fines[6], ref_starport, ref_danger, ref_cash;
+extern unsigned char ref_msglog[];
+extern unsigned long ref_msgindex;
 extern unsigned char *ref_framebuffer;
 extern int ref_draw_char(int glyph, int colour, int x, int y, int min_y, int max_y);
 extern int ref_char_width(int code);
@@ -488,6 +493,7 @@ static int state_mode, vector_mode, sent_start;
 static int state_combat_mode;
 static int missile_probe_mode;
 static int laser_probe_mode;
+static int legal_probe_mode;
 /* --game-frame <frames> <key> [<key>...]: the real game from the new game on, keys sent by scan code every 40 frames after frame 200, the 320x200 frame and palette written to game-frame.bin at the end. */
 static int game_frame_mode;
 static int no_intro_start;
@@ -707,6 +713,44 @@ void TimerFrameUpdate(void)
                    heat_before, (unsigned)(p[0xea] | p[0xeb] << 8),
                    (unsigned long)(p[0x11e] | p[0x11f] << 8 | p[0x120] << 16 | p[0x121] << 24),
                    (unsigned)p[0x151]);
+            fflush(stdout);
+        }
+        if (frames + 1 >= limit) exit(0);
+    } else if (legal_probe_mode) {
+        /* F931/F941's legal consequences from the executed game: fire once at
+           frame 165 while the new game still sits on the Ross 154 pad (the
+           starport "Hope"), then print DATA_008860's illegal-fire flag,
+           DATA_008646/47's wanted state, the six-starport fine ledger, the
+           current starport, credits and the tail of F271's message log. */
+        static int legal_fired;
+        unsigned long player_pointer = state_u32(0xc8);
+        if (frames >= 165 && !legal_fired && player_pointer != 0) {
+            ref_laser_fire((unsigned char *)player_pointer, 0);
+            legal_fired = 1;
+        }
+        if (frames >= 160 && player_pointer != 0) {
+            unsigned char *p = (unsigned char *)player_pointer;
+            char msg[131];
+            int k;
+            /* F271's ten records are 1038 bytes; DATA_008681 is the text
+               field at +9 and DATA_005099 is the next free index. */
+            memcpy(msg, ref_msglog + ((ref_msgindex + 9) % 10) * 1038, 130);
+            msg[130] = 0;
+            for (k = 0; k < 130; ++k) {
+                if (msg[k] == 0) { msg[k] = 0; break; }
+                if ((unsigned char)msg[k] < 0x20 || (unsigned char)msg[k] > 0x7e)
+                    msg[k] = (msg[k] == 0x0d) ? '|' : '.';
+            }
+            printf("{\"frame\":%lu,\"system\":%u,\"starport\":%lu,"
+                   "\"danger\":%lu,\"illegal\":%u,\"wanted\":%u,\"alert\":%d,"
+                   "\"fines\":[%lu,%lu,%lu,%lu,%lu,%lu],\"cash\":%lu,"
+                   "\"msg_index\":%lu,\"msg\":\"%s\"}\n",
+                   frames, (unsigned)p[0x86], ref_starport, ref_danger,
+                   (unsigned)ref_illegal_fire, (unsigned)ref_wanted,
+                   (int)(signed char)ref_alert,
+                   ref_fines[0], ref_fines[1], ref_fines[2], ref_fines[3],
+                   ref_fines[4], ref_fines[5], ref_cash,
+                   (ref_msgindex + 9) % 10, msg);
             fflush(stdout);
         }
         if (frames + 1 >= limit) exit(0);
@@ -5760,9 +5804,10 @@ int main(int argc, char **argv)
     state_combat_mode = argc == 3 && !strcmp(argv[1], "--state-combat");
     missile_probe_mode = argc == 3 && !strcmp(argv[1], "--missile-probe");
     laser_probe_mode = argc == 3 && !strcmp(argv[1], "--laser-probe");
-    state_mode = argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode || laser_probe_mode);
+    legal_probe_mode = argc == 3 && !strcmp(argv[1], "--legal-probe");
+    state_mode = argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode || laser_probe_mode || legal_probe_mode);
     if (argc != 2 && !state_mode)
-        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --laser-probe <frames> | --vectors | --font | --blit | --models");
+        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --laser-probe <frames> | --legal-probe <frames> | --vectors | --font | --blit | --models");
     count = argv[state_mode ? 2 : 1];
     {
         char *end;

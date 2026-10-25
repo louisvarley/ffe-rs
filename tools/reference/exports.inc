@@ -565,3 +565,26 @@ _ref_gui_set_last_action equ FUNC_001415_GuiSetLastAction
 ; Missile launch (F1096 -> F941), for the --missile-probe adapter mode.
 GLOBAL _ref_launch_missile
 _ref_launch_missile equ FUNC_001096
+
+; Legal probe (--legal-probe): F931/F941's illegal-fire flag DATA_008860,
+; DATA_008646/47's wanted/alert state, the per-starport fine ledger
+; DATA_009095 (six dwords), the current starport DATA_008996, the system danger
+; DATA_009010, credits DATA_008888 and F271's ten-record message log.
+GLOBAL _ref_illegal_fire
+GLOBAL _ref_wanted
+GLOBAL _ref_alert
+GLOBAL _ref_fines
+GLOBAL _ref_starport
+GLOBAL _ref_danger
+GLOBAL _ref_cash
+GLOBAL _ref_msglog
+GLOBAL _ref_msgindex
+_ref_illegal_fire equ DATA_008860
+_ref_wanted equ DATA_008646
+_ref_alert equ DATA_008647
+_ref_fines equ DATA_009095
+_ref_starport equ DATA_008996
+_ref_danger equ DATA_009010
+_ref_cash equ DATA_008888
+_ref_msglog equ DATA_008681
+_ref_msgindex equ DATA_005099
