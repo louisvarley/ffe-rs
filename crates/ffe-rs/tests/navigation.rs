@@ -1185,6 +1185,22 @@ fn the_navigation_computer_lists_the_systems_places() {
         (nav.target, nav.locked, nav.view),
         (Some(index), Some(index), View::Closed)
     );
+    // The hot areas follow the marker cells: x 10..20 / 230..240, y 5+15r.
+    nav.open(View::Places);
+    let rows = nav.listed();
+    assert_eq!(ffe_rs::screen::Screen::place_row(10, 5), Some(0));
+    assert_eq!(ffe_rs::screen::Screen::place_row(20, 20), Some(1));
+    assert_eq!(ffe_rs::screen::Screen::place_row(230, 5), Some(9));
+    // A click on the second column's first marker is the tenth place and
+    // targets that body, exactly as action 0xd9 does.
+    let row = ffe_rs::screen::Screen::place_row(230, 5).unwrap();
+    assert!(rows.len() > row, "Sol has 18 places");
+    nav.selected = row;
+    let tenth = nav.selected_body().unwrap();
+    assert_eq!(tenth, rows[9]);
+    let tenth_name = nav.bodies[tenth].name.clone();
+    assert_eq!(nav.engage().map(|b| b.name.clone()), Some(tenth_name));
+    assert_eq!((nav.target, nav.locked), (Some(tenth), Some(tenth)));
     // The ffe-rs system map still lists every body, in its own order.
     nav.open(View::System);
     assert!(nav.listed().iter().any(|i| !nav.bodies[*i].kind.is_place()));

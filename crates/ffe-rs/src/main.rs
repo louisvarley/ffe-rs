@@ -3622,10 +3622,11 @@ fn run() -> Result<(), String> {
                 ],
             );
         }
-        if let Some(nav) = nav
-            .as_ref()
-            .filter(|nav| nav.view != NavView::Closed && galaxy.is_none())
-        {
+        if let Some(nav) = nav.as_ref().filter(|nav| {
+            state.mode == ffe_rs::flight::Mode::Flight
+                && nav.view != NavView::Closed
+                && galaxy.is_none()
+        }) {
             let ship = original
                 .as_ref()
                 .map_or([0; 3], |model| model.player().motion.position);
@@ -3663,7 +3664,10 @@ fn run() -> Result<(), String> {
                 };
                 screen.draw_nav_list(&rows, &detail);
             } else if nav.view == NavView::Places {
-                // F1099's own list: markers and names only, over the view.
+                // F1099's own list: markers and names only, over the view. It is
+                // drawn after `screen.draw` (F1099's HUD and F272's message
+                // window), so no console writing can cover it; its rows end at
+                // y 133, above F272's window at y 158.
                 screen.draw_places(&nav.lines(ship));
             } else {
                 screen.draw_map(
