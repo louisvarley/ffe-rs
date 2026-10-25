@@ -170,6 +170,8 @@ pub fn mount(view: ViewMode) -> Option<usize> {
         ViewMode::TopTurret => Some(2),
         ViewMode::BottomTurret => Some(3),
         ViewMode::External => Some(0),
+        // F1040's first check: the missile view (5) fires nothing.
+        ViewMode::Missile => None,
     }
 }
 
@@ -209,7 +211,9 @@ pub fn gun_origin(
     axes: [[f64; 3]; 3],
 ) -> [f64; 3] {
     let words = stats.map_or([0, 0], |stats| match view_mode {
-        ViewMode::Front | ViewMode::External => stats.front_gun,
+        // The missile view fires nothing (F1040); the front gun is only a
+        // harmless placeholder for a caller that asks for a gun origin here.
+        ViewMode::Front | ViewMode::External | ViewMode::Missile => stats.front_gun,
         ViewMode::Rear => stats.rear_gun,
         ViewMode::TopTurret => stats.top_turret,
         ViewMode::BottomTurret => stats.bottom_turret,
@@ -405,6 +409,8 @@ mod tests {
         assert_eq!(mount(ViewMode::TopTurret), Some(2));
         assert_eq!(mount(ViewMode::BottomTurret), Some(3));
         assert_eq!(mount(ViewMode::External), Some(0));
+        // F1040: view 5 does nothing.
+        assert_eq!(mount(ViewMode::Missile), None);
     }
 
     #[test]

@@ -25,10 +25,11 @@ set: `DATA_007246` (navigation, colour 0x11) is a 9x9 box at (160,79) drawn by
 `F1113` with size 4; `DATA_007247` (combat, colour 0x10) is a circle of radius
 six at (159,79) (`FUNC_001612_DrawCircle`). They are armed targetter modes, not
 lock marks; the locked target's display is `F1100`'s targeting tunnels
-(`docs/notes/scanner.md`). The port draws the combat circle for a missile lock
-(`DATA_007247` set by `Shift+T`, see §8) and the navigation box when its
-targeter is set, both on F1113's blink; otherwise the port's lock brackets stand
-in for the navigation target.
+(`docs/notes/scanner.md`). From 2026-10-25 the port arms them like the source:
+`T`/`Shift+T` toggle `DATA_007246`/`DATA_007247` **only with the Auto targetter**
+(`ship+0xc8` bit 7), F1010's per-frame acquisition picks the object within six
+pixels of the view centre, and F1111 draws the box/circle on F1113's blink. The
+port's own lock brackets are gone.
 
 ### 1.2 The velocity marker (`FUNC_001112`, `ffe.asm:81996`) — not a target X
 
@@ -511,19 +512,25 @@ is the single F942 test.
   gun offsets) are implemented and tested, but no playable loadout reaches
   them.
 - **Missiles** are implemented for the player (see §8): `M`/F1096/F941, the
-  missile object, guidance, fuse, damage and the F1120 pylon lamps, launched
-  against a `Shift+T` missile lock. NPC ships do not launch missiles (F754's AI
-  path), the missile view (F10) and ECM are not wired.
+  missile object, guidance, fuse, damage and the F1120 pylon lamps. The combat
+  target `player+0xed` (`DATA_008875`) is set by clicking a ship, by the
+  equipment-gated auto-targetter, or by the port's older `Shift+T` fallback.
+  NPC ships do not launch missiles (F754's AI path), so F1057's decoy retarget
+  has no playable chaff source yet. The missile view (F10) and ECM are wired
+  (see §8.2).
 - **Hit effects/explosions.** `F939`'s particle, `F942`'s explosion and the
   `F926` debris are ported in `ffe_core::effects` and drawn by `screen`; see §7.
   `F952` is subsystem damage, not a visual effect.
-- **Sound cues** (0x0a/0x0b/0x1c/0x1d/0x14) are not played.
+- **Laser and hit cues** (0x0a/0x0b/0x1c/0x1d/0x14) are not played; the ECM
+  (0x19/0x1a) and lock (0x15) cues are (see §8.3).
 - **The combat targeter** is ported (`docs/notes/scanner.md`): F1100/F1113's
   targeting tunnels, F1114's boxes, F1111's blinking F1612 circle/box cursor
-  and the `DATA_007252` game-second blink. The *arming* rules (`t` with the
-  target computer, F1010/F1060/F1062) are not wired because the port has no
-  target-computer equipment; the missile lock sets `DATA_007247` and draws
-  F1114's circle, and `T` still cycles locks (an existing deviation).
+  and the `DATA_007252` game-second blink. The Auto targetter (general bit 7)
+  is now fitted through the starport Upgrades list; `T`/`Shift+T` arm the
+  navigation/combat cursor and F1010/F1062/F1064 acquire the object within six
+  pixels of the view centre (see §8.2). The port still lets `T` cycle locks
+  when the item is **not** fitted (reported deviation) so the sandbox autopilot
+  remains usable without a starport visit.
 - **Target colour.** F1100's colour is a COLPAL low index (0x11 navigation /
   0x10 combat, 0x5f in the missile view), not the runtime upper palette; the
   port resolves it through the imported low palette (`F1641`/`base:palette/low`).
@@ -609,9 +616,14 @@ effects are framed by `effects_view`.
   2^(13+4) mm (131 m); F718 (`ffe.asm:47435`) runs the F569 contact test and
   F721 (`ffe.asm:47661`) calls F720 (`ffe.asm:47622`) with
   `DATA_006269[model]`, which calls F953. F719 (`ffe.asm:47573`) is the
-  explosion/`F925` removal. F718's ECM branch reads `DATA_008835 & 4` and
-  destroys models 4, 7, 8, 9, 10, 11, 12 and 13 (not 5 or 6); F1057
-  (`ffe.asm:78789`) can retarget a missile whose target is the player.
+  explosion/`F925` removal. F718's ECM branch reads `DATA_008835` bits 2/3 and
+  `DATA_000029`'s per-model dispatch (`ffe.asm:47495-47566`): the standard
+  system destroys models 5 and 6, the Naval system also destroys 7, 9 and 10,
+  and 4, 8, 11, 12 and 13 are immune. (An earlier version of this note had the
+  table inverted.) There is no range or owner test; the burst is global for the
+  frame. F1057 (`ffe.asm:78789`) can retarget a model 6..11 missile whose target
+  is the player to the chaff object `DATA_007253`, gated per missile on
+  `F1530() & 0x1000`.
 - **HUD.** F1120 (`ffe.asm:82429-82620`) shows buttons 0x3b..0x44 for pylons
   9..0 with image `word & 0xf`, and hides 0x4f while `DATA_007247` is set.
   F1099/F1100's missile view (5) reads the last missile (`DATA_008877`); the
@@ -630,15 +642,21 @@ effects are framed by `effects_view`.
 - `Combat`: `missiles: [u8; 10]` = F998's `[0x82, 0x82, 0..]`,
   `first_missile`, `take_missile` and `missile_count`; serde default so old
   saves have no missiles. `Flight::validate` rejects a code with no model.
-- `Navigator`: `missile_lock` (`DATA_008875`) and `missiles`; the combat lock
-  is set by Shift+T on a locked ship (the port's T cycles, so the shift goes
-  to the combat target instead of the previous navigation target when a ship
-  is locked), and is cleared when the ship dies or the system changes.
-- `main`: `M` scans the pylons, requires the combat lock, launches at the
+- `Navigator`: `missile_lock` (`DATA_008875`), `missiles` and `missile_view`
+  (`DATA_008877`, the last missile the player launched); the combat target is
+  set by clicking a ship, by the auto-targetter (below) or by the port's older
+  `Shift+T` fallback, and is cleared when the ship dies or the system changes.
+  F941's launch stores the new missile's id in `missile_view` for the player's
+  owner; F1102 clears it when that missile dies.
+- `main`: `M` scans the pylons, requires the combat target, launches at the
   ship's position and axes, and messages the outcome; `tick_missiles` applies
-  F953 after `tick_ships`.
+  F953 after `tick_ships`. `E`/`;`/Insert fire F935's ECM when the equipment is
+  fitted (no energy or ammo cost); F10 enters the missile view when the Missile
+  Viewer is fitted and `DATA_008877` is live. `T`/`Shift+T` with the Auto
+  targetter arm F1111's cursor and the per-frame acquisition sets the target.
 - `Screen`: draws F941's missile objects through the ordinary model renderer,
-  draws F1114's circle at (0x9f,0x4f) while the combat lock blinks, and feeds
+  draws F1114's circle at (0x9f,0x4f) while the combat targetter is *armed*,
+  F1113's navigation box while the navigation targetter is armed, and feeds
   the pylon words to `ShipSystems.slots` so F1120's ten lamps show the
   remaining ammo on the F2 page.
 - **Timing from the executed original.** `--missile-probe` (see 8.3) shows a
@@ -646,6 +664,36 @@ effects are framed by `effects_view`.
   is 0x20 (not the frame's 994); F758's age increments once per 20 frames, so
   guidance runs at 0.4 s and the 60-update lifetime is 24 s. The port carries
   F717's thrust vector every frame and updates F758's aim/fuse every 0.4 s.
+- **ECM.** `Loadout::ecm()` reads the Naval E.C.M. bit (23) first and the
+  standard bit (19); `MissileField::ecm(naval)` applies F718's
+  `ffe_core::missile::ecm_destroys` table and returns the losses;
+  `Navigator::ecm` spawns F719's model-0x9b explosion (no debris) and clears
+  `DATA_008877` if the viewed missile was one of them. The key is F1054's `e`
+  (0x65) plus the source's `;` (0x3b) and Insert (0x2); the sound cues are
+  0x19/0x1a. There is **no** energy, ammo or range cost in F935/F718; the only
+  gate is the fitted bit. `E` is also the port's Modern-controls roll key, so
+  holding it both rolls and fires one burst on the press edge.
+- **Auto targetter.** `ffe_rs::targeter::Arming` holds `DATA_007246`/`7247` and
+  the skip bytes `DATA_007248`/`7249`; `main` gates `T`/`Shift+T` on
+  `Loadout::auto_targetter()`. Every frame while armed, it projects the bodies
+  and ships with `Screen::body_projection` and calls
+  `targeter::acquire`, which is F1061/F1063's F989 window and six-pixel
+  Manhattan rule. The navigation acquisition sets `nav.locked`, the combat one
+  `nav.ship_lock`/`nav.missile_lock`; the cursor disarms and sample 0x15
+  (`Cue::UiBeep2`) plays. The recovered listing has no call to F1010, so this
+  per-frame acquisition is the port's (reported).
+- **Missile view.** `ViewMode::Missile` and `ViewState::missile` carry
+  `player+0xef`'s missile object; `Camera::new` uses the missile's position and
+  axes plus its model's eye words (F1054's `JUMP_004340`). `main` fills it from
+  `Navigator::viewed_missile`, forces the front view when F1102 clears the id,
+  and F1099's view-5 branch skips the nav target, gunsight, velocity marker and
+  player HUD while the combat range uses colour 0x5f and measures from the
+  missile.
+- **Chaff/decoy.** `MissileField::retarget` implements F1057's model 6..11
+  range and per-missile `F1530() & 0x1000` gate. `F1054`'s `c` would need
+  `player+0x174`'s chaff count, but the recovered listing has **no writer** for
+  that word (the F1120 lamp reads it and the `c` handler compares it to zero),
+  so the port has no playable chaff source and does not invent an ammo count.
 - **Deliberate floating-point simplification:** the original's Q15 thrust
   words become mm/s2 with the AI's 0x20 tics (0.59 mm/s2 per word), F585's
   quantised turn words become a continuous maximum rate (turn =
@@ -655,15 +703,27 @@ effects are framed by `effects_view`.
 
 ### 8.3 Evidence
 
-- `cargo test -p ffe-core missile`: 7 tests (tables, launch, tracking, fuse,
-  contact, expiry, ballistic).
-- `cargo test -p ffe-rs --lib missile`: 5 tests (model 6 spec, F953 shield
-  branch, F942 kill, timeout, ammo scan).
+- `cargo test -p ffe-core missile`: 9 tests (tables, launch, tracking, fuse,
+  contact, expiry, ballistic, ECM's model table and F1057's range).
+- `cargo test -p ffe-rs --lib missile`: 8 tests (model 6 spec, F953 shield
+  branch, F942 kill, timeout, ammo scan, F941 ids, ECM losses and retarget).
 - `cargo test -p ffe-rs --test missile_view -- --ignored` with
   `FFE_WORLD_CACHE`: the lock -> launch -> shield hit -> second launch -> kill
   sequence at 120 m, with `missile-launch.ppm`, `missile-hit.ppm` and
   `missile-kill.ppm`; the frame differs with the missile removed and with
   F1114's circle off.
+- `cargo test -p ffe-rs --test ecm_view -- --ignored` with `FFE_WORLD_CACHE`:
+  the equipment gate, F718's model-6 loss, F719's effect object and
+  `DATA_008877`'s clear, plus the armed navigation cursor and the missile view
+  camera/readout. `docs/evidence/ecm/` holds `ecm-before/after.png`, the
+  `targeter-armed.png` box and `missile-view.png` (front view for comparison),
+  with a README on the source and the model-155 limitation.
+- `cargo test -p ffe-core missile` and `cargo test -p ffe-rs --lib missile`
+  now also cover `DATA_000029` (models 5/6, the naval 7/9/10 and the immune
+  4/8/11/12/13), F1057's model range/gate, the F941 ids and F719's explosion.
+- `cargo test -p ffe-rs --test views` covers the missile camera's position,
+  axes and cockpit fallback; `targeter`'s unit tests cover the F989 window,
+  the six-pixel rule and the arming skip bytes.
 - The reference `--state-combat` probe already confirms F998's two `0x82`
   words in the executed new game (section 6). `--missile-probe 400` (new
   adapter mode, `tools/reference/headless.c`) launches F1096 in the executed
@@ -673,29 +733,47 @@ effects are framed by `effects_view`.
   and 4 at frame 399, so F758 runs every 20 frames; the first guidance update
   turns the missile toward the target. That probe is the calibration for the
   port's 0.4 s guidance interval, 24 s lifetime and 0.59 mm/s2 per thrust
-  word.
+  word. It also confirms that F1096 reads the combat target from the same
+  `player+0xed` word the port calls `missile_lock`: `headless.c` writes
+  `ref_state[0xed]` and the executed launch stores it at the missile's `+0xfe`
+  (target 114).
 
 ### 8.4 What remains
 
-- **Missile view (5)** and F1099's `DATA_008877` range readout are not wired
-  (no F10 equipment).
 - **NPC launches.** F754 lets an AI ship launch at `+0xfe`; the port's ships do
-  not fire or launch, so their missiles and the F1057 decoy/retarget path are
-  absent. The core `Missile` and `MissileField` are owner-agnostic and can take
-  that later.
-- **ECM.** F718's `DATA_008835 & 4` branch and F1057's retarget are not
-  reachable (no equipment/ECM model); the port has no ECM key.
-- **F1113's navigation-target box** and the targeter's blink lamps still use
-  the port's brackets; F1114's circle is drawn.
-- **Sound cues** 0x15 (lock), 0x14 (launch), 0x20 and the F719 explosion are
-  not played (the audio layer is synthetic).
+  not fire or launch, so their missiles are absent. The core `Missile` and
+  `MissileField` are owner-agnostic and can take that later.
+- **Chaff.** F1057's retarget is implemented and unit-tested, but the chaff
+  count `player+0x174` has no writer in the recovered listing, so F1054's `c`
+  key has no ammo source. Do not add one by invention; a save-format or
+  outfitting owner decision is needed.
+- **ECM visuals.** F935's `ship+0x14f = 2` / `ship+0x151 |= 0x20` draws model
+  0xa1 at the ship for the activation frame (F1536). The port plays the sample
+  and destroys the missiles but does not draw that one-frame ring. F719's
+  model-0x9b object is spawned; its command stream collapses to single-pixel
+  flats in the port's model renderer, as F942's does (the visible F942 burst is
+  F926 debris, which F719 does not spawn).
+- **Targeter acquisition order.** F989 walks the object slots from 0x72 down;
+  the port projects `nav.bodies` and `nav.ships` in their own order, because it
+  does not model object slots. Bodies are the only navigation-target
+  candidates; the original can store a ship in `player+0xec`, which the port's
+  `locked` index cannot.
+- **T without the Auto targetter.** The port keeps `T` cycling locks (and
+  `Shift+T` toggling the missile target) when the item is not fitted, so the
+  sandbox autopilot/missiles still work before a starport visit. The original
+  returns without doing anything.
+- **Sound cues.** The lock (0x15) and ECM (0x19/0x1a) samples are now posted
+  (`Cue::UiBeep2`/`Cue::Ecm`/`Cue::NavalEcm`); F719's 0x06 and F941's 0x20 are
+  not, as the launch path predates this slice.
 - **The original's exact F597 lead and F585 quantisation** are approximated in
   floating point; the tables and gross behaviour match.
 - **Player missile damage** would use the existing `Flight::take_damage`;
   NPC launches are the missing source.
-- **Owner decisions:** whether to add the missile view (F10), NPC launching
-  (F754), ECM, the F1113 navigation box/lamps and the full F1116 targeter
-  display; how `Shift+T` should behave as the lock gesture; and whether the
+- **Owner decisions:** the missile view (F10), ECM and the auto-targetter are
+  now ported (2026-10-25). Decide whether `T` should do nothing without the
+  Auto targetter (the source) or keep the port's cycle-lock fallback; whether
+  to give the chaff dispenser an ammo source (the source's count has no writer
+  here); whether `E` should stay shared with Modern roll; and whether the
   approximated F597 lead/F585 turn quantisation is close enough. The
   `--missile-probe` reference run calibrates the 0.4 s guidance interval, the
   24 s (60-update) lifetime and the per-thrust acceleration.

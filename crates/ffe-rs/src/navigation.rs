@@ -800,6 +800,9 @@ pub struct Navigator {
     /// The combat target (`DATA_008875`) the missile lock-on uses. F1096/F941
     /// launch at this target, not at the navigation target `ship_lock`.
     pub missile_lock: Option<u32>,
+    /// `DATA_008877` (`player+0xef`): the last missile the player launched,
+    /// which F10's missile view rides. Cleared when that missile dies (F1102).
+    pub missile_view: Option<u32>,
     /// The missiles in flight (F941 objects, model 4..13).
     pub missiles: crate::missile::MissileField,
     /// The system index the traffic was spawned for: a killed ship is not
@@ -1247,6 +1250,7 @@ impl Navigator {
             effects: Vec::new(),
             ship_lock: None,
             missile_lock: None,
+            missile_view: None,
             missiles: crate::missile::MissileField::default(),
             spawned: None,
             sequence: None,
@@ -2078,6 +2082,7 @@ impl Navigator {
         self.ship_lock = None;
         self.effects.clear();
         self.missile_lock = None;
+        self.missile_view = None;
         self.missiles.clear();
         self.spawned = Some(self.current);
         !self.ships.is_empty()
@@ -2491,10 +2496,16 @@ impl Navigator {
             pylon,
             launcher_radius,
         );
+        // F941 stores the new object's id at `DATA_008877` when the launcher is
+        // the player (`+0x100 == DATA_008857`). The port's player owner is 0.
+        if owner == 0 {
+            self.missile_view = self.missiles.missiles.last().map(|missile| missile.id);
+        }
     }
 
     /// One frame of missiles: F758/F717's tracking, the fuse and F953's damage.
-    /// The combat target is cleared when its ship is gone.
+    /// The combat target is cleared when its ship is gone, and F1102 forces the
+    /// missile view's object to zero when that missile dies.
     pub fn tick_missiles(
         &mut self,
         seconds: f64,
@@ -2506,7 +2517,60 @@ impl Navigator {
         {
             self.missile_lock = None;
         }
-        self.missiles.tick(seconds, &mut self.ships)
+        let events = self.missiles.tick(seconds, &mut self.ships);
+        if self
+            .missile_view
+            .is_some_and(|id| self.missiles.get(id).is_none())
+        {
+            self.missile_view = None;
+        }
+        events
+    }
+
+    /// The missile the F10 view rides (`DATA_008877`), when it is still alive.
+    pub fn viewed_missile(&self) -> Option<&ffe_core::missile::Missile> {
+        self.missiles.get(self.missile_view?)
+    }
+
+    /// F718/F719: an ECM burst (F935 already checked the equipment). Every
+    /// live missile the model table defeats is destroyed and gets F719's
+    /// model-0x9b explosion; the viewed missile clears `DATA_008877`.
+    pub fn ecm(&mut self, naval: bool) -> Vec<crate::missile::EcmLoss> {
+        let losses = self.missiles.ecm(naval);
+        if losses.is_empty() {
+            return losses;
+        }
+        let seed = (self.clock * 1000.0) as u32
+            ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9)
+            ^ if naval { 0x8000_0000 } else { 0x4000_0000 };
+        let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
+        for loss in &losses {
+            self.effects.push(ffe_core::effects::missile_explosion(
+                loss.position,
+                loss.axes,
+                &mut rng,
+            ));
+        }
+        if self
+            .missile_view
+            .is_some_and(|id| losses.iter().any(|loss| loss.id == id))
+        {
+            self.missile_view = None;
+        }
+        losses
+    }
+
+    /// F1057's chaff retarget: pull missiles aimed at `from` (the player) to
+    /// the chaff object `to`. `allow` is the per-missile `F1530() & 0x1000`
+    /// roll. The chaff launch itself (`F1054`'s `c`) has no ammo writer in the
+    /// recovered build, so no playable caller yet (`docs/notes/combat.md`).
+    pub fn retarget_missiles(
+        &mut self,
+        from: u32,
+        to: u32,
+        allow: impl FnMut(&ffe_core::missile::Missile) -> bool,
+    ) -> usize {
+        self.missiles.retarget(from, to, allow)
     }
 
     /// The locked NPC ship, if one is.

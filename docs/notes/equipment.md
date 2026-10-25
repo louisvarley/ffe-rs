@@ -128,6 +128,21 @@ at `player+0xc8`, while F1116's +0xc6/+0xc7 and +0x268 are fields of the player
 block itself. The recovered asm's `mov ebx,DATA_008804` uses the player block
 base; `[ebx+0x3fb6]` is the field the older notes call `DATA_003fb6`.
 
+### Combat equipment bits (2026-10-25)
+
+| bit | record (code) | use |
+|---|---|---|
+| 7 | Auto targetter (`0x17`) | F1054's `T`/`Shift+T` arm `DATA_007246`/`7247`; F1010 acquires under the crosshair |
+| 9 | Missile Viewer (`0x19`) | `F10` (view 5) needs it and `player+0xef` |
+| 11 | Chaff Dispenser (`0x1b`) | F1054's `c` needs it and `player+0x174` (no writer in the recovered build) |
+| 19 | E.C.M. System (`0x03`) | F935 sets `DATA_008835 |= 4` |
+| 23 | Naval E.C.M. System (`0x07`) | F935 sets `DATA_008835 |= 0xc` (also bit 3) |
+
+Rust: `Loadout::{auto_targetter, missile_viewer, chaff_dispenser, ecm}`;
+`ffe_core::equipment::{AUTO_TARGETTER_BIT, MISSILE_VIEWER_BIT, CHAFF_BIT,
+ECM_BIT, NAVAL_ECM_BIT, Ecm}`. See `docs/notes/combat.md` §8 for the ECM model
+table and the targeter/missile-view behaviour.
+
 ### F991 view-row icons (`ffe.asm:73469`)
 
 - `0x10` always (labels toggle).

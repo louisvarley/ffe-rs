@@ -1,8 +1,9 @@
 //! Flight views, as the original handles them (docs/notes/views.md).
 //!
 //! The view mode is the player's `DATA_008872` (0 front, 1 rear, 2/3 turrets,
-//! 4 external; 5 missile and 6 combat computer need equipment not modelled
-//! here). F1 cycles front, rear, turret, external; F6-F9 select directly.
+//! 4 external, 5 missile; 6 is the combat computer). F1 cycles front, rear,
+//! turret, external; F6-F9 select directly, F10 the missile view (Missile
+//! Viewer and a missile in flight) and F11 the combat computer.
 //! The external camera keeps the original's yaw and pitch (16-bit angles,
 //! `+0x128`/`+0x12c`) and signed distance (`+0x130`, negative = behind), turned
 //! by FUNC_001054's two rotations of the ship's axes; the turrets keep theirs at
@@ -20,6 +21,9 @@ pub enum ViewMode {
     /// Mode 3: the turret looking below (ships with 4 or more gun mounts).
     BottomTurret,
     External,
+    /// Mode 5: the camera rides the last missile the player launched
+    /// (`player+0xef`, `DATA_008877`; F1054's `JUMP_004340`).
+    Missile,
 }
 
 impl ViewMode {
@@ -30,6 +34,7 @@ impl ViewMode {
             ViewMode::TopTurret => "Top Turret View",
             ViewMode::BottomTurret => "Bottom Turret View",
             ViewMode::External => "External View",
+            ViewMode::Missile => "Missile View",
         }
     }
 
@@ -48,7 +53,8 @@ impl ViewMode {
                 ViewMode::turret(gun_mounts, turret_pitch).unwrap_or(ViewMode::External)
             }
             ViewMode::TopTurret | ViewMode::BottomTurret => ViewMode::External,
-            ViewMode::External => ViewMode::Front,
+            // FUNC_001001's `DATA_008872`+1 is 6, and 6 > 4 wraps to 0.
+            ViewMode::External | ViewMode::Missile => ViewMode::Front,
         }
     }
 
@@ -188,9 +194,23 @@ impl ExternalCamera {
     }
 }
 
+/// The missile view's camera object: F1054 copies the missile object the
+/// player launched (`player+0xef`) and calls F1053 with its model descriptor's
+/// eye words. The eye is `forward * word0 + up * word1`, the same placement as
+/// the cockpit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MissileCamera {
+    /// The missile object's position in flight units.
+    pub position: [f64; 3],
+    /// The missile's right, up and forward axes.
+    pub axes: [[f64; 3]; 3],
+    /// The missile model's eye words (descriptor `+0x18`/`+0x1a`).
+    pub eye: [i16; 2],
+}
+
 /// The player's view: the mode, the external camera and the turret angles (both
-/// kept across modes).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// kept across modes), and the missile the F10 view rides.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewState {
     pub mode: ViewMode,
     pub external: ExternalCamera,
@@ -198,6 +218,8 @@ pub struct ViewState {
     /// The original's "Lock external view to ship" (`DATA_009020`): the external
     /// camera's offset follows the turned forward axis; off uses the ship's own.
     pub lock_external: bool,
+    /// `DATA_008877`: the missile object view 5 rides, when one is alive.
+    pub missile: Option<MissileCamera>,
     /// What the console shows besides the views (time acceleration, speeds).
     pub console: crate::console::ConsoleState,
 }
@@ -209,6 +231,7 @@ impl Default for ViewState {
             external: ExternalCamera::default(),
             turret: TurretCamera::default(),
             lock_external: true,
+            missile: None,
             console: crate::console::ConsoleState::default(),
         }
     }
@@ -300,6 +323,29 @@ impl Camera {
                 Self {
                     position,
                     axes: [right, up, forward],
+                }
+            }
+            // F1054's JUMP_004340: the camera is the missile object itself,
+            // placed at its own position plus its model's eye offset, with the
+            // missile's axes. With no missile the view falls back to the
+            // cockpit (the caller forces the front view when the missile dies).
+            ViewMode::Missile => {
+                let Some(missile) = views.missile else {
+                    return Self {
+                        position: eye(forward, words(|s| s.eye, 0)),
+                        axes: [right, up, forward],
+                    };
+                };
+                let [along, above] = missile
+                    .eye
+                    .map(|word| f64::from(word) * 32767.0 / 4096.0 / model_scale);
+                Self {
+                    position: std::array::from_fn(|i| {
+                        missile.position[i]
+                            + missile.axes[2][i] * along
+                            + missile.axes[1][i] * above
+                    }),
+                    axes: missile.axes,
                 }
             }
             // rot(C, A, yaw), then rot(B, C, pitch); the camera sits at

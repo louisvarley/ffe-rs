@@ -94,6 +94,33 @@ pub fn is_mine(code: u8) -> bool {
     code & MINE_FLAG != 0
 }
 
+/// F718's ECM dispatch table, `DATA_000029` (`ffe.asm:47490`), indexed by the
+/// missile model. The value is the branch: 0 destroys on any ECM burst, 1 is
+/// immune, 2 needs the naval system's extra `DATA_008835` bit 3.
+///
+/// The table is `[0, 0, 0, 0, 1, 0, 0, 2, 1, 2, 2, 1, 1, 1]`, so models 5 and
+/// 6 are destroyed by the standard E.C.M. and models 7, 9 and 10 only by the
+/// Naval E.C.M.; 4, 8, 11, 12 and 13 are immune (`ffe.asm:47495-47566`,
+/// `DATA_000030`'s three jump entries). Models above 13 take the source's
+/// `ja` branch and are destroyed.
+pub const ECM_BRANCH: [u8; 14] = [0, 0, 0, 0, 1, 0, 0, 2, 1, 2, 2, 1, 1, 1];
+
+/// F718: does an ECM burst of `kind` destroy a missile of `model`?
+pub fn ecm_destroys(model: u32, naval: bool) -> bool {
+    match ECM_BRANCH.get(model as usize) {
+        Some(0) => true,
+        Some(2) => naval,
+        Some(_) => false,
+        None => true,
+    }
+}
+
+/// F1057's retarget range: only models 6..=11 (`cmp esi,6; jc`, `cmp esi,0xb;
+/// ja`). A chaff cloud can pull these away from the player.
+pub fn retargetable(model: u32) -> bool {
+    (6..=11).contains(&model)
+}
+
 /// F941's AI state for a launched code.
 pub fn ai_state(code: u8) -> u8 {
     if is_mine(code) {
@@ -179,6 +206,11 @@ pub enum State {
 pub struct Missile {
     pub spec: Spec,
     pub ai_state: u8,
+    /// F941's object id (`+0x86`). `DATA_008877` (the missile view's object,
+    /// `player+0xef`) holds this id, and F1057's retarget keeps the missile's
+    /// `+0xfe` separate from it. The field is assigned by
+    /// `ffe-rs::missile::MissileField` (the core has no object slots).
+    pub id: u32,
     /// The launcher's object id (`+0x100`).
     pub owner: u32,
     /// The combat target (`+0xfe`), `DATA_008875` at launch.
@@ -237,6 +269,7 @@ impl Missile {
         Self {
             spec,
             ai_state,
+            id: 0,
             owner,
             target,
             position,
@@ -462,6 +495,39 @@ mod tests {
         assert_eq!(ai_state(0x82), AI_MISSILE);
         assert_eq!(ai_state(0xc0), AI_MINE_MODEL_4);
         assert_eq!(ai_state(0xc1), AI_MINE);
+    }
+
+    #[test]
+    fn ecm_uses_f718s_model_table_and_the_naval_extra_bit() {
+        // F718/DATA_000029: 0 destroys, 1 immune, 2 needs DATA_008835 bit 3.
+        assert_eq!(ECM_BRANCH.len(), 14);
+        for model in [0, 1, 2, 3, 5, 6] {
+            assert!(ecm_destroys(model, false), "model {model}");
+            assert!(ecm_destroys(model, true), "model {model}");
+        }
+        for model in [4, 8, 11, 12, 13] {
+            assert!(!ecm_destroys(model, false), "model {model}");
+            assert!(!ecm_destroys(model, true), "model {model}");
+        }
+        for model in [7, 9, 10] {
+            assert!(!ecm_destroys(model, false), "model {model}");
+            assert!(ecm_destroys(model, true), "model {model}");
+        }
+        // The source's `ja` past 13 destroys, though no missile uses it.
+        assert!(ecm_destroys(14, false));
+        // The new game's 0x82 is model 6, which the standard ECM defeats.
+        assert!(ecm_destroys(model(0x82).unwrap(), false));
+    }
+
+    #[test]
+    fn f1057_retargets_only_models_six_to_eleven() {
+        assert!(!retargetable(4));
+        assert!(!retargetable(5));
+        for model in 6..=11 {
+            assert!(retargetable(model), "model {model}");
+        }
+        assert!(!retargetable(12));
+        assert!(!retargetable(13));
     }
 
     #[test]

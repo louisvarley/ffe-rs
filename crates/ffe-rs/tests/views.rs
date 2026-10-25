@@ -1,6 +1,6 @@
 use ffe_rs::camera::{
-    key_amount, Camera, ExternalCamera, ExternalKeys, TurretCamera, ViewMode, ViewState,
-    DEFAULT_DISTANCE,
+    key_amount, Camera, ExternalCamera, ExternalKeys, MissileCamera, TurretCamera, ViewMode,
+    ViewState, DEFAULT_DISTANCE,
 };
 use ffe_rs::flight::Flight;
 use ffe_rs::screen::{body_label_positions, BodyLabel, Screen, ViewButton};
@@ -123,6 +123,37 @@ fn eyes_sit_at_the_ship_statistics_offsets() {
     turned.turret.pitch = -0x4000;
     let camera = Camera::new(&state, &turned, Some(&stats), 32767.0);
     assert!((camera.axes[2][1] - 1.0).abs() < 1e-9, "{:?}", camera.axes);
+}
+
+#[test]
+fn the_missile_view_rides_the_missile_objects_eye_and_axes() {
+    // F1054's JUMP_004340: the camera is the missile object, offset by its own
+    // model descriptor's eye words along its forward and up axes.
+    let missile = MissileCamera {
+        position: [100.0, 200.0, 300.0],
+        axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        eye: [4096, -4096],
+    };
+    let mut state = Flight::free_flight();
+    state.position = [0.0; 3];
+    let mut views = ViewState {
+        mode: ViewMode::Missile,
+        missile: Some(missile),
+        ..ViewState::default()
+    };
+    let camera = Camera::new(&state, &views, None, 32767.0);
+    assert_eq!(camera.axes, missile.axes);
+    assert_eq!(camera.position, [100.0, 199.0, 301.0]);
+    // No missile: the cockpit fallback, and F1 leaves the view for the front.
+    views.missile = None;
+    let camera = Camera::new(&state, &views, None, 32767.0);
+    assert_eq!(
+        camera.axes,
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    );
+    assert_eq!(camera.position, [0.0, 0.0, 0.0]);
+    assert_eq!(ViewMode::Missile.next(1, 0), ViewMode::Front);
+    assert_eq!(ViewMode::Missile.name(), "Missile View");
 }
 
 #[test]

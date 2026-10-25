@@ -426,8 +426,9 @@ impl Console {
         } else {
             self.hide(0x16);
         }
-        // The views are radio group 1: one image 1, the rest 0.
-        for id in [0x15usize, 0x16, 0x17, 0x18] {
+        // The views are radio group 1: one image 1, the rest 0. 0x14 is the
+        // missile view's button (F1054's F5/F10).
+        for id in [0x14usize, 0x15, 0x16, 0x17, 0x18] {
             self.set_image(id, 0);
         }
         let selected = match view {
@@ -435,6 +436,7 @@ impl Console {
             ViewMode::Rear => 0x17,
             ViewMode::TopTurret | ViewMode::BottomTurret => 0x16,
             ViewMode::External => 0x15,
+            ViewMode::Missile => 0x14,
         };
         if self.is_visible(selected) {
             self.set_image(selected, 1);
@@ -622,7 +624,8 @@ mod tests {
         assert_eq!(console.buttons[0x3b].cur, 2);
         assert_eq!(console.buttons[0x3c].cur, 2);
         assert!(!console.is_visible(0x3d));
-        // The 0x4f lamp is hidden while DATA_007247 (the missile lock) is set.
+        // The 0x4f lamp is hidden while DATA_007247 (the combat targetter is
+        // armed) is set.
         assert!(console.is_visible(0x4f));
         systems.data_247 = true;
         console.apply_engines_off_page(&systems);

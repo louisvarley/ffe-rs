@@ -18,8 +18,20 @@
 //! targetter (a 4-half-size box at (160,79), colour 0x11) and `DATA_007247` the
 //! combat targetter (a circle of radius 6 at (159,79), colour 0x10). Both blink
 //! with `DATA_007252`, which is the parity of the game second (`DATA_008799 /
-//! 0xc22e`). The port does not arm the auto-targetter (its `T` cycles locks); the
-//! draw path is exposed for the caller and for frames.
+//! 0xc22e`).
+//!
+//! `F1054`'s `T` (action 0x74) and `Shift+T` toggle the two flags, but only
+//! with the Auto targetter fitted (`ship+0xc8 & 0x80`, record 0x17,
+//! `ffe.asm:78737-78768`). While a flag is set, `F1010` calls `F1062`/`F1064`
+//! every frame: `F1061`/`F1063` walk the live objects in F989's order and pick
+//! the first whose screen position is within a six-pixel Manhattan distance of
+//! the view centre; the acquisition writes the target (`player+0xec` /
+//! `player+0xed`) and disarms. The targeters also skip the current target and
+//! the one captured when they were armed (`DATA_007248`/`DATA_007249`).
+//!
+//! The recovered listing has no call to `F1010`; the port runs the acquisition
+//! from its flight step so the armed cursor is not inert (`docs/notes/combat.md`
+//! §8.4).
 
 /// F1100/F1111's targetter colours: navigation 0x11, combat 0x10.
 ///
@@ -77,6 +89,40 @@ pub const CURSOR_BOX: ((i32, i32), i32) = ((0xa0, 0x4f), 4);
 /// F1111's cursor circle centre (0x9f, 0x4f) and radius (`0xc >> 1`).
 pub const CURSOR_CIRCLE: ((i32, i32), i32) = ((0x9f, 0x4f), 6);
 
+/// F1061/F1063's crosshair: an object's screen position within this Manhattan
+/// distance of the view centre is acquired. F989 passes the object's x+3/y-4 to
+/// the callbacks, which compare against (0xa3,0x4b), so the object's own point
+/// is (0xa0,0x4f) — the view centre.
+pub const CROSSHAIR: (i32, i32) = (0xa0, 0x4f);
+/// F1061/F1063's `cmp ebx,6; jg` window.
+pub const ACQUIRE_DISTANCE: i32 = 6;
+
+/// F989's live-object screen window before it calls a targeter callback:
+/// `x > 0`, `x + 3 < 0x13c`, `y > 0` and `y - 4 < 0x95` (`ffe.asm:73373`).
+pub fn targetable(x: i32, y: i32) -> bool {
+    x > 0 && x + 3 < 0x13c && y > 0 && y - 4 < 0x95
+}
+
+/// F1061/F1063: the first object of `entries` (F989's order: highest slot
+/// first) within [`ACQUIRE_DISTANCE`] of [`CROSSHAIR`], skipping the current
+/// target and the target captured when the cursor was armed. `entries` are
+/// `(object id, screen x, screen y)`.
+pub fn acquire(
+    entries: &[(u32, i32, i32)],
+    current: Option<u32>,
+    previous: Option<u32>,
+) -> Option<u32> {
+    entries
+        .iter()
+        .find(|(id, x, y)| {
+            Some(*id) != current
+                && Some(*id) != previous
+                && targetable(*x, *y)
+                && (*x - CROSSHAIR.0).abs() + (*y - CROSSHAIR.1).abs() <= ACQUIRE_DISTANCE
+        })
+        .map(|(id, _, _)| *id)
+}
+
 /// Which auto-targetter `DATA_007246`/`DATA_007247` is armed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cursor {
@@ -84,6 +130,57 @@ pub enum Cursor {
     Navigation,
     /// `DATA_007247`: the combat targetter's circle.
     Combat,
+}
+
+/// `F1054`'s targetter bytes: the two armed flags and the skip bytes F1061/
+/// F1063 read (`DATA_007248`/`DATA_007249`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Arming {
+    /// `DATA_007246`: the navigation targetter is armed.
+    pub navigation: bool,
+    /// `DATA_007247`: the combat targetter is armed.
+    pub combat: bool,
+    /// `DATA_007248`: the navigation target at the moment `T` armed it.
+    pub previous_navigation: Option<u32>,
+    /// `DATA_007249`: the combat target at the moment `Shift+T` armed it.
+    pub previous_combat: Option<u32>,
+}
+
+impl Arming {
+    /// `T`: toggle `DATA_007246`; arming stores the current target in
+    /// `DATA_007248` so the first acquisition does not re-pick it. Returns the
+    /// new armed state.
+    pub fn toggle_navigation(&mut self, current: Option<u32>) -> bool {
+        if self.navigation {
+            self.navigation = false;
+        } else {
+            self.navigation = true;
+            self.previous_navigation = current;
+        }
+        self.navigation
+    }
+
+    /// `Shift+T`: toggle `DATA_007247` and store `DATA_007249`.
+    pub fn toggle_combat(&mut self, current: Option<u32>) -> bool {
+        if self.combat {
+            self.combat = false;
+        } else {
+            self.combat = true;
+            self.previous_combat = current;
+        }
+        self.combat
+    }
+
+    /// F1062: an acquisition disarms the navigation cursor.
+    pub fn acquired_navigation(&mut self) {
+        self.navigation = false;
+    }
+
+    /// F1064: an acquisition (or a failed scan that clears the target) disarms
+    /// the combat cursor.
+    pub fn acquired_combat(&mut self) {
+        self.combat = false;
+    }
 }
 
 /// The locked target's tunnel parameters (`F1100`'s call to `F1113`).
@@ -318,6 +415,50 @@ mod tests {
         // The bottom is clamped to 0x9d and the top stays inside.
         let edges = box_edges(160, 160, 20);
         assert_eq!(edges[1], ((180, 140), (180, 157)));
+    }
+
+    #[test]
+    fn the_targeter_acquires_within_six_pixels_of_the_view_centre() {
+        // F1061 compares the object's (x+3, y-4) to (0xa3, 0x4b): equivalently
+        // the object's own point to (0xa0, 0x4f) with the same Manhattan sum.
+        let entries = [
+            (7, 0xa0, 0x4f),          // dead centre
+            (8, 0xa0 + 6, 0x4f),      // exactly six
+            (9, 0xa0 + 7, 0x4f),      // seven: out
+            (10, 0xa0 + 3, 0x4f + 4), // 3 + 4 = 7: out
+            (11, 0xa0 - 3, 0x4f - 3), // 3 + 3 = 6: in
+        ];
+        assert_eq!(acquire(&entries, None, None), Some(7));
+        // The first acquisition skips the armed-time target and the current
+        // one (F1061's two `cmp`).
+        assert_eq!(acquire(&entries, Some(7), None), Some(8));
+        assert_eq!(acquire(&entries, Some(7), Some(8)), Some(11));
+        assert_eq!(acquire(&entries, Some(7), Some(11)), Some(8));
+        // F989's window: x > 0, x + 3 < 0x13c, y > 0, y - 4 < 0x95.
+        assert!(targetable(1, 5));
+        assert!(!targetable(0, 79));
+        assert!(!targetable(0x139, 79));
+        assert!(!targetable(160, 0));
+        assert!(targetable(160, 0x98));
+        assert!(!targetable(160, 0x99));
+    }
+
+    #[test]
+    fn arming_toggles_and_stores_the_skip_targets() {
+        let mut arming = Arming::default();
+        assert!(arming.toggle_navigation(Some(3)));
+        assert_eq!(arming.previous_navigation, Some(3));
+        assert!(!arming.toggle_navigation(Some(4)));
+        assert_eq!(arming.previous_navigation, Some(3));
+        // Re-arm for the cross-cursor test, then arm the combat cursor too.
+        assert!(arming.toggle_navigation(Some(4)));
+        assert!(arming.toggle_combat(Some(9)));
+        assert_eq!(arming.previous_combat, Some(9));
+        arming.acquired_combat();
+        assert!(!arming.combat);
+        assert!(arming.navigation, "the other cursor stays armed");
+        arming.acquired_navigation();
+        assert!(!arming.navigation);
     }
 
     #[test]

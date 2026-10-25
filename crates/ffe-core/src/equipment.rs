@@ -98,6 +98,32 @@ pub fn get(index: usize) -> Option<&'static Equipment> {
 /// 15 and 16 have no record; a fitted loadout must leave them clear.
 pub const GENERAL_MASK: u32 = 0xff_fe_3f_ff;
 
+/// `ship+0xc8` bit 7: the Auto targetter (record code `0x17`). `F1054`'s `T`
+/// and `Shift+T` (action `0x74`) only toggle `DATA_007246`/`DATA_007247` when
+/// this is fitted (`ffe.asm:78737-78768`).
+pub const AUTO_TARGETTER_BIT: u32 = 1 << 7;
+/// `ship+0xc8` bit 9: the Missile Viewer (record code `0x19`). `F1054`'s `F10`
+/// (action `0xfb`) needs it **and** a missile in flight (`player+0xef`).
+pub const MISSILE_VIEWER_BIT: u32 = 1 << 9;
+/// `ship+0xc8` bit 11: the Chaff Dispenser (record code `0x1b`).
+pub const CHAFF_BIT: u32 = 1 << 11;
+/// `ship+0xc8` bit 19: the E.C.M. System (record code `0x03`).
+pub const ECM_BIT: u32 = 1 << 19;
+/// `ship+0xc8` bit 23: the Naval E.C.M. System (record code `0x07`).
+pub const NAVAL_ECM_BIT: u32 = 1 << 23;
+
+/// The ECM equipment `F935` finds, in its test order: Naval first (`+0xca`
+/// bit 7, `DATA_008835 |= 0xc`), then the standard E.C.M. (`+0xca` bit 3,
+/// `DATA_008835 |= 0x4`). The source has no energy, ammo or range cost: the
+/// only gate is the fitted bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ecm {
+    /// `ship+0xc8` bit 19.
+    Standard,
+    /// `ship+0xc8` bit 23, which also sets `DATA_008835` bit 3.
+    Naval,
+}
+
 /// The missile record whose code is `code` (`ship+0xd6..` stores this byte).
 pub fn missile_by_code(code: u8) -> Option<&'static Equipment> {
     EQUIPMENT
@@ -241,6 +267,33 @@ impl Loadout {
         self.general & 1 != 0
     }
 
+    /// `ship+0xc8` bit 7: the Auto targetter, which arms the blinking
+    /// auto-targetter cursor and its crosshair acquisition.
+    pub fn auto_targetter(&self) -> bool {
+        self.general & AUTO_TARGETTER_BIT != 0
+    }
+
+    /// `ship+0xc8` bit 9: the Missile Viewer, needed for `F10`.
+    pub fn missile_viewer(&self) -> bool {
+        self.general & MISSILE_VIEWER_BIT != 0
+    }
+
+    /// `ship+0xc8` bit 11: the Chaff Dispenser (`F1054`'s `c` key).
+    pub fn chaff_dispenser(&self) -> bool {
+        self.general & CHAFF_BIT != 0
+    }
+
+    /// `F935`'s equipment test: Naval E.C.M. first, then the standard system.
+    pub fn ecm(&self) -> Option<Ecm> {
+        if self.general & NAVAL_ECM_BIT != 0 {
+            Some(Ecm::Naval)
+        } else if self.general & ECM_BIT != 0 {
+            Some(Ecm::Standard)
+        } else {
+            None
+        }
+    }
+
     /// `ship+0xe2`: 0x40 per fitted shield generator (`F413` adds, `F415`
     /// subtracts).
     pub fn shield_max(&self) -> u16 {
@@ -377,6 +430,43 @@ mod tests {
         assert!(loadout.fitted(42, &[0; 4]));
         assert!(!loadout.fitted(27, &[0; 4]), "no shield generator fitted");
         assert!(!loadout.cooling_booster());
+    }
+
+    #[test]
+    fn the_combat_equipment_bits_match_their_records() {
+        // F393: (record[0x12] ^ 0x10) & 0x1f. Auto targetter 0x17 -> 7,
+        // Missile Viewer 0x19 -> 9, Chaff Dispenser 0x1b -> 11, E.C.M. 0x03 ->
+        // 19, Naval E.C.M. 0x07 -> 23.
+        assert_eq!(AUTO_TARGETTER_BIT, 0x80);
+        assert_eq!(MISSILE_VIEWER_BIT, 0x200);
+        assert_eq!(CHAFF_BIT, 0x800);
+        assert_eq!(ECM_BIT, 0x8_0000);
+        assert_eq!(NAVAL_ECM_BIT, 0x80_0000);
+        let loadout = Loadout {
+            general: AUTO_TARGETTER_BIT | MISSILE_VIEWER_BIT | CHAFF_BIT,
+            ..Loadout::default()
+        };
+        assert!(loadout.auto_targetter());
+        assert!(loadout.missile_viewer());
+        assert!(loadout.chaff_dispenser());
+        assert_eq!(loadout.ecm(), None);
+        // F935 tests the naval bit first and lights both DATA_008835 bits.
+        let naval = Loadout {
+            general: ECM_BIT | NAVAL_ECM_BIT,
+            ..Loadout::default()
+        };
+        assert_eq!(naval.ecm(), Some(Ecm::Naval));
+        let standard = Loadout {
+            general: ECM_BIT,
+            ..Loadout::default()
+        };
+        assert_eq!(standard.ecm(), Some(Ecm::Standard));
+        // The new-game Eagle has none of the five.
+        let new_game = Loadout::new_game();
+        assert!(!new_game.auto_targetter());
+        assert!(!new_game.missile_viewer());
+        assert!(!new_game.chaff_dispenser());
+        assert_eq!(new_game.ecm(), None);
     }
 
     #[test]

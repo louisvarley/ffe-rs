@@ -842,7 +842,9 @@ impl Screen {
             ViewMode::Rear => 1,
             ViewMode::TopTurret => 2,
             ViewMode::BottomTurret => 3,
-            ViewMode::External => return None,
+            // F1099 skips F1111 in external, the missile view and the combat
+            // computer (the missile view jumps over the whole HUD block).
+            ViewMode::External | ViewMode::Missile => return None,
         };
         (self.lasers[mount] != 0).then_some(mount)
     }
@@ -1411,6 +1413,11 @@ impl Screen {
     /// autopilot flies; the Set/Act/Alt block at (2,148) and the turret angles at
     /// (5,76) in turret views.
     fn draw_player_hud(&mut self, view: ViewMode) {
+        // F1099 jumps to JUMP_004541 in the missile view: only the combat
+        // target's range text is drawn there.
+        if view == ViewMode::Missile {
+            return;
+        }
         let hud = self.hud.clone();
         if let Some(text) = hud.shield_text() {
             self.text(SHIELDS_POS.0, SHIELDS_POS.1, &text, HUD_COLOUR);
@@ -1812,7 +1819,7 @@ impl Screen {
                 "CLASSIC: hold right mouse to steer; Enter/Shift thrust",
                 "CLASSIC keys: ,/. yaw; A/Z pitch; [ ] roll. F3 preset",
                 "X brake  D clearance  L launch  B/N trade  PGUP/DN ship",
-                "VIEWS: F1 cycle F6 front F7 rear F8 turret F9 external",
+                "VIEWS: F1 cycle F6-F9 direct F10 missile. M launches.",
                 "F2 ship systems page. Original HUD: shields/hull/speed/log.",
                 "External: arrows turn, +/- zoom. Turret: arrows aim",
                 "F12 models (Shift+F12 lab). F11 shot. P pause. Esc prefs.",
@@ -1820,7 +1827,7 @@ impl Screen {
                 "TAB system map. G galaxy map: arrows, PgUp/Dn, C, H jumps",
                 "N icon: station list. L: object labels on/off.",
                 "Click a body/T: lock. K: autopilot (docks). Bksp: stop.",
-                "? closes help. Esc: preference pages. Map icon: systems.",
+                "T/Shift+T: targeter. E: ECM. ? closes help. Esc: preference pages.",
             ]
             .iter()
             .enumerate()

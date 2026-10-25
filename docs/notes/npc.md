@@ -470,8 +470,11 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 - **The original's deaths.** The player's destruction is a starport recovery,
   not F924's game-over/pod sequence.
 - **The target readout** is only for locked ships and uses the port's output
-  path; the combat targeter is drawn (F1113/F1114) but its arming is absent
-  (`docs/notes/scanner.md`).
+  path. The combat targeter is drawn (F1113/F1114) and its arming is now wired
+  to the fitted Auto targetter (`docs/notes/combat.md` §8.2); with the item
+  fitted, `Shift+T` arms the crosshair acquisition that sets the missile lock.
+  The new-game Eagle still has no Auto targetter, so `Shift+T` keeps the port's
+  older lock toggle until one is bought.
 
 ## 5. Owner decisions
 
