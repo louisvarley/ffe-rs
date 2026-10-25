@@ -785,6 +785,12 @@ pub struct Navigator {
     /// The player's legal standing (`DATA_008646` bit 0 / `DATA_008647`): the
     /// police alert that makes police and military ships hostile.
     pub legal: npc::Legal,
+    /// The commander's military/Elite standing (`DATA_008911`-`8913`,
+    /// `DATA_009091`).
+    pub career: npc::Career,
+    /// F869's system allegiance (`DATA_008996`, the system word `>> 6`): the
+    /// fine-ledger and criminal-record slot F236/F655/F312 read.
+    pub jurisdiction: usize,
     /// F675's carried ships: the pirates close enough to follow a hyperspace
     /// jump, restored by F680 when the new system is entered.
     persisted: Vec<npc::Persisted>,
@@ -1036,6 +1042,10 @@ pub struct Attack {
     pub crime: bool,
     /// F942's bounty for a destroyed pirate (`+0x11a`), else 0.
     pub bounty: u32,
+    /// F942's statistics `+0x16` word for a destroyed ship.
+    pub rating: i16,
+    /// F942 changed the Elite-rating word (`score >> 16` compared).
+    pub rating_changed: bool,
     /// A police or military ship turned hostile because of this hit.
     pub police: bool,
     /// F942 destroyed the ship.
@@ -1064,6 +1074,15 @@ const APPROACH_STOP: f64 = 1.0e6;
 const STATION_FRAME: f64 = 2.0e8;
 /// Within this many radii of a planet or moon, its motion carries the ship.
 const WORLD_FRAME_RADII: f64 = 50.0;
+
+/// F869's `DATA_008996`: the system word's `>> 6` allegiance, the six-record
+/// ledger and criminal-record slot. A cache without system tables reads slot 0.
+fn jurisdiction_of(cache: &VerifiedCache, code: u32) -> usize {
+    cache
+        .asset("base:world/system-tables")
+        .and_then(|bytes| Tables::new(bytes).ok())
+        .map_or(0, |tables| (tables.details(code).allegiance >> 6) as usize)
+}
 
 /// World seconds to the original's clock words: whole days, then the fraction of a
 /// day in 2^-32ths (the orbits turn once in 365 days).
@@ -1225,6 +1244,7 @@ impl Navigator {
         current: usize,
         bodies: Vec<Body>,
     ) -> Result<Self, String> {
+        let jurisdiction = jurisdiction_of(cache, entries[current].params.code);
         Ok(Self {
             entries,
             current,
@@ -1245,6 +1265,8 @@ impl Navigator {
             traffic: HashMap::new(),
             ships: Vec::new(),
             legal: npc::Legal::default(),
+            career: npc::Career::default(),
+            jurisdiction,
             persisted: Vec::new(),
             player_at: [0; 3],
             effects: Vec::new(),
@@ -2382,31 +2404,41 @@ impl Navigator {
 
     /// F234/F235 as `IsCloseToStarport`: the ordinal of the nearest starport
     /// whose `+0x88` exponential distance is below [`JURISDICTION_DISTANCE`]
-    /// (`0x13`), or `None` outside a starport's region. The ordinal is the
-    /// `DATA_008996` index into the `DATA_009095` fine ledger.
+    /// (`0x13`), or `None` outside a starport's region. The ordinal is only the
+    /// witness position; F236's ledger index is the system allegiance
+    /// (`DATA_008996`), see [`Self::jurisdiction`].
     pub fn starport_in_range(&self, at: [i64; 3]) -> Option<usize> {
         starport_witness(&self.bodies, at)
     }
 
-    /// The fine ledger for the starport at `body`: F655's `owes` argument, read
-    /// from F236's per-starport `DATA_009095` array. A station uses the nearest
-    /// starport's ledger, as `DATA_008996` is the system's starport index.
-    pub fn fine_at(&self, body: usize) -> u32 {
-        let Some(target) = self.bodies.get(body) else {
-            return 0;
-        };
-        let mut ordinal = 0usize;
-        let mut nearest: Option<(f64, usize)> = None;
-        for candidate in &self.bodies {
-            if candidate.kind == Kind::Starport {
-                let away = distance(target.position, candidate.position);
-                if nearest.is_none_or(|(best, _)| away < best) {
-                    nearest = Some((away, ordinal));
-                }
-                ordinal += 1;
-            }
-        }
-        nearest.map_or(0, |(_, index)| self.legal.owed(Some(index)))
+    /// The fine ledger for the current jurisdiction: F655's `owes` argument,
+    /// `DATA_009095[DATA_008996]`. `body` is unused beyond the station check.
+    pub fn fine_at(&self, _body: usize) -> u32 {
+        self.legal.owed(Some(self.jurisdiction))
+    }
+
+    /// The fine the local police would collect, `DATA_009095[DATA_008996]`.
+    pub fn fine_here(&self) -> u32 {
+        self.legal.owed(Some(self.jurisdiction))
+    }
+
+    /// F544/F545: pay the local fine. The caller owns the cash word and deducts
+    /// [`npc::FinePayment::paid`].
+    pub fn pay_fine(&mut self, cash: u32) -> npc::FinePayment {
+        self.legal.pay_fine(cash, self.jurisdiction)
+    }
+
+    /// F312's F2 profile values for this navigator's commander, system and local
+    /// jurisdiction. `commander` is the save's commander name (the original's
+    /// `DATA_008920`).
+    pub fn profile(&self, commander: &str) -> ffe_core::status::Profile {
+        ffe_core::status::Profile::new(
+            commander,
+            self.system_name(),
+            self.jurisdiction,
+            &self.career,
+            &self.legal,
+        )
     }
 
     /// F931/F941's player branch: the first shot in a system reports the
@@ -2416,8 +2448,12 @@ impl Navigator {
     /// makes the police and military ships hostile (the port's `DATA_008647`
     /// response; F783 clears it when the chase ends).
     pub fn player_fired(&mut self, at: [i64; 3]) -> Option<LegalReport> {
-        let starport = self.starport_in_range(at);
-        let offence = self.legal.player_fired(starport)?;
+        // F234 finds the witness; F237 then records F236 against F869's
+        // allegiance (`DATA_008996`), not the starport ordinal.
+        let witness = self.starport_in_range(at);
+        let offence = self
+            .legal
+            .player_fired(witness.map(|_| self.jurisdiction))?;
         let mut police = false;
         if self.legal.wanted {
             for ship in &mut self.ships {
@@ -2439,6 +2475,7 @@ impl Navigator {
         let was_alive = ship.alive();
         let crime = ship.role.clean() && was_alive;
         let bounty = ship.bounty;
+        let rating = ship.rating;
         let station = ship.station;
         let held_bay = ship.bay.is_some();
         let result = ship.hit(damage);
@@ -2447,6 +2484,9 @@ impl Navigator {
             self.legal.wanted = true;
             self.legal.offences += 1;
         }
+        // F942 adds the destroyed ship's statistics +0x16 to DATA_008911 and
+        // prints the Elite Federation notice when the rating word changes.
+        let rating_changed = destroyed && self.career.award_kill(rating);
         let mut police = false;
         if self.legal.wanted {
             for ship in &mut self.ships {
@@ -2467,6 +2507,8 @@ impl Navigator {
             } else {
                 0
             },
+            rating,
+            rating_changed,
             police,
             destroyed,
         })
@@ -2988,6 +3030,7 @@ impl Navigator {
         }
         self.current = index;
         self.bodies = bodies(cache, &self.entries[index], clock_words(self.clock))?;
+        self.jurisdiction = jurisdiction_of(cache, self.entries[index].params.code);
         self.refreshed = self.clock;
         self.target = None;
         self.locked = None;

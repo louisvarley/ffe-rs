@@ -224,6 +224,7 @@ mod tests {
                 mass: 25,
             },
             shield_strength: 20,
+            rating: 10,
             cargo: 8,
             state: State::Attack,
             anchor: [0; 3],

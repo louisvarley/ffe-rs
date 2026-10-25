@@ -324,6 +324,9 @@ pub struct Screen {
     /// Draw the log this frame. The navigation list / places screens can hide
     /// it without touching the ring, as the original's console does.
     pub messages_visible: bool,
+    /// F312's F2 profile page, when it is open. The original draws it over the
+    /// upper view; the console stays below.
+    pub profile: Option<ffe_core::status::Profile>,
     /// The game date and time header `F272` writes before the entries.
     pub clock: String,
     /// The console's mutable `DATA_005100` state, derived from the view and ship
@@ -765,6 +768,7 @@ impl Screen {
             systems: ShipSystems::default(),
             messages: MessageLog::new(),
             messages_visible: true,
+            profile: None,
             clock: String::new(),
             console: Console::new(),
             gauges: [None, None, None],
@@ -1370,6 +1374,77 @@ impl Screen {
     /// entry and the older dated entries, 8-pixel lines, a colour-4 shadow one
     /// pixel left and up, clipped to the console (y 158..199). `F273`'s scroll
     /// moves the whole block up from the header (`ffe.asm:21075-21097`).
+    /// F312's profile page: the title at (30, 5), the two-column status block at
+    /// (2, 20) with F1399's `0xfd` tab stops (114 and 150), the current
+    /// jurisdiction's record at (4, 75), and medals/permits at (4, 132). The
+    /// positions and strings are from `DATA_005136`/`DATA_005189` and the
+    /// executed original's frame `docs/evidence/status/original-profile.png`.
+    fn draw_profile(&mut self, profile: &ffe_core::status::Profile) {
+        const TEXT: u8 = 0x0f;
+        self.text(
+            30,
+            5,
+            &format!("PROFILE FOR COMMANDER {}", profile.commander),
+            TEXT,
+        );
+        self.text(2, 20, "MILITARY STANDING", TEXT);
+        self.text(114, 20, "LEGAL STATUS", TEXT);
+        self.text(
+            2,
+            30,
+            &format!("Federal Rank: {}", profile.federal_rank),
+            TEXT,
+        );
+        self.text(
+            114,
+            30,
+            &format!("Federal:  {}", profile.federal_status),
+            TEXT,
+        );
+        self.text(
+            2,
+            40,
+            &format!("Imperial Title: {}", profile.imperial_title),
+            TEXT,
+        );
+        self.text(
+            114,
+            40,
+            &format!("Imperial: {}", profile.imperial_status),
+            TEXT,
+        );
+        self.text(
+            2,
+            50,
+            &format!("Elite Rating: {}", profile.elite_rating),
+            TEXT,
+        );
+        self.text(
+            114,
+            50,
+            &format!("Interpol: {}", profile.interpol_status),
+            TEXT,
+        );
+        self.text(
+            2,
+            65,
+            &format!("{} CRIMINAL RECORD", profile.heading()),
+            TEXT,
+        );
+        for (index, offence) in profile.record.iter().take(10).enumerate() {
+            let (x, row) = if index < 5 {
+                (4, index)
+            } else {
+                (108, index - 5)
+            };
+            self.text(x, 75 + row * 9, offence, TEXT);
+        }
+        self.text(2, 123, "MEDALS AND PERMITS", TEXT);
+        for (index, medal) in profile.medals.iter().take(3).enumerate() {
+            self.text(4, 132 + index * 9, medal, TEXT);
+        }
+    }
+
     fn draw_messages(&mut self) {
         if !self.messages_visible {
             return;
@@ -1783,6 +1858,13 @@ impl Screen {
         // top bar, controls button, SPEED line and status/map/autopilot block are
         // gone (they covered the shields/hull rows, the Autopilot and Set/Act
         // lines, and the lift's lower rows).
+        if state.mode == Mode::Flight {
+            if let Some(profile) = self.profile.clone() {
+                // F312's profile page is drawn over the upper view; the console
+                // below it is untouched.
+                self.draw_profile(&profile);
+            }
+        }
         if state.mode == Mode::Docked {
             // The docked screens put the game's console message in the console's
             // message area at the lower right, not over the menu.
@@ -1808,7 +1890,9 @@ impl Screen {
         } else {
             // F272's text window: date/time header, ten entries, 124-pixel wrap,
             // shadow at (195, y-1) and text at (196, y), clipped to y 158..199.
-            self.draw_messages();
+            if self.profile.is_none() {
+                self.draw_messages();
+            }
         }
         if help {
             self.rect(0, 13, 320, 145, 1);

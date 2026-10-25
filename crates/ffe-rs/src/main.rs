@@ -676,6 +676,8 @@ fn run() -> Result<(), String> {
     let mut acceleration = 0usize;
     // F2's status/equipment page (`F1120`, `DATA_008871 & 8`).
     let mut status_page = false;
+    // F2's sub-page: 0 is `F1120`'s ship/equipment page, 1 is F312's profile.
+    let mut status_section = 0u8;
     // The single route into the original's ten-entry log. Port-only notices
     // (`message` below) never enter it.
     let mut log_channel = Channel::default();
@@ -1352,6 +1354,9 @@ fn run() -> Result<(), String> {
         }
         // F2 is the original's status screen: F1120's ship diagram and equipment
         // page on the console. The key and its console button both toggle it.
+        // The original's page keys are F6 (ship systems) and F7 (this profile):
+        // `F292` maps action 0xf6 to page 0 and 0xf7 to page 1. They select the
+        // status page only while it is open.
         if active
             && state.mode == ffe_rs::flight::Mode::Flight
             && !help
@@ -1360,14 +1365,32 @@ fn run() -> Result<(), String> {
             && model_viewer.is_none()
             && (pressed(Key::F2) || console_click == Some(Click::Screen(2)))
         {
-            status_page = !status_page;
-            held_controls.disarm(&keys_down);
-            message = if status_page {
-                "Status: ship systems (F2 returns)."
+            if status_page {
+                status_page = false;
+                status_section = 0;
+                message = "Flight console.".to_owned();
             } else {
-                "Flight console."
+                status_page = true;
+                status_section = 0;
+                message = "Status: ship systems (F2 returns, F7 commander profile).".to_owned();
             }
-            .to_owned();
+            held_controls.disarm(&keys_down);
+        }
+        if active
+            && status_page
+            && state.mode == ffe_rs::flight::Mode::Flight
+            && !help
+            && !scenarios
+            && model_lab.is_none()
+            && model_viewer.is_none()
+        {
+            if pressed(Key::F7) {
+                status_section = 1;
+                message = "Status: commander profile (F6 ship systems).".to_owned();
+            } else if pressed(Key::F6) {
+                status_section = 0;
+                message = "Status: ship systems (F7 commander profile).".to_owned();
+            }
         }
         // Every console click beeps (F1056). A click whose screen is not ported
         // gets only the port's transient note: the source writes no F271 entry
@@ -2302,9 +2325,9 @@ fn run() -> Result<(), String> {
                     let mut view_note: Option<String> = None;
                     let chosen = if pressed(Key::F1) || clicked == Some(ViewButton::Cycle) {
                         Some(views.mode.next(gun_mounts, views.turret.pitch))
-                    } else if pressed(Key::F6) {
+                    } else if !status_page && pressed(Key::F6) {
                         Some(ViewMode::Front)
-                    } else if pressed(Key::F7) {
+                    } else if !status_page && pressed(Key::F7) {
                         Some(ViewMode::Rear)
                     } else if pressed(Key::F8) || clicked == Some(ViewButton::Turret) {
                         turret
@@ -2472,14 +2495,18 @@ fn run() -> Result<(), String> {
                         },
                         None => (0, 0),
                     };
-                    let rows = station::row_count(
-                        dock.screen,
-                        bulletin_rows,
-                        market_rows,
-                        upgrade_rows.len(),
-                        repair_rows.len(),
-                        ship_rows,
-                    );
+                    let rows = if dock.screen == StationScreen::Police {
+                        1
+                    } else {
+                        station::row_count(
+                            dock.screen,
+                            bulletin_rows,
+                            market_rows,
+                            upgrade_rows.len(),
+                            repair_rows.len(),
+                            ship_rows,
+                        )
+                    };
                     let step = i32::from(pressed(Key::Down)) - i32::from(pressed(Key::Up));
                     if step != 0 {
                         dock.step(step, rows);
@@ -2507,6 +2534,8 @@ fn run() -> Result<(), String> {
                                 } else if dock.screen == StationScreen::Ships {
                                     // F354's digit action is the left (Buy) button.
                                     dock_action = Some(StationAction::BuyShip { row: index });
+                                } else if dock.screen == StationScreen::Police {
+                                    dock_action = Some(police_action(nav.as_ref()));
                                 } else if let Some(entry) =
                                     station::menu_entry(dock.screen, index, 0)
                                 {
@@ -2527,6 +2556,8 @@ fn run() -> Result<(), String> {
                             ));
                         } else if dock.screen == StationScreen::Ships {
                             dock_action = Some(StationAction::BuyShip { row: dock.selected });
+                        } else if dock.screen == StationScreen::Police {
+                            dock_action = Some(police_action(nav.as_ref()));
                         } else if let Some(entry) =
                             station::menu_entry(dock.screen, dock.selected, 0)
                         {
@@ -2551,6 +2582,8 @@ fn run() -> Result<(), String> {
                                         dock_action = Some(StationAction::NotPorted(
                                             "Repairs and servicing actions are not ported.",
                                         ));
+                                    } else if dock.screen == StationScreen::Police {
+                                        dock_action = Some(police_action(nav.as_ref()));
                                     } else if dock.screen == StationScreen::Bulletin {
                                         // F453/F523: selecting an advertisement
                                         // shows it in full; the mission reply
@@ -2695,7 +2728,11 @@ fn run() -> Result<(), String> {
                             dock.open(screen);
                             let (bbs, hulls) =
                                 station_offer_counts(nav.as_mut(), &cache, state.ship);
-                            message = station::hint(screen, bbs, hulls).to_owned();
+                            message = if screen == StationScreen::Police {
+                                police_message(nav.as_ref())
+                            } else {
+                                station::hint(screen, bbs, hulls).to_owned()
+                            };
                         }
                         StationAction::Back => {
                             dock.back();
@@ -2735,6 +2772,18 @@ fn run() -> Result<(), String> {
                         StationAction::ViewShip { row } => {
                             if let Some(nav) = nav.as_mut() {
                                 message = view_ship(nav, &cache, &state, row);
+                            }
+                        }
+                        StationAction::PayFine => {
+                            if let Some(nav) = nav.as_mut() {
+                                let payment = nav.pay_fine(state.credits);
+                                if payment.ok() {
+                                    state.credits = state.credits.saturating_sub(payment.paid);
+                                    message = ffe_core::status::fine_paid_message(payment.amount);
+                                } else {
+                                    message =
+                                        ffe_core::status::fine_refused_message(payment.amount);
+                                }
                             }
                         }
                         StationAction::Trade { buy, row } => {
@@ -3601,6 +3650,12 @@ fn run() -> Result<(), String> {
             views.mode = ViewMode::Front;
             message = "Missile view ended.".to_owned();
         }
+        screen.profile =
+            if state.mode == ffe_rs::flight::Mode::Flight && status_page && status_section == 1 {
+                nav.as_ref().map(|nav| nav.profile(death::COMMANDER_NAME))
+            } else {
+                None
+            };
         views.console = ConsoleState {
             acceleration,
             paused,
@@ -3610,7 +3665,7 @@ fn run() -> Result<(), String> {
                 .map(|model| model.set_speed_metres().round() as i32),
             labels,
             navigation: nav.as_ref().is_some_and(|nav| nav.view == NavView::Places),
-            status_page,
+            status_page: status_page && status_section == 0,
         };
         // Launching from the station puts the ship out from it in this system, on the
         // original flight model (which the navigation moves).
@@ -3923,6 +3978,12 @@ fn run() -> Result<(), String> {
                                             text.push_str(" Police are responding.");
                                         }
                                         pending_log.add(Source::Combat, text);
+                                        if attack.rating_changed {
+                                            pending_log.add(
+                                                Source::Combat,
+                                                ffe_core::status::ELITE_MESSAGE,
+                                            );
+                                        }
                                     }
                                     // F750/F236: the first hit starts the battle
                                     // (siren + song 14 if enabled); F953/F942
@@ -4364,6 +4425,35 @@ fn run() -> Result<(), String> {
                             scroll: dock.scroll,
                             selected: dock.selected,
                             total: hulls.len(),
+                        });
+                    } else if dock.screen == StationScreen::Police {
+                        let fine = nav.fine_here();
+                        let row = if fine > 0 {
+                            ffe_rs::station::DockRow {
+                                main: "Pay fine".to_owned(),
+                                detail: Some(format!(
+                                    "${} fine",
+                                    crate::trade::credits(fine.min(i32::MAX as u32) as i32)
+                                )),
+                                columns: Vec::new(),
+                                fitted: false,
+                            }
+                        } else {
+                            ffe_rs::station::DockRow {
+                                main: "Hang up.".to_owned(),
+                                detail: None,
+                                columns: Vec::new(),
+                                fitted: false,
+                            }
+                        };
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title: station::title(dock.screen, &station_name),
+                            rows: vec![row],
+                            status,
+                            scroll: 0,
+                            selected: 0,
+                            total: 1,
                         });
                     } else {
                         let entries: &[station::Entry] = match dock.screen {
@@ -5115,6 +5205,26 @@ fn fit_or_remove(
 
 /// The BBS and hull-list counts of the station the player is docked at, for the
 /// console hint (0/0 when there is no navigator).
+fn police_action(nav: Option<&Navigator>) -> StationAction {
+    if nav.is_some_and(|nav| nav.fine_here() > 0) {
+        StationAction::PayFine
+    } else {
+        StationAction::Back
+    }
+}
+
+fn police_message(nav: Option<&Navigator>) -> String {
+    let Some(nav) = nav else {
+        return station::POLICE_HINT.to_owned();
+    };
+    let fine = nav.fine_here();
+    if fine > 0 {
+        ffe_core::status::police_greeting(nav.system_name(), fine)
+    } else {
+        "You have no outstanding fine in this jurisdiction.".to_owned()
+    }
+}
+
 fn station_offer_counts(
     nav: Option<&mut Navigator>,
     cache: &ffe_content::VerifiedCache,
