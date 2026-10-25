@@ -211,12 +211,20 @@ anywhere while docked. These are called out as port conveniences in
   are enforced. The Upgrades free-space check and the cash/cargo/cabins line use
   `trade::capacity` (F390/F391's hold), so the Wt column has a real effect.
 - **Repairs and Servicing** (`F443`/`F444`): the three service rows
-  (Deluxe 80*mass, Drive Only 50*mass, Equipment Only 50*mass) with the
+  (Deluxe 80*mass, Drive Only 50*mass, Equipment Only 50*mass, where `mass` is
+  the statistics' `+0xa` price mass, 38 for the reference Eagle) with the
   0x9815-0x9817 strings, the stored service dates (`Flight::service_days`,
   `DATA_008926`/`DATA_008925`) and the reference frame's `$` cost column at
-  x 292. The service actions (F446-F452), the six thruster damage words
-  (`+0xbc..+0xc6`) and the hull-damage rows need state the port does not carry
-  yet, so a row button reports that the action is not ported.
+  x 292. F444's damage rows are built from real state: `0x9813` (250 kg for
+  $10), `0x9818` (the whole hull at $10 per hull point = $40/t), `0x9814`
+  (`Repair <Left/Right/Bottom/Top/Main/Reverse> thruster`, $100) and `0x9812`
+  (`Repair <item>`, `DATA_005303` = 2.5 x the equipment price, e.g. Fuel Scoop
+  $875). The row buttons run F446-F452 (`station::apply_repair`): they charge
+  ten times the whole-credit cost (cash is in tenths), restore the hull point
+  or words, clear the `ship+0xcc` damaged bit and set `ship+0xc8`, and reset
+  the Deluxe/Drive/Equipment 500-day counters and dates. Messages are
+  0x98f1-0x98f3; the refusal is the port's "You cannot afford ..." wording
+  (F440's 0x99e4 is "You cannot afford a new <item>").
 - **New and Reconditioned Ships** (`F437`/`F438`): F622/F634/F635's `+0x2e6`
   stock (13 hulls at most, from `DATA_006184..6198` and `DATA_006193`) with
   F437's columns. Cost is the statistics word at `+0xa` times 1000; Pt.Exchg is
@@ -281,10 +289,13 @@ owner wants it, the next step is to follow the F2 console action
    `ffe-core::shipyard`/`shipyard_table.rs`. Ported: the stock, rows, buy and
    part exchange, and a console View summary. Remaining: F439's full View page
    (F991-style stats panel) and F441's passenger/registration side effects.
-3. **Repairs/servicing**. The three F444 service rows are ported. Remaining:
-   F446-F452's actions, the six thruster damage words (`+0xbc..+0xc6`),
-   `DATA_005303`'s cost table and the hull-damage rows (0x9812-0x9814/0x9818);
-   the port's `Flight` has hull/shield words but no thruster damage.
+3. **Repairs/servicing**. Ported: F444's three service rows and the hull,
+   thruster and item rows; F446-F452's actions, charges, dates and counters;
+   the six thruster damage words (`+0xbc..+0xc6`); `DATA_005303`'s costs
+   (= 2.5 x the equipment price). Remaining: F952's outer
+   `F922(cargo space) < DATA_008889` cargo split (the port has no combat score
+   word), F440's 0x99e4 wording, and the smoke/particle timers (`+0x14e`/
+   `+0x14f`).
 4. **Bulletin board entries**. Ported: `F622`/`F633`'s generation and daily
    update, the `+0x132` 18 x 24-byte array, `DATA_006170`, the templates
    0x981a..0x982d and the embedded 0x99xx name/passage strings. Remaining:
@@ -361,14 +372,20 @@ The port's own frames are produced by
 checks the title/header/row pixels and saves `Services-ours.ppm`,
 `Shipyard-ours.ppm`, `Market-ours.ppm`, `Bulletin-ours.ppm`,
 `Upgrades-ours.ppm`, `Upgrades-buy-laser.ppm`, `Ships-ours.ppm`,
-`Ships-buy.ppm` and `Repairs-ours.ppm`. It also asserts the current system's
+`Ships-buy.ppm`, `Repairs-ours.ppm`, `Repairs-damaged.ppm` and
+`Repairs-repaired.ppm`. It also asserts the current system's
 tech level (Mars High's 0xfd), the 51-row F383 list, F444's 3040/1900/1900
 service rows at mass 38, a populated BBS (with every 0xff code expanded and no
 `[0x....]` fallbacks), a populated ship list at F634's 13-hull cap, and the buy
 sequence: ten times the net whole-credit charge, the new model, and the old
 hull replacing the bought row. The ship rows use the new game Eagle (model 23)
 for the trade-in, so the frame's Pt.Exchg values follow the reference rule
-(Cost - 36100).
+(Cost - 36100). The damaged/repaired pair uses a hull at 140/152, the Fuel
+Scoop's damaged bit and the Main thruster zeroed: the list grows to seven rows
+(three services, both hull rows, Main and Fuel Scoop) and returns to the three
+service rows. The committed PNGs are
+`docs/evidence/station/repairs-damaged-ours.png` and
+`repairs-repaired-ours.png`.
 
 What was not captured: the commander/F2 status screen (not part of the
 station menu) and a Thargoid system's services (the port has none). The

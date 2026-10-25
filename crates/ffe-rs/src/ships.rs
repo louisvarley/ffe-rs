@@ -32,10 +32,12 @@ pub struct ShipStats {
     pub fuel_scoop_mounting: bool,
     /// +0x6, hull mass in tonnes (object +0xe4 holds it times 4).
     pub mass: u16,
+    /// +0xa, the second mass word: F437's Cost is this times 1000 and F444's
+    /// service rows charge 80/50 times it (the reference Eagle's 38 gives
+    /// 3040/1900/1900).
+    pub price_mass: u16,
     /// +0x8, the cargo space (tonnes, signed word) before the hyperdrive's mass.
     pub cargo: i16,
-    /// +0xa, F437's Cost word (credits / 1000) and the trade-in's mass term.
-    pub price_mass: u16,
     /// +0xc, the shield-strength word the shipyard's View page shows (the
     /// Cobra Mk III's is 150). F1099's in-flight readout uses the live object's
     /// `+0xe0/+0xe2` words, not this one.

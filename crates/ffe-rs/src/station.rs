@@ -21,6 +21,9 @@
 //! header at y 2, entry text at the row's y + 1 and the second line at +10. The
 //! cash/cargo/cabins line is at (1, 138) and (1, 148) (`F558`, message 0x98e8).
 
+use crate::flight::Flight;
+use crate::ships::ShipStats;
+
 /// The docked screens. The variants are the original screen indices, except that
 /// the services root and the shipyard share index 0 (F333 and F382).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -59,6 +62,10 @@ pub enum Action {
     },
     /// F438/F439's right button: view the offered hull.
     ViewShip {
+        row: usize,
+    },
+    /// F444/F446-F452's row button: run the repair or service.
+    Repair {
         row: usize,
     },
     /// The service exists but its data or routine is not ported. The text is
@@ -108,37 +115,184 @@ pub fn upgrades(
         .collect()
 }
 
+/// F444's per-row action (`F446`-`F452`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairAction {
+    /// `F450`: the deluxe service, both counters and dates (`0x9815`).
+    Deluxe,
+    /// `F451`: drive only (`0x9816`).
+    DriveService,
+    /// `F452`: equipment only (`0x9817`).
+    EquipmentService,
+    /// `F447`: 250 kg of hull (`0x9813`).
+    HullQuarter,
+    /// `F448`: the entire hull (`0x9818`).
+    HullAll,
+    /// `F446`: one damaged general-equipment bit (`0x9812`).
+    Item(u8),
+    /// `F449`: one damaged thruster (`0x9814`).
+    Thruster(u8),
+}
+
 /// One line of F444's Repairs and Servicing list. The three service rows are
-/// always built for a drive-fitted ship; the damage/thruster rows need state the
-/// port does not carry yet.
+/// always built for a drive-fitted ship; the hull, thruster and equipment rows
+/// come from the player's damage state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepairRow {
     pub title: String,
     /// F444's `$<cost>` (whole credits in row `+0xc`; the action charges ten
     /// times it, as the player's cash is in tenths).
     pub cost: u32,
+    pub action: RepairAction,
 }
 
-/// F444's service rows at a starport: `mass` is the ship statistics' `+0x6`,
-/// `drive` is `ship+0xd0`, and the two strings are the stored service dates
-/// (`DATA_008926`/`DATA_008925`) as the date-only form the 0x9816/0x9817
-/// templates print. The costs are `mass * 80`, `mass * 50` and `mass * 50`.
+/// The three service rows for an undamaged ship: `mass` is the ship
+/// statistics' `+0xa` (F444's service cost word), `drive` is `ship+0xd0`, and
+/// the two strings are the stored service dates (`DATA_008926`/`DATA_008925`).
+/// The costs are `mass * 80`, `mass * 50` and `mass * 50`.
 pub fn repairs(mass: u32, drive: bool, last_drive: &str, last_equipment: &str) -> Vec<RepairRow> {
+    repairs_for(
+        mass,
+        drive,
+        [0, 0],
+        0,
+        [false; 6],
+        last_drive,
+        last_equipment,
+    )
+}
+
+/// F444's full list: the three service rows (`0x9815`-`0x9817`), the two hull
+/// rows when the hull is damaged (`0x9813`/`0x9818`), a row for each destroyed
+/// thruster (`0x9814`) and one for each damaged general-equipment bit
+/// (`0x9812`).
+#[allow(clippy::too_many_arguments)]
+pub fn repairs_for(
+    mass: u32,
+    drive: bool,
+    hull: [u16; 2],
+    equipment: u32,
+    thrusters: [bool; 6],
+    last_drive: &str,
+    last_equipment: &str,
+) -> Vec<RepairRow> {
     let mut rows = vec![RepairRow {
         title: "Deluxe service (drive and equipment)".to_owned(),
         cost: mass.saturating_mul(80),
+        action: RepairAction::Deluxe,
     }];
     if drive {
         rows.push(RepairRow {
             title: format!("Drive Only service (last: {last_drive})"),
             cost: mass.saturating_mul(50),
+            action: RepairAction::DriveService,
         });
     }
     rows.push(RepairRow {
         title: format!("Equipment Only service (last: {last_equipment})"),
         cost: mass.saturating_mul(50),
+        action: RepairAction::EquipmentService,
     });
+    let damage = hull
+        .get(1)
+        .copied()
+        .unwrap_or(0)
+        .saturating_sub(hull.first().copied().unwrap_or(0));
+    if damage != 0 {
+        // 0x9813: "Repair 250kg of hull (<n>t total damage)", one hull point
+        // (250 kg) per click for $10.
+        rows.push(RepairRow {
+            title: format!(
+                "Repair 250kg of hull ({:.2}t total damage)",
+                f64::from(damage) * 0.25
+            ),
+            cost: 10,
+            action: RepairAction::HullQuarter,
+        });
+        // 0x9818: "Repair entire hull", $10 per hull point.
+        rows.push(RepairRow {
+            title: "Repair entire hull".to_owned(),
+            cost: u32::from(damage).saturating_mul(10),
+            action: RepairAction::HullAll,
+        });
+    }
+    for (index, damaged) in thrusters.iter().enumerate() {
+        if *damaged {
+            let name = crate::damage::THRUSTER_NAMES
+                .get(index)
+                .copied()
+                .unwrap_or("");
+            rows.push(RepairRow {
+                title: format!("Repair {name} thruster"),
+                cost: crate::damage::THRUSTER_REPAIR_COST,
+                action: RepairAction::Thruster(index as u8),
+            });
+        }
+    }
+    for bit in 0..32u8 {
+        if equipment & (1u32 << bit) == 0 {
+            continue;
+        }
+        let Some(item) = ffe_core::equipment::general_for_bit(bit) else {
+            continue;
+        };
+        rows.push(RepairRow {
+            title: format!("Repair {}", item.name),
+            cost: ffe_core::equipment::repair_cost(item),
+            action: RepairAction::Item(bit),
+        });
+    }
     rows
+}
+
+/// F446-F452 for one repair row: charge ten times the whole-credit cost (the
+/// player's cash is in tenths), apply the action and return the original's
+/// message (`0x98f1`-`0x98f3`). F440's refusal is ported as the port's own
+/// "You cannot afford" wording, as elsewhere in the station code.
+pub fn apply_repair(
+    state: &mut Flight,
+    stats: Option<&ShipStats>,
+    row: &RepairRow,
+    day: u32,
+) -> Result<&'static str, String> {
+    let cost = row.cost.saturating_mul(10);
+    if state.credits < cost {
+        return Err(format!("You cannot afford {}.", row.title));
+    }
+    state.credits -= cost;
+    match row.action {
+        RepairAction::Deluxe => {
+            state.reset_service(0, day);
+            state.reset_service(1, day);
+            Ok("Your deluxe service has been completed, and payment deducted.")
+        }
+        RepairAction::DriveService => {
+            state.reset_service(0, day);
+            Ok("Your service has been completed, and payment deducted.")
+        }
+        RepairAction::EquipmentService => {
+            state.reset_service(1, day);
+            Ok("Your service has been completed, and payment deducted.")
+        }
+        RepairAction::HullQuarter => {
+            state.repair_hull(1);
+            Ok("Your repair has been completed, and payment deducted.")
+        }
+        RepairAction::HullAll => {
+            state.hull[0] = state.hull[1];
+            Ok("Your repair has been completed, and payment deducted.")
+        }
+        RepairAction::Item(bit) => {
+            state.repair_equipment(bit);
+            Ok("Your repair has been completed, and payment deducted.")
+        }
+        RepairAction::Thruster(index) => {
+            if let Some(stats) = stats {
+                state.damage.repair_thruster(usize::from(index), stats);
+            }
+            Ok("Your repair has been completed, and payment deducted.")
+        }
+    }
 }
 
 /// The services root `F333` adds: Launch Request, then (unless the system's

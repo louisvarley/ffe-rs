@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use ffe_core::npc::Random;
+
+use crate::damage::{Damage, SystemEvent};
+
 pub const STEP: f64 = 0.02;
 pub const BUY_PRICE: u32 = 10;
 pub const SELL_PRICE: u32 = 9;
@@ -71,10 +75,30 @@ pub struct Flight {
     /// screen load with day 0, the new game's 1-Jan-3250.
     #[serde(default)]
     pub service_days: [u32; 2],
+    /// The thruster words, damaged equipment bits and service counters
+    /// (`ship+0xbc..+0xc6`, `+0xcc`, `DATA_008923`/`DATA_008924`). Saves from
+    /// before the damage model load undamaged with fresh counters.
+    #[serde(default)]
+    pub damage: Damage,
+    /// The last game day the servicing roll (F934) ran for; `None` starts at
+    /// the first frame so a loaded save does not replay every past day.
+    #[serde(skip)]
+    pub last_service_day: Option<u32>,
+    /// F1033's scoop cooldown, in accelerated seconds (`0x2468a` tics).
+    #[serde(skip)]
+    pub scoop_cooldown: f64,
+    /// The original's shared random stream (`DATA_008818`/`DATA_008820`) for
+    /// the damage and servicing rolls.
+    #[serde(skip, default = "default_rng")]
+    pub rng: Random,
     /// F1104's death sequence, when the hull has been used up and no escape
     /// craft launched. Saves from before the sequence load alive.
     #[serde(default)]
     pub death: Option<crate::death::Death>,
+}
+
+fn default_rng() -> Random {
+    Random::new(0x2545_f491, 0x9e37_79b9)
 }
 
 fn default_ship() -> u32 {
@@ -112,6 +136,10 @@ impl Default for Flight {
             hull: [0; 2],
             loadout: ffe_core::equipment::Loadout::default(),
             service_days: [0; 2],
+            damage: Damage::default(),
+            last_service_day: None,
+            scoop_cooldown: 0.0,
+            rng: default_rng(),
             death: None,
         }
     }
@@ -363,15 +391,294 @@ impl Flight {
     /// generator (F413 adds, F415 removes). A save from before the damage
     /// model loads with `[0, 0]` and takes the full hull here; an existing
     /// damaged ship keeps its words while its full value matches, and a change
-    /// of hull (or of generators) resets them.
+    /// of hull (or of generators) resets them. A new hull also carries a fresh
+    /// set of thruster limits and no damaged equipment.
     pub fn ensure_damage(&mut self, hull_full: u16) {
         if hull_full != 0 && self.hull[1] != hull_full {
             self.hull = [hull_full, hull_full];
+            self.damage = Damage::default();
         }
         let shield_max = self.loadout.shield_max();
         if shield_max != self.shields[1] {
             self.shields = [shield_max, shield_max];
         }
+    }
+
+    /// Fill the six thruster limits from the ship's statistics when the save
+    /// predates them (object set-up, the routine at 0x125c0).
+    pub fn ensure_thrusters(&mut self, stats: &crate::ships::ShipStats) {
+        self.damage.ensure_thrusters(stats);
+    }
+
+    /// The six limit words the flight model clamps against: F929's engine
+    /// failure zeroes them all, otherwise the saved words (object set-up's
+    /// values, less any destroyed thrusters).
+    pub fn limits(&self, stats: Option<&crate::ships::ShipStats>) -> ffe_core::thrust::Limits {
+        if self.damage.engine_failed {
+            return ffe_core::thrust::Limits::default();
+        }
+        self.damage
+            .limits()
+            .or_else(|| stats.map(crate::ships::ShipStats::limits))
+            .unwrap_or(crate::original_flight::FALLBACK_LIMITS)
+    }
+
+    /// The sum of the three thrust words, F938's engine load (`|x|+|y|+|z|`).
+    pub fn thrust_sum(&self, thrust_words: [i16; 3]) -> i32 {
+        thrust_words
+            .iter()
+            .fold(0i32, |sum, word| sum.wrapping_add(i32::from(*word).abs()))
+    }
+
+    /// F938 (`ffe.asm:70122`) for one frame: shield recharge
+    /// (`max * tics / 32`, halved without the Energy Booster) and the Hull
+    /// Auto-Repair System (`+0xc8` bit 31) adding `tics` hull points up to the
+    /// full hull.
+    pub fn recharge(&mut self, tics: u32, hull_full: u16) {
+        if self.shields[0] < self.shields[1] {
+            let mut added = (u64::from(self.shields[1]) * u64::from(tics) / 32) as u32;
+            if !self.loadout.energy_booster() {
+                added /= 2;
+            }
+            self.shields[0] = self.shields[0]
+                .saturating_add(u16::try_from(added).unwrap_or(u16::MAX))
+                .min(self.shields[1]);
+        }
+        if hull_full != 0 && self.hull[1] == 0 {
+            self.hull = [0, hull_full];
+        }
+        if self.loadout.hull_auto_repair() && self.hull[0] < hull_full {
+            let added = u16::try_from(tics).unwrap_or(u16::MAX);
+            self.hull[0] = self.hull[0].saturating_add(added).min(hull_full);
+        }
+    }
+
+    /// F953's hull-damage tail (`ffe.asm:71289-71311`): a hit at least a
+    /// quarter of the remaining hull, or one whose proportional random draw
+    /// fires, calls F952's subsystem roll. The original's outer F952 test also
+    /// compares `F922(cargo space)` with `DATA_008889`; that word is the
+    /// player's combat score, which the port does not carry.
+    pub fn take_damage_with_systems(
+        &mut self,
+        damage: u32,
+        mass: u16,
+    ) -> (ffe_core::laser::Damage, Option<SystemEvent>) {
+        let result = self.take_damage(damage, mass);
+        if result != ffe_core::laser::Damage::Hull {
+            return (result, None);
+        }
+        let quarter = (u32::from(self.hull[0]) / 4).max(1);
+        let proportional = damage
+            .saturating_mul(0x8000)
+            .checked_div(quarter)
+            .unwrap_or(u32::MAX)
+            .min(0xffff);
+        if damage < quarter && self.rng.bounded(0x1_0000) >= proportional {
+            return (result, None);
+        }
+        let roll = self.rng.bounded(0x1_0000) as u16;
+        let thruster = self.rng.bounded(6) as u8;
+        (result, self.apply_subsystem_roll(roll, thruster))
+    }
+
+    /// [`Flight::take_damage_with_systems`] with explicit F950 draws, for tests
+    /// and for callers that keep their own random stream. The hull hit is
+    /// applied; the subsystem roll always runs.
+    pub fn take_damage_roll(
+        &mut self,
+        damage: u32,
+        mass: u16,
+        roll: u16,
+        thruster: u8,
+    ) -> (ffe_core::laser::Damage, Option<SystemEvent>) {
+        let result = self.take_damage(damage, mass);
+        if result != ffe_core::laser::Damage::Hull {
+            return (result, None);
+        }
+        (result, self.apply_subsystem_roll(roll, thruster))
+    }
+
+    /// F950 for one draw (`F1530` 0..0xffff) and thruster index (`F922(6)`).
+    pub fn apply_subsystem_roll(&mut self, roll: u16, thruster: u8) -> Option<SystemEvent> {
+        let event = if roll >= 0x5555 {
+            self.damage
+                .break_equipment(&mut self.loadout.general, &mut self.rng)
+                .map(SystemEvent::EquipmentDamaged)
+        } else if roll < 0x888 {
+            self.combat.drive = 0;
+            self.combat.energy = 0;
+            Some(SystemEvent::DriveDamaged)
+        } else if roll < 0x1c71 {
+            if self.combat.drive != 0 {
+                self.combat.drive = 1;
+            }
+            Some(SystemEvent::DriveDamaged)
+        } else if self.damage.break_thruster(usize::from(thruster)) {
+            Some(SystemEvent::ThrusterDamaged(thruster))
+        } else {
+            None
+        };
+        if event.is_some() {
+            self.damage.fuel_empty = false;
+        }
+        event
+    }
+
+    /// F950's roll: two thirds break a fitted general item (F945/F933), then
+    /// the drive (F947/F948) and finally a thruster (F949) as the draw falls.
+    pub fn subsystem_roll(&mut self) -> Option<SystemEvent> {
+        let roll = self.rng.bounded(0x1_0000) as u16;
+        let thruster = self.rng.bounded(6) as u8;
+        self.apply_subsystem_roll(roll, thruster)
+    }
+
+    /// F929's fuel slot: hydrogen for drives below class 10, military fuel
+    /// (`ffe_core::hyperspace::MILITARY_FUEL`) from class 10 up.
+    pub fn fuel_slot(&self) -> usize {
+        if self.combat.drive >= ffe_core::hyperspace::MILITARY_CLASS as u8 {
+            ffe_core::hyperspace::MILITARY_FUEL
+        } else {
+            ffe_core::hyperspace::HYDROGEN
+        }
+    }
+
+    /// Burn one tonne of fuel from the hold. Returns false when the slot is
+    /// empty (F929's `+0x15a`/`+0x15c` test).
+    pub fn burn_fuel(&mut self) -> bool {
+        let slot = self.fuel_slot();
+        match self.hold.get_mut(slot) {
+            Some(tonnes) if *tonnes > 0 => {
+                *tonnes -= 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// F929's empty pool: with the Auto Refueller fitted and fuel in the hold,
+    /// burn one tonne and add `0x20000000` energy. Otherwise latch the empty
+    /// warning and F929's engine failure.
+    pub fn refuel_energy(&mut self) -> bool {
+        if !self.loadout.auto_refueller() || !self.burn_fuel() {
+            self.damage.fuel_empty = true;
+            self.damage.engine_failed = true;
+            return false;
+        }
+        self.combat.energy = self
+            .combat
+            .energy
+            .saturating_add(crate::damage::ENERGY_PER_TONNE);
+        self.damage.fuel_empty = false;
+        self.damage.engine_failed = false;
+        true
+    }
+
+    /// After F930's shot (F929): an emptied pool is refilled from fuel.
+    pub fn refuel_after_energy(&mut self) {
+        if self.combat.energy == 0 {
+            self.refuel_energy();
+        }
+    }
+
+    /// F938's thrust energy (`mass * sum |thrust words| >> 9 * tics`) through
+    /// F929. Returns true when the engine failed (no energy and no fuel).
+    pub fn spend_thrust_energy(&mut self, tics: u32, mass: u16, thrust_sum: i32) -> bool {
+        let cost = ((u64::from(mass) * u64::from(thrust_sum.max(0) as u32)) >> 9)
+            .saturating_mul(u64::from(tics));
+        if cost == 0 && self.combat.energy > 0 {
+            self.damage.engine_failed = false;
+            return false;
+        }
+        if u64::from(self.combat.energy) > cost {
+            self.combat.energy -= u32::try_from(cost).unwrap_or(u32::MAX);
+            self.damage.engine_failed = false;
+            return false;
+        }
+        self.combat.energy = 0;
+        if self.refuel_energy() {
+            false
+        } else {
+            self.damage.engine_failed = true;
+            true
+        }
+    }
+
+    /// F933/F934's daily servicing: the counters fall by one a day; when a
+    /// 0..255 draw beats the counter, one fitted item (F933) or the drive
+    /// fails from lack of servicing.
+    pub fn service_day(&mut self, day: u32) -> Vec<SystemEvent> {
+        let last = self.last_service_day.unwrap_or(day);
+        if day <= last {
+            return Vec::new();
+        }
+        self.last_service_day = Some(day);
+        let days = (day - last).min(4096);
+        let mut events = Vec::new();
+        for _ in 0..days {
+            for index in 0..2 {
+                let counter = &mut self.damage.service_counters[index];
+                *counter = counter.saturating_sub(1);
+                let counter = *counter;
+                if self.rng.bounded(0x100) <= counter {
+                    continue;
+                }
+                if index == 0 {
+                    if let Some(bit) = self
+                        .damage
+                        .break_equipment(&mut self.loadout.general, &mut self.rng)
+                    {
+                        events.push(SystemEvent::EquipmentFailure(bit));
+                    }
+                } else if self.combat.drive != 0 {
+                    self.combat.drive = 0;
+                    self.combat.energy = 0;
+                    events.push(SystemEvent::DriveFailure);
+                }
+            }
+        }
+        events
+    }
+
+    /// F449/F450/F451/F452: reset a service counter to 500 days.
+    pub fn reset_service(&mut self, index: usize, day: u32) {
+        if let Some(counter) = self.damage.service_counters.get_mut(index) {
+            *counter = crate::damage::SERVICE_DAYS;
+        }
+        if let Some(date) = self.service_days.get_mut(index) {
+            *date = day;
+        }
+    }
+
+    /// F446: repair one general-equipment bit (clear `+0xcc`, set `+0xc8`).
+    pub fn repair_equipment(&mut self, bit: u8) -> bool {
+        self.damage.repair_equipment(bit, &mut self.loadout.general)
+    }
+
+    /// F447/F448: repair `points` hull points, up to the full hull.
+    pub fn repair_hull(&mut self, points: u16) {
+        if self.hull[1] != 0 {
+            self.hull[0] = self.hull[0].saturating_add(points).min(self.hull[1]);
+        }
+    }
+
+    /// F1033: add one tonne of hydrogen to the hold, if there is space.
+    /// Returns the new hydrogen count.
+    pub fn scoop_hydrogen(&mut self, capacity: u32) -> Option<u16> {
+        let used: u32 = self.hold.iter().map(|tonnes| u32::from(*tonnes)).sum();
+        if used >= capacity {
+            return None;
+        }
+        if self.hold.len() < ffe_core::market::NAMES {
+            self.hold.resize(ffe_core::market::NAMES, 0);
+        }
+        let slot = &mut self.hold[ffe_core::hyperspace::HYDROGEN];
+        *slot = slot.saturating_add(1);
+        Some(*slot)
+    }
+
+    /// Whether the player's hull has been used up (F942 destroys the object).
+    pub fn destroyed(&self) -> bool {
+        self.hull[1] != 0 && self.hull[0] == 0
     }
 
     /// F953 (`ffe.asm:71190`) on the player: the shields absorb first (`+0xe0`
@@ -412,11 +719,6 @@ impl Flight {
         self.shields[0] = state.shields;
         self.hull[0] = state.hull;
         result
-    }
-
-    /// Whether the player's hull has been used up (F942 destroys the object).
-    pub fn destroyed(&self) -> bool {
-        self.hull[1] != 0 && self.hull[0] == 0
     }
 }
 

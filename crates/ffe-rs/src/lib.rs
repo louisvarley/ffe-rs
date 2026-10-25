@@ -5,6 +5,7 @@ pub mod camera;
 pub mod combat;
 pub mod console;
 mod console_table;
+pub mod damage;
 pub mod death;
 pub mod display;
 pub mod docking;
