@@ -10,36 +10,41 @@ piece is called out below.
 - **Start-system table** `DATA_006820` (`ffedat.asm:14448`): five 20-byte
   records of galaxy x, y, z (16.16), the star's number in its sector and one
   dword beside them. `ffe_rs::navigation::START_SYSTEMS` keeps them:
-  records 0 and 4 are the same system (`0x17170200`, `0x15287600`, -222,
-  star 6); **record 1 is Ross 154** (`0x17176a00`, `0x15243200`, `-0x3400`,
-  star 1); records 2 (`0x17188000`, `0x1524a000`) and 3 (`0x1715e000`,
-  `0x151ee000`) are the other two.
+  **record 0 is Gateway [-1,4]** (`0x17170200`, `0x15287600`, -56832, star 6)
+  and record 4 repeats it; **record 1 is Ross 154** (`0x17176a00`,
+  `0x15243200`, `-0x3400`, star 1); records 2 (`0x17188000`, `0x1524a000`)
+  and 3 (`0x1715e000`, `0x151ee000`) are the other two. Record 0's system is
+  not one of the hand-coded ones: F829/F832 generate it from the record and
+  F830 names it Gateway.
 - **Clock**: the game's day counter is absolute, `0x121cf7.5` days =
   `102,562,286,400` seconds (`0x121cf7` whole days and the half-day fraction
   `0x80000000`). `Navigator::new_game` starts there; the calendar subtracts
   that start, so the console shows 1 Jan 3250, noon. The development sandbox
   keeps a 0-based clock (`start_clock`), so the date stays right in both.
-- **F998's state for start type 1**: 1000 CR (`DATA_008888`), ship 23 (the
-  Eagle long range fighter, `0x17`), the hold is the ship's 20 t less `0xc`
-  (8 t), and time acceleration 994 (`DATA_009012`). F994 sets the player's state
-  byte to `0x30` (landed at an open-air starport's pad) and `DATA_008857` (the
-  player's object index) is 107.
-- **The pad**: F994 calls F650 with the player's ship and object `0x6e`; that
-  object is the system's starport. In this checkout Ross 154's starport is
-  `slot 0x6e`, model `0x55` (an open-air model: class `+0x14c` bit `0x40`),
-  bay 1. F650 turns the bay's pad `(-250, 0, 250)` by the station's F1674
-  rows and shifts each component left ten. With the generated rows
+- **F998's default (type 0)**: 10,000 CR (`DATA_008888 = 0x2710`), ship 31
+  (the Saker Mk III fighter, `0x1f`), a 1 t free hold, time acceleration 994
+  (`DATA_009012`), player state `0x30` and `DATA_008857 = 87`. The F2 page
+  shows the Saker, Scanner/Automatic Pilot/Atmospheric Shielding/Navigation
+  computer, the 1MW pulse front mount, Cargo Space 1 t, no shield generators
+  and `--start` type 0's Gateway/Hope/Old Blackelk seat (`slot 0x6a`).
+  F998's type-1 arm is still available with `--start 1`: 1000 CR, ship 23
+  (the Eagle long range fighter, `0x17`), 8 t hold, player index 107 and
+  starport `slot 0x6e`. Types 2-5 are unverified and map to type 1.
+- **The pad**: F994 calls F650 with the player's ship and the chosen starport
+  object. The default arm uses `slot 0x6a` (Old Blackelk on Hope); the type-1
+  arm uses `slot 0x6e` (Ross 154's starport, model `0x55`, bay 1). F650 turns
+  the bay's pad `(-250, 0, 250)` by the station's F1674 rows and shifts each
+  component left ten. For Ross 154 the generated rows
   `[-906354405, 1945245414, 76650739, -1938310550, -909597149, 163923668,
-  180966058, 0, 2139827798]` the offset is `(126, -227, 240) << 10` =
-  `[129024, -232448, 245760]` mm in the station's frame. F994 then adds the
-  ship's collision radius (`+0x140`, 5,200 mm for the Eagle) along its second
-  row (the up row, copied from the station): `(-4694, -2203, 396)`, so the seat
-  is the station position plus `[124330, -234651, 246156]`. The local test
-  (`new_game_starts_at_ross_154`) checks this and the date, hold and cash.
-- **Boot**: the default boot is this new game. `--start sol` keeps the old
-  Sol/Mars High development sandbox (and `Navigator::new`, which the existing
-  tests use). `--skip-intro` is accepted for the eventual front-end wiring; the
-  logo drawing is not wired yet.
+  180966058, 0, 2139827798]` give `(126, -227, 240) << 10` =
+  `[129024, -232448, 245760]` mm; F994 adds the ship's collision radius
+  (`+0x140`, 5,200 mm for the Eagle) along its up row: `(-4694, -2203, 396)`,
+  so the seat is the station position plus `[124330, -234651, 246156]`. The
+  local tests (`new_game_default_is_the_saker_at_hope`,
+  `new_game_starts_at_ross_154`) check the seat, date, hold and cash.
+- **Boot**: the default boot is F998's type 0. `--start 1` keeps Ross 154 and
+  `--start sol` the old Sol/Mars High development sandbox (`Navigator::new`).
+  `--skip-intro` bypasses the logo/credits; a normal run shows them.
 
 ## The intro screens (F961/F962)
 

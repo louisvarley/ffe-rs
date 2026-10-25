@@ -2,11 +2,12 @@
 //!
 //! The original keeps the four mount lasers at `ship+0xd2..+0xd5`, the refire
 //! countdown at `+0xe8`, the heat at `+0xea` and the energy at `+0x11e`. The
-//! new game's start type 1 (Ross 154, model `0x17`) fits one 1MW pulse laser
-//! (`0x88`) in the front mount, two missiles, a class-2 drive and 1 t of
-//! energy; `FUNC_000998` at `ffe.asm:74099` is the source. There is no
-//! outfitting or save equipment in this port, so that new-game loadout is kept
-//! when the development ship list changes the hull.
+//! DOS default start (`F998`'s type-0 arm, `ffe.asm:74159`) gives the Saker
+//! Mk III (model `0x1f`) one 1MW pulse laser (`0x88`) in the front mount, two
+//! `0x82` missiles, a class-2 drive and 1 t of energy (`0x20000000`). The
+//! type-1 Ross 154 arm fits the same four combat words. There is no outfitting
+//! or save equipment in this port, so the new-game loadout is kept when the
+//! development ship list changes the hull.
 use ffe_core::laser::{self, FireError, LaserSpec, State};
 use serde::{Deserialize, Serialize};
 
@@ -48,8 +49,9 @@ pub struct Combat {
 }
 
 impl Combat {
-    /// F998's start type 1 record: a 1MW pulse laser in the front mount, a
-    /// class-2 drive and `0x20000000` energy (one tonne).
+    /// F998's default (type-0) arm and its type-1 arm both fit a 1MW pulse
+    /// laser in the front mount, a class-2 drive and `0x20000000` energy (one
+    /// tonne); the Saker Mk III's other two mounts stay empty.
     pub fn new_game() -> Self {
         let mut missiles = [0; ffe_core::missile::PYLONS];
         missiles[0] = ffe_core::missile::PLAYER_MISSILE;
@@ -285,8 +287,9 @@ mod tests {
     }
 
     #[test]
-    fn new_game_has_f998s_front_pulse_laser_and_two_missiles() {
+    fn the_saker_start_has_f998s_front_pulse_laser_and_two_missiles() {
         let combat = Combat::new_game();
+        // F998 type 0: front 0x88; the Saker's rear/turret mounts stay empty.
         assert_eq!(combat.lasers, [laser::PULSE_1MW, 0, 0, 0]);
         assert_eq!(
             combat.missiles,

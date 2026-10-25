@@ -237,30 +237,39 @@ elsewhere).
 
 ## 4. The new-game ship and its laser (F998)
 
-`FUNC_000998` (`ffe.asm:74028`) for start type 1 (Ross 154) sets, at
-`ffe.asm:74099`:
+`FUNC_000998` (`ffe.asm:74028`) dispatches on `DATA_008881`: type 1 is the
+Ross 154 arm, and **type 0 is the DOS default** (`F147(0)`). The default arm at
+`ffe.asm:74159` sets:
 
-- model `0x17` (23) — the **Eagle long range fighter**, not the Sidewinder
-  (model 26 / 0x1a; `shipidx.txt`);
-- front laser `ship+0xd2 = 0x88` (1MW pulse);
+- model `0x1f` (31) - the **Saker Mk III fighter** (`shipidx.txt`), with
+  F1533's `DATA_002655` statistics: 2 gun mounts, 28 t mass, 23 t cargo,
+  shield word 16412, eye `1800/400`, front gun `2200/0`, rear `1900/-200`;
+- front laser `ship+0xd2 = 0x88` (1MW pulse); the other mounts stay zero;
 - drive byte `+0xd0 = 2`;
-- two missiles `+0xd6/+0xd7 = 0x82`;
+- two missiles `+0xd6/+0xd7 = 0x82` (`KL760 Homing Missile`);
 - energy `+0x11e = 0x20000000` (1 t);
-- cash `0x3e8` (1000 CR).
+- general equipment `ship+0xc8 = 0x40240020`: Scanner (18), Automatic Pilot
+  (21), Atmospheric Shielding (30), Navigation computer (5); no Combat
+  Computer, radar mapper, shield generator or cabins;
+- cash `0x2710` (10,000 credit units);
+- `sub [DATA_008889],0x10` for the drive/equipment allowance, then the F2 page
+  subtracts the 6 t of fitted items and shows **1 t free hold**.
 
-The cache's statistics block for model 23 confirms one gun mount
-(`+0x4 = 1`), front gun `+0x20/+0x22 = 1300/0`, eye `1500/30`, rear gun
-`800/0`, missiles 2. The earlier notes that called start type 1 the
-"Sidewinder" are wrong; the port's `NEW_GAME_SHIP = 23` is right.
+The executed default arm confirms model 31, mounts 2, lasers `[136,0,0,0]`,
+missiles `[130,130,0,0,0,0]`, drive 2, shields `[0,0]`, hull 112 and cash
+10000 (`docs/evidence/saker/`). The type-1 Ross 154 arm keeps model `0x17`
+(23) with one mount and the same four combat words; the port supports it with
+`--start 1`.
 
 There is no outfitting or save equipment in the port. It therefore keeps the
 F998 new-game loadout (front 1MW pulse, class-2 drive, 1 t energy) for the
 sandbox too, and keeps the front laser when the development ship list changes
-the hull unless the hull has no gun mount. **Consequence:** with the new-game
-Eagle (one mount) only the front view has a laser, so only the front view draws
-the gunsight and fire works only there. Rear and turret firing are implemented
-and unit-tested with a synthetic loadout, but no playable hull carries a rear
-or turret laser today. Do not give turrets a laser by invention.
+the hull unless the hull has no gun mount. **Consequence:** the Saker has two
+hull mounts, so F1 offers front/rear/external, but only the front mount has a
+laser: only the front view draws the gunsight and fire works only there. Rear
+and turret firing are implemented and unit-tested with a synthetic loadout, but
+no playable hull carries a rear or turret laser today. Do not give turrets a
+laser by invention.
 
 ## 5. What the port implements
 
@@ -345,14 +354,18 @@ or turret laser today. Do not give turrets a laser by invention.
   differ.
 - **Reference:** `tools/reference/headless.c` now has a `--state-combat <frames>`
   mode that runs the real new game and prints the player object's laser words.
-  `jjffe-smoke.exe --state-combat 170` in a disposable directory prints, from
-  frame 161:
+  For the type-1 arm, `--state-combat 170` prints from frame 161:
   `model 23, mounts 1, lasers [136,0,0,0], missiles [130,130,0,0,0,0],
   drive 2, shields [0,0], hull 100, refire 0, heat 0, energy 536870912
-  (0x20000000), cash 1000`. This confirms F998's start-type 1 loadout against
-  the executed original: one `0x88` front pulse laser, two `0x82` missiles, an
-  Eagle (model 23), 1 t energy and no shields. The existing `--state` output is
-  unchanged.
+  (0x20000000), cash 1000`. For the DOS default arm (a local probe build using
+  the default start key `0x0b`) it prints from frame 161:
+  `player 87, model 31, mounts 2, lasers [136,0,0,0],
+  missiles [130,130,0,0,0,0], drive 2, shields [0,0], hull 112, refire 0,
+  heat 0, energy 536870912 (0x20000000), cash 10000`, and the F2 page shows the
+  Saker, its four general items, the 1MW pulse front mount, Cargo Space 1 t
+  and no shield generators. This confirms F998's type-0 loadout against the
+  executed original; `docs/evidence/saker/` holds the page. The existing
+  `--state` output is unchanged.
 - **NPC AI frames (2026-10-25):** `cargo test -p ffe-rs --test npc_ai -- --ignored`
   with `FFE_WORLD_CACHE` puts the player in front of a pirate and ticks the real
   AI until F931/F930/F953 damage arrives, kills a clean ship for the police

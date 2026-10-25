@@ -63,12 +63,12 @@ fn start_choices_are_read_every_frame_and_skip_maps_to_the_verified_type() {
         intro.key(INTRO_END - 1, '1'),
         Some(IntroAction::Start { .. })
     ));
-    // Any other key is F147(0); the port uses the verified type 1.
+    // Any other key is F147(0): the type-0 Saker in Gateway.
     assert_eq!(
         intro.key(BOOT_TICS, '\0'),
         Some(IntroAction::Skip {
-            chosen: 1,
-            notice: Some("DOS boots start type 0; starting the verified type 1 (Ross 154)")
+            chosen: 0,
+            notice: None
         })
     );
     // V is a no-op before the DOS gate and latches the version after it.
@@ -77,8 +77,8 @@ fn start_choices_are_read_every_frame_and_skip_maps_to_the_verified_type() {
     assert_eq!(
         intro.key(BOOT_TICS, '0'),
         Some(IntroAction::Skip {
-            chosen: 1,
-            notice: Some("DOS boots start type 0; starting the verified type 1 (Ross 154)")
+            chosen: 0,
+            notice: None
         })
     );
 }

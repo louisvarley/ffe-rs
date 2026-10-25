@@ -45,7 +45,8 @@ use std::time::Instant;
 /// Which game the boot starts: the original's new game or the development sandbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Boot {
-    /// Ross 154, the Eagle (model 23), 1000 CR, on the starport pad (`--start 1` default).
+    /// The DOS default: Hope in Gateway with F998's type-0 Saker Mk III
+    /// (model 0x1f), 10,000 CR. `--start 1` keeps Ross 154's Eagle.
     NewGame(u8),
     /// The existing Sol/Mars High sandbox (`--start sol`).
     Sandbox,
@@ -85,7 +86,7 @@ fn options() -> Result<Options, String> {
     let mut capture = None;
     let mut capture_planet = None;
     let mut capture_traffic = None;
-    let mut boot = Boot::NewGame(1);
+    let mut boot = Boot::NewGame(ffe_rs::navigation::DEFAULT_START_TYPE);
     let mut boot_given = false;
     let mut skip_intro = false;
     let mut capture_prefs = None;
@@ -99,7 +100,7 @@ fn options() -> Result<Options, String> {
         } else if arg == "--start" && !boot_given {
             let value = args
                 .next()
-                .ok_or("--start requires 1..5 or sol")?
+                .ok_or("--start requires 0..5 or sol")?
                 .to_string_lossy()
                 .to_ascii_lowercase();
             boot_given = true;
@@ -108,17 +109,21 @@ fn options() -> Result<Options, String> {
             } else {
                 let start_type = value
                     .parse::<u8>()
-                    .map_err(|_| "start type must be 1..5 or sol")?;
-                if !(1..=5).contains(&start_type) {
-                    return Err("start type must be 1..5 or sol".to_owned());
+                    .map_err(|_| "start type must be 0..5 or sol")?;
+                if start_type > 5 {
+                    return Err("start type must be 0..5 or sol".to_owned());
                 }
-                if start_type != 1 {
+                if (2..=5).contains(&start_type) {
                     eprintln!(
                         "Start type {start_type} is the JJFFE mapping and is not verified; \
                          starting type 1 (Ross 154)."
                     );
                 }
-                Boot::NewGame(1)
+                Boot::NewGame(if (2..=5).contains(&start_type) {
+                    1
+                } else {
+                    start_type
+                })
             };
         } else if arg == "--skip-intro" && !skip_intro {
             skip_intro = true;
@@ -155,7 +160,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 1..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-prefs DIR] [--capture-intro DIR]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -511,7 +516,7 @@ fn run() -> Result<(), String> {
         || options.capture_planet.is_some()
         || options.capture_traffic.is_some();
     let mut boot = options.boot;
-    if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(1)) {
+    if !options.skip_intro && !scripts && matches!(options.boot, Boot::NewGame(_)) {
         boot = Boot::NewGame(run_intro(
             &mut window,
             &mut screen,
@@ -541,8 +546,8 @@ fn run() -> Result<(), String> {
         .map(|scene| ShipList::from_cache(&cache, scene))
         .unwrap_or_default();
     // The systems, their bodies and the autopilot (Tab, G, Backspace). The default
-    // boot is the original's new game at Ross 154; `--start sol` keeps the
-    // development sandbox for the existing tests and screenshots.
+    // boot is F998's type 0 at Hope in Gateway; `--start 1` keeps Ross 154 and
+    // `--start sol` the development sandbox for the existing screenshots.
     let mut nav = match boot {
         Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type),
         Boot::Sandbox => Navigator::new(&cache),
@@ -555,7 +560,18 @@ fn run() -> Result<(), String> {
         if let Some(new_game) = nav.new_game {
             state.credits = u32::try_from(new_game.cash).unwrap_or(0);
             state.ship = new_game.ship;
-            state.mode = ffe_rs::flight::Mode::Docked;
+            // F994's state 0x30 is the landed surface view (F1050/F1054), not the
+            // docked services board: the ship sits on the open-air pad in the
+            // flight view. F1050 draws it from the cockpit with the console below.
+            state.mode = ffe_rs::flight::Mode::Flight;
+            state.system_flight = nav.docked.is_some();
+            state.position = new_game
+                .seat
+                .map(|v| v as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
+            state.velocity = [0.0; 3];
+            if let Some(index) = nav.docked {
+                state.axes = Some(nav.bodies[index].orientation);
+            }
             eprintln!(
                 "New game: {} (start type {}), {} CR, ship {}, hold {} t, time accel {}.",
                 nav.system_name(),
@@ -575,10 +591,11 @@ fn run() -> Result<(), String> {
     if nav.as_ref().is_some_and(|nav| nav.docked.is_some()) {
         sound.play(Cue::Station);
     }
-    // F998's new-game armament: one 1MW pulse laser in the front mount, a class-2
-    // drive and 1 t of energy on the start-type 1 hull, with that hull's general
-    // equipment bits and two 0x82 missiles (the equipment page's icons). The port
-    // has no outfitting yet, so the same original loadout arms the sandbox too.
+    // F998's new-game armament (the same four combat words in the type-0 and
+    // type-1 arms): one 1MW pulse laser in the front mount, a class-2 drive and
+    // 1 t of energy, plus the general equipment bits and two 0x82 missiles (the
+    // equipment page's icons). The port has no outfitting yet, so the same
+    // original loadout arms the sandbox too.
     state.combat = Combat::new_game();
     state.loadout = ffe_core::equipment::Loadout::new_game();
     // A scripted undock for screenshots: start the launch sequence immediately.

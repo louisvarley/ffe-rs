@@ -14,11 +14,12 @@ systems, and an autopilot to planets, stations and other bodies for testing.
 | Console `n` icon: the system's places list | done 2026-10-24: the original's stations/starports list, marker clicks engage the autopilot (`docs/notes/labels.md`) |
 | Console `l` icon: text labels | done 2026-10-24: the original player flag, F989/F1108 labels over the flight view |
 
-The default boot is now the original's new game: Ross 154, the Eagle (model 23),
-1000 CR, 1 Jan 3250 12:00, landed on the starport pad (`navigation::new_game`,
-`docs/notes/intro.md`). `L` takes off from the open-air pad through the
-original's F1013 `0x24` -> F1031 `0x26` -> `0x00` path (EXP-010). The
-development sandbox (`--start sol`)
+The default boot is now F998's type 0: Gateway [-1,4], Hope and Old Blackelk,
+the Saker Mk III (model `0x1f`), 10,000 CR, a 1 t free hold, 1 Jan 3250 12:00,
+landed on the pad (`navigation::new_game`, `docs/notes/intro.md`). `--start 1`
+keeps Ross 154 and the Eagle (model 23). `L` takes off from the open-air pad
+through the original's F1013 `0x24` -> F1031 `0x26` -> `0x00` path (EXP-010).
+The development sandbox (`--start sol`)
 starts docked at a station **in a planet's orbit** - the closest such station,
 else the first station - so the launch puts that world in view (Sol: Mars High,
 1.61 Mars radii). That is a starting-scenario choice, not the original's fixed

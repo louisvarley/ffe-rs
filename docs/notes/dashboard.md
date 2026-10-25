@@ -565,15 +565,17 @@ log; the docked screens keep their own two-line note. The original's
 
 ### 6.9c The new-game ship and its laser (F998)
 
-`FUNC_000998` for start type 1 (Ross 154) sets model **23 (0x17), the Eagle long
-range fighter** — not a Sidewinder (model 26 / 0x1a) — with one front `0x88`
-(1MW pulse) laser, two `0x82` missiles, drive byte 2, `0x20000000` energy and
-1000 CR (`docs/notes/combat.md` §4; confirmed against the executed original by
-`--state-combat`). The cache's statistics block for model 23 has one gun mount,
-so only the front view has a laser: the gunsight and firing are front-only in
-the playable, while the rear/turret paths are tested with a synthetic loadout.
-Earlier notes that called start type 1 a Sidewinder are wrong; the port's
-`NEW_GAME_SHIP = 23` is right.
+The DOS default is F998's **type 0**: model **31 (0x1f), the Saker Mk III
+fighter** (F1533 `DATA_002655`: 2 mounts, 28 t mass, 23 t cargo, front gun
+`2200/0`, eye `1800/400`), with one front `0x88` (1MW pulse) laser, two `0x82`
+missiles, drive byte 2, `0x20000000` energy, `0x40240020` general equipment,
+10,000 CR and a 1 t free hold (`docs/notes/combat.md` 4; confirmed against the
+executed original by the local default-arm `--state-combat` probe and the F2
+page in `docs/evidence/saker/`). Only the front mount has a laser: the gunsight
+and firing are front-only in the playable, while the rear/turret paths are
+tested with a synthetic loadout. `--start 1` keeps Ross 154's Eagle (model 23,
+one mount, 1000 CR); earlier notes that called start type 1 a Sidewinder are
+wrong.
 
 ### 6.10 Status lamps and the engines-off page
 
