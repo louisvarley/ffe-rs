@@ -20,7 +20,7 @@ use ffe_core::sector::{distance as star_distance, Drive, Tables as GalaxyTables}
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
 use ffe_core::traffic::{
-    begin_exit, finish_touch, state, Reply, Stages, Starport, Takeoff, TakeoffStep,
+    begin_exit, finish_touch, state, Landing, Reply, Stages, Starport, Takeoff, TakeoffStep,
 };
 use ffe_core::RandomState;
 use std::collections::HashMap;
@@ -713,6 +713,9 @@ pub struct Navigator {
     /// The open-air starport takeoff (`0x30`/`0x24`/`0x26`/`0x00`), when the
     /// player has launched from a pad.
     pub takeoff: Option<Takeoff>,
+    /// The landed state (`0x32`/`0x34`) after a rough landing on a planet or
+    /// moon (`0x2e`/`0x30` for an open-air starport pad).
+    pub landed: Option<Landed>,
     /// F650's pad tables (cache v26), for placing the ship on a pad (F994).
     pads: Option<Pads>,
     /// A message from the autopilot's own clearance request.
@@ -783,6 +786,24 @@ pub struct Sequence {
     pub station: usize,
     pub stages: Stages,
     pub launching: bool,
+}
+
+/// The player's landed state on a surface (`DATA_008870`): F1021's rough
+/// landing (`0x32`) or open-air starport touch (`0x2e`), then the view
+/// function's guarded state (`0x34`/`0x30`). `index` is the body the ship came
+/// down on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Landed {
+    pub landing: Landing,
+    pub index: usize,
+}
+
+impl Landed {
+    /// The mode word F1011/F1012 (`0x30` or `0x34`) or the frame's touch
+    /// (`0x2e`/`0x32`).
+    pub fn state(&self) -> u8 {
+        self.landing.state
+    }
 }
 
 /// What a frame of traffic changed.
@@ -960,6 +981,7 @@ impl Navigator {
             spawned: None,
             sequence: None,
             takeoff: None,
+            landed: None,
             pads: cache
                 .asset("base:gameplay/pads")
                 .and_then(|bytes| Pads::from_bytes(bytes).ok()),
@@ -1367,6 +1389,67 @@ impl Navigator {
             _ => self.takeoff = Some(takeoff),
         }
         step
+    }
+
+    /// F1021's rough landing: the ship has settled on planet or moon `index`.
+    /// The mode becomes `0x32` for the frame of the touch; [`Self::landing_frame`]
+    /// then runs F1047's view function for `0x34`. A starport pad or a station
+    /// hull is not a surface landing (F1019/F1021 give those the docking stages
+    /// or the open-air `0x2e` state).
+    pub fn land(&mut self, index: usize) -> bool {
+        if self.landed.is_some() || self.takeoff.is_some() || self.sequence.is_some() {
+            return false;
+        }
+        let Some(body) = self.bodies.get(index) else {
+            return false;
+        };
+        if !matches!(body.kind, Kind::Planet | Kind::Moon) {
+            return false;
+        }
+        self.target = None;
+        self.final_leg = false;
+        self.landed = Some(Landed {
+            landing: Landing::on_surface(),
+            index,
+        });
+        true
+    }
+
+    /// The frame after a landing: F1047 turns `0x32` into `0x34` (and F1048
+    /// `0x2e` into `0x30`). Returns the guarded state once.
+    pub fn landing_frame(&mut self) -> Option<u8> {
+        let landed = self.landed.as_mut()?;
+        landed.landing.frame()
+    }
+
+    /// The landed mode word (`0x34`), or the frame's `0x32`; `None` in flight.
+    pub fn landed_state(&self) -> Option<u8> {
+        self.landed.as_ref().map(Landed::state)
+    }
+
+    /// The body the ship is landed on.
+    pub fn landed_body(&self) -> Option<usize> {
+        self.landed.as_ref().map(|landed| landed.index)
+    }
+
+    /// F1056's launch action (its action 9) at a landed state: F1013's climb
+    /// begins at `0x24`. F1031's contact scan then clears it into `0x00` (a
+    /// planet's touch has no starport region `0x20`); see [`Self::takeoff_step`].
+    /// `Err` when the ship is not in a landed state.
+    pub fn begin_surface_launch(&mut self) -> Result<(), String> {
+        let Some(landed) = self.landed else {
+            return Err("Not landed on a surface.".to_owned());
+        };
+        if self.sequence.is_some() || self.takeoff.is_some() {
+            return Err("Already launching.".to_owned());
+        }
+        let takeoff = landed
+            .landing
+            .begin_launch()
+            .ok_or_else(|| "Not landed on a surface.".to_owned())?;
+        self.takeoff = Some(takeoff);
+        self.landed = None;
+        Ok(())
     }
 
     /// The mode word the takeoff's current state gives the flight model
@@ -1844,6 +1927,9 @@ impl Navigator {
         self.clock += seconds;
         self.refresh(cache);
         self.drift = [0; 3];
+        // A transfer is a jump in the system frame; it cannot arrive landed.
+        self.landed = None;
+        self.takeoff = None;
     }
 
     pub fn refresh(&mut self, cache: &VerifiedCache) {
@@ -1932,6 +2018,14 @@ impl Navigator {
     /// game clock moves by the jump time; the caller burns `Jumped::fuel`. Refused with a
     /// reason when the system is out of range, the same system, or the hold has too little fuel.
     pub fn hyperspace(&mut self, cache: &VerifiedCache, index: usize) -> Result<Jumped, String> {
+        // F903 only jumps from mode 0 or 0x24; a landed ship must launch first.
+        if self.landed.is_some()
+            || self
+                .takeoff
+                .is_some_and(|takeoff| takeoff.state != state::TAKEOFF)
+        {
+            return Err("Launch before a hyperspace jump.".to_owned());
+        }
         let Some((distance, report)) = self.jump_report(index) else {
             return Err("No hyperdrive data for this ship or system.".to_owned());
         };
@@ -1980,6 +2074,8 @@ impl Navigator {
         self.traffic.clear();
         self.markets.clear();
         self.sequence = None;
+        self.takeoff = None;
+        self.landed = None;
         self.final_leg = false;
         self.frame = None;
         self.drift = [0; 3];

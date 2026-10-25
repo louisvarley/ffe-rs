@@ -32,8 +32,7 @@ use minifb::{MouseButton, MouseMode};
 
 /// What the open-air launch tells the player: F1013/F1031 need thrust to climb
 /// out of the starport's effect region.
-const TAKEOFF_HINT: &str =
-    "Lifting off: pitch up and raise the set speed to clear the starport's pad.";
+const TAKEOFF_HINT: &str = "Lifting off: pitch up and raise the set speed to clear the ground.";
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
@@ -1472,9 +1471,29 @@ fn run() -> Result<(), String> {
                     }
                 }
                 if state.mode == ffe_rs::flight::Mode::Flight {
-                    // `l` / the console labels icon: toggle the object name labels
-                    // (`DATA_008804+0xe9` bit 2, ffe.asm 78447-78465).
-                    if pressed(Key::L) || console_click == Some(Click::Labels) {
+                    // F1056's launch action (its action 9) from a landed state:
+                    // `0x34` goes straight to F1013's climb. In flight `L` is the
+                    // original's text-label toggle instead.
+                    let landed = nav.as_ref().and_then(|nav| nav.landed_state());
+                    if pressed(Key::L) && landed.is_some() {
+                        if let Some(nav) = nav.as_mut() {
+                            match nav.begin_surface_launch() {
+                                Ok(()) => {
+                                    acceleration = 0;
+                                    if let Some(model) = original.as_mut() {
+                                        model.set_time_acceleration(0);
+                                        // F1042's zero motion, then F1013's climb:
+                                        // the up thrust is F1041's `0x24` request.
+                                        model.begin_takeoff();
+                                    }
+                                    message = TAKEOFF_HINT.to_owned();
+                                }
+                                Err(why) => message = why,
+                            }
+                        }
+                    } else if pressed(Key::L) || console_click == Some(Click::Labels) {
+                        // `l` / the console labels icon: toggle the object name
+                        // labels (`DATA_008804+0xe9` bit 2, ffe.asm 78447-78465).
                         labels = !labels;
                         message = if labels {
                             "Text labels on.".to_owned()
@@ -1990,23 +2009,31 @@ fn run() -> Result<(), String> {
                     model.teleport(model.player().motion.position);
                 }
                 if let Some(nav) = nav.as_mut().filter(|nav| !nav.holding()) {
-                    if let Some((command, body)) = nav.command(&cache, model) {
-                        keys = command.keys;
-                        command_face = command.face;
-                        if let Some((landing, seconds)) = command.skip {
-                            model.teleport(landing);
-                            nav.transfer(&cache, seconds);
-                            message = format!("Transfer to {}: {:.0} s.", body.name, seconds);
-                        } else if command.arrived {
-                            message = format!("Arrived at {}.", body.name);
-                            nav.target = None;
-                        } else if nav.docking() {
-                            let range = distance(model.player().motion.position, body.position);
-                            message =
-                                format!("Autopilot: docking at {} {}.", body.name, describe(range));
-                        } else {
-                            let range = distance(model.player().motion.position, body.position);
-                            message = format!("Autopilot: {} {}.", body.name, describe(range));
+                    // A landed ship has no autopilot input (F1012 runs no F1037
+                    // and the target is cleared by F1021); the clock and the
+                    // body's motion still carry it.
+                    if nav.landed.is_none() {
+                        if let Some((command, body)) = nav.command(&cache, model) {
+                            keys = command.keys;
+                            command_face = command.face;
+                            if let Some((landing, seconds)) = command.skip {
+                                model.teleport(landing);
+                                nav.transfer(&cache, seconds);
+                                message = format!("Transfer to {}: {:.0} s.", body.name, seconds);
+                            } else if command.arrived {
+                                message = format!("Arrived at {}.", body.name);
+                                nav.target = None;
+                            } else if nav.docking() {
+                                let range = distance(model.player().motion.position, body.position);
+                                message = format!(
+                                    "Autopilot: docking at {} {}.",
+                                    body.name,
+                                    describe(range)
+                                );
+                            } else {
+                                let range = distance(model.player().motion.position, body.position);
+                                message = format!("Autopilot: {} {}.", body.name, describe(range));
+                            }
                         }
                     }
                     if let Some(notice) = nav.notice.take() {
@@ -2053,7 +2080,13 @@ fn run() -> Result<(), String> {
                 let ship_at = model.absolute_position();
                 let player_info =
                     ffe_core::objects::ModelInfo::read(model_records, model_stats, state.ship);
-                let landing = if model.on_pad() {
+                // The original's landed handlers (F1011/F1012) run no flight
+                // step: no F1037/F1041, no F601/F603/F1512, and F1039 only sees
+                // the turret's input. The view (F1050/F1054) and F1056's input
+                // still run, and the ship's position is the one the contact
+                // settled it at.
+                let landed_state = nav.as_ref().and_then(|nav| nav.landed_state());
+                let landing = if model.on_pad() || landed_state.is_some() {
                     None
                 } else {
                     nav.as_ref()
@@ -2075,15 +2108,20 @@ fn run() -> Result<(), String> {
                             ))
                         })
                 };
-                let step_result = if model.on_pad() {
+                let mut landed_at = None;
+                let step_result = if let Some(mode) = landed_state {
+                    model.set_mode(mode);
+                    Ok(None)
+                } else if model.on_pad() {
                     model
                         .step_pad(elapsed, &keys, landing_tools.as_ref())
                         .map(Some)
-                } else if let Some((_, parent, at, info)) = landing {
+                } else if let Some((index, parent, at, info)) = landing {
                     model
                         .step_landing(elapsed, &keys, &parent, at, &info, landing_tools.as_ref())
                         .map(|contact| {
                             if contact.flags & 0x40 != 0 {
+                                landed_at = Some(index);
                                 message = "Landed. The ship is settled on the surface.".to_owned();
                                 // F1088's docking/landing transition, then
                                 // F1094's docking music.
@@ -2104,6 +2142,24 @@ fn run() -> Result<(), String> {
                 match step_result {
                     Ok(contact) => {
                         model.apply(&mut state);
+                        // F1021's rough landing (`0x32`) then F1047's view frame
+                        // (`0x34`): the ship is settled, its motion is F1042's
+                        // zero and the surface view is the flight view from there.
+                        if let Some(index) = landed_at {
+                            if let Some(nav) = nav.as_mut() {
+                                if nav.land(index) {
+                                    model.settle_landing();
+                                    if let Some(mode) = nav.landing_frame() {
+                                        model.set_mode(mode);
+                                    }
+                                    model.apply(&mut state);
+                                    message = format!(
+                                        "Landed on {}. The surface view is ahead; L launches.",
+                                        nav.bodies[index].name
+                                    );
+                                }
+                            }
+                        }
                         // F1013/F1031: the open-air starport takeoff's mode
                         // word follows the contact scan and the set speed.
                         if let Some(contact) = contact {
@@ -2137,11 +2193,14 @@ fn run() -> Result<(), String> {
                                     }
                                     Some(ffe_core::traffic::TakeoffStep::Cleared) => {
                                         model.set_mode(ffe_core::traffic::state::FREE);
-                                        // F573/F1677: back to the system frame.
-                                        model.end_pad_takeoff();
+                                        // F573/F1677: back to the system frame. A
+                                        // surface launch never built the pad world.
+                                        if model.on_pad() {
+                                            model.end_pad_takeoff();
+                                        }
                                         model.apply(&mut state);
                                         takeoff_climb = None;
-                                        message = "Clear of the starport: free flight.".to_owned();
+                                        message = "Clear of the surface: free flight.".to_owned();
                                     }
                                     Some(ffe_core::traffic::TakeoffStep::Retakeoff) => {
                                         model.begin_takeoff();

@@ -25,7 +25,11 @@ executed original; `docs/notes/docking.md`). The default new game's open-air
 starport takeoff is the original's F1013 `0x24` -> F1031 `0x26` -> `0x00` path
 over a persistent two-body pad contact (`ffe_core::traffic::Takeoff`,
 `docs/notes/intro.md`), so the ship no longer needs the old refusal or a
-teleport; indoor stations keep the lift. Since 2026-10-24 the docked screen is the original's station services menu and stockmarket
+teleport; indoor stations keep the lift. Since 2026-10-25 a rough surface touch
+lands through 0x32 to F1047's 0x34, draws the F1050/F1054 landed view with
+F1877's haze sky, and `L` climbs off again through 0x24/0x26/0x00
+(`docs/NAVIGATION.md`; the `verify-surface.py` oracle reports `sky_matches:
+true`). Since 2026-10-24 the docked screen is the original's station services menu and stockmarket
 (`docs/notes/station.md`: the `DATA_005304` screen table, the `0x98xx` strings, the row buttons,
 hot areas and keys; checked against reference (JJFFE 2.8a7) game frames; the services and shipyard roots
 and the market are ported, the equipment/ship/repair lists and BBS generation are not). The
@@ -103,7 +107,7 @@ ECM.
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 139 items, 70 done and 69 left on
+  in `burndown.js`; 14 milestones, 140 items, 71 done and 69 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -250,14 +254,15 @@ capture produced by two repeat runs of the local reference.
 | v0.65 scanner contacts and targeter | `ffe_rs::scanner` (F275 filters, `DATA_008683` colours, stalk geometry, orientation), `ffe_rs::targeter` (F1113 tunnels, F1114 edges, F1612 circle, F1100 size), `ShipSystems::ca`, `Screen::draw_scanner`; main feeds bodies and ships | `scanner_view.rs` (2, ignored), `scanner.rs`/`targeter.rs` unit tests (8), cached frames | none (the geometry/colour table are from `ffe.asm`; no new oracle) | — | contacts for the system's bodies and NPC ships (starports filtered), 19-colour mass table, up/down stalk clipping and the 8-frame globe; the combat/navigation targeter tunnels and circle draw when the preference/flags allow. Auto-targeter arming/equipment, per-target range colours and two simultaneous targets remain; `docs/notes/scanner.md` |
 | v0.66 hit particles, explosions and debris | `ffe_core::effects` (F939 hit, F942 explosion, F926 debris), `Navigator::{damage_ship_at, effects}`, `Screen::SystemEffect`, `NpcShip::cargo` persistence | `effects_view.rs` (2, ignored), effects unit tests, `npc_view`/`npc_ai` | none (models 155/158/0x99 come from the cache; F942's `+0xa4` gate is documented) | — | every laser hit spawns F939's model-158 particle at F817's hit point; a kill spawns F942's model-155 object and F926's debris from the ship's cargo; the effect lifetimes advance in `tick_ships`. Model 155's twelve fragments are drawn with the deliberate `EXPLOSION_MASS` 0x4000 word and stay wireframe until F1560/F1613 fills; effect lifetimes vs the original AI timers remain an owner decision; `docs/notes/combat.md` §7.1 |
 | v0.67 missiles, lock-on and pylon lamps | `ffe_core::missile` (types, F941 impulse, F758 guidance, F718/F721 contact), `ffe_rs::missile`, `Combat::missiles`, `Navigator::{missile_lock, missiles, launch_missile, tick_missiles}`, `Screen::SystemMissile`, `tools/reference/headless.c --missile-probe` | `missile.rs` (7), `missile_view.rs` (1, ignored), `combat.rs` (+ missile pylon), console pylon-lamp test | `--missile-probe` (pylon 130→0, model-6 object, owner 107, target 114, guidance every 20 frames) calibrates 0.4 s/24 s | — | `M` launches the first pylon after a `Shift+T` lock; the object flies F758's lead/turn with F585's quantisation, fuses at 131 m, calls F718/F721/F953, and the F1120 pylon lamps follow `Combat::missiles`. Missile view (F10), NPC launches, ECM and the F1113 nav box/lamps remain; `docs/notes/combat.md` §8 |
+| v0.68 surface landing and landed view | `ffe_core::traffic` (0x32/0x34, `Takeoff::from_landed`), `Navigator::{land, landed_state, landing_frame, begin_surface_launch}`, `OriginalFlight::settle_landing`, `Screen` surface sky/landed view, `verify-surface.py` | `takeoff.rs` (6), `planet_view.rs` (19, ignored), `verify-surface.py` in `verify-all.py` | `verify-surface.py`: `sky_matches: true`, header_close 0.9934, view coverage 0.589 | — | F1021's rough touch drives 0x32 → F1047's 0x34; the starport 0x2e/0x30 states, F1050/F1054 landed view and F1877's haze sky (stars suppressed) draw, and `L` climbs again through 0x24 → 0x26 → 0x00. The `+0x138` collision vs `+0x140` drawn radius can show space where the original shows ground; pad landing from flight is not routed to 0x2e/0x30; 0x30 shows services (EXP-014); the landed state is not saved; surface depth/fills remain; `docs/NAVIGATION.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 579 `#[test]` functions total; 134 are `#[ignore]`
+  `cargo clippy -D warnings`. 583 `#[test]` functions total; 136 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **444 runnable synthetic tests** (445 on Linux).
+  **447 runnable synthetic tests** (448 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

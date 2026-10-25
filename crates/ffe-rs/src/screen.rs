@@ -230,6 +230,10 @@ pub struct Screen {
     /// The flight view's background: the original's space colour
     /// (`DATA_008815..817`, set by the Graphic Detail page), RGB.
     pub sky: u32,
+    /// F1877's planet-atmosphere background (`DATA_008814..8817`) from the last
+    /// frame's scene. The original clears the next upper view to it and leaves
+    /// the stars out while it is set; `None` uses [`Screen::sky`].
+    surface_sky: Option<u32>,
     /// The original's "Background stars" option; off leaves the sky empty.
     pub stars_visible: bool,
     /// The original's "Lock external view to ship" option (camera offset axis).
@@ -686,6 +690,7 @@ impl Screen {
             // `FUNC_000219_SysMenuInit`'s default: "Light Blue" (4), drawn as
             // the captured quantised palette entry (`#0c0c4c`).
             sky: prefs::space_colour_rgb(4),
+            surface_sky: None,
             stars_visible: true,
             lock_external: true,
             discs: Vec::new(),
@@ -1498,7 +1503,11 @@ impl Screen {
         // quantised colour (`prefs::space_colour_rgb`, `DATA_008815..817`)
         // directly. The docked screen and the maps paint over it.
         if state.mode != Mode::Docked {
-            self.frame[..320 * VIEW_HEIGHT].fill(self.sky);
+            // F1052 clears with the background colour the previous frame's scene
+            // left in `DATA_008814..8817`; a planet's haze overrides the space
+            // colour until the eye is out of it again.
+            let background = self.surface_sky.unwrap_or(self.sky);
+            self.frame[..320 * VIEW_HEIGHT].fill(background);
         }
         if let Some(map) = self.galaxy.take().filter(|_| scene.is_some()) {
             self.draw_galaxy(scene.unwrap(), &map);
@@ -1524,7 +1533,9 @@ impl Screen {
             self.jitter.cursor = self.jitter.start;
             let world = self.lift.as_ref().is_none_or(|lift| lift.world);
             for index in 0..self.stars.len() {
-                if !world || !self.stars_visible {
+                // F1052 draws F1775's stars only while the previous frame's
+                // background flag is clear.
+                if !world || !self.stars_visible || self.surface_sky.is_some() {
                     break;
                 }
                 if let Some((x, y)) = camera.project(self.stars[index], false) {
@@ -1534,7 +1545,17 @@ impl Screen {
                 }
             }
             if world {
+                // F1052 sets `DATA_008814` to 0 before F1536 draws the objects;
+                // the scene's planets set it again when their haze holds the eye.
+                if let Some(scene) = scene {
+                    scene.clear_haze_sky();
+                }
                 self.draw_discs(&camera, scene);
+                self.surface_sky = scene.and_then(|scene| scene.haze_sky()).map(|colour| {
+                    u32::from(colour[0]) << 16 | u32::from(colour[1]) << 8 | u32::from(colour[2])
+                });
+            } else {
+                self.surface_sky = None;
             }
             // FUNC_001054 hides the player's own ship only in the front view.
             // Painter's order between the two objects: the farther one first.

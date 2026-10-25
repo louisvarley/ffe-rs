@@ -195,6 +195,15 @@ impl Starport {
 pub mod state {
     pub const FREE: u8 = 0x00;
     pub const AUTOPILOT: u8 = 0x02;
+    /// F1021's rough landing: the frame the terrain touch is made, before the
+    /// view function F1047 turns it into [`LANDED_ROUGH`].
+    pub const LANDING: u8 = 0x32;
+    /// Landed on a planet or moon's surface, away from a starport ("landed
+    /// rough" in the source notes).
+    pub const LANDED_ROUGH: u8 = 0x34;
+    /// F1021's landing on an open-air starport's pad: the frame of the touch,
+    /// before the view function F1048 turns it into [`LANDED`].
+    pub const STARPORT_LANDING: u8 = 0x2e;
     /// Landed at an open-air starport's pad (F994's new-game state).
     pub const LANDED: u8 = 0x30;
     pub const STARPORT_ALIGN: u8 = 0x08;
@@ -257,10 +266,12 @@ pub enum TakeoffStep {
     Retakeoff,
 }
 
-/// The original's open-air starport takeoff, `DATA_008870`: `0x30` landed on
-/// the pad, `0x24` F1013's climb, `0x26` F1031's flight within the starport's
-/// effect region, then `0x00` free flight. The traffic record and the ship's
-/// physics stay with their owners; this is only the mode word and its tests.
+/// The original's takeoff, `DATA_008870`: `0x30` landed on an open-air
+/// starport's pad or `0x34` landed rough on a surface, `0x24` F1013's climb,
+/// `0x26` F1031's flight within the starport's effect region (a planet's contact
+/// carries no `0x20` region, so F1031 clears it at once), then `0x00` free
+/// flight. The traffic record and the ship's physics stay with their owners;
+/// this is only the mode word and its tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Takeoff {
     pub state: u8,
@@ -274,10 +285,18 @@ impl Takeoff {
         }
     }
 
+    /// A ship left in either landed state: the open-air starport's `0x30` or a
+    /// surface's `0x34`.
+    pub fn from_landed(state: u8) -> Option<Self> {
+        matches!(state, state::LANDED | state::LANDED_ROUGH).then_some(Takeoff { state })
+    }
+
     /// The launch action has been accepted: F1013's climb (`0x24`). From a new
-    /// game's `0x30`; other states are left alone.
+    /// game's `0x30` (F381's open-air request) or a surface landing's `0x34`
+    /// (F1056's launch action, which goes straight to `0x24`); other states are
+    /// left alone.
     pub fn begin(&mut self) -> bool {
-        if self.state != state::LANDED {
+        if self.state != state::LANDED && self.state != state::LANDED_ROUGH {
             return false;
         }
         self.state = state::TAKEOFF;
@@ -321,6 +340,60 @@ impl Takeoff {
             }
             _ => None,
         }
+    }
+}
+
+/// F1021's rough landing and F1047's landing frame: `DATA_008870` goes `0x32`
+/// on the terrain touch and `0x34` when the view function runs, so the guarded
+/// landed state is in place for the next frame's handler. An open-air starport
+/// touch takes the parallel `0x2e` -> `0x30` pair (F1019's branch and F1048,
+/// which also resets the traffic record). Both landed states share F1050's
+/// view and the launch action; the launch itself is [`Takeoff`] from `0x24`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Landing {
+    pub state: u8,
+}
+
+impl Landing {
+    /// F1021's touch of a planet or moon away from a starport: `0x32`.
+    pub fn on_surface() -> Self {
+        Landing {
+            state: state::LANDING,
+        }
+    }
+
+    /// F1019's touch of an open-air starport's pad: `0x2e`.
+    pub fn at_starport() -> Self {
+        Landing {
+            state: state::STARPORT_LANDING,
+        }
+    }
+
+    /// The frame's view function: F1047 turns `0x32` into `0x34` (and sets the
+    /// launch permission flag), F1048 turns `0x2e` into `0x30` (and resets the
+    /// starport record). Returns the state it took, once.
+    pub fn frame(&mut self) -> Option<u8> {
+        let next = match self.state {
+            state::LANDING => state::LANDED_ROUGH,
+            state::STARPORT_LANDING => state::LANDED,
+            _ => return None,
+        };
+        self.state = next;
+        Some(next)
+    }
+
+    /// One of the two landed states (`0x30` or `0x34`).
+    pub fn landed(&self) -> bool {
+        matches!(self.state, state::LANDED | state::LANDED_ROUGH)
+    }
+
+    /// The launch action at a landed state: F1056's action 9. An open-air
+    /// starport's `0x30` first needs F381's F654 permission; the surface's
+    /// `0x34` goes straight to F1013's climb (`0x24`).
+    pub fn begin_launch(&self) -> Option<Takeoff> {
+        self.landed().then_some(Takeoff {
+            state: state::TAKEOFF,
+        })
     }
 }
 

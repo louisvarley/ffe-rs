@@ -179,6 +179,10 @@ pub struct ModelViewer {
     terrain: Option<(Vec<u8>, Vec<u8>)>,
     /// The seed (`+0xa0`) of the surface being drawn, set by the caller.
     pub surface_seed: std::cell::Cell<u32>,
+    /// F1877's `DATA_008814..8817` from the last planet surface drawn: the
+    /// background flag and colour the original clears the next upper view to.
+    /// [`ModelViewer::clear_haze_sky`] begins a frame's scene.
+    pub haze_sky: std::cell::Cell<Option<[u8; 3]>>,
     /// The longest axis vector of the last surface drawn: the planet's radius in
     /// the model's units.
     pub surface_extent: std::cell::Cell<f64>,
@@ -504,6 +508,7 @@ impl ModelViewer {
             lighting: FALLBACK_LIGHTING,
             terrain: None,
             surface_seed: std::cell::Cell::new(0),
+            haze_sky: std::cell::Cell::new(None),
             surface_extent: std::cell::Cell::new(0.0),
             descriptors: Vec::new(),
             ship_stats: Vec::new(),
@@ -843,6 +848,18 @@ impl ModelViewer {
     /// The ambient colour a dot's halo mixes with (`DATA_008815`).
     pub fn set_sky(&mut self, colour: [u8; 3]) {
         self.sky = colour;
+    }
+
+    /// Begin a frame's scene: F1052 sets `DATA_008814` to 0 before F1536 draws
+    /// the objects, and F1877 sets it again for a planet whose haze holds the eye.
+    pub fn clear_haze_sky(&self) {
+        self.haze_sky.set(None);
+    }
+
+    /// F1877's background colour from the scene just drawn, when a planet's
+    /// atmosphere set it (`DATA_008814` non-zero).
+    pub fn haze_sky(&self) -> Option<[u8; 3]> {
+        self.haze_sky.get()
     }
 
     /// The star light-point tables, when the cache has them (v23).
@@ -1195,6 +1212,16 @@ impl ModelViewer {
             // A failed patch leaves the rest of the planet undrawn; the caller
             // reports the frame's skipped count rather than logging every frame.
             let _ = &outcome;
+            // F1877 writes the background flag and colour when the eye is in
+            // the atmosphere: the original's F1052 clears the next upper view to
+            // it (`DATA_008814..8817`), and only draws stars when the flag is 0.
+            if sky.flag != 0 {
+                let [red, green, blue] = sky.colour;
+                self.haze_sky
+                    .set(Some(self.textures.rgb(
+                        u16::from(red) << 8 | u16::from(green) << 4 | u16::from(blue),
+                    )));
+            }
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
             for (_, at) in order {

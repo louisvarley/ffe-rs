@@ -75,6 +75,7 @@ ORACLES = [
     ("verify-map-stars.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-dots.py", ["--reference", "{commands}", "--cache", "{cache}"]),
     ("verify-galaxy-map.py", ["--smoke", "{smoke}", "--cache", "{cache}"]),
+    ("verify-surface.py", ["--smoke", "{smoke}", "--cache", "{cache}"]),
 ]
 
 

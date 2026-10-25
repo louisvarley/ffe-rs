@@ -4,6 +4,37 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Surface landing and the landed view merged (v0.68)
+
+- Merged `surface` (f05c403, 2bbfa20): F1021's rough touch drives 0x32 and
+  `landing_frame` picks F1047's 0x34; the starport 0x2e/0x30 states,
+  `Takeoff::from_landed`, `OriginalFlight::settle_landing`, the F1050/F1054
+  landed view and F1877's haze sky (with F1775's stars suppressed while it is
+  set) are ported. `L` climbs again through 0x24 -> 0x26 -> 0x00. The core
+  `takeoff` tests grew the landed sequence and `planet_view` the full
+  landing-to-launch frames.
+- Merge was conflict-free (`ort`, main.rs/navigation.rs/screen.rs auto-merged),
+  but one stale test was fixed: `planet_view`'s landed background check only
+  drew when `FFE_SHOT_DIR` was set, so it read an undrawn frame in a normal run;
+  it now draws explicitly and passes with shots off.
+- **`verify-surface.py` is now part of `verify-all.py`.** It runs the executed
+  original's landed frame, drives `planet_view`'s `new_game_landed_surface_view`
+  and reports `sky_matches: true`, `header_close: 0.9934`, `view_inside:
+  0.9969`, `view_coverage: 0.589`, `ours_view_pixels: 25086` vs the real
+  42594, and rejects tampering. `verify-all.py --only surface` passes.
+- **Owner decisions:** the `+0x138` collision radius vs the `+0x140` drawn
+  radius mismatch can show space where the original shows ground; landing on a
+  starport pad from flight is still not routed to 0x2e/0x30; 0x30 shows the
+  station services (EXP-014) rather than F1050's landed view; the landed state
+  is not saved; surface object depth/fills remain. The local v27 cache rebuild
+  is required (the branch predates it).
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `cargo test -p ffe-core --test takeoff` (6),
+  `--test planet_view -- --ignored` (19), `verify-surface.py` and
+  `verify-all.py --only surface`; all cached view suites still pass.
+
+---
+
 ## 2026-10-25 - Missiles, lock-on and pylon lamps merged (v0.67)
 
 - Merged `missiles` (ef41062): `ffe_core::missile` (the ten pylon codes and

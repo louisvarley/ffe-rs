@@ -1074,3 +1074,347 @@ fn level_flight_near_the_surface_shows_the_horizon() {
         .unwrap();
     }
 }
+
+/// The whole surface-landing sequence, as the playable runs it: a slow, level
+/// touch on a planet's terrain takes F1021's `0x32`; F1047's view frame makes it
+/// `0x34`; the surface view is the flight view from the settled ship (terrain,
+/// F1877's sky and the starport where one is in range); `L` starts F1013's climb
+/// (`0x24`), F1013 hands over to `0x26`, F1031 clears it to `0x00`, and the ship
+/// flies again. Frames are saved with `FFE_SHOT_DIR`.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn landing_reaches_the_surface_state_and_launches_again() {
+    use ffe_core::traffic::{state, TakeoffStep};
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{landing_body, Library, Navigator};
+    use ffe_rs::original_flight::{
+        Keys as OriginalKeys, OriginalFlight, UNITS_PER_FLIGHT_UNIT as UNIT,
+    };
+    use ffe_rs::screen::{Disc, SystemStation};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let port_index = nav.bodies.iter().position(|b| b.name == "London").unwrap();
+    let planet_index = nav.bodies[port_index].parent.unwrap();
+    let port = nav.bodies[port_index].clone();
+    let planet = nav.bodies[planet_index].clone();
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let ship = 14;
+    let player_info = ffe_core::objects::ModelInfo::read(records, stats, ship).unwrap();
+    let planet_info = ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap();
+    let parent = landing_body(&planet, &planet_info);
+    let library = Library(&cache);
+    let tools = ffe_core::surface::SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
+    let to_port: [f64; 3] = std::array::from_fn(|k| (port.position[k] - planet.position[k]) as f64);
+    let radius = to_port.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let to_port = to_port.map(|v| v / radius);
+    // The starport's own high ground (F879 puts it on the terrain), ten metres
+    // inside the collision surface: a level, still ship the terrain contact
+    // settles. The playable's F1033 would give this point the starport's effect
+    // region (0x20) and F1021's pad branch; the test drives the rough branch the
+    // planet is for by naming the planet as the scan's parent.
+    let up = to_port;
+    let at: [i64; 3] =
+        std::array::from_fn(|k| (planet.position[k] as f64 + up[k] * (radius - 10_000.0)) as i64);
+    let mut flight = Flight {
+        mode: Mode::Flight,
+        position: at.map(|v| v as f64 / UNIT),
+        system_flight: true,
+        ship,
+        ..Flight::default()
+    };
+    let right = {
+        let c = [up[1], -up[0], 0.0];
+        let l = c.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+        c.map(|v| v / l)
+    };
+    let forward = [
+        up[1] * right[2] - up[2] * right[1],
+        up[2] * right[0] - up[0] * right[2],
+        up[0] * right[1] - up[1] * right[0],
+    ];
+    flight.axes = Some([right, up, forward]);
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    let mut view_state = flight.clone();
+
+    let touch = model
+        .step_landing(
+            0.02,
+            &OriginalKeys::default(),
+            &parent,
+            planet.position,
+            &player_info,
+            Some(&tools),
+        )
+        .unwrap();
+    assert_eq!(touch.flags & 0x40, 0x40, "the slow level touch lands");
+    assert_eq!(touch.flags & 0x80, 0, "and does not crash");
+    assert!(nav.land(planet_index), "the planet is a landing body");
+    assert_eq!(nav.landed_state(), Some(state::LANDING));
+    assert_eq!(nav.landed_state(), Some(0x32));
+    assert_eq!(nav.landing_frame(), Some(state::LANDED_ROUGH));
+    assert_eq!(nav.landed_state(), Some(0x34));
+    model.settle_landing();
+    model.set_mode(nav.landed_state().unwrap());
+    assert_eq!(model.player().mode, 0x34);
+    model.apply(&mut view_state);
+    assert!(view_state.speed() < 0.01, "F1042 zeroed the speed");
+
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.discs = vec![Disc {
+        centre: planet.position.map(|v| v as f64 / UNIT),
+        radius: planet.inner_radius as f64 / UNIT,
+        light: [1.0, 0.0, 0.0],
+        colours: (12, 4),
+        star: false,
+        model: Some((planet.model, planet.seed)),
+        orientation: planet.orientation,
+    }];
+    screen.stations = nav
+        .bodies
+        .iter()
+        .filter(|b| {
+            matches!(
+                b.kind,
+                ffe_rs::navigation::Kind::Station | ffe_rs::navigation::Kind::Starport
+            )
+        })
+        .map(|b| SystemStation {
+            model: b.model,
+            centre: b.position.map(|v| v as f64 / UNIT),
+            orientation: b.orientation,
+            speed: b.spin,
+            door: 0xffff,
+            tics: 0,
+        })
+        .collect();
+    let shots = std::env::var_os("FFE_SHOT_DIR");
+    let save = |name: &str, state: &Flight, screen: &mut Screen| {
+        if let Some(dir) = &shots {
+            screen.draw(state, ViewState::default(), Some(&viewer), false, true, "");
+            let mut ppm = b"P6\n320 200\n255\n".to_vec();
+            for p in screen.logical_pixels() {
+                ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+            }
+            std::fs::write(std::path::Path::new(dir).join(name), ppm).unwrap();
+        }
+    };
+    // F1052 clears with the previous frame's scene colour: the second draw is
+    // the settled surface view, with F1877's atmosphere sky over the space one.
+    // Draw explicitly so the check does not depend on FFE_SHOT_DIR being set.
+    screen.draw(
+        &view_state,
+        ViewState::default(),
+        Some(&viewer),
+        false,
+        true,
+        "",
+    );
+    screen.draw(
+        &view_state,
+        ViewState::default(),
+        Some(&viewer),
+        false,
+        true,
+        "",
+    );
+    save("surface-0000-landed.ppm", &view_state, &mut screen);
+    let view = &screen.logical_pixels()[..320 * 158];
+    // F1052's background at this altitude is the space colour (`DATA_008814`
+    // stays 0: the eye is above the haze's surface), and the terrain/starport
+    // fill the rest of the upper view.
+    assert_eq!(
+        view[0], screen.sky,
+        "the surface background is the space colour"
+    );
+    let ground = view.iter().filter(|p| **p != screen.sky).count();
+    assert!(ground > 4_000, "the surface view drew {ground} pixels");
+
+    // L: F1056's launch action. F1013's climb begins at 0x24.
+    nav.begin_surface_launch().unwrap();
+    model.begin_takeoff();
+    assert_eq!(nav.takeoff_state(), Some(state::TAKEOFF));
+    let mut seen = Vec::new();
+    let mut cleared = false;
+    let seat = model.absolute_position();
+    for _ in 0..6_000 {
+        if nav.takeoff.is_none() {
+            break;
+        }
+        // The rough landing's scan is the planet's terrain, not the starport's
+        // hull: F1021's non-pad branch.
+        let body = nav.bodies[planet_index].clone();
+        let info = ffe_core::objects::ModelInfo::read(records, stats, body.model).unwrap();
+        let parent = landing_body(&body, &info);
+        let climbing = nav.takeoff_state() == Some(state::TAKEOFF);
+        let keys = OriginalKeys {
+            faster: !climbing && model.set_speed_metres() < 500.0,
+            ..OriginalKeys::default()
+        };
+        let contact = model
+            .step_landing(
+                0.02,
+                &keys,
+                &parent,
+                body.position,
+                &player_info,
+                Some(&tools),
+            )
+            .unwrap();
+        let before = nav.takeoff_state().unwrap();
+        // A terrain contact reports F1033's altitude directly; a complex shape
+        // that leaves it at i32::MAX is measured from the landing seat.
+        let altitude = if contact.altitude() == i32::MAX {
+            let at = model.absolute_position();
+            (0..3)
+                .map(|k| (at[k] - seat[k]) as f64 * up[k])
+                .sum::<f64>()
+                .clamp(0.0, f64::from(i32::MAX)) as i32
+        } else {
+            contact.altitude()
+        };
+        let step = nav.takeoff_step(altitude, model.set_speed_units(), contact.flags);
+        if nav.takeoff_state() != Some(before) {
+            seen.push(before);
+        }
+        match step {
+            Some(TakeoffStep::HandOff) => {
+                model.set_mode(nav.takeoff_state().unwrap());
+                model.apply(&mut view_state);
+                save("surface-0100-climb.ppm", &view_state, &mut screen);
+            }
+            Some(TakeoffStep::Cleared) => {
+                model.set_mode(state::FREE);
+                model.apply(&mut view_state);
+                save("surface-0200-flight.ppm", &view_state, &mut screen);
+                cleared = true;
+                break;
+            }
+            Some(TakeoffStep::Retakeoff) => model.begin_takeoff(),
+            None => {}
+        }
+    }
+    eprintln!(
+        "surface launch modes {seen:?}, cleared {cleared}, moved {}, mode {:#x}",
+        ffe_rs::navigation::describe(
+            (0..3)
+                .map(|k| (model.absolute_position()[k] - seat[k]) as f64)
+                .map(|v| v * v)
+                .sum::<f64>()
+                .sqrt()
+        ),
+        model.player().mode
+    );
+    assert_eq!(seen.first(), Some(&state::TAKEOFF), "F1013's climb first");
+    assert!(
+        seen.contains(&state::AFTER_TAKEOFF),
+        "F1013 hands over to 0x26"
+    );
+    assert!(cleared, "F1031 clears the planet into free flight");
+    assert_eq!(model.player().mode, 0x00);
+    assert!(nav.takeoff.is_none() && nav.landed.is_none());
+}
+
+/// The new game's landed-at-starport view (state `0x30`, F1050/F1054): the
+/// flight view from F994's pad seat, with the planet and the starport drawn and
+/// the flight console below. `FFE_SHOT_DIR/landed-starport.ppm` is the frame
+/// `tools/reference/verify-surface.py` compares with the executed original's
+/// (`jjffe-smoke --game-frame 500 0`).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn new_game_landed_surface_view() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{Kind, Navigator};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::{Disc, SystemStation};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let nav = Navigator::new_game(&cache, 1).unwrap();
+    let start = nav.new_game.as_ref().unwrap();
+    let index = nav.docked.unwrap();
+    let body = nav.bodies[index].clone();
+    let mut state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: start.ship,
+        position: start.seat.map(|v| v as f64 / UNIT),
+        ..Flight::default()
+    };
+    state.axes = Some(body.orientation);
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.discs = nav
+        .bodies
+        .iter()
+        .filter(|b| matches!(b.kind, Kind::Star | Kind::Planet | Kind::Moon))
+        .map(|b| {
+            let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
+            Disc {
+                centre: b.position.map(|v| v as f64 / UNIT),
+                radius: if b.kind == Kind::Star {
+                    b.radius as f64 / UNIT
+                } else {
+                    b.inner_radius as f64 / UNIT
+                },
+                light: b.position.map(|v| -(v as f64) / length.sqrt().max(1.0)),
+                colours: (12, 4),
+                star: b.kind == Kind::Star,
+                model: Some((b.model, b.seed)),
+                orientation: b.orientation,
+            }
+        })
+        .collect();
+    let tics = ffe_core::model_animation::START_TICS;
+    screen.stations = nav
+        .bodies
+        .iter()
+        .filter(|b| matches!(b.kind, Kind::Station | Kind::Starport))
+        .map(|b| SystemStation {
+            model: b.model,
+            centre: b.position.map(|v| v as f64 / UNIT),
+            orientation: b.orientation,
+            speed: b.spin,
+            door: 0xffff,
+            tics,
+        })
+        .collect();
+    screen.sky = ffe_rs::prefs::space_colour_rgb(4);
+    // Two frames: F1052 applies the previous scene's background colour.
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        // Draw again so the saved frame is a settled one.
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, true, "");
+        let mut ppm = b"P6\n320 200\n255\n".to_vec();
+        for p in screen.logical_pixels() {
+            ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+        }
+        std::fs::write(std::path::Path::new(&dir).join("landed-starport.ppm"), ppm).unwrap();
+    }
+    let view = &screen.logical_pixels()[..320 * 158];
+    eprintln!(
+        "landed at {}: {} non-sky pixels, sky {:#08x}, corner {:#08x}",
+        body.name,
+        view.iter().filter(|p| **p != screen.sky).count(),
+        screen.sky,
+        view[0]
+    );
+    assert_eq!(
+        view[0], screen.sky,
+        "the landed background is the space colour until the haze"
+    );
+    assert!(
+        view.iter().filter(|p| **p != screen.sky).count() > 2_000,
+        "the starport and its terrain are drawn"
+    );
+}

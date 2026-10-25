@@ -111,7 +111,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-5", title: "Original input processing, key accumulation and remapping", status: "in-progress", version: "v0.49g" },
         { id: "flight-6", title: "Time acceleration and its RNG consumption", status: "in-progress", version: "v0.49i" },
         { id: "flight-7", title: "Collision detection and response (ccoll)", status: "done", version: "v0.48o" },
-        { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "todo" },
+        { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "in-progress", version: "v0.68" },
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
         { id: "flight-11", title: "Launch sequence", status: "done", version: "v0.55" },
@@ -134,7 +134,8 @@ window.FFE_BURNDOWN = {
         { id: "world-8", title: "Navigation: system and galaxy maps", status: "todo" },
         { id: "world-9", title: "Lighting by the local star (ships, stations, lift) and day/night", status: "in-progress", version: "v0.48k" },
         { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" },
-        { id: "world-11", title: "Terrain distance query and complex-shape collisions (F1876 mode 1, F576-F583), starports placed on planets", status: "done", version: "v0.51e" }
+        { id: "world-11", title: "Terrain distance query and complex-shape collisions (F1876 mode 1, F576-F583), starports placed on planets", status: "done", version: "v0.51e" },
+        { id: "world-12", title: "Surface landing 0x32/0x34, F1050/F1054 landed view and L takeoff", status: "done", version: "v0.68" }
       ]
     },
     {
@@ -179,7 +180,7 @@ window.FFE_BURNDOWN = {
         { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
         { id: "ui-9", title: "Options, key bindings screen", status: "done", version: "v0.48p" },
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "todo" },
-        { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "todo" },
+        { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "in-progress", version: "v0.68" },
         { id: "ui-12", title: "Hit particles, explosions and debris (F939/F942/F926)", status: "done", version: "v0.66" }
       ]
     },
@@ -542,6 +543,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 69,
       note: "Missiles merged (v0.67): ffe-core::missile (type/damage tables, F941's launch impulse, F758's 20-frame guidance and 60-update lifetime, the 131 m fuse, F718/F721 contact and F953 damage), ten pylon words in Combat, Navigator lock/launch/tick, M launch with Shift+T lock, missile objects drawn, F1114's circle and F1120 pylon lamps; --missile-probe calibrates 0.4 s guidance/24 s lifetime. Remaining: the missile view (F10), NPC launches, ECM, F1113 navigation box/lamps and the full F1116 targeter; owner decisions on Shift+T and the approximated lead/turn. One item added and completed (gameplay-19), so the remaining count is unchanged; gameplay-5 is in progress."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 69,
+      note: "Surface landing merged (v0.68): F1021's rough touch drives 0x32 -> F1047's 0x34, the starport 0x2e/0x30 states, Takeoff::from_landed and OriginalFlight::settle_landing; F1050/F1054 draw the landed view with F1877's haze sky (stars suppressed), and L climbs again through 0x24 -> 0x26 -> 0x00. verify-surface.py joins verify-all.py and reports sky_matches: true (header_close 0.9934, view coverage 0.589). One item added and completed (world-12); flight-8 and ui-11 are in progress. Owner decisions: the +0x138 collision vs +0x140 drawn-radius mismatch, pad landing from flight not routed to 0x2e/0x30, 0x30 services vs F1050's landed view (EXP-014), the landed state not saved, and surface object depth/fills."
     }
   ]
 };
