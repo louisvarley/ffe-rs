@@ -1,13 +1,18 @@
 # The docked station and starport screens (F320-F362, F536-F558, F382-F445)
 
-Status (2026-10-25): **the services root, shipyard root and stockmarket are
-ported**; the equipment table and fitted loadout are now in `ffe-core::equipment`
-(embedded, cache still v26), but the Upgrades rows still wait on the starport's
-tech level (below). The ship and repair lists and the bulletin board's
-generated entries remain shells (their tables/generators are not imported). The
-screen map, strings, layout, hot areas and keys below are read from
-`jjffe-master/ffe.asm`/`ffedat.asm` and checked against frames of the reference
-game (JJFFE 2.8a7 built from that asm; see "Evidence").
+Status (2026-10-25): **the services root, shipyard root, stockmarket and the
+Upgrades list are ported**. The equipment table and fitted loadout live in
+`ffe-core::equipment` (embedded, cache still v26); the starport tech level is
+now read from F869 (below), so F383's rows, F387/F388's prices and F386's
+Fit/Remove buttons work end to end for general equipment, cabins, lasers,
+shield generators and missiles. Drives and mining machines are listed but their
+buttons report that the category has no port state. The repairs screen builds
+F444's three service rows (their actions are not wired yet); the ship list and
+the bulletin board's generated entries remain faithful empty states because
+their tables/generators are not imported. The screen map, strings, layout, hot
+areas and keys below are read from `jjffe-master/ffe.asm`/`ffedat.asm` and
+checked against frames of the reference game (JJFFE 2.8a7 built from that asm;
+see "Evidence").
 
 Rust: `ffe_rs::station` (screen table, layout, hot areas, state),
 `Screen::draw_dock`/`Screen::draw_market`, wired in `main.rs` by `DockState`.
@@ -77,6 +82,27 @@ the launch/landing wording, not in the menu. `F333` omits Shipyard, Bulletin
 Board and Stockmarket for a Thargoid system (`w[D8996] == 4`); the port has no
 Thargoid system.
 
+## The starport tech level (F869/F622)
+
+`F869` (`ffe.asm:60899`) returns the system record's fields; `F622`
+(`ffe.asm:42654`) stores the byte at record `+5` in `DATA_008995`, then copies
+`+6` to `DATA_008993`, `+7` to `DATA_009010`, `+8` to `DATA_008994`, `+9` and
+the word at `+10` to its locals. The record base is `DATA_007106 + 54 * index`,
+which is the galaxy record at `DATA_007110` for an in-table system and one of
+the eight class records before it for a procedural one (F868 returns -1..-8).
+`ffe_core::galaxy::Tables::details` already returns those bytes as
+`Details::bytes[5]`; `Details::tech_level()` and `Tables::tech_level()` name
+`bytes[0]` as the tech level, and `Navigator::tech_level` reads it for the
+current system. No new cache asset or cache bump is involved.
+
+The reference Sirocco frame was captured at a tech-0x75/0x88 system: the first
+thirteen rows are exactly the records at or below that tech in
+`DATA_005289` order. The port's frame in the sandbox is Mars High (tech 0xfd),
+which offers 51 records. `F383`'s price block is commented `; FIX: incorrect
+tech prices` in the recovered asm; the existing `equipment::tech_multiplier`
+keeps the documented monotonic 9/10/11/12 thresholds, which is the reported
+deviation from the asm's descending compares.
+
 ## Strings
 
 The `0x98xx` messages are `DATA_005299[code & 0x1ff]` (`ffedat.asm` 6778),
@@ -143,12 +169,26 @@ anywhere while docked. These are called out as port conveniences in
   leaves it in the port.
 - **Bulletin Board**: empty, with the original's 0x98de console line. The
   port does not generate BBS entries yet, so it does not invent any.
-- **Upgrades / Repairs / New Ships**: the original screen shells (title,
-  header, Go Back). Upgrades has the `equipment::outfitting` data API ready
-  (F383 availability/prices, F393 fitted bits) but no rows, because the
-  station's tech level (`DATA_008995`, from F869) is not generated yet — the
-  port draws the empty shell rather than inventing one. Repairs/New Ships wait
-  on their own generators.
+- **Upgrades** (`F383`/`F386`): the rows are `equipment::outfitting` at the
+  current system's F869 tech level, in `DATA_005289` order, with the 0x98f5
+  header, the measured x 242/272/302 price/removal/Wt columns and the 0x2e row
+  buttons. F329's second (Remove) button is drawn only for a fitted row. The
+  left button/`1`..`4`/Enter calls `outfitting::fit`; the right button calls
+  `outfitting::remove`; both charge/refund ten times the row's whole-credit
+  price, because the player's cash is in tenths. General bits, cabins, lasers,
+  shield generators and missiles apply to `Loadout`/`Combat`; drives and
+  mining machines have no port state and report that instead of inventing one.
+- **Repairs and Servicing** (`F443`/`F444`): the three service rows
+  (Deluxe 80*mass, Drive Only 50*mass, Equipment Only 50*mass) with the
+  0x9815-0x9817 strings, the stored service dates (`Flight::service_days`,
+  `DATA_008926`/`DATA_008925`) and the reference frame's `$` cost column at
+  x 292. The service actions (F446-F452), the six thruster damage words
+  (`+0xbc..+0xc6`) and the hull-damage rows need state the port does not carry
+  yet, so a row button reports that the action is not ported.
+- **New and Reconditioned Ships**: the original screen shell (title, 0x98f6
+  header, Go Back). The shipyard list needs F622/F634's generated `+0x2e6`
+  entries, which are not imported; F437's empty-state message (0x98ed) is the
+  faithful content for a station with no hulls.
 
 The commander/options screen is **not** a station service: there is no entry
 for it in `F333`/`F382`. In the original it is the separate status screen
@@ -161,26 +201,32 @@ owner wants it, the next step is to follow the F2 console action
 
 ## Remaining (with the data)
 
-1. **Equipment (upgrades)**. The `DATA_005289` table (66 records, 22 bytes) is
-   embedded in `ffe-core::equipment` (no cache change), with F393's bits and
-   F383's availability/prices, and the fitted loadout is in `Flight::loadout`.
-   Remaining: the starport's tech level `DATA_008995` from F869 (`F383` compares
-   it with `record+0x13`), then `station::Screen::Upgrades` can build rows with
-   `equipment::outfitting`. Do **not** invent a tech level; it must come from
-   F869/the starport data. The F392 Fit/Remove actions then apply through the
-   loadout API. See `docs/notes/equipment.md`.
+1. **Equipment (upgrades)**. Ported: the `DATA_005289` table (66 records, 22
+   bytes) is embedded in `ffe-core::equipment`, F869/F622's `DATA_008995` tech
+   level is read through `galaxy::Tables`, and `station::Upgrades` builds F383's
+   rows with `equipment::outfitting`; `outfitting::fit`/`remove` implement
+   F386's cash/space checks and the general, cabin, laser, shield and missile
+   handlers. Remaining: drive (`F409`/`F411`) and mining-machine state, and the
+   second-hand random branch of F383's prices (see `docs/notes/equipment.md`).
 2. **Shipyard ships**. `F445` reads the station's generated entries
    (`+0x2e6`, up to 13 `{model, index}` words from `F634/F635` and
    `DATA_006199..6200`) and the ship statistics; prices come from
-   `DATA_005268..5272`. Needs the starport structure's shipyard list (F622)
-   and the generation stream.
-3. **Repairs/servicing**. `F436`/`F385` and the damage words (`+0xe4`,
-   thruster damage) and service table `DATA_005292`; the port has no damage
-   model wired to the station.
+   `DATA_005268..5272`. The model table is already `ffe_core::npc::SHIP_TYPES`
+   (types 2/3 + 2*allegiance are the military/shipyard lists) and F634's 13-row
+   cap is known, but the `DATA_005268..5272` price/exchange table and F438-F442's
+   buy/view actions are not imported, so the port keeps F437's empty state
+   rather than showing an unpriced list.
+3. **Repairs/servicing**. The three F444 service rows are ported. Remaining:
+   F446-F452's actions, the six thruster damage words (`+0xbc..+0xc6`),
+   `DATA_005303`'s cost table and the hull-damage rows (0x9812-0x9814/0x9818);
+   the port's `Flight` has hull/shield words but no thruster damage.
 4. **Bulletin board entries**. `F622`/`F633` generate them from `F621` and
    `DATA_006170` (F636-F646), with the mission strings 0x981a..0x982c and
    names. This is also the mission/BBS slice; the port must port the starport
-   record's BBS array (`+0x132`, 18 entries of 24 bytes) and the day update.
+   record's BBS array (`+0x132`, 18 entries of 24 bytes), the
+   `DATA_006170`/`DATA_006199`-style generator tables and the 0x981a..0x982c
+   strings. None of those are in the current cache, so the port keeps the
+   original empty state (0x98de) rather than inventing advertisements.
 5. **Commander/options**: F2 status screen, outside the station module.
 
 ## Evidence
@@ -209,7 +255,11 @@ The port's own frames are produced by
 `cargo test -p ffe-rs --test station_view -- --ignored` with
 `FFE_WORLD_CACHE` set and `FFE_SHOT_DIR` pointing at a directory; the test
 checks the title/header/row pixels and saves `Services-ours.ppm`,
-`Shipyard-ours.ppm`, `Market-ours.ppm` and `Bulletin-ours.ppm`.
+`Shipyard-ours.ppm`, `Market-ours.ppm`, `Bulletin-ours.ppm`,
+`Upgrades-ours.ppm`, `Upgrades-buy-laser.ppm`, `Ships-ours.ppm` and
+`Repairs-ours.ppm`. It also asserts the current system's tech level (Mars
+High's 0xfd), the 51-row F383 list, and F444's 3040/1900/1900 service rows at
+mass 38.
 
 What was not captured: the commander/F2 status screen (not part of the
 station menu), a Thargoid system's services (the port has none), and a

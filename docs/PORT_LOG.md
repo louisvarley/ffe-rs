@@ -4,6 +4,29 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Starport tech level, Upgrades and repairs merged (v0.73)
+
+- Merged `station-services` (13ae64c): F869/F622's starport tech level reaches
+  `Navigator` (`galaxy::Details/Tables::tech_level`, `Navigator::tech_level`),
+  and the Upgrades screen builds real rows from `equipment::outfitting` with
+  Fit/Remove across general equipment, cabins, lasers, shields and missiles at
+  F387/F388 prices/refunds. F394's fuel-scoop gate, F329's Remove button/hot
+  area and F444's repair rows with dates are in; the shipyard and BBS keep
+  their faithful empty states. The `station_view` covered test now checks the
+  Upgrades/Ships/Repairs frames too.
+- Conflict: `lib.rs` only (kept `palette` and `outfitting`); `station.rs`,
+  `main.rs`, `screen.rs` and `navigation.rs` auto-merged with the npc-dock,
+  effects, missiles and palette work, and the workspace is green.
+- **Owner decisions:** drive/mining rows are visible-but-disabled rather than
+  hidden; ship prices/BBS tables wait for their imports; repair actions are
+  listed before thruster damage exists; the price multiplier follows the
+  current F383 table.
+- Tests: workspace, clippy, fmt; `station_view --ignored` (1, including the new
+  Upgrades/Ships/Repairs frames), `market_view`, `dashboard_view` and
+  `console_view` cached suites; the v28 cache is unchanged.
+
+---
+
 ## 2026-10-25 - NPC docking cycle merged (v0.72)
 
 - Merged `npc-dock` (f42b9b2): the `DATA_006255` AI table rows were offset and

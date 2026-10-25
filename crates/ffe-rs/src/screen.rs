@@ -2109,6 +2109,7 @@ impl Screen {
                         0x2b,
                     ),
                 ],
+                fitted: false,
             })
             .collect();
         let visible = station::layout(StationScreen::Market).visible();
@@ -2144,7 +2145,12 @@ impl Screen {
         for (index, row) in view.rows.iter().take(visible).enumerate() {
             let y = station::LIST_TOP + index as i32 * layout.pitch;
             // F328: an 8x9 button at x 124 (and x 136 for the two-button screens).
+            // On Upgrades F329 draws the Remove button only when F383 set the
+            // row's fitted bit (F392).
             for button in 0..layout.buttons {
+                if button == 1 && view.screen == StationScreen::Upgrades && !row.fitted {
+                    continue;
+                }
                 let x = 124 + button * 12;
                 if let Some(Some(icon)) = self.dock_icons.first() {
                     icon.blit_rgb(&mut self.frame, &palette, x, y);

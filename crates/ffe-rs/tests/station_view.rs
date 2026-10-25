@@ -1,9 +1,12 @@
 //! The docked screens drawn from the real cache, checked against the layout
 //! read from the DOS release's screens (`docs/notes/station.md`). Local-only:
 //! needs `FFE_WORLD_CACHE`; set `FFE_SHOT_DIR` to keep the frames.
+use ffe_core::equipment::Loadout;
 use ffe_rs::camera::ViewState;
+use ffe_rs::combat::Combat;
 use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::navigation::Navigator;
+use ffe_rs::outfitting::{self, Limits};
 use ffe_rs::screen::{MarketRow, MarketView, Screen};
 use ffe_rs::station::{self, DockRow, DockView, Screen as StationScreen};
 use ffe_rs::trade;
@@ -31,6 +34,40 @@ fn draw(screen: &mut Screen, dock: Option<DockView>, market: Option<MarketView>,
         ..Flight::default()
     };
     screen.draw(&state, ViewState::default(), None, false, true, message);
+}
+
+/// The Upgrades DockView F327/F329 draw from F383's rows.
+fn upgrade_view(
+    station: &str,
+    rows: &[station::UpgradeRow],
+    status: station::Status,
+    scroll: usize,
+) -> DockView {
+    let visible = station::layout(StationScreen::Upgrades).visible();
+    let first = scroll.min(rows.len().saturating_sub(visible));
+    DockView {
+        screen: StationScreen::Upgrades,
+        title: station::title(StationScreen::Upgrades, station),
+        rows: rows
+            .iter()
+            .skip(first)
+            .take(visible)
+            .map(|row| DockRow {
+                main: row.name.to_owned(),
+                detail: None,
+                columns: vec![
+                    (station::UPGRADE_PRICE_X, format!("{}", row.price), 0x7d),
+                    (station::UPGRADE_REMOVAL_X, format!("{}", row.removal), 0x7d),
+                    (station::UPGRADE_MASS_X, format!("{}t", row.mass), 0x7d),
+                ],
+                fitted: row.fitted,
+            })
+            .collect(),
+        status,
+        scroll: first,
+        selected: 0,
+        total: rows.len(),
+    }
 }
 
 /// The services root, shipyard, bulletin board and market at the first station
@@ -78,6 +115,7 @@ fn docked_screens_draw_at_the_original_layout() {
                 main: entry.title.to_owned(),
                 detail: entry.detail.map(str::to_owned),
                 columns: Vec::new(),
+                fitted: false,
             })
             .collect();
         let view = DockView {
@@ -166,4 +204,148 @@ fn docked_screens_draw_at_the_original_layout() {
         "Sorry, no advertisements have been placed."
     );
     save(&screen, "Bulletin-ours.ppm");
+
+    // F869/F622's starport tech level: Ross 154's record byte +5 is 0xfd, the
+    // value the reference Sirocco frame's Upgrades list reflects (record 0's
+    // 0xff is above the station, so XB74 Proximity Mine is the first row).
+    let tech_level = nav.tech_level(&cache).expect("system tables (cache v15)");
+    assert_eq!(tech_level, 0xfd, "DATA_008995");
+    let mut loadout = Loadout::new_game();
+    let mut combat = Combat::new_game();
+    let rows = station::upgrades(tech_level, &loadout, &combat.lasers);
+    assert_eq!(rows[0].name, "XB74 Proximity Mine");
+    assert_eq!(rows.len(), 51, "the records at or below tech 0xfd");
+    let view = upgrade_view(&name, &rows, status, 0);
+    let before = screen.logical_pixels().to_vec();
+    draw(&mut screen, Some(view), None, station::UPGRADES_HINT);
+    assert_ne!(
+        &before[16 * 320 + 152..16 * 320 + 240],
+        &screen.logical_pixels()[16 * 320 + 152..16 * 320 + 240],
+        "upgrades row"
+    );
+    assert_ne!(
+        &before[16 * 320 + 242..16 * 320 + 260],
+        &screen.logical_pixels()[16 * 320 + 242..16 * 320 + 260],
+        "upgrades price column"
+    );
+    save(&screen, "Upgrades-ours.ppm");
+
+    // F386's Fit/Remove on the Upgrades row: remove the new game's front 1MW
+    // pulse laser, then buy the 5MW one; the frame shows the new fitted flag
+    // (the Remove button on that row) and the Fitting console line.
+    let five_mw = rows
+        .iter()
+        .find(|row| row.name == "5MW Pulse Laser")
+        .copied()
+        .expect("the reference frame lists the 5MW pulse laser");
+    let mut credits = 1_000_000u32;
+    let limits = Limits {
+        mounts: 1,
+        pylons: 2,
+        free_space: hold,
+    };
+    outfitting::remove(21, tech_level, &mut loadout, &mut combat, &mut credits).unwrap();
+    let message = outfitting::fit(
+        five_mw.index,
+        tech_level,
+        &mut loadout,
+        &mut combat,
+        &mut credits,
+        limits,
+    )
+    .unwrap();
+    assert!(message.starts_with("Fitting 5MW Pulse Laser"));
+    let rows = station::upgrades(tech_level, &loadout, &combat.lasers);
+    assert!(
+        rows.iter()
+            .find(|row| row.name == "5MW Pulse Laser")
+            .unwrap()
+            .fitted
+    );
+    assert!(
+        !rows
+            .iter()
+            .find(|row| row.name == "1MW Pulse Laser")
+            .unwrap()
+            .fitted
+    );
+    let fitted_at = rows
+        .iter()
+        .position(|row| row.name == "5MW Pulse Laser")
+        .expect("the bought row is still offered");
+    draw(
+        &mut screen,
+        Some(upgrade_view(
+            &name,
+            &rows,
+            status,
+            fitted_at.saturating_sub(6),
+        )),
+        None,
+        &message,
+    );
+    save(&screen, "Upgrades-buy-laser.ppm");
+
+    // The shipyard list has no importable generator in this cache: F437's
+    // empty-state message (0x98ed) is the original text for no hulls.
+    let ships = DockView {
+        screen: StationScreen::Ships,
+        title: station::title(StationScreen::Ships, &name),
+        rows: Vec::new(),
+        status,
+        scroll: 0,
+        selected: 0,
+        total: 0,
+    };
+    let before = screen.logical_pixels().to_vec();
+    draw(&mut screen, Some(ships), None, station::SHIPS_EMPTY);
+    assert_ne!(
+        &before[2 * 320 + 120..2 * 320 + 200],
+        &screen.logical_pixels()[2 * 320 + 120..2 * 320 + 200],
+        "ships header"
+    );
+    assert_eq!(station::hint(StationScreen::Ships, 0), station::SHIPS_EMPTY);
+    save(&screen, "Ships-ours.ppm");
+
+    // F444's three service rows for an undamaged, drive-fitted ship: the
+    // reference frame's Sirocco costs (mass 38 -> 3040/1900/1900) and dates.
+    let repairs = station::repairs(38, true, "1-Jan-3250", "1-Jan-3250");
+    assert_eq!(
+        repairs.iter().map(|row| row.cost).collect::<Vec<_>>(),
+        [3040, 1900, 1900]
+    );
+    let tiles = DockView {
+        screen: StationScreen::Repairs,
+        title: station::title(StationScreen::Repairs, &name),
+        rows: repairs
+            .iter()
+            .map(|row| DockRow {
+                main: row.title.clone(),
+                detail: None,
+                columns: vec![(station::REPAIR_COST_X, format!("${}", row.cost), 0x7d)],
+                fitted: false,
+            })
+            .collect(),
+        status,
+        scroll: 0,
+        selected: 0,
+        total: repairs.len(),
+    };
+    let before = screen.logical_pixels().to_vec();
+    draw(&mut screen, Some(tiles), None, station::REPAIRS_HINT);
+    assert_ne!(
+        &before[16 * 320 + 140..16 * 320 + 300],
+        &screen.logical_pixels()[16 * 320 + 140..16 * 320 + 300],
+        "repairs first service row"
+    );
+    assert_ne!(
+        &before[16 * 320 + 292..16 * 320 + 315],
+        &screen.logical_pixels()[16 * 320 + 292..16 * 320 + 315],
+        "repairs cost column"
+    );
+    assert_eq!(
+        station::hint(StationScreen::Repairs, 0),
+        station::REPAIRS_HINT
+    );
+    save(&screen, "Repairs-ours.ppm");
 }

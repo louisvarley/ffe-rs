@@ -45,6 +45,14 @@ pub enum Action {
         row: usize,
     },
     Back,
+    /// F386's left button: fit the offered equipment row.
+    Fit {
+        row: usize,
+    },
+    /// F386's right button: remove the offered (fitted) equipment row.
+    Remove {
+        row: usize,
+    },
     /// The service exists but its data or routine is not ported. The text is
     /// reported on the console, never drawn into the station screen.
     NotPorted(&'static str),
@@ -55,6 +63,74 @@ pub struct Entry {
     pub title: &'static str,
     pub detail: Option<&'static str>,
     pub action: Action,
+}
+
+/// One line of F383's Upgrades list: the equipment record, its tech-scaled fit
+/// and removal prices, its mass and whether the ship already has it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UpgradeRow {
+    pub index: usize,
+    pub name: &'static str,
+    pub price: u32,
+    pub removal: u32,
+    pub mass: u32,
+    pub fitted: bool,
+}
+
+/// F383's rows for a starport at `tech_level`: `equipment::outfitting` already
+/// filters by the record's `+0x13` against `DATA_008995` and applies F383's tech
+/// multiplier, and `loadout`/`lasers` supply F392's fitted flags.
+pub fn upgrades(
+    tech_level: u16,
+    loadout: &ffe_core::equipment::Loadout,
+    lasers: &[u8; 4],
+) -> Vec<UpgradeRow> {
+    ffe_core::equipment::outfitting(tech_level, loadout, lasers)
+        .into_iter()
+        .filter_map(|row| {
+            ffe_core::equipment::get(row.index).map(|item| UpgradeRow {
+                index: row.index,
+                name: item.name,
+                price: row.price,
+                removal: row.removal,
+                mass: row.mass,
+                fitted: row.fitted,
+            })
+        })
+        .collect()
+}
+
+/// One line of F444's Repairs and Servicing list. The three service rows are
+/// always built for a drive-fitted ship; the damage/thruster rows need state the
+/// port does not carry yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepairRow {
+    pub title: String,
+    /// F444's `$<cost>` (whole credits in row `+0xc`; the action charges ten
+    /// times it, as the player's cash is in tenths).
+    pub cost: u32,
+}
+
+/// F444's service rows at a starport: `mass` is the ship statistics' `+0x6`,
+/// `drive` is `ship+0xd0`, and the two strings are the stored service dates
+/// (`DATA_008926`/`DATA_008925`) as the date-only form the 0x9816/0x9817
+/// templates print. The costs are `mass * 80`, `mass * 50` and `mass * 50`.
+pub fn repairs(mass: u32, drive: bool, last_drive: &str, last_equipment: &str) -> Vec<RepairRow> {
+    let mut rows = vec![RepairRow {
+        title: "Deluxe service (drive and equipment)".to_owned(),
+        cost: mass.saturating_mul(80),
+    }];
+    if drive {
+        rows.push(RepairRow {
+            title: format!("Drive Only service (last: {last_drive})"),
+            cost: mass.saturating_mul(50),
+        });
+    }
+    rows.push(RepairRow {
+        title: format!("Equipment Only service (last: {last_equipment})"),
+        cost: mass.saturating_mul(50),
+    });
+    rows
 }
 
 /// The services root `F333` adds: Launch Request, then (unless the system's
@@ -229,6 +305,17 @@ pub const MARKET_PRICE_X: i32 = 214;
 pub const MARKET_STOCK_X: i32 = 254;
 pub const MARKET_CARGO_X: i32 = 290;
 
+/// The Upgrades row's `$ to Fit`, `$ for Removal` and `Wt` columns, read from the
+/// reference frame (`docs/evidence/station/equipment.png`): the values start at
+/// x 242, 272 and 302, under the 0x98f5 header.
+pub const UPGRADE_PRICE_X: i32 = 242;
+pub const UPGRADE_REMOVAL_X: i32 = 272;
+pub const UPGRADE_MASS_X: i32 = 302;
+
+/// The repairs list's `Cost` column (the 0x98f4 header's value column, measured
+/// from the reference frame `docs/evidence/station/repairs.png`).
+pub const REPAIR_COST_X: i32 = 292;
+
 /// Position of the status line's labels and values (`F558`, message 0x98e8).
 pub const STATUS_ROW_1: i32 = 138;
 pub const STATUS_ROW_2: i32 = 148;
@@ -256,6 +343,9 @@ pub struct DockRow {
     pub main: String,
     pub detail: Option<String>,
     pub columns: Vec<(i32, String, u8)>,
+    /// Upgrades only: F383 stores F392's fitted flag at row `+0x18` bit 0, and
+    /// F329 draws the second (Remove) button only when it is set.
+    pub fitted: bool,
 }
 
 /// The rows and status the docked screen draws for one frame.
@@ -333,6 +423,11 @@ pub enum Hot {
         buy: bool,
         row: usize,
     },
+    /// The Upgrades list's Fit (left) and Remove (right) buttons (`F386`).
+    Outfit {
+        remove: bool,
+        row: usize,
+    },
     More,
     Up,
     Down,
@@ -360,16 +455,28 @@ impl HotArea {
 /// arrows, then "Go Back"; a click on overlapping areas takes the last, as the
 /// original's list does.
 pub fn hot_areas(screen: Screen, scroll: usize, rows: usize) -> Vec<HotArea> {
+    hot_areas_with_fitted(screen, scroll, rows, None)
+}
+
+/// [`hot_areas`] with the Upgrades list's fitted flags: F329 adds the right
+/// (Remove) button's hot area only when F383 set the row's fitted bit, so a
+/// click where the button is not drawn does nothing, as in the original.
+pub fn hot_areas_with_fitted(
+    screen: Screen,
+    scroll: usize,
+    rows: usize,
+    fitted: Option<&[bool]>,
+) -> Vec<HotArea> {
     let layout = layout(screen);
     let mut areas = Vec::new();
     let last = (scroll + layout.visible()).min(rows);
     for row in scroll..last {
         let y = LIST_TOP + (row - scroll) as i32 * layout.pitch;
         let x0 = 124;
-        let hot = if screen == Screen::Market {
-            Hot::Market { buy: true, row }
-        } else {
-            Hot::Row(row)
+        let hot = match screen {
+            Screen::Market => Hot::Market { buy: true, row },
+            Screen::Upgrades => Hot::Outfit { remove: false, row },
+            _ => Hot::Row(row),
         };
         areas.push(HotArea {
             x0,
@@ -379,10 +486,15 @@ pub fn hot_areas(screen: Screen, scroll: usize, rows: usize) -> Vec<HotArea> {
             hot,
         });
         if layout.buttons >= 2 {
-            let hot = if screen == Screen::Market {
-                Hot::Market { buy: false, row }
-            } else {
-                Hot::Row(row)
+            if screen == Screen::Upgrades
+                && fitted.is_some_and(|fitted| !fitted.get(row).copied().unwrap_or(false))
+            {
+                continue;
+            }
+            let hot = match screen {
+                Screen::Market => Hot::Market { buy: false, row },
+                Screen::Upgrades => Hot::Outfit { remove: true, row },
+                _ => Hot::Row(row),
             };
             areas.push(HotArea {
                 x0: 136,
@@ -425,7 +537,20 @@ pub fn hot_areas(screen: Screen, scroll: usize, rows: usize) -> Vec<HotArea> {
 
 /// The hot area under a point, last added first.
 pub fn click(screen: Screen, scroll: usize, rows: usize, x: i32, y: i32) -> Option<Hot> {
-    hot_areas(screen, scroll, rows)
+    click_with_fitted(screen, scroll, rows, None, x, y)
+}
+
+/// [`click`] with the Upgrades fitted flags (the Remove button's hot area only
+/// exists on a fitted row).
+pub fn click_with_fitted(
+    screen: Screen,
+    scroll: usize,
+    rows: usize,
+    fitted: Option<&[bool]>,
+    x: i32,
+    y: i32,
+) -> Option<Hot> {
+    hot_areas_with_fitted(screen, scroll, rows, fitted)
         .into_iter()
         .rev()
         .find(|area| area.contains(x, y))
@@ -443,15 +568,23 @@ pub fn menu_entry(screen: Screen, index: usize, bulletin_rows: usize) -> Option<
     }
 }
 
-/// The number of rows a screen shows, given the dynamic BBS/market sizes.
-pub fn row_count(screen: Screen, bulletin_rows: usize, market_rows: usize) -> usize {
+/// The number of rows a screen shows, given the dynamic BBS/market/upgrade and
+/// repair sizes. The ship list stays empty until its generator is imported.
+pub fn row_count(
+    screen: Screen,
+    bulletin_rows: usize,
+    market_rows: usize,
+    upgrade_rows: usize,
+    repair_rows: usize,
+) -> usize {
     match screen {
         Screen::Services => SERVICES.len(),
         Screen::Shipyard => SHIPYARD.len(),
         Screen::Bulletin => bulletin_rows,
         Screen::Market => market_rows,
-        // The equipment, ship and repair lists need data the port does not import.
-        Screen::Upgrades | Screen::Repairs | Screen::Ships => 0,
+        Screen::Upgrades => upgrade_rows,
+        Screen::Repairs => repair_rows,
+        Screen::Ships => 0,
     }
 }
 
@@ -462,7 +595,7 @@ pub fn hint(screen: Screen, bulletin_rows: usize) -> &'static str {
         Screen::Market => MARKET_HINT,
         Screen::Upgrades => UPGRADES_HINT,
         Screen::Ships => {
-            if row_count(Screen::Ships, 0, 0) == 0 {
+            if row_count(Screen::Ships, 0, 0, 0, 0) == 0 {
                 SHIPS_EMPTY
             } else {
                 SHIPS_HINT
@@ -616,8 +749,20 @@ mod tests {
         let areas = hot_areas(Screen::Upgrades, 4, 42);
         assert!(areas.iter().any(|area| area.hot == Hot::Up));
         assert_eq!(click(Screen::Upgrades, 0, 42, 204, 150), Some(Hot::Back));
-        assert_eq!(click(Screen::Upgrades, 0, 42, 127, 17), Some(Hot::Row(0)));
-        assert_eq!(click(Screen::Upgrades, 0, 42, 139, 17), Some(Hot::Row(0)));
+        assert_eq!(
+            click(Screen::Upgrades, 0, 42, 127, 17),
+            Some(Hot::Outfit {
+                remove: false,
+                row: 0
+            })
+        );
+        assert_eq!(
+            click(Screen::Upgrades, 0, 42, 139, 17),
+            Some(Hot::Outfit {
+                remove: true,
+                row: 0
+            })
+        );
         assert_eq!(click(Screen::Upgrades, 0, 42, 150, 17), None);
     }
 
@@ -642,11 +787,126 @@ mod tests {
     #[test]
     fn every_menu_row_has_an_action() {
         for screen in [Screen::Services, Screen::Shipyard] {
-            for index in 0..row_count(screen, 0, 0) {
+            for index in 0..row_count(screen, 0, 0, 0, 0) {
                 assert!(menu_entry(screen, index, 0).is_some(), "{screen:?} {index}");
             }
         }
         assert!(menu_entry(Screen::Services, 4, 0).is_none());
         assert!(menu_entry(Screen::Market, 0, 0).is_none());
+    }
+
+    #[test]
+    fn upgrades_rows_are_f383s_available_records_at_ross_154s_tech() {
+        use ffe_core::equipment::{self, Loadout};
+        // Ross 154's record byte +5 is 0xfd (F869/F622 -> DATA_008995). The
+        // reference Sirocco frame shows this list; the 0xff records (Dummy Mine
+        // etc.) are above the station and are not offered.
+        let rows = upgrades(0xfd, &Loadout::new_game(), &[0x88, 0, 0, 0]);
+        assert_eq!(rows[0].name, "XB74 Proximity Mine");
+        assert_eq!(rows[0].index, 1);
+        let laser = rows
+            .iter()
+            .find(|row| row.name == "1MW Pulse Laser")
+            .expect("the reference frame's seventh row");
+        assert_eq!(laser.price, equipment::get(21).unwrap().price * 12);
+        assert_eq!(laser.removal, equipment::get(21).unwrap().removal * 12);
+        assert_eq!(laser.mass, 1);
+        assert!(laser.fitted, "0x88 is the new game's front laser");
+        assert!(
+            !rows
+                .iter()
+                .find(|row| row.name == "Missile Viewer")
+                .unwrap()
+                .fitted
+        );
+        assert!(!rows.iter().any(|row| row.name == "XB13 Dummy Prox. Mine"));
+        // A low-tech port offers only the tech <= 0x16 record.
+        assert_eq!(upgrades(0x16, &Loadout::default(), &[0; 4]).len(), 1);
+    }
+
+    #[test]
+    fn upgrades_buttons_are_fit_on_the_left_and_remove_on_the_right() {
+        let areas = hot_areas(Screen::Upgrades, 0, 66);
+        assert_eq!(
+            areas[0].hot,
+            Hot::Outfit {
+                remove: false,
+                row: 0
+            }
+        );
+        assert_eq!(
+            areas[1].hot,
+            Hot::Outfit {
+                remove: true,
+                row: 0
+            }
+        );
+        assert_eq!(
+            click(Screen::Upgrades, 0, 66, 127, 17),
+            Some(Hot::Outfit {
+                remove: false,
+                row: 0
+            })
+        );
+        assert_eq!(
+            click(Screen::Upgrades, 0, 66, 139, 17),
+            Some(Hot::Outfit {
+                remove: true,
+                row: 0
+            })
+        );
+    }
+
+    #[test]
+    fn repairs_rows_are_f444s_three_services_at_the_reference_costs() {
+        let rows = repairs(38, true, "1-Jan-3250", "1-Jan-3250");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].title, "Deluxe service (drive and equipment)");
+        assert_eq!(rows[0].cost, 3040);
+        assert_eq!(rows[1].title, "Drive Only service (last: 1-Jan-3250)");
+        assert_eq!(rows[1].cost, 1900);
+        assert_eq!(rows[2].title, "Equipment Only service (last: 1-Jan-3250)");
+        assert_eq!(rows[2].cost, 1900);
+        // F444 omits the Drive Only row when no drive is fitted.
+        assert_eq!(repairs(38, false, "", "1-Jan-3250").len(), 2);
+    }
+
+    #[test]
+    fn the_remove_button_exists_only_on_fitted_rows() {
+        let fitted = [false, true];
+        let areas = hot_areas_with_fitted(Screen::Upgrades, 0, 2, Some(&fitted));
+        // Row 0 (unfitted): Fit only. Row 1 (fitted): Fit and Remove.
+        assert_eq!(
+            areas[0].hot,
+            Hot::Outfit {
+                remove: false,
+                row: 0
+            }
+        );
+        assert_eq!(
+            areas[1].hot,
+            Hot::Outfit {
+                remove: false,
+                row: 1
+            }
+        );
+        assert_eq!(
+            areas[2].hot,
+            Hot::Outfit {
+                remove: true,
+                row: 1
+            }
+        );
+        assert_eq!(
+            click_with_fitted(Screen::Upgrades, 0, 2, Some(&fitted), 139, 17),
+            None
+        );
+        assert_eq!(
+            click_with_fitted(Screen::Upgrades, 0, 2, Some(&fitted), 139, 27),
+            Some(Hot::Outfit {
+                remove: true,
+                row: 1
+            })
+        );
     }
 }

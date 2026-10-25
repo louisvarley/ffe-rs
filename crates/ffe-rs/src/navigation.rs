@@ -1179,6 +1179,15 @@ impl Navigator {
         ))
     }
 
+    /// `DATA_008995`: the starport tech level of the current system, from F869's
+    /// record byte at `+5`. F622 stores it once per system and F383 uses it for
+    /// the Upgrades rows and prices. `None` when the cache has no system tables.
+    pub fn tech_level(&self, cache: &VerifiedCache) -> Option<u16> {
+        let blob = cache.asset("base:world/system-tables")?;
+        let tables = Tables::new(blob).ok()?;
+        Some(tables.tech_level(self.entries[self.current].params.code))
+    }
+
     /// The market of station `index`: generated on the first visit (F622's loop for one
     /// station, from a stream seeded by the system and the station, so a market is the
     /// same whenever it is first seen), and brought up to the day by the daily drift

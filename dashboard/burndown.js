@@ -130,7 +130,7 @@ window.FFE_BURNDOWN = {
         { id: "world-3", title: "System object types and orbits (csystem)", status: "todo" },
         { id: "world-4", title: "Galaxy generation and the RNG stream question (KNOWN_ISSUES F1476)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-5", title: "Planet surfaces and landing approach", status: "done", version: "v0.54" },
-        { id: "world-6", title: "Starports: services and events (cstarport)", status: "todo" },
+        { id: "world-6", title: "Starports: services and events (cstarport)", status: "in-progress", version: "v0.73" },
         { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-8", title: "Navigation: system and galaxy maps", status: "todo" },
         { id: "world-9", title: "Lighting by the local star (ships, stations, lift) and day/night", status: "in-progress", version: "v0.48k" },
@@ -145,8 +145,8 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "gameplay-1", title: "Market and economy tables, pricing and cargo", status: "in-progress", version: "market-v20" },
-        { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "in-progress", version: "v0.62" },
-        { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.62" },
+        { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "in-progress", version: "v0.73" },
+        { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.73" },
         { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "done", version: "v0.57" },
         { id: "gameplay-5", title: "Missiles and countermeasures", status: "in-progress", version: "v0.67" },
         { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "done", version: "v0.72" },
@@ -162,7 +162,8 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" },
         { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" },
         { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "done", version: "v0.63" },
-        { id: "gameplay-19", title: "Player missiles, missile lock and F1120 pylon lamps", status: "done", version: "v0.67" }
+        { id: "gameplay-19", title: "Player missiles, missile lock and F1120 pylon lamps", status: "done", version: "v0.67" },
+        { id: "gameplay-20", title: "Starport tech level, Upgrades Fit/Remove, fuel-scoop gate and repairs rows", status: "done", version: "v0.73" }
       ]
     },
     {
@@ -570,6 +571,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 66,
       note: "NPC docking cycle merged (v0.72): the corrected DATA_006255 AI table and the Approach/Docked/Launch/Depart rows, DockRequest and tick_with_station, bay occupancy through the station record, F747's door-close wait and F733/F734/F735/F736/F761/F762; docked ships are hidden, traders get destinations and the npc_docking evidence frames cover approach/docked/launch. The AI item (gameplay-6) is done. Remaining owner decisions: the 2-3 day docked interval vs the shortened observation, the 30 s give-up/next-station vs endless retry, the cruise-speed floor and the despawn range."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 66,
+      note: "Station services merged (v0.73): F869/F622's starport tech level now reaches Navigators (Details/Tables::tech_level), the Upgrades screen builds real rows from equipment::outfitting with Fit/Remove across general/cabins/lasers/shields/missiles using F387/F388 prices and refunds, F394's fuel-scoop gate and F329's Remove button/hot area are in, and F444's repair rows show dates; shipyard and BBS keep their faithful empty states. One item added and completed (gameplay-20); gameplay-2/gameplay-3 and world-6 are in progress. Owner decisions: drive/mining rows visible-but-disabled vs hidden, ship price/BBS imports later, repairs actions before thruster damage, and the price-multiplier behaviour."
     }
   ]
 };

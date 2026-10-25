@@ -33,6 +33,19 @@ fn tables_are_validated_and_codes_are_classed() {
 }
 
 #[test]
+fn f869_copies_the_record_byte_at_five_as_the_starport_tech_level() {
+    let mut bytes = blob();
+    // The first record's +5 is DATA_008995 (F622 stores it from F869's byte).
+    bytes[GALAXY_OFFSET + 5] = 0xfd;
+    let tables = Tables::new(&bytes).unwrap();
+    assert_eq!(tables.details(0x100).bytes[0], 0xfd);
+    assert_eq!(tables.tech_level(0x100), 0xfdu16);
+    // A procedural class reads the eight records before DATA_007110; class -8's
+    // record starts at offset 0 and its +5 is the first zero byte.
+    assert_eq!(tables.tech_level(0x1fff | 0x1fff << 13), 0);
+}
+
+#[test]
 fn control_takes_the_greater_nibble_and_swaps_the_ranks() {
     let bytes = blob();
     let tables = Tables::new(&bytes).unwrap();
