@@ -1462,12 +1462,11 @@ fn run() -> Result<(), String> {
             message = note.to_owned();
         }
         // F4 is the original's station/comms action (F1056's action 0xf4,
-        // F343): from state 0x2a (docked) or 0x30 (the new game's starport pad)
-        // it opens the services board. At the pad it is drawn over the landed
-        // view, not as a docked state: F1003's return (F1) only closes it, so the
-        // flight model, HUD and console are never torn down. A starport landing
-        // after flight is also `0x30` but keeps its own landed record; opening
-        // its services board is a remaining decision (see the report).
+        // F343): from state 0x2a (docked) or 0x30 (an open-air starport pad, the
+        // new game's start or a landing after flight) it opens the services
+        // board. It is drawn over the landed view, not as a docked state:
+        // F1003's return (F1) only closes it, so the flight model, HUD and
+        // console are never torn down.
         if active
             && !death_control
             && model_lab.is_none()
@@ -1476,9 +1475,24 @@ fn run() -> Result<(), String> {
                 || console_click == Some(Click::Screen(4))
                 || (capture_start && frames == 50))
         {
-            let pad_services = nav.as_ref().is_some_and(|nav| nav.on_pad());
+            let pad_services = nav.as_ref().is_some_and(|nav| {
+                nav.on_pad()
+                    || nav.landed_body().is_some_and(|index| {
+                        nav.bodies
+                            .get(index)
+                            .is_some_and(|body| body.kind == NavKind::Starport)
+                    })
+            });
             match state.mode {
                 ffe_rs::flight::Mode::Flight if pad_services => {
+                    // A landed starport after flight is also source state 0x30,
+                    // but keeps a landed record; select its station for the
+                    // board. The new game's pad already has it.
+                    if let Some(nav) = nav.as_mut() {
+                        if let Some(index) = nav.landed_body() {
+                            nav.docked = Some(index);
+                        }
+                    }
                     dock.open(StationScreen::Services);
                     pad_board = true;
                     message = station::SERVICES_HINT.to_owned();
@@ -2724,7 +2738,22 @@ fn run() -> Result<(), String> {
                     match station_action {
                         StationAction::Launch => {
                             if let Some(nav) = nav.as_mut() {
-                                match nav.begin_launch() {
+                                let surface = nav.landed_body();
+                                let climb =
+                                    surface.and_then(|index| nav.bodies.get(index)).map(|body| {
+                                        (
+                                            original
+                                                .as_mut()
+                                                .map_or([0; 3], |model| model.absolute_position()),
+                                            body.orientation[1],
+                                        )
+                                    });
+                                let launch = if surface.is_some() {
+                                    nav.begin_surface_launch()
+                                } else {
+                                    nav.begin_launch()
+                                };
+                                match launch {
                                     Ok(()) if nav.takeoff.is_some() => {
                                         // F381 leaves the open-air starport's
                                         // ship on its pad; the launch button
@@ -2732,10 +2761,23 @@ fn run() -> Result<(), String> {
                                         // and this frame's docked-to-flight block
                                         // below places the model on the pad.
                                         acceleration = 0;
-                                        // F994's pad hand-off: the docked-to-
-                                        // flight block below builds the original
-                                        // model and F1013's climb.
-                                        last_mode = ffe_rs::flight::Mode::Docked;
+                                        if surface.is_some() {
+                                            // F1013 from a landed starport: the
+                                            // model already exists and keeps its
+                                            // own landed/contact state.
+                                            takeoff_climb = climb;
+                                            if let Some(model) = original.as_mut() {
+                                                model.set_time_acceleration(0);
+                                                model.begin_takeoff();
+                                            } else {
+                                                last_mode = ffe_rs::flight::Mode::Docked;
+                                            }
+                                        } else {
+                                            // F994's pad hand-off: the docked-to-
+                                            // flight block below builds the
+                                            // original model and F1013's climb.
+                                            last_mode = ffe_rs::flight::Mode::Docked;
+                                        }
                                         state.mode = ffe_rs::flight::Mode::Flight;
                                         state.system_flight = true;
                                         pad_board = false;
