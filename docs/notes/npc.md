@@ -40,9 +40,16 @@ resume transit, instead of orbiting for ever.
     `ffe.asm:6898`). There is no direct `F34(0x16, ...)` call in `ffe.asm`, so
     no system field, government, allegiance or random draw sets it: F690 runs
     only when a mission script has set that variable. See "Owner decisions".
-  - `DATA_008997` Ã— F691: ships parked in station bays (the cache's ship-data
-    table is not loaded, so the port has none);
-  - `RND(+8) Ã— F699`: shuttles (`F772(0xf)`);
+  - `DATA_008997` Ã— F691: ships parked in station bays. `DATA_008997` is
+    `DATA_NumStarports`, the count of the 18-record `DATA_008999`/`DATA_009000`
+    starport array F617/F618 build at system creation from the objects with
+    `+0x14c & 0x10` (stations and starports); each record's object slot is at
+    `+0x130`. It is **not** a cache ship-data table. The count is
+    `RND(4 * places)` capped at 25, and each ship is a type-1 trader put
+    straight into a bay (see §2, F691);
+  - `RND(+8) Ã— F699`: auxiliary bulk carriers (`F772(0xf)`, the Lynx/LRC
+    list). Table record 0xf is not model 0x0f (the Interplanetary Shuttle);
+    F699's ships are state 0x0d and hold, with no route or dock request;
   - `+6` patrol groups Ã— F698, Ã—4 in-system: F694/F695/F696 make a lone pirate
     or a group of three around the player;
   - `RND(+6) Ã— F692`: a no-op.
@@ -102,8 +109,10 @@ resume transit, instead of orbiting for ever.
 - **F922** (`ffe.asm:68974`) as `Random::bounded`, so model and placement
   draws are the original generator's (`a = rotl16(a + b + rotl5(b))`,
   `b = rotl5(b_old)`, result `(a & 0xffff) * limit >> 16`).
-- F688's count fields (`Details::bytes[3]` for traders/shuttles, `bytes[1]`
-  for patrol groups, `bytes[2]` for police) with a cap of `MAX_SHIPS = 5`. A
+- F688's count fields (`Details::bytes[3]` for traders/F699's aux count,
+  `bytes[1]`
+  for patrol groups, `bytes[2]` for the port's police group) with a cap of
+  `MAX_SHIPS = 9` (`MAX_BAY_SHIPS = 3` for the F691 branch). A
   normal system entry asks F688 for its own counts and **can spawn none**: the
   original may roll zero traffic. The port's old "at least one trader and one
   pirate group" guarantee is now `SpawnOptions::CAPTURE`, used only by
@@ -243,7 +252,7 @@ The port's `State` names the subset it runs and lists its original codes in
 
 ### The station traffic cycle (F689, F745/F746, F733/F747, F734/F735, F651/F736, F761/F762)
 
-Traders and shuttles no longer orbit for ever. F689 gives a trader `+0x100` (its
+Traders no longer orbit for ever. F689 gives a trader `+0x100` (its
 starport destination) and state 0x11; the source then runs the cycle below, and
 the port runs the same states over its `npc::Station` snapshot and the station's
 `traffic::Starport` record:
@@ -273,6 +282,43 @@ picks a random starport, the port walks them in order; F747's two-to-three days
 are counted in game seconds, so the console's time acceleration shortens them;
 and FFE's thrust units do not scale to the port's millimetre frame, so traders
 and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
+
+### Station-bay ships (F691) and F699's aux traders
+
+F691 is the source of the "initial docked traders" the traffic cycle used to
+lack. It is not loading a cache ship-data table: `DATA_008997` is the count of
+the starport records F617/F618 built from the generated system's place objects
+(`+0x14c & 0x10`), and `DATA_008999` is that 18 × 802-byte array (its `+0x130`
+is the station object slot). F700 draws one record uniformly.
+
+| Step | Original | Port |
+|---|---|---|
+| count | `RND(4 * DATA_008997)`, capped at 0x19 (25) | `Counts::bay_ships` from `counts_with_places(system, places)`; port cap `MAX_BAY_SHIPS` |
+| ship | F772(1): F635's trader list with the allegiance shift | `Role::Trader`, `npc::spawn` |
+| station | F700: `RND(DATA_008997)` over `DATA_008999` | `rng.bounded(places)` over the place anchors; `NpcShip::station` |
+| bay | F650 scans `+0xce` down; a full station → F940 removes the ship | `Navigator::spawn_traffic_with` → `occupy_station_bays`; `Starport::request_docking`, full → the ship is dropped |
+| placement | starports (`+0x14c & 0x20`) copy the station's position/orientation then add F650's bay vector; closed stations use the bay vector alone | the port's F650 stand-in: `pads::position` for an open-air starport, or `Station::bay_point` for a closed station |
+| state | `+0xff = 0x24`, `+0xfe` = station, F747's object time **without** the `+2` days | `State::Docked`, `dock_span = docked_object_seconds(rng.advance())` (F1530), `begin_docked_for` |
+| later | F733 countdown → F734/F735 launch → F651/F736 → F761/F762 | the ordinary station cycle above |
+
+Two source quirks are kept. First, F688 runs the station branch only when its
+`DATA_009046` bit 0 is clear; F686 (system entry) sets it and F687 (the
+post-launch event) clears it. The port spawns once, on launch/hyperspace
+(`main`'s `Traffic::LaunchDone` and `Navigator::spawn_traffic`), which is F687's
+pass, so the branch runs; the new-game `Navigator::new_game` previews it on the
+pad. Second, with places present F699's aux draw runs only when the F691 roll
+was non-zero. F699 itself is `F772(0xf)` (the Lynx/LRC table), state 0x0d; row
+0x0d has no control or movement routine, so these ships hold on their F702
+orbit and the source gives them no station, route or dock request. The port
+does not invent one: `Role::Shuttle` is F699's aux trader and stays in `Hold`.
+(The `Interplanetary Shuttle` model 0x0f is F635 table record 0xd, which F688
+does not call.)
+
+The new-game flow collapses F686's flag-set pass and F687's later pass into the
+single `Navigator::spawn_traffic` call: the port cannot run F688 twice without
+duplicating all the traders and pirates. The initial bay ships therefore exist
+while the player is still on the pad (invisible, and `tick_ships` does not run
+there), and launch straight into F733's countdown.
 
 ### Firing at the player (F931/F930/F953)
 
@@ -370,20 +416,23 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 
 ## 3. Tests and frames
 
-- `cargo test -p ffe-core npc`: twenty-four tests. The original sixteen cover the
+- `cargo test -p ffe-core npc`: thirty-one tests. The original sixteen cover the
   F635 table/counts, the allegiance shift, F922's determinism, F688 counts/cap,
   placement, the `DATA_006255` rows, F585's turn divisor, F601's thrust/mass
   speeds, the F697 bounty table, F931's gates and F930's damage, the braking
   standoff, the transit arrival, F694/F695 escorts, F675/F680 persistence,
-  F953/F942 damage and the hold/attack motion. This slice adds the traffic
-  cycle: the bay request/approach/dock with the bay occupied, F747's 2-3 day
-  interval, the door-open launch and F651 release with the next station, the
-  full-station give-up (F655's Full and F762), and the F867 clearance timeout
-  recycling the ship. The Thargoid tests check F690's `RND(F35(0x16))` limit and
-  `DATA_006197` models, `Role::Thargoid`'s type/class/hostility, F774's
-  class/cargo laser choice (203 t -> 0x20MW beam, 13,000 t -> 0xcf), and the
-  model shield/hull/drive words. `cargo test -p ffe-core equipment` checks the
-  Thargoid Laser's equipment record (0xd5, 50 t, tech 255).
+  F953/F942 damage and the hold/attack motion. The traffic slice adds the bay
+  request/approach/dock with the bay occupied, F747's 2-3 day interval, the
+  door-open launch and F651 release with the next station, the full-station
+  give-up (F655's Full and F762), and the F867 clearance timeout recycling the
+  ship. This slice adds F1530's word sequence, F691's object-time split, the
+  `RND(4 * places)` bay spawn with a place destination, the zero-roll F699
+  quirk, F699's type-0xf hold row, and F751's escort-to-attack hand-off. The
+  Thargoid tests check F690's `RND(F35(0x16))` limit and `DATA_006197` models,
+  `Role::Thargoid`'s type/class/hostility, F774's class/cargo laser choice
+  (203 t -> 0x20MW beam, 13,000 t -> 0xcf), and the model shield/hull/drive
+  words. `cargo test -p ffe-core equipment` checks the Thargoid Laser's
+  equipment record (0xd5, 50 t, tech 255).
 - `cargo test -p ffe-rs combat`: adds the player's F953 words
   (`Flight::take_damage`) and their save defaults.
 - `cargo test -p ffe-rs --test npc_ai -- --ignored` with
@@ -407,6 +456,15 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
   `F735/F865 ... F651 frees bay 0`, `F761/F762`). The logged approach is
   128.7 s at `STATION_CRUISE_SPEED` (40,000 mm/s). The PNGs and the full log are
   in `docs/evidence/npc-docking/` (README.md).
+- `cargo test -p ffe-rs --test station_traffic -- --ignored` with the same
+  cache: F691's initial station-bay ships. It picks a start-record whose
+  `RND(4 * places)` roll placed a ship in a bay, asserts F650's bay is occupied
+  by the ship's traffic id and the ship is in `State::Docked` with F691's
+  object time (0..16 days), fast-forwards that timer and runs F733/F734/F735/
+  F651/F736 until F761/F762 puts it in transit to the next place. Set
+  `FFE_SHOT_DIR` to keep `station-traffic.ppm`, `station-bay-docked.ppm` and
+  `station-bay-launch.ppm`; the PNGs, the logged sequence and the source map
+  are in `docs/evidence/station-traffic/` (README.md).
 - `cargo test -p ffe-rs --test thargoid_view -- --ignored` with the same cache:
   `Navigator::spawn_thargoid_traffic(..., 12)` runs F690 with `F35(0x16) = 12`
   (F688 draws `RND(12)`; this checkpoint's seed produces one);
@@ -446,9 +504,14 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
   it does not spawn patrols, apply fines or show the wanted status outside the
   message line. F1035/F1036 are surface spawns and are absent with the rest of
   the surface traffic.
-- **Station-bay ships (F691).** The cache's ship-data table is not loaded, so
-  the initial docked traders are not spawned; the traffic cycle starts from
-  F689's arriving traders instead.
+- **Station traffic is no longer missing.** F691's initial bay ships are
+  implemented (`docs/evidence/station-traffic/`), and F699's aux traders/`Lynx`
+  bulk carriers are spawned in their source state 0x0d hold. F688's F686/F687
+  two-pass flag is collapsed into one spawn pass (above). What remains is the
+  original's exact bay geometry (`DATA_006175`/`DATA_006179`'s per-model bay
+  tables, of which FFE has five station models) for closed stations: the port
+  reuses `Station::bay_point`, its existing F650 stand-in. F699's own `+0x56`
+  station association is not stored (the row has no behaviour that reads it).
 - **Exact F702 placement.** The raw ffp orbit is not used; see the deviation.
 - **F942's effects.** Ported 2026-10-25: the model-0x9b destruction object and
   F926's debris pods are in `ffe_core::effects` and drawn by `Screen`; F939's
@@ -510,8 +573,20 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 - **Fleeing trigger.** The 25 % hull jump-out is the port's; the original has
   the states but no trigger. Keep it, remove it, or replace it with the
   original's position-based F737 condition.
-- **Traffic cap.** Keep `MAX_SHIPS = 5`, or let F688's counts and F927's slot
-  rules produce the original's many more ships.
+- **Traffic cap.** This slice raised `MAX_SHIPS` from 5 to 9 and added
+  `MAX_BAY_SHIPS = 3` so a station's own F691/F699 ships do not crowd out F689/
+  F698's traffic. The original's F927 has far more slots. Keep these caps, or
+  let F688's counts and F927's slot rules produce the source's many more ships.
+- **F699 semantics.** The source's `F772(0xf)` is the Lynx/LRC bulk carrier
+  list, and state 0x0d holds, so the port spawns no "shuttle route": the previous
+  port versions sent these ships to a station, which was an invention. Decide
+  whether to keep the source's parked aux traders or, if the game wants visible
+  interplanetary shuttles, add the real model-0x0f spawn path (none exists in
+  F688) and document it as a port addition.
+- **F686/F687's two F688 passes.** The source spawns traders/Thargoids at system
+  entry with `DATA_009046` bit 0 set (no bay ships/F699), then runs F688 again
+  after launch with it clear. The port spawns once. Keep the collapsed pass, or
+  split it to match the source's duplicate-trader timing.
 - **Full docking AI.** Now ported at the state level (F745/F746, F747/F733,
   F734/F735, F651/F736, F761/F762). The open decisions are the port's
   trade-offs: a 2-3 day docked interval counted in game seconds (so time

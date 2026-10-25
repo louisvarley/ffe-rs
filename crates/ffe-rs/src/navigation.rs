@@ -29,6 +29,10 @@ use ffe_core::traffic::{
 use ffe_core::RandomState;
 use std::collections::HashMap;
 
+/// One leader's frame for F695/F751's escorts: its id, system position, axes
+/// and AI state.
+type LeaderFrame = (u32, [i64; 3], [[f64; 3]; 3], npc::State);
+
 /// The reverse thrust's deceleration (metres per second squared, world time).
 const BRAKING: f64 = 90.0;
 
@@ -2456,6 +2460,20 @@ impl Navigator {
             ships.push(ship);
         }
         ships.truncate(npc::MAX_SHIPS);
+        // The ships being replaced may still hold bays in a traffic record. The
+        // original's F651/F927 release the slot with the object; the port must
+        // do the same when a spawn (a jump, or a scripted respawn) replaces the
+        // list, or a station fills with bays no visible ship owns.
+        let held: Vec<(usize, u8)> = self
+            .ships
+            .iter()
+            .filter(|ship| ship.bay.is_some())
+            .filter_map(|ship| Some((ship.station?, npc::traffic_id(ship.id))))
+            .collect();
+        for (station, id) in held {
+            self.starport(station).release(id);
+        }
+        self.occupy_station_bays(&mut ships);
         self.ships = ships;
         self.player_at = player;
         self.ship_lock = None;
@@ -2465,6 +2483,54 @@ impl Navigator {
         self.missiles.clear();
         self.spawned = Some(self.current);
         !self.ships.is_empty()
+    }
+
+    /// F691/F650: give every initial station-bay ship its bay and start F747's
+    /// object time. The ships come from `npc::spawn` in `State::Docked` with a
+    /// destination but no bay; the traffic record owns F650, so the bay is
+    /// allocated here exactly as an arriving trader's request would be. A full
+    /// station drops that ship (the source's F940 after F650 fails). The bay
+    /// stays occupied while the handling record is cleared (F653).
+    fn occupy_station_bays(&mut self, ships: &mut Vec<NpcShip>) {
+        let mut keep = Vec::with_capacity(ships.len());
+        for mut ship in ships.drain(..) {
+            if ship.state != npc::State::Docked || ship.bay.is_some() {
+                keep.push(ship);
+                continue;
+            }
+            let Some(index) = ship.station else {
+                keep.push(ship);
+                continue;
+            };
+            if !self
+                .bodies
+                .get(index)
+                .is_some_and(|body| body.kind.is_place())
+            {
+                continue;
+            }
+            let id = npc::traffic_id(ship.id);
+            let Reply::Granted(bay) = self.starport(index).request_docking(id, false, 0) else {
+                continue;
+            };
+            let pad = self.pad_point(index, bay.index);
+            ship.bay = Some(bay.index);
+            ship.pad = pad;
+            {
+                // F652/F653: the ship is in the bay and the handling record is
+                // reset; F650's allocation remains in `pads`.
+                let port = self.starport(index);
+                port.touch(id);
+                port.reset();
+            }
+            let seat = self
+                .station_snapshot(&ship)
+                .map(|station| station.bay_point())
+                .unwrap_or_else(|| self.bodies[index].position);
+            ship.begin_docked_for(seat, ship.dock_span);
+            keep.push(ship);
+        }
+        *ships = keep;
     }
 
     /// Force the F688 spawner to run again for the current system, even when
@@ -2513,13 +2579,25 @@ impl Navigator {
             return events;
         }
         // F695's escorts hold a station in their leader's frame: right*+0x102 +
-        // up*+0x104 + forward*+0x106 (F743's F610 target).
-        let leaders: Vec<(u32, [i64; 3], [[f64; 3]; 3])> = self
+        // up*+0x104 + forward*+0x106 (F743's F610 target). F751 then hands the
+        // escort to the attack when the leader is in state 1/2 (the port's
+        // Attack/Pass): it drops the formation offsets and targets the leader's
+        // target, which is the player for a pirate group.
+        let leaders: Vec<LeaderFrame> = self
             .ships
             .iter()
             .filter(|ship| ship.alive())
-            .map(|ship| (ship.id, ship.position, ship.axes()))
+            .map(|ship| (ship.id, ship.position, ship.axes(), ship.state))
             .collect();
+        for ship in &mut self.ships {
+            if let Some(leader) = ship.leader {
+                if leaders.iter().any(|(id, _, _, state)| {
+                    *id == leader && matches!(state, npc::State::Attack | npc::State::Pass)
+                }) {
+                    ship.join_attack();
+                }
+            }
+        }
         // The station-traffic snapshot of every ship's destination, taken before
         // the mutable AI pass (the traffic record and the bodies are read here).
         let stations: Vec<Option<npc::Station>> = self
@@ -2530,7 +2608,8 @@ impl Navigator {
         let mut requests = Vec::new();
         for (ship, station) in self.ships.iter_mut().zip(stations.iter()) {
             let escort = ship.leader.and_then(|id| {
-                let (_, position, axes) = leaders.iter().find(|(leader, _, _)| *leader == id)?;
+                let (_, position, axes, _) =
+                    leaders.iter().find(|(leader, _, _, _)| *leader == id)?;
                 let [right, up, forward] = ship.formation;
                 Some(std::array::from_fn(|axis| {
                     position[axis]

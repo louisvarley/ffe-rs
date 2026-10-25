@@ -248,6 +248,7 @@ mod tests {
             bay: None,
             pad: None,
             dock_timer: 0.0,
+            dock_span: 0.0,
             dock_retry: 0.0,
             dock_wait: 0.0,
         }
