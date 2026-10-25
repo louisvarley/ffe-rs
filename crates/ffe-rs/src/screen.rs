@@ -238,6 +238,10 @@ pub struct Screen {
     /// The flight view's background: the original's space colour
     /// (`DATA_008815..817`, set by the Graphic Detail page), RGB.
     pub sky: u32,
+    /// `DATA_008812`, the "Level of Shape Detail" the planet surfaces are
+    /// generated at. The executed boot's default "High" is 1; the preference
+    /// row is stored less one (see [`crate::prefs::SHAPE_DETAIL`]).
+    pub surface_detail: i32,
     /// F1877's planet-atmosphere background (`DATA_008814..8817`) from the last
     /// frame's scene. The original clears the next upper view to it and leaves
     /// the stars out while it is set; `None` uses [`Screen::sky`].
@@ -726,6 +730,7 @@ impl Screen {
             // `FUNC_000219_SysMenuInit`'s default: "Light Blue" (4), drawn as
             // the captured quantised palette entry (`#0c0c4c`).
             sky: prefs::space_colour_rgb(4),
+            surface_detail: 1,
             surface_sky: None,
             stars_visible: true,
             lock_external: true,
@@ -1454,6 +1459,17 @@ impl Screen {
         let background = pack(intro.background) & 0xfff;
         if let Some(viewer) = scene {
             viewer.set_background(background);
+            // F959 gives the intro object (`DATA_009127`) the surface seed
+            // `+0xa0 = 0x789a3456` (ffe.asm:71595). F1876 generates the patch
+            // grid from it, so the planet's terrain is that object's, not the
+            // zero-filled default.
+            viewer
+                .surface_seed
+                .set(crate::front_end::INTRO_SURFACE_SEED);
+            // `DATA_008812` is 1 by the time the intro loop runs (the executed
+            // boot's default Shape Detail); the scene was wrongly built at 2,
+            // whose finer subdivision aliased the band textures into speckle.
+            viewer.set_surface_detail(self.surface_detail);
         }
         let model = match scene {
             Some(viewer) if intro.model != 0 => {
@@ -1555,6 +1571,7 @@ impl Screen {
                     ((background & 0xff) as u8) >> 4,
                 ]) & 0xfff,
             );
+            scene.set_surface_detail(self.surface_detail);
         }
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);

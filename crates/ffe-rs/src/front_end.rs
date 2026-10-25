@@ -64,6 +64,10 @@ impl IntroLine {
     }
 }
 
+/// F959's object `+0xa0`: the surface seed F1876 reads for the intro's curved
+/// surfaces (`mov dword [ebx+0xa0],0x789a3456`, ffe.asm:71595).
+pub const INTRO_SURFACE_SEED: u32 = 0x789a_3456;
+
 /// F962's eighteen credit calls (`ffe.asm:71796-72058`, strings `0x941b..0x942c`),
 /// at their exact thresholds, positions and wrap widths. `string` indexes the
 /// raw DOS bytes in `base:text/intro-credits` (cache v27); the renderer applies

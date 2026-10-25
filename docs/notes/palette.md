@@ -68,10 +68,12 @@ object keep a palette index across a rebuild even though the palette moves.
    its key in `DATA_009222` (82970-82975).
 2. If the occupied cube has more than 64 cells, it median-cuts the occupied
    extent into exactly 64 boxes: tighten a box to its occupied cells
-   (`F1329`), split the heap root on its longest axis at `(lo + hi) / 2`,
-   tighten both halves, and insert the right half into the max-heap. Only the
-   new box sifts up; the root's count changes in place (83025-83159).
-   With at most 64 cells it makes one box per occupied cell (83225-83273).
+   (`F1329`), split the heap root on its **longest-axis extent** at
+   `(lo + hi) / 2`, tighten both halves, sink the shrunken root down the
+   larger-child path, and insert the right half at the end of the heap, where
+   it sifts up by the same extent key (83025-83159). The key is `box + 0xc`
+   (the longest extent), not the cell count. With at most 64 cells it makes
+   one box per occupied cell (83225-83273).
 3. Each box's cells are written as `box + 1` in the cube; the slots array is
    zeroed first (83160-83223).
 4. The previous bank's 64 colours claim the boxes that contain them
@@ -84,16 +86,24 @@ object keep a palette index across a rebuild even though the palette moves.
 6. `F1331` uploads the changed slots at `0x80 + slot`, then toggles the bank.
 
 `F1327` returns `DATA_007770[key] - 1` for a fixed word, else
-`DATA_009141[DATA_009139[key] - 1]`. The cube is not cleared between frames in
-the assembly (`F1328` clears it only when a palette file is loaded,
-`F125`/`F126`; `F1641` calls it after the low palette). Keeping every built
-cell for a whole screen does not match the executed frames: after a long intro
-the accumulated cells re-cut the 64 boxes and the planet and galaxy collapse
-into noise, while original frames 1514 and 1515 have identical upper palettes.
-The port therefore clears the cube before each frame's registration
-(`ModelViewer::render_matrix`), so each build is cut around the colours that
-frame queues, which reproduces the executed frames. The previous bank still
-claims its boxes, so slot identity within a frame is unchanged.
+`DATA_009141[DATA_009139[key] - 1]`. The cube is cleared **once per frame** by
+`F1786` (`ffe.asm:61644`), which the boot/intro and game loops call immediately
+before F961/drawing; `F1328` is also called by the palette-file loads
+(`F125`/`F126`) and after `F1641`'s low palette. Each build is therefore cut
+around the colours that frame queues, and two frames of one animation build the
+same 64 boxes (the executed original's frames 1514 and 1515 have identical
+upper palettes). The previous bank still claims its boxes, so slot identity
+within a frame is unchanged. The port clears the cube at the start of each
+`ModelViewer::render_matrix`, matching `F1786`.
+
+**The median-cut heap.** The port originally compared the wrong heap key (the
+cell count) and never sifted the shrunken root: it split `heap[1]` again and
+again until most of the 64 boxes were empty, whose `2 * (lo + hi - 1) + 1`
+representative is `31,31,31` (six-bit grey). Those grey entries filled the
+previous bank and the planet's band texture resolved through them. The builder
+now uses `F1329`'s longest extent (`box + 0xc`) and the original's
+sink-root/insert-right movement. `a_uniform_cube_cuts_into_sixty_four_non_empty_boxes`
+pins it: an 8x8x8 cube yields 64 non-empty boxes and no grey representatives.
 
 **When it runs:** the intro loop calls it after F961/F962 every frame
 (`ffe.asm:68461`); the in-game loop calls it on the redraw branch
@@ -119,7 +129,15 @@ claims its boxes, so slot identity within a frame is unchanged.
   and both banks persist on the viewer. Text glyph executions and the curved
   surface queue are built before the build, so the glyph faces' and the
   terrain's F1326 colours are in the cube. The text's own material colour is
-  resolved through F1692/F1693 and given to the glyph instance (F1747).
+  resolved through F1692/F1693 and given to the glyph instance (F1747). `F1747`
+  negates the text frame's first row when F1740 leaves a left-handed frame
+  (`5f64b-5f658`); without it the glyphs are mirrored (`GAME` read `ƎMAפ`).
+- `ModelViewer::surface_detail` carries `DATA_008812`, the "Level of Shape
+  Detail" F1876 uses for the curved-surface subdivision. The executed boot has
+  **1** (the default High row, stored less one); the old hard-coded 2
+  over-subdivided the patch and aliased the band texture into per-texel
+  speckle. `screen.rs` passes `Screen::surface_detail`, which `main.rs` sets
+  from `prefs.shape_detail - 1` and clamps at 0 like `F917`.
 - `screen.rs::draw_intro` sets F961's background word before rendering and
   fills the frame with its resolved RGB. `front_end::IntroFrame::background`
   carries F961's `(0,0,0)`/`(0,0,4)`.
@@ -157,6 +175,28 @@ resolves `(0,0,4)` to it, and clears to `#040444`. This is pinned by
 The remaining differences are dominated by a green shade: the original has
 `(52,84,52)` where the port's smaller registered colour set gives `(36,68,36)`,
 plus a few map-overlay positions the existing oracle already accepts.
+
+**Banded intro planet.** Model 176's big planet is surface `kind 3` (polar,
+F1842): 32 band colours and texture block 95, generated from `DATA_008812`.
+The reference adapter's boot leaves `DATA_008812 = 1` (a local instrumented
+`--intro-live`/`--game-frame` build prints it; it is 0 on frame 0, then 1).
+Building the same patch at 2 subdivided it finer than the source and produced
+the frame that the owner saw as orange/teal speckle. At 1 the planet's horizontal
+same-colour run length is 2.26 (the original frame 1515 is 2.51; the pre-fix
+port was 1.80), and the rebuilt upper palette shares 47 of its 56 colours with
+the executed frame's 64. The band table's nine distinct values times the five
+visible light shades keep this frame in the at-most-64-cells branch, so its
+representatives are single-cell `4 * cell + 1`; the heap fix matters for the
+frames that cross 64 (the galaxy and the in-game surfaces).
+`the_intro_planet_uses_the_runtime_shape_detail` and
+`consecutive_intro_frames_build_the_same_upper_palette` pin the two.
+`docs/evidence/visuals/intro-palette-after.txt` is the frame's six-bit bank.
+
+**Logo text.** Model 177's child 361 text (DOS `0x408a` = `GAME!TEK`; JJFFE's
+string is `FRONTIER`, `intro-todo.md` D5) read mirrored on every animation
+frame. F1747's handedness flip fixes it; the before/after pair is
+`docs/evidence/visuals/game-tek-letters-*.png`, and
+`the_game_tek_logo_text_is_not_mirrored` pins the assembled frame hash.
 
 **Scanner and space.** The scanner view frames (`scanner-system`,
 `scanner-tunnels`, `scanner-blink-*`) are pixel-identical before and after:

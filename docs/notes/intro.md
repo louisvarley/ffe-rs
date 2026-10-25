@@ -203,12 +203,16 @@ of discarding the whole scene. `--capture-intro` therefore shows the planet,
 ship, asteroids and galaxy at the same tics as `jjffe-smoke --intro-live`.
 
 **GAME!TEK.** Model 177 -> child 361 is the logo: one slab face and text
-`0x408a` ("GAME!TEK", glyph set 0, size 15); 362/363 are PRESENTS/DAVID
-BRABEN'S. The text record's material `0x0888` is resolved through
-F1692/F1693 and passed to the glyph instance (F1747); without it the glyph
-faces were black holes in the slab. There is no second logo path: the letters
-are the original's fixed grey, matching the executed frame at animation 63
-(`(192,192,192)` on `(64,64,64)`). See `docs/evidence/visuals/`.
+`0x408a` (the DOS cache's "GAME!TEK", glyph set 0, size 15); 362/363 are
+PRESENTS/DAVID BRABEN'S. The text record's material `0x0888` is resolved
+through F1692/F1693 and passed to the glyph instance (F1747); without it the
+glyph faces were black holes in the slab. F1747 also negates the text frame's
+first row when F1740 leaves a left-handed frame (`ffe.asm:5f64b-5f658`): without
+that every glyph was mirrored (`GAME` read `ƎMAפ`), while the slab stayed
+symmetric. The letters are the original's fixed grey, matching the executed
+frame at animation 63 (`(192,192,192)` on `(64,64,64)`). The executed JJFFE
+reference draws its own `FRONTIER` string for this model (`intro-todo.md` D5);
+the port keeps the DOS cache's GAME!TEK. See `docs/evidence/visuals/`.
 
 Song 0 `QQFRONT` now plays during the intro:
 `run_intro` calls F919's `front_end_music()`, ticks F1904, and stops the song on
@@ -219,10 +223,15 @@ ported in `ffe_rs::palette`. The intro uses its own `F1575` colours: `(0,0,0)`
 for model 177 (fixed low entry 0, black) and `(0,0,4)` for model 176. The
 executed original at the switch frame has exactly one upper entry, six-bit
 `(1,1,17)` (expanded `#040444`), and the same entry is the clear colour; the
-port now produces that entry and background. The request cube is cleared before
-each frame's registration; the intro's later frames (planet, galaxy) then match
-the executed original instead of drifting into noise. See `docs/notes/palette.md`
-for the source map, the colour-word format and the frame evidence.
+port now produces that entry and background. `F1786` clears the request cube
+once per frame before F961, so the intro's later frames (planet, galaxy) are
+cut around that frame's colours. The median-cut heap uses F1329's longest
+extent and the original's sink-root/insert-right movement; the old
+count-keyed, root-repeated split filled most boxes with the empty `31,31,31`
+representative and speckled the band texture. The planet is generated at
+`DATA_008812 = 1` (the boot's Shape Detail; the old hard-coded 2 over-subdivided
+it). See `docs/notes/palette.md` for the source map, the colour-word format and
+the frame evidence.
 
 
 **Tests and frames.** `crates/ffe-rs/tests/front_end.rs` covers the thresholds,
