@@ -7,6 +7,7 @@ use crate::docking::{Contact, Port, CLEARANCE_RANGE};
 use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND, UNITS_PER_FLIGHT_UNIT};
 use ffe_content::VerifiedCache;
 use ffe_core::bulletin;
+use ffe_core::calendar::Calendar;
 use ffe_core::effects::{self, Effect};
 use ffe_core::galaxy::{tables, Tables};
 use ffe_core::hyperspace::{plan as jump_plan, Report};
@@ -829,9 +830,16 @@ pub struct Navigator {
     /// The ship and fuel the galaxy list and the jump use.
     pub drive: Option<DriveState>,
     /// The markets of the stations visited in this system.
-    markets: HashMap<usize, StationMarket>,
+    markets: HashMap<(u32, usize), StationMarket>,
     /// The BBS advertisements and hull stock of each visited starport (F622).
-    offers: HashMap<usize, StationOffers>,
+    offers: HashMap<(u32, usize), StationOffers>,
+    /// The day marker for the once-a-day updates (F152's `DATA_008808`).
+    calendar: Calendar,
+    /// The mission/contract deadlines the missions stream has registered. They
+    /// are counted in [`Self::day`]s and expire on the day tick.
+    deadlines: Vec<Deadline>,
+    /// The deadlines that fell due since the last [`Self::take_expired`].
+    expired: Vec<Deadline>,
     /// The autopilot has reached a station's approach point and is flying into
     /// the slot.
     pub final_leg: bool,
@@ -901,12 +909,31 @@ pub fn burn_fuel(hold: &mut Vec<u16>, drive: Option<DriveState>, tonnes: i32) {
 }
 
 /// A station's market with the stream its daily drift draws from and the game day it
-/// was last brought up to.
+/// was last brought up to. The F870 conditions are kept with it so the daily
+/// tick can run from the stored state without re-reading the system tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StationMarket {
     pub market: Market,
     rng: RandomState,
     day: u32,
+    population: i64,
+    danger: i64,
+    flags: [u8; 37],
+}
+
+impl StationMarket {
+    /// F633's market half for one day.
+    fn daily(&mut self, tables: &MarketTables<'_>) -> Result<(), String> {
+        self.market.daily(
+            tables,
+            &Conditions {
+                population: self.population,
+                danger: self.danger,
+                flags: &self.flags,
+            },
+            &mut self.rng,
+        )
+    }
 }
 
 /// A starport's generated BBS and hull stock (F622/F633), with the stream and
@@ -918,6 +945,19 @@ pub struct StationOffers {
     pub hulls: Vec<(u32, u16)>,
     rng: npc::Random,
     day: u32,
+    /// The F622/F869 record the daily generation needs: the system and station
+    /// names, the neighbourhood the advertisements name, population, danger,
+    /// allegiance and the two shipyard bytes.
+    code: u32,
+    name: String,
+    station_name: String,
+    destinations: Vec<bulletin::Destination>,
+    population: u32,
+    danger: u32,
+    allegiance: u16,
+    military: u32,
+    civil: u32,
+    starports: u32,
 }
 
 impl StationOffers {
@@ -951,10 +991,64 @@ impl StationOffers {
         shipyard::part_exchange(&mut self.hulls, row, player);
         Ok(purchase)
     }
+
+    /// F633's BBS and shipyard half for one day. Returns whether the visible
+    /// board and stock changed. The name table is optional, as in F622.
+    fn daily(&mut self, cache: &VerifiedCache, day: u32) -> (bool, bool) {
+        let names = cache
+            .asset("base:text/names")
+            .and_then(|bytes| Names::new(bytes).ok());
+        let world = bulletin::World {
+            code: self.code,
+            name: &self.name,
+            population: self.population,
+            danger: self.danger,
+            allegiance: self.allegiance,
+            station_name: &self.station_name,
+            destinations: &self.destinations,
+            names: names.as_ref(),
+        };
+        let posts = self.posts.clone();
+        bulletin::daily(&mut self.rng, &mut self.posts, &world, day);
+        let hulls = self.hulls.clone();
+        shipyard::daily(
+            &mut self.rng,
+            &mut self.hulls,
+            self.allegiance,
+            self.population,
+            self.military,
+            self.civil,
+            self.starports,
+        );
+        (posts != self.posts, hulls != self.hulls)
+    }
 }
 
-/// The most days of drift applied at once (a long transfer or a wait).
-const MAX_DRIFT_DAYS: u32 = 30;
+/// One day's periodic updates, the port's record of F633 plus the deadline
+/// hook. `day` is the navigator's day counter ([`Navigator::day`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DayTick {
+    pub day: u32,
+    /// Visited markets that ran F633's price/stock drift.
+    pub markets: usize,
+    /// Bulletin boards whose daily draw replaced an entry.
+    pub boards: usize,
+    /// Shipyards whose daily draw changed the hull list.
+    pub hulls: usize,
+    /// Deadline ids that fell due on this day.
+    pub expired: Vec<u32>,
+}
+
+/// A mission or contract deadline registered through
+/// [`Navigator::schedule_deadline`].
+/// `day` is counted like [`Navigator::day`]: whole days since the new game
+/// (or the sandbox clock's start), so a mission's own day arithmetic can be
+/// passed in directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deadline {
+    pub id: u32,
+    pub day: u32,
+}
 
 /// The player's index in a station's bay table (the original's `DATA_008857`; 0 is an
 /// empty bay).
@@ -1267,6 +1361,9 @@ impl Navigator {
                 .unwrap_or_default(),
             markets: HashMap::new(),
             offers: HashMap::new(),
+            calendar: Calendar::at(0),
+            deadlines: Vec::new(),
+            expired: Vec::new(),
             galaxy_tables: cache
                 .asset("base:world/galaxy-tables")
                 .map(<[u8]>::to_vec)
@@ -1387,6 +1484,7 @@ impl Navigator {
         nav.pads = Some(pads);
         nav.clock = NEW_GAME_CLOCK;
         nav.start_clock = NEW_GAME_CLOCK;
+        nav.calendar = Calendar::at(nav.day());
         nav.docked = Some(index);
         nav.traffic.insert(index, port);
         nav.new_game = Some(NewGameState {
@@ -1520,13 +1618,15 @@ impl Navigator {
     /// The market of station `index`: generated on the first visit (F622's loop for one
     /// station, from a stream seeded by the system and the station, so a market is the
     /// same whenever it is first seen), and brought up to the day by the daily drift
-    /// (F633's market half, at most 30 days at once).
+    /// (F633's market half). Every day after the first visit is applied once, however
+    /// many frames or how much time acceleration produced it.
     pub fn market(
         &mut self,
         cache: &VerifiedCache,
         index: usize,
     ) -> Result<&mut StationMarket, String> {
         let day = self.day();
+        let code = self.entries[self.current].params.code;
         let (population, danger, flags) = self.conditions(cache)?;
         let conditions = Conditions {
             population,
@@ -1535,22 +1635,27 @@ impl Navigator {
         };
         let tables = MarketTables::new(&self.market_tables)
             .map_err(|_| "this cache has no market tables (cache v20)".to_owned())?;
-        if let std::collections::hash_map::Entry::Vacant(slot) = self.markets.entry(index) {
+        let key = (code, index);
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.markets.entry(key) {
             let mut rng = RandomState::new(
-                self.entries[self.current].params.code ^ 0x4d41_524b,
+                code ^ 0x4d41_524b,
                 (index as u32 + 1).wrapping_mul(0x9e37_79b9),
             );
             let market = Market::generate(&tables, &conditions, &mut rng)?;
-            slot.insert(StationMarket { market, rng, day });
+            slot.insert(StationMarket {
+                market,
+                rng,
+                day,
+                population,
+                danger,
+                flags,
+            });
         }
-        let station = self.markets.get_mut(&index).expect("just made");
-        let days = day.saturating_sub(station.day).min(MAX_DRIFT_DAYS);
-        for _ in 0..days {
-            station
-                .market
-                .daily(&tables, &conditions, &mut station.rng)?;
+        let station = self.markets.get_mut(&key).expect("just made");
+        for _ in (station.day + 1)..=day {
+            station.daily(&tables)?;
         }
-        station.day = day.max(station.day);
+        station.day = station.day.max(day);
         Ok(station)
     }
 
@@ -1618,7 +1723,8 @@ impl Navigator {
             destinations: &destinations,
             names: names.as_ref(),
         };
-        if let std::collections::hash_map::Entry::Vacant(slot) = self.offers.entry(index) {
+        let key = (code, index);
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.offers.entry(key) {
             let mut rng = npc::Random::new(
                 code ^ 0x4253_5342,
                 (index as u32 + 1).wrapping_mul(0x9e37_79b9),
@@ -1637,24 +1743,119 @@ impl Navigator {
                 hulls,
                 rng,
                 day,
+                code,
+                name,
+                station_name,
+                destinations,
+                population: market.population,
+                danger: market.danger,
+                allegiance: (details.allegiance >> 6) as u16,
+                military: details.bytes[1],
+                civil: details.bytes[3],
+                starports,
             });
         }
-        let offers = self.offers.get_mut(&index).expect("just made");
-        let days = day.saturating_sub(offers.day).min(MAX_DRIFT_DAYS);
-        for _ in 0..days {
-            bulletin::daily(&mut offers.rng, &mut offers.posts, &world, day);
-            shipyard::daily(
-                &mut offers.rng,
-                &mut offers.hulls,
-                (details.allegiance >> 6) as u16,
-                market.population,
-                details.bytes[1],
-                details.bytes[3],
-                starports,
-            );
+        let offers = self.offers.get_mut(&key).expect("just made");
+        for d in (offers.day + 1)..=day {
+            offers.daily(cache, d);
         }
-        offers.day = day.max(offers.day);
+        offers.day = offers.day.max(day);
         Ok(offers)
+    }
+
+    /// The last whole day whose periodic updates ran (`DATA_008808`).
+    pub fn last_day_tick(&self) -> u32 {
+        self.calendar.day()
+    }
+
+    /// Run F633's daily updates for every day the clock has crossed since the
+    /// last call: the visited markets' price and stock drift, the bulletin
+    /// boards' daily replacement and the shipyards' hull stock. Each day is
+    /// processed once, in order, so one long frame, a time-accelerated run and
+    /// a jump of several days all leave the same state.
+    ///
+    /// The returned records are one per day: what changed, and which mission
+    /// deadlines fell due. Callers that need those from an [`Self::advance`]
+    /// (which runs this itself) drain [`Self::take_expired`] instead.
+    pub fn tick_days(&mut self, cache: &VerifiedCache) -> Vec<DayTick> {
+        let days = self.calendar.advance(self.day());
+        if days.is_empty() {
+            return Vec::new();
+        }
+        // The tables are taken out of `self` so the markets can be visited while
+        // the drift draws from them.
+        let blob = self.market_tables.clone();
+        let tables = MarketTables::new(&blob).ok();
+        let mut ticks = Vec::new();
+        for day in days {
+            let mut tick = DayTick {
+                day,
+                ..DayTick::default()
+            };
+            if let Some(tables) = tables.as_ref() {
+                for station in self.markets.values_mut() {
+                    if station.day < day {
+                        if station.daily(tables).is_ok() {
+                            tick.markets += 1;
+                        }
+                        station.day = day;
+                    }
+                }
+            }
+            for offers in self.offers.values_mut() {
+                if offers.day < day {
+                    let (board, hulls) = offers.daily(cache, day);
+                    tick.boards += usize::from(board);
+                    tick.hulls += usize::from(hulls);
+                    offers.day = day;
+                }
+            }
+            self.expire(day, &mut tick);
+            ticks.push(tick);
+        }
+        ticks
+    }
+
+    /// Register (or move) a mission/contract deadline. The missions stream can
+    /// pass its own "day" arithmetic; [`Self::day`] is the same counter (whole
+    /// days since the new game/sandbox start). On the day tick, every deadline
+    /// whose day has arrived is queued for [`Self::take_expired`] and reported
+    /// in that day's [`DayTick`]. Re-registering an id replaces its day.
+    pub fn schedule_deadline(&mut self, id: u32, day: u32) {
+        self.deadlines.retain(|deadline| deadline.id != id);
+        self.deadlines.push(Deadline { id, day });
+    }
+
+    /// Remove a deadline (a mission completed or abandoned). Returns whether it
+    /// was registered.
+    pub fn cancel_deadline(&mut self, id: u32) -> bool {
+        let before = self.deadlines.len();
+        self.deadlines.retain(|deadline| deadline.id != id);
+        before != self.deadlines.len()
+    }
+
+    /// The deadlines still pending, in registration order.
+    pub fn deadlines(&self) -> &[Deadline] {
+        &self.deadlines
+    }
+
+    /// Take the deadlines that fell due since the last call. The missions
+    /// stream calls this after advancing time and expires or reports them.
+    pub fn take_expired(&mut self) -> Vec<Deadline> {
+        std::mem::take(&mut self.expired)
+    }
+
+    fn expire(&mut self, day: u32, tick: &mut DayTick) {
+        let mut pending = Vec::with_capacity(self.deadlines.len());
+        for deadline in self.deadlines.drain(..) {
+            if deadline.day <= day {
+                tick.expired.push(deadline.id);
+                self.expired.push(deadline);
+            } else {
+                pending.push(deadline);
+            }
+        }
+        self.deadlines = pending;
     }
 
     /// The player's hold in tonnes: the new game's F998 value when this navigator
@@ -2783,7 +2984,8 @@ impl Navigator {
         }
     }
 
-    /// Move the planets: the game clock advances `seconds` of world time.
+    /// Move the planets: the game clock advances `seconds` of world time, and
+    /// any whole day it crosses runs its periodic updates once (F152).
     pub fn advance(&mut self, cache: &VerifiedCache, seconds: f64) {
         self.clock += seconds;
         // Placing a system is cheap but not free: once a second of world time, and
@@ -2791,6 +2993,7 @@ impl Navigator {
         if self.clock - self.refreshed >= 1.0 || self.clock < self.refreshed {
             self.refresh(cache);
         }
+        self.tick_days(cache);
     }
 
     /// A transfer: the clock jumps and the ship is placed to match, so the target's
@@ -2798,6 +3001,7 @@ impl Navigator {
     pub fn transfer(&mut self, cache: &VerifiedCache, seconds: f64) {
         self.clock += seconds;
         self.refresh(cache);
+        self.tick_days(cache);
         self.drift = [0; 3];
         // A transfer is a jump in the system frame; it cannot arrive landed.
         self.landed = None;
@@ -2957,6 +3161,11 @@ impl Navigator {
         let days = f64::from(report.jump_time.unwrap_or(0)) / 65_536.0;
         self.clock += days * 86_400.0;
         let arrival = self.jump(cache, index)?;
+        // F152's day event is dispatched on the next frame in the original; the
+        // jump time's days are still exactly one tick each. The destination's
+        // markets are made fresh on arrival (F622), so only the deadline hook
+        // and the marker have anything to do here.
+        self.tick_days(cache);
         Ok(Jumped {
             arrival,
             distance,
@@ -3007,6 +3216,7 @@ impl Navigator {
         self.docked = None;
         self.traffic.clear();
         self.markets.clear();
+        self.offers.clear();
         self.sequence = None;
         self.takeoff = None;
         self.landed = None;

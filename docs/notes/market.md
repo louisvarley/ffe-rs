@@ -51,8 +51,10 @@ at the first visit: water 0.9, grain 38.0, precious metals 1735.6, gem stones 30
   the value F1533 stores at `+0x116` and F992 copies): 5 t for the default Eagle long range fighter.
   The original lowers it further for equipment (F911 and the new-game set-up); not modelled.
 - A market is made on the first visit to a station from a stream seeded by the system code and the
-  station (the same every run), and brought up to the day by the daily drift when seen again (at most 30
-  days at once). Markets and the traffic records are not saved; the cash and the hold are.
+  station (the same every run), and brought up to the day by the daily drift when seen again. Every
+  crossed day runs once (`ffe_core::calendar`, `Navigator::tick_days`; `docs/notes/time.md`); there
+  is no 30-day catch-up cap, so a long acceleration or jump applies each missed day in order.
+  Markets and the traffic records are not saved; the cash and the hold are.
 - Not here: the black market (the illegal goods, which the original lists behind a toggle), mission cargo,
   the price events the original raises (`F48(0x18...)`), jettisoning, the equipment that changes the hold,
   and the exact interleaving of the random draws with the rest of the game. Starports (planet-side) are
@@ -65,7 +67,9 @@ at the first visit: water 0.9, grain 38.0, precious metals 1735.6, gem stones 30
 - `tools/reference/verify-assets.py`: the imported tables and names equal JJFFE's `DATA_006164..6169` and
   `DATA_006216..6253`, and the executable's own bytes at the recorded offset (run on 2026-10-24).
 - All 329 table systems generate a market (population at most 9, danger at most 7, so every table index
-  is in range); `tests/market_view.rs` (local-only) trades, drifts, saves and draws.
+  is in range); `tests/market_view.rs` (local-only) trades, drifts, saves and draws. The day boundary
+  itself (one drift per crossed day, acceleration equivalence) is `tests/timed_events.rs`
+  (`docs/notes/time.md`).
 - **Verified against the executed original** (2026-10-24): `--market` in `headless.c` runs F619 and F620 with
   the game's own tables and generator on 8,192 random commodities, populations, dangers and flags;
   `tools/reference/verify-market.py` with `crates/ffe-rs/tests/market_reference.rs` finds every price, every

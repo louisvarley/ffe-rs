@@ -1,0 +1,11 @@
+{"note":"start","clock":0.0,"day":0,"last_day_tick":0,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":15005},"posts":18,"hulls":13}
+{"note":"day","clock":86400.0,"day":1,"last_day_tick":1,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":14357},"posts":18,"hulls":13}
+{"note":"day","clock":172800.0,"day":2,"last_day_tick":2,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":13814},"posts":18,"hulls":13}
+{"note":"day","clock":259200.0,"day":3,"last_day_tick":3,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":13865},"posts":18,"hulls":13}
+{"note":"day","clock":345600.0,"day":4,"last_day_tick":4,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":14243},"posts":18,"hulls":13}
+{"note":"day","clock":432000.0,"day":5,"last_day_tick":5,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":13930},"posts":18,"hulls":13}
+{"note":"day","clock":518400.0,"day":6,"last_day_tick":6,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":14301},"posts":18,"hulls":13}
+{"note":"day","clock":604800.0,"day":7,"last_day_tick":7,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":13877},"posts":18,"hulls":13}
+{"note":"day","clock":691200.0,"day":8,"last_day_tick":8,"system":"Sol","docked":true,"ships":0,"water":{"price":9,"stock":14220},"posts":18,"hulls":13}
+{"note":"jump","clock":831510.4,"day":9,"last_day_tick":9,"system":"Alpha Centauri A,B","docked":false,"ships":1,"water":{"price":10,"stock":2161},"posts":9,"hulls":3}
+{"note":"dock","clock":831510.4,"day":9,"last_day_tick":9,"system":"Alpha Centauri A,B","docked":true,"ships":1,"water":{"price":10,"stock":2161},"posts":9,"hulls":3}

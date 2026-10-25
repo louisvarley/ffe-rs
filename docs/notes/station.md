@@ -188,7 +188,9 @@ anywhere while docked. These are called out as port conveniences in
   board is generated on first use from `DATA_006170` (`F621`: 32 slots, 18
   stored) and the 0x981a..0x982d templates. F622 makes `population * 4 + 1`
   attempts; F633's daily roll replaces one entry when `random(7) < population`.
-  The four 33-pixel rows wrap at 177 pixels and the up/down/More arrows page
+  The day tick (`Navigator::tick_days`, `docs/notes/time.md`) runs F633 once per
+  crossed day for every visited board, and the same tick drifts markets and
+  shipyard stock. The four 33-pixel rows wrap at 177 pixels and the up/down/More arrows page
   them; selecting a post shows its full text on the console (F523's mission
   reply actions are not ported). The goods, military, passenger/parcel,
   removal, crew and charity generators are ported; the recent-systems wanted
@@ -247,7 +249,7 @@ owner wants it, the next step is to follow the F2 console action
 | `ffedat.asm:9443` `DATA_006170` | 32 BBS generator slots F621 indexes | `bulletin_table::GENERATORS` |
 | `ffe.asm:42635` F621 | dispatch `F922(0x20)` to a generator | `bulletin::generate_one` |
 | `ffe.asm:42654` F622 | make the BBS/stock for each starport (`population * 4 + 1` attempts) | `navigation::station_offers` |
-| `ffe.asm:43279` F633 | daily BBS/stock update | `bulletin::daily`, `shipyard::daily` |
+| `ffe.asm:43279` F633 | daily BBS/stock update | `bulletin::daily`, `shipyard::daily`, `navigation::tick_days` |
 | `ffe.asm:43626..44257` F636-F646 | the generators and `F646`'s six-dword entry | `bulletin::{goods, military, ship_job, removal, crew, charity}` |
 | `ffedat.asm:6778` `DATA_005299` | the 0x981a..0x982d templates and 0x99xx embeds | `bulletin_table::{TEMPLATES, STRINGS}` |
 | `ffedat.asm:9476..9505` `DATA_006171..6174` | passage multipliers, extra danger money and danger multipliers | `bulletin::{PASSAGE, DANGER_}*` |
