@@ -18,7 +18,7 @@ structural:
 * the console's top rows (158..168) match the original's pixel for pixel
   (>= 98% within 8 levels): the panel art is the original's.
 
-Needs `jjffe-smoke.exe`, `data.bin` (cache v27) and numpy/Pillow.
+Needs `jjffe-smoke.exe`, `data.bin` (cache v26) and numpy/Pillow.
 """
 import argparse
 import json
@@ -72,7 +72,7 @@ def accepted(result):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke", required=True, type=Path, help="jjffe-smoke.exe")
-    parser.add_argument("--cache", required=True, type=Path, help="data.bin (cache v27)")
+    parser.add_argument("--cache", required=True, type=Path, help="data.bin (cache v26)")
     args = parser.parse_args()
     smoke = args.smoke.resolve(strict=True)
     root = Path(__file__).resolve().parents[2]
