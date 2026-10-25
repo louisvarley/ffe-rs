@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 27 or len(manifest["files"]) != 1796:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 28 or len(manifest["files"]) != 1797:
             raise RuntimeError("incorrect cache scope/count")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
@@ -143,7 +143,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1797:
+            if archive.testzip() is not None or len(archive.infolist()) != 1798:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])
@@ -388,6 +388,9 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
                             raise RuntimeError("WAV metadata differs")
                         if reader.readframes(reader.getnframes()) != (game / "FX" / name).read_bytes():
                             raise RuntimeError("WAV samples differ")
+                elif asset["kind"] == "music_hmp":
+                    if payload != (game / "MUSIC" / "QQFRONT.HMP").read_bytes():
+                        raise RuntimeError("intro HMP differs")
                 elif asset["kind"] == "cabin_png":
                     name = Path(record["path"]).stem.upper() + ".BMP"
                     bmp = (game / name).read_bytes()

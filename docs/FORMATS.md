@@ -197,16 +197,20 @@ contract, not the full schema/examples in sections 2.1 onward.
   `character_widths`, the 256 signed bytes of `DATA_007648` at file offset
   `0xe9998`/RVA `0xffd98`). See `ffe_rs::intro_text` and
   `docs/notes/intro.md`.
+- V28 adds `base:music/qqfront` (`music/qqfront.hmp`, type `music_hmp`): the
+  player's `MUSIC/QQFRONT.HMP` byte-for-byte, so the boot's F919 song 0 is
+  available from the cache. The other 16 HMPs stay player-supplied runtime files.
+  See `docs/notes/sound.md`.
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
-  v10); v26 1794; v27 1796. Tools read every version. The playable requires v2 font content;
+  v10); v26 1794; v27 1796; v28 1797. Tools read every version. The playable requires v2 font content;
   F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps
   points-only inspection; v4 adds declared-face inspection. The lab requires
   matching command/vertex model indices, counts and descriptor offsets.
   V5 adds a fourth, normal-filtered outline view, requiring matching normal/vertex
   model indices, vertex counts and descriptor offsets.
   No submodels, gameplay tables, other font data,
-  journal, music, CD media or replacement art. No version can
+  journal, the other 16 HMP songs, CD media or replacement art. No version can
   label any archive as complete game content.
 - Reader limits: 64 MiB archive/aggregate payload, 2048 assets, 4 MiB manifest.
   Unsafe/duplicate/unsorted paths, duplicate IDs, symlinks, extra/missing entries,

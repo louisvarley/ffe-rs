@@ -71,6 +71,10 @@ pub enum AssetKind {
         height: u32,
     },
     EffectWav,
+    /// The intro song `MUSIC/QQFRONT.HMP`, stored losslessly (v28). The other
+    /// 16 songs stay player-supplied runtime files; the intro needs its theme
+    /// as soon as the boot loop starts.
+    MusicHmp,
     /// The original texture descriptor table `DATA_007811` (v8).
     TextureDescriptors {
         count: u32,
@@ -282,7 +286,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=27) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=28) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -356,6 +360,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
             )
         {
             return Err("The intro credits and character widths require cache v27.".to_owned());
+        }
+        if manifest.format_version < 28 && matches!(record.asset, AssetKind::MusicHmp) {
+            return Err("The intro song asset requires cache v28.".to_owned());
         }
         if manifest.format_version < 24
             && matches!(
@@ -718,6 +725,11 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         AssetKind::EffectWav => {
             if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt " {
                 return Err("invalid effect WAV descriptor/signature".to_owned());
+            }
+        }
+        AssetKind::MusicHmp => {
+            if bytes.len() < 0x40 || !bytes.starts_with(b"HMIMIDIP") {
+                return Err("invalid intro HMP signature".to_owned());
             }
         }
     }

@@ -27,7 +27,7 @@ build-data imports 345 bitmaps, two raw texture blocks, the fixed low palette, c
 effects and main font into a deterministic partial cache. V3 adds two original
 station vertex programs; v4/v5 add root commands/normals and v6 the original sine table; v7 imports every model that decodes; v8 adds the texture descriptor table and the 12-bit fixed colour map (floppy 1.02).
 inspect-data verifies every entry. Bounded native command execution is not yet
-complete station rendering. Submodels, gameplay tables, music and full conversion remain absent.
+complete station rendering. Submodels, gameplay tables, the other 16 songs and full conversion remain absent.
 verify-reference compares fixed legacy RNG/timer vectors and bounded new-game
 clock transitions against native Rust primitives. It is not full flight validation.
 model-census reports, read-only, how far each of the 465 original models gets
@@ -256,7 +256,7 @@ fn run() -> Result<u8, String> {
                 .map_err(|error| error.to_string())?;
             writeln!(output).map_err(|error| error.to_string())?;
         } else {
-            writeln!(output, "Verified content cache v{}: {}\nAssets: {}; source fingerprints: {}\nPartial content only; not a complete game cache. Runtime upper palette, full model-command execution/submodels, gameplay tables, other fonts, journal, music and CD media remain unresolved.",
+            writeln!(output, "Verified content cache v{}: {}\nAssets: {}; source fingerprints: {}\nPartial content only; not a complete game cache. Runtime upper palette, full model-command execution/submodels, gameplay tables, other fonts, journal, the other 16 songs and CD media remain unresolved.",
                 manifest.format_version, manifest.source_profile, manifest.files.len(), manifest.source_files.len()).map_err(|error| error.to_string())?;
         }
         return Ok(0);

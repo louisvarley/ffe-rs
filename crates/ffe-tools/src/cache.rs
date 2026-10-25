@@ -615,6 +615,13 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
                 },
                 bytes: image.indexed_png()?,
             });
+        } else if record.path == "MUSIC/QQFRONT.HMP" {
+            assets.push(Asset {
+                id: "base:music/qqfront".to_owned(),
+                path: "music/qqfront.hmp".to_owned(),
+                kind: AssetKind::MusicHmp,
+                bytes: recorded_bytes(&root, record)?,
+            });
         } else if record.path.starts_with("FX/") && record.path.ends_with(".RAW") {
             let name = record
                 .path
@@ -662,15 +669,16 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         }
         + 4;
     // Plus the v10 model descriptor table, the v12 ship statistics table and the
-    // v16 model record table.
-    if models < 2 || assets.len() != 382 + tables + 3 * models {
+    // v16 model record table, and v28's one intro HMP.
+    let intro_song = usize::from(assets.iter().any(|asset| asset.id == "base:music/qqfront"));
+    if models < 2 || assets.len() != 382 + tables + 3 * models + intro_song {
         return Err(format!(
             "unexpected imported asset count {} ({models} models); no cache written",
             assets.len()
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 27,
+        format: "ffe-content-cache".to_owned(), format_version: 28,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,
@@ -689,7 +697,7 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
             } else {
                 "Lighting tables are not imported: their RVAs are verified for floppy 1.02 only.".to_owned()
             },
-            "Station commands are structurally decoded, not fully executed; submodels, other fonts, gameplay tables, journal, music and optional CD media remain unconverted.".to_owned(),
+            "Station commands are structurally decoded, not fully executed; submodels, other fonts, gameplay tables, journal, the other 16 HMP songs and optional CD media remain unconverted.".to_owned(),
             "Not a playable game cache or installable graphics pack; patch-output layouts are unsupported.".to_owned(),
         ],
         files: Vec::new(),

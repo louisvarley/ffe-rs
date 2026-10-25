@@ -1,18 +1,17 @@
 # Sounds and music
 
 Status: reference note for the `sound` stream. It documents the original
-DOS/JJFFE sound effects and music, the HMP format, the player that now exists in
-`ffe-core`/`ffe-audio`, and the exact interface the ESC/preferences page should
-use. It does not claim that effects are mixed in the game yet: the 23 cached
-effect WAVs are still unplayed; section 1.4 lists the call sites and the cue
-layer now posts them.
+DOS/JJFFE sound effects and music, the HMP format, the player in
+`ffe-core`/`ffe-audio`, the 16-voice effect mixer, and the exact interface the
+ESC/preferences page uses. The 23 cached effect WAVs are now decoded and mixed;
+the intro's song 0 (`QQFRONT`) starts with F919 and loops until the start key.
 
-**Cue wiring update:** `crates/ffe-rs/src/sound.rs` now posts the original's
+**Cue wiring update:** `crates/ffe-rs/src/sound.rs` posts the original's
 effect cues and scene music from the game events, and the ESC Sound Effects
 page drives `AudioSettings`/`SoundFlags`. The sample table, call sites, music
 rules, tests and the remaining mixer work are recorded in
-`docs/notes/sound-cues.md`. Effects still have no device path (the system engine
-uses a `NullSampleSink`); music is audible through the WinMM player.
+`docs/notes/sound-cues.md`. Effects are audible through WinMM `waveOut`; music is
+audible through the WinMM MIDI player.
 
 Sources read for this note:
 
@@ -191,14 +190,41 @@ Line references are the call instruction. "Default" means `F1906` (level 63);
 | `F1904` (132643) | done | Returns done, clears current song. |
 | `F528` (90894) | stop song | System cleanup. |
 
-The cache already contains all 23 WAVs, but the port has no mixer. The events
-that need wiring are therefore the rows above with a non-`nowt` sample:
+The cache contains all 23 WAVs and the mixer decodes them. The events that need
+wiring are therefore the rows above with a non-`nowt` sample:
 weapons (`F930`, `F935`, `F719`, `F720`, `F941`, `F942`, `F953`), collisions
 (`F745`, `F953`), docking/launch (`F1018`-`F1098`), station/engine ambience
 (`F1042`/`F1043`/`F1046`, `F1092`), wind (`F1014`), hyperspace (`F908`), camera
 (`F1125`) and the UI/notification family (`F150`, `F209`, `F216`, `F351`,
 `F361`, `F380`, `F983`, `F1056`, `F1059`-`F1065`). `nowt` rows should stay
 no-ops, not "missing sample" errors.
+
+### 1.5 The port mixer (`ffe_audio::mixer`)
+
+`Mixer` is the software equivalent of the DirectSound channel array. It is
+pure (no device) and is driven by the effect sink: `MixerSampleSink` renders
+256-frame blocks on a WinMM `waveOut` thread, or exposes `mix_into` headlessly in
+tests. The sample set is decoded from the cache's `base:effect/<name>` WAVs at
+startup (`GameAudio::from_cache`); a v27 cache still has all 23.
+
+| Rule | Implementation |
+|---|---|
+| Voices | 16 (`NUMCHANNELS`). |
+| Same sample already playing | Reuse its voice. If the descriptor has a fixed `voice` (`>= 0`) the repeat is ignored, except index `0x10`, which only updates volume/pitch (the station bed's `F1910`). |
+| Generic sample already playing | A second call allocates another voice, as `SoundPlaySample` does. |
+| No free voice | Steal a `laser1` (`0x0b`) voice; with none, drop the new sample. This is the original's explicit choice, not oldest-voice eviction. |
+| Loop count | `LoadSample` copies the PCM `loopcount` times (`0` means once), so `station` is 50 copies and `ecm`/`necm` 2, `siren` 3. |
+| Pitch | `pitch == -1` is 22,050 Hz; add the descriptor's `pitchmod` (wind is -0x4000, station 0x10 is +0x1000), clamp to DirectSound's 100..=200,000 Hz and resample by that ratio. |
+| Volume | `F1908` passes `level << 9` (capped 0x7fff). `SoundPlaySample` computes `(long)(2217 * log10(volume))`, rounds up to a multiple of 16 and subtracts 10,000 centibels. `level_centibels`/`level_gain` reproduce that exactly; level 63 is 0 centibels, level 31 is -688, level 0 is silence. |
+| Mixing | Sum the 16 voices in floating point, then clamp to `i16`. The original leaves this to DirectSound; the port's hard cut at the sample end is the same behaviour. |
+| Preferences | `AudioEngine` applies `effects_on` before the sink and `effects_volume` through `settings.effect_level` (the original level is scaled before the curve). `set_settings` stops all voices when effects are switched off. |
+
+The mixer does not implement positional audio. The original's `F1759` spatial
+helper is present in `ffe.asm` but not called by the DOS game; the port has no
+per-voice pan or distance attenuation. The fixed-voice markers are honoured as
+the source's repeat rules, not as a forced channel allocation: `w32sound.cpp`
+allocates the first free DirectSound channel and uses `fixednum` only to suppress
+a repeat.
 
 ---
 
@@ -511,7 +537,8 @@ The port (`ffe-audio`):
   closest available equivalent of the original's system-MIDI destination. There
   is no DirectMusic/MCI/BASS layer.
 - On non-Windows or when no device opens, the `NullMidiSink` is used. Tests and
-  CI never require a device.
+  CI never require a device. The effect path is independent: `waveOut` when it
+  opens, otherwise the same `Mixer` headless (silent but deterministic for tests).
 - No `.mid` override: the port always reads `<SongPath>/<NAME>.HMP`. JJFFE's
   `.mid`-first preference is a documented difference; adding it later only needs
   an SMF reader in front of the same `MidiSink`.
@@ -598,6 +625,8 @@ use ffe_audio::{Audio, AudioEngine, AudioError, MusicLibrary};
 
 let library = MusicLibrary::from_game_dir(game_dir); // <game>/MUSIC
 let mut audio: Box<dyn Audio> = Box::new(AudioEngine::system(library));
+// In the game use `GameAudio::from_cache(&game_dir, &cache)`: it also opens the
+// wave device and installs the cache's `base:effect/*` WAVs and intro song.
 // Or: let mut audio = crate::audio::open_game_audio(game_dir);
 audio.set_settings(settings);
 audio.set_sound_flags(flags);
@@ -647,13 +676,20 @@ code, not a filename; it multiplies the supplied level by
 
 Concrete constructors:
 
-- `AudioEngine::system(library)`: Windows system MIDI when available, otherwise
-  silent. This is the normal game choice and never fails.
+- `AudioEngine::system(library)`: Windows system MIDI and wave output when
+  available, otherwise silent/headless. This is the normal game choice and never
+  fails. It has an empty effect set; use `system_with_effects` or
+  `GameAudio::from_cache` to install the cache WAVs.
+- `AudioEngine::system_with_effects(library, effects)`: the normal game engine
+  with decoded `EffectLibrary` samples.
 - `AudioEngine::silent(library)`: no device, for CI/headless.
-- `AudioEngine::windows(library, None)`: explicit WinMM open, returns
-  `AudioError::MidiUnavailable` on failure.
+- `AudioEngine::silent_with_effects(library, effects)`: headless but still
+  renders the effect path (useful for captures that must not open a device).
+- `AudioEngine::windows(library, None)`: explicit WinMM MIDI open, returns
+  `AudioError::MidiUnavailable` on failure. The effect device is independent.
 - `AudioEngine::new(library, midi_sink, sample_sink)`: custom backends (also how
-  tests attach `RecordingMidiSink`/`RecordingSampleSink`).
+  tests attach `RecordingMidiSink`/`RecordingSampleSink`/`MixerSampleSink`).
+- `AudioEngine::set_effects(effects)`: install WAVs after construction.
 
 The preferences page should not spin a thread. Call `tick` from the same loop
 that advances the game clock; 20 ms or the frame time is fine. The player uses
@@ -665,8 +701,9 @@ microsecond integers and does not drift with variable frame times.
    `crate::audio` re-export in `ffe-rs`.
 2. Store `AudioSettings` and `SoundFlags` in its preferences structure and
    persist them with serde.
-3. Create one `AudioEngine::system(MusicLibrary::from_game_dir(game_dir))` at
-   start-up and keep it for the process lifetime.
+3. Create one `GameAudio::from_cache(&game_dir, &cache)` (or
+   `AudioEngine::system_with_effects`) at start-up and keep it for the process
+   lifetime.
 4. On the ESC page's "Sound Effects" controls, update the matching `SoundFlags`
    field or `AudioSettings` value and call `set_sound_flags`/`set_settings`.
    `music_volume`/`effects_volume` are new sliders; the original had only the
@@ -690,21 +727,24 @@ New code:
 
 - `crates/ffe-core/src/hmp.rs`: HMP parser, absolute-tick events, duration, SMF
   export, errors and unit tests.
-- `crates/ffe-audio`: `MusicLibrary` (17-name table and runtime `MUSIC/` load),
-  `MusicPlayer` (tick-driven MIDI scheduler, once/loop, CC7 scaling, all-notes-off),
-  `AudioEngine`/`Audio` trait, WinMM sink, recording/null sinks, settings/flags,
-  and a runnable `examples/play.rs`.
+- `crates/ffe-audio`: `MusicLibrary` (17-name table, runtime `MUSIC/` load and a
+  cache HMP override), `MusicPlayer` (tick-driven MIDI scheduler, once/loop, CC7
+  scaling, all-notes-off), `AudioEngine`/`Audio` trait, WinMM MIDI sink,
+  `mixer` (WAV decode, sample table, 16 voices, centibel curve), WinMM `waveOut`
+  sink, recording/null sinks, settings/flags, and a runnable `examples/play.rs`.
 - Workspace member `crates/ffe-audio`; no new external runtime dependencies
-  (WinMM is a system library; `serde` was already in the workspace).
+  (`winmm` is a system library; `serde` was already in the workspace).
 
 Evidence (run on the reference checkout with the player's `MUSIC` folder):
 
 ```
 cargo test -p ffe-audio -p ffe-core
-  9 ffe-audio unit tests passed
+  19 ffe-audio unit tests passed (mixer, WAV, voices, settings, player)
   3 ffe-core hmp tests passed
   1 player_smoke test passed (null backend)
   FFE_MUSIC_DIR=<game>/MUSIC: all 17 HMPs parsed; 2 asset tests passed
+cargo test -p ffe-rs --test sound_mixer
+  3 passed (real PCM mixed, mute stops voices, 50% volume curve)
 ```
 
 The 17-file test prints the table in section 2.1 and asserts:
@@ -713,28 +753,37 @@ track count = data tracks + 1, >0 data tracks/events/ticks, division 192, tempo
 recording tests assert the startup CC7 volume, note on/off, loop restart, stop
 (all-notes-off plus reset), and volume changes without a restart.
 
+The mixer tests assert actual PCM output (`Mixer::render`), one-shot end,
+`ecm`'s two baked copies, the `0x0f` ignore/`0x10` update rules, the laser1
+steal, the `nowt` no-op, and the exact centibel values for levels 0/31/63.
+
 Remaining work, in order:
 
-1. **Effect mixer.** The `play_sample` calls listed in 1.4 are now wired from
-   the game events (`docs/notes/sound-cues.md`), but they still record/no-op:
-   no device path exists for effects. Decode the cached WAVs (or RAW directly),
-   mix 16 voices at 22,050 Hz mono, implement the fixed-voice/loop-count rules
-   and the `2217*log10(level)` curve.
-2. **Device support.** WinMM system MIDI is in; test on a machine without the
-   GS Wavetable Synth (a MIDI port that only exposes external hardware). Add a
+1. **Continuous beds.** `Engine`, `Station` and `Wind` are still one-shot cue
+   calls from the game. The mixer implements the 50-copy station loop and
+   `0x10`'s volume/pitch update, but the flight state does not yet drive
+   `F1910`'s envelope or `F1908`'s randomised second wind voice. This is the
+   next audible improvement.
+2. **Device support.** WinMM system MIDI and `waveOut` are in; test on a machine
+   without the GS Wavetable Synth (a MIDI port that only exposes external
+   hardware) and on a machine whose default wave device is exclusive-mode. Add a
    device picker if needed. A bundled SoundFont/software synth is a separate
    licensing decision (CLAUDE.MD §5).
 3. **`.mid` override.** If a user has `MUSIC/*.mid`, JJFFE prefers it. Add a
    small SMF reader and route it through the same `MidiSink`.
-4. **Cache asset decision.** The player currently reads `MUSIC/*.HMP` at runtime.
-   This is deliberate: HMPs are player-supplied, not in `data.bin`, and they are
-   tiny. If offline rendering is wanted, add `audio/music/<name>.mid` cache
-   assets (the path is already reserved in `docs/FORMATS.md`) and use the same
-   parser/SMF writer. Do not commit the HMPs; they are copyrighted game data.
+4. **Cache asset decision.** V28 caches only `MUSIC/QQFRONT.HMP`
+   (`base:music/qqfront`, byte-for-byte) because the intro needs it at boot; the
+   other 16 stay player-supplied runtime files. Extending the same `music_hmp`
+   kind to all 17 would remove the runtime folder dependency but raise the cache
+   to 1813 assets. Do not commit the HMPs; they are copyrighted game data.
 5. **Timbre.** The system synth is not the HMI patch set. Notes/timing/volume
    are faithful; instrument sound is not. Record the synth/SoundFont identity in
    any future cache provenance.
 6. **QQFRONT/QQSUSPEN duration.** Confirm whether the advertised header includes
-   a repeat. There are no loop markers, so the port plays the event timeline.
+   a repeat. There are no loop markers, so the port plays the event timeline and
+   F919 restarts it on completion.
+7. **Positional audio.** `F1759` (the spatial-volume helper) is not called by
+   the DOS game, and the port has no pan/distance path. Add it only if a caller
+   needs it; the original effect calls are mono.
 
 No dashboard, burndown or `docs/PORT_LOG.md` edits were made.

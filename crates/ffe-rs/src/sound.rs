@@ -9,21 +9,26 @@
 //! [`Audio`](crate::audio::Audio) player receives `play_sample(index, level,
 //! pitch)`.
 //!
-//! Two deliberate limits:
+//! Two implementation notes:
 //!
-//! - The port has no effects mixer yet (`docs/notes/sound.md` §5, remaining
-//!   work 1). Cue calls therefore go to whatever [`SampleSink`] the engine
-//!   owns: the system engine's sink is silent, the recording sink in tests
-//!   records them. The cue mapping and event wiring are complete and testable.
+//! - The effect mixer (`ffe_audio::Mixer`) decodes the cache WAVs and mixes 16
+//!   voices. The system engine opens a WinMM `waveOut` device and installs the
+//!   cache's `base:effect/*` payloads; a missing device (and every test/capture)
+//!   falls back to the same mixer headless. The cue mapping and event wiring are
+//!   independent of the device.
 //! - The continuous engine/station/wind beds are one-shot cue calls here. The
 //!   original re-sends `0x0f`/`0x10` with `F1910`/volume envelopes and loops a
-//!   50-copy sample; both are the mixer's job, not the game loop's.
+//!   50-copy sample; the mixer implements the loop count, but the port does not
+//!   yet drive the envelope from the flight state.
 //!
 //! Citations are to `jjffe-master/ffe.asm`; sample names are the `FX/*.RAW`
 //! table in `win32/w32sound.cpp` (`pSoundSampleDescs`).
 
-use crate::audio::{Audio, AudioEngine, AudioSettings, MusicLibrary, SoundFlags};
+use crate::audio::{
+    Audio, AudioEngine, AudioSettings, EffectLibrary, MusicLibrary, SoundFlags, EFFECT_NAMES,
+};
 use crate::prefs::Prefs;
+use ffe_content::VerifiedCache;
 use std::path::Path;
 use std::time::Duration;
 
@@ -245,9 +250,26 @@ impl GameAudio {
     }
 
     /// The normal game engine: the WinMM system synth when a device opens,
-    /// silence otherwise. Never fails.
+    /// silence otherwise. Never fails. It has no effect samples; the game uses
+    /// [`Self::from_cache`], so the cache's WAVs are installed.
     pub fn from_game_dir(game_dir: impl AsRef<Path>) -> Self {
         Self::new(AudioEngine::system(MusicLibrary::from_game_dir(game_dir)))
+    }
+
+    /// The normal game engine with the cache's decoded effects and the cached
+    /// intro song. `cache` is the verified `data.bin`; its `base:effect/*` WAVs
+    /// are turned into the 16-voice mixer's sample set, and `base:music/qqfront`
+    /// (cache v28+) seeds song 0. A v27 cache simply has no cached song and the
+    /// player's `MUSIC/QQFRONT.HMP` is used instead.
+    pub fn from_cache(game_dir: impl AsRef<Path>, cache: &VerifiedCache) -> Self {
+        let mut music = MusicLibrary::from_game_dir(game_dir);
+        if let Some(bytes) = cache.asset("base:music/qqfront") {
+            music.insert_hmp(0, bytes.to_vec());
+        }
+        Self::new(AudioEngine::system_with_effects(
+            music,
+            cached_effects(cache),
+        ))
     }
 
     /// No device, for captures and the smoke test. Cues are no-ops; music is
@@ -431,6 +453,23 @@ impl GameAudio {
         self.audio.tick(elapsed);
         self.update_music();
     }
+}
+
+/// Decode every cached `base:effect/<name>` WAV. A missing asset is not an
+/// error (a v27 cache has them all; a hand-built cache may not), and a malformed
+/// one is reported once and skipped rather than disabling the rest.
+fn cached_effects(cache: &VerifiedCache) -> EffectLibrary {
+    let mut effects = EffectLibrary::new();
+    for name in EFFECT_NAMES {
+        let id = format!("base:effect/{name}");
+        let Some(bytes) = cache.asset(&id) else {
+            continue;
+        };
+        if let Err(error) = effects.insert_wav(name, bytes) {
+            eprintln!("Effect {id}: {error}");
+        }
+    }
+    effects
 }
 
 #[cfg(test)]
