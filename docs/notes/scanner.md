@@ -85,7 +85,10 @@ yaw.
 When `DATA_009024` ("Show targeting tunnels") is set, the view is not 4
 (external) or 6 (combat computer), the target's screen words are inside
 `-1000..1000`, and — when `DATA_009025` is clear — the target has no statistics
-block (so is not a ship), `F1100` calls `F1113` four times with shift 0..3:
+block (so is not a ship), `F1100` calls `F1113` four times with shift 0..3.
+The combat target's tunnels are additionally gated on the missile view (5), so
+in normal views only the navigation target draws the four boxes
+(`ffe.asm:81185-81250`):
 
 ```
 w = 0x80 - shift*0x20
@@ -130,10 +133,12 @@ do not draw the tunnel.
 - `main.rs`: scanner contacts from `Navigator::bodies` (position, parent frame,
   model/mass) plus live NPC ships (the player's frame), gated by
   `ShipSystems::ca & 4` (the new-game default now sets 0x04); the orientation
-  from the ship's yaw; the autopilot/nav target's tunnels in 0x11, the
-  combat/manual target's in 0x10, gated by `prefs.others[6]` (show) and
-  `[7]` (ships) and not in the external view. F1100's off-view fixed spot is
-  (50,50) for the navigation target and (50,60) for the combat target.
+  from the ship's yaw. A body lock is the navigation target (0x11) and an NPC
+  ship lock the combat target (0x10); the navigation target's four tunnels are
+  gated by `prefs.others[6]` (show), `[7]` (ships) and not the external view.
+  F1100's off-view fixed spot is (50,50) for the navigation target and (50,60)
+  for the combat target. The unclipped projection (`Screen::body_projection`)
+  feeds the off-view arrow choice.
 - `targeter.rs`: F1113's four boxes (size from the range mantissa), F1114's
   clipped edges, F1612's circle, and the box/circle cursor on `blink`.
 - Removed the port's own corner brackets around the locked target; the original
@@ -146,11 +151,13 @@ do not draw the tunnel.
   cycles locks instead (existing deviation). `Screen::targeter`/`Screen::blink`
   implement the draw path and frames; deciding whether to add the equipment and
   the F1010/F1060/F1062 arming is an owner decision.
-- **Range text.** F1100's text colour is the target's (0x11 nav / 0x10 combat,
-  0x5f in missile view); the port keeps the earlier verified colour 95. The
-  on-view "Target d km ~/}/down/right-arrow" forms are not drawn; the port
-  draws the number at the target and the Behind/Out of Range strings. Two
-  simultaneous targets (0xec and 0xed) are collapsed to one display.
+- **Range text.** Ported as F1100: the text colour is the target's COLPAL
+  (0x11 nav green / 0x10 combat red, 0x5f in missile view). The number is in
+  hundredths with two decimals and no space (`5.40AU`, `1.00km`), drawn one
+  10-row line below the target's `-5` origin. The off-view Behind, Out of
+  Range and four arrow forms (0x7d/0x7e left/right, 0x7f/0x80 below) are
+  ported. Two simultaneous targets (0xec and 0xed) are still collapsed to one
+  display, and the port has no missile view for 0x5f.
 - **Scanner same-frame source.** The original's `player+0x56` is the physics
   frame body; the port uses `Navigator::frame()`, chosen by
   `Navigator::follow` from the station/planet proximity. Traffic is marked as

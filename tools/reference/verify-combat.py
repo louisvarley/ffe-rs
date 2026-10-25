@@ -51,6 +51,7 @@ COMBAT_TESTS = {
     "gauges_show_f270s_energy_and_heat_bars",
     "new_game_hull_carries_f998s_one_front_pulse_laser",
     "target_damage_readout_draws_f1099s_text",
+    "target_lock_uses_f1100s_green_and_two_decimal_au",
     "beam_is_model_156_at_the_gun",
 }
 

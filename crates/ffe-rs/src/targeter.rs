@@ -8,6 +8,11 @@
 //! line from (160,79) to the target, and `F1114` draws its four edges clipped to
 //! the 320x158 view.
 //!
+//! `F1100` also owns the range text: its value is in hundredths, the string's
+//! FF30 index 7 writes two decimals, and the on-view suffix has no leading
+//! space (`5.40AU`). [`range_text`] builds the exact on-view, Behind, Out of
+//! Range and arrow forms.
+//!
 //! `F1111` (the gunsight routine) draws a blinking cursor while one of the
 //! original's auto-targetter flags is set: `DATA_007246` is the navigation
 //! targetter (a 4-half-size box at (160,79), colour 0x11) and `DATA_007247` the
@@ -17,8 +22,55 @@
 //! draw path is exposed for the caller and for frames.
 
 /// F1100/F1111's targetter colours: navigation 0x11, combat 0x10.
+///
+/// These are COLPAL palette indices, not F1326 colour words: F1587 uses the
+/// value directly as a video index. The fixed low palette (`F1641`'s upload of
+/// `DATA_007769`) makes 0x11 green `(0,60,0)` six-bit and 0x10 red
+/// `(60,0,0)`. `F1327` reaches the same entries through the fixed map
+/// (`0x0f0` -> 17, `0xf00` -> 16); the dynamic upper half is not involved.
 pub const NAVIGATION_COLOUR: u8 = 0x11;
 pub const COMBAT_COLOUR: u8 = 0x10;
+
+/// The missile view's combat-target colour (`F1099` adds 0x4f to 0x10 when
+/// `ship+0xea == 5`). The port has no missile view yet; kept so a caller does
+/// not have to invent the value.
+pub const MISSILE_VIEW_COLOUR: u8 = 0x5f;
+
+/// F1100's three fixed text forms (besides the arrow forms).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeForm {
+    /// The on-view number: F1100's 0x8604/05. The original string starts with
+    /// the (ignored) 0x81 marker and a newline, so the text sits 10 rows below
+    /// the target's `-5` origin.
+    OnView,
+    /// 0x8606/07: `Target <n> km/AU Behind`.
+    Behind,
+    /// 0x8608/09: `Target Out of Range (<n> km/AU)`.
+    OutOfRange,
+    /// F1100's off-view arrow forms (0x860a..0x8611).
+    Arrow(RangeArrow),
+}
+
+/// The four off-view arrow strings. The bytes are the original font codes:
+/// 0x7d/0x7e are the left/right arrows, 0x7f/0x80 their below-target variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeArrow {
+    /// 0x860a/b: `\x7d Target <n> km/AU` (target above/level, left).
+    Left,
+    /// 0x860c/d: `Target <n> km/AU \x7e` (above/level, right).
+    Right,
+    /// 0x860e/f: `\x7f Target <n> km/AU` (target below, left).
+    BelowLeft,
+    /// 0x8610/11: `Target <n> km/AU \x80` (target below, right).
+    BelowRight,
+}
+
+/// The COLPAL index for the navigation target's green. The fixed map's
+/// `0x0f0` word selects the same low entry (`DATA_007770[0x0f0] == 17`), so the
+/// colour is the imported palette, not a hard-coded RGB.
+pub const NAVIGATION_WORD: u16 = 0x0f0;
+/// The fixed-map word for the combat target's low entry 16.
+pub const COMBAT_WORD: u16 = 0xf00;
 
 /// F1111's cursor box origin (0xa0, 0x4f) and half size.
 pub const CURSOR_BOX: ((i32, i32), i32) = ((0xa0, 0x4f), 4);
@@ -49,6 +101,67 @@ pub struct Tunnels {
 /// F1100's tunnel half size from the range ffp mantissa (`DATA_008882`).
 pub fn tunnel_base(mantissa: i16) -> i32 {
     0x40 + (((-i32::from(mantissa)) & 0x7ff) >> 5)
+}
+
+/// F1100's number: the km/AU value is in hundredths (`laser::range_value`), and
+/// the string's FF30 index 7 is `FUNC_001381_FF30Write2dpFracV1`, so the text
+/// is always `<int>.<two digits><unit>` with no space before the suffix
+/// (`ffedat.asm:18889-18891`; `ffe.asm:81263-81281`). The trailing zeros are
+/// kept: 540 -> `5.40AU`, 5 -> `0.05AU`.
+pub fn range_number(value: i32, au: bool) -> String {
+    let unit = if au { "AU" } else { "km" };
+    let sign = if value < 0 { "-" } else { "" };
+    let value = value.unsigned_abs();
+    format!("{sign}{}.{:02}{unit}", value / 100, value % 100)
+}
+
+/// F1100's off-view arrow pick (`ffe.asm:81299-81323`): row 79 and below uses
+/// the below-target variants; the horizontal split is column 160.
+pub fn off_view_arrow(x: i32, y: i32) -> RangeArrow {
+    if y > 79 {
+        if x >= 160 {
+            RangeArrow::BelowRight
+        } else {
+            RangeArrow::BelowLeft
+        }
+    } else if x >= 160 {
+        RangeArrow::Right
+    } else {
+        RangeArrow::Left
+    }
+}
+
+/// F1100's text form for a target. On-view bounds are `x-5 < 0x138` and
+/// `y-5 < 0x8e` with no negative values (the original's unsigned compares).
+pub fn range_form(behind: bool, offscreen: bool, x: i32, y: i32) -> RangeForm {
+    if behind {
+        RangeForm::Behind
+    } else if offscreen {
+        RangeForm::OutOfRange
+    } else if (0..0x138).contains(&(x - 5)) && (0..0x8e).contains(&(y - 5)) {
+        RangeForm::OnView
+    } else {
+        RangeForm::Arrow(off_view_arrow(x, y))
+    }
+}
+
+/// The expanded F1100 range string for `form` (`ffedat.asm:18889-18915`).
+/// `RangeForm::OnView` returns the number only; the caller applies F1100's
+/// leading-newline offset (10 rows) when it draws it.
+pub fn range_text(form: RangeForm, value: i32, au: bool) -> Vec<u8> {
+    let number = range_number(value, au).into_bytes();
+    let number = number.as_slice();
+    match form {
+        RangeForm::OnView => number.to_vec(),
+        RangeForm::Behind => [b"Target ".as_slice(), number, b" Behind"].concat(),
+        RangeForm::OutOfRange => [b"Target Out of Range (".as_slice(), number, b")"].concat(),
+        RangeForm::Arrow(RangeArrow::Left) => [b"} Target ".as_slice(), number].concat(),
+        RangeForm::Arrow(RangeArrow::Right) => [b"Target ".as_slice(), number, b" ~"].concat(),
+        RangeForm::Arrow(RangeArrow::BelowLeft) => [b"\x7f Target ".as_slice(), number].concat(),
+        RangeForm::Arrow(RangeArrow::BelowRight) => {
+            [b"Target ".as_slice(), number, b" \x80"].concat()
+        }
+    }
 }
 
 /// One of F1113's four nested boxes.
@@ -198,5 +311,87 @@ mod tests {
         assert!(pixels.contains(&(165, 79)));
         assert!(!pixels.contains(&(159, 79)), "the centre is not filled");
         assert!(pixels.iter().all(|(_, y)| (0..0x9e).contains(y)));
+    }
+
+    #[test]
+    fn the_range_is_hundredths_with_two_decimals_and_no_space() {
+        assert_eq!(range_number(540, true), "5.40AU");
+        assert_eq!(range_number(100, false), "1.00km");
+        assert_eq!(range_number(5, true), "0.05AU");
+        assert_eq!(range_number(0, false), "0.00km");
+        assert_eq!(range_number(12_345, true), "123.45AU");
+        // F1545 writes the sign before the integer, F1377 puts the point in.
+        assert_eq!(range_number(-5, true), "-0.05AU");
+    }
+
+    #[test]
+    fn the_range_forms_are_f1100s_strings() {
+        assert_eq!(range_text(RangeForm::OnView, 540, true), b"5.40AU".to_vec());
+        assert_eq!(
+            range_text(RangeForm::Behind, 540, true),
+            b"Target 5.40AU Behind".to_vec()
+        );
+        assert_eq!(
+            range_text(RangeForm::OutOfRange, 540, true),
+            b"Target Out of Range (5.40AU)".to_vec()
+        );
+        // The four off-view forms: 0x7d/0x7e left/right, 0x7f/0x80 below.
+        assert_eq!(
+            range_text(RangeForm::Arrow(RangeArrow::Left), 100, false),
+            b"} Target 1.00km".to_vec()
+        );
+        assert_eq!(
+            range_text(RangeForm::Arrow(RangeArrow::Right), 100, false),
+            b"Target 1.00km ~".to_vec()
+        );
+        assert_eq!(
+            range_text(RangeForm::Arrow(RangeArrow::BelowLeft), 540, true),
+            b"\x7f Target 5.40AU".to_vec()
+        );
+        assert_eq!(
+            range_text(RangeForm::Arrow(RangeArrow::BelowRight), 540, true),
+            b"Target 5.40AU \x80".to_vec()
+        );
+    }
+
+    #[test]
+    fn the_off_view_arrows_follow_f1100s_row_and_column() {
+        assert_eq!(off_view_arrow(100, 79), RangeArrow::Left);
+        assert_eq!(off_view_arrow(159, 79), RangeArrow::Left);
+        assert_eq!(off_view_arrow(160, 79), RangeArrow::Right);
+        assert_eq!(off_view_arrow(100, 80), RangeArrow::BelowLeft);
+        assert_eq!(off_view_arrow(159, 120), RangeArrow::BelowLeft);
+        assert_eq!(off_view_arrow(160, 80), RangeArrow::BelowRight);
+        assert_eq!(off_view_arrow(300, 158), RangeArrow::BelowRight);
+    }
+
+    #[test]
+    fn the_range_form_prefers_behind_then_out_of_range_then_the_view_bounds() {
+        assert_eq!(range_form(true, true, 160, 79), RangeForm::Behind);
+        assert_eq!(range_form(false, true, 160, 79), RangeForm::OutOfRange);
+        // On view: (x-5, y-5) in x 0..0x137, y 0..0x8d.
+        assert_eq!(range_form(false, false, 5, 5), RangeForm::OnView);
+        assert_eq!(
+            range_form(false, false, 4, 5),
+            RangeForm::Arrow(RangeArrow::Left)
+        );
+        assert_eq!(range_form(false, false, 316, 146), RangeForm::OnView);
+        assert_eq!(
+            range_form(false, false, 317, 79),
+            RangeForm::Arrow(RangeArrow::Right)
+        );
+        assert_eq!(
+            range_form(false, false, 160, 147),
+            RangeForm::Arrow(RangeArrow::BelowRight)
+        );
+    }
+
+    #[test]
+    fn the_target_colours_are_the_fixed_low_palette_entries() {
+        assert_eq!(NAVIGATION_COLOUR, 0x11);
+        assert_eq!(COMBAT_COLOUR, 0x10);
+        // The fixed map's pure-green/pure-red words select the same entries.
+        assert_eq!(NAVIGATION_WORD, 0x0f0);
+        assert_eq!(COMBAT_WORD, 0xf00);
     }
 }
