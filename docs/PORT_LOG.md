@@ -4,6 +4,60 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Six-stream integration round: controls, lasers, lock-on, log, places, terrain
+
+- Merged, one at a time, each green and pushed: `terrain` (365bd36), `places`
+  (ce2f35e), `log-ui` (03bae77), `lockon` (640ccf2), `lasers` (9307746) and
+  `controls` (44f74f9).
+- **terrain (v0.76).** `navigation::surface_radius(body, landed)` uses the inner
+  `+0x140` base on approach and the outer `+0x138` collision radius once landed;
+  `terrain_draw` culls the far shell for an eye inside it and suppresses the
+  haze/sky, so F575 lands on the drawn sphere. EXP-016 records the per-state
+  radius and inside-shell culling; `verify-surface.py` stays green (coverage
+  0.6074). Conflict: `DEVIATIONS.md` (kept the npc-dock EXP-015 wording and
+  added the branch's EXP-016). Owner decisions: per-state radius vs one outer
+  radius, no depth buffer for far-side starports, textured fills now available.
+- **places (v0.77).** F1099's list geometry (action 0x11, marker cells x10/230,
+  names x25/245, 9 rows/column, 15-px rows, bitmap 0x31, colour 0x11, no
+  panel), click targets/autopilot engagement and flight-only overlays; Gateway
+  evidence frame. Owner decisions: the Gateway start (Old Blackelk/Hope) is not
+  reachable (start type 0), paging beyond 18 is port-only, 0x11 is always
+  available, and Alt/Hope belongs to the dashboard stream.
+- **log-ui (v0.78).** F271/F272/F273: 120/124 wrap, header plus newest undated
+  and older dated lines, five top-anchored rows at x196/y159 with clip
+  158..200 and 0x18 scroll, `messages_visible`, F1393 km/h (km/s above the
+  threshold), separate Set/Act lines, no autopilot range spam, PgUp/PgDn; the
+  places list wins when open. Conflict fix: the places tests' `PlayerHud` speed
+  literals became floats (mechanical). Owner decisions: colours approximate,
+  the 0.342 km/h constant differs from the port unit by ~2%, the log draws after
+  the console per source.
+- **lockon (v0.79).** F1100's navigation green 0x11 and combat red 0x10,
+  two-decimal AU/km (`5.40AU`), on-view `(x-5,y+5)`, off-view arrows/Behind/Out-
+  of-Range, F1111 cursor radius 6/colour 0x10, and combat tunnels only in the
+  missile view. Owner decisions: green is the navigation target and red the
+  combat target per F1099, target-computer arming and the `+0x8a` gate remain,
+  two simultaneous targets are collapsed.
+- **lasers (v0.80).** F1776's raw muzzle origin with the front-view cull (no
+  invented flash), interaction-box entry so boxes containing the gun no longer
+  swallow shots, F930 laser1/laser2 bank by shot index, and `frame_tics` (994 at
+  50 Hz, 828 at 60 Hz); `laser_view`/`combat_view` and `verify-combat.py`.
+  Conflict: `verify-combat.py`'s test-name set (kept the lock-on colour test and
+  the renamed front-only beam test). Owner decisions: AABB vs target axes, NPC
+  gun origin, source-accurate no-front-muzzle, missile view/upper palette
+  unchanged.
+- **controls (v0.81).** Classic holds RMB to steer (F1038 in the original
+  flight, 50-px stick in the prototype), Enter/Shift sets speed,
+  preset-specific turret/external routing with no leaks, immediate switching
+  and `saves/controls.cfg` persistence (`docs/CONTROLS.md`); Modern unchanged.
+  Owner decisions: sensitivity option, prototype roll missing, Classic default
+  vs Modern, only controls persist.
+- Checks per merge: workspace, clippy, fmt and the affected cached suites;
+  `verify-surface.py` after terrain, `verify-combat.py`/`verify-labels.py` where
+  affected; the final suite is 56 entries (55 PASS / 1 SKIP / 0 FAIL on
+  Windows). Cache stays v28 (1,797 assets).
+
+---
+
 ## 2026-10-25 - Ship-label pen and clipping merged (v0.75)
 
 - Merged `labels` (653f539, 236b4a8): ship labels now use F1108's projected

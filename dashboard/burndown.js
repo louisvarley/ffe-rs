@@ -136,7 +136,8 @@ window.FFE_BURNDOWN = {
         { id: "world-9", title: "Lighting by the local star (ships, stations, lift) and day/night", status: "in-progress", version: "v0.48k" },
         { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" },
         { id: "world-11", title: "Terrain distance query and complex-shape collisions (F1876 mode 1, F576-F583), starports placed on planets", status: "done", version: "v0.51e" },
-        { id: "world-12", title: "Surface landing 0x32/0x34, F1050/F1054 landed view and L takeoff", status: "done", version: "v0.68" }
+        { id: "world-12", title: "Surface landing 0x32/0x34, F1050/F1054 landed view and L takeoff", status: "done", version: "v0.68" },
+        { id: "world-13", title: "Surface radius: inner on approach, outer when landed, inside-shell culling", status: "done", version: "v0.76" }
       ]
     },
     {
@@ -163,7 +164,8 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" },
         { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "done", version: "v0.63" },
         { id: "gameplay-19", title: "Player missiles, missile lock and F1120 pylon lamps", status: "done", version: "v0.67" },
-        { id: "gameplay-20", title: "Starport tech level, Upgrades Fit/Remove, fuel-scoop gate and repairs rows", status: "done", version: "v0.73" }
+        { id: "gameplay-20", title: "Starport tech level, Upgrades Fit/Remove, fuel-scoop gate and repairs rows", status: "done", version: "v0.73" },
+        { id: "gameplay-21", title: "Laser muzzle origin, hit-box entry and 50/60 Hz tics", status: "done", version: "v0.80" }
       ]
     },
     {
@@ -184,7 +186,11 @@ window.FFE_BURNDOWN = {
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "in-progress", version: "v0.71" },
         { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "in-progress", version: "v0.68" },
         { id: "ui-12", title: "Hit particles, explosions and debris (F939/F942/F926)", status: "done", version: "v0.66" },
-        { id: "ui-13", title: "Ship labels at F1108's pen with F1584/F1598 top clipping", status: "done", version: "v0.75" }
+        { id: "ui-13", title: "Ship labels at F1108's pen with F1584/F1598 top clipping", status: "done", version: "v0.75" },
+        { id: "ui-14", title: "Navigation list geometry, markers, names and autopilot input", status: "done", version: "v0.77" },
+        { id: "ui-15", title: "Message log layout, dated entries, scroll and km/h speed lines", status: "done", version: "v0.78" },
+        { id: "ui-16", title: "Target range colours, two-decimal formats, arrows and cursor", status: "done", version: "v0.79" },
+        { id: "ui-17", title: "Classic/Modern presets, RMB steer and controls.cfg persistence", status: "done", version: "v0.81" }
       ]
     },
     {
@@ -587,6 +593,36 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 65,
       note: "Ship-label pen and clipping merged (v0.75): labels now sit at F1108's projected point + (4,-4), with F1584/F1598 signed top clipping and F1587's 0x13c right limit through the shared clipped-text path; --labels/verify-labels (13 cases, trace b08a9b62...) pins the walk and pixels, and npc_view/console_view/views carry the cached assertions with docs/evidence/labels frames. One item added and completed (ui-13), so the remaining count is unchanged. Remaining owner decisions: registrations (AB-123) vs the port's model name + serial, 3D hull text/decal scaling, near-target suppression/overlap order/mission labels."
-    }
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Terrain radius merged (v0.76): navigation::surface_radius uses the inner +0x140 base on approach and the outer +0x138 collision radius once landed; terrain_draw culls the far shell for an eye inside it and suppresses the haze/sky, and F575 lands on the drawn sphere. EXP-016 records the per-state radius and inside-shell culling; verify-surface.py stays green (coverage ~0.607). Owner decisions: per-state radius vs a single outer radius, no depth buffer for far-side starports, and the now-available textured fills. One item added and completed (world-13), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Places list merged (v0.77): F1099's list geometry (action 0x11, marker cells x10/230, names x25/245, 9 rows/column, 15-px rows, bitmap 0x31, colour 0x11, no panel), click targets and autopilot engagement, overlays gated to flight; Gateway evidence frame. Owner decisions: the Gateway start (Old Blackelk/Hope) is not reachable (start type 0), paging beyond 18 is port-only, 0x11 is always available, and Alt/Hope belongs to the dashboard stream. One item added and completed (ui-14), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Message log merged (v0.78): F271/F272/F273's 120/124 wrap, header plus newest undated and older dated lines, five top-anchored rows at x196/y159 with clip 158..200 and 0x18 scroll, messages_visible, F1393 km/h (km/s above threshold), separate Set/Act lines, no autopilot range spam, PgUp/PgDn; the list wins over the log when open. Owner decisions: header/entry colours approximate, the 0.342 km/h constant differs from the port unit by ~2%, and the log draws after the console per source. One item added and completed (ui-15), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Target range merged (v0.79): F1100's navigation green 0x11 and combat red 0x10, two-decimal AU/km (5.40AU), on-view (x-5,y+5), off-view arrows/Behind/Out-of-Range, F1111 cursor radius 6/colour 0x10, and combat tunnels only in the missile view. Owner decisions: green is the navigation target and red the combat target per F1099, target-computer arming and the +0x8a gate remain, and two simultaneous targets are collapsed. One item added and completed (ui-16), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Laser fixes merged (v0.80): F1776's raw muzzle origin with the front-view cull (no invented flash), interaction-box entry so boxes containing the gun no longer swallow shots, F930 laser1/laser2 bank by shot index, and the frame_tics guard (994 at 50 Hz, 828 at 60 Hz). Owner decisions: AABB vs target axes, NPC gun origin, source-accurate no-front-muzzle, missile view and upper palette unchanged. One item added and completed (gameplay-21), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 65,
+      note: "Controls merged (v0.81): the Classic preset holds RMB to steer (F1038 in the original flight, 50-px stick in the prototype), Enter/Shift set speed, preset-specific turret/external routing with no leaks, immediate switching and saves/controls.cfg persistence; Modern behaviour unchanged. Owner decisions: a sensitivity option, prototype roll missing, Classic default vs Modern, and only controls persist. One item added and completed (ui-17), so the remaining count is unchanged."
+    },
   ]
 };
