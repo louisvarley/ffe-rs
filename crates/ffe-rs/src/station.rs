@@ -53,6 +53,14 @@ pub enum Action {
     Remove {
         row: usize,
     },
+    /// F438/F442's left button: buy the offered hull (part exchange).
+    BuyShip {
+        row: usize,
+    },
+    /// F438/F439's right button: view the offered hull.
+    ViewShip {
+        row: usize,
+    },
     /// The service exists but its data or routine is not ported. The text is
     /// reported on the console, never drawn into the station screen.
     NotPorted(&'static str),
@@ -316,6 +324,12 @@ pub const UPGRADE_MASS_X: i32 = 302;
 /// from the reference frame `docs/evidence/station/repairs.png`).
 pub const REPAIR_COST_X: i32 = 292;
 
+/// F437's Cost, Pt.Exchg and Cap. columns, measured from the reference frame
+/// (`docs/evidence/station/ships.png`).
+pub const SHIP_COST_X: i32 = 228;
+pub const SHIP_EXCHANGE_X: i32 = 258;
+pub const SHIP_CAPACITY_X: i32 = 306;
+
 /// Position of the status line's labels and values (`F558`, message 0x98e8).
 pub const STATUS_ROW_1: i32 = 138;
 pub const STATUS_ROW_2: i32 = 148;
@@ -428,6 +442,11 @@ pub enum Hot {
         remove: bool,
         row: usize,
     },
+    /// The Ships list's Buy (left) and View (right) buttons (`F438`).
+    Ship {
+        view: bool,
+        row: usize,
+    },
     More,
     Up,
     Down,
@@ -476,6 +495,7 @@ pub fn hot_areas_with_fitted(
         let hot = match screen {
             Screen::Market => Hot::Market { buy: true, row },
             Screen::Upgrades => Hot::Outfit { remove: false, row },
+            Screen::Ships => Hot::Ship { view: false, row },
             _ => Hot::Row(row),
         };
         areas.push(HotArea {
@@ -494,6 +514,7 @@ pub fn hot_areas_with_fitted(
             let hot = match screen {
                 Screen::Market => Hot::Market { buy: false, row },
                 Screen::Upgrades => Hot::Outfit { remove: true, row },
+                Screen::Ships => Hot::Ship { view: true, row },
                 _ => Hot::Row(row),
             };
             areas.push(HotArea {
@@ -568,14 +589,15 @@ pub fn menu_entry(screen: Screen, index: usize, bulletin_rows: usize) -> Option<
     }
 }
 
-/// The number of rows a screen shows, given the dynamic BBS/market/upgrade and
-/// repair sizes. The ship list stays empty until its generator is imported.
+/// The number of rows a screen shows, given the dynamic BBS/market/upgrade,
+/// repair and hull sizes.
 pub fn row_count(
     screen: Screen,
     bulletin_rows: usize,
     market_rows: usize,
     upgrade_rows: usize,
     repair_rows: usize,
+    ship_rows: usize,
 ) -> usize {
     match screen {
         Screen::Services => SERVICES.len(),
@@ -584,18 +606,18 @@ pub fn row_count(
         Screen::Market => market_rows,
         Screen::Upgrades => upgrade_rows,
         Screen::Repairs => repair_rows,
-        Screen::Ships => 0,
+        Screen::Ships => ship_rows,
     }
 }
 
 /// The title of the console line shown when a screen opens.
-pub fn hint(screen: Screen, bulletin_rows: usize) -> &'static str {
+pub fn hint(screen: Screen, bulletin_rows: usize, ship_rows: usize) -> &'static str {
     match screen {
         Screen::Services | Screen::Shipyard => SERVICES_HINT,
         Screen::Market => MARKET_HINT,
         Screen::Upgrades => UPGRADES_HINT,
         Screen::Ships => {
-            if row_count(Screen::Ships, 0, 0, 0, 0) == 0 {
+            if ship_rows == 0 {
                 SHIPS_EMPTY
             } else {
                 SHIPS_HINT
@@ -787,7 +809,7 @@ mod tests {
     #[test]
     fn every_menu_row_has_an_action() {
         for screen in [Screen::Services, Screen::Shipyard] {
-            for index in 0..row_count(screen, 0, 0, 0, 0) {
+            for index in 0..row_count(screen, 0, 0, 0, 0, 0) {
                 assert!(menu_entry(screen, index, 0).is_some(), "{screen:?} {index}");
             }
         }
@@ -854,6 +876,39 @@ mod tests {
                 remove: true,
                 row: 0
             })
+        );
+    }
+
+    #[test]
+    fn ship_buttons_are_buy_on_the_left_and_view_on_the_right() {
+        let areas = hot_areas(Screen::Ships, 0, ffe_core::shipyard::MAX_HULLS);
+        assert_eq!(
+            areas[0].hot,
+            Hot::Ship {
+                view: false,
+                row: 0
+            }
+        );
+        assert_eq!(areas[1].hot, Hot::Ship { view: true, row: 0 });
+        assert_eq!(
+            click(Screen::Ships, 0, 13, 127, 17),
+            Some(Hot::Ship {
+                view: false,
+                row: 0
+            })
+        );
+        assert_eq!(
+            click(Screen::Ships, 0, 13, 139, 17),
+            Some(Hot::Ship { view: true, row: 0 })
+        );
+        assert!(areas.iter().any(|area| area.hot == Hot::Back));
+        assert_eq!(row_count(Screen::Ships, 0, 0, 0, 0, 13), 13);
+        assert_eq!(hint(Screen::Ships, 0, 13), SHIPS_HINT);
+        assert_eq!(hint(Screen::Ships, 0, 0), SHIPS_EMPTY);
+        assert_eq!(row_count(Screen::Bulletin, 18, 0, 0, 0, 0), 18);
+        assert_eq!(
+            hint(Screen::Bulletin, 1, 0),
+            "Please choose advertisement. Direct link will be made with advertiser."
         );
     }
 

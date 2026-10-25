@@ -6,6 +6,7 @@
 use crate::docking::{Contact, Port, CLEARANCE_RANGE};
 use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND, UNITS_PER_FLIGHT_UNIT};
 use ffe_content::VerifiedCache;
+use ffe_core::bulletin;
 use ffe_core::effects::{self, Effect};
 use ffe_core::galaxy::{tables, Tables};
 use ffe_core::hyperspace::{plan as jump_plan, Report};
@@ -17,6 +18,7 @@ use ffe_core::objects::Models as ShipModels;
 use ffe_core::objects::{Models, PhysList, Placement};
 use ffe_core::pads::Pads;
 use ffe_core::sector::{distance as star_distance, Drive, Strings, Tables as GalaxyTables};
+use ffe_core::shipyard;
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
 use ffe_core::traffic::{
@@ -825,6 +827,8 @@ pub struct Navigator {
     pub drive: Option<DriveState>,
     /// The markets of the stations visited in this system.
     markets: HashMap<usize, StationMarket>,
+    /// The BBS advertisements and hull stock of each visited starport (F622).
+    offers: HashMap<usize, StationOffers>,
     /// The autopilot has reached a station's approach point and is flying into
     /// the slot.
     pub final_leg: bool,
@@ -900,6 +904,50 @@ pub struct StationMarket {
     pub market: Market,
     rng: RandomState,
     day: u32,
+}
+
+/// A starport's generated BBS and hull stock (F622/F633), with the stream and
+/// game day the daily update uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StationOffers {
+    pub posts: Vec<bulletin::Post>,
+    /// The `+0x2e6` `{model, random word}` entries, in list order.
+    pub hulls: Vec<(u32, u16)>,
+    rng: npc::Random,
+    day: u32,
+}
+
+impl StationOffers {
+    /// F437's rows for the player's current ship and its drive class. The
+    /// player's model is the fitted drive's source in this port (there is no
+    /// separate drive state), so the trade-in is the reference 950 * mass word.
+    pub fn rows(&self, player: u32, fitted_drive: Option<u8>) -> Vec<shipyard::Hull> {
+        self.hulls
+            .iter()
+            .filter_map(|(model, seed)| shipyard::row(*model, player, fitted_drive, *seed))
+            .collect()
+    }
+
+    /// F442's buy: cash and part exchange, then the bought hull is replaced by
+    /// the player's old model in the station list. The caller applies the new
+    /// model and clears the fitted items (F441).
+    pub fn buy(
+        &mut self,
+        row: usize,
+        player: u32,
+        cash_tenths: i64,
+    ) -> Result<shipyard::Purchase, String> {
+        let hull = self
+            .hulls
+            .get(row)
+            .and_then(|(model, seed)| shipyard::row(*model, player, None, *seed))
+            .ok_or_else(|| "That hull is no longer on the list.".to_owned())?;
+        let purchase = shipyard::buy(&hull, player, cash_tenths).ok_or_else(|| {
+            "You cannot afford that ship, even with the part exchange.".to_owned()
+        })?;
+        shipyard::part_exchange(&mut self.hulls, row, player);
+        Ok(purchase)
+    }
 }
 
 /// The most days of drift applied at once (a long transfer or a wait).
@@ -1214,6 +1262,7 @@ impl Navigator {
                 .map(<[u8]>::to_vec)
                 .unwrap_or_default(),
             markets: HashMap::new(),
+            offers: HashMap::new(),
             galaxy_tables: cache
                 .asset("base:world/galaxy-tables")
                 .map(<[u8]>::to_vec)
@@ -1499,6 +1548,109 @@ impl Navigator {
         }
         station.day = day.max(station.day);
         Ok(station)
+    }
+
+    /// The system list as the bulletin's destination picker sees it: the
+    /// original F857 neighbourhood, with each entry's population and danger.
+    fn offers_destinations(&self, cache: &VerifiedCache) -> Vec<bulletin::Destination> {
+        let Some(blob) = cache.asset("base:world/system-tables") else {
+            return Vec::new();
+        };
+        let Ok(tables) = Tables::new(blob) else {
+            return Vec::new();
+        };
+        self.entries
+            .iter()
+            .map(|entry| {
+                let market = tables.market(entry.params.code);
+                bulletin::Destination {
+                    code: entry.params.code,
+                    name: entry.name.clone(),
+                    population: market.population,
+                    danger: market.danger,
+                }
+            })
+            .collect()
+    }
+
+    /// A starport's BBS and hull stock: F622 on first use, then F633's daily
+    /// half. The stream is seeded by the system code and station, like the
+    /// market's (the original uses its one global stream; the port keeps a
+    /// station stream so a board is stable whenever it is revisited).
+    pub fn station_offers(
+        &mut self,
+        cache: &VerifiedCache,
+        index: usize,
+    ) -> Result<&mut StationOffers, String> {
+        let day = self.day();
+        let code = self.entries[self.current].params.code;
+        let blob = cache
+            .asset("base:world/system-tables")
+            .ok_or("this cache has no system tables (cache v15)")?;
+        let tables = Tables::new(blob)?;
+        let details = tables.details(code);
+        let market = tables.market(code);
+        let name = self.system_name().to_owned();
+        let station_name = self
+            .bodies
+            .get(index)
+            .map(|body| body.name.clone())
+            .ok_or("no such station")?;
+        let starports = self
+            .bodies
+            .iter()
+            .filter(|body| body.kind == Kind::Starport)
+            .count() as u32;
+        let destinations = self.offers_destinations(cache);
+        let names_bytes = cache.asset("base:text/names");
+        let names = names_bytes.and_then(|bytes| Names::new(bytes).ok());
+        let world = bulletin::World {
+            code,
+            name: &name,
+            population: market.population,
+            danger: market.danger,
+            allegiance: (details.allegiance >> 6) as u16,
+            station_name: &station_name,
+            destinations: &destinations,
+            names: names.as_ref(),
+        };
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.offers.entry(index) {
+            let mut rng = npc::Random::new(
+                code ^ 0x4253_5342,
+                (index as u32 + 1).wrapping_mul(0x9e37_79b9),
+            );
+            let posts = bulletin::generate(&mut rng, &world, day);
+            let hulls = shipyard::stock(
+                &mut rng,
+                (details.allegiance >> 6) as u16,
+                market.population,
+                details.bytes[1],
+                details.bytes[3],
+                starports,
+            );
+            slot.insert(StationOffers {
+                posts,
+                hulls,
+                rng,
+                day,
+            });
+        }
+        let offers = self.offers.get_mut(&index).expect("just made");
+        let days = day.saturating_sub(offers.day).min(MAX_DRIFT_DAYS);
+        for _ in 0..days {
+            bulletin::daily(&mut offers.rng, &mut offers.posts, &world, day);
+            shipyard::daily(
+                &mut offers.rng,
+                &mut offers.hulls,
+                (details.allegiance >> 6) as u16,
+                market.population,
+                details.bytes[1],
+                details.bytes[3],
+                starports,
+            );
+        }
+        offers.day = day.max(offers.day);
+        Ok(offers)
     }
 
     /// The player's hold in tonnes: the new game's F998 value when this navigator

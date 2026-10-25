@@ -2150,12 +2150,33 @@ fn run() -> Result<(), String> {
                     } else {
                         Vec::new()
                     };
+                    // F622/F633's BBS and hull stock. Both are generated once
+                    // per station and brought up to the day; the buy updates
+                    // the same list.
+                    let (bulletin_rows, ship_rows) = match nav
+                        .as_mut()
+                        .and_then(|nav| nav.docked.map(|station| (nav, station)))
+                    {
+                        Some((nav, station)) => match nav.station_offers(&cache, station) {
+                            Ok(offers) => (offers.posts.len(), offers.rows(state.ship, None).len()),
+                            Err(error) => {
+                                if dock.screen == StationScreen::Bulletin
+                                    || dock.screen == StationScreen::Ships
+                                {
+                                    message = format!("Station offers unavailable: {error}");
+                                }
+                                (0, 0)
+                            }
+                        },
+                        None => (0, 0),
+                    };
                     let rows = station::row_count(
                         dock.screen,
-                        0,
+                        bulletin_rows,
                         market_rows,
                         upgrade_rows.len(),
                         repair_rows.len(),
+                        ship_rows,
                     );
                     let step = i32::from(pressed(Key::Down)) - i32::from(pressed(Key::Up));
                     if step != 0 {
@@ -2181,6 +2202,9 @@ fn run() -> Result<(), String> {
                                     dock_action = Some(StationAction::NotPorted(
                                         "Repairs and servicing actions are not ported.",
                                     ));
+                                } else if dock.screen == StationScreen::Ships {
+                                    // F354's digit action is the left (Buy) button.
+                                    dock_action = Some(StationAction::BuyShip { row: index });
                                 } else if let Some(entry) =
                                     station::menu_entry(dock.screen, index, 0)
                                 {
@@ -2199,6 +2223,8 @@ fn run() -> Result<(), String> {
                             dock_action = Some(StationAction::NotPorted(
                                 "Repairs and servicing actions are not ported.",
                             ));
+                        } else if dock.screen == StationScreen::Ships {
+                            dock_action = Some(StationAction::BuyShip { row: dock.selected });
                         } else if let Some(entry) =
                             station::menu_entry(dock.screen, dock.selected, 0)
                         {
@@ -2223,6 +2249,21 @@ fn run() -> Result<(), String> {
                                         dock_action = Some(StationAction::NotPorted(
                                             "Repairs and servicing actions are not ported.",
                                         ));
+                                    } else if dock.screen == StationScreen::Bulletin {
+                                        // F453/F523: selecting an advertisement
+                                        // shows it in full; the mission reply
+                                        // actions are not ported.
+                                        let station = nav.as_ref().and_then(|nav| nav.docked);
+                                        if let (Some(nav), Some(station)) = (nav.as_mut(), station)
+                                        {
+                                            if let Ok(offers) = nav.station_offers(&cache, station)
+                                            {
+                                                if let Some(post) = offers.posts.get(index) {
+                                                    dock.selected = index;
+                                                    message = post.text.clone();
+                                                }
+                                            }
+                                        }
                                     } else if let Some(entry) =
                                         station::menu_entry(dock.screen, index, 0)
                                     {
@@ -2239,6 +2280,14 @@ fn run() -> Result<(), String> {
                                         StationAction::Remove { row }
                                     } else {
                                         StationAction::Fit { row }
+                                    });
+                                }
+                                station::Hot::Ship { view, row } => {
+                                    dock.selected = row;
+                                    dock_action = Some(if view {
+                                        StationAction::ViewShip { row }
+                                    } else {
+                                        StationAction::BuyShip { row }
                                     });
                                 }
                                 station::Hot::More => {
@@ -2341,11 +2390,15 @@ fn run() -> Result<(), String> {
                         }
                         StationAction::Open(screen) => {
                             dock.open(screen);
-                            message = station::hint(screen, 0).to_owned();
+                            let (bbs, hulls) =
+                                station_offer_counts(nav.as_mut(), &cache, state.ship);
+                            message = station::hint(screen, bbs, hulls).to_owned();
                         }
                         StationAction::Back => {
                             dock.back();
-                            message = station::hint(dock.screen, 0).to_owned();
+                            let (bbs, hulls) =
+                                station_offer_counts(nav.as_mut(), &cache, state.ship);
+                            message = station::hint(dock.screen, bbs, hulls).to_owned();
                         }
                         StationAction::Fit { row } => {
                             if let Some(nav) = nav.as_ref() {
@@ -2369,6 +2422,16 @@ fn run() -> Result<(), String> {
                                     row,
                                     true,
                                 );
+                            }
+                        }
+                        StationAction::BuyShip { row } => {
+                            if let Some(nav) = nav.as_mut() {
+                                message = buy_ship(nav, &cache, &mut state, row);
+                            }
+                        }
+                        StationAction::ViewShip { row } => {
+                            if let Some(nav) = nav.as_mut() {
+                                message = view_ship(nav, &cache, &state, row);
                             }
                         }
                         StationAction::Trade { buy, row } => {
@@ -3856,6 +3919,72 @@ fn run() -> Result<(), String> {
                             selected: dock.selected,
                             total: repairs.len(),
                         });
+                    } else if dock.screen == StationScreen::Bulletin {
+                        let posts = nav
+                            .station_offers(&cache, station)
+                            .map(|offers| offers.posts.clone())
+                            .unwrap_or_default();
+                        let visible = station::layout(StationScreen::Bulletin).visible();
+                        dock.selected = dock.selected.min(posts.len().saturating_sub(1));
+                        dock.scroll = dock.scroll.min(posts.len().saturating_sub(visible));
+                        let rows = posts
+                            .iter()
+                            .skip(dock.scroll)
+                            .map(|post| ffe_rs::station::DockRow {
+                                main: post.text.clone(),
+                                detail: None,
+                                columns: Vec::new(),
+                                fitted: false,
+                            })
+                            .collect();
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title: station::title(dock.screen, &station_name),
+                            rows,
+                            status,
+                            scroll: dock.scroll,
+                            selected: dock.selected,
+                            total: posts.len(),
+                        });
+                    } else if dock.screen == StationScreen::Ships {
+                        let hulls = nav
+                            .station_offers(&cache, station)
+                            .map(|offers| offers.rows(state.ship, None))
+                            .unwrap_or_default();
+                        let visible = station::layout(StationScreen::Ships).visible();
+                        dock.selected = dock.selected.min(hulls.len().saturating_sub(1));
+                        dock.scroll = dock.scroll.min(hulls.len().saturating_sub(visible));
+                        let rows = hulls
+                            .iter()
+                            .skip(dock.scroll)
+                            .map(|hull| ffe_rs::station::DockRow {
+                                main: hull.name.to_owned(),
+                                detail: None,
+                                columns: vec![
+                                    (station::SHIP_COST_X, format!("${}", hull.price), 0x7d),
+                                    (
+                                        station::SHIP_EXCHANGE_X,
+                                        if hull.net < 0 {
+                                            format!("-${}", -hull.net)
+                                        } else {
+                                            format!("${}", hull.net)
+                                        },
+                                        0x7d,
+                                    ),
+                                    (station::SHIP_CAPACITY_X, format!("{}t", hull.cargo), 0x7d),
+                                ],
+                                fitted: false,
+                            })
+                            .collect();
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title: station::title(dock.screen, &station_name),
+                            rows,
+                            status,
+                            scroll: dock.scroll,
+                            selected: dock.selected,
+                            total: hulls.len(),
+                        });
                     } else {
                         let entries: &[station::Entry] = match dock.screen {
                             StationScreen::Services => &station::SERVICES,
@@ -4595,6 +4724,86 @@ fn fit_or_remove(
         )
     };
     result.unwrap_or_else(|why| why)
+}
+
+/// The BBS and hull-list counts of the station the player is docked at, for the
+/// console hint (0/0 when there is no navigator).
+fn station_offer_counts(
+    nav: Option<&mut Navigator>,
+    cache: &ffe_content::VerifiedCache,
+    ship: u32,
+) -> (usize, usize) {
+    let Some(nav) = nav else {
+        return (0, 0);
+    };
+    let Some(station) = nav.docked else {
+        return (0, 0);
+    };
+    match nav.station_offers(cache, station) {
+        Ok(offers) => (offers.posts.len(), offers.rows(ship, None).len()),
+        Err(_) => (0, 0),
+    }
+}
+
+/// F438/F442/F441's buy: part exchange the current ship for row `row`, charge
+/// ten times the net whole-credit price, install the new model and clear the
+/// fitted items (the screen's hint: "a ship with no extra equipment"). F442
+/// leaves the old hull in the station list; F441 resets the ship's damage and
+/// equipment, which the port mirrors here.
+fn buy_ship(
+    nav: &mut Navigator,
+    cache: &ffe_content::VerifiedCache,
+    state: &mut Flight,
+    row: usize,
+) -> String {
+    let Some(station) = nav.docked else {
+        return "Not docked.".to_owned();
+    };
+    let result = match nav.station_offers(cache, station) {
+        Ok(offers) => offers.buy(row, state.ship, i64::from(state.credits)),
+        Err(error) => return error,
+    };
+    match result {
+        Ok(purchase) => {
+            state.credits = u32::try_from(purchase.cash_tenths).unwrap_or(0);
+            state.ship = purchase.model;
+            state.loadout = ffe_core::equipment::Loadout::default();
+            state.combat = Combat::default();
+            state.hull = [0, 0];
+            state.shields = [0, 0];
+            "Congratulations on your purchase. Call our upgrade department for the latest in additional equipment.".to_owned()
+        }
+        Err(text) => text,
+    }
+}
+
+/// F438's right button (F439's View page): the port shows the statistics the
+/// page quotes on the console rather than adding a second screen. The values
+/// are the shipyard table's, not invented.
+fn view_ship(
+    nav: &mut Navigator,
+    cache: &ffe_content::VerifiedCache,
+    state: &Flight,
+    row: usize,
+) -> String {
+    let Some(station) = nav.docked else {
+        return "Not docked.".to_owned();
+    };
+    match nav.station_offers(cache, station) {
+        Ok(offers) => {
+            let hulls = offers.rows(state.ship, None);
+            hulls.get(row).map_or_else(
+                || "No such ship.".to_owned(),
+                |hull| {
+                    format!(
+                        "{}: {}t mass, {}t capacity, {} gun mount(s), {} missile pylon(s), drive class {}.",
+                        hull.name, hull.mass, hull.cargo, hull.gun_mounts, hull.missiles, hull.drive
+                    )
+                },
+            )
+        }
+        Err(error) => error,
+    }
 }
 
 /// F444's three service rows for the player's ship: the statistics' mass, the

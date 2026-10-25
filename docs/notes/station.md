@@ -1,25 +1,30 @@
 # The docked station and starport screens (F320-F362, F536-F558, F382-F445)
 
-Status (2026-10-25): **the services root, shipyard root, stockmarket and the
-Upgrades list are ported**. The equipment table and fitted loadout live in
-`ffe-core::equipment` (embedded, cache still v26); the starport tech level is
-now read from F869 (below), so F383's rows, F387/F388's prices and F386's
-Fit/Remove buttons work end to end for general equipment, cabins, lasers,
-shield generators and missiles. Drives and mining machines are listed but their
-buttons report that the category has no port state. The repairs screen builds
-F444's three service rows (their actions are not wired yet); the ship list and
-the bulletin board's generated entries remain faithful empty states because
-their tables/generators are not imported. The screen map, strings, layout, hot
-areas and keys below are read from `jjffe-master/ffe.asm`/`ffedat.asm` and
-checked against frames of the reference game (JJFFE 2.8a7 built from that asm;
-see "Evidence").
+Status (2026-10-25): **the services root, shipyard root, stockmarket, Upgrades,
+New and Reconditioned Ships and the Bulletin Board are ported**. The equipment
+table and fitted loadout live in `ffe-core::equipment` (embedded, cache still
+v26); the starport tech level is now read from F869 (below), so F383's rows,
+F387/F388's prices and F386's Fit/Remove buttons work end to end for general
+equipment, cabins, lasers, shield generators and missiles. Drives and mining
+machines are listed but their buttons report that the category has no port
+state. The repairs screen builds F444's three service rows (their actions are
+not wired yet). The shipyard's hull table is generated into
+`ffe-core::shipyard` from the DOS statistics blocks and `ffedat.asm`, so F437's
+rows, F438/F442's Buy/part exchange and F634/F635's stock are real; the
+Bulletin Board generates F621's advertisements from `DATA_006170` and the
+0x981a..0x982d templates, and F633's daily update replaces entries. The screen
+map, strings, layout, hot areas and keys below are read from
+`jjffe-master/ffe.asm`/`ffedat.asm` and checked against frames of the reference
+game (JJFFE 2.8a7 built from that asm; see "Evidence").
 
 Rust: `ffe_rs::station` (screen table, layout, hot areas, state),
 `Screen::draw_dock`/`Screen::draw_market`, wired in `main.rs` by `DockState`.
-Cache: the first slice needs **no new asset and no cache bump**: the station
-name, the 33 commodity names and the market tables are already cached (v26);
-the fixed screen strings are constants in `station.rs`. Cache v27 is needed
-only for the remaining data listed at the end.
+Cache: **no new asset and no cache bump**: the station name, the 33 commodity
+names, the market tables (v20), the model statistics (v12) and the system
+tables (v15) are already cached (v28); the screen strings, the shipyard table
+and the bulletin templates are constants in `ffe-core`/`station.rs`. The
+shipyard generator reads the existing `base:ship/stats` asset; no cache version
+change.
 
 ## The screen tables
 
@@ -125,6 +130,7 @@ handled by `F319` (ffe.asm 25633) and `F1347`. The ones these screens use:
 | 0x980d..0x9810 | Upgrades / Repairs and Servicing / New and Reconditioned Ships / Contact Local Police |
 | 0x9819 | Launch Request |
 | 0x98d2..0x98d6 | `{station} Services` / `{station} Shipyard` / `{station} Traffic Control` / `{station} Bulletin Board` / `{station} Stockmarket` |
+| 0x981a..0x982d | BBS advertisements (WANTED/SHIP REQUIRED/GOODS BOUGHT.../military/crew/charity); the generator templates, embeds 0x9918..0x991c passage descriptions, 0x99b4..0x99c3 removal titles and 0x99d7..0x99de charities |
 | 0x98dc | Which service do you require? |
 | 0x98dd/0x98de | Please choose advertisement... / Sorry, no advertisements have been placed. |
 | 0x98df | Choose Buy or Sell to trade one unit. |
@@ -178,8 +184,16 @@ anywhere while docked. These are called out as port conveniences in
   and the cargo/cash/cabins line. Buying and selling keep the verified F555/
   F556 core. The market has no Go Back arrow in the original; `Backspace`
   leaves it in the port.
-- **Bulletin Board**: empty, with the original's 0x98de console line. The
-  port does not generate BBS entries yet, so it does not invent any.
+- **Bulletin Board** (`F453`/`F621`/`F622`/`F633`): the 18-entry `+0x132`
+  board is generated on first use from `DATA_006170` (`F621`: 32 slots, 18
+  stored) and the 0x981a..0x982d templates. F622 makes `population * 4 + 1`
+  attempts; F633's daily roll replaces one entry when `random(7) < population`.
+  The four 33-pixel rows wrap at 177 pixels and the up/down/More arrows page
+  them; selecting a post shows its full text on the console (F523's mission
+  reply actions are not ported). The goods, military, passenger/parcel,
+  removal, crew and charity generators are ported; the recent-systems wanted
+  board (F636), missing-person (F637) and special-offer commodity (F641)
+  generators need state the port does not keep and return no entry.
 - **Upgrades** (`F383`/`F386`): the rows are `equipment::outfitting` at the
   current system's F869 tech level, in `DATA_005289` order, with the 0x98f5
   header, the measured x 242/272/302 price/removal/Wt columns and the 0x2e row
@@ -196,10 +210,19 @@ anywhere while docked. These are called out as port conveniences in
   x 292. The service actions (F446-F452), the six thruster damage words
   (`+0xbc..+0xc6`) and the hull-damage rows need state the port does not carry
   yet, so a row button reports that the action is not ported.
-- **New and Reconditioned Ships**: the original screen shell (title, 0x98f6
-  header, Go Back). The shipyard list needs F622/F634's generated `+0x2e6`
-  entries, which are not imported; F437's empty-state message (0x98ed) is the
-  faithful content for a station with no hulls.
+- **New and Reconditioned Ships** (`F437`/`F438`): F622/F634/F635's `+0x2e6`
+  stock (13 hulls at most, from `DATA_006184..6198` and `DATA_006193`) with
+  F437's columns. Cost is the statistics word at `+0xa` times 1000; Pt.Exchg is
+  Cost less `950 * (drive mass + word[+0xa] - drive mass[required drive])`; Cap.
+  is the `+0x8` cargo word; the name is the `0x4000 | word[+0xe]` ship-string
+  code expanded through `DATA_004682`. The left button/digit/Enter buys
+  (F442/F441): the cash check is ten times the whole-credit net price, the new
+  model is installed, all fitted items are cleared and the bought row is
+  replaced by the player's old hull. The right button prints F439's statistics
+  on the console (the View page itself is not drawn). The table is generated by
+  `tools/gen-shipyard-table.py` from `ffedat.asm` and the cache's
+  `base:ship/stats` (the DOS `FIRSTENC.EXE` blocks); see
+  `docs/notes/equipment.md` for the statistics layout.
 
 The commander/options screen is **not** a station service: there is no entry
 for it in `F333`/`F382`. In the original it is the separate status screen
@@ -209,6 +232,26 @@ map that screen's routine or layout in this slice, and nothing was invented
 for it: it is a separate player screen, not part of the docked module. If the
 owner wants it, the next step is to follow the F2 console action
 (`DATA_005100`/`DATA_007684`) to its routine and port its panel.
+
+## Shipyard and BBS source map
+
+| source | what it is | port |
+|---|---|---|
+| `ffedat.asm:6118` `DATA_005268..5272` | the arrays of ship-name-list pointers F382 selects (`sh1`.., `fsh1`.., `ish1`..); **not prices** | `station::SHIPYARD`, F634's lists (price comes from the statistics block) |
+| `ffedat.asm:9622` `DATA_006199/6200` | the 19 `{count, pointer}` ship-type lists (`DATA_006184..6198`) | `ffe_core::npc::SHIP_TYPES` |
+| `ffe.asm:30441` F437 | the list rows: cost, trade-in, capacity, name | `ffe_core::shipyard::{row, trade_in}` |
+| `ffe.asm:30561` F438 | Buy (bit 0x10 clear) or View (set) | `station::Hot::Ship`, `main::buy_ship/view_ship` |
+| `ffe.asm:30738` F440/F441/F442 | insufficient cash, loadout reset, part exchange | `shipyard::buy/part_exchange`, `main::buy_ship` |
+| `ffe.asm:43543/43576` F634/F635 | append a hull (1/8 skip, 13 cap) and pick a model | `shipyard::stock/daily/pick` |
+| `ffedat.asm:7266` `DATA_005300` | drive masses for the trade-in | `shipyard_table::DRIVE_MASS` |
+| `ffedat.asm:9443` `DATA_006170` | 32 BBS generator slots F621 indexes | `bulletin_table::GENERATORS` |
+| `ffe.asm:42635` F621 | dispatch `F922(0x20)` to a generator | `bulletin::generate_one` |
+| `ffe.asm:42654` F622 | make the BBS/stock for each starport (`population * 4 + 1` attempts) | `navigation::station_offers` |
+| `ffe.asm:43279` F633 | daily BBS/stock update | `bulletin::daily`, `shipyard::daily` |
+| `ffe.asm:43626..44257` F636-F646 | the generators and `F646`'s six-dword entry | `bulletin::{goods, military, ship_job, removal, crew, charity}` |
+| `ffedat.asm:6778` `DATA_005299` | the 0x981a..0x982d templates and 0x99xx embeds | `bulletin_table::{TEMPLATES, STRINGS}` |
+| `ffedat.asm:9476..9505` `DATA_006171..6174` | passage multipliers, extra danger money and danger multipliers | `bulletin::{PASSAGE, DANGER_}*` |
+| `ffedat.asm:28488` `DATA_008999` | 18 starport records: `+0x130` object, `+0x131` flags, `+0x132` BBS (18 x 24), `+0x2e2` count, `+0x2e6` hulls, `+0x31e` hull count | `navigation::StationOffers` |
 
 ## Remaining (with the data)
 
@@ -221,24 +264,65 @@ owner wants it, the next step is to follow the F2 console action
    second-hand random branch of F383's prices (see `docs/notes/equipment.md`).
 2. **Shipyard ships**. `F445` reads the station's generated entries
    (`+0x2e6`, up to 13 `{model, index}` words from `F634/F635` and
-   `DATA_006199..6200`) and the ship statistics; prices come from
-   `DATA_005268..5272`. The model table is already `ffe_core::npc::SHIP_TYPES`
-   (types 2/3 + 2*allegiance are the military/shipyard lists) and F634's 13-row
-   cap is known, but the `DATA_005268..5272` price/exchange table and F438-F442's
-   buy/view actions are not imported, so the port keeps F437's empty state
-   rather than showing an unpriced list.
+   `DATA_006199..6200`) and the ship statistics. `DATA_005268..5272` is not a
+   price table: it is the array of ship-name-list pointers (`sh1`.., `fsh1`..,
+   `ish1`..) F382 selects. The price is F437's `word[+0xa] * 1000` and the
+   trade-in is its `DATA_005300` formula; both are now in
+   `ffe-core::shipyard`/`shipyard_table.rs`. Ported: the stock, rows, buy and
+   part exchange, and a console View summary. Remaining: F439's full View page
+   (F991-style stats panel) and F441's passenger/registration side effects.
 3. **Repairs/servicing**. The three F444 service rows are ported. Remaining:
    F446-F452's actions, the six thruster damage words (`+0xbc..+0xc6`),
    `DATA_005303`'s cost table and the hull-damage rows (0x9812-0x9814/0x9818);
    the port's `Flight` has hull/shield words but no thruster damage.
-4. **Bulletin board entries**. `F622`/`F633` generate them from `F621` and
-   `DATA_006170` (F636-F646), with the mission strings 0x981a..0x982c and
-   names. This is also the mission/BBS slice; the port must port the starport
-   record's BBS array (`+0x132`, 18 entries of 24 bytes), the
-   `DATA_006170`/`DATA_006199`-style generator tables and the 0x981a..0x982c
-   strings. None of those are in the current cache, so the port keeps the
-   original empty state (0x98de) rather than inventing advertisements.
+4. **Bulletin board entries**. Ported: `F622`/`F633`'s generation and daily
+   update, the `+0x132` 18 x 24-byte array, `DATA_006170`, the templates
+   0x981a..0x982d and the embedded 0x99xx name/passage strings. Remaining:
+   F636's recent-systems wanted board, F637's missing-person destination picker
+   (F857's grid perturbation) and F641's special-offer commodity table, plus the
+   mission reply actions F524-F532 (accept/decline, permits, advance) and the
+   BBS entry's service flags. Those generators return no entry rather than
+   inventing one.
 5. **Commander/options**: F2 status screen, outside the station module.
+
+## Differences and uncertainties
+
+- **Ship display names are not the model-file names.** The cache's
+  `base:text/model-names` (`DATA_004682` read as model-slot names) is offset
+  from the shipyard's display name: model 0x2b's statistics `+0xe` is
+  `0x4028`, which `F1345` expands to "Spar attack fighter", while
+  `model-names[0x2b]` is "Turner Class". `ffe-core::shipyard` follows F437 and
+  the `0x4000 | index` code, which is what the reference frame shows. The
+  `model-names` use by `ships.rs` is unchanged here.
+- The statistics block's `+0xe` is the ship-name ffcode (F437, F439 and the
+  in-flight ship list F282 all expand it). `crates/ffe-rs/src/ships.rs` calls
+  `+0xe` "shield strength"; the shipyard table reads the shield word at `+0xc`
+  (150 for the Cobra Mk III), which is the consistent field. This is a
+  pre-existing label in the flight slice, flagged for its owner; nothing in
+  this slice changes it.
+- F639/F640's hidden "goods bought and sold" availability byte (`DATA_008990`
+  and the 37-byte stock string) is not carried by the port: F639 always offers
+  the notice and F640 offers it on one draw in two. The template and company
+  name generator are the originals.
+- The original draws the stock and BBS from its one global random stream,
+  interleaved with traffic and everything else. The port seeds a station stream
+  from the system code and station index (like `StationMarket`), so the *same
+  station* is stable but its hull names and post mix differ from a reference
+  capture. Prices, capacities, templates and generation counts are the
+  original's.
+- `F437`'s Cost uses the `+0xa` word, not the `+0x6` hull mass. The two differ
+  (Eagle 0x17: 38 vs 25), and the reference frame confirms 38,000 for the
+  Eagle-sized row.
+- The table bytes were compared through the cache: `base:ship/stats` is
+  generated by `ffe-tools build-data` from the DOS `FIRSTENC.EXE` (floppy 1.02)
+  and the shipyard script reads those blocks. The reference frame's Sirocco
+  rows (Spar 71000/34900/37t, Hawk 48000/11900/7t, Constrictor
+  143000/106900/90t, Lion 348000/311900/235t, Cobra Mk III 124000/87900/80t,
+  Puma 1265000/1228900/825t, Tiger 472000/435900/320t) match the generated
+  table exactly with the new game's 36,100 trade-in. The JJFFE listing's ship
+  *statistics* are pointers into its executable, so there is no second numeric
+  listing to diff; the model lists `DATA_006184..6198` match
+  `ffe_core::npc::SHIP_TYPES` entry for entry.
 
 ## Evidence
 
@@ -267,10 +351,15 @@ The port's own frames are produced by
 `FFE_WORLD_CACHE` set and `FFE_SHOT_DIR` pointing at a directory; the test
 checks the title/header/row pixels and saves `Services-ours.ppm`,
 `Shipyard-ours.ppm`, `Market-ours.ppm`, `Bulletin-ours.ppm`,
-`Upgrades-ours.ppm`, `Upgrades-buy-laser.ppm`, `Ships-ours.ppm` and
-`Repairs-ours.ppm`. It also asserts the current system's tech level (Mars
-High's 0xfd), the 51-row F383 list, and F444's 3040/1900/1900 service rows at
-mass 38.
+`Upgrades-ours.ppm`, `Upgrades-buy-laser.ppm`, `Ships-ours.ppm`,
+`Ships-buy.ppm` and `Repairs-ours.ppm`. It also asserts the current system's
+tech level (Mars High's 0xfd), the 51-row F383 list, F444's 3040/1900/1900
+service rows at mass 38, a populated BBS (with every 0xff code expanded and no
+`[0x....]` fallbacks), a populated ship list at F634's 13-hull cap, and the buy
+sequence: ten times the net whole-credit charge, the new model, and the old
+hull replacing the bought row. The ship rows use the new game Eagle (model 23)
+for the trade-in, so the frame's Pt.Exchg values follow the reference rule
+(Cost - 36100).
 
 What was not captured: the commander/F2 status screen (not part of the
 station menu) and a Thargoid system's services (the port has none). The
