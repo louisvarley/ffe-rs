@@ -4,6 +4,31 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Once-a-day time tick
+
+- Merged `timed-events` (`b011b9d`) as `0594f0e`, conflict-free. The branch was
+  based on the final-batch `main`, so the market/BBS/shipyard and
+  hyperspace/landing-audit paths were already common.
+- `ffe_core::calendar::Calendar` carries `DATA_008808`'s day marker;
+  `Navigator::tick_days` runs F633's market drift, BBS replacement and shipyard
+  stock once per crossed day, through `advance`/`transfer` and hyperspace
+  (a direct `jump` adds no time). Per-station day markers keep each offer set
+  stable, and `schedule_deadline`/`cancel_deadline`/`take_expired` give the
+  missions stream a typed bridge without inventing a mission format.
+- Owner decisions: the clock and navigator are not in `Flight` today, so saving
+  the date/market days needs a serialized navigator section and a save-version
+  bump; the `DATA_009004` news buffer and F636/F637/F641 generators need state
+  and a visible screen; `F48(0x18)`/module 21 need the script VM; paused/docked
+  time does not advance; F59's dated service reminders wait on the repairs
+  actions (`docs/notes/time.md`).
+- Checks: workspace tests, clippy `-D warnings`, fmt; `timed_events` (6
+  ignored), `market_view` (2), `station_view` (2), `npc_docking` (1),
+  `npc_ai` (4); navigation debug and the release exhaustive case (244 s);
+  `verify-market`, `verify-station` (including queue/models) and
+  `verify-galaxy-map` pass.
+
+---
+
 ## 2026-10-25 - Player-build cleanup
 
 - Merged `cleanup` (`fcc2ec9` as `80b7507`) conflict-free: the port-only

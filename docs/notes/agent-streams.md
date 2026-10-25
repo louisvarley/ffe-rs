@@ -78,6 +78,7 @@ and pushed before the next one started.
 | gameover | `ca899a8` | `81a405b` | F1104→F1107→F917 tombstone (172, rare 175), timed return, `--capture-gameover`/`--death-probe` | Conflicts in main (capture options, run_intro signature/default start) and exports (kept legal + damage). `ui-19` (v0.96). Owner decisions: commander name, load UI, model 175, obituary scale/face. |
 | events | `b1b4218` | `e7518ef` | source-tagged writer (12 Source), port-only rerouting, F271 replace/NULL/ring/scroll, `message_log` scan | Conflicts in main (pad_board + pending_log target lock) and dashboard notes (F4 services/F5 note). `ui-20` (v0.97). Owner decisions: DOS start line, lock wording, unported feedback, DATA_008810/scroll. |
 | cleanup | `fcc2ec9` | `80b7507` | remove playable help/scenarios/debug labels, gate F11/F12/O behind `--dev`/`FFE_DEV`, source F1/F11/F12 bindings, `view_command`/`dev_command`, evidence | Conflict-free (branch based on current main). `ui-21` (v0.98). Owner decisions: F3 Modern/Classic vs source map, F5 snapshots, `--start sol` CLI-only, stale `test-playable.ps1`. |
+| timed-events | `b011b9d` | `0594f0e` | `calendar::Calendar`, `Navigator::tick_days` daily market/BBS/shipyard, advance/transfer/hyperspace wiring, per-station markers, deadline API, `timed_events` + JSONL | Conflict-free (based on final-batch main). `gameplay-15` done (v0.99). Owner decisions: clock/navigator not in `Flight` (save bump), news buffer/script VM absent, paused/docked ticks off, repair reminders pending. |
 
 ## Branches not in this round
 

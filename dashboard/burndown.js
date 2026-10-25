@@ -161,7 +161,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-12", title: "Communications and messages", status: "todo" },
         { id: "gameplay-13", title: "Player death and the escape capsule", status: "todo" },
         { id: "gameplay-14", title: "Rank, reputation and legal status", status: "todo" },
-        { id: "gameplay-15", title: "Time-driven events over a long run", status: "todo" },
+        { id: "gameplay-15", title: "Time-driven events over a long run (daily market/BBS/shipyard/deadline tick)", status: "done", version: "v0.99" },
         { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" },
         { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" },
         { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "done", version: "v0.63" },
@@ -724,6 +724,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 64,
       note: "Cleanup merged (v0.98): the port-only full-screen help page and scenario selector/debug labels are gone, F11/F12/O moved behind --dev/FFE_DEV=1 (Ctrl+F11 screenshot, Ctrl+F12 viewer, Ctrl+Shift+F12 lab), and F1/F11/F12 are back to the source view cycle/combat-computer note/escape capsule. input::view_command/dev_command tests, views/playable coverage and cleanup evidence are in. Owner decisions: F3 still toggles Modern/Classic although source F3 is the map (candidate for Port Options), F5 snapshots remain, --start sol stays CLI-only, and tools/test-playable.ps1 still carries help/scenario assumptions. One item added and completed (ui-21), so the remaining count is unchanged."
+    },,
+    {
+      date: "2026-10-25",
+      remaining: 63,
+      note: "Timed events merged (v0.99): ffe_core::calendar::Calendar tracks DATA_008808's day marker; Navigator::tick_days runs F633's market drift, BBS replacement and shipyard stock once per crossed day through advance/transfer/hyperspace (direct jump adds no time), with per-station day markers and schedule_deadline/cancel_deadline/take_expired for the missions stream. Owner decisions: the clock/navigator are not in Flight (a save-format version bump is needed), the news buffer/script VM is missing, paused/docked time does not advance, and service reminders await the repairs actions. One existing item completed (gameplay-15), so the remaining count falls by one."
     },
   ]
 };
