@@ -189,9 +189,17 @@ contract, not the full schema/examples in sections 2.1 onward.
   read past into, exactly as the original does; 216 bytes from file offset
   `0xc7e0c` (RVA `0xde20c`) in floppy 1.02, verified byte-for-byte against the
   executable and the declarations. Semantics: `ffe_core::pads`.
+- V27 adds `base:text/intro-credits` (`text/intro-credits.bin`, type
+  `intro_strings`, 19 NUL-terminated strings: the 18 F962 credits
+  `0x941b..0x942c` and the version line `0x942d`, raw bytes with the
+  `0x0d`/`0xfd`/`0xfe` layout codes intact, from file offset `0xbd361`/RVA
+  `0xd3761`) and `base:text/char-widths` (`text/char-widths.bin`, type
+  `character_widths`, the 256 signed bytes of `DATA_007648` at file offset
+  `0xe9998`/RVA `0xffd98`). See `ffe_rs::intro_text` and
+  `docs/notes/intro.md`.
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
-  v10). Tools read every version. The playable requires v2 font content;
+  v10); v26 1794; v27 1796. Tools read every version. The playable requires v2 font content;
   F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps
   points-only inspection; v4 adds declared-face inspection. The lab requires
   matching command/vertex model indices, counts and descriptor offsets.

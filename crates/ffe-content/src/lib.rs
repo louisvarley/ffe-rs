@@ -146,6 +146,17 @@ pub enum AssetKind {
     NameText {
         source_offset: u64,
     },
+    /// The 18 intro credit strings (`0x941b..0x942c`) as raw NUL-terminated
+    /// bytes, layout codes intact (v27).
+    IntroStrings {
+        count: u32,
+        source_offset: u64,
+    },
+    /// `DATA_007648`, the signed 256-byte character-width table F1398 wraps with
+    /// (v27).
+    CharacterWidths {
+        source_offset: u64,
+    },
     /// The planet engine's tables `DATA_007836..7899` with the code pointers
     /// replaced by ranks (v17); see `ffe_convert::embedded::decode_terrain_tables`.
     TerrainTables {
@@ -271,7 +282,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=26) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=27) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -337,6 +348,14 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         }
         if manifest.format_version < 26 && matches!(record.asset, AssetKind::PadTables { .. }) {
             return Err("The open-air pad tables require cache v26.".to_owned());
+        }
+        if manifest.format_version < 27
+            && matches!(
+                record.asset,
+                AssetKind::IntroStrings { .. } | AssetKind::CharacterWidths { .. }
+            )
+        {
+            return Err("The intro credits and character widths require cache v27.".to_owned());
         }
         if manifest.format_version < 24
             && matches!(
@@ -679,6 +698,22 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::DotTables { .. } => {
             ffe_core::model_dot::DotTables::new(bytes)?;
+        }
+        AssetKind::IntroStrings { count, .. } => {
+            let mut split = bytes.split(|byte| *byte == 0);
+            for index in 0..*count {
+                if split.next().is_none_or(<[u8]>::is_empty) {
+                    return Err(format!("invalid intro credit {index}"));
+                }
+            }
+            if split.next().is_some_and(|rest| !rest.is_empty()) {
+                return Err("intro credits have trailing bytes".to_owned());
+            }
+        }
+        AssetKind::CharacterWidths { .. } => {
+            if bytes.len() != 256 {
+                return Err("invalid character-width table".to_owned());
+            }
         }
         AssetKind::EffectWav => {
             if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt " {
