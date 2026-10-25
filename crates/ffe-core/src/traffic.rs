@@ -105,6 +105,13 @@ impl Starport {
         None
     }
 
+    /// The bay F650 gave `ship` (`+0xd0..+0xce`), if it still holds one.
+    pub fn bay_of(&self, ship: u8) -> Option<u16> {
+        self.bay_range()
+            .find(|index| self.pads[*index] == ship)
+            .map(|index| index as u16)
+    }
+
     /// F651: the ship's bay is freed and the door closes (mode 1, nobody current).
     pub fn release(&mut self, ship: u8) {
         for index in self.bay_range() {
@@ -188,6 +195,8 @@ impl Starport {
 pub mod state {
     pub const FREE: u8 = 0x00;
     pub const AUTOPILOT: u8 = 0x02;
+    /// Landed at an open-air starport's pad (F994's new-game state).
+    pub const LANDED: u8 = 0x30;
     pub const STARPORT_ALIGN: u8 = 0x08;
     pub const ALIGN: u8 = 0x0a;
     pub const OPEN_DOOR: u8 = 0x0c;
@@ -227,6 +236,90 @@ pub mod state {
             LAUNCH_OUT => "moving into the docking area",
             LAUNCHING_STATION | LAUNCHING_STARPORT => "leaving the station",
             _ => "",
+        }
+    }
+}
+
+/// F1013's takeoff altitude (`DATA_008867`): above it (and with the set speed
+/// clear) state `0x24` hands over to `0x26`.
+pub const TAKEOFF_ALTITUDE: i32 = 0x30d40;
+
+/// What one frame of the open-air takeoff found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakeoffStep {
+    /// F1013: the climb is over, state `0x24` becomes `0x26` (the ship is in
+    /// free flight within the starport region).
+    HandOff,
+    /// F1031: the starport's effect region is behind the ship, state `0x26`
+    /// becomes `0x00` and F1032 releases the bay.
+    Cleared,
+    /// F1031: the ship came down on the pad again, state `0x26` becomes `0x24`.
+    Retakeoff,
+}
+
+/// The original's open-air starport takeoff, `DATA_008870`: `0x30` landed on
+/// the pad, `0x24` F1013's climb, `0x26` F1031's flight within the starport's
+/// effect region, then `0x00` free flight. The traffic record and the ship's
+/// physics stay with their owners; this is only the mode word and its tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Takeoff {
+    pub state: u8,
+}
+
+impl Takeoff {
+    /// A new game's state: on the pad (`F994`).
+    pub fn landed() -> Self {
+        Takeoff {
+            state: state::LANDED,
+        }
+    }
+
+    /// The launch action has been accepted: F1013's climb (`0x24`). From a new
+    /// game's `0x30`; other states are left alone.
+    pub fn begin(&mut self) -> bool {
+        if self.state != state::LANDED {
+            return false;
+        }
+        self.state = state::TAKEOFF;
+        true
+    }
+
+    /// The machine in F1013's climb, as the launch action starts it.
+    pub fn taking_off() -> Self {
+        let mut takeoff = Takeoff::landed();
+        takeoff.begin();
+        takeoff
+    }
+
+    /// One frame: F1013 tests the altitude and set speed before its flight
+    /// steps, F1031 scans the contact first and then decides. `flags` are
+    /// F1033's collision flags (F1019's `0x20` is "within the starport's effect
+    /// region", `0x40` a landing), `altitude` F1033's distance (`DATA_008867`)
+    /// and `set_speed` F1013's `DATA_008918`. `starport` says the contact was a
+    /// starport (class `0x20`), whose pad F1031 lets the ship take off again.
+    pub fn step(
+        &mut self,
+        altitude: i32,
+        set_speed: i32,
+        flags: u8,
+        starport: bool,
+    ) -> Option<TakeoffStep> {
+        use state::*;
+        match self.state {
+            TAKEOFF if altitude > TAKEOFF_ALTITUDE || set_speed != 0 => {
+                self.state = AFTER_TAKEOFF;
+                Some(TakeoffStep::HandOff)
+            }
+            // F1031 checks the region first and the landing second.
+            AFTER_TAKEOFF if flags & 0x20 == 0 => {
+                self.state = FREE;
+                Some(TakeoffStep::Cleared)
+            }
+            AFTER_TAKEOFF if starport && flags & 0x40 != 0 => {
+                self.state = TAKEOFF;
+                Some(TakeoffStep::Retakeoff)
+            }
+            _ => None,
         }
     }
 }

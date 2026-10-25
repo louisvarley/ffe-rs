@@ -89,3 +89,23 @@ fn offset_turns_the_pad_and_shifts_ten_with_the_original_wrap() {
         [22 << 10, 23 << 10, 30 << 10]
     );
 }
+
+#[test]
+fn f994_lifts_the_ship_off_the_pad_along_its_up_row() {
+    let pads = pads();
+    let rows = identity();
+    let base = [1_000, 2_000, 3_000];
+    // The second row is the ship's up (F994 copies the station's rows first).
+    let up = [0, i32::MAX, 0];
+    // F1521's product: 5200 * 0x7fffffff >> 31 is 5199, not 5200.
+    assert_eq!(
+        pads.seat(base, 0x56, 0, rows, true, 5_200, up).unwrap(),
+        [1_000 + 203_776, 2_000 + 5_199, 3_000 - 204_800]
+    );
+    // No up component in the row, no lift; the indoor branch still adds it.
+    assert_eq!(
+        pads.seat(base, 0x56, 0, rows, false, 5_200, [i32::MAX, 0, 0])
+            .unwrap(),
+        [1_000 + 5_199, 2_000, 3_000 - 1]
+    );
+}

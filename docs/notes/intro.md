@@ -31,7 +31,10 @@ piece is called out below.
   rows and shifts each component left ten. With the generated rows
   `[-906354405, 1945245414, 76650739, -1938310550, -909597149, 163923668,
   180966058, 0, 2139827798]` the offset is `(126, -227, 240) << 10` =
-  `[129024, -232448, 245760]` mm in the station's frame. The local test
+  `[129024, -232448, 245760]` mm in the station's frame. F994 then adds the
+  ship's collision radius (`+0x140`, 5,200 mm for the Eagle) along its second
+  row (the up row, copied from the station): `(-4694, -2203, 396)`, so the seat
+  is the station position plus `[124330, -234651, 246156]`. The local test
   (`new_game_starts_at_ross_154`) checks this and the date, hold and cash.
 - **Boot**: the default boot is this new game. `--start sol` keeps the old
   Sol/Mars High development sandbox (and `Navigator::new`, which the existing
@@ -79,17 +82,34 @@ piece is called out below.
 | Model 177 then 176, the primary bitmap, the animation | F961/F962 | Data shared by the release; same oracle. |
 | New-game state (Ross 154, cash, ship, hold, clock, state 0x30) | F829/F998/F994 | Same as DOS; `--state` reports state 48, index 107, cash 1000, start type 1 and time 994. |
 
-## Takeoff from the starport (blocked)
+## Takeoff from the starport (F1013/F1031/F1032, 2026-10-25)
 
-The new game is landed on an open-air starport pad. The original's takeoff is
-player state `0x24` (F1013: F1037, then switch to `0x26` when the altitude
-word `DATA_008867` passes `0x30d40` or `DATA_008918` is set) followed by normal
-flight; the earlier port's launch instead teleported the ship to the station's
-`standoff` (20 km) with the lift geometry. That teleport is invented and has
-been **removed**: `Navigator::begin_launch` now refuses an open-air starport
-with a clear message, and `docs/DEVIATIONS.md` EXP-010 records the gap. Indoor
-stations keep the verified lift launch. Porting F1013's altitude/timer hand-off
-is the follow-up.
+The new game is landed on an open-air starport pad in state `0x30`. The launch
+action (F381's F654) starts F1013's climb (`0x24`): F1037's input, then the
+hand-off to `0x26` once `DATA_008867` passes `0x30d40` or `DATA_008918` is set,
+F1041's fixed up-thrust, F602/F1512 and F1033's scan. F1031 then flies the
+state `0x26` ship normally and watches the same scan: while F1033's `0x20`
+("within the starport's effect region", the starport collision stream's node
+flags) is set it stays; when it clears, the mode becomes `0x00` and F1032 calls
+F651 to free the bay. A landing (`0x40`) on the open-air pad during `0x26`
+returns to `0x24`. `ffe_core::traffic::Takeoff` holds the mode word and its
+transitions; `Navigator::{begin_launch, takeoff_step}` drive it and release the
+bay. Indoor stations keep the verified lift launch.
+
+The pad contact is the ported F575/F576 complex-shape scan, kept in a persistent
+two-body world (`OriginalFlight::{begin_pad_takeoff, step_pad, end_pad_takeoff}`)
+so F570's frame switch survives across frames. F994's placement is F650's offset
+plus the ship's `+0x140` collision radius along its up row (`Pads::seat`, used by
+`Navigator::new_game` and `takeoff_seat`). One difference: a starport's complex
+shape leaves F1033's altitude at `i32::MAX`, so F1013's altitude test uses the
+height climbed from the pad seat along its up row as the fallback; the original
+would otherwise hand over on the first frame. `tests/navigation.rs` runs the
+landed -> `0x24` -> `0x26` -> `0x00` sequence with the new game's cache
+(`FFE_SHOT_DIR` also saves pad, climb and clear frames), and
+`crates/ffe-core/tests/takeoff.rs` pins the mode transitions. The playable's
+`--capture DIR` script flies the same takeoff off the default new game's pad
+and saves every tenth frame. The old invented 20 km teleport stays removed;
+`docs/DEVIATIONS.md` EXP-010 records the port's fallback.
 
 ## Oracle
 

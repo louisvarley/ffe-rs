@@ -49,6 +49,11 @@ pub struct OriginalFlight {
     forward_limit: i16,
     /// The time acceleration (`DATA_009012`, per 20 ms): 0x3e2 is real time.
     acceleration: u32,
+    /// The two-body world of an open-air takeoff: the ship is body 1 and the
+    /// starport body 2, so F570's frame switches (and their position, velocity
+    /// and orientation changes) persist from frame to frame while the ship is
+    /// on the pad. Dropped when the takeoff clears.
+    pad_world: Option<Bodies>,
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -99,6 +104,7 @@ impl OriginalFlight {
             held: [0.0; 6],
             forward_limit: limits.axes[2][0],
             acceleration: crate::console::TIME_ACCELERATION[0],
+            pad_world: None,
         }
     }
 
@@ -112,6 +118,152 @@ impl OriginalFlight {
     /// advances by the real time times it, while key amounts stay in real time.
     pub fn set_time_acceleration(&mut self, step: usize) {
         self.acceleration = crate::console::TIME_ACCELERATION[step.min(4)];
+    }
+
+    /// F1042 and the launch button: zero the velocity, the turn rates, the
+    /// thrust words and the set speed, and put the ship in F1013's climb
+    /// (`DATA_008870` `0x24`). The caller has already placed it on the pad.
+    pub fn begin_takeoff(&mut self) {
+        self.player.mode = ffe_core::traffic::state::TAKEOFF;
+        self.player.set_speed = 0;
+        self.player.motion.velocity = [0; 3];
+        self.player.motion.rate = [0; 3];
+        self.player.motion.thrust = [0; 3];
+    }
+
+    /// Set the player's mode word (`DATA_008870`): the takeoff machine's
+    /// states are copied here each frame so F1041's `0x24` up-thrust and the
+    /// ordinary flight paths apply.
+    pub fn set_mode(&mut self, mode: u8) {
+        self.player.mode = mode;
+    }
+
+    /// The set speed (`DATA_008918`) in the original's velocity units.
+    pub fn set_speed_units(&self) -> i32 {
+        self.player.set_speed
+    }
+
+    /// Start the persistent two-body world of an open-air takeoff: the ship
+    /// (body 1) at its absolute position relative to the starport (body 2).
+    /// F570's frame switches then carry across frames instead of being undone
+    /// by a fresh world each tick.
+    pub fn begin_pad_takeoff(
+        &mut self,
+        parent: &Body,
+        parent_position: [i64; 3],
+        player_model: &ModelInfo,
+    ) {
+        let motion = self.player.motion;
+        let vector: [i64; 3] =
+            std::array::from_fn(|k| motion.position[k].wrapping_sub(parent_position[k]));
+        let (outer_radius, inner_radius) = player_model.radii();
+        let mut world = Bodies {
+            stamp: 1,
+            frame_tics: self.player.frame_tics,
+            player: 1,
+            ..Bodies::default()
+        };
+        world.live[1] = true;
+        world.physical[1] = true;
+        world.live[2] = true;
+        world.physical[2] = true;
+        let mut words = Words::default();
+        // The landing gear is down (`+0x9e` word 1 = 0xffff).
+        words.0[1] = 0xffff;
+        world.body[1] = Body {
+            position: vector,
+            velocity: motion.velocity,
+            parent: 2,
+            index: 1,
+            kind: 0,
+            orientation: std::array::from_fn(|k| motion.orientation[k / 3][k % 3]),
+            outer_radius,
+            inner_radius,
+            shape: player_model.class(),
+            model: motion.model,
+            words,
+            ..Body::default()
+        };
+        let mut station = *parent;
+        station.position = parent_position;
+        station.parent = 0;
+        station.rotating = 0;
+        station.index = 2;
+        world.body[2] = station;
+        self.player.motion.position = vector;
+        self.player.motion.parent = 2;
+        self.player.motion.rotating = 0;
+        self.player.motion.switch_delay = 0;
+        self.player.motion.updated = 0;
+        self.pad_world = Some(world);
+    }
+
+    /// One frame on the pad in that world: the same F1041/F601/F1512/F1033
+    /// tick as [`OriginalFlight::step_landing`], with the starport as the
+    /// player's parent so F570's `0x20` region and F1031's hand-off see it.
+    pub fn step_pad(
+        &mut self,
+        elapsed: f64,
+        keys: &Keys,
+        tools: Option<&SurfaceTools>,
+    ) -> Result<Contact, String> {
+        let (_, world_tics) = self.prepare(elapsed, keys);
+        self.player.reference_counter = 0xd;
+        let world = self
+            .pad_world
+            .as_mut()
+            .ok_or("No pad takeoff world to step.")?;
+        // F1677's absolute-position cache is keyed by DATA_008811, the frame
+        // stamp, so it must change every frame.
+        world.stamp = world.stamp.wrapping_add(1);
+        world.frame_tics = world_tics;
+        self.player.tick_with(
+            &ThrusterKeys::default(),
+            i64::from(world_tics),
+            world,
+            1,
+            tools,
+        )
+    }
+
+    /// The ship is still in the pad world.
+    pub fn on_pad(&self) -> bool {
+        self.pad_world.is_some()
+    }
+
+    /// F1677's absolute position in millimetres (the player's own position
+    /// outside the pad world, where it is already absolute).
+    pub fn absolute_position(&mut self) -> [i64; 3] {
+        match self.pad_world.as_mut() {
+            Some(world) => world.absolute(1).unwrap_or(self.player.motion.position),
+            None => self.player.motion.position,
+        }
+    }
+
+    /// Leave the pad world: F573 turns the ship back into the linear frame and
+    /// F1677 gives its absolute position, so ordinary free flight continues.
+    pub fn end_pad_takeoff(&mut self) {
+        let Some(mut world) = self.pad_world.take() else {
+            return;
+        };
+        let motion = self.player.motion;
+        world.body[1].position = motion.position;
+        world.body[1].velocity = motion.velocity;
+        world.body[1].orientation = std::array::from_fn(|k| motion.orientation[k / 3][k % 3]);
+        if world.body[1].rotating != 0 {
+            world.to_linear(1, 2);
+        }
+        let station = world.body[2].position;
+        let body = world.body[1];
+        self.player.motion.position =
+            std::array::from_fn(|k| body.position[k].wrapping_add(station[k]));
+        self.player.motion.velocity = body.velocity;
+        self.player.motion.orientation =
+            std::array::from_fn(|k| std::array::from_fn(|c| body.orientation[3 * k + c]));
+        self.player.motion.parent = 0;
+        self.player.motion.rotating = 0;
+        self.player.motion.switch_delay = 0;
+        self.player.motion.updated = 0;
     }
 
     /// Put the ship at a position (millimetres) with its velocity cleared and the
@@ -388,12 +540,18 @@ impl OriginalFlight {
 
     /// Copy the state into `flight`: position and velocity in flight units, the
     /// orientation, `yaw`/`pitch` for saves, and the forward thrust for the glows.
-    pub fn apply(&self, flight: &mut Flight) {
+    /// In the pad world the player's position is relative to the starport, so
+    /// F1677's absolute position is what the views and navigation see.
+    pub fn apply(&mut self, flight: &mut Flight) {
+        let position = match self.pad_world.as_mut() {
+            Some(world) => world.absolute(1).unwrap_or(self.player.motion.position),
+            None => self.player.motion.position,
+        };
         let motion = &self.player.motion;
         let axes: [[f64; 3]; 3] = motion
             .orientation
             .map(|row| row.map(|v| f64::from(v) / 2_147_483_648.0));
-        flight.position = motion.position.map(|p| p as f64 / UNITS_PER_FLIGHT_UNIT);
+        flight.position = position.map(|p| p as f64 / UNITS_PER_FLIGHT_UNIT);
         flight.velocity = motion
             .velocity
             .map(|v| f64::from(v) * MM_PER_SECOND / UNITS_PER_FLIGHT_UNIT);

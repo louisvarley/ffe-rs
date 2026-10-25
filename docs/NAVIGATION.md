@@ -16,13 +16,15 @@ systems, and an autopilot to planets, stations and other bodies for testing.
 
 The default boot is now the original's new game: Ross 154, the Eagle (model 23),
 1000 CR, 1 Jan 3250 12:00, landed on the starport pad (`navigation::new_game`,
-`docs/notes/intro.md`). Open-air starport takeoff is blocked until F1013's
-0x24 -> 0x26 path is ported (EXP-010). The development sandbox (`--start sol`)
+`docs/notes/intro.md`). `L` takes off from the open-air pad through the
+original's F1013 `0x24` -> F1031 `0x26` -> `0x00` path (EXP-010). The
+development sandbox (`--start sol`)
 starts docked at a station **in a planet's orbit** - the closest such station,
 else the first station - so the launch puts that world in view (Sol: Mars High,
 1.61 Mars radii). That is a starting-scenario choice, not the original's fixed
 start.
 | Stations in the flight view and docking | done (2026-10-24), ffe-rs rules: see "Docking" below |
+| Open-air starport takeoff | done (2026-10-25): F1013 `0x24`, F1031 `0x26`, F1032/F651 bay release (`docs/notes/intro.md`) |
 | Galaxy beyond the 12 hand-coded systems | not done: the other table systems need the sector star generator (F832-F856, tables `DATA_006799..6808`) and their name strings |
 
 ## The autopilot
