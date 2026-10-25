@@ -115,7 +115,8 @@ window.FFE_BURNDOWN = {
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
         { id: "flight-11", title: "Launch sequence", status: "done", version: "v0.55" },
-        { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "todo" }
+        { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "todo" },
+        { id: "flight-13", title: "Open-air starport takeoff (F1013 0x24, F1031/F1032 bay release, F573 return)", status: "done", version: "v0.59" }
       ]
     },
     {
@@ -491,6 +492,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 73,
       note: "Original HUD merged (v0.58): ten-entry dated message log and clock, shields/hull/Set/Act/Alt and turret readouts, F1116 lamps and F1120's engines-off page (F2/record 0x0c), and the 82-record DATA_005100 console table with F261 draw order, F262 radio reset and F263/264 visibility. The port's top bar, SPEED line and 119..157 status/autopilot block are retired (ui-2 done). Still open: player damage and equipment words (so shields/hull read defaults and F991 0x10-0x14 stay hidden), scanner contacts, altitude/F1393 speed units, F3 key still on Modern/Classic, and the DOS F2 mapping is unverified."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 73,
+      note: "Open-air starport takeoff merged (v0.59): F994/F650's pad seat (with the ship's +0x140 radius along the up row), F381/F654 clearance, F1013's 0x24 climb, F1031's 0x20 region test and hand-off to 0x26, F1032/F651's bay release and F573/F1677's return to the system frame; the pad contact runs F575/F576 in a persistent two-body world, so the old 20 km teleport and the takeoff refusal are gone (EXP-010 keeps only the DATA_008867 climb fallback). The default new game now starts landed at Ross 154's Sirocco Station and takes off with L. One item added and completed (flight-13), so the remaining count is unchanged."
     }
   ]
 };

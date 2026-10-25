@@ -106,6 +106,30 @@ impl Pads {
         Ok(crate::frames::vec_mat_mul(pad, &station_rows).map(|v| i64::from(v.wrapping_shl(10))))
     }
 
+    /// F994's placement of a ship on a pad: F650's offset, then F994 adds the
+    /// ship's collision radius (`+0x140`) along its second row (`+0xc..+0x14`,
+    /// the up row). `base` is the station's position and `up` the row the ship
+    /// was given (F994 copies the station's orientation to it first). The
+    /// product is F1521's, widened to `i64` by F994's `Int64Add32`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn seat(
+        &self,
+        base: [i64; 3],
+        model: u32,
+        bay: u16,
+        station_rows: [i32; 9],
+        open_air: bool,
+        radius: i32,
+        up: [i32; 3],
+    ) -> Result<[i64; 3], String> {
+        let offset = self.position(model, bay, station_rows, open_air)?;
+        Ok(std::array::from_fn(|k| {
+            base[k]
+                .wrapping_add(offset[k])
+                .wrapping_add(i64::from(crate::model::multiply(radius, up[k])))
+        }))
+    }
+
     /// F650's whole position branch. `open_air` is the station class byte
     /// `+0x14c`'s bit 0x40, which the caller supplies: without it F650 returns
     /// [`INDOOR_OFFSET`] without looking at the model or bay.

@@ -608,7 +608,7 @@ original's.
 | **Missile (5)** | `F1099`/`F1100` missile branch, tracked missile, console | missing (no missiles/equipment) |
 | **Combat computer (6)** | bitmap 97 gunsight, target boxes, `F1108/F1109`, console | no such view in the port |
 | **Docked** | separate station/cockpit screens; the console art is shared | port station screens; console buttons suppressed (`screen.rs`) |
-| **Landed (rough/normal)/take-off** | strings `0x8614-0x8617`; surface state; console | no landed state; docking is an immediate mode change |
+| **Landed (rough/normal)/take-off** | strings `0x8614-0x8617`; surface state; console | surface landing is F575's settled contact with no landed screen; the new game's open-air starport pad takes off through F1013 `0x24` -> F1031 `0x26` -> `0x00` |
 | **Map** | F3 galaxy map, system list, console date/name/type/fuel (`galaxy-map.md`, `NAVIGATION.md`) | galaxy scene + system list ported; the console clock is the original's, the rest of the map text is the port's |
 | **Damage/death** | hull/shield %, `F1104` death to external view, `F1098` escape capsule (F12) | no player damage; hull reads 100.0%, shields hidden; F12 is the model viewer |
 | **Hyperspace** | `F908-F910` countdown/scene; console | immediate jump (`main.rs`, EXP-007) |

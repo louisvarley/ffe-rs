@@ -173,13 +173,38 @@ fn new_game_starts_at_ross_154() {
     let offset = pads
         .position(body.model, state.bay, body.rows, true)
         .unwrap();
+    // F994: the pad offset, then the ship's collision radius along its up row
+    // (the station's second row, copied to the ship first).
+    let info = ffe_core::objects::ModelInfo::read(
+        cache.asset("base:model/records").unwrap(),
+        cache.asset("base:ship/stats").unwrap(),
+        state.ship,
+    )
+    .unwrap();
+    let radius = info.radii().1 as i32;
+    let up = [body.rows[3], body.rows[4], body.rows[5]];
+    assert_eq!(radius, 5_200);
+    assert_eq!(up, [-1_938_310_550, -909_597_149, 163_923_668]);
+    let expected = pads
+        .seat(
+            body.position,
+            body.model,
+            state.bay,
+            body.rows,
+            true,
+            radius,
+            up,
+        )
+        .unwrap();
+    assert_eq!(state.seat, expected);
     assert_eq!(
-        state.seat,
         [
-            body.position[0] + offset[0],
-            body.position[1] + offset[1],
-            body.position[2] + offset[2]
-        ]
+            state.seat[0] - body.position[0] - offset[0],
+            state.seat[1] - body.position[1] - offset[1],
+            state.seat[2] - body.position[2] - offset[2],
+        ],
+        [-4_694, -2_203, 396],
+        "F1521's radius product, hand-checked"
     );
     // Hand-checked: model 0x55 uses DATA_006177; bay 1 is (-250, 0, 250); the
     // station rows are (Q31, from F1674)
@@ -195,11 +220,181 @@ fn new_game_starts_at_ross_154() {
     // The calendar counts from 0x121cf7.5 days, not from the absolute clock.
     assert_eq!(nav.date_text(), "1-Jan-3250 12:00:00");
     assert_eq!(nav.day(), 0);
-    // The original's 0x24 -> 0x26 takeoff is not ported; the launch is blocked
-    // rather than teleporting the ship 20 km out.
-    let error = nav.begin_launch().unwrap_err();
-    assert!(error.contains("starport takeoff"), "{error}");
+    // F654 grants the launch and the open-air path starts F1013's climb (0x24)
+    // with no lift stages: the ship stays on its pad.
+    nav.begin_launch().unwrap();
+    assert_eq!(nav.takeoff_state(), Some(ffe_core::traffic::state::TAKEOFF));
     assert!(nav.sequence.is_none());
+    assert!(nav.cleared(index), "F654 made the player the current ship");
+    assert_eq!(nav.takeoff_seat(index, radius), Some(state.seat));
+}
+
+/// The scripted takeoff: the new game starts landed on Ross 154's open-air
+/// starport (`0x30`), `L` asks F654 and puts the ship in F1013's climb (`0x24`),
+/// F1013 hands over to `0x26` at the altitude/set-speed test, and F1031's
+/// contact scan clears the starport's effect region and releases the bay.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn new_game_takes_off_from_the_pad_into_free_flight() {
+    use ffe_core::traffic::TakeoffStep;
+    use ffe_rs::navigation::{landing_body, Library, Navigator};
+    use ffe_rs::original_flight::Keys as OriginalKeys;
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    let index = nav.docked.expect("landed at the start starport");
+    let state = nav.new_game.unwrap();
+    let body = nav.bodies[index].clone();
+    nav.begin_launch().unwrap();
+    assert_eq!(nav.takeoff_state(), Some(ffe_core::traffic::state::TAKEOFF));
+
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let mut flight = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: state.ship,
+        ..Flight::default()
+    };
+    flight.position = state.seat.map(|v| v as f64 / unit);
+    flight.axes = Some(body.orientation);
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    model.begin_takeoff();
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = ffe_core::objects::ModelInfo::read(records, stats, state.ship).unwrap();
+    let library = Library(&cache);
+    let tools = cache
+        .asset("base:terrain/tables")
+        .zip(cache.asset("base:terrain/maps"))
+        .map(
+            |(terrain_table, terrain_maps)| ffe_core::surface::SurfaceTools {
+                shapes: &library,
+                terrain_table,
+                terrain_maps,
+                detail: 0,
+            },
+        );
+    let station_body = landing_body(
+        &body,
+        &ffe_core::objects::ModelInfo::read(records, stats, body.model).unwrap(),
+    );
+    // The persistent two-body pad world, as the playable keeps it.
+    model.begin_pad_takeoff(&station_body, body.position, &info);
+    // Frames for an eye check, as the other view tests save them.
+    let shots = std::env::var_os("FFE_SHOT_DIR");
+    let viewer = shots
+        .as_ref()
+        .and_then(|_| ffe_rs::model_viewer::ModelViewer::new(&cache).ok());
+    let save = |name: &str, model: &mut OriginalFlight, nav: &Navigator| {
+        if let (Some(dir), Some(viewer)) = (&shots, &viewer) {
+            let path = std::path::Path::new(dir).join(name);
+            shot(&cache, viewer, nav, model, &path);
+        }
+    };
+    save("takeoff-0000-pad.ppm", &mut model, &nav);
+    let mut seen = Vec::new();
+    let mut cleared = false;
+    for frame in 0..8_000 {
+        if nav.takeoff.is_none() {
+            break;
+        }
+        let at = model.absolute_position();
+        let parent_index = nav.landing_parent(at, info.radii().0).unwrap_or(index);
+        let parent = nav.bodies[parent_index].clone();
+        let parent_info = ffe_core::objects::ModelInfo::read(records, stats, parent.model).unwrap();
+        let parent_body = landing_body(&parent, &parent_info);
+        // F1013's climb is automatic (the fixed up thrust); once F1013 has
+        // handed over, raise the set speed to fly out of the starport region.
+        let climbing = nav.takeoff_state() == Some(ffe_core::traffic::state::TAKEOFF);
+        let keys = OriginalKeys {
+            faster: !climbing && model.set_speed_metres() < 500.0,
+            ..OriginalKeys::default()
+        };
+        let contact = if model.on_pad() {
+            model.step_pad(0.02, &keys, tools.as_ref())
+        } else {
+            model.step_landing(
+                0.02,
+                &keys,
+                &parent_body,
+                parent.position,
+                &info,
+                tools.as_ref(),
+            )
+        }
+        .unwrap_or_else(|error| {
+            panic!(
+                "frame {frame}: parent {parent_index} {} {:?} model {:#x} class {:#x} \
+                 tools {}: {error}",
+                parent.name,
+                parent.kind,
+                parent.model,
+                parent_info.class(),
+                tools.is_some()
+            )
+        });
+        let before = nav.takeoff_state().unwrap();
+        // A complex starport shape leaves F1033's altitude at 0x7fffffff; the
+        // playable measures the climb from the pad for F1013's test.
+        let altitude = if contact.altitude() == i32::MAX {
+            let at = model.absolute_position();
+            (0..3)
+                .map(|k| (at[k] - state.seat[k]) as f64 * body.orientation[1][k])
+                .sum::<f64>()
+                .clamp(0.0, f64::from(i32::MAX)) as i32
+        } else {
+            contact.altitude()
+        };
+        let step = nav.takeoff_step(altitude, model.set_speed_units(), contact.flags);
+        if nav.takeoff_state() != Some(before) {
+            seen.push(before);
+        }
+        match step {
+            Some(TakeoffStep::HandOff) => {
+                model.set_mode(nav.takeoff_state().unwrap());
+                save("takeoff-0100-climb.ppm", &mut model, &nav);
+            }
+            Some(TakeoffStep::Cleared) => {
+                model.set_mode(ffe_core::traffic::state::FREE);
+                model.end_pad_takeoff();
+                save("takeoff-0200-clear.ppm", &mut model, &nav);
+                cleared = true;
+                break;
+            }
+            Some(TakeoffStep::Retakeoff) => model.begin_takeoff(),
+            None => {}
+        }
+    }
+    let moved = distance(model.absolute_position(), state.seat);
+    eprintln!(
+        "takeoff modes {seen:?}, cleared {cleared}, moved {}, set speed {:.0} m/s, \
+         mode {:#x}, docked {:?}",
+        describe(moved),
+        model.set_speed_metres(),
+        model.player().mode,
+        nav.docked
+    );
+    assert_eq!(
+        seen.first(),
+        Some(&ffe_core::traffic::state::TAKEOFF),
+        "F1013's climb is the first mode"
+    );
+    assert!(
+        seen.contains(&ffe_core::traffic::state::AFTER_TAKEOFF),
+        "F1013 hand-off to 0x26: {seen:?}"
+    );
+    assert!(cleared, "F1031 cleared the starport region: {seen:?}");
+    assert_eq!(model.player().mode, 0x00, "free flight");
+    assert!(nav.takeoff.is_none());
+    assert_eq!(nav.docked, None, "the ship has left the starport");
+    assert!(
+        moved > 0x30d40 as f64,
+        "the ship climbed above F1013's altitude: {}",
+        describe(moved)
+    );
+    // F1032 called F651: the bay is free and the starport awaits another ship.
+    let port = nav.starport(index);
+    assert_eq!(port.bay_of(ffe_rs::navigation::PLAYER), None);
+    assert_eq!(port.mode, 1);
 }
 
 /// The map state the keys drive: open, choose, jump, fly.
@@ -627,7 +822,7 @@ fn autopilot_docks_at_stations() {
                         shots.push(name);
                         let path = std::path::Path::new(&dir)
                             .join(format!("dock-{}-{name}.ppm", wanted.replace(' ', "_")));
-                        shot(&cache, &viewer, &nav, &flight, &path);
+                        shot(&cache, &viewer, &nav, &mut flight, &path);
                     }
                 }
             }
@@ -704,7 +899,7 @@ fn shot(
     cache: &ffe_content::VerifiedCache,
     viewer: &ffe_rs::model_viewer::ModelViewer,
     nav: &ffe_rs::navigation::Navigator,
-    flight: &OriginalFlight,
+    flight: &mut OriginalFlight,
     path: &std::path::Path,
 ) {
     use ffe_rs::original_flight::{TICS_PER_SECOND, UNITS_PER_FLIGHT_UNIT as UNIT};

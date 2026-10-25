@@ -4,6 +4,36 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Open-air starport takeoff merged (v0.59)
+
+- Merged `takeoff` (74da8d8): F994/F650's seat (the pad offset plus the ship's
+  `+0x140` collision radius along its up row, `Pads::seat`), F381/F654
+  clearance, F1013's `0x24` climb, F1031's starport `0x20` effect-region test
+  and hand-off to `0x26`, F1032/F651's bay release, F1042's zero motion and
+  F573/F1677's return to the system frame. The pad contact runs F575/F576's
+  complex-shape scan in a persistent two-body world
+  (`OriginalFlight::{begin_pad_takeoff, step_pad, end_pad_takeoff}`), so the
+  old invented 20 km teleport is not involved. `ffe_core::traffic::Takeoff`
+  holds the mode word; `Navigator::{begin_launch, takeoff_step, takeoff_seat}`
+  drive it. The default new game starts landed at Ross 154's Sirocco Station.
+- **The refusal is gone.** `begin_launch` no longer rejects an open-air
+  starport. The only remaining deviation in EXP-010 is F1013's altitude test:
+  a starport's complex shape leaves F1033's altitude at `i32::MAX`, so the port
+  measures the climb from the pad seat along its up row instead.
+- Merge was conflict-free (git `ort` auto-merged `main.rs`); the HUD round's F2
+  status page and console table, the combat HUD and the station/prefs screens
+  are untouched. Checks: `cargo test --workspace --locked`, clippy
+  `-D warnings`, `cargo fmt --check`; `cargo test -p ffe-core --test takeoff
+  --test pads` (4 + 5); the two cached navigation tests
+  (`new_game_starts_at_ross_154`, `new_game_takes_off_from_the_pad_into_free_flight`)
+  pass.
+- Docs: EXP-010 rewritten (takeoff ported, refusal removed); `STATUS.md`,
+  `NAVIGATION.md`, `docs/notes/dashboard.md` and `docs/notes/intro.md` no
+  longer call takeoff blocked; the 2026-10-24 PORT_LOG bullet is marked
+  superseded.
+
+---
+
 ## 2026-10-25 - Original HUD, message log and table-driven console merged (v0.58)
 
 - Merged `hud` (2cccccd, 4d4f2be): `ffe_rs::messages` (ten-entry dated log,
@@ -243,6 +273,8 @@ Notes: `docs/notes/collision.md`. `crates/ffe-core/src/landing.rs`,
 - **Open-air starport takeoff is blocked** with a clear message (player states
   `0x24`/`0x26` are not ported) instead of inventing a teleport (EXP-010).
   Indoor stations keep the verified lift launch.
+  *(Superseded 2026-10-25: F1013/F1031/F1032 are ported; see the takeoff entry
+  above. The refusal is gone.)*
 
 ## 2026-10-24 - F650 pad tables (cache v26)
 

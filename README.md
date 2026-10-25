@@ -492,7 +492,7 @@ python ci\check_forbidden.py
 ```
 
 Automated Rust tests use synthetic data, not proprietary game files.
-Windows validation currently runs 364 synthetic tests; an additional
+Windows validation currently runs 369 synthetic tests; an additional
 case/link-handling test is enabled on Unix. CI is configured for Windows and
 Linux; remote CI has not been run by this local implementation session.
 

@@ -12,14 +12,19 @@ Ross 154, the Eagle (model 23), 1000 CR, 1 Jan 3250 12:00 and player state 0x30
 on the starport's pad; `--start sol` keeps the Sol/Mars High development
 sandbox.
 The front end's logo/credit timeline is `ffe_rs::front_end` (the JJFFE legal
-splash is not part of it; `docs/notes/intro.md`). Open-air starport takeoff is
-still blocked with a message (EXP-010).
+splash is not part of it; `docs/notes/intro.md`). `L` takes off from the open-air
+starport pad through the original's F1013 `0x24` -> F1031 `0x26` -> `0x00` path
+(EXP-010); the earlier refusal is gone.
 
 `docs/NAVIGATION.md`: system and galaxy maps (Tab, G) and an autopilot to planets
 and stations, for testing the generated systems. Not part of the original game.
 Hyperspace jumps use the original's drive range, fuel and jump time over real star positions
 (`docs/notes/hyperspace.md`; both match the executed original; the jump scene is not drawn). Docking and launching show the original's lift scenes (`ffe_core::lift`, verified on 8,192 cases against the
-executed original; `docs/notes/docking.md`). Since 2026-10-24 the docked screen is the original's station services menu and stockmarket
+executed original; `docs/notes/docking.md`). The default new game's open-air
+starport takeoff is the original's F1013 `0x24` -> F1031 `0x26` -> `0x00` path
+over a persistent two-body pad contact (`ffe_core::traffic::Takeoff`,
+`docs/notes/intro.md`), so the ship no longer needs the old refusal or a
+teleport; indoor stations keep the lift. Since 2026-10-24 the docked screen is the original's station services menu and stockmarket
 (`docs/notes/station.md`: the `DATA_005304` screen table, the `0x98xx` strings, the row buttons,
 hot areas and keys; checked against reference (JJFFE 2.8a7) game frames; the services and shipyard roots
 and the market are ported, the equipment/ship/repair lists and BBS generation are not). The
@@ -62,7 +67,7 @@ scanner contacts and altitude units remain.
   audit** (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 133 items, 60 done and 73 left on
+  in `burndown.js`; 14 milestones, 134 items, 61 done and 73 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -180,7 +185,7 @@ capture produced by two repeat runs of the local reference.
 | v0.45 animation inputs, station spin | `ffe-core::model_animation` | `model_animation.rs` (6) | `verify-animation.py` (2,640 rotation + 4,096 orbital + F1537/F1680/F1683 set-ups) | `10ed4039…`, `2ab63f4d…` | global 0 = GameTics >> 10, global 1 gear/door (F865); F866/F1675 spin, model 74 at speed 10 |
 | v0.46 ship statistics, eyes, turrets | cache v12 `base:ship/stats`, `ShipStats`, `camera` eye/turret views | `views.rs` | none (data imported byte-exact; views from the assembly) | — | thrust limits feed global 15; F8 turret views for > 2 gun mounts |
 | v0.48e surface plumbing | `trace_surface` queue words (events 60/61) | — | whole-table oracle unchanged (448, 0 mismatched) | `4431b861…` | F1823 (entry hash map) and F1833 (mode dispatch) read and documented; surfaces are planet-scale, so the synthetic z-2000 station context clips them all |
-| v0.48p front end and new game | `ffe_rs::front_end`, `navigation::{Body, START_SYSTEMS, NewGameState, new_game}`, date helper | `front_end.rs` (8), `navigation.rs` (+1, ignored), `intro_reference.rs` (1, ignored) | `verify-intro.py` (76 cases, 10 tamper fields) | `a9489bbe5d0a2765938c1d14f8ba70505c0726bcd110d492eb01959616eafc3d` | F961/F962's 18 credits, model 177/176, bitmap 0x42, animation and the F829/F998/F994 start (Ross 154, Eagle model 23, 1000 CR, state 0x30, pad seat); default boot is the new game, `--start sol` the sandbox; JJFFE legal splash and V line are not boot data; starport takeoff blocked (EXP-010) |
+| v0.48p front end and new game | `ffe_rs::front_end`, `navigation::{Body, START_SYSTEMS, NewGameState, new_game}`, date helper | `front_end.rs` (8), `navigation.rs` (+1, ignored), `intro_reference.rs` (1, ignored) | `verify-intro.py` (76 cases, 10 tamper fields) | `a9489bbe5d0a2765938c1d14f8ba70505c0726bcd110d492eb01959616eafc3d` | F961/F962's 18 credits, model 177/176, bitmap 0x42, animation and the F829/F998/F994 start (Ross 154, Eagle model 23, 1000 CR, state 0x30, pad seat); default boot is the new game, `--start sol` the sandbox; JJFFE legal splash and V line are not boot data; open-air starport takeoff ported 2026-10-25 (F1013/F1031/F1032, EXP-010) |
 | v0.48d surface helpers | `ffe_core::model_surface::{cross_sign, mix32, max_abs_msb}` | `model_surface.rs` (2) | `--surface-sign` (12 pairs), `--surface-helpers` (8 mixes, 9 points) pinned | — | F1875, F1824, F1825 ported; F1816/F1817/F1820 are arena allocators to replace, not reproduce |
 | v0.48c surface resolution | `SurfaceEmission::{origin, axes}` (F1874), `trace_surface` probe | `model_execute.rs` (+1) | `verify-station-models.py`: 448 models, 40 surface resolutions, 0 mismatched | `2036461a…` | origin (F1470 view), word0/6/10 and the three axis vectors verified; F1876's patch rendering not ported (see `docs/notes/surfaces.md`) |
 | v0.48b 3D text | `ffe-convert::glyph_programs`, `GlyphSet`, `ModelViewer::draw_texts`, cache v14 | `text.rs` (1), `glyphs.rs` (1, ignored), `embedded.rs` (+1), `cache.rs` (+1) | census: all three font sets import; models 15/30/66/453 draw text with nothing skipped | — | F1747: each character's program runs through `execute_live` in an F1740 frame, its return word sets the next pen; `0x3016`/`0x3022` expand the object string |
@@ -190,14 +195,15 @@ capture produced by two repeat runs of the local reference.
 | v0.48p Escape preference pages, space colour | `ffe_rs::prefs`, `Screen::draw_prefs`, `Screen::{sky, stars_visible}`, `IndexedImage::blit_rgb` | `prefs.rs` (8 + unit tests), `prefs.rs` test (8) | none (layout/strings from `ffedat.asm`; the original Escape frame is a manual capture) | — | pages 0-4 are `DATA_004963`..`DATA_004967` with `DATA_004903`..`DATA_004905` hot areas and primary icon bitmaps 44/45; space colour is `DATA_008815..817` (default Light Blue, six-bit `#0c0c4c`); port page 5 (Modern/Classic) and `Quit`; grey unimplemented rows; see `docs/notes/prefs.md`, EXP-012/013 |
 | v0.57 crosshair, lasers, combat HUD | `ffe_core::laser`, `ffe_rs::combat::Combat` (on `Flight`), `Screen::{draw_gunsight, draw_velocity_marker, draw_gauges, draw_target_hud}`, `IndexedImage::blit_clipped`, main Space fire | `laser.rs` (8), `combat.rs` (4), `combat_view.rs` (6, ignored), local frames | `--state-combat` prints F998's loadout from the executed original (model 23, one `0x88` mount, two `0x82` missiles, 1 t energy); no new verify-all entry | — | bitmap 97 gunsight at (129,48) per mount (not views 4/6), bitmap 98 velocity marker (front only), F270 bars, F1100 range; F930/F931/F929/F730/F938 firing, F953/F942 damage; no NPC ships yet, so the target readout and model-157 flash are unreachable; `docs/notes/combat.md` |
 | v0.58 original HUD, message log, console table | `ffe_rs::{messages, hud, console, console_table}`, `Screen::{draw_messages, draw_console, draw_gauges}`, `ShipSystems`, `PlayerHud` | `dashboard_view.rs` (3, ignored), `console_table.rs` (13 + unit tests), `console.rs` (F261/262/263/264/991/1116/1117/1120) | none (the layout/strings are from `ffe.asm`; `tools/gen-console-table.py` imports the 82 records byte-exactly) | — | ten-entry dated log and clock, shields/hull/Set/Act/Alt and turret text, lamps and the engines-off page (F2/record 0x0c), the table-driven console and the retired port top bar/status block; player damage/equipment state, scanner contacts, F991 0x11-0x14, altitude/F1393 units and the F2/F3 key mappings remain; `docs/notes/dashboard.md` |
+| v0.59 open-air starport takeoff | `ffe_core::traffic::Takeoff`, `Pads::seat`, `Navigator::{begin_launch, takeoff_step, takeoff_seat}`, `OriginalFlight::{begin_pad_takeoff, step_pad, end_pad_takeoff}`, main F1013/F1031 wiring | `takeoff.rs` (4), `pads.rs` (+1), `navigation.rs` (+1 ignored, cached takeoff) | none (the state path and constants are from `ffe.asm`; the new-game seat is checked against F650's tables) | — | F994/F650 seat, F381/F654 clearance, F1013 `0x24`, F1031's `0x20` region test and `0x26` hand-off, F1032/F651 bay release, F573/F1677 return, F575/F576 in a persistent two-body pad world; the refusal and the 20 km teleport are gone. The only deviation left is the DATA_008867 climb fallback (EXP-010); `docs/notes/intro.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 486 `#[test]` functions total; 121 are `#[ignore]`
+  `cargo clippy -D warnings`. 492 `#[test]` functions total; 122 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **364 runnable synthetic tests** (365 on Linux).
+  **369 runnable synthetic tests** (370 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

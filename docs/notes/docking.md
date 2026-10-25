@@ -83,12 +83,15 @@ the real game: the interior model with word 0 (the waiting stages) is nearly emp
 
 ## What the port keeps and leaves out
 
-Kept: the record and every routine above, the stage order and timeouts, the clearance countdown, the lift scenes.
+Kept: the record and every routine above, the stage order and timeouts, the clearance countdown, the lift scenes,
+F650's open-air pad tables (`DATA_006175..6179`, `ffe_core::pads`, with F994's radius lift on the seat) and the
+open-air takeoff (`ffe_core::traffic::Takeoff`: F1013's `0x24` -> `0x26`, F1031's `0x20` region test and F1032/F651's
+bay release; `docs/notes/intro.md`). The takeoff's pad contact runs F575/F576's complex-shape scan, so F575's
+crash/bounce tail applies there too.
 Left out: the player's velocity matching the station's rotation (F1025 sets it from F589/F591, F1088 at the end);
-sounds; the open-air starport pads (F650's tables `DATA_006175..6179`) and landing; the playable's own docking
-touch test still pushes the ship clear instead of running the collision stream and F575's crash and bounce
-(ported in `ffe_core::landing`/`collision`, see `docs/notes/collision.md`, but not wired into `ffe_rs::navigation`,
-`docs/NAVIGATION.md`).
+sounds; the playable's own docking touch test still pushes the ship clear instead of running the collision stream and
+F575's crash and bounce for an indoor station (ported in `ffe_core::landing`/`collision`, see `docs/notes/collision.md`,
+but not wired into `ffe_rs::navigation`, `docs/NAVIGATION.md`).
 
 ## Verification
 

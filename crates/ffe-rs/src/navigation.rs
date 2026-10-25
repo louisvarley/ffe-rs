@@ -17,7 +17,9 @@ use ffe_core::pads::Pads;
 use ffe_core::sector::{distance as star_distance, Drive, Tables as GalaxyTables};
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
-use ffe_core::traffic::{begin_exit, finish_touch, state, Reply, Stages, Starport};
+use ffe_core::traffic::{
+    begin_exit, finish_touch, state, Reply, Stages, Starport, Takeoff, TakeoffStep,
+};
 use ffe_core::RandomState;
 use std::collections::HashMap;
 
@@ -681,6 +683,11 @@ pub struct Navigator {
     traffic: HashMap<usize, Starport>,
     /// The docking or launching stages the player is in, when it is.
     pub sequence: Option<Sequence>,
+    /// The open-air starport takeoff (`0x30`/`0x24`/`0x26`/`0x00`), when the
+    /// player has launched from a pad.
+    pub takeoff: Option<Takeoff>,
+    /// F650's pad tables (cache v26), for placing the ship on a pad (F994).
+    pads: Option<Pads>,
     /// A message from the autopilot's own clearance request.
     pub notice: Option<String>,
     /// Game seconds not yet handed to the clearance countdowns.
@@ -884,6 +891,10 @@ impl Navigator {
             docked: None,
             traffic: HashMap::new(),
             sequence: None,
+            takeoff: None,
+            pads: cache
+                .asset("base:gameplay/pads")
+                .and_then(|bytes| Pads::from_bytes(bytes).ok()),
             notice: None,
             carry: 0.0,
             market_tables: cache
@@ -940,25 +951,31 @@ impl Navigator {
             .allocate(PLAYER)
             .ok_or("the start starport has no free bay")?;
         let body = &bodies[index];
-        let offset = pads.position(body.model, bay.index, body.rows, body.open_air)?;
-        let seat = [
-            body.position[0] + offset[0],
-            body.position[1] + offset[1],
-            body.position[2] + offset[2],
-        ];
-        let cargo = {
-            let models = Models {
-                records: cache
-                    .asset("base:model/records")
-                    .ok_or("no model records")?,
-                stats: cache.asset("base:ship/stats").ok_or("no ship statistics")?,
-                gameplay: cache
-                    .asset("base:gameplay/tables")
-                    .ok_or("no gameplay tables")?,
-            };
-            (models.cargo_space(NEW_GAME_SHIP).unwrap_or(0) - NEW_GAME_HOLD_LOSS).max(0)
+        let models = Models {
+            records: cache
+                .asset("base:model/records")
+                .ok_or("no model records")?,
+            stats: cache.asset("base:ship/stats").ok_or("no ship statistics")?,
+            gameplay: cache
+                .asset("base:gameplay/tables")
+                .ok_or("no gameplay tables")?,
         };
+        // F994 copies the station's orientation to the ship and puts it on the
+        // pad: F650's offset plus the ship's collision radius along its up row.
+        let up = [body.rows[3], body.rows[4], body.rows[5]];
+        let radius = models.info(NEW_GAME_SHIP).radii().1 as i32;
+        let seat = pads.seat(
+            body.position,
+            body.model,
+            bay.index,
+            body.rows,
+            body.open_air,
+            radius,
+            up,
+        )?;
+        let cargo = (models.cargo_space(NEW_GAME_SHIP).unwrap_or(0) - NEW_GAME_HOLD_LOSS).max(0);
         let mut nav = Self::assemble(cache, entries, current, bodies)?;
+        nav.pads = Some(pads);
         nav.clock = NEW_GAME_CLOCK;
         nav.start_clock = NEW_GAME_CLOCK;
         nav.docked = Some(index);
@@ -1140,6 +1157,29 @@ impl Navigator {
             .map(|body| body.position)
     }
 
+    /// Where F994 puts a ship of collision radius `radius` on the bay's pad:
+    /// the station's position plus F650's offset, lifted along the ship's up row
+    /// (F994 copies the station's rows to the ship first, so that row is the
+    /// station's second row). `None` when this station has no pad for the
+    /// player or the cache has no pad tables.
+    pub fn takeoff_seat(&self, index: usize, radius: i32) -> Option<[i64; 3]> {
+        let body = self.bodies.get(index)?;
+        let bay = self.traffic.get(&index)?.bay_of(PLAYER)?;
+        let up = [body.rows[3], body.rows[4], body.rows[5]];
+        self.pads
+            .as_ref()?
+            .seat(
+                body.position,
+                body.model,
+                bay,
+                body.rows,
+                body.open_air,
+                radius,
+                up,
+            )
+            .ok()
+    }
+
     /// The traffic record of a station, made on first use with its bay count.
     pub fn starport(&mut self, index: usize) -> &mut Starport {
         let bays = self.bodies.get(index).map_or(3, |b| b.bays);
@@ -1200,33 +1240,74 @@ impl Navigator {
         let Some(index) = index else {
             return Err("No station to launch from.".to_owned());
         };
-        if self.sequence.is_some() {
+        if self.sequence.is_some() || self.takeoff.is_some() {
             return Err("Already launching.".to_owned());
-        }
-        // An open-air starport's takeoff (the original's states 0x24 -> 0x26:
-        // F1013's altitude/timer test, then normal flight clear of the pad) is
-        // not ported. The old path put the ship 20 km out, which is invented.
-        if self
-            .bodies
-            .get(index)
-            .is_some_and(|b| b.kind == Kind::Starport)
-        {
-            return Err(
-                "Open-air starport takeoff is not ported (player states 0x24/0x26); \
-                 launch blocked. Use an orbital station or --start sol."
-                    .to_owned(),
-            );
         }
         if !self.starport(index).request(PLAYER) {
             return Err("Launch refused: traffic control is busy.".to_owned());
         }
         self.docked = Some(index);
+        // An open-air starport has no lift: F381 asks F654 and leaves the ship
+        // on its pad, and the launch button takes the player to 0x24, F1013's
+        // climb. The lift stages remain for indoor stations.
+        if self
+            .bodies
+            .get(index)
+            .is_some_and(|b| b.kind == Kind::Starport)
+        {
+            self.takeoff = Some(Takeoff::taking_off());
+            return Ok(());
+        }
         self.sequence = Some(Sequence {
             station: index,
             stages: Stages::launch_requested(),
             launching: true,
         });
         Ok(())
+    }
+
+    /// One frame of the open-air takeoff's mode word: F1013's hand-off from
+    /// `0x24` to `0x26`, then F1031's decisions. `altitude` is F1033's
+    /// `DATA_008867`, `set_speed` F1013's `DATA_008918` and `flags` F1033's
+    /// collision flags. On [`TakeoffStep::Cleared`] the bay is released (F1032
+    /// calls F651) and the ship is in free flight.
+    pub fn takeoff_step(
+        &mut self,
+        altitude: i32,
+        set_speed: i32,
+        flags: u8,
+    ) -> Option<TakeoffStep> {
+        let mut takeoff = self.takeoff?;
+        // F1031's second test is the object's class `0x20` (a starport), not
+        // its open-air bit.
+        let starport = self
+            .docked
+            .and_then(|index| self.bodies.get(index))
+            .is_some_and(|body| body.kind == Kind::Starport);
+        let step = takeoff.step(altitude, set_speed, flags, starport);
+        match step {
+            Some(TakeoffStep::Cleared) => {
+                if let Some(index) = self.docked {
+                    self.starport(index).release(PLAYER);
+                }
+                self.takeoff = None;
+                self.docked = None;
+            }
+            _ => self.takeoff = Some(takeoff),
+        }
+        step
+    }
+
+    /// The mode word the takeoff's current state gives the flight model
+    /// (`DATA_008870`); `None` when no takeoff is running.
+    pub fn takeoff_state(&self) -> Option<u8> {
+        self.takeoff.map(|takeoff| takeoff.state)
+    }
+
+    /// The takeoff has only just begun and the ship is still on its pad.
+    pub fn taking_off(&self) -> bool {
+        self.takeoff
+            .is_some_and(|takeoff| takeoff.state == state::TAKEOFF)
     }
 
     /// The lift models this frame's stage draws, and whether it is a launch (drawn alone,
