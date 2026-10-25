@@ -2529,6 +2529,19 @@ fn run() -> Result<(), String> {
                             ));
                         } else if dock.screen == StationScreen::Ships {
                             dock_action = Some(StationAction::BuyShip { row: dock.selected });
+                        } else if dock.screen == StationScreen::Bulletin {
+                            let station = nav.as_ref().and_then(|nav| nav.docked);
+                            if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
+                                if let Some(text) = open_bulletin_post(
+                                    nav,
+                                    &cache,
+                                    station,
+                                    dock.selected,
+                                    &mut dock,
+                                ) {
+                                    message = text;
+                                }
+                            }
                         } else if let Some(entry) =
                             station::menu_entry(dock.screen, dock.selected, 0)
                         {
@@ -2554,32 +2567,18 @@ fn run() -> Result<(), String> {
                                             "Repairs and servicing actions are not ported.",
                                         ));
                                     } else if dock.screen == StationScreen::Bulletin {
-                                        // F453/F523: selecting an advertisement
-                                        // shows it in full; the mission reply
-                                        // actions are not ported.
+                                        // F453/F454/F523: a goods advertisement
+                                        // opens F454's black market; any other
+                                        // shows in full (the mission replies are
+                                        // not ported).
                                         let station = nav.as_ref().and_then(|nav| nav.docked);
                                         if let (Some(nav), Some(station)) = (nav.as_mut(), station)
                                         {
-                                            let illegal = trade::illegal_available(nav, &cache)
-                                                .unwrap_or(false);
-                                            if let Ok(offers) = nav.station_offers(&cache, station)
-                                            {
-                                                if let Some(post) = offers.posts.get(index) {
-                                                    dock.selected = index;
-                                                    // F454: a 0x9829 smuggler
-                                                    // advertisement opens F536's
-                                                    // stockmarket with the
-                                                    // illegal-goods mask (0x80).
-                                                    if post.code == 0x9829 && illegal {
-                                                        dock.open_black_market(
-                                                            post.fake,
-                                                            ffe_core::bulletin::post_seed(post),
-                                                        );
-                                                        message = station::MARKET_HINT.to_owned();
-                                                    } else {
-                                                        message = post.text.clone();
-                                                    }
-                                                }
+                                            if let Some(text) = open_bulletin_post(
+                                                nav, &cache, station, index, &mut dock,
+                                            ) {
+                                                dock.selected = index;
+                                                message = text;
                                             }
                                         }
                                     } else if let Some(entry) =
@@ -5184,6 +5183,32 @@ fn fit_or_remove(
 
 /// The BBS and hull-list counts of the station the player is docked at, for the
 /// console hint (0/0 when there is no navigator).
+/// F453's bulletin-board row action, for a mouse click or Enter: F454 opens
+/// F536's black market when the advertisement is 0x9829 and the system has an
+/// illegal commodity; otherwise the advertisement's full text goes to the
+/// console. Returns the console line.
+fn open_bulletin_post(
+    nav: &mut Navigator,
+    cache: &ffe_content::VerifiedCache,
+    station: usize,
+    index: usize,
+    dock: &mut DockState,
+) -> Option<String> {
+    let illegal = trade::illegal_available(nav, cache).unwrap_or(false);
+    let post = nav
+        .station_offers(cache, station)
+        .ok()?
+        .posts
+        .get(index)?
+        .clone();
+    if post.code == 0x9829 && illegal {
+        dock.open_black_market(post.fake, ffe_core::bulletin::post_seed(&post));
+        Some(station::MARKET_HINT.to_owned())
+    } else {
+        Some(post.text)
+    }
+}
+
 fn station_offer_counts(
     nav: Option<&mut Navigator>,
     cache: &ffe_content::VerifiedCache,
