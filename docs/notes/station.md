@@ -287,19 +287,18 @@ owner wants it, the next step is to follow the F2 console action
 
 ## Differences and uncertainties
 
-- **Ship display names are not the model-file names.** The cache's
-  `base:text/model-names` (`DATA_004682` read as model-slot names) is offset
-  from the shipyard's display name: model 0x2b's statistics `+0xe` is
-  `0x4028`, which `F1345` expands to "Spar attack fighter", while
-  `model-names[0x2b]` is "Turner Class". `ffe-core::shipyard` follows F437 and
-  the `0x4000 | index` code, which is what the reference frame shows. The
-  `model-names` use by `ships.rs` is unchanged here.
-- The statistics block's `+0xe` is the ship-name ffcode (F437, F439 and the
-  in-flight ship list F282 all expand it). `crates/ffe-rs/src/ships.rs` calls
-  `+0xe` "shield strength"; the shipyard table reads the shield word at `+0xc`
-  (150 for the Cobra Mk III), which is the consistent field. This is a
-  pre-existing label in the flight slice, flagged for its owner; nothing in
-  this slice changes it.
+- **Ship display names are the statistics name code.** `DATA_004682` is keyed
+  by the `0x4000 | n` ship-name ffcode in each model's statistics `+0xe`
+  (F437/F439/F282 -> F1345), not by the model table slot: model 0x2b's `+0xe`
+  is `0x4028`, "Spar attack fighter", while `model-names[0x2b]` is "Turner
+  Class". `ffe-core::shipyard`, `ffe_rs::ships::{model_name,npc_spec,ShipList}`
+  and the viewer's text fallback all expand the same code, so the shipyard,
+  Page Up/Down, HUD labels and console status agree. `docs/notes/ship-names.md`
+  has the full mapping.
+- The statistics block's `+0xc` is the shield word (150 for the Cobra Mk III)
+  and `+0xe` is the ship-name ffcode; the old `+0xe` "shield strength" label in
+  `ships.rs` was a bug and is fixed. F1099's in-flight readout uses the live
+  object's `+0xe0/+0xe2` words, not the statistics `+0xc`.
 - F639/F640's hidden "goods bought and sold" availability byte (`DATA_008990`
   and the 37-byte stock string) is not carried by the port: F639 always offers
   the notice and F640 offers it on one draw in two. The template and company

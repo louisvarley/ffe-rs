@@ -35,8 +35,9 @@ pub(crate) fn texture_layout(profile: &str) -> Option<(u32, u32)> {
     }
 }
 
-/// Model name table (`DATA_004682`) RVA (v11), matched against JJFFE 2.8a7 in
-/// floppy 1.02 only.
+/// Model string table (`DATA_004682`) RVA (v11), keyed by ship-name ffcode
+/// (`0x4000 | n`, the `+0xe` word of a model's statistics block), matched
+/// against JJFFE 2.8a7 in floppy 1.02 only.
 pub(crate) fn names_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xd1444),

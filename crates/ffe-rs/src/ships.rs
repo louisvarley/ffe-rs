@@ -1,14 +1,18 @@
-//! The flyable craft: original model table slots 14..=70, the ship range of the
-//! original's model name table (`DATA_004682`, cache v11). Slots named
-//! "Unknown", or holding text rather than a name, are left out, as are craft the
-//! viewer cannot draw on their own.
+//! The flyable craft: original model table slots 14..=0x47 (ship indexes
+//! 0x0e..=0x47). A model's display name is not its table slot: the statistics
+//! block's `+0xe` word is a ship-name ffcode, expanded through `DATA_004682`
+//! (F437/F439/F282 -> F1345, cache v11). Slots named "Unknown", or holding text
+//! rather than a name, are left out, as are craft the viewer cannot draw on
+//! their own.
 use crate::model_viewer::ModelViewer;
 use ffe_content::VerifiedCache;
 
-/// First and last model table slots of the original's ship range.
+/// First and last model table slots of the original's ship range: ship indexes
+/// 0x0e..=0x47 (`doc/srctools/shipidx.txt`).
 pub const FIRST_SHIP: u32 = 14;
-pub const LAST_SHIP: u32 = 70;
-/// The Eagle long range fighter (slot 20), used when a save names no ship.
+pub const LAST_SHIP: u32 = 0x47;
+/// The legacy fallback for a save without a ship field. Slot 20 (0x14) is the
+/// Falcon attack fighter; the Eagle long range fighter is slot 0x17 (23).
 pub const DEFAULT_SHIP: u32 = 20;
 
 /// The fields of a model's 48-byte statistics block (descriptor +0x38, cache v12)
@@ -26,8 +30,15 @@ pub struct ShipStats {
     pub mass: u16,
     /// +0x8, the cargo space (tonnes, signed word) before the hyperdrive's mass.
     pub cargo: i16,
-    /// +0xe, the shield-strength word F1099's target readout shows.
+    /// +0xa, F437's Cost word (credits / 1000) and the trade-in's mass term.
+    pub price_mass: u16,
+    /// +0xc, the shield-strength word the shipyard's View page shows (the
+    /// Cobra Mk III's is 150). F1099's in-flight readout uses the live object's
+    /// `+0xe0/+0xe2` words, not this one.
     pub shield_strength: i16,
+    /// +0xe, the ship-name ffcode (`0x4000 | index`) F437/F439/F282 expand
+    /// through `DATA_004682` (F1345/F1348). It is not a shield word.
+    pub name_code: u16,
     /// +0x12, missile mounts.
     pub missiles: u16,
     /// +0x14, the hyperdrive word: negative means a drive of the class in its low byte.
@@ -55,7 +66,9 @@ impl ShipStats {
             gun_mounts: block[4] as i8,
             mass: word(6),
             cargo: word(8) as i16,
-            shield_strength: word(0xe) as i16,
+            price_mass: word(0xa),
+            shield_strength: word(0xc) as i16,
+            name_code: word(0xe),
             missiles: word(0x12),
             drive: word(0x14) as i16,
             eye: [word(0x18) as i16, word(0x1a) as i16],
@@ -100,9 +113,35 @@ pub struct ShipList {
     ships: Vec<(u32, String)>,
 }
 
-/// The NPC view of a ship model: its name (cache v11), F1533's radii and the
-/// statistics' mass and shield word. `None` for a model without statistics
-/// (the original's traffic tables can name a model this cache does not).
+/// F1345's `DATA_004682[code & 0x3fff]` lookup. The table is keyed by the
+/// ship-name ffcode, not by the model table slot: the same table holds UI and
+/// decal strings too, and the model-to-code mapping is the statistics block's
+/// `+0xe` word (see [`model_name`]).
+pub fn name_at(table: &[u8], code: u16) -> Option<String> {
+    let entry = table
+        .split(|byte| *byte == 0)
+        .nth(usize::from(code & 0x3fff))?;
+    let name = String::from_utf8_lossy(entry).trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
+/// A model's original display name: the ship-name ffcode in its statistics
+/// block (`+0xe`) expanded through `DATA_004682` (what F437, F439 and F282 do).
+/// `None` for a model without a statistics block or a code outside the table.
+pub fn model_name(cache: &VerifiedCache, model: u32) -> Option<String> {
+    let info = ffe_core::objects::ModelInfo::read(
+        cache.asset("base:model/records")?,
+        cache.asset("base:ship/stats")?,
+        model,
+    )?;
+    let stats = ShipStats::from_block(&info.stats?)?;
+    name_at(cache.asset("base:text/model-names")?, stats.name_code)
+}
+
+/// The NPC view of a ship model: its original name (the statistics `+0xe`
+/// ffcode, cache v11), F1533's radii and the statistics' mass and shield word
+/// (`+0xc`). `None` for a model without statistics (the original's traffic
+/// tables can name a model this cache does not).
 pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec> {
     let info = ffe_core::objects::ModelInfo::read(
         cache.asset("base:model/records")?,
@@ -111,12 +150,7 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
     )?;
     let stats = ShipStats::from_block(&info.stats?)?;
     let names = cache.asset("base:text/model-names")?;
-    let name = names
-        .split(|byte| *byte == 0)
-        .nth(model as usize)
-        .map(|name| String::from_utf8_lossy(name).trim().to_owned())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| format!("Ship {model}"));
+    let name = name_at(names, stats.name_code).unwrap_or_else(|| format!("Ship {model}"));
     Some(ffe_core::npc::Spec {
         model,
         name,
@@ -131,23 +165,26 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
 }
 
 impl ShipList {
-    /// Ships with an original name (cache v11) and a model the viewer can draw.
-    /// Empty without the name table.
+    /// Ships with an original name (the statistics `+0xe` ffcode expanded through
+    /// cache v11's `DATA_004682`) and a model the viewer can draw. Empty without
+    /// the name table or the statistics blocks.
     pub fn from_cache(cache: &VerifiedCache, models: &ModelViewer) -> Self {
-        let Some(table) = cache.asset("base:text/model-names") else {
+        let (Some(table), Some(records), Some(stats)) = (
+            cache.asset("base:text/model-names"),
+            cache.asset("base:model/records"),
+            cache.asset("base:ship/stats"),
+        ) else {
             return Self::default();
         };
-        let names: Vec<String> = table
-            .split(|b| *b == 0)
-            .map(|name| name.iter().map(|b| char::from(*b)).collect())
-            .collect();
         let ships = (FIRST_SHIP..=LAST_SHIP)
             .filter_map(|index| {
-                let name = names.get(index as usize)?.trim();
+                let info = ffe_core::objects::ModelInfo::read(records, stats, index)?;
+                let model_stats = ShipStats::from_block(&info.stats?)?;
+                let name = name_at(table, model_stats.name_code)?;
                 let readable =
                     name.chars().next().is_some_and(char::is_alphabetic) && name != "Unknown";
                 let drawable = models.find(index).and_then(|m| m.radius()).is_some();
-                (readable && drawable).then(|| (index, name.to_owned()))
+                (readable && drawable).then_some((index, name))
             })
             .collect();
         Self { ships }

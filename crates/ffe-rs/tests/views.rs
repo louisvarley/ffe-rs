@@ -14,7 +14,10 @@ fn views(mode: ViewMode, external: ExternalCamera) -> ViewState {
     }
 }
 
-/// The Eagle long range fighter's statistics block (model 20, JJFFE `DATA_002592`).
+/// Model 20 (0x14, the Falcon attack fighter) statistics block (JJFFE
+/// `DATA_002592`). The block's `+0xe` name code is 0x4010 -> "Falcon attack
+/// fighter"; the Eagle long range fighter is model 0x17. The early port called
+/// this block the Eagle and used it for the view/limits tests.
 const EAGLE: [u8; 48] = [
     0xde, 0x3f, 0xd7, 0xec, 0x1, 0x0, 0x10, 0x0, 0xb, 0x0, 0x2e, 0x0, 0x64, 0x0, 0x10, 0x40, 0x1,
     0x0, 0x2, 0x0, 0xa, 0x80, 0x0, 0x1, 0x4e, 0x7, 0x7f, 0x0, 0x25, 0x5, 0x7f, 0x0, 0xa2, 0x8, 0x0,
@@ -77,6 +80,10 @@ fn ship_stats_decode_the_original_block() {
         (16350, -4905, 1)
     );
     assert_eq!((eagle.mass, eagle.missiles), (16, 2));
+    // +0xc is the shield word and +0xe the ship-name ffcode (0x4010 names
+    // this model "Falcon attack fighter"), not the other way round.
+    assert_eq!((eagle.shield_strength, eagle.name_code), (100, 0x4010));
+    assert_eq!(eagle.price_mass, 46);
     assert_eq!(eagle.eye, [1870, 127]);
     assert_eq!((eagle.top_turret, eagle.bottom_turret), ([192, 42], [4, 7]));
     // Object set-up (0x125c0): z [reverse, forward], x and y +-|reverse|.
@@ -415,7 +422,7 @@ fn ship_list_steps_and_wraps_in_table_order() {
 }
 
 #[test]
-fn saves_keep_the_ship_and_older_saves_load_the_eagle() {
+fn saves_keep_the_ship_and_older_saves_load_the_fallback_hull() {
     let state = Flight {
         ship: 35,
         ..Flight::default()

@@ -614,9 +614,9 @@ impl Spec {
     }
 
     /// The shield maximum. F773 gives an AI ship `random * 16` from its equipment
-    /// budget; the port uses the model's shield word's low byte times four, which
-    /// gives the traffic ships a shield that a 1MW pulse can absorb (see
-    /// `docs/notes/npc.md`).
+    /// budget; the port uses the statistics `+0xc` shield word's low byte times
+    /// four, which gives the traffic ships a shield that a 1MW pulse can absorb
+    /// (see `docs/notes/npc.md`).
     pub fn shield_max(&self) -> u16 {
         (self.shield_strength & 0xff).saturating_mul(4)
     }

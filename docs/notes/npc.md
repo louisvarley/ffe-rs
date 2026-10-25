@@ -410,14 +410,16 @@ and shuttles get `STATION_CRUISE_SPEED`/`STATION_ACCEL` for the approach.
 - `cargo test -p ffe-rs --test thargoid_view -- --ignored` with the same cache:
   `Navigator::spawn_thargoid_traffic(..., 12)` runs F690 with `F35(0x16) = 12`
   (F688 draws `RND(12)`; this checkpoint's seed produces one);
-  the test then asserts model 0x31's original statistics (232 t hull, 16,430
-  shield word, 14,715 thrust, drive 14, one mount, 203 t cargo, 90,000 mm
-  radius, 928 hull, 184 shields) and F774's 20MW-beam pick, pins the model for
-  a stable frame, and fires the new-game 1MW pulse at 60 Hz. Four shield hits
-  (184 -> 0) and nineteen hull hits (928 -> 0) kill it in 23 shots. Set
+  the test then asserts model 0x31's original statistics (232 t hull, the
+  `+0xc` shield word 180 -- the `+0xe` word is the name code 0x402e -- 14,715
+  thrust, drive 14, one mount, 203 t cargo, 90,000 mm radius, 928 hull, and the
+  port's 720-shield approximation) and F774's 20MW-beam pick, pins the model for
+  a stable frame, and fires the new-game 1MW pulse at 60 Hz. Fourteen shield
+  hits (720 -> 20), a fifteenth that spills 30 into the hull, and eighteen more
+  hull hits (928 -> 0) kill it in 33 shots. Set
   `FFE_SHOT_DIR` to keep `thargoid-before.ppm`,
-  `thargoid-hit-shields.ppm` (shield bubble, 72.8 %), `thargoid-hit-hull.ppm`
-  (98.2 % hull), `thargoid-kill.ppm` (0.0 % hull/shields) and
+  `thargoid-hit-shields.ppm` (shield bubble, 2.8 %), `thargoid-hit-hull.ppm`
+  (96.8 % hull), `thargoid-kill.ppm` (0.0 % hull/shields) and
   `thargoid-death.ppm` (F942's model-0x9b explosion); the PNGs and README are
   in `docs/evidence/thargoids/`.
 - **Live frames:** `ffe-rs.exe --root <repo> --skip-intro --capture-traffic

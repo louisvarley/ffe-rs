@@ -162,7 +162,8 @@ contract, not the full schema/examples in sections 2.1 onward.
 - V11 adds `text/model-names.bin`, ID `base:text/model-names`, type
   `model_names` with `count`, `source_offset`: the readable model string table
   (`DATA_004682`, RVA `0x0d1444`), NUL-terminated entries in table order, entry n
-  naming model slot n. The table is **scanned**, not cut at the 209 entries the
+  being the string of ffcode `0x4000 | n` (a model's statistics `+0xe` word),
+  **not** model slot n. The table is **scanned**, not cut at the 209 entries the
   JJFFE 2.8a7 declaration lists: the release executable continues past them (219
   entries on floppy 1.02, including "police" and the First Encounters logo), and
   the model text commands index the same table as `0x4000 | n`. A scan below 209
