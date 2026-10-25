@@ -164,6 +164,22 @@ fn f991_shows_the_view_row_and_only_hides_the_turret_on_two_mount_ships() {
     );
     assert!(console.is_visible(0x16));
     assert_eq!(console.image(0x16), Some(0xaf));
+    // F10's missile view: with the Missile Viewer and player+0xef, 0x14 is
+    // shown and lit, and the other view buttons are off (radio group 1).
+    let mut console = Console::new();
+    console.apply_flight(
+        ViewMode::Missile,
+        &console_state,
+        &ShipSystems {
+            mounts: 2,
+            general: 1 << 9,
+            ef: 1,
+            ..ShipSystems::default()
+        },
+    );
+    assert!(console.is_visible(0x14));
+    assert_eq!(console.image(0x14), Some(0xad), "missile view lit");
+    assert_eq!(console.image(0x18), Some(162), "front off");
 }
 
 #[test]

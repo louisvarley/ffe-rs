@@ -64,12 +64,15 @@ drawn in views 4 and 6, the velocity marker only in the front view.
 
 ## In ffe-rs
 
-Front, rear and external, F1 cycle, F6/F7/F9 and the three console icons/hot
-areas are ported as above (external camera exact; "lock to ship" on). Not
-ported: turret, missile and combat views (equipment and mounts are not
-modelled), eye offsets (the rear view does not draw the own ship), the
-Alt-arrow mouse nudge. ffe-rs moved its own development keys off the original
-ones: help F1 -> H, model viewer F6 -> M, load F9 -> Shift+F5.
+Front, rear, turret, external and **missile** views, F1 cycle, F6-F10 and the
+console icons/hot areas are ported as above (external camera exact; "lock to
+ship" on). F10's missile view needs the fitted Missile Viewer and
+`player+0xef` (`DATA_008877`); the camera is the missile object itself
+(`ViewMode::Missile` + `ViewState::missile`, F1054's `JUMP_004340`), and F1102
+forces the front view when that missile dies. F1099's view-5 branch draws only
+the combat target's amber (0x5f) range text. Not ported: the combat computer
+(view 6) and the Alt-arrow mouse nudge. ffe-rs moved its own development keys
+off the original ones: help F1 -> H, model viewer F6 -> M, load F9 -> Shift+F5.
 
 The fixed gunsight now follows F1111 exactly (`docs/notes/combat.md`): bitmap
 97 at (129,48), drawn in any view but external/combat whose mount

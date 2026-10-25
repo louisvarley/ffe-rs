@@ -1,6 +1,6 @@
 use ffe_core::laser;
 use ffe_core::traffic::Reply;
-use ffe_rs::camera::{key_amount, ship_axes, ExternalKeys, ViewMode, ViewState};
+use ffe_rs::camera::{key_amount, ship_axes, ExternalKeys, MissileCamera, ViewMode, ViewState};
 use ffe_rs::combat::{self, Combat};
 use ffe_rs::console::{
     acceleration_for_digit, Click, ConsoleState, ShipSystems, ACCELERATION_NAMES,
@@ -476,6 +476,10 @@ fn run() -> Result<(), String> {
         .asset("base:world/system-tables")
         .and_then(|bytes| ffe_core::galaxy::Tables::new(bytes).ok());
     let mut views = ViewState::default();
+    // `F1054`'s auto-targetter arming (`DATA_007246`/`DATA_007247`) and the
+    // skip targets (`DATA_007248`/`DATA_007249`); only the fitted Auto targetter
+    // lets `T`/`Shift+T` touch them.
+    let mut targeter = ffe_rs::targeter::Arming::default();
     // The original flight model (key O); None runs the synthetic prototype flight.
     let mut original: Option<OriginalFlight> = None;
     // When each external-view or turret key went down, for the original's
@@ -1249,10 +1253,34 @@ fn run() -> Result<(), String> {
                     if pressed(Key::T) || console_click == Some(Click::Target) {
                         let back = window.is_key_down(Key::LeftShift)
                             || window.is_key_down(Key::RightShift);
-                        let combat_id = if back { nav.ship_lock } else { None };
-                        if let Some(id) = combat_id {
-                            // Shift+T selects the combat target (DATA_008875),
-                            // the one F1096/F941 launch a missile at.
+                        if state.loadout.auto_targetter() {
+                            // F1054's 't' (action 0x74): with the Auto targetter
+                            // (`ship+0xc8 & 0x80`) T toggles `DATA_007246` and
+                            // Shift+T `DATA_007247`; arming stores the current
+                            // target as the one to skip (`DATA_007248/7249`).
+                            if back {
+                                let armed = targeter.toggle_combat(nav.ship_lock);
+                                message = if armed {
+                                    "Combat targetter armed: put a ship under the crosshair."
+                                        .to_owned()
+                                } else {
+                                    "Combat targetter off.".to_owned()
+                                };
+                            } else {
+                                let armed = targeter
+                                    .toggle_navigation(nav.locked.map(|index| index as u32));
+                                message = if armed {
+                                    "Navigation targetter armed: put an object under the crosshair."
+                                        .to_owned()
+                                } else {
+                                    "Navigation targetter off.".to_owned()
+                                };
+                            }
+                        } else if let Some(id) = if back { nav.ship_lock } else { None } {
+                            // The port's older gesture (no Auto targetter): Shift+T
+                            // locks the currently locked ship as the missile
+                            // target. Kept as a documented deviation so the
+                            // new-game Eagle can still fire its missiles.
                             let name = nav
                                 .ships
                                 .iter()
@@ -1285,6 +1313,29 @@ fn run() -> Result<(), String> {
                                 body.name,
                                 describe(distance(ship, body.position))
                             );
+                        }
+                    }
+                    // F1054's 'e' (0x65), ';' (0x3b) and Insert (0x2): F935
+                    // lights the ECM bits; F718's missile update then destroys
+                    // the models in `DATA_000029`. There is no energy or ammo
+                    // cost in the source.
+                    if pressed(Key::E) || pressed(Key::Semicolon) || pressed(Key::Insert) {
+                        match state.loadout.ecm() {
+                            Some(ecm) => {
+                                let naval = ecm == ffe_core::equipment::Ecm::Naval;
+                                let losses = nav.ecm(naval);
+                                sound.play(if naval { Cue::NavalEcm } else { Cue::Ecm });
+                                message = if losses.is_empty() {
+                                    "ECM: no missiles in range.".to_owned()
+                                } else {
+                                    format!(
+                                        "ECM destroys {} missile{}.",
+                                        losses.len(),
+                                        if losses.len() == 1 { "" } else { "s" }
+                                    )
+                                };
+                            }
+                            None => message = "No E.C.M. system fitted.".to_owned(),
                         }
                     }
                     if let Some(point) = click_point
@@ -1328,16 +1379,87 @@ fn run() -> Result<(), String> {
                             } else {
                                 nav.locked = None;
                                 let id = nav.ships[index - body_count].id;
-                                if let Some(ship) = nav.lock_ship(id) {
+                                let locked = nav
+                                    .lock_ship(id)
+                                    .map(|ship| (ship.name.clone(), ship.position));
+                                if let Some((name, at)) = locked {
+                                    // A clicked ship is F1099's combat target
+                                    // (`player+0xed`), the same word F1096 launches
+                                    // a missile at.
+                                    nav.missile_lock = Some(id);
                                     sound.play(Cue::UiBeep2);
                                     message = format!(
                                         "Locked on {} {}. Space fires.",
-                                        ship.name,
-                                        describe(distance(
-                                            ship_position(&original, &state),
-                                            ship.position
-                                        ))
+                                        name,
+                                        describe(distance(ship_position(&original, &state), at))
                                     );
+                                }
+                            }
+                        }
+                    }
+                    // F1010/F1062/F1064: while an auto-targetter cursor is
+                    // armed, F989's first live object within six pixels of the
+                    // view centre becomes the target. An acquisition disarms
+                    // the cursor; an empty crosshair only clears the target.
+                    if targeter.navigation || targeter.combat {
+                        let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                        let project = |position: [i64; 3]| {
+                            Screen::body_projection(
+                                &state,
+                                &views,
+                                scene.as_ref(),
+                                position.map(|v| v as f64 / unit),
+                            )
+                        };
+                        let ship_entries: Vec<(u32, i32, i32)> = nav
+                            .ships
+                            .iter()
+                            .filter(|ship| ship.visible())
+                            .filter_map(|ship| project(ship.position).map(|(x, y)| (ship.id, x, y)))
+                            .collect();
+                        let body_entries: Vec<(u32, i32, i32)> = nav
+                            .bodies
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, body)| {
+                                project(body.position).map(|(x, y)| (index as u32, x, y))
+                            })
+                            .collect();
+                        if targeter.navigation {
+                            match ffe_rs::targeter::acquire(
+                                &body_entries,
+                                nav.locked.map(|index| index as u32),
+                                targeter.previous_navigation,
+                            ) {
+                                Some(id) => {
+                                    nav.locked = Some(id as usize);
+                                    targeter.acquired_navigation();
+                                    sound.play(Cue::UiBeep2);
+                                    if let Some(body) = nav.bodies.get(id as usize) {
+                                        message = format!("Navigation target: {}.", body.name);
+                                    }
+                                }
+                                None => nav.locked = None,
+                            }
+                        }
+                        if targeter.combat {
+                            match ffe_rs::targeter::acquire(
+                                &ship_entries,
+                                nav.ship_lock,
+                                targeter.previous_combat,
+                            ) {
+                                Some(id) => {
+                                    nav.missile_lock = Some(id);
+                                    let name = nav.lock_ship(id).map(|ship| ship.name.clone());
+                                    targeter.acquired_combat();
+                                    sound.play(Cue::UiBeep2);
+                                    if let Some(name) = name {
+                                        message = format!("Combat target: {name}. M launches.");
+                                    }
+                                }
+                                None => {
+                                    nav.ship_lock = None;
+                                    nav.missile_lock = None;
                                 }
                             }
                         }
@@ -1588,6 +1710,10 @@ fn run() -> Result<(), String> {
                         _ => None,
                     });
                     let turret = ViewMode::turret(gun_mounts, views.turret.pitch);
+                    // F1054's F10 (action 0xfb): the missile view needs the
+                    // Missile Viewer (general bit 9) and a missile in flight
+                    // (`player+0xef`); otherwise the key does nothing.
+                    let mut view_note: Option<String> = None;
                     let chosen = if pressed(Key::F1) || clicked == Some(ViewButton::Cycle) {
                         Some(views.mode.next(gun_mounts, views.turret.pitch))
                     } else if pressed(Key::F6) {
@@ -1598,6 +1724,19 @@ fn run() -> Result<(), String> {
                         turret
                     } else if pressed(Key::F9) {
                         Some(ViewMode::External)
+                    } else if pressed(Key::F10) {
+                        if views.mode == ViewMode::Missile {
+                            Some(ViewMode::Missile)
+                        } else if !state.loadout.missile_viewer() {
+                            view_note =
+                                Some("F10: fit the Missile Viewer at a starport.".to_owned());
+                            None
+                        } else if nav.as_ref().is_some_and(|nav| nav.missile_view.is_some()) {
+                            Some(ViewMode::Missile)
+                        } else {
+                            view_note = Some("F10: no missile of yours is in flight.".to_owned());
+                            None
+                        }
                     } else if let Some(ViewButton::Select(mode)) = clicked {
                         Some(mode)
                     } else {
@@ -1611,6 +1750,9 @@ fn run() -> Result<(), String> {
                             sound.play(Cue::Camera);
                         }
                         message = format!("{}.", views.mode.name());
+                    }
+                    if let Some(note) = view_note {
+                        message = note;
                     }
                 }
                 let now = Instant::now();
@@ -2612,6 +2754,28 @@ fn run() -> Result<(), String> {
             original = None;
             state.axes = None;
         }
+        // F1054's JUMP_004340 and F1102: the missile view camera is the
+        // `DATA_008877` missile object (its position, axes and model eye). When
+        // that missile dies, F1102 clears the view to the front.
+        views.missile = nav.as_ref().and_then(|nav| {
+            let missile = nav.viewed_missile()?;
+            let stats = scene
+                .as_ref()
+                .and_then(|scene| scene.ship_stats(missile.spec.model));
+            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+            Some(MissileCamera {
+                position: missile.position.map(|value| value as f64 / unit),
+                axes: missile.axes,
+                eye: stats.map_or([0, 0], |stats| stats.eye),
+            })
+        });
+        if state.mode == ffe_rs::flight::Mode::Flight
+            && views.mode == ViewMode::Missile
+            && views.missile.is_none()
+        {
+            views.mode = ViewMode::Front;
+            message = "Missile view ended.".to_owned();
+        }
         views.console = ConsoleState {
             acceleration,
             paused,
@@ -3076,8 +3240,13 @@ fn run() -> Result<(), String> {
             }
             None => Vec::new(),
         };
-        // DATA_007247 (combat target) and DATA_007252 (F1113's blink).
-        screen.missile_lock = nav.as_ref().is_some_and(|nav| nav.missile_lock.is_some());
+        // F1111's cursor: DATA_007246's navigation box and DATA_007247's combat
+        // circle, both while DATA_007252's blink is on. The armed flags are the
+        // auto-targetter state, not the lock itself.
+        screen.missile_lock = targeter.combat;
+        screen.targeter = targeter
+            .navigation
+            .then_some(ffe_rs::targeter::Cursor::Navigation);
         screen.missile_blink = nav.as_ref().is_some_and(|nav| {
             ((nav.clock * ffe_rs::original_flight::TICS_PER_SECOND / 49_710.0) as u64) & 1 == 0
         });
@@ -3424,8 +3593,13 @@ fn run() -> Result<(), String> {
         screen.target_damage = None;
         screen.tunnels = None;
         if state.mode == ffe_rs::flight::Mode::Flight {
+            let missile_view = views.mode == ViewMode::Missile;
+            // F1099's missile view reads the combat target only (the navigation
+            // target call is after its `cmp ship+0xea,5; jz`).
             let target = if let Some(ship) = locked_ship {
                 Some((ship.position, Some(ship)))
+            } else if missile_view {
+                None
             } else {
                 marked.and_then(|index| {
                     nav.as_ref()?
@@ -3435,10 +3609,23 @@ fn run() -> Result<(), String> {
                 })
             };
             if let Some((position, ship)) = target {
-                let from = player_at;
+                // F1100 measures from the missile (`DATA_008877`) in view 5,
+                // otherwise from the player's ship.
+                let from = match (missile_view, views.missile) {
+                    (true, Some(camera)) => camera.position.map(|value| {
+                        (value * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT).round() as i64
+                    }),
+                    _ => player_at,
+                };
                 let (mantissa, exponent) = laser::range_words(from, position);
                 let (value, au) = laser::range_value(mantissa, exponent);
-                let forward = ship_axes(&state)[2];
+                let forward = if missile_view {
+                    views
+                        .missile
+                        .map_or(ship_axes(&state)[2], |camera| camera.axes[2])
+                } else {
+                    ship_axes(&state)[2]
+                };
                 let toward = [
                     (position[0] - from[0]) as f64,
                     (position[1] - from[1]) as f64,
@@ -3458,11 +3645,13 @@ fn run() -> Result<(), String> {
                 );
                 // The navigation target (player+0xec, a body) takes F1100's
                 // (50,50) and colour 0x11; the combat target (player+0xed, a
-                // ship) (50,60) and colour 0x10. The port has no missile view,
-                // so the combat 0x5f variant is not reachable.
+                // ship) (50,60) and colour 0x10; in the missile view F1099
+                // passes 0x5f (amber), not 0x10.
                 let navigation = ship.is_none();
                 let colour = if navigation {
                     ffe_rs::targeter::NAVIGATION_COLOUR
+                } else if missile_view {
+                    ffe_rs::targeter::MISSILE_VIEW_COLOUR
                 } else {
                     ffe_rs::targeter::COMBAT_COLOUR
                 };
@@ -3486,10 +3675,13 @@ fn run() -> Result<(), String> {
                 // every view but external (4)/combat computer (6); the combat
                 // target only in the missile view (5), which the port does not
                 // have.
+                // The navigation target draws them in every view but external
+                // (4)/combat computer (6); the combat target only in the
+                // missile view (5).
                 if prefs.others[6]
                     && (ship.is_none() || prefs.others[7])
                     && views.mode != ViewMode::External
-                    && navigation
+                    && (navigation || missile_view)
                 {
                     if let Some((sx, sy)) = projection
                         .filter(|(sx, sy)| (-1000..1000).contains(sx) && (-1000..1000).contains(sy))
@@ -3502,7 +3694,7 @@ fn run() -> Result<(), String> {
                         });
                     }
                 }
-                if let Some(ship) = ship {
+                if let Some(ship) = ship.filter(|_| !missile_view) {
                     screen.target_damage = Some(ffe_rs::screen::TargetDamage {
                         hull: ship.hull_per_mille(),
                         shields: (ship.damage.shields_max > 0).then(|| ship.shield_percent()),
@@ -3550,10 +3742,12 @@ fn run() -> Result<(), String> {
             e9: if labels { 4 } else { 0 },
             mounts: stats.map_or(1, |stats| stats.gun_mounts),
             slots: state.combat.missiles,
-            data_246: screen.target_mark.is_some(),
-            // F1120 hides the 0x4f lamp while the missile combat target is set;
-            // F1063/F1064 write DATA_008875/7247.
-            data_247: nav.as_ref().is_some_and(|nav| nav.missile_lock.is_some()),
+            // DATA_007246/7247 are the armed targetters (F1054's T/Shift+T);
+            // DATA_008877 (`player+0xef`) lights the missile-view icon while a
+            // missile of the player's is in flight.
+            data_246: targeter.navigation,
+            data_247: targeter.combat,
+            ef: u8::from(nav.as_ref().is_some_and(|nav| nav.missile_view.is_some())),
             general: state.loadout.general,
             ..screen.systems
         };

@@ -162,6 +162,24 @@ pub fn hit(
     }
 }
 
+/// F719: the missile's own explosion (model 0x9b) after ECM or F721. F719
+/// writes `+0xa4 = 0xffffffff` and `+0x9e = 0xffff` and calls F925 to remove
+/// the missile; it does not spawn F926's debris pods the way F942 does, and
+/// its velocity word is left zero.
+pub fn missile_explosion(position: [i64; 3], axes: [[f64; 3]; 3], rng: &mut Random) -> Effect {
+    let (forward, up) = random_axes(axes[2], rng);
+    Effect {
+        kind: Kind::Explosion,
+        model: EXPLOSION_MODEL,
+        position,
+        velocity: [0.0; 3],
+        forward,
+        up,
+        age: 0.0,
+        life: EXPLOSION_SECONDS,
+    }
+}
+
 /// F942 and F926: the destruction object plus its debris pods.
 ///
 /// `cargo` is the ship's cargo space (`+0x116`, F942's second debris count).
@@ -306,6 +324,17 @@ mod tests {
                 assert!((10.0..=1033.0).contains(&pod.velocity[axis]));
             }
         }
+    }
+
+    #[test]
+    fn f719_spawns_one_explosion_and_no_debris() {
+        let mut rng = Random::new(7, 8);
+        let burst = missile_explosion([1, 2, 3], axes(), &mut rng);
+        assert_eq!(burst.model, EXPLOSION_MODEL);
+        assert_eq!(burst.kind, Kind::Explosion);
+        assert_eq!(burst.position, [1, 2, 3]);
+        assert_eq!(burst.velocity, [0.0; 3], "F719 leaves the velocity zero");
+        assert_eq!(burst.life, EXPLOSION_SECONDS);
     }
 
     #[test]

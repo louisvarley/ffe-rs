@@ -146,18 +146,20 @@ do not draw the tunnel.
 
 ## 5. Differences and owner decisions
 
-- **Auto-targetter arming is not wired.** The port has no target computer
-  (`ship+0xc8 & 0x80`), so the original does nothing on `t`; the port's `T`
-  cycles locks instead (existing deviation). `Screen::targeter`/`Screen::blink`
-  implement the draw path and frames; deciding whether to add the equipment and
-  the F1010/F1060/F1062 arming is an owner decision.
+- **Auto-targetter arming is wired (2026-10-25).** The Auto targetter is
+  general bit 7 (`ship+0xc8 & 0x80`, record 0x17) and can be fitted at a
+  starport. With it, `T`/`Shift+T` arm the navigation/combat cursor,
+  `targeter::acquire` implements F1061/F1063's six-pixel crosshair rule and
+  F1010's per-frame acquisition, and F1111 draws the box/circle. Without it,
+  the port's `T` still cycles locks (reported deviation). See
+  `docs/notes/combat.md` §8.2.
 - **Range text.** Ported as F1100: the text colour is the target's COLPAL
   (0x11 nav green / 0x10 combat red, 0x5f in missile view). The number is in
   hundredths with two decimals and no space (`5.40AU`, `1.00km`), drawn one
   10-row line below the target's `-5` origin. The off-view Behind, Out of
   Range and four arrow forms (0x7d/0x7e left/right, 0x7f/0x80 below) are
   ported. Two simultaneous targets (0xec and 0xed) are still collapsed to one
-  display, and the port has no missile view for 0x5f.
+  display. The missile view now exists and uses 0x5f (`docs/notes/views.md`).
 - **Scanner same-frame source.** The original's `player+0x56` is the physics
   frame body; the port uses `Navigator::frame()`, chosen by
   `Navigator::follow` from the station/planet proximity. Traffic is marked as

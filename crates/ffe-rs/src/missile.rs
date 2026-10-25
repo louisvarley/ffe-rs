@@ -7,7 +7,7 @@
 //! shields→hull→death path) so the missile and the laser share one damage
 //! implementation.
 use ffe_core::laser::Damage;
-use ffe_core::missile::{self, Event, Missile, Spec, Target};
+use ffe_core::missile::{self, Event, Missile, Spec, State, Target};
 use ffe_core::npc::NpcShip;
 
 use crate::ships::ShipStats;
@@ -16,6 +16,22 @@ use crate::ships::ShipStats;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MissileField {
     pub missiles: Vec<Missile>,
+    /// The next F941 object id. The core `Missile` has no object slots, so the
+    /// field hands each launch an id; `DATA_008877` refers to it.
+    next_id: u32,
+}
+
+/// A missile F718's ECM destroyed, for F719's explosion and the message log.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EcmLoss {
+    pub id: u32,
+    /// The missile model (`+0x82`), to explain which ECM defeated it.
+    pub model: u32,
+    /// The system-frame position (millimetres) F719 puts the model-0x9b object
+    /// at.
+    pub position: [i64; 3],
+    /// The missile's axes, for the explosion object's random matrix.
+    pub axes: [[f64; 3]; 3],
 }
 
 /// What a tick did, for the message log.
@@ -69,10 +85,64 @@ impl MissileField {
             pylon,
             launcher_radius,
         ));
+        if let Some(missile) = self.missiles.last_mut() {
+            missile.id = self.next_id;
+        }
+        self.next_id = self.next_id.wrapping_add(1);
     }
 
     pub fn clear(&mut self) {
         self.missiles.clear();
+    }
+
+    /// The live missile with F941's object id (`+0x86`).
+    pub fn get(&self, id: u32) -> Option<&Missile> {
+        self.missiles
+            .iter()
+            .find(|missile| missile.id == id && missile.alive())
+    }
+
+    /// F718's ECM branch: destroy every live missile the source's model table
+    /// defeats. The frame's `DATA_008835` bits are global, so there is no range
+    /// or owner test. Returns the destroyed missiles for F719's explosion.
+    pub fn ecm(&mut self, naval: bool) -> Vec<EcmLoss> {
+        let mut losses = Vec::new();
+        for missile in &mut self.missiles {
+            if missile.alive() && missile::ecm_destroys(missile.spec.model, naval) {
+                missile.state = State::Spent;
+                losses.push(EcmLoss {
+                    id: missile.id,
+                    model: missile.spec.model,
+                    position: missile.position,
+                    axes: missile.axes,
+                });
+            }
+        }
+        self.missiles.retain(Missile::alive);
+        losses
+    }
+
+    /// F1057: pull a missile away from `from` to the chaff object `to`. Only
+    /// models 6..=11 are affected, and the original rolls
+    /// `F1530() & 0x1000` for each; `allow` is that per-missile gate.
+    pub fn retarget(
+        &mut self,
+        from: u32,
+        to: u32,
+        mut allow: impl FnMut(&Missile) -> bool,
+    ) -> usize {
+        let mut count = 0;
+        for missile in &mut self.missiles {
+            if missile.alive()
+                && missile.target == Some(from)
+                && missile::retargetable(missile.spec.model)
+                && allow(missile)
+            {
+                missile.target = Some(to);
+                count += 1;
+            }
+        }
+        count
     }
 
     /// Tick every missile over `seconds` of world time, then apply F953 to any
@@ -199,6 +269,75 @@ mod tests {
             Some(4)
         );
         assert!(MissileField::spec(0x8a, None, 0).is_none());
+    }
+
+    fn spec_for(model: u32) -> Spec {
+        Spec::from_words(model, 32700, -6540, 2100)
+    }
+
+    #[test]
+    fn launches_get_f941_object_ids_and_can_be_found() {
+        let mut field = MissileField::default();
+        field.launch(spec_for(6), 0x82, 0, None, [0; 3], axes(), 1, 5200);
+        field.launch(spec_for(7), 0x83, 0, None, [0; 3], axes(), 2, 5200);
+        assert_eq!(field.missiles[0].id, 0);
+        assert_eq!(field.missiles[1].id, 1);
+        assert!(field.get(0).is_some());
+        assert_eq!(field.get(1).unwrap().spec.model, 7);
+        assert!(field.get(2).is_none());
+    }
+
+    #[test]
+    fn ecm_destroys_f718s_models_and_only_f719s_explosions_remain() {
+        let mut field = MissileField::default();
+        for model in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13] {
+            field.launch(spec_for(model), 0x82, 0, None, [0; 3], axes(), 1, 5200);
+        }
+        // The standard system defeats models 5 and 6; its DATA_008835 bit 2.
+        let losses = field.ecm(false);
+        assert_eq!(
+            losses.iter().map(|loss| loss.model).collect::<Vec<_>>(),
+            vec![5, 6]
+        );
+        assert!(losses.iter().all(|loss| loss.id < 10));
+        // F719's object data is the missile's position and axes (the odd-pylon
+        // separation offset from F941).
+        assert_eq!(losses[0].position, [0x2000, -5200, 0]);
+        assert_eq!(losses[0].axes, axes());
+        // Naval E.C.M. adds 7, 9 and 10.
+        let losses = field.ecm(true);
+        assert_eq!(
+            losses.iter().map(|loss| loss.model).collect::<Vec<_>>(),
+            vec![7, 9, 10]
+        );
+        // 4, 8, 11, 12 and 13 are immune to both.
+        assert_eq!(
+            field
+                .missiles
+                .iter()
+                .map(|missile| missile.spec.model)
+                .collect::<Vec<_>>(),
+            vec![4, 8, 11, 12, 13]
+        );
+        assert!(field.ecm(true).is_empty());
+    }
+
+    #[test]
+    fn f1057_retargets_only_the_models_it_names_and_only_from_the_chosen_target() {
+        let mut field = MissileField::default();
+        field.launch(spec_for(6), 0x82, 0, Some(1), [0; 3], axes(), 1, 5200);
+        field.launch(spec_for(5), 0x81, 0, Some(1), [0; 3], axes(), 1, 5200);
+        field.launch(spec_for(7), 0x83, 0, Some(1), [0; 3], axes(), 1, 5200);
+        field.launch(spec_for(8), 0x84, 0, Some(2), [0; 3], axes(), 1, 5200);
+        // F1530's 0x1000 gate is per missile; this one accepts.
+        assert_eq!(field.retarget(1, 99, |_| true), 2);
+        assert_eq!(field.missiles[0].target, Some(99));
+        assert_eq!(field.missiles[1].target, Some(1), "model 5 is not named");
+        assert_eq!(field.missiles[2].target, Some(99));
+        assert_eq!(field.missiles[3].target, Some(2), "another target");
+        // A failed roll leaves them all alone.
+        assert_eq!(field.retarget(99, 0, |_| false), 0);
+        assert_eq!(field.missiles[0].target, Some(99));
     }
 
     #[test]
