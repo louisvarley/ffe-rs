@@ -171,7 +171,9 @@ pub enum Click {
 }
 
 impl Click {
-    /// The note for a click whose behaviour is not ported, or `None` when it is.
+    /// The port's transient note for a click whose behaviour is not ported, or
+    /// `None` when it is. The DOS source writes no F271 entry for these screens,
+    /// so `main` must not put this text in the dated log.
     pub fn unported(self) -> Option<&'static str> {
         match self {
             // F2 is the status/equipment page (F1120), F3 the map, F1 the views

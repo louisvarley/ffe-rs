@@ -98,7 +98,78 @@ size.
   list is pixel-identical with the log hidden or shown.
 - `tests/dashboard_view.rs` still pins the log to x195..320/y158..200.
 
-## 6. Remaining differences / owner decisions
+## 6. Source map and the port-only log fix (2026-10-25, `events` stream)
+
+The owner reported dated "in-game" lines that the original never writes:
+`F2/F5 (comms) are not ported yet.`, `Front View`, pause/status/debug text.
+They came from `main.rs`'s single `message` string, which fed both F271 and the
+port's docked note.
+
+### 6.1 What actually writes F271 in DOS FFE
+
+`F271` takes `(text, colour byte, flags)` (`ffe.asm:20623-20793`). Flags bit 0
+(`DATA_008682`) is the **replace** flag: the write goes to the current slot
+`DATA_005099`; a new entry advances the slot, a replace keeps it, so repeated
+replace writes overwrite one entry. A NULL text with the replace flag clears the
+current entry (decrements the slot and clears text/flags, `20760-20783`).
+
+Direct `F271` call sites:
+
+| Call | Caller | Use |
+|---|---|---|
+| `11436` | `F89` (string-expanded message table) | new entry (0,0) |
+| `26698` | `F339` | NULL clear |
+| `27150` | `F350` message writer | replace when arg 0, new when arg 1 |
+| `60476` | `F863` | replace progress (`0x12`) |
+| `60518` | `F865` | NULL clear |
+| `72141` | `F964` (leave flight) | NULL clear |
+| `72790` | `F982` `t` target (`0x8a01`) | replace |
+| `72805` | `F982` action `0xff` | NULL clear |
+
+Nearly every game message reaches `F271` through `F350`/`F351`/`F352`
+(`ffe.asm:27076-27207`); `F351` adds the bong, `F352` formats a queued message.
+`F272` (`20794-21105`) is the draw; `F273` (`21109-21232`) is scroll/auto-scroll.
+
+### 6.2 Port mapping
+
+`messages.rs` now has `Source` (one variant per producing stream, each with a
+DOS citation), `Event` (source + text + replace flag), `Channel` (the one writer,
+which dedupes and returns `Post::{Added,Updated,Cleared,Ignored}`) and
+`MessageLog::{record,record_replace,clear_current}`. `Entry` keeps the source
+and replace flag.
+
+`main.rs` has two channels: `pending_log` (source-faithful game events) and
+`message` (the port's transient note, drawn only on docked screens). Only
+`log_channel.post` touches `screen.messages`. Removed from the log: unported
+F4/F5/missile/combat notices, view names, pause/resume, time acceleration,
+status-page, labels, control-preset, flight-model and help text, screenshots,
+model-lab/viewer errors, save/load notes, station service hints, ship switching,
+capture/transfer text, `Set:/Act:` (these are F1099 HUD lines, `DATA_007310`),
+and the sandbox boundary/docking text. Landing/start lines are the source form
+`Landed at <body>.` (no `L, launches` suffix).
+
+### 6.3 Clearing and aging
+
+* New entry: append, evict the oldest beyond ten, reset scroll.
+* Replace: overwrite the newest entry only while it is replace-flagged;
+  otherwise open a new replace-flagged entry (the source's current slot).
+* NULL clear: pop the newest entry only if replace-flagged (autopilot off,
+  entering docked, F964's leave-flight path).
+* Scroll: unchanged `F273` clamp/auto-scroll; a new entry returns to the newest.
+
+### 6.4 Evidence and tests
+
+* `crates/ffe-rs/tests/message_log.rs` scans `main.rs`: exactly one writer, no
+  raw `messages.push/update`, every `pending_log` call has a `Source` with a
+  citation, every `Source` is used, and the port-only blocklist never appears in
+  a log call.
+* `messages.rs` unit tests cover replace-vs-new, NULL clear, ring eviction,
+  scroll reset, citations.
+* `tests/messages_view.rs` (local cache) renders boot + four unported clicks +
+  four view changes; the log stays the one start line.
+  Frames: `docs/evidence/events/log-*.{ppm,png}`.
+
+## 7. Remaining differences / owner decisions
 
 - Header colour 17 and entry colour 15 are the port's approximations of the
   original's runtime `COLPAL` values (4/6); the shadow is palette 4.

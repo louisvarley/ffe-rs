@@ -16,9 +16,10 @@ Implemented on this branch (all positions re-read from `ffe.asm`):
 - **Message log and clock** (inventory 14/15, slice D): `messages.rs` keeps the
   ten-entry ring, 124-pixel wrap, 8-pixel lines, the (196,159) window with its
   (195, y-1) colour-4 shadow, y 158 clipping and `F273`'s 0x18 scroll clamp /
-  0x3cae6 auto-scroll. `main.rs` pushes every changed console message with the
-  game date/time, so the port's existing messages all flow through the original
-  log. Docked screens keep their own two-line note.
+  0x3cae6 auto-scroll. `main.rs` routes only source-tagged game events (F271's
+  producers) through `messages::Channel` with the game date/time; port-only
+  notices stay in the undated docked/port note. Docked screens keep their own
+  two-line note.
 - **Player HUD** (16/17/18/24, slice F): `hud.rs` draws shields at (2,1), hull
   at (2,11), Autopilot at (2,139), Set/Act/Alt at (2,148) and the turret
   Decn/Rotn at (5,76), with `F1099`'s value formulas and skip conditions.
@@ -33,8 +34,8 @@ Implemented on this branch (all positions re-read from `ffe.asm`):
   `Console` implements `F261`'s draw order, `F262`'s set-image-with-radio-reset
   and `F263/264`'s visibility, and the flight page is derived from the view,
   meter, labels and systems. The 22 hot areas are unchanged. A click whose
-  handler is still absent now writes `Click::unported()` into the log instead of
-  doing nothing.
+  handler is still absent keeps `Click::unported()` as the port's transient note;
+  it is not a source F271 entry.
 - **Scanner and targeter** (11/12/13/41, `scanner` branch): `scanner.rs` and
   `targeter.rs` implement `F274/F275`'s contact scan/projection/stalks and the
   `DATA_008683` colours, the 254..261 globe, and `F1100/F1113/F1114/F1111`'s
@@ -162,7 +163,7 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 4 | Screen buttons F4,F3,F2,F1 (0x0b-0x0e) | `DATA_005100` 0x0b-0x0e; `F261`; `F1439` | partial | `console.rs` table; `main.rs` F1/F2/F3/F4 clicks; `tests/console_table.rs` | F1 views, F2 status page, F3 map and F4 services (`F343`, from `0x2a`/`0x30`) are consumed; F5 writes "not ported" into the log. The DOS F2 key itself is not established; the console record is the original's |
 | 5 | View buttons front/rear/turret/external (0x15-0x18) | `F1001/F1002/F1003`; `views.md` | done (4 of 6) | `screen.rs:198-203,732-743`; `tests/views.rs` | Missile (0x14) and combat (0x13) hidden by absent equipment; turret shown only >2 mounts as original |
 | 6 | Time-acceleration meter 0x26-0x2b | `F208` `ffe.asm:17066`; `F1439` | done | `console.rs:19-28`; `screen.rs:725-730`; `tests/console.rs:14-74` | 0x25 duplicate pause mark not drawn; `DATA_008808 -= 0xc22e` quirk not ported |
-| 7 | Right-hand buttons 0x0f-0x12 / 0x00-0x0a | `DATA_005100`; hot areas 0x6e/0x6c/0x48; `NAVIGATION.md` | done (drawing) | `console_table.rs`; `console.rs` table draw; `main.rs` H/labels/nav clicks | Table-driven icons; hyperspace/labels/navigation are consumed; capsule and other unported actions report in the log |
+| 7 | Right-hand buttons 0x0f-0x12 / 0x00-0x0a | `DATA_005100`; hot areas 0x6e/0x6c/0x48; `NAVIGATION.md` | done (drawing) | `console_table.rs`; `console.rs` table draw; `main.rs` H/labels/nav clicks | Table-driven icons; hyperspace/labels/navigation are consumed; capsule and other unported actions keep only the transient note |
 | 8 | Autopilot/STOP/TARGET buttons | none (port addition) | removed | — | The port block that held them is retired; the autopilot indication is the original F1099 line and lamp 0x47 |
 | 9 | Button table/state engine (82 records, radios, visibility) | `DATA_005100` `ffedat.asm:4601`; `F261/262/263/264` `ffe.asm:20336-20490` | done | `console_table.rs` (82 records, generated), `console.rs` (`F261` draw, `F262` radio reset, `F263/264`), `tests/console_table.rs` | Byte-exact table; flight-page visibility derived from view/meter/labels/systems |
 | 10 | Three bar gauges | `F270` `ffe.asm:20554-20622` | done | `combat.rs` (`GAUGE_BITMAPS`), `screen.rs` `draw_gauges`, `laser::gauge_height`; `combat_view` local frames | Energy (`+0x11e`), heat (`+0xea`) and the third (`DATA_008921`, always zero) drawn at x249/242/237; the original art is secondary 179/178/177 |
@@ -192,7 +193,7 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 34 | Hyperspace countdown | `F908-F910`; `DEVIATIONS.md` EXP-007 | **missing** | `main.rs` immediate jump | No countdown UI/scene |
 | 35 | Autopilot indicator | `F1099` 0x8618 at (2,139); `F1116` 0x47 | done | `hud.rs`, `screen.rs`, `main.rs`; `dashboard_view` local frames | "Autopilot" at (2,139) and lamp 0x47 when the autopilot targets; the nav target's tunnels are F1100/F1113's |
 | 36 | Text metrics / clipping | `F1586` `ffe.asm:93785`; font asset 9 rows | partial | `indexed.rs`, `messages.rs` wrap; `dashboard_view` local frames | The console log uses the 124-pixel wrap and y 158 clip; other port text still wraps by 308 px at x3 with 9/10 px spacing |
-| 37 | Hot areas | `DATA_007684` `ffedat.asm:23641`; `F1439`; mouse poll `ffe.asm:86045-86070` | done (22/22) | `console.rs`; `tests/console.rs` | Exact coordinates/order; clicks without a handler now write into the message log |
+| 37 | Hot areas | `DATA_007684` `ffedat.asm:23641`; `F1439`; mouse poll `ffe.asm:86045-86070` | done (22/22) | `console.rs`; `tests/console.rs` | Exact coordinates/order; clicks without a handler keep only the transient note, not a dated F271 entry |
 | 38 | Keys | `F1056`; `DATA_007688`; JJFFE 6-0 | partial | `views.md`; `main.rs` | F2 (status page) added, but its DOS mapping is unverified; F3 still toggles Modern/Classic (the original F3 is the map, available by click); F10 unused; F11/F12 repurposed |
 | 39 | Port-only top bar/status block/map buttons | none | retired | `screen.rs` | Removed in the HUD merge; the original HUD, message window and scanner own those rows |
 | 40 | Radio groups | `F262` `ffe.asm:20369-20413`; table | done | `console.rs` `F262`, `tests/console_table.rs` | Set-image-with-radio-reset implemented over the 82-record table |
@@ -323,11 +324,11 @@ equipment icons; **23..37** = lamps.
 
 | Records | Role | Handler | Port |
 |---|---|---|---|
-| 0x0b-0x0e | screen buttons F4/F3/F2/F1 | `F1439` shows; `F1003`/screen callbacks | F1 views, F2 status, F3 map, F4 services (F343); F5 reports unported |
+| 0x0b-0x0e | screen buttons F4/F3/F2/F1 | `F1439` shows; `F1003`/screen callbacks | F1 views, F2 status, F3 map, F4 services (F343); F5 keeps only the transient note |
 | 0x15-0x18 | front/rear/turret/external | `F1001/F1002/F1003` | done |
 | 0x13/0x14 | combat/missile views | `F1002/F1056`, equipment | hidden (no equipment) |
 | 0x26-0x2b | time acceleration | `F208` | done |
-| 0x0f-0x12, 0x00-0x0a | right-hand cluster | hot areas 0x6e/0x6c/0x48; `F1116` | drawn by the table; hyperspace/labels/navigation consumed, capsule reports unported |
+| 0x0f-0x12, 0x00-0x0a | right-hand cluster | hot areas 0x6e/0x6c/0x48; `F1116` | drawn by the table; hyperspace/labels/navigation consumed, capsule keeps only the transient note |
 | 0x37-0x39 | three lamps | initial images; `F151`/`F217` | done (`F1116`/`ShipSystems`) |
 | 0x3a-0x51 | engines-off systems page | `F1117/F1118/F1120` | done (F2) |
 | 0x10-0x19 | view-row equipment icons | `F991` | table-driven; 0x11-0x14 need equipment words |
@@ -335,9 +336,9 @@ equipment icons; **23..37** = lamps.
 `Click::Screen(2)` (F2) opens the status page, `Screen(3)` (F3) the map,
 `Screen(4)` (F4) the services board from `0x2a`/`0x30`, and
 `Click::Labels`, `Click::Navigation` and `Click::Hyperspace` are consumed.
-`F5`, missile, combat and capsule clicks now write `Click::unported()`'s text
-into the message log; the console records themselves are all drawn from the
-table.
+`F5`, missile and combat clicks keep `Click::unported()`'s text as the port's
+transient note, not a dated F271 entry; the console records themselves are all
+drawn from the table.
 
 Note also the table rows above are the *record* status; the flight page's
 visibility is derived in `console.rs`, and the equipment-conditioned icons
@@ -538,10 +539,11 @@ order and the downward-stalk grid mask.
 Port: implemented in `crates/ffe-rs/src/messages.rs` (ten-entry ring, game
 date/time per entry, 124-pixel wrap, 8-pixel lines, shadow at (195, y-1) and
 text at (196, y), y 158 clipping, the 0x18 scroll clamp and the 0x3cae6
-auto-scroll). `main.rs` pushes every changed console message with
-`nav.date_text()`, so the port's existing messages flow through the original
-log; the docked screens keep their own two-line note. The original's
-`DATA_008810` on/off flag and the two scroll actions are not wired to input.
+auto-scroll). `main.rs` writes only source-tagged game events through
+`messages::Channel`; port-only notices never enter the dated log (see
+`docs/notes/message-log.md` §6). The docked screens keep their own two-line
+note. The original's `DATA_008810` on/off flag and the two scroll actions are
+not wired to input.
 
 ### 6.9 Reticles, gunsight, velocity marker
 
