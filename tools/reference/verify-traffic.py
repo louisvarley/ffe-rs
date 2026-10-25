@@ -5,8 +5,8 @@
 station records. The Rust test (`executed_reference_traffic`) must reproduce the record after
 each call and every return value; altered fields and an empty trace must be rejected.
 
-The adapter's current sources need the Linux build (tools/reference/build-linux.sh); pass its
-jjffe-smoke or jjffe-commands.
+The adapter's current sources build on Windows (`build-smoke.ps1`) and Linux
+(`build-linux.sh`); pass either jjffe-smoke or jjffe-commands.
 """
 import argparse
 import hashlib
