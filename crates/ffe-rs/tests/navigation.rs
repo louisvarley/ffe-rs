@@ -1111,7 +1111,10 @@ fn the_map_destination_survives_the_map_and_jumps() {
     map.update_selection(&tables);
     let selected = map.selected.clone().expect("the target star");
     assert_eq!(selected.code, code);
+    // Choosing a star is a destination, not a body lock.
+    assert_eq!((nav.locked, nav.target), (None, None));
     nav.set_destination(selected.code, selected.position);
+    assert_eq!((nav.locked, nav.target), (None, None));
     assert_eq!(nav.destination_entry(), Some(target));
     assert_eq!(nav.destination_distance(), Some(435));
     // F828's fuel line: the map shows the cost, the shortfall or the range.
