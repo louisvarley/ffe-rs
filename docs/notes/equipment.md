@@ -229,7 +229,9 @@ control byte `+0x87 == 3` (player) or `0xb` (AI) take this path.
 
 None. The equipment table is 66 * 22 = 1,452 bytes of static data and is
 generated into `ffe-core`, like the console table. The market goods tables were
-already cached in v20; the cache is **v28** and the equipment table adds no assets.
+already cached in v20; the cache is **v29** and the equipment table adds no assets.
+The damage/repair slice adds no assets either (the saved words and the
+`DATA_005303` table are computed or embedded like the equipment table).
 
 ## Differences and uncertainties
 
@@ -249,6 +251,10 @@ already cached in v20; the cache is **v28** and the equipment table adds no asse
   the combat slice's and are flagged for its owner, not changed here.
 - `F383`'s second-hand price uses a per-visit random multiplier the port has not
   reproduced; deterministic tech-multiplier prices are a reported deviation.
+- `DATA_005303` was checked against the DOS `FIRSTENC.EXE` at file offset
+  `0xc2650`: its 32 `(name code, cost)` pairs give exactly `2.5 x` the
+  equipment price (truncated) for every fitted general item, so the Rust
+  `equipment::repair_cost` computes the value instead of embedding the table.
 
 
 ## Tests
