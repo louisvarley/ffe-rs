@@ -505,8 +505,10 @@ impl OriginalFlight {
             &mut world,
             1,
             tools,
-        )?;
-        // Undo the per-frame landing margin so it does not accumulate.
+        );
+        // Undo the per-frame landing margin so it does not accumulate, and put
+        // the player back in the system frame even when the scan fails (an
+        // undecodable starport pad must not leave it parent-relative).
         self.player.motion.renormalise();
         let absolute = world.absolute(1).unwrap_or(vector);
         self.player.motion.position = absolute;
@@ -514,7 +516,7 @@ impl OriginalFlight {
         self.player.motion.rotating = 0;
         self.player.motion.updated = 0;
         self.player.motion.switch_delay = 0;
-        Ok(contact)
+        contact
     }
 
     /// The key state F1037/F1038 and set speed for one frame; returns the input
