@@ -1269,7 +1269,6 @@ impl ModelViewer {
         // text instance colour (the GAME!TEK cyan) is only added to local faces;
         // registering it would put a dynamic cell in model 177's empty upper
         // palette, which the executed original does not have.
-        let _ = &text_runs;
         let (surfaces, skipped, haze) = self.collect_surfaces(&result, light);
         frame.skipped += skipped;
         for batch in &surfaces {
