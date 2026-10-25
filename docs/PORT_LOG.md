@@ -4,6 +4,32 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-25 - Sound cues and scene music merged (v0.61)
+
+- Merged `soundfx` (f985ea1, d88036f): `ffe_rs::sound::{GameAudio, Cue}` with
+  F1906/F1907/F1908 dispatch and the per-sample gates, F1902-F1904's music
+  rules (explicit/random/done/continuous), the cue-to-sample table from
+  `w32sound.cpp`, and the live event wiring: preference pages and toggles,
+  console/station beeps, message bong, ship lock, lasers, shield/hull hits,
+  explosions, battle siren and song 14/stop, docking/launch doors and samples,
+  engine/station beds, camera, hyperspace and song 15, docking music, and the
+  world tick for MIDI/continuous music. The Sound Effects page is applied at
+  boot and on change.
+- Merge was conflict-free (`ort`); the prefs and main.rs additions sit beside
+  the HUD/combat/NPC/takeoff wiring and all of it still passes.
+- **The effect mixer/device is still missing:** `AudioEngine`'s device engine
+  owns a `NullSampleSink`, so cue calls are recorded/no-op on a real run; music
+  is audible through the HMP/WinMM player. Song 0 (front end) is not reachable
+  until the intro is drawn. ECM, missile and wind cues exist as API + tests
+  only; `docs/notes/sound-cues.md` records the table, call sites and gaps.
+- Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
+  `cargo fmt --check`; `--test sound_cues` (2 + unit tests) and `--test prefs`
+  (10). The first full test run hit a full `C:` drive (`Os error 112`) in
+  `ffe-tools/tests/inspect.rs`; after clearing `target/debug/incremental` and a
+  stale 691 MB temp mirror the suite passed. That was environmental, not code.
+
+---
+
 ## 2026-10-25 - NPC traffic, ship damage and targeting merged (v0.60)
 
 - Merged `npcs` (81569a2): `ffe_core::npc` (F635's nineteen-record model table

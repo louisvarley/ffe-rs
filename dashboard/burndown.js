@@ -196,10 +196,10 @@ window.FFE_BURNDOWN = {
       title: "Audio",
       status: "planned",
       tasks: [
-        { id: "audio-1", title: "Sound effects: the 23 effects and sound requests", status: "todo" },
-        { id: "audio-2", title: "HMP to MIDI parsing", status: "todo" },
-        { id: "audio-3", title: "MIDI synthesis and music playback", status: "todo" },
-        { id: "audio-4", title: "Positional volume and mixing", status: "todo" }
+        { id: "audio-1", title: "Sound effects: the 23 effects and sound requests", status: "in-progress", version: "v0.61" },
+        { id: "audio-2", title: "HMP to MIDI parsing", status: "done", version: "v0.48q" },
+        { id: "audio-3", title: "MIDI synthesis and music playback", status: "done", version: "v0.48q" },
+        { id: "audio-4", title: "Positional volume and mixing", status: "in-progress", version: "v0.61" }
       ]
     },
     {
@@ -503,6 +503,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 73,
       note: "NPC traffic merged (v0.60): F688/F635 spawns traders, shuttles, police and a pirate group on a station/player-based placement (the deliberate F702 deviation), with F922's bounded RNG, a three-state flight AI, F953/F942 damage, F1536's model-157 shield flash, F942's death marker, ship labels, click/lock/T cycling, F1100 range and F1099 hull/shield readout. The port's combat readout is now reachable in a real system; `--capture-traffic` saves the traffic, hit and kill frames. Full AI, police response, ship fire, missiles, F942's own explosion and persistence remain. One item added and completed (gameplay-16), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 71,
+      note: "Sound cues merged (v0.61): F1906/F1907/F1908's cue dispatch and per-sample gates, F1902-F1904's music rules, the cue-to-sample table and live wiring for prefs, messages, lock, lasers, shield/hull hits, explosions, siren, docking/launch, engine/station beds, camera, hyperspace and scene music; the Sound Effects toggles apply at boot and on change. Music plays through the existing WinMM player (audio-2/audio-3 done), but the effect mixer/device is still a null sink, so effect cues are recorded/no-op and song 0 stays unreachable until the intro draws. audio-1/audio-4 stay in progress."
     }
   ]
 };

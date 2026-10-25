@@ -42,7 +42,13 @@ and damage rules (`docs/notes/combat.md`; hitscan, no laser projectile). Since
 traders, shuttles, police and pirates from F688/F635), so ships are drawn,
 labelled and lockable, take F953/F942 damage, and the target hull/shield
 readout and F1536's model-157 shield flash are reachable. The ships do not
-fire, and full AI, police response, missiles and persistence remain. Since 2026-10-25 the console is
+fire, and full AI, police response, missiles and persistence remain. Since
+2026-10-25 the game also posts the original's sound cues and scene music
+(`docs/notes/sound-cues.md`): F1906/F1907/F1908 dispatch and gates, F1902's
+song rules and the live event sites, with the Sound Effects page applied at
+boot and on change. The effect mixer/device is still a null sink, so cues are
+recorded/no-op on a real run; music plays through the HMP/WinMM player, and
+song 0 waits for the intro to be drawn. Since 2026-10-25 the console is
 the original's: a ten-entry dated message log and clock, the shields/hull,
 Set/Act/Alt and turret readouts, the F1116 status lamps and F1120's engines-off
 page (F2), and the 82-record `DATA_005100` button table driving the flight page;
@@ -67,11 +73,11 @@ scanner contacts and altitude units remain.
   thrusters, animation, views, text/labels, curved surfaces, lines, fills,
   docking, station screens (`station.md`), market, hyperspace, navigation, the
   galaxy map, the front end/new game (`intro.md`), combat (`combat.md`), NPC
-  traffic (`npc.md`), and the **ship dashboard audit** (`dashboard.md`: the
-  complete original console/HUD gap list, with the byte-validated DATA_005100
-  button and DATA_007684 hot-area tables).
+  traffic (`npc.md`), sound cues (`sound-cues.md`), and the **ship dashboard
+  audit** (`dashboard.md`: the complete original console/HUD gap list, with the
+  byte-validated DATA_005100 button and DATA_007684 hot-area tables).
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 135 items, 62 done and 73 left on
+  in `burndown.js`; 14 milestones, 135 items, 64 done and 71 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -211,14 +217,15 @@ capture produced by two repeat runs of the local reference.
 | v0.58 original HUD, message log, console table | `ffe_rs::{messages, hud, console, console_table}`, `Screen::{draw_messages, draw_console, draw_gauges}`, `ShipSystems`, `PlayerHud` | `dashboard_view.rs` (3, ignored), `console_table.rs` (13 + unit tests), `console.rs` (F261/262/263/264/991/1116/1117/1120) | none (the layout/strings are from `ffe.asm`; `tools/gen-console-table.py` imports the 82 records byte-exactly) | — | ten-entry dated log and clock, shields/hull/Set/Act/Alt and turret text, lamps and the engines-off page (F2/record 0x0c), the table-driven console and the retired port top bar/status block; player damage/equipment state, scanner contacts, F991 0x11-0x14, altitude/F1393 units and the F2/F3 key mappings remain; `docs/notes/dashboard.md` |
 | v0.59 open-air starport takeoff | `ffe_core::traffic::Takeoff`, `Pads::seat`, `Navigator::{begin_launch, takeoff_step, takeoff_seat}`, `OriginalFlight::{begin_pad_takeoff, step_pad, end_pad_takeoff}`, main F1013/F1031 wiring | `takeoff.rs` (4), `pads.rs` (+1), `navigation.rs` (+1 ignored, cached takeoff) | none (the state path and constants are from `ffe.asm`; the new-game seat is checked against F650's tables) | — | F994/F650 seat, F381/F654 clearance, F1013 `0x24`, F1031's `0x20` region test and `0x26` hand-off, F1032/F651 bay release, F573/F1677 return, F575/F576 in a persistent two-body pad world; the refusal and the 20 km teleport are gone. The only deviation left is the DATA_008867 climb fallback (EXP-010); `docs/notes/intro.md` |
 | v0.60 NPC traffic and ship combat | `ffe_core::npc` (F688/F635/F1533/F953/F942/F1536/F922), `Navigator::{ships, spawn_traffic, tick_ships, lock_ship, damage_ship}`, `Screen::{draw_system_ships, SystemShip, TargetDamage}`, `--capture-traffic` | `npc.rs` (6), `npc_view.rs` (1, ignored), cached frames | none (F635's table and F688's counts from `ffe.asm`; the placement is the recorded deviation) | — | traders, shuttles, police and a pirate group spawn per system; ships are drawn, labelled, click/lock/T-targeted with F1100 range and F1099 hull/shields, take F953/F942 damage, show F1536's model-157 shield flash and a death marker; full AI, police response, ship fire, missiles, F942's explosion and persistence remain; `docs/notes/npc.md` |
+| v0.61 sound cues and scene music | `ffe_rs::sound::{GameAudio, Cue}`, F1906/F1907/F1908 dispatch, F1902-F1904 music rules, prefs `SoundFlags`, live wiring in `main.rs` | `sound_cues.rs` (2 + unit tests), `prefs.rs` (+2) | none (cue indices/levels and gates from `ffe.asm`/`w32sound.cpp`; no audio-device capture) | — | every effect cue the port can reach is posted (prefs, station/console, lock, messages, lasers, shield/hull, explosions, siren, docking/launch doors, engine/station beds, camera, hyperspace) and scene music follows F1902/F919/F750/F656/F1094/F232; the Sound Effects toggles apply at boot and on change. **The effect mixer/device is still missing** (`NullSampleSink`), so cues are recorded/no-op; music is audible through the HMP/WinMM player, but song 0 is unreachable until the intro draws. ECM/missile/wind cues are API+test only; `docs/notes/sound-cues.md` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 499 `#[test]` functions total; 123 are `#[ignore]`
+  `cargo clippy -D warnings`. 510 `#[test]` functions total; 123 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **375 runnable synthetic tests** (376 on Linux).
+  **386 runnable synthetic tests** (387 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,

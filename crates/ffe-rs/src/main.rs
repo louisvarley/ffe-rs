@@ -23,6 +23,7 @@ use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
 use ffe_rs::ships::ShipList;
+use ffe_rs::sound::{Cue, GameAudio};
 use ffe_rs::station::{self, Action as StationAction, DockState, Screen as StationScreen};
 use ffe_rs::trade;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
@@ -311,6 +312,19 @@ fn run() -> Result<(), String> {
     // The Escape pages, including the modern/classic control preset the top
     // bar's button and F3 also toggle.
     let mut prefs = Prefs::default();
+    // Sound effects and music. The original's cues (`F1906`/`F1907`) and songs
+    // (`F1902`..`F1904`) are posted from the events below; captures and the
+    // smoke test never open a device.
+    let headless = options.capture.is_some()
+        || options.capture_planet.is_some()
+        || options.capture_traffic.is_some()
+        || options.smoke_frames.is_some();
+    let mut sound = if headless {
+        GameAudio::silent(&options.root)
+    } else {
+        GameAudio::from_game_dir(&options.root)
+    };
+    sound.apply_prefs(&prefs);
     let mut help = false;
     let mut scenarios = false;
     let mut model_lab = None;
@@ -396,6 +410,11 @@ fn run() -> Result<(), String> {
     }
     if options.skip_intro {
         eprintln!("--skip-intro: the logo sequence and the credits are not shown.");
+    }
+    // F1910: the initial new game is on a starport pad, so the station bed is
+    // requested once. (The original keeps re-sending its volume/pitch.)
+    if nav.as_ref().is_some_and(|nav| nav.docked.is_some()) {
+        sound.play(Cue::Station);
     }
     // F998's new-game armament: one 1MW pulse laser in the front mount, a class-2
     // drive and 1 t of energy on the start-type 1 hull. The port has no outfitting
@@ -555,6 +574,9 @@ fn run() -> Result<(), String> {
         } else {
             measured
         };
+        // F1904/F232/F919: advance the song and restart the front-end theme or
+        // the continuous-music selection when the current song is done.
+        sound.tick(std::time::Duration::from_secs_f64(elapsed));
         let active = window.is_active();
         let keys_down = window.get_keys();
         held_controls.update(
@@ -586,12 +608,14 @@ fn run() -> Result<(), String> {
         // pages directly, as the owner asked.
         if active && pressed(Key::Escape) {
             prefs.escape();
+            sound.play(Cue::UiBeep);
             held_controls.disarm(&keys_down);
             last = now;
         }
         // While the pages are open the game is frozen: only the page state and
         // the page picture change. The original stops the clock in FUNC_000220.
         if prefs.open {
+            let before = prefs.clone();
             if active {
                 let key = [
                     (Key::Up, PrefsKey::Up),
@@ -619,6 +643,12 @@ fn run() -> Result<(), String> {
                     }
                     Activate::None => {}
                 }
+            }
+            // F150/F216: a page action beeps and any Sound Effects change is
+            // applied to the player immediately.
+            if prefs != before {
+                sound.apply_prefs(&prefs);
+                sound.play(Cue::UiBeep);
             }
             // Consume the mouse-down edge while the pages are open; the page
             // loop returns before the flight loop's edge bookkeeping.
@@ -734,6 +764,9 @@ fn run() -> Result<(), String> {
         }
         // Every console button the port has no screen for says so in the message
         // log instead of doing nothing.
+        if console_click.is_some() {
+            sound.play(Cue::UiBeep);
+        }
         if let Some(note) = console_click.and_then(Click::unported) {
             message = note.to_owned();
         }
@@ -991,6 +1024,10 @@ fn run() -> Result<(), String> {
                                     burn_fuel(&mut state, nav.drive, jumped.fuel);
                                     let forward = ship_axes(&state)[2];
                                     nav.spawn_traffic(&cache, jumped.arrival, forward);
+                                    // F908's `0x21`; F656's song 15 when the
+                                    // "Music after hyperspace" switch is on.
+                                    sound.play(Cue::Hyperspace);
+                                    sound.hyperspace_music();
                                     message = format!(
                                         "Hyperspace: {} in {:.1} days, {} t of fuel. Arrived in the {} system.",
                                         ffe_rs::navigation::range_text(jumped.distance),
@@ -1072,6 +1109,7 @@ fn run() -> Result<(), String> {
                             if index < body_count {
                                 nav.ship_lock = None;
                                 if let Some(body) = nav.lock(index) {
+                                    sound.play(Cue::UiBeep);
                                     message = format!(
                                         "Locked on {} {}. K or AUTOPILOT flies there.",
                                         body.name,
@@ -1082,6 +1120,7 @@ fn run() -> Result<(), String> {
                                 nav.locked = None;
                                 let id = nav.ships[index - body_count].id;
                                 if let Some(ship) = nav.lock_ship(id) {
+                                    sound.play(Cue::UiBeep2);
                                     message = format!(
                                         "Locked on {} {}. Space fires.",
                                         ship.name,
@@ -1270,7 +1309,12 @@ fn run() -> Result<(), String> {
                         None
                     };
                     if let Some(next) = chosen {
+                        let changed = next != views.mode;
                         views.mode = next;
+                        if changed {
+                            // F1125: `0x27` camera on a view change.
+                            sound.play(Cue::Camera);
+                        }
                         message = format!("{}.", views.mode.name());
                     }
                 }
@@ -1315,6 +1359,7 @@ fn run() -> Result<(), String> {
                     views.external.step(keys, elapsed_ms, minimum);
                 }
                 let mut dock_action: Option<StationAction> = None;
+                let dock_before = dock;
                 if state.mode == ffe_rs::flight::Mode::Docked
                     && !help
                     && !scenarios
@@ -1461,10 +1506,17 @@ fn run() -> Result<(), String> {
                                         acceleration = 0;
                                         state.mode = ffe_rs::flight::Mode::Flight;
                                         state.system_flight = true;
+                                        // F1018's launch-transition beep.
+                                        sound.stop_for_sequence();
+                                        sound.play(Cue::UiBeep);
                                         message = TAKEOFF_HINT.to_owned();
                                     }
                                     Ok(()) => {
                                         acceleration = 0;
+                                        // F1048 stops the song; F1098's launch
+                                        // sample comes at the end of the lift
+                                        // sequence (`Traffic::LaunchDone`).
+                                        sound.stop_for_sequence();
                                         message =
                                             "Launch permission granted: moving into the lift."
                                                 .to_owned();
@@ -1508,6 +1560,10 @@ fn run() -> Result<(), String> {
                         StationAction::NotPorted(text) => message = text.to_owned(),
                     }
                 }
+                // F1056: station-screen navigation and buttons beep.
+                if dock_action.is_some() || dock != dock_before {
+                    sound.play(Cue::UiBeep);
+                }
                 let action = if pressed(Key::L) && state.mode == ffe_rs::flight::Mode::Docked {
                     match nav.as_mut() {
                         Some(nav) if state.mode == ffe_rs::flight::Mode::Docked => {
@@ -1516,11 +1572,14 @@ fn run() -> Result<(), String> {
                                     acceleration = 0;
                                     state.mode = ffe_rs::flight::Mode::Flight;
                                     state.system_flight = true;
+                                    sound.stop_for_sequence();
+                                    sound.play(Cue::UiBeep);
                                     message = TAKEOFF_HINT.to_owned();
                                     None
                                 }
                                 Ok(()) => {
                                     acceleration = 0;
+                                    sound.stop_for_sequence();
                                     message = "Launch permission granted: moving into the lift."
                                         .to_owned();
                                     None
@@ -1557,6 +1616,8 @@ fn run() -> Result<(), String> {
                         },
                         None => "No stations: navigation is unavailable.".to_owned(),
                     };
+                    // F1020's docking-computer beep.
+                    sound.play(Cue::UiBeep);
                     None
                 } else if pressed(Key::D) {
                     Some(state.request_docking())
@@ -1826,11 +1887,16 @@ fn run() -> Result<(), String> {
                         .map(|contact| {
                             if contact.flags & 0x40 != 0 {
                                 message = "Landed. The ship is settled on the surface.".to_owned();
+                                // F1088's docking/landing transition, then
+                                // F1094's docking music.
+                                sound.play(Cue::Docking);
+                                sound.docking_music();
                             } else if contact.flags & 0x80 != 0 {
                                 message = format!(
                                     "Crash: damage {}. The ship bounced off the surface.",
                                     contact.damage.max(0)
                                 );
+                                sound.play(Cue::HullDamage);
                             }
                             Some(contact)
                         })
@@ -1916,6 +1982,10 @@ fn run() -> Result<(), String> {
                                             if nav.begin_docking(index) {
                                                 acceleration = 0;
                                                 model.set_time_acceleration(0);
+                                                // F1019/F1048: the airlock cue and
+                                                // the sequence stops the song.
+                                                sound.stop_for_sequence();
+                                                sound.play(Cue::Docking);
                                                 message = format!(
                                                     "{name}: docking, aligning with the lift."
                                                 );
@@ -2009,6 +2079,11 @@ fn run() -> Result<(), String> {
                                     "Docking"
                                 }
                             );
+                            // F1026/F1029's airlock `0x12`/`0x13` on the door
+                            // stages (the other stages have no cue).
+                            if text.contains("door") {
+                                sound.play(Cue::Door);
+                            }
                         }
                         Traffic::Docked(_) => {
                             state.mode = ffe_rs::flight::Mode::Docked;
@@ -2017,6 +2092,11 @@ fn run() -> Result<(), String> {
                             state.thrust = 0.0;
                             state.docking_requested = false;
                             dock.open(StationScreen::Services);
+                            // F1088/F1094: the docking cue, the station bed and
+                            // a random docking song.
+                            sound.play(Cue::Docking);
+                            sound.play(Cue::Station);
+                            sound.docking_music();
                             message = station::SERVICES_HINT.to_owned();
                         }
                         Traffic::LaunchOut(index) => {
@@ -2024,6 +2104,7 @@ fn run() -> Result<(), String> {
                             // still in the lift until it is open (LaunchDone). Keep
                             // the docked/inside view, not the flight view.
                             message = format!("Launching: leaving {}.", nav.bodies[index].name);
+                            sound.play(Cue::Door);
                         }
                         Traffic::LaunchDone(index) => {
                             // F1088/F1089: the door is open and the ship leaves.
@@ -2031,6 +2112,11 @@ fn run() -> Result<(), String> {
                             state.docking_requested = false;
                             state.system_flight = true;
                             launch_grace = Some(index);
+                            // F1098's `0x20` launch, F1092's engine bed and
+                            // F1094's random launch music.
+                            sound.play(Cue::Launch);
+                            sound.play(Cue::Engine);
+                            sound.docking_music();
                             message = format!("Clear of {}.", nav.bodies[index].name);
                             // F688 spawns the system traffic on entering it;
                             // the sandbox has no new game, so the launch is its
@@ -2187,6 +2273,9 @@ fn run() -> Result<(), String> {
             if let Some(mount) = combat::mount(views.mode) {
                 match state.combat.fire(mount, frame_tics) {
                     Ok(shot) => {
+                        // F930: `laser1` for banks 0..3, `laser2` for 4..15; the
+                        // port's four mounts are all in the first bank.
+                        sound.play(Cue::Laser { bank: mount as u8 });
                         let stats = scene
                             .as_ref()
                             .and_then(|scene| scene.ship_stats(state.ship));
@@ -2243,6 +2332,9 @@ fn run() -> Result<(), String> {
                                                 }
                                             );
                                         }
+                                        // F953's hull/impact sample for a
+                                        // non-ship target.
+                                        sound.play(Cue::HullDamage);
                                     }
                                 }
                             } else if let Some(nav) = nav.as_mut() {
@@ -2250,6 +2342,7 @@ fn run() -> Result<(), String> {
                                 if let Some(ship) = nav.ships.get(index) {
                                     let id = ship.id;
                                     let name = ship.name.clone();
+                                    let model = ship.model;
                                     nav.lock_ship(id);
                                     let outcome = nav.damage_ship(id, shot.damage);
                                     if let Some(ship) = nav.ships.iter().find(|ship| ship.id == id)
@@ -2268,6 +2361,42 @@ fn run() -> Result<(), String> {
                                             }
                                             None => format!("{name}: no damage."),
                                         };
+                                    }
+                                    // F750/F236: the first hit starts the battle
+                                    // (siren + song 14 if enabled); F953/F942
+                                    // then play the shield, hull or explosion
+                                    // sample. F351's bong follows the message
+                                    // log entry at the end of the frame.
+                                    sound.start_battle();
+                                    match outcome {
+                                        Some(ffe_core::laser::Damage::Shields) => {
+                                            sound.play(Cue::ShieldHit);
+                                        }
+                                        Some(ffe_core::laser::Damage::Hull) => {
+                                            sound.play(Cue::HullDamage);
+                                        }
+                                        Some(ffe_core::laser::Damage::Destroyed) => {
+                                            sound.play(Cue::ShipExplosion);
+                                            // F942: the `boom` for a hull whose
+                                            // descriptor mass (`+0x6`) is >= 0xa.
+                                            let large = scene
+                                                .as_ref()
+                                                .and_then(|scene| scene.ship_stats(model))
+                                                .is_some_and(|stats| stats.mass >= 0x0a);
+                                            if large {
+                                                sound.play(Cue::LargeExplosion);
+                                            }
+                                        }
+                                        None => {}
+                                    }
+                                    // F770: the last hostile's death ends the
+                                    // battle and stops the song.
+                                    if matches!(outcome, Some(ffe_core::laser::Damage::Destroyed))
+                                        && !nav.ships.iter().any(|ship| {
+                                            ship.alive() && ship.role == ffe_core::npc::Role::Pirate
+                                        })
+                                    {
+                                        sound.end_battle();
                                     }
                                 }
                             }
@@ -2696,10 +2825,12 @@ fn run() -> Result<(), String> {
             ..screen.systems
         };
         screen.clock = nav.as_ref().map(|nav| nav.date_text()).unwrap_or_default();
-        // F271: a changed console message becomes a dated log entry.
+        // F271: a changed console message becomes a dated log entry. F351's
+        // bong accompanies a newly shown message.
         if message != logged && !message.is_empty() {
             screen.messages.push(message.clone(), screen.clock.clone());
             logged.clone_from(&message);
+            sound.play(Cue::Message);
         }
         // F273's auto-scroll timer runs on the world tics.
         let log_tics =
