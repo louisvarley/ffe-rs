@@ -136,14 +136,18 @@ fn a_thargoid_spawns_from_f690_and_dies_to_the_players_laser() {
     let spec = ffe_rs::ships::npc_spec(&cache, 0x31).expect("model 0x31 has no statistics");
     assert_eq!(spec.name, "Unknown");
     assert_eq!(spec.mass, 232);
-    assert_eq!(spec.shield_strength, 16_430);
+    // The statistics' +0xc shield word (the +0xe word is the name code
+    // 0x402e, which the old port misread as 16,430).
+    assert_eq!(spec.shield_strength, 180);
     assert_eq!(spec.thrust, 14_715);
     assert_eq!(spec.drive, 14);
     assert_eq!(spec.gun_mounts, 1);
     assert_eq!(spec.cargo, 203);
     assert_eq!(spec.radius, 90_000);
     assert_eq!(spec.hull(), 928);
-    assert_eq!(spec.shield_max(), 184);
+    // Spec::shield_max is the port's approximation of F773's random*16: the
+    // statistics shield word's low byte times four, now read from +0xc.
+    assert_eq!(spec.shield_max(), 720);
     // F774 with class 0x11's 0xb2 proportion and 203 t of cargo picks the 75 t
     // 20MW beam (0xb3), not the 900 t 0xcf entry.
     assert_eq!(
@@ -202,7 +206,7 @@ fn a_thargoid_spawns_from_f690_and_dies_to_the_players_laser() {
     let mut shots = 0usize;
     let mut shield_hit = false;
     let mut hull_hit = false;
-    for frame in 0..1000 {
+    for frame in 0..1600 {
         combat.tick(tics, dt);
         let Ok(shot) = combat.fire(0, tics) else {
             continue;
@@ -251,9 +255,10 @@ fn a_thargoid_spawns_from_f690_and_dies_to_the_players_laser() {
         }
     }
     assert!(shield_hit && hull_hit, "the kill skipped a damage stage");
-    // 184 shields and a 928 hull at 50 damage a shot: four shield hits then
-    // nineteen hull hits, thirty-eight frames apart.
-    assert_eq!(shots, 23);
+    // 720 shields and a 928 hull at 50 damage a shot: fourteen shield hits, a
+    // fifteenth that spills thirty into the hull, then eighteen more hull hits,
+    // thirty-eight frames apart.
+    assert_eq!(shots, 33);
     let ship = nav.ships.iter().find(|ship| ship.id == id).unwrap();
     assert!(!ship.alive());
     assert_eq!(ship.state, ffe_core::npc::State::Dead);

@@ -91,8 +91,10 @@ table and hot areas but not the view radio group (their radio ids are 7, 6 and
 ## Turrets and eyes (ported)
 
 Ship statistics (descriptor +0x38, 48 bytes, cache v12 `base:ship/stats`): +0x0
-forward thrust, +0x2 reverse thrust, +0x4 gun mounts, +0x6 mass, +0x18/+0x1a
-cockpit eye (forward, up), +0x28/+0x2a top turret, +0x2c/+0x2e bottom turret.
+forward thrust, +0x2 reverse thrust, +0x4 gun mounts, +0x6 mass, +0xa F437's
+price word, +0xc the shield word, +0xe the ship-name ffcode (`0x4000 | n`),
++0x18/+0x1a cockpit eye (forward, up), +0x28/+0x2a top turret, +0x2c/+0x2e
+bottom turret.
 FUNC_001053 places the eye at C*w0 + B*w1, each word * 0x7fff >> 12 model units;
 rear negates A and C first; turrets add +/-0x3e to the up word and turn by
 `+0x204`/`+0x206` (FUNC_001038 clamps; pitch < 0 = top). F8 and the turret

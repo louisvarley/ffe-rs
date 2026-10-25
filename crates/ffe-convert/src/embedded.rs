@@ -570,13 +570,15 @@ pub struct EmbeddedModelNames {
 }
 
 /// The model string table (`DATA_004682`, "Ship string table"): pointers to
-/// NUL-terminated Latin-1 strings, entry n naming model table slot n. The
-/// release executable's table is longer than the JJFFE declaration's 209 entries
-/// (219 on floppy 1.02: the extra ones include "police" and the First Encounters
-/// logo), and the model text commands index the same table through
-/// `0x4000 | n`. So the table is scanned, not taken from the declaration: the
-/// scan stops at the first word that is not a pointer into the data section
-/// holding a terminated string.
+/// NUL-terminated Latin-1 strings, entry n the string of ffcode `0x4000 | n`.
+/// Entry n is **not** model table slot n: the commands and F437/F439/F282 look
+/// the code up in a model's statistics block at `+0xe`, and the table also holds
+/// UI/decal strings. The release executable's table is longer than the JJFFE
+/// declaration's 209 entries (219 on floppy 1.02: the extra ones include
+/// "police" and the First Encounters logo), and the model text commands index
+/// the same table through `0x4000 | n`. So the table is scanned, not taken from
+/// the declaration: the scan stops at the first word that is not a pointer into
+/// the data section holding a terminated string.
 pub fn decode_model_names(bytes: &[u8], rva: u32) -> Result<EmbeddedModelNames, String> {
     let section = DataSection::parse(bytes)?;
     let first = section.offset(rva, 4)?;

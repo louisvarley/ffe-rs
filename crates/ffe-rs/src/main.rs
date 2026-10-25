@@ -762,7 +762,8 @@ fn run() -> Result<(), String> {
         );
     let model_records = cache.asset("base:model/records").unwrap_or(&[]);
     let model_stats = cache.asset("base:ship/stats").unwrap_or(&[]);
-    // The original's named craft (cache v11); Page Up/Down changes the player's ship.
+    // The original's named craft (cache v11 names + v12 statistics); Page Up/Down
+    // changes the player's ship.
     let ships = scene
         .as_ref()
         .map(|scene| ShipList::from_cache(&cache, scene))
@@ -2648,7 +2649,7 @@ fn run() -> Result<(), String> {
                                 ships.name(ship).unwrap_or("unnamed")
                             )
                         }
-                        None => "No ship list: rebuild data.bin (cache v11).".to_owned(),
+                        None => "No ship list: rebuild data.bin (cache v12).".to_owned(),
                     };
                 }
                 if let Some(station_action) = dock_action {

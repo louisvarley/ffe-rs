@@ -23,6 +23,12 @@ data section holding a NUL-terminated printable string) instead of trusting the
 declaration. Cache v13 carries all 219 strings; v11/v12 carried 209, which left
 every code above `0x40d0` unresolved.
 
+Entry n is **not** model table slot n: it is the string for ffcode `0x4000 | n`.
+A model's code is the `+0xe` word in its statistics block, so several slots share
+a name (0x3d/0x46 are both Lynx Bulk Carrier) and the table also holds UI and
+decal strings. `docs/notes/ship-names.md` maps this for ships; the text
+commands themselves resolve `0x4000 | n` directly.
+
 ## The census (floppy 1.02, cache v13)
 
 Decoding every cached model (`text_census`):

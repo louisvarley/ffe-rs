@@ -837,6 +837,23 @@ impl ModelViewer {
             .ok_or_else(|| format!("Model string {code:#06x} is not in the cache."))
     }
 
+    /// The model's own name for F1747's `0x3016`/`0x3022` fallback: the
+    /// statistics block's `+0xe` ship-name ffcode expanded through
+    /// `DATA_004682` (F282's mapping), not the table slot. Models without
+    /// statistics keep the old slot lookup so text still draws.
+    fn model_name(&self, model: u32) -> Option<&[u8]> {
+        let code = self
+            .ship_stats
+            .get(model as usize)
+            .and_then(|stats| stats.as_ref())
+            .map(|stats| stats.name_code);
+        if let Some(name) = code.and_then(|code| self.model_strings.get(usize::from(code & 0x3fff)))
+        {
+            return Some(name);
+        }
+        self.model_strings.get(model as usize).map(Vec::as_slice)
+    }
+
     /// Step the engines through off, half and full thrust ([`THRUST_STEPS`]).
     pub fn cycle_thrust(&mut self) {
         let position = THRUST_STEPS.iter().position(|t| *t == self.thrust);
@@ -2357,9 +2374,8 @@ impl ModelViewer {
                 if !self.registration.is_empty() {
                     return Ok(self.registration.clone());
                 }
-                self.model_strings
-                    .get(model as usize)
-                    .cloned()
+                self.model_name(model)
+                    .map(<[u8]>::to_vec)
                     .ok_or_else(|| format!("Model {model} has no name string."))
             }
             0x4000..=0x7fff => self.model_string(code).map(<[u8]>::to_vec),
