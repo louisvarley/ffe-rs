@@ -298,6 +298,9 @@ pub struct Screen {
     pub labels: Vec<BodyLabel>,
     /// The galaxy map to draw instead of the flight view, when it is open.
     pub galaxy: Option<MapScene>,
+    /// The galaxy map's console selection (`F834`/`F840`), applied on top of
+    /// the flight page while [`Screen::galaxy`] is set.
+    pub map_console: crate::console::MapConsole,
     /// Whether a body is locked, for the autopilot buttons.
     pub has_lock: bool,
     /// The four mount lasers (`ship+0xd2..+0xd5`), for F1111's gunsight rule.
@@ -753,6 +756,7 @@ impl Screen {
             blink: false,
             labels: Vec::new(),
             galaxy: None,
+            map_console: crate::console::MapConsole::default(),
             has_lock: false,
             lasers: [0; 4],
             beam: None,
@@ -1595,6 +1599,11 @@ impl Screen {
                 systems.mounts = systems.mounts.max(3);
             }
             self.console.apply_flight(view, &views.console, &systems);
+            if self.galaxy.is_some() {
+                // F834/F840: the map's page replaces the view row while the
+                // screen buttons, meter, scanner and lamps stay visible.
+                self.console.apply_map(&self.map_console);
+            }
             for (_, button) in self.console.drawable() {
                 let Some(id) = button.image() else {
                     continue;

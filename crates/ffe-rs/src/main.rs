@@ -14,6 +14,7 @@ use ffe_rs::galaxy_map::GalaxyMap;
 use ffe_rs::gameover::GameOver;
 use ffe_rs::hud::PlayerHud;
 use ffe_rs::input;
+use ffe_rs::map_keys::{self, MapAction};
 use ffe_rs::messages::{Channel, Event as LogEvent, Post, Source};
 use ffe_rs::model_lab::ModelLab;
 use ffe_rs::model_viewer::ModelViewer;
@@ -649,6 +650,8 @@ fn run() -> Result<(), String> {
     // The galaxy map's state and the tables it reads (cache v21 to v25).
     let mut galaxy: Option<GalaxyMap> = None;
     let mut map_drag: Option<(i32, i32)> = None;
+    // The map's `DATA_005100` page selection (F834/F840). Reset when the map opens.
+    let mut map_console = ffe_rs::console::MapConsole::default();
     let sector_tables = cache
         .asset("base:world/galaxy-tables")
         .and_then(|bytes| ffe_core::sector::Tables::new(bytes).ok());
@@ -1375,8 +1378,27 @@ fn run() -> Result<(), String> {
         if console_click.is_some() {
             sound.play(Cue::UiBeep);
         }
-        if let Some(note) = console_click.and_then(Click::unported) {
-            message = note.to_owned();
+        // The original galaxy map page owns F5-F12 (F840). While it is
+        // showing, those keys and the overlapping console hot areas are
+        // map-local and the port's global save, view, screenshot and viewer
+        // keys are not run; everywhere else they are unchanged. See `map_keys`
+        // and docs/notes/galaxy-map.md.
+        let map_page_open = nav
+            .as_ref()
+            .is_some_and(|nav| map_keys::owns_keys(nav.view, galaxy.is_some()))
+            && !help
+            && !scenarios
+            && model_lab.is_none()
+            && model_viewer.is_none();
+        if let Some(click) = console_click {
+            if let Some(note) = click.unported() {
+                // The map row's hot areas are the original's function-key
+                // actions (F5-F12), not the flight screens; the map block
+                // handles them.
+                if !map_page_open || map_keys::click(click).is_none() {
+                    message = note.to_owned();
+                }
+            }
         }
         // F4 is the original's station/comms action (F1056's action 0xf4,
         // F343): from state 0x2a (docked) or 0x30 (landed at an open-air
@@ -1424,7 +1446,7 @@ fn run() -> Result<(), String> {
                 window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
             // F12 is the model viewer (Shift+F12 the model lab).
             // F11 saves the presented frame for bug reports (a binary PPM).
-            if pressed(Key::F11) {
+            if pressed(Key::F11) && !map_page_open {
                 let dir = options.root.join("shots");
                 let _ = fs::create_dir_all(&dir);
                 let mut number = 1;
@@ -1440,7 +1462,7 @@ fn run() -> Result<(), String> {
                     Err(error) => format!("Screenshot failed: {error}"),
                 };
             }
-            if pressed(Key::F12) && shift_down {
+            if pressed(Key::F12) && shift_down && !map_page_open {
                 held_controls.disarm(&keys_down);
                 if model_lab.is_some() {
                     model_lab = None;
@@ -1457,7 +1479,7 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
-            if pressed(Key::F12) && !shift_down {
+            if pressed(Key::F12) && !shift_down && !map_page_open {
                 held_controls.disarm(&keys_down);
                 if model_viewer.is_some() {
                     model_viewer = None;
@@ -1527,11 +1549,14 @@ fn run() -> Result<(), String> {
                     if galaxy.is_none() && sector_tables.is_some() {
                         if let Some(home) = nav.current_position() {
                             galaxy = Some(GalaxyMap::new(home, nav.reach().unwrap_or(0)));
+                            // F834: a fresh map page with the map icon lit.
+                            map_console = ffe_rs::console::MapConsole::default();
                         }
                     }
                 } else {
                     galaxy = None;
                 }
+                let mut hyperspace = false;
                 if let Some(map) = galaxy.as_mut() {
                     let held = |key| window.is_key_down(key);
                     let slow = held(Key::LeftShift) || held(Key::RightShift);
@@ -1562,6 +1587,68 @@ fn run() -> Result<(), String> {
                     }
                     if held(Key::PageDown) || held(Key::Minus) || held(Key::NumPadMinus) {
                         map.zoom_by(zoom);
+                    }
+                    // F840 owns F5-F12 while this page is showing (map_keys):
+                    // F5 the controls page, F6 select, F7 details, F8 picture,
+                    // F9/F10 details with next/previous, F11/F12 zoom. The
+                    // details and picture screens are later slices; their keys
+                    // light the original button and report that state. F969's
+                    // console hot areas send the same function-key actions, so
+                    // a click on the map row is routed the same way.
+                    let mut actions = Vec::new();
+                    if let Some(action) = console_click.and_then(map_keys::click) {
+                        actions.push(action);
+                    }
+                    let mut map_key = false;
+                    for (offset, key) in [
+                        Key::F5,
+                        Key::F6,
+                        Key::F7,
+                        Key::F8,
+                        Key::F9,
+                        Key::F10,
+                        Key::F11,
+                        Key::F12,
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        if pressed(key) {
+                            map_key = true;
+                            if let Some(action) = map_keys::action(5 + offset as u8) {
+                                actions.push(action);
+                            }
+                        }
+                    }
+                    for action in actions {
+                        match action {
+                            MapAction::ZoomIn => map.zoom_by(-zoom),
+                            MapAction::ZoomOut => map.zoom_by(zoom),
+                            MapAction::Page => {
+                                map_console = ffe_rs::console::MapConsole::default();
+                                message = "Map controls: F6 select, F7 details, F8 picture, \
+                                           F9/F10 next/previous, F11/F12 zoom."
+                                    .to_owned();
+                            }
+                            action => {
+                                if let Some(page) = map_keys::page(action) {
+                                    map_console = page;
+                                }
+                                message = match action {
+                                    MapAction::Select => "Map controls selected.".to_owned(),
+                                    MapAction::Picture => {
+                                        "The map picture mode (F844-F849) is not ported yet."
+                                            .to_owned()
+                                    }
+                                    _ => {
+                                        "The map details page (F842) is not ported yet.".to_owned()
+                                    }
+                                };
+                            }
+                        }
+                    }
+                    if map_key {
+                        held_controls.disarm(&keys_down);
                     }
                     map.zoom = map.zoom.max(0x2000);
                     if pressed(Key::C) {
@@ -1603,7 +1690,6 @@ fn run() -> Result<(), String> {
                         _ => nav.clear_destination(),
                     }
                 }
-                let mut hyperspace = false;
                 if console_click == Some(Click::Hyperspace) {
                     if nav.destination.is_some() {
                         hyperspace = true;
@@ -2262,8 +2348,10 @@ fn run() -> Result<(), String> {
                     }
                     // F12's console icon is F1056's F1098 call (`78528`): the
                     // escape capsule or Stowmaster launches when fitted, and
-                    // nothing happens (F1098 returns 0) when it is not.
-                    if console_click == Some(Click::Capsule) {
+                    // nothing happens (F1098 returns 0) when it is not. On the
+                    // map page that hot area is F840's F12 (zoom out), not the
+                    // capsule.
+                    if console_click == Some(Click::Capsule) && !map_page_open {
                         match death::escape_craft(&state.loadout) {
                             Some(craft) => {
                                 let stats = scene
@@ -2300,17 +2388,25 @@ fn run() -> Result<(), String> {
                     // Missile Viewer (general bit 9) and a missile in flight
                     // (`player+0xef`); otherwise the key does nothing.
                     let mut view_note: Option<String> = None;
-                    let chosen = if pressed(Key::F1) || clicked == Some(ViewButton::Cycle) {
+                    // The galaxy map owns F6-F10 and its row covers the view
+                    // buttons, so neither the keys nor those clicks change the
+                    // flight view while the F834 page is showing.
+                    let view_keys = !map_page_open;
+                    let clicked = if view_keys { clicked } else { None };
+                    let chosen = if (pressed(Key::F1) || clicked == Some(ViewButton::Cycle))
+                        && view_keys
+                    {
                         Some(views.mode.next(gun_mounts, views.turret.pitch))
-                    } else if pressed(Key::F6) {
+                    } else if pressed(Key::F6) && view_keys {
                         Some(ViewMode::Front)
-                    } else if pressed(Key::F7) {
+                    } else if pressed(Key::F7) && view_keys {
                         Some(ViewMode::Rear)
-                    } else if pressed(Key::F8) || clicked == Some(ViewButton::Turret) {
+                    } else if (pressed(Key::F8) || clicked == Some(ViewButton::Turret)) && view_keys
+                    {
                         turret
-                    } else if pressed(Key::F9) {
+                    } else if pressed(Key::F9) && view_keys {
                         Some(ViewMode::External)
-                    } else if pressed(Key::F10) {
+                    } else if pressed(Key::F10) && view_keys {
                         if views.mode == ViewMode::Missile {
                             Some(ViewMode::Missile)
                         } else if !state.loadout.missile_viewer() {
@@ -2884,7 +2980,7 @@ fn run() -> Result<(), String> {
                 }
                 let shift =
                     window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
-                if pressed(Key::F5) && !shift {
+                if pressed(Key::F5) && !shift && !map_page_open {
                     message = match snapshot(&save_dir, &state) {
                         Ok(text) => text,
                         Err(e) => {
@@ -2894,7 +2990,7 @@ fn run() -> Result<(), String> {
                     };
                 }
                 // Load moved from F9 (the original's external view) to Shift+F5.
-                if pressed(Key::F5) && shift {
+                if pressed(Key::F5) && shift && !map_page_open {
                     let loaded = snapshots(&save_dir).and_then(|paths| {
                         paths
                             .last()
@@ -4178,6 +4274,7 @@ fn run() -> Result<(), String> {
             });
         }
         screen.galaxy = None;
+        screen.map_console = map_console;
         if let (Some(map), Some(tables), Some(viewer), Some(nav)) = (
             galaxy.as_mut(),
             sector_tables.as_ref(),

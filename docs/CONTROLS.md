@@ -53,6 +53,8 @@ right button is the steering hold. The left button remains the console pointer
 | Galaxy map: choose the star at the centre as the jump destination | **G** |
 | Hyperspace to the chosen destination (also after G closes) | **H** |
 | Re-centre the galaxy map | **C** |
+| Map page (while the map is open): controls / select / details / picture | **F5 / F6 / F7 / F8** |
+| Map page: details with next / previous; zoom in / out | **F9 / F10; F11 / F12** |
 | Time acceleration 1x/10x/100x/1000x/10000x | **6 7 8 9 0** (or the meter) |
 | Pause | **P** (or the meter) |
 | Views: cycle / front / rear / turret / external | **F1 / F6 / F7 / F8 / F9** |
@@ -68,6 +70,13 @@ right button is the steering hold. The left button remains the console pointer
 | Change ship | **Page Up / Page Down** |
 | Docked rows / actions | **Up/Down**, **Enter**, **1**..**4**, **Backspace**, **B**/**N** trade |
 | Quit from the preference pages | click `Quit`, or select it and press Enter |
+
+The galaxy map's F5-F12 are **map-local**: they drive the original's F834/F840
+page only while the map is showing. Outside it the global keys are unchanged
+(F5 save, Shift+F5 load, F6-F10 views, F11 screenshot, F12/Shift+F12 model
+viewer/lab). The Tab system map and the `n` places list are not the original
+map page and keep the global keys. Clicking the map's console icons does not
+change the flight view while the page is open.
 
 An open-air takeoff is flown, not automatic: the launch action starts F1013's
 fixed up-thrust (`0x24`); above 200,000 mm it hands over to `0x26`, and the
