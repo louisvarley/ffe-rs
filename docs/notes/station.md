@@ -1,8 +1,10 @@
 # The docked station and starport screens (F320-F362, F536-F558, F382-F445)
 
-Status (2026-10-24): **the services root, shipyard root and stockmarket are
-ported**; the equipment, ship and repair lists and the bulletin board's
-generated entries are shells (their tables/generators are not imported). The
+Status (2026-10-25): **the services root, shipyard root and stockmarket are
+ported**; the equipment table and fitted loadout are now in `ffe-core::equipment`
+(embedded, cache still v26), but the Upgrades rows still wait on the starport's
+tech level (below). The ship and repair lists and the bulletin board's
+generated entries remain shells (their tables/generators are not imported). The
 screen map, strings, layout, hot areas and keys below are read from
 `jjffe-master/ffe.asm`/`ffedat.asm` and checked against frames of the reference
 game (JJFFE 2.8a7 built from that asm; see "Evidence").
@@ -142,7 +144,11 @@ anywhere while docked. These are called out as port conveniences in
 - **Bulletin Board**: empty, with the original's 0x98de console line. The
   port does not generate BBS entries yet, so it does not invent any.
 - **Upgrades / Repairs / New Ships**: the original screen shells (title,
-  header, Go Back) with no rows. Their data is listed under "Remaining".
+  header, Go Back). Upgrades has the `equipment::outfitting` data API ready
+  (F383 availability/prices, F393 fitted bits) but no rows, because the
+  station's tech level (`DATA_008995`, from F869) is not generated yet — the
+  port draws the empty shell rather than inventing one. Repairs/New Ships wait
+  on their own generators.
 
 The commander/options screen is **not** a station service: there is no entry
 for it in `F333`/`F382`. In the original it is the separate status screen
@@ -155,11 +161,14 @@ owner wants it, the next step is to follow the F2 console action
 
 ## Remaining (with the data)
 
-1. **Equipment (upgrades)**. `F383` builds 0x42 rows from `DATA_005292`
-   (`ffedat.asm` ~17900; 22 bytes each: name ffcode, flags, price, weight,
-   tech level) and `F392` checks fitting/removal. Needs a new cache asset (or
-   an embedded table) plus the equipment bits/damage model. Cache v27 if
-   imported as data.
+1. **Equipment (upgrades)**. The `DATA_005289` table (66 records, 22 bytes) is
+   embedded in `ffe-core::equipment` (no cache change), with F393's bits and
+   F383's availability/prices, and the fitted loadout is in `Flight::loadout`.
+   Remaining: the starport's tech level `DATA_008995` from F869 (`F383` compares
+   it with `record+0x13`), then `station::Screen::Upgrades` can build rows with
+   `equipment::outfitting`. Do **not** invent a tech level; it must come from
+   F869/the starport data. The F392 Fit/Remove actions then apply through the
+   loadout API. See `docs/notes/equipment.md`.
 2. **Shipyard ships**. `F445` reads the station's generated entries
    (`+0x2e6`, up to 13 `{model, index}` words from `F634/F635` and
    `DATA_006199..6200`) and the ship statistics; prices come from

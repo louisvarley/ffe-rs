@@ -1,6 +1,8 @@
 //! Native simulation primitives: no I/O, wall clock, GPU, or legacy runtime.
 
 pub mod collision;
+pub mod equipment;
+mod equipment_table;
 pub mod ffp;
 pub mod frames;
 pub mod galaxy;

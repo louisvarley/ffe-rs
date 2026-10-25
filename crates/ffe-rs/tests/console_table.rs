@@ -168,11 +168,11 @@ fn f991_shows_the_view_row_and_only_hides_the_turret_on_two_mount_ships() {
 
 #[test]
 fn f1120_draws_the_equipment_page_and_hides_the_lamps() {
+    // Bits 2, 19, 23, 24 and 26 of the general-equipment dword: military
+    // cameras, ECM, Naval ECM, hyperspace cloud analyser and energy bomb.
     let systems = ShipSystems {
         slots: [0, 1, 2, 0, 0, 0, 0, 0, 0, 3],
-        ca: 0x80 | 0x8,
-        cb: 0x4 | 0x1,
-        c8: 4,
+        general: (1 << 2) | (1 << 19) | (1 << 23) | (1 << 24) | (1 << 26),
         p511e: 1,
         e8: 0x34,
         data_247: false,
@@ -192,7 +192,7 @@ fn f1120_draws_the_equipment_page_and_hides_the_lamps() {
     assert!(console.is_visible(0x4a) && console.is_visible(0x4b));
     assert!(console.is_visible(0x4c) && console.is_visible(0x4d));
     assert!(console.is_visible(0x4e));
-    assert_eq!(console.image(0x4a), Some(272), "ca bit 0x80 is image 1");
+    assert_eq!(console.image(0x4a), Some(272), "Naval ECM is image 1");
     for id in [0x45usize, 0x46, 0x47, 0x48, 0x49] {
         assert!(!console.is_visible(id), "{id:#x} is hidden on the page");
     }
@@ -208,4 +208,60 @@ fn f1120_draws_the_equipment_page_and_hides_the_lamps() {
     assert!(!console.is_visible(0x3a));
     assert!(console.is_visible(0x45) || console.is_visible(0x46));
     assert_eq!(console.image(0x19), Some(163));
+}
+
+#[test]
+fn f991_shows_the_equipment_icons_its_dword_bits_select() {
+    let console_state = ConsoleState::default();
+    // Bits 5 (Navigation computer), 6 (Combat Computer), 27 (Escape Capsule)
+    // and 9 (Missile Viewer) light 0x11-0x14; 0x14 also needs player+0xef.
+    let mut systems = ShipSystems {
+        general: (1 << 5) | (1 << 6) | (1 << 9) | (1 << 27),
+        ..ShipSystems::default()
+    };
+    let mut console = Console::new();
+    console.apply_flight(ViewMode::Front, &console_state, &systems);
+    for id in [0x11usize, 0x12, 0x13] {
+        assert!(console.is_visible(id), "{id:#x} follows its bit");
+    }
+    assert!(!console.is_visible(0x14), "0x14 also needs player+0xef");
+    systems.ef = 1;
+    console.apply_flight(ViewMode::Front, &console_state, &systems);
+    assert!(console.is_visible(0x14));
+    // Bit 3 is the other half of F991's 0x12 test (the Stowmaster fighter).
+    let systems = ShipSystems {
+        general: 1 << 3,
+        ..ShipSystems::default()
+    };
+    console.apply_flight(ViewMode::Front, &console_state, &systems);
+    assert!(console.is_visible(0x12));
+    // No equipment: all four stay hidden.
+    console.apply_flight(ViewMode::Front, &console_state, &ShipSystems::default());
+    for id in [0x11usize, 0x12, 0x13, 0x14] {
+        assert!(!console.is_visible(id));
+    }
+}
+
+#[test]
+fn f1120_draws_the_new_games_two_missile_icons() {
+    let systems = ShipSystems::default().with_loadout(&ffe_core::equipment::Loadout::new_game());
+    assert_eq!(systems.general, 0x4024_0000);
+    let mut console = Console::new();
+    console.apply_flight(
+        ViewMode::Front,
+        &ConsoleState {
+            status_page: true,
+            ..ConsoleState::default()
+        },
+        &systems,
+    );
+    // F998 fits two 0x82 (KL760) missiles: slots 0 and 1, image 2, records
+    // 0x3b and 0x3c at (14,165) and (33,164).
+    assert_eq!(buttons()[0x3b].bitmaps[2], 346, "image 2 is bitmap 346");
+    assert!(console.is_visible(0x3b) && console.is_visible(0x3c));
+    assert_eq!(console.image(0x3b), Some(346));
+    assert_eq!(console.image(0x3c), Some(346));
+    for id in 0x3d..=0x44 {
+        assert!(!console.is_visible(id), "{id:#x} has no missile");
+    }
 }

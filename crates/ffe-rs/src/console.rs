@@ -224,9 +224,11 @@ pub fn click(x: i32, y: i32) -> Option<Click> {
         .map(|(_, click)| *click)
 }
 
-/// The player ship's equipment/status bytes the console routines read. The port
-/// has no equipment or engine model yet, so these are explicit inputs with
-/// new-game defaults; `docs/notes/dashboard.md` §6.10 lists every bit.
+/// The player ship's equipment/status bytes the console routines read. The
+/// equipment words now come from [`ffe_core::equipment::Loadout`] through
+/// [`ShipSystems::with_loadout`]; the engine, target and GUI bytes stay
+/// explicit runtime inputs with new-game defaults. `docs/notes/dashboard.md`
+/// §6.10 lists every condition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShipSystems {
     /// `player+0xe8`: the engine/autopilot status byte (F1116 compares it with
@@ -239,18 +241,17 @@ pub struct ShipSystems {
     pub ec: u8,
     /// `player+0xf0`: the dword that suppresses the 0x47 lamp.
     pub f0: u32,
-    /// `ship+0xc6`..`+0xcb`, the equipment/status bits.
-    pub c6: u8,
-    pub c7: u8,
-    /// `ship+0xc8` is read as a dword by F991 (bit 27) and a byte elsewhere.
-    pub c8: u32,
-    pub c9: u8,
-    pub ca: u8,
-    pub cb: u8,
+    /// `player+0xc6`'s word: the 0x45 lamp reads bit 0x40 here and bit 0 in the
+    /// high byte (`player+0xc7`). These are status bits, not equipment.
+    pub status: u16,
+    /// `ship+0xc8`: the general equipment bitfield (`Category::General`), whose
+    /// four bytes are `ship+0xc8..+0xcb`. The bit from a record is
+    /// `(record[0x12] ^ 0x10) & 0x1f` (F393).
+    pub general: u32,
     /// `player+0xef`: the missile-view equipment byte.
     pub ef: u8,
-    /// `ship+0xd6..+0xdf`: ten equipment slots; the low nibble selects the icon
-    /// image (F1120).
+    /// `ship+0xd6..+0xdf`: ten missile pylons; the low nibble selects the icon
+    /// image (F1120) and the byte is the missile record's code (F418).
     pub slots: [u8; 10],
     /// `player+0x174`: the dword F1120's 0x51 condition tests.
     pub p174: u16,
@@ -269,20 +270,16 @@ pub struct ShipSystems {
 
 impl Default for ShipSystems {
     fn default() -> Self {
-        // The new-game Eagle long range fighter: one gun mount, no equipment
-        // bits set (the port does not model equipment yet). The lamp page is
-        // still the original's for those values.
+        // An empty ship: one gun mount and no equipment. `main` calls
+        // `with_loadout` with the saved loadout; the new game's F998 loadout is
+        // `Loadout::new_game`.
         Self {
             e8: 0,
             e9: 0,
             ec: 0,
             f0: 0,
-            c6: 0,
-            c7: 0,
-            c8: 0,
-            c9: 0,
-            ca: 0,
-            cb: 0,
+            status: 0,
+            general: 0,
             ef: 0,
             slots: [0; 10],
             p174: 0,
@@ -293,6 +290,27 @@ impl Default for ShipSystems {
             b6: 0,
             mounts: 1,
         }
+    }
+}
+
+impl ShipSystems {
+    /// Fill the words that come from the fitted loadout: the general-equipment
+    /// dword and the ten missile pylons. The rest (engine/target/status bytes)
+    /// are runtime state and stay as the caller set them.
+    pub fn with_loadout(mut self, loadout: &ffe_core::equipment::Loadout) -> Self {
+        self.general = loadout.general;
+        self.slots = loadout.missiles;
+        self
+    }
+
+    /// `player+0xc6` and its high byte `player+0xc7`.
+    fn status_bytes(&self) -> [u8; 2] {
+        self.status.to_le_bytes()
+    }
+
+    /// `ship+0xc8..+0xcb`: the general-equipment dword's four bytes.
+    fn general_bytes(&self) -> [u8; 4] {
+        self.general.to_le_bytes()
     }
 }
 
@@ -369,20 +387,29 @@ impl Console {
             .filter(|(_, button)| button.visible)
     }
 
-    /// `F991`: the view-row buttons 0x15-0x19. 0x10's icon is the labels toggle
-    /// and 0x11-0x14 the equipment icons, which this build leaves to `F1120` and
-    /// the labels state.
+    /// `F991`: the view-row buttons 0x10-0x19. 0x10 is the labels toggle;
+    /// 0x11-0x14 are the equipment icons, conditioned on the general-equipment
+    /// dword (bits 5, 27 or 3, 6, and 9 with `player+0xef`) exactly as F991's
+    /// byte/dword tests read it; 0x15-0x19 are the views and the status page.
     pub fn apply_view_row(
         &mut self,
         view: crate::camera::ViewMode,
-        mounts: i8,
+        systems: &ShipSystems,
         console: &ConsoleState,
     ) {
         use crate::camera::ViewMode;
+        self.show(0x10);
+        self.show_if(0x11, systems.general & (1 << 5) != 0);
+        self.show_if(
+            0x12,
+            systems.general & (1 << 27) != 0 || systems.general & (1 << 3) != 0,
+        );
+        self.show_if(0x13, systems.general & (1 << 6) != 0);
+        self.show_if(0x14, systems.ef != 0 && systems.general & (1 << 9) != 0);
         for id in [0x15usize, 0x17, 0x18, 0x19] {
             self.show(id);
         }
-        if mounts > 2 {
+        if systems.mounts > 2 {
             self.show(0x16);
         } else {
             self.hide(0x16);
@@ -406,6 +433,8 @@ impl Console {
 
     /// `F1117`'s normal page: F1116's five lamps plus the three ship lamps.
     pub fn apply_normal_page(&mut self, systems: &ShipSystems) {
+        let status = systems.status_bytes();
+        let general = systems.general_bytes();
         for id in [0x37usize, 0x38, 0x39] {
             self.show(id);
         }
@@ -414,7 +443,7 @@ impl Console {
         } else {
             self.hide(0x47);
         }
-        if systems.p268 != 0 && systems.e8 <= 6 && systems.c6 & 0x40 != 0 && systems.c7 & 1 != 0 {
+        if systems.p268 != 0 && systems.e8 <= 6 && status[0] & 0x40 != 0 && status[1] & 1 != 0 {
             self.show(0x45);
         } else {
             self.hide(0x45);
@@ -433,7 +462,7 @@ impl Console {
             self.set_image(0x39, 1);
         } else {
             self.set_image(0x39, 0);
-            let image = u8::from(systems.ec != 0 && systems.ca & 0x20 != 0);
+            let image = u8::from(systems.ec != 0 && general[2] & 0x20 != 0);
             self.set_image(0x49, image);
         }
         let image = if systems.e8 < 0x28 && (systems.e9 & 1 == 0 || systems.b6 & 2 != 0) {
@@ -445,9 +474,13 @@ impl Console {
     }
 
     /// `F1120`: the engines-off/equipment page. Hides the five F1116 lamps,
-    /// shows the 60x45 ship diagram (0x3a), ten equipment icons (0x3b-0x44), the
-    /// system lamps (0x4a-0x4e, 0x4f, 0x51) and lights 0x19.
+    /// shows the 60x45 ship diagram (0x3a), ten missile icons (0x3b-0x44), the
+    /// system lamps (0x4a-0x4e, 0x4f, 0x51) and lights 0x19. Every lamp and icon
+    /// reads the general-equipment bytes or the missile pylons, as the original
+    /// does.
     pub fn apply_engines_off_page(&mut self, systems: &ShipSystems) {
+        let general = systems.general_bytes();
+        let status = systems.status_bytes();
         for id in [0x45usize, 0x46, 0x47, 0x48, 0x49] {
             self.hide(id);
         }
@@ -466,26 +499,31 @@ impl Console {
                 self.set_image(id, value & 0xf);
             }
         }
-        if systems.c9 & 8 != 0 && systems.p174 != 0 {
+        // 0x51: the chaff dispenser (general bit 11) and player+0x174's count.
+        if general[1] & 8 != 0 && systems.p174 != 0 {
             self.show(0x51);
         } else {
             self.hide(0x51);
         }
-        if systems.ca & 0x80 != 0 {
+        // 0x4a: Naval ECM (bit 23) is image 1, plain ECM (bit 19) image 0.
+        if general[2] & 0x80 != 0 {
             self.set_image(0x4a, 1);
             self.show(0x4a);
-        } else if systems.ca & 8 != 0 {
+        } else if general[2] & 8 != 0 {
             self.set_image(0x4a, 0);
             self.show(0x4a);
         } else {
             self.hide(0x4a);
         }
-        self.show_if(0x4b, systems.cb & 4 != 0);
-        self.show_if(0x4c, systems.cb & 1 != 0);
-        self.show_if(0x4d, systems.c8 & 4 != 0);
+        // 0x4b: energy bomb (bit 26); 0x4c: hyperspace cloud analyser (bit 24);
+        // 0x4d: military cameras (bit 2).
+        self.show_if(0x4b, general[3] & 4 != 0);
+        self.show_if(0x4c, general[3] & 1 != 0);
+        self.show_if(0x4d, general[0] & 4 != 0);
+        // 0x4e: a missile in flight (player+0x511e) or the c6 status bit 0x10.
         self.show_if(
             0x4e,
-            (systems.p511e != 0 && systems.e8 == 0x34) || systems.c6 & 0x10 != 0,
+            (systems.p511e != 0 && systems.e8 == 0x34) || status[0] & 0x10 != 0,
         );
         // The three ship lamps are not hidden by F1120.
         for id in [0x37usize, 0x38, 0x39] {
@@ -533,7 +571,7 @@ impl Console {
         }
         self.set_image(0x10, u8::from(console.labels));
         self.set_image(0x11, u8::from(console.navigation));
-        self.apply_view_row(view, systems.mounts, console);
+        self.apply_view_row(view, systems, console);
         if console.status_page {
             self.apply_engines_off_page(systems);
         } else {

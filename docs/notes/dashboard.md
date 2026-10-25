@@ -41,6 +41,17 @@ Implemented on this branch (all positions re-read from `ffe.asm`):
 
 Still open, with the data each needs, are listed in §11.
 
+**Equipment update (2026-10-25).** `ffe-core::equipment` now carries the 66-record
+`DATA_005289` table (DOS bytes, record 53 follows DOS), F393's general-bit
+formula and F383's availability/price rules, and `Flight::loadout` stores the
+fitted general bits, ten missile pylons and cabins. `Flight::{ensure_damage,
+hit, destroyed}` apply F953's shields/hull order to the player. F991's view-row
+icons and F1120's missile icons/lamps now read that state; the new game's two
+`0x82` missiles show their real icons. Still open: nothing fires at the player
+(the `hit` call site), `player+0xef`, and the station Upgrades rows, which need
+the starport tech level (`DATA_008995`, F869) before F383 can offer anything —
+see `docs/notes/equipment.md`.
+
 Related notes: `docs/notes/console.md` (button decode, v0.49i), `views.md`
 (view modes), `galaxy-map.md` (the map), `text.md` (fonts/labels),
 `NAVIGATION.md` (system list), `DEVIATIONS.md` (EXP-001/007/008).
@@ -157,8 +168,8 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 14 | Message log (10 dated entries, wrap, scroll) | `F271/272/273`; `DATA_008681` `ffedat.asm:27851` | done | `messages.rs`, `screen.rs` `draw_messages`; `dashboard_view` local frames | Ten dated entries, 124-pixel wrap, shadow/text at (195/196), y 158 clip and F273 scroll/auto-scroll; the log on/off flag and scroll keys are not wired |
 | 15 | Date/clock in flight | `F272` date/time header; `StringConvertDate/Time` | done | `messages.rs`, `screen.rs`, `main.rs` (`nav.date_text`) | Port date format from the navigator; the original's exact string routine is not re-derived |
 | 16 | Speed / set speed / altitude | `F1099` string 0x8620/22, x2,y148 | partial | `hud.rs` `speed_lines`, `screen.rs`; `dashboard_view` local frames | Set/Act/Alt drawn at (2,148) with the original positions and wrap; values still the flight model's m/s, F1393's conversion/suffixes and a real altitude are not modelled |
-| 17 | Shields % | `F1099` `ffe.asm:80780-80820`, 0x8624 at (2,1) | partial | `hud.rs` `shield_text`, `screen.rs`; `dashboard_view` local frames | Formula and position are the original's; the player has no damage state, so the words stay equal and the line is hidden |
-| 18 | Hull % | `F1099` `ffe.asm:80821-80855`, 0x8638 at (2,11) | partial | `hud.rs` `hull_text`, `screen.rs`; `dashboard_view` local frames | Drawn at (2,11), reads 100.0% from the ship mass; no damage state behind the words |
+| 17 | Shields % | `F1099` `ffe.asm:80780-80820`, 0x8624 at (2,1) | partial | `hud.rs` `shield_text`, `Flight::shields`, `equipment::Loadout`; `dashboard_view` local frames | Formula/position are the original's and the maximum comes from the fitted generators; the new game has no generator so the line is hidden, and nothing fires at the player yet so the current word never drops |
+| 18 | Hull % | `F1099` `ffe.asm:80821-80855`, 0x8638 at (2,11) | partial | `hud.rs` `hull_text`, `Flight::{ensure_damage, hit, destroyed}`; `dashboard_view` local frames | Drawn at (2,11) with the real hull word (mass*4) and F953's damage order; the call site waits for ship fire |
 | 19 | Target range / reticle / off-screen text | `F1100` `ffe.asm:81021-81344`; 0x8604/05, 0x8606-11 | done (range) | `laser::{range_words, range_value}`, `screen.rs` `draw_target_hud`; `combat_view` local frames | Range at the target and the (50,50) "Behind"/"Out of Range" text draw; the exact arrow variants are port wording. Bitmap 98 is the velocity marker, not a target reticle (row 23) |
 | 20 | Target shields/hull readout | `F1099` `ffe.asm:80856-80900`, 0x8625/26 at (235,1) | done | `laser::damage`, `screen.rs` `draw_target_hud`, `npc.rs`; `npc_view` cached frame | Live NPC ships now carry shields/hull, so the readout and model 157's shield flash are reachable; the combat targeter boxes remain the port's brackets |
 | 21 | Target warnings: Hyp.Analyser, bounty, clouds | `F1099` `ffe.asm:80900-80990`; 0x862f/30/31/32/34 | **missing** | none | No equipment/cloud/mission state |
@@ -166,14 +177,14 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 23 | Velocity / prograde marker | `F1112` `ffe.asm:81996`; bitmap 98 | done | `screen.rs` `draw_velocity_marker`, `combat.rs` `velocity_marker`; `combat_view` local frames | Bitmap 98 is the velocity marker (front view only), **not** a target X; the offset (-19,-18) and clip rule are the original's |
 | 24 | Turret declination/rotation text | `F1099` `ffe.asm:80700-80740`; 0x8636 at (5,76) | done | `hud.rs` `turret_lines`, `screen.rs`; `dashboard_view` local frames | Drawn in turret views at (5,76), colour 18, angles from the camera's turret state |
 | 25 | Status lamps 0x37-0x39 | `DATA_005100`; initial images; `F151`/`F217` | done | `console_table.rs` records 0x37-0x39, `console.rs` `F1116`/`ShipSystems`; `console_table` tests | Lamps at (52,185)/(71,189)/(87,188); 0x38/0x46 follow `+0xe9` bit 1, 0x39 lights with `e8 == 2` |
-| 26 | Status lamps 0x45-0x49 | `F1116` `ffe.asm:82223-82346` | done | `console.rs` `F1116`, `ShipSystems`; `tests/console_table.rs` | Conditions/images implemented; several inputs are defaults because equipment data is not imported |
-| 27 | Equipment page 0x3a-0x51 (engines off) | `F1120` `ffe.asm:82429-82620`; `F1117/1118` | done (F2) | `console.rs` `F1117/F1120`, `console_table.rs`; `dashboard_view` local frames | Ship diagram, ten equipment icons and system lamps; F2/record 0x0c toggles it. The DOS F2 key itself is not verified; equipment words are defaults |
-| 28 | View-row equipment icons 0x10-0x19 | `F991` `ffe.asm:73469-73560` | partial | `console.rs` `F991`, `console_table.rs`; `console_table` tests | 0x10/0x15-0x19 drawn; 0x11-0x14 stay hidden until the equipment words `+0xc8..+0xcb`/`+0xef` are modelled |
+| 26 | Status lamps 0x45-0x49 | `F1116` `ffe.asm:82223-82346` | done | `console.rs` `F1116`, `ShipSystems`, `equipment::Loadout`; `console_table` tests | Conditions/images implemented; the general-equipment bits are the real fitted loadout, while `p268`/`p174`/`p511e` remain port values |
+| 27 | Equipment page 0x3a-0x51 (engines off) | `F1120` `ffe.asm:82429-82620`; `F1117/1118` | done (F2) | `console.rs` `F1117/F1120`, `console_table.rs`; `dashboard_view` local frames | Ship diagram, ten missile icons and the general-bit lamps read the fitted `Loadout`; F2/record 0x0c toggles it. The DOS F2 key itself is not verified |
+| 28 | View-row equipment icons 0x10-0x19 | `F991` `ffe.asm:73469-73560` | partial | `console.rs` `F991`, `console_table.rs`; `console_table` tests | 0x11-0x14 are driven by the fitted general bits; 0x14 also needs `player+0xef`, which is still zero until the missile view exists |
 | 29 | Front/rear/turret/external console/HUD | `F1099` view branches; `views.md` | partial | `hud.rs`, `screen.rs`; `dashboard_view` local frames | Per-view HUD readouts, turret angles and gunsight rule landed; scanner contacts and per-view console differences remain |
 | 30 | Missile / combat-computer views | `F1099` views 5/6; `F1110`; `views.md` | **missing** | `console.rs` messages only | Need equipment/missiles/targeting; buttons hidden |
 | 31 | Docked/landed screens | FFE station services; `F2` screens | partial (port screen) | `station.rs`, `screen.rs` `draw_dock` | Port's own market/status box; no original station/cockpit screens |
 | 32 | Galaxy/system maps | `F840` etc.; `galaxy-map.md`; `NAVIGATION.md` | done (scene), partial (console) | `galaxy_map.rs`, `screen.rs` | Map scene verified; the clock is now the original's, the rest of the map text is the port's |
-| 33 | Damage/death/escape capsule | `F1104` death; `F1098` capsule; `F12` | **missing** | `console.rs` unported message | No player damage/death/capsule; the HUD hull line reads 100.0% until damage exists; F12 is the model viewer |
+| 33 | Damage/death/escape capsule | `F1104` death; `F1098` capsule; `F12` | partial | `Flight::{ensure_damage, hit, destroyed}`, `laser::apply_damage`; `combat` tests | F953's shields-then-hull damage and destruction are modelled for the player and tested; nothing fires at the player yet, and F1104's death screen/F1098 capsule are missing; F12 is the model viewer |
 | 34 | Hyperspace countdown | `F908-F910`; `DEVIATIONS.md` EXP-007 | **missing** | `main.rs` immediate jump | No countdown UI/scene |
 | 35 | Autopilot indicator | `F1099` 0x8618 at (2,139); `F1116` 0x47 | done | `hud.rs`, `screen.rs`, `main.rs`; `dashboard_view` local frames | "Autopilot" at (2,139) and lamp 0x47 when the autopilot targets; the targeter boxes are still the port's brackets |
 | 36 | Text metrics / clipping | `F1586` `ffe.asm:93785`; font asset 9 rows | partial | `indexed.rs`, `messages.rs` wrap; `dashboard_view` local frames | The console log uses the 124-pixel wrap and y 158 clip; other port text still wraps by 308 px at x3 with 9/10 px spacing |
@@ -182,7 +193,7 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 39 | Port-only top bar/status block/map buttons | none | retired | `screen.rs` | Removed in the HUD merge; the original HUD, message window and scanner own those rows |
 | 40 | Radio groups | `F262` `ffe.asm:20369-20413`; table | done | `console.rs` `F262`, `tests/console_table.rs` | Set-image-with-radio-reset implemented over the 82-record table |
 | 41 | Contact colours | `DATA_008683` `ffedat.asm:27855`; `F275` | **missing** | none | 19-colour contact table not imported |
-| 42 | Button redraw/state updates | `F1116` `82223`; `F991`; `F1120`; `F1003` | **missing** | `screen.rs` redraws constants every frame | No per-mode visibility/image state or update-on-change |
+| 42 | Button redraw/state updates | `F1116` `82223`; `F991`; `F1120`; `F1003` | done | `console.rs` `Console::{set_image, show, hide, draw}`, `console_table.rs`; `console_table` tests | F261 draw order, F262 image with radio reset, F263/264 visibility and the equipment-derived page state per frame |
 
 ---
 
@@ -581,14 +592,13 @@ normal page until it runs):
 - appends hot areas `DATA_007258`, sets `ship+0xe9 |= 8`, lights `0x19`.
 
 Port: `F1116`, `F1120`'s engines-off page and the `0x3a`/`0x4f`/`0x51` lamps are
-implemented over `console::ShipSystems` (a table-driven console state), and
+implemented over `console::ShipSystems` (a table-driven console state) and the
+fitted `equipment::Loadout` (general bits, missile pylons, shields/cabins), and
 `F2`/console record `0x0c` toggles the engines-off page. `F991`'s view row is
-table-driven too. **Still missing:** the equipment words behind `0x10-0x14`
-(the same `ship+0xc8..0xcb`/`0xef` bits), `0x268`, `0x174`, `0x511e`, and the
-`DATA_007258` hot-area append; their rows stay hidden until those state values
-are modelled. The original F2 key mapping is not established from the DOS
-release — the port binds F2 as the user asked; the console record is the
-original's.
+table-driven from the same bits. **Still missing:** `player+0xef` for `0x14`,
+`0x268`, `0x174`, `0x511e`, and the `DATA_007258` hot-area append. The original
+F2 key mapping is not established from the DOS release — the port binds F2 as
+the user asked; the console record is the original's.
 
 `F991` (`ffe.asm:73469-73560`) shows the ten view-row icons `0x10-0x19`
 (`0x10` always; `0x11-0x14` conditioned on equipment bits
@@ -805,12 +815,13 @@ port block are **done** (`hud`, `combat` and earlier rounds). What remains:
 1. **Scanner contacts** (`F274/F275`). Needs a read-only object scan; can use
    `Navigator.bodies` first, then live objects. The panel art and the port's
    station blip are there; stalks, colours and orientation overlay are not.
-2. **Player damage, equipment and ship systems.** Add `ship+0xe0/e2/e4` damage,
-   `+0xc8..+0xcb`/`+0xef` equipment words, `+0x268`, `player+0x174`, `+0x511e`
-   so shields/hull stop reading defaults, the view-row `0x11-0x14` icons can
-   show, and the engines page's lamps are driven by real equipment.
-3. **F991 0x10-0x14 / `0x16`** stay hidden until those equipment words exist
-   (the mount rule is implemented, the bits are not).
+2. **Player damage call site.** `Flight::{ensure_damage, hit, destroyed}` and
+   F953's shields-then-hull order are ported, but nothing fires at the player
+   yet; NPC fire (and F938 recharge/auto-repair) is the trigger the next slice
+   adds.
+3. **`player+0xef`** is still zero, so F991's missile-view icon `0x14` stays
+   hidden until the missile view exists; `0x268`, `0x174` and `0x511e` remain
+   port values for the lamps.
 4. **Altitude and speed conversion** (`F1393`). The HUD draws Set/Act in the
    flight model's m/s; the original's conversion and `km`/`m` suffixes and a
    real altitude are not modelled.

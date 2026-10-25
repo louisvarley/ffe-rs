@@ -143,8 +143,8 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "gameplay-1", title: "Market and economy tables, pricing and cargo", status: "in-progress", version: "market-v20" },
-        { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "todo" },
-        { id: "gameplay-3", title: "Fuel, damage and repair", status: "todo" },
+        { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "in-progress", version: "v0.62" },
+        { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.62" },
         { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "done", version: "v0.57" },
         { id: "gameplay-5", title: "Missiles and countermeasures", status: "todo" },
         { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "in-progress", version: "v0.60" },
@@ -157,7 +157,8 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-13", title: "Player death and the escape capsule", status: "todo" },
         { id: "gameplay-14", title: "Rank, reputation and legal status", status: "todo" },
         { id: "gameplay-15", title: "Time-driven events over a long run", status: "todo" },
-        { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" }
+        { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" },
+        { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" }
       ]
     },
     {
@@ -508,6 +509,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 71,
       note: "Sound cues merged (v0.61): F1906/F1907/F1908's cue dispatch and per-sample gates, F1902-F1904's music rules, the cue-to-sample table and live wiring for prefs, messages, lock, lasers, shield/hull hits, explosions, siren, docking/launch, engine/station beds, camera, hyperspace and scene music; the Sound Effects toggles apply at boot and on change. Music plays through the existing WinMM player (audio-2/audio-3 done), but the effect mixer/device is still a null sink, so effect cues are recorded/no-op and song 0 stays unreachable until the intro draws. audio-1/audio-4 stay in progress."
+    },
+    {
+      date: "2026-10-25",
+      remaining: 71,
+      note: "Equipment merged (v0.62): ffe-core::equipment carries the 66-record DATA_005289 table (DOS bytes verified; record 53 follows DOS), F393's general bits, F383's availability/prices and the Loadout (general bits, ten missile pylons, shields/cabins); Flight::loadout is saved with serde defaults and Flight::{ensure_damage, hit, destroyed} apply F953's shields-then-hull order. F991's view-row icons, F1120's missile icons and the lamps now read the real state, including the new-game's two 0x82 missiles. Still open: nothing fires at the player (the hit call site), F938 recharge/auto-repair, the death/capsule screens, and the station Upgrades rows, which need the starport tech level DATA_008995 from F869 (do not invent it). One item added and completed (gameplay-17), so the remaining count is unchanged; gameplay-2/gameplay-3 are in progress."
     }
   ]
 };

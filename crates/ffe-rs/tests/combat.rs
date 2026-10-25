@@ -70,3 +70,108 @@ fn the_pulse_refire_heat_and_energy_gates_match_f931() {
         Err(ffe_core::laser::FireError::NoEnergy)
     );
 }
+
+#[test]
+fn the_equipment_loadout_survives_a_save_and_old_saves_load_empty() {
+    use ffe_core::equipment::Loadout;
+
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    state.loadout = Loadout::new_game();
+    state.shields = [64, 64];
+    state.hull = [4608, 4608];
+    let bytes = ffe_rs::saves::encode(&state).unwrap();
+    let loaded = ffe_rs::saves::decode(&bytes).unwrap();
+    assert_eq!(loaded.loadout, state.loadout);
+    assert_eq!(loaded.loadout.missiles[0..2], [0x82, 0x82]);
+    // A save from before equipment has no field; it loads with nothing fitted.
+    let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    json["state"].as_object_mut().unwrap().remove("loadout");
+    let old = ffe_rs::saves::decode(&serde_json::to_vec(&json).unwrap()).unwrap();
+    assert_eq!(old.loadout, Loadout::default());
+    assert_eq!(old.shields, [64, 64], "the damage words still round-trip");
+    assert_eq!(old.hull, [4608, 4608]);
+    // A save from before the damage model has neither field; the defaults load
+    // and `ensure_damage` fills them from the ship statistics.
+    json["state"].as_object_mut().unwrap().remove("shields");
+    json["state"].as_object_mut().unwrap().remove("hull");
+    let mut older = ffe_rs::saves::decode(&serde_json::to_vec(&json).unwrap()).unwrap();
+    assert_eq!(older.shields, [0, 0]);
+    assert_eq!(older.hull, [0, 0]);
+    older.ensure_damage(4608);
+    assert_eq!(older.hull, [4608, 4608]);
+    // A loadout with a bit or missile code the original never sets is rejected.
+    state.loadout.general = 1 << 14;
+    assert!(ffe_rs::saves::encode(&state).is_err());
+    state.loadout = Loadout::new_game();
+    state.loadout.missiles[0] = 0x80;
+    assert!(ffe_rs::saves::encode(&state).is_err());
+}
+
+#[test]
+fn f953_damages_the_players_shields_then_hull() {
+    use ffe_core::equipment::Loadout;
+    use ffe_core::laser::Damage;
+
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    // One shield generator: `+0xe2 = 0x40`; a 100 t hull is 400 in `+0xe4`.
+    state.loadout = Loadout {
+        shield_generators: 1,
+        ..Loadout::default()
+    };
+    state.ensure_damage(400);
+    assert_eq!(state.shields, [0x40, 0x40]);
+    assert_eq!(state.hull, [400, 400]);
+    assert!(!state.destroyed());
+    // Shields absorb the hit first (F953's first branch).
+    assert_eq!(state.hit(10), Damage::Shields);
+    assert_eq!(state.shields, [0x36, 0x40]);
+    assert_eq!(state.hull, [400, 400]);
+    // A larger hit breaks the shields and takes the rest from the hull.
+    assert_eq!(state.hit(60), Damage::Hull);
+    assert_eq!(state.shields, [0, 0x40]);
+    assert_eq!(state.hull, [394, 400]);
+    // ensure_damage keeps the damage while the full words match.
+    state.ensure_damage(400);
+    assert_eq!(state.hull, [394, 400]);
+    // A hit at least the remaining hull destroys the ship (F942).
+    assert_eq!(state.hit(1000), Damage::Destroyed);
+    assert_eq!(state.hull, [0, 400]);
+    assert!(state.destroyed());
+    // The HUD then reads the real words, not a default full hull.
+    let hud = ffe_rs::hud::PlayerHud {
+        shields: state.shields,
+        hull: state.hull,
+        ..Default::default()
+    };
+    assert_eq!(hud.shield_text().as_deref(), Some("Shields: 0%"));
+    assert_eq!(hud.hull_text().as_deref(), Some("Hull: 0.0%"));
+}
+
+#[test]
+fn a_new_game_hull_has_no_shields_until_a_generator_is_fitted() {
+    use ffe_core::equipment::Loadout;
+    use ffe_core::laser::Damage;
+
+    let mut state = Flight {
+        mode: Mode::Flight,
+        loadout: Loadout::new_game(),
+        ..Flight::default()
+    };
+    state.ensure_damage(4608);
+    assert_eq!(state.shields, [0, 0], "F998 leaves +0xe2 zero");
+    assert_eq!(state.hull, [4608, 4608]);
+    // Without shields every point goes to the hull.
+    assert_eq!(state.hit(50), Damage::Hull);
+    assert_eq!(state.hull, [4558, 4608]);
+    // Fitting a generator gives 0x40 points (F413) on the next frame.
+    state.loadout.shield_generators = 1;
+    state.ensure_damage(4608);
+    assert_eq!(state.shields, [0x40, 0x40]);
+    assert_eq!(state.hull, [4558, 4608], "damage survives the fit");
+}

@@ -417,9 +417,11 @@ fn run() -> Result<(), String> {
         sound.play(Cue::Station);
     }
     // F998's new-game armament: one 1MW pulse laser in the front mount, a class-2
-    // drive and 1 t of energy on the start-type 1 hull. The port has no outfitting
-    // or save equipment, so the same original loadout arms the sandbox too.
+    // drive and 1 t of energy on the start-type 1 hull, with that hull's general
+    // equipment bits and two 0x82 missiles (the equipment page's icons). The port
+    // has no outfitting yet, so the same original loadout arms the sandbox too.
     state.combat = Combat::new_game();
+    state.loadout = ffe_core::equipment::Loadout::new_game();
     // A scripted undock for screenshots: start the launch sequence immediately.
     if let Some(dir) = &options.capture {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
@@ -2256,6 +2258,8 @@ fn run() -> Result<(), String> {
         let frame_tics =
             (elapsed * 50.0 * f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])) as u32;
         if active && !paused && state.mode == ffe_rs::flight::Mode::Flight {
+            // F938 reads `ship+0xc8 & 1` (the laser cooling booster) directly.
+            state.combat.cooling_booster = state.loadout.cooling_booster();
             state.combat.tick(frame_tics, elapsed * acceleration_factor);
         }
         screen.beam = None;
@@ -2787,21 +2791,21 @@ fn run() -> Result<(), String> {
             }
         }
         // F1099's player text and the console's lamp/equipment inputs. The
-        // equipment bytes have no model yet (they stay zero); the hull falls back
-        // to the ship's full mass word and the altitude is the port's explicit
-        // placeholder zero (the original's `player+0xdc` is not modelled).
+        // damage words are F1533's hull (mass * 4) and F413's shield maximum
+        // (0x40 per generator); the equipment bits and missile pylons come from
+        // the saved loadout, so a damaged shield, a fitted ECM or a missile
+        // icon is real state rather than a default.
         let stats = scene
             .as_ref()
             .and_then(|scene| scene.ship_stats(state.ship));
         let hull_full = stats.map_or(0, |stats| stats.mass.wrapping_mul(4));
+        if stats.is_some() {
+            state.ensure_damage(hull_full);
+        }
         let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
         screen.hud = PlayerHud {
             shields: state.shields,
-            hull: if state.hull[1] != 0 {
-                state.hull
-            } else {
-                [hull_full, hull_full]
-            },
+            hull: state.hull,
             set_speed: views.console.set_speed,
             actual_speed: state.speed().round() as i32,
             altitude: Some(0),
@@ -2822,6 +2826,8 @@ fn run() -> Result<(), String> {
             mounts: stats.map_or(1, |stats| stats.gun_mounts),
             data_246: screen.target_mark.is_some(),
             data_247: screen.target_mark.is_some_and(|mark| mark.engaged),
+            general: state.loadout.general,
+            slots: state.loadout.missiles,
             ..screen.systems
         };
         screen.clock = nav.as_ref().map(|nav| nav.date_text()).unwrap_or_default();
