@@ -278,6 +278,24 @@ impl OriginalFlight {
         self.pad_world = Some(world);
     }
 
+    /// F1011/F1012: a parked ship reads only F1039's turret steering.
+    /// F1014/F1015 are atmosphere handlers, not the F1037/F1041 flight tick.
+    /// No gravity, thrust integration or collision movement runs until launch.
+    pub fn step_landed(&mut self, elapsed: f64, keys: &Keys, mode: u8) {
+        self.player.mode = mode;
+        let turret_keys = if matches!(self.player.view, 2 | 3) {
+            Keys {
+                faster: false,
+                slower: false,
+                ..*keys
+            }
+        } else {
+            Keys::default()
+        };
+        self.prepare(elapsed, &turret_keys);
+        self.player.altitude = 0;
+    }
+
     /// One frame on the pad in that world: the same F1041/F601/F1512/F1033
     /// tick as [`OriginalFlight::step_landing`], with the planet as the
     /// player's parent (F603's gravity and F1033's altitude) and the starport a
@@ -313,6 +331,13 @@ impl OriginalFlight {
         };
         world.body[2].position = planet_position;
         if world.live[3] {
+            if matches!(self.player.mode, 0x2e | 0x30 | 0x32 | 0x34) {
+                for k in 0..3 {
+                    let next = station_position[k].wrapping_sub(planet_position[k]);
+                    self.player.motion.position[k] = self.player.motion.position[k]
+                        .wrapping_add(next.wrapping_sub(world.body[3].position[k]));
+                }
+            }
             world.body[3].position =
                 std::array::from_fn(|k| station_position[k].wrapping_sub(planet_position[k]));
         }
@@ -351,6 +376,10 @@ impl OriginalFlight {
                 let mut world = world.clone();
                 world.stamp = world.stamp.wrapping_add(1);
                 world.body[1].take_motion(&self.player.motion);
+                // A parked body may not have run a collision tick for 256 frames.
+                // Invalidate explicitly: incrementing an 8-bit stamp can alias its
+                // old cache stamp and return an obsolete absolute position.
+                world.body[1].stamp = world.stamp.wrapping_sub(1);
                 world.absolute(1).unwrap_or(self.player.motion.position)
             }
             None => self.player.motion.position,
@@ -371,6 +400,7 @@ impl OriginalFlight {
         // F1677's absolute position first: it already inverts a rotating frame,
         // so the one-frame hand-over to the system frame does not move the ship
         // by a frame-rotation-sized step.
+        world.body[1].stamp = world.stamp.wrapping_sub(1);
         let absolute = world.absolute(1).unwrap_or(motion.position);
         if world.body[1].rotating != 0 {
             world.to_linear(1, 2);

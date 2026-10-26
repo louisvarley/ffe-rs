@@ -870,6 +870,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-26",
       remaining: 64,
       note: "Hope launch ground repaired: source model scale offsets replace collision-bound radius scaling; original near-surface culling and atmosphere restored. Four executed-original near-pad cases match 168 triangles and queues. Actual Saker launch rises with visible terrain at 0/1/3 seconds across orbital refresh. Final 240-frame 1x launch capture passes; removed scripted 10000x stress action during takeoff. ui-11 remains in progress for broader approach fidelity."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 64,
+      note: "Idle boot and services repaired: F994 mode 0x30 now selects F1011/F1012 parked handling, not gravity/collision integration; fixed the u8 absolute-position stamp alias after 256 frames. Enter/default start stays Gateway/Hope/Old Blackelk. Twelve-second idle plus subsequent climb regression passes. Pad-board mouse routing now accepts services buttons while Flight mode stays landed. No milestone count change."
     }
   ]
 };

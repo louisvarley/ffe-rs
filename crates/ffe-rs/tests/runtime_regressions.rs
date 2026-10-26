@@ -93,14 +93,19 @@ fn the_pad_services_board_does_not_change_flight_mode() {
 }
 
 #[test]
-fn a_landed_ship_runs_its_flight_input_and_contact_scan() {
+fn a_landed_ship_uses_the_source_parked_handler() {
     let source = main_rs();
+    let parked = source
+        .split("let step_result = if let Some(mode) = landed_state {")
+        .nth(1)
+        .unwrap()
+        .split("} else if model.on_pad()")
+        .next()
+        .unwrap();
+    assert!(parked.contains("model.step_landed(elapsed, &keys, mode)"));
+    assert!(!parked.contains("step_landing("));
     assert!(
-        source.contains("let landed_parent = nav.as_ref().and_then"),
-        "the landed branch must resolve its parent for F1033/F1037"
-    );
-    assert!(
-        source.contains("model.set_mode(mode);\n                    if let Some((index, parent, at, info)) = landed_parent"),
-        "the landed mode must fall through to step_landing, not stop at set_mode"
+        source.contains("filter(|nav| nav.landed_view())"),
+        "the new-game pad must select the parked handler too"
     );
 }

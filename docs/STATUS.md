@@ -1,5 +1,13 @@
 # Status and handoff
 
+## Idle start and services correction — 2026-10-26
+
+Enter/default start stays on Hope at Old Blackelk in Gateway. Corrected the
+landed handler to suppress flight integration until launch, and invalidated an
+absolute-position cache alias after 256 idle frames. Pad services now receive
+mouse clicks while the game stays in landed Flight mode. See
+[idle-start-services](notes/idle-start-services.md).
+
 ## Hope ground correction — 2026-10-26
 
 Fixed terrain scale from model scale offsets and removed the added inside-sphere

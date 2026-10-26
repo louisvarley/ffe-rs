@@ -1029,11 +1029,8 @@ fn run() -> Result<(), String> {
                     new_game.acceleration
                 );
             }
-            // F994/F1011: the new game's open-air pad already has its flight
-            // model. F1011 calls F1014 at a starport, and F1014 runs F1037
-            // (set speed) and F1041 (thrust), so Enter/Shift/W/S and F1099's
-            // Set work before the launch action. Without this the pad ran the
-            // synthetic prototype (no Set word) and every speed key looked dead.
+            // F994 creates the parked model in state 0x30. Only F1039's
+            // turret input runs here; launch selects the flight/physics handler.
             if let Some(index) = nav.docked {
                 let station = nav.bodies[index].clone();
                 let planet = station
@@ -1054,6 +1051,7 @@ fn run() -> Result<(), String> {
                         .as_ref()
                         .and_then(|scene| scene.ship_stats(state.ship));
                     let mut model = OriginalFlight::from_flight(&state, stats.as_ref());
+                    model.set_mode(nav.new_game.map_or(0x30, |start| start.player_state));
                     model.begin_pad_takeoff(
                         &ffe_rs::navigation::landing_body(&planet, &planet_info),
                         planet.position,
@@ -1645,7 +1643,7 @@ fn run() -> Result<(), String> {
             && !death_control
             && mouse_down
             && !mouse_was_down
-            && state.mode == ffe_rs::flight::Mode::Docked
+            && (state.mode == ffe_rs::flight::Mode::Docked || pad_board)
             && model_lab.is_none()
             && model_viewer.is_none()
         {
@@ -3908,12 +3906,12 @@ fn run() -> Result<(), String> {
                 if let Some(info) = player_info {
                     model.set_collision_radius(info.radii().1);
                 }
-                // The original's landed handlers (F1011/F1012) run no flight
-                // step: no F1037/F1041, no F601/F603/F1512, and F1039 only sees
-                // the turret's input. The view (F1050/F1054) and F1056's input
-                // still run, and the ship's position is the one the contact
-                // settled it at.
-                let landed_state = nav.as_ref().and_then(|nav| nav.landed_state());
+                // F1011/F1012 hold the ship on its pad/surface. F1039 permits
+                // turret input; flight physics begins only after the launch action.
+                let landed_state = nav
+                    .as_ref()
+                    .filter(|nav| nav.landed_view())
+                    .map(|nav| nav.landed_state().unwrap_or(0x30));
                 // The pad takeoff's own F1031 test has just put the starport's
                 // effect region behind the ship; give the port's approach scan a
                 // short grace so its terrain contact cannot re-settle the ship
@@ -3973,64 +3971,10 @@ fn run() -> Result<(), String> {
                             }
                         })
                 };
-                // F1012/F1047's landed handlers (0x32/0x34) and F1011's pad view
-                // (0x30) still read the keyboard and run F1041/F1037: the source
-                // F1014/F1015 call F1037, F1041 and the contact scan, so Enter /
-                // Shift / W / S set the speed and the engine thrust applies even
-                // while the ship sits on the surface. The old branch only copied
-                // the mode word, which froze the HUD's Set and ignored every
-                // speed key until the player launched.
-                let landed_parent = nav.as_ref().and_then(|nav| {
-                    let index = nav.landed_body()?;
-                    let body = nav.bodies.get(index)?;
-                    let info =
-                        ffe_core::objects::ModelInfo::read(model_records, model_stats, body.model)?;
-                    Some((
-                        index,
-                        ffe_rs::navigation::landing_body(body, &info),
-                        body.position,
-                        info,
-                    ))
-                });
                 let mut landed_at = None;
                 let step_result = if let Some(mode) = landed_state {
-                    if nav
-                        .as_ref()
-                        .and_then(|nav| nav.landed_body())
-                        .and_then(|index| nav.as_ref()?.bodies.get(index))
-                        .is_some_and(|body| body.kind == NavKind::Starport)
-                    {
-                        model.settle_starport_landing();
-                    }
-                    model.set_mode(mode);
-                    if let Some((index, parent, at, info)) = landed_parent {
-                        model
-                            .step_landing(
-                                elapsed,
-                                &keys,
-                                &parent,
-                                at,
-                                &info,
-                                landing_tools.as_ref(),
-                            )
-                            .map(|contact| {
-                                if contact.flags & 0x40 != 0 {
-                                    landed_at = Some(index);
-                                } else if contact.flags & 0x80 != 0 {
-                                    pending_log.add(
-                                        Source::Collision,
-                                        format!(
-                                            "Crash: damage {}. The ship bounced off the surface.",
-                                            contact.damage.max(0)
-                                        ),
-                                    );
-                                    sound.play(Cue::HullDamage);
-                                }
-                                Some(contact)
-                            })
-                    } else {
-                        Ok(None)
-                    }
+                    model.step_landed(elapsed, &keys, mode);
+                    Ok(None)
                 } else if model.on_pad() {
                     model
                         .step_pad(elapsed, &keys, landing_tools.as_ref())
@@ -4117,7 +4061,11 @@ fn run() -> Result<(), String> {
                         // hyperspace jump. With no contact (free space) the port
                         // leaves it at the original's "no surface" maximum.
                         if let Some(nav) = nav.as_mut() {
-                            nav.altitude = contact.as_ref().map_or(i32::MAX, |c| c.altitude());
+                            nav.altitude = if nav.landed_view() {
+                                0
+                            } else {
+                                contact.as_ref().map_or(i32::MAX, |c| c.altitude())
+                            };
                         }
                         // F1021's rough landing (`0x32`) then F1047's view frame
                         // (`0x34`): the ship is settled, its motion is F1042's
@@ -4246,7 +4194,8 @@ fn run() -> Result<(), String> {
                                     launch_grace = None;
                                 }
                             }
-                            if launch_grace.is_none() && nav.takeoff.is_none() {
+                            if launch_grace.is_none() && nav.takeoff.is_none() && !nav.landed_view()
+                            {
                                 if let Some((index, contact)) =
                                     nav.contact(ship, state.speed() * 9.7)
                                 {
