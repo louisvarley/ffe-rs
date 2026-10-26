@@ -27,7 +27,7 @@ else the first station - so the launch puts that world in view (Sol: Mars High,
 start.
 | Stations in the flight view and docking | done (2026-10-24), ffe-rs rules: see "Docking" below |
 | Open-air starport takeoff | done (2026-10-25, verified from the default start): F1013 `0x24`, F1031 `0x26`, F1032/F651 bay release, F994's planet parent for F603 (`docs/notes/intro.md`) |
-| Galaxy beyond the 12 hand-coded systems | not done: the other table systems need the sector star generator (F832-F856, tables `DATA_006799..6808`) and their name strings |
+| Galaxy beyond the 12 hand-coded systems | partly done (2026-10-26): a new game offers its start system's galaxy-table neighbours within 30 LY, generated from the sector star generator and name strings exactly as F852/F860/F832/F878 do (`navigation::galaxy_around`; e.g. Titican, 4.42 LY from Gateway, with the station Argent). Systems beyond that radius are still not on offer |
 
 ## The autopilot
 

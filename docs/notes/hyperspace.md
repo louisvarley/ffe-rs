@@ -49,8 +49,11 @@ mass 16) reaches 18.75 light years.
   A new game has no fuel: buy military fuel at the station's market.
 - The test systems (Test-1 to Test-4) now have codes of real sectors near Sol, so they have positions of their own.
 - Not here: the jump scene itself (F908's module mode 4, the `+0x106` visual timeout and F909's F148/F912 drawing),
-  misjumps (F910, the 1 in 256 chance), the galaxy map's mouse hover pick, and the systems beyond the 12 hand-coded
-  ones and four test ones: their positions are known (`system_position`) but the playable lists only those 16. F909
+  misjumps (F910, the 1 in 256 chance), the galaxy map's mouse hover pick, and the systems beyond the set on offer
+  (the 12 hand-coded ones, four test ones and a new game's start-system neighbours). Since 2026-10-26 `Navigator::new_game` offers the
+  start system's real galaxy-table neighbours within 30 LY (`navigation::galaxy_around`), generated from F852/F860's
+  star and F841 type word through F832's seed/mass/stars and F830/F869's name/population; Titican (4.42 LY from
+  Gateway) and its station Argent are reachable, while the `--start sol` sandbox keeps the 16-entry list. F909
   switches the world immediately, so the port's arrival is the same state without the drawn jump.
 - Verification: `the_map_destination_survives_the_map_and_jumps` (destination survives the map, altitude/range/fuel
   gates, arrival locks/effects cleared), `f901_burns_the_hold_and_leaves_military_waste`, and

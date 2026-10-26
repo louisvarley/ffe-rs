@@ -46,7 +46,12 @@ gone.
 `docs/NAVIGATION.md`: system and galaxy maps (Tab, G) and an autopilot to planets
 and stations, for testing the generated systems. Not part of the original game.
 Hyperspace jumps use the original's drive range, fuel and jump time over real star positions
-(`docs/notes/hyperspace.md`; both match the executed original; the jump scene is not drawn). Docking and launching show the original's lift scenes (`ffe_core::lift`, verified on 8,192 cases against the
+(`docs/notes/hyperspace.md`; both match the executed original; the jump scene is not drawn).
+Since 2026-10-26 a new game also offers the start system's real galaxy-table neighbours within
+30 LY (`navigation::galaxy_around`: F852/F860 select the star and F841 type word, F832 derives
+seed/mass/stars, F830/F869 the name and population), so the default Gateway start can jump to
+Titican (4.42 LY) and its generated station Argent; the `--start sol` sandbox keeps the
+16-entry hand-coded/test list. Docking and launching show the original's lift scenes (`ffe_core::lift`, verified on 8,192 cases against the
 executed original; `docs/notes/docking.md`). The default new game's open-air
 starport takeoff is the original's F1013 `0x24` -> F1031 `0x26` -> `0x00` path
 over a persistent two-body pad contact (`ffe_core::traffic::Takeoff`,

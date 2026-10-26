@@ -2,17 +2,15 @@
 //! starting starport, hyperspace to Titican, dock at Argent, buy water, launch,
 //! jump home and sell the water at Old Blackelk.
 //!
-//! Local-only (needs `FFE_WORLD_CACHE`). **On the current tree this test cannot
-//! pass:** it stops at step 3 with the catalogue below. `Titican` is a real
-//! neighbour of Gateway in the galaxy tables (4.42 LY away, code `0x12a53716`,
-//! within the Saker's 10.71 LY range), but it is not one of the systems
-//! `Navigator::new_game` offers, and the navigator has no public API to add an
-//! entry, so `Navigator::hyperspace(index)` has no index for it. `Argent` appears
-//! in no generated system either. When a name is missing the test prints every
-//! system on offer with its stations and starports and fails with that catalogue
-//! instead of guessing a substitute.
-//! `reports_the_systems_and_stations_on_offer` prints the same catalogue without
-//! failing, for when the neighbour systems are added.
+//! Local-only (needs `FFE_WORLD_CACHE`). `Titican` is a real neighbour of
+//! Gateway in the galaxy tables (4.42 LY away, code `0x12a53716`, within the
+//! Saker's 10.71 LY range); `Navigator::new_game` now offers the start system's
+//! galaxy-table neighbours through `navigation::galaxy_around` (F852/F860/F832/
+//! F878) within `NEIGHBOUR_REACH` (30 LY), so `Navigator::hyperspace(index)` has
+//! an index for it and its generated bodies include the station `Argent`. When
+//! a name is missing the test prints every system on offer with its stations and
+//! starports and fails with that catalogue instead of guessing a substitute.
+//! `reports_the_systems_and_stations_on_offer` prints the same catalogue.
 //!
 //! Run with:
 //! `FFE_WORLD_CACHE=<data.bin> cargo test -p ffe-rs --test trade_loop -- --ignored --nocapture`
@@ -24,8 +22,8 @@ use ffe_core::traffic::state as traffic_state;
 use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::navigation::{
-    bodies, burn_fuel, clock_words, galaxy, start_entry, DriveState, Entry, Kind, Navigator,
-    Traffic, PLAYER, START_SYSTEMS,
+    bodies, burn_fuel, clock_words, galaxy_around, start_entry, DriveState, Entry, Kind, Navigator,
+    Traffic, NEIGHBOUR_REACH, PLAYER, START_SYSTEMS,
 };
 use ffe_rs::original_flight::{OriginalFlight, MM_PER_SECOND};
 use ffe_rs::trade;
@@ -36,11 +34,13 @@ fn cache() -> ffe_content::VerifiedCache {
 }
 
 /// The systems `Navigator::new_game(&cache, 0)` offers, in its own order:
-/// `galaxy`'s hand-coded entries with F829 record 0 (Gateway) replacing one or
-/// appended (`navigation.rs:179-233`, `1808-1824`).
+/// `galaxy_around`'s hand-coded, test and Gateway-neighbour entries with F829
+/// record 0 (Gateway) replacing one or appended (`navigation.rs` `galaxy_around`
+/// and `new_game`).
 fn systems(cache: &ffe_content::VerifiedCache) -> Vec<Entry> {
-    let mut entries = galaxy(cache).expect("the galaxy list");
     let gateway = start_entry(cache, START_SYSTEMS[0]).expect("F829 record 0 (Gateway)");
+    let mut entries = galaxy_around(cache, gateway.params.code, NEIGHBOUR_REACH)
+        .expect("the galaxy list around Gateway");
     match entries
         .iter()
         .position(|entry| entry.params.code == gateway.params.code)

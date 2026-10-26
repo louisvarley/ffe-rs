@@ -19,7 +19,9 @@ use ffe_core::npc::{self, Anchor, NpcShip};
 use ffe_core::objects::Models as ShipModels;
 use ffe_core::objects::{Models, PhysList, Placement};
 use ffe_core::pads::Pads;
-use ffe_core::sector::{distance as star_distance, Drive, Strings, Tables as GalaxyTables};
+use ffe_core::sector::{
+    distance as star_distance, position as star_position, Drive, Strings, Tables as GalaxyTables,
+};
 use ffe_core::shipyard;
 use ffe_core::surface::{Mesh, Shape, Shapes, SurfaceTools};
 use ffe_core::sysgen::{Generator, Params, OBJECT_BYTES};
@@ -265,6 +267,134 @@ fn test_code(cache: &VerifiedCache, n: usize, home: u32) -> u32 {
         }
     }
     found.get(n).copied().unwrap_or(home)
+}
+
+/// How far (in F833's hundredths of a light year) a start system's list is
+/// extended to its galaxy-table neighbours: 30 light years. The default
+/// Saker's class 2 drive reaches 10.71 LY, so this is deliberately generous.
+pub const NEIGHBOUR_REACH: i32 = 3_000;
+
+/// F833's units per sector: the distance is in hundredths of a light year and
+/// a sector is about eight of them (`docs/notes/hyperspace.md`).
+const UNITS_PER_SECTOR: i32 = 800;
+
+/// One star around a system, as [`neighbours_within`] finds it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Neighbour {
+    code: u32,
+    /// F856 position, 16.16.
+    position: [i32; 3],
+    /// F841's type word: F852 reads its low byte as the start type and its high
+    /// byte as the number of stars.
+    kind: u16,
+    /// F833 distance from the home system.
+    distance: i32,
+}
+
+/// F840/F852's selection around a system: every star of the sectors within
+/// `reach` of `home`, nearest first, without `home` itself. `sector(x, y)`
+/// supplies the stars of one sector as `(number, F856 position, F841 type
+/// word)`; the original enumerates whole sectors this way (F853's count and
+/// F841/F856's vectors), which is why no star is missed at a sector boundary.
+fn neighbours_within<F>(home_code: u32, home: [i32; 3], reach: i32, mut sector: F) -> Vec<Neighbour>
+where
+    F: FnMut(u16, u16) -> Vec<(usize, [i32; 3], u16)>,
+{
+    if reach <= 0 {
+        return Vec::new();
+    }
+    let (hx, hy) = (
+        (home_code & 0x1fff) as i32,
+        ((home_code >> 13) & 0x1fff) as i32,
+    );
+    let radius = reach / UNITS_PER_SECTOR + 1;
+    let mut found = Vec::new();
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            let (x, y) = (hx + dx, hy + dy);
+            if !(0..0x2000).contains(&x) || !(0..0x2000).contains(&y) {
+                continue;
+            }
+            for (number, position, kind) in sector(x as u16, y as u16) {
+                let code =
+                    (x as u32 & 0x1fff) | (y as u32 & 0x1fff) << 13 | (number as u32 & 0x3f) << 26;
+                if code == home_code {
+                    continue;
+                }
+                let distance = star_distance(home, position);
+                if distance <= reach {
+                    found.push(Neighbour {
+                        code,
+                        position,
+                        kind,
+                        distance,
+                    });
+                }
+            }
+        }
+    }
+    found.sort_by(|a, b| a.distance.cmp(&b.distance).then(a.code.cmp(&b.code)));
+    found.dedup_by_key(|neighbour| neighbour.code);
+    found
+}
+
+/// The systems on offer around a start system: [`galaxy`]'s hand-coded and
+/// test systems plus the start system's real galaxy-table neighbours within
+/// `reach`, each generated from its F841 type word and F856 position exactly as
+/// F852/F860/F832 do for a map destination. A neighbour already on offer (a
+/// hand-coded system, or one of the tests) keeps its hand-coded entry.
+pub fn galaxy_around(
+    cache: &VerifiedCache,
+    home_code: u32,
+    reach: i32,
+) -> Result<Vec<Entry>, String> {
+    let mut entries = galaxy(cache)?;
+    let Some(blob) = cache.asset("base:world/galaxy-tables") else {
+        return Ok(entries);
+    };
+    let galaxy = GalaxyTables::new(blob)?;
+    let Some(home) = galaxy.system_position(home_code) else {
+        return Ok(entries);
+    };
+    let system = Tables::new(
+        cache
+            .asset("base:world/system-tables")
+            .ok_or("no system tables")?,
+    )?;
+    // A pre-v22 cache has the tables but no system strings; the start arm that
+    // needs them (`start_entry`) already reports that, so the neighbours are
+    // simply not offered here.
+    let Some(strings) = cache
+        .asset("base:text/system-strings")
+        .and_then(|bytes| Strings::new(bytes).ok())
+    else {
+        return Ok(entries);
+    };
+    let neighbours = neighbours_within(home_code, home, reach, |x, y| {
+        galaxy
+            .stars(x, y)
+            .iter()
+            .enumerate()
+            .map(|(number, star)| (number, star_position(x, y, &star.vector), star.kind))
+            .collect()
+    });
+    for neighbour in neighbours {
+        if entries
+            .iter()
+            .any(|entry| entry.params.code == neighbour.code)
+        {
+            continue;
+        }
+        entries.push(system_entry(
+            neighbour.code,
+            neighbour.position,
+            u32::from(neighbour.kind),
+            &galaxy,
+            &system,
+            &strings,
+        )?);
+    }
+    Ok(entries)
 }
 
 /// A system's bodies at a game clock.
@@ -1475,11 +1605,63 @@ pub const DEFAULT_STARPORT_SLOT: usize = 0x6a;
 /// F994's player index for the default arm (`DATA_008857`).
 pub const DEFAULT_PLAYER_INDEX: u8 = 87;
 
+/// F832's seed for a system from its F856 position and F841 type word:
+/// `(y >> 16) + (y << 16) + x - z`, or zero when the type word's low byte has
+/// bit 0x80 (the marker the start table's extra word also uses: a zero seed
+/// selects the hand-coded system, `sysgen::Generator::generate`).
+fn system_seed(position: [i32; 3], startype: u8) -> u32 {
+    if startype & 0x80 != 0 {
+        return 0;
+    }
+    let [x, y, z] = position;
+    (y >> 16)
+        .wrapping_add(y << 16)
+        .wrapping_add(x)
+        .wrapping_sub(z) as u32
+}
+
+/// F832/F830/F869 for one system: `extra` is the F829 record's extra word (a
+/// galaxy-table star's F841 type word plays the same role), and `position` is
+/// its 16.16 record position (F856's for a table star).
+fn system_entry(
+    code: u32,
+    position: [i32; 3],
+    extra: u32,
+    galaxy: &GalaxyTables,
+    system: &Tables,
+    strings: &Strings,
+) -> Result<Entry, String> {
+    let name = galaxy
+        .system_name(strings, code)
+        .ok_or_else(|| format!("F830 has no name for system {code:#x}"))?;
+    // F869's first byte is `DATA_008995`: F832 leaves it where F855 reads the
+    // generator's population-like parameter.
+    let details = system.details(code);
+    // F832: `stars` is the high extra byte's low three bits and the total mass
+    // is the `extra & 0xf` row of DATA_006803 scaled by `stars & 0xf8`.
+    let numstars = extra >> 8;
+    let mut name_field = [0u8; 20];
+    let length = name.len().min(name_field.len());
+    name_field[..length].copy_from_slice(&name[..length]);
+    Ok(Entry {
+        name: String::from_utf8_lossy(&name).trim().to_owned(),
+        params: Params {
+            seed: system_seed(position, extra as u8),
+            mass: galaxy.start_mass((extra & 0xf) as usize, numstars as u8),
+            stars: numstars & 7,
+            code,
+            population: details.bytes[0] as i32,
+            name: name_field,
+        },
+    })
+}
+
 /// F829/F832/F869/F830 for one record of `DATA_006820`: the system F830 names,
 /// generated from the record's coordinates and extra word with F878's inputs.
 /// Record 0 is the DOS default start (Gateway [-1,4], the planet Hope and the
 /// starport Old Blackelk); record 1 is Ross 154, whose hand-coded template the
-/// galaxy list already holds.
+/// galaxy list already holds (its extra word's 0x80 bit selects that template,
+/// F832).
 pub fn start_entry(
     cache: &VerifiedCache,
     record: (i32, i32, i32, u32, u32),
@@ -1495,40 +1677,12 @@ pub fn start_entry(
             .asset("base:text/system-strings")
             .ok_or("no system strings (cache v22)")?,
     )?;
-    let name = tables
-        .system_name(&strings, code)
-        .ok_or_else(|| format!("F830 has no name for system {code:#x}"))?;
-    // F869's first byte is `DATA_008995`: F832 leaves it where F855 reads the
-    // generator's population-like parameter.
-    let details = Tables::new(
+    let system = Tables::new(
         cache
             .asset("base:world/system-tables")
             .ok_or("no system tables")?,
-    )?
-    .details(code);
-    // F832: `seed = (y >> 16) + (y << 16) + x - z`, `stars` is the high extra
-    // byte's low three bits, and the total mass is the `extra & 0xf` row of
-    // DATA_006803 scaled by `stars & 0xf8`.
-    let seed = (y >> 16)
-        .wrapping_add(y << 16)
-        .wrapping_add(x)
-        .wrapping_sub(z) as u32;
-    let stars = extra >> 8;
-    let mass = tables.start_mass((extra & 0xf) as usize, stars as u8);
-    let mut name_field = [0u8; 20];
-    let length = name.len().min(name_field.len());
-    name_field[..length].copy_from_slice(&name[..length]);
-    Ok(Entry {
-        name: String::from_utf8_lossy(&name).trim().to_owned(),
-        params: Params {
-            seed,
-            mass,
-            stars: stars & 7,
-            code,
-            population: details.bytes[0] as i32,
-            name: name_field,
-        },
-    })
+    )?;
+    system_entry(code, [x, y, z], extra, &tables, &system, &strings)
 }
 
 /// The original's new-game state, kept for the local comparison with `--state`
@@ -1805,7 +1959,11 @@ impl Navigator {
         let code = (record.0 >> 16) as u32 & 0x1fff
             | ((record.1 >> 16) as u32 & 0x1fff) << 13
             | (record.3 & 0x3f) << 26;
-        let mut entries = galaxy(cache)?;
+        // The start system's real galaxy-table neighbours are enterable as the
+        // original's map destinations are (F852/F860/F832/F878), so the default
+        // Gateway start can reach Titican and other systems within the drive's
+        // reach. The hand-coded and test entries keep their places.
+        let mut entries = galaxy_around(cache, code, NEIGHBOUR_REACH)?;
         let current = if default_arm {
             // Record 0 is not one of the hand-coded systems: F829/F832 generate
             // it from the record's coordinates and extra word.
@@ -4938,5 +5096,68 @@ mod tests {
             !turned_away,
             "the ship passed the standoff and came back (an orbit)"
         );
+    }
+
+    /// F832's seed formula on the executed original's Gateway position and a
+    /// galaxy-table star's F856 position/F841 type word. No cache: the inputs are
+    /// the values the tables hold, so this pins the derivation synthetically.
+    #[test]
+    fn the_system_seed_is_f832s_position_formula() {
+        let gateway = [0x1717_0200, 0x1528_7600, -56_832];
+        assert_eq!(system_seed(gateway, 8), 0x8d17_f528);
+        // The 0x80 bit of the start type (Ross 154's extra word 0x88) selects
+        // the hand-coded system, so F832 leaves the seed zero.
+        assert_eq!(system_seed(gateway, 0x88), 0);
+        // Titican, star 4 of sector [0x1716, 0x1529]: F856's position and F841's
+        // type word 0x0002 (start type 2, no stars).
+        assert_eq!(
+            system_seed([387_375_616, 355_008_512, -58_368], 2),
+            0x1717_db29
+        );
+    }
+
+    /// The neighbour listing is a synthetic galaxy: the home star is skipped,
+    /// duplicates are dropped, only stars within the reach survive, and the
+    /// nearest comes first (F840/F852's whole-sector walk around the centre).
+    #[test]
+    fn neighbours_are_the_stars_within_reach_nearest_first() {
+        let home_code = 100 | 100 << 13;
+        let home = [100 << 16, 100 << 16, 0];
+        let sectors = |x: u16, y: u16| -> Vec<(usize, [i32; 3], u16)> {
+            match (x, y) {
+                (100, 100) => vec![
+                    (0, home, 0x08),
+                    (1, [home[0] + 0x8000, home[1], 0], 0x02),
+                    // A sector listing the same star twice must not duplicate it.
+                    (1, [home[0] + 0x8000, home[1], 0], 0x02),
+                    (2, [home[0], home[1] + 0x1_8000, 0], 0x02),
+                ],
+                (101, 100) => vec![(0, [home[0] + (1 << 16), home[1], 0], 0x02)],
+                // Four sectors away is about 32 LY, beyond the 30 LY reach.
+                (104, 100) => vec![(0, [home[0] + (4 << 16), home[1], 0], 0x02)],
+                _ => Vec::new(),
+            }
+        };
+        let found = neighbours_within(home_code, home, NEIGHBOUR_REACH, sectors);
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert_eq!(found[0].code, 100 | 100 << 13 | 1 << 26);
+        assert_eq!(found[0].distance, 401);
+        assert_eq!(found[0].kind, 0x02);
+        assert_eq!(found[1].code, 101 | 100 << 13);
+        assert_eq!(found[1].distance, 802);
+        assert_eq!(found[2].code, 100 | 100 << 13 | 2 << 26);
+        assert_eq!(found[2].distance, 1_204);
+        assert!(
+            found
+                .iter()
+                .all(|neighbour| neighbour.distance <= NEIGHBOUR_REACH),
+            "{found:?}"
+        );
+        assert!(
+            found.iter().all(|neighbour| neighbour.code != home_code),
+            "the home star is not its own neighbour"
+        );
+        // A zero reach lists nothing (and a negative one, too).
+        assert!(neighbours_within(home_code, home, 0, |_, _| unreachable!()).is_empty());
     }
 }
