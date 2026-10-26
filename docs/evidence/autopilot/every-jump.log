@@ -1,0 +1,54 @@
+﻿running 1 test
+Sol -> Mercury (Planet): arrived true in 6493 steps, range 7 Mm stop 7 Mm set 0 m/s aligned 1.0000 pushes 0 clock 1281
+Sol -> Moon (Moon): arrived true in 6503 steps, range 7 Mm stop 7 Mm set 0 m/s aligned 1.0000 pushes 0 clock 63326
+Sol -> Daedalus (Station): arrived true in 7067 steps, range 0.2 km stop 20.0 km set 0 m/s aligned 1.0000 pushes 0 clock 73726
+Sol -> London (Starport): arrived true in 6504 steps, range 5.7 km stop 96.3 km set 0 m/s aligned 1.0000 pushes 0 clock 135906
+Sol -> Sol (Star): arrived true in 6520 steps, range 2145 Mm stop 2145 Mm set 0 m/s aligned 1.0000 pushes 0 clock 176355
+Alpha Centauri A,B -> Lagrange (Planet): arrived true in 6469 steps, range 101 Mm stop 101 Mm set 0 m/s aligned 1.0000 pushes 0 clock 179502
+Alpha Centauri A,B -> 2042 L1 (Moon): arrived true in 6511 steps, range 3 Mm stop 3 Mm set 0 m/s aligned 1.0000 pushes 0 clock 183216
+Alpha Centauri A,B -> Eden Station (Station): arrived true in 7156 steps, range 0.2 km stop 20.0 km set 0 m/s aligned 1.0000 pushes 0 clock 2224325
+Alpha Centauri A,B -> Alpha Centauri A (Star): arrived true in 6487 steps, range 2145 Mm stop 2145 Mm set 0 m/s aligned 1.0000 pushes 0 clock 2559197
+Wolf 630 A,B -> Landfall (Planet): arrived true in 6471 steps, range 10 Mm stop 10 Mm set 0 m/s aligned 1.0000 pushes 0 clock 2560233
+Wolf 630 A,B -> Mayflower High (Station): arrived true in 7040 steps, range 0.3 km stop 20.0 km set 0 m/s aligned 1.0000 pushes 0 clock 2561385
+Wolf 630 A,B -> Mayflower City (Starport): arrived true in 6506 steps, range 6.3 km stop 80.0 km set 0 m/s aligned 1.0000 pushes 0 clock 2562888
+Wolf 630 A,B -> Wolf 630 A (Star): arrived true in 6495 steps, range 1155 Mm stop 1155 Mm set 0 m/s aligned 1.0000 pushes 0 clock 3430627
+61 Cygni A,B -> Scott (Planet): arrived true in 6465 steps, range 10 Mm stop 10 Mm set 0 m/s aligned 1.0000 pushes 0 clock 3431553
+61 Cygni A,B -> 61 Cygni A,B 2a (Moon): arrived true in 6467 steps, range 3 Mm stop 3 Mm set 0 m/s aligned 1.0000 pushes 0 clock 4870522
+61 Cygni A,B -> Amundsen (Starport): arrived true in 6523 steps, range 6.5 km stop 56.7 km set 0 m/s aligned 1.0000 pushes 0 clock 4906494
+61 Cygni A,B -> 61 Cygni A (Star): arrived true in 6466 steps, range 1650 Mm stop 1650 Mm set 0 m/s aligned 1.0000 pushes 0 clock 5484883
+Sirius, Sirius B -> Lucifer (Planet): arrived true in 6508 steps, range 3 Mm stop 3 Mm set 0 m/s aligned 1.0000 pushes 0 clock 5489231
+Sirius, Sirius B -> Factory Central (Starport): arrived true in 6510 steps, range 7.0 km stop 90.5 km set 0 m/s aligned 1.0000 pushes 0 clock 5496288
+Sirius, Sirius B -> Sirius (Star): arrived true in 6468 steps, range 0.06 AU stop 0.06 AU set 0 m/s aligned 1.0000 pushes 0 clock 5792150
+Eta Cassiopeia -> Rock (Planet): arrived true in 6476 steps, range 7 Mm stop 7 Mm set 0 m/s aligned 1.0000 pushes 0 clock 5794468
+Eta Cassiopeia -> Navy Central (Moon): arrived true in 6482 steps, range 6 Mm stop 6 Mm set 0 m/s aligned 1.0000 pushes 0 clock 5869723
+Eta Cassiopeia -> Morgue's Mortuary (Station): arrived true in 6998 steps, range 1.5 km stop 20.0 km set 0 m/s aligned 1.0000 pushes 0 clock 5944810
+Eta Cassiopeia -> New Kyoto (Starport): arrived true in 6468 steps, range 6.9 km stop 96.3 km set 0 m/s aligned 1.0000 pushes 0 clock 6020947
+Eta Cassiopeia -> Eta Cassiopeia (Star): arrived true in 6488 steps, range 2145 Mm stop 2145 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6051966
+Ross 154 -> Dust Ball (Planet): arrived true in 6479 steps, range 3 Mm stop 3 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6053235
+Ross 154 -> Merlin (Moon): arrived true in 6505 steps, range 10 Mm stop 10 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6088709
+Ross 154 -> Sirocco Station (Starport): arrived true in 6503 steps, range 7.0 km stop 56.7 km set 0 m/s aligned 1.0000 pushes 0 clock 6124118
+Ross 154 -> Ross 154 (Star): arrived true in 6515 steps, range 1155 Mm stop 1155 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6144407
+Lave -> Planet Lave (Planet): arrived true in 6481 steps, range 10 Mm stop 10 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6145558
+Lave -> Lave Station (Station): arrived true in 7048 steps, range 0.2 km stop 20.0 km set 0 m/s aligned 1.0000 pushes 0 clock 6147281
+Lave -> Lave (Star): arrived true in 6477 steps, range 1650 Mm stop 1650 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6193890
+Diso -> Birmingham (Planet): arrived true in 6473 steps, range 10 Mm stop 10 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6194858
+Diso -> Shifnalport (Station): arrived true in 7069 steps, range 0.2 km stop 20.0 km set 0 m/s aligned 1.0000 pushes 0 clock 6196235
+Diso -> Diso (Star): arrived true in 6509 steps, range 2145 Mm stop 2145 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6264012
+Leesti -> Leesti 1 (Planet): arrived true in 6469 steps, range 7 Mm stop 7 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6264884
+Leesti -> George Lucas (Station): arrived true in 7056 steps, range 0.2 km stop 20.0 km set 0 m/s aligned 1.0000 pushes 0 clock 6265961
+Leesti -> Leesti (Star): arrived true in 6491 steps, range 1155 Mm stop 1155 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6304723
+Zaonce -> Industry (Planet): arrived true in 6470 steps, range 7 Mm stop 7 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6305596
+Zaonce -> Ridley Scott (Station): arrived true in 6995 steps, range 0.2 km stop 20.0 km set 0 m/s aligned 1.0000 pushes 0 clock 6306771
+Zaonce -> Zaonce (Star): arrived true in 6491 steps, range 3300 Mm stop 3300 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6344719
+Test-1 -> Test-1 1 (Planet): arrived true in 6476 steps, range 8 Mm stop 8 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6346307
+Test-1 -> Test-1 3a (Moon): arrived true in 6481 steps, range 3 Mm stop 3 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6426348
+Test-1 -> Test-1  (Star): arrived true in 6476 steps, range 1155 Mm stop 1155 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6460825
+Test-2 -> Test-2 A (Star): arrived true in 6466 steps, range 1650 Mm stop 1650 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6473104
+Test-3 -> Test-3 A,B1 (Planet): arrived true in 6474 steps, range 5 Mm stop 5 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6473978
+Test-3 -> Test-3 A,B2a (Moon): arrived true in 6501 steps, range 7 Mm stop 7 Mm set 0 m/s aligned 1.0000 pushes 0 clock 6625447
+Test-3 -> Robins Town (Starport): arrived true in 6508 steps, range 5.8 km stop 62.0 km set 0 m/s aligned 1.0000 pushes 0 clock 7143565
+Test-3 -> Test-3 A (Star): arrived true in 6481 steps, range 1155 Mm stop 1155 Mm set 0 m/s aligned 1.0000 pushes 0 clock 7239191
+Test-4 -> Test-4 1 (Planet): arrived true in 6487 steps, range 3 Mm stop 3 Mm set 0 m/s aligned 1.0000 pushes 0 clock 7242341
+Test-4 -> Test-4 5a (Moon): arrived true in 6480 steps, range 3 Mm stop 3 Mm set 0 m/s aligned 1.0000 pushes 0 clock 7351930
+Test-4 -> Test-4  (Star): arrived true in 6474 steps, range 80 Mm stop 80 Mm set 0 m/s aligned 1.0000 pushes 0 clock 7369621
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 3.33s

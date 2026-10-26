@@ -1,0 +1,5 @@
+﻿running 1 test
+engaged: target Pluto set 33 m/s
+cancelled: target/leg cleared, set 0 m/s
+braked from 59 to 0 velocity units after 50 s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.02s

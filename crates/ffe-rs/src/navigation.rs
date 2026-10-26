@@ -599,6 +599,12 @@ pub struct Command {
     pub skip: Option<([i64; 3], f64)>,
 }
 
+/// The last few metres of an arrival: the braking curve approaches the standoff
+/// asymptotically, and the set-speed step is too coarse to creep the final
+/// millimetres. F742's own test is an exponential distance band (about 0.5-1 km),
+/// so 10 m is a tighter arrival than the source's.
+const ARRIVAL_SLOP: f64 = 1.0e4;
+
 /// World seconds to cover `metres` from rest to rest: full thrust (about 300 m/s
 /// per second) up to the speed the braking (90 m/s per second) can still stop.
 pub fn transfer_seconds(metres: f64) -> f64 {
@@ -611,6 +617,140 @@ pub fn transfer_seconds(metres: f64) -> f64 {
         let ramp = limit * limit / (2.0 * up) + limit * limit / (2.0 * down);
         limit / up + limit / down + (metres - ramp) / limit
     }
+}
+
+/// The time and place of a long leg to a body that is itself moving: the first
+/// `t` with `t == transfer_seconds(distance(ship, aim(t)) - stop_cover)`, where
+/// `aim(t)` is the destination at `clock + t`.
+///
+/// The original has no long-leg transfer; the port's instant transfer is its
+/// own convenience. A fixed-point loop (`guess from the current position`) is
+/// unstable for a body whose orbital displacement during the transfer is large:
+/// the guess chases the planet around its orbit and never comes back, which is
+/// the autopilot circling a planet instead of homing on it. This solves the
+/// rendezvous by bracketing the first crossing and bisecting it, so the landing
+/// point is where the body really is at the advanced clock.
+pub fn intercept_time(
+    ship: [i64; 3],
+    stop_cover: f64,
+    initial: f64,
+    mut aim: impl FnMut(f64) -> Option<[i64; 3]>,
+) -> Option<(f64, [i64; 3])> {
+    let gap = |at: [i64; 3]| (distance(ship, at) - stop_cover).max(0.0) / 1000.0;
+    let early = |t: f64, at: [i64; 3]| t - transfer_seconds(gap(at));
+    // g(0) is negative: the leg takes longer than no time at all. Find a time
+    // by which the transfer has caught up with the clock (g >= 0).
+    let mut high = initial.max(30.0).max(1.0);
+    let mut bracketed = false;
+    for _ in 0..32 {
+        let at = aim(high)?;
+        if early(high, at) >= 0.0 {
+            bracketed = true;
+            break;
+        }
+        high *= 2.0;
+        if high > 1.0e10 {
+            return None;
+        }
+    }
+    if !bracketed {
+        return None;
+    }
+    // The body may lap the ship before that bound, so find the *first* crossing
+    // rather than bisecting the whole interval.
+    let mut low = 0.0;
+    let samples = 32;
+    for step in 1..=samples {
+        let t = high * f64::from(step) / f64::from(samples);
+        let at = aim(t)?;
+        if early(t, at) >= 0.0 {
+            high = t;
+            break;
+        }
+        low = t;
+    }
+    for _ in 0..24 {
+        let mid = 0.5 * (low + high);
+        let at = aim(mid)?;
+        if early(mid, at) >= 0.0 {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    let t = high;
+    aim(t).map(|at| (t, at))
+}
+
+/// The point of an orbital station's slot the final leg flies through this
+/// frame, and the standoff to brake for. F745/F746 re-aim at F650's pad vector
+/// on every tick, so the approach follows the current slot: a ship that is off
+/// the axis first lines up on a gate outside the face, then enters along it.
+/// Aiming at the centre alone crosses a spinning station's hull and is pushed
+/// clear, which is the port's "cleared but never docks".
+fn slot_leg(port: &Port, ship: [i64; 3]) -> ([f64; 3], f64) {
+    let offset: [f64; 3] = std::array::from_fn(|k| (ship[k] - port.centre[k]) as f64);
+    let range = offset.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let axial: f64 = (0..3).map(|k| offset[k] * port.axis[k]).sum();
+    let lateral = (range * range - axial * axial).max(0.0).sqrt();
+    let gate = port.front + 4.0 * port.corridor() + 1.0e6;
+    if axial > port.front && lateral < port.corridor() * 0.25 {
+        // Lined up in front of the face: enter along the axis, braking so the
+        // face is crossed below the 250 m/s slot limit. The contact scan docks
+        // at the face before the standoff is reached.
+        (port.axis.map(|a| a * (port.front * 0.2)), port.front * 0.8)
+    } else {
+        // Outside the corridor or behind the station: line up on the gate.
+        (port.axis.map(|a| a * gate), 0.0)
+    }
+}
+
+/// A safe route to a station's approach point. A straight line from an arbitrary
+/// start can cut through the hull (a jump arrival on the far side of the
+/// station): if the segment to `aim` passes inside the station's safety sphere,
+/// steer to a point on that sphere at a tangent toward the destination instead.
+/// Repeated each frame, it works around the hull and then lines up on F741's
+/// approach point.
+fn station_route(port: &Port, ship: [i64; 3], aim: [i64; 3]) -> [i64; 3] {
+    let safe = port.front + 4.0 * port.corridor() + 5.0e5;
+    let r: [f64; 3] = std::array::from_fn(|k| (ship[k] - port.centre[k]) as f64);
+    let range = r.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let dot = |a: [f64; 3], b: [f64; 3]| (0..3).map(|k| a[k] * b[k]).sum::<f64>();
+    let unit = |v: [f64; 3]| {
+        let length = v.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-9);
+        v.map(|c| c / length)
+    };
+    if range < safe {
+        // Inside the safety sphere: move radially out first.
+        let out = if range > 1.0 { unit(r) } else { port.axis };
+        return std::array::from_fn(|k| port.centre[k] + (out[k] * safe * 1.2).round() as i64);
+    }
+    let d: [f64; 3] = std::array::from_fn(|k| (aim[k] - ship[k]) as f64);
+    let dd = dot(d, d);
+    if dd <= 1.0 {
+        return aim;
+    }
+    let t = (-dot(r, d) / dd).clamp(0.0, 1.0);
+    let closest: [f64; 3] = std::array::from_fn(|k| r[k] + d[k] * t);
+    let miss = closest.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if miss >= safe {
+        return aim;
+    }
+    let radial = unit(r);
+    let mut tangent = std::array::from_fn(|k| d[k] - radial[k] * dot(d, radial));
+    if tangent.iter().map(|v| v * v).sum::<f64>() < 1.0 {
+        // Dead through the centre: pick a tangent about the docking axis.
+        tangent = [
+            port.axis[1] * radial[2] - port.axis[2] * radial[1],
+            port.axis[2] * radial[0] - port.axis[0] * radial[2],
+            port.axis[0] * radial[1] - port.axis[1] * radial[0],
+        ];
+    }
+    let tangent = unit(tangent);
+    let step = unit(std::array::from_fn(|k| {
+        radial[k] * std::f64::consts::FRAC_1_SQRT_2 + tangent[k] * std::f64::consts::FRAC_1_SQRT_2
+    }));
+    std::array::from_fn(|k| port.centre[k] + (step[k] * safe).round() as i64)
 }
 
 /// What the autopilot remembers between frames: the last aim error, to see how
@@ -662,7 +802,7 @@ pub fn autopilot(
         * MM_PER_SECOND
         / 1000.0;
     let mut keys = Keys::default();
-    if range <= stop {
+    if range <= stop + ARRIVAL_SLOP {
         keys.slower = true;
         return Command {
             keys,
@@ -858,8 +998,12 @@ pub struct Navigator {
     /// The deadlines that fell due since the last [`Self::take_expired`].
     expired: Vec<Deadline>,
     /// The autopilot has reached a station's approach point and is flying into
-    /// the slot.
+    /// the slot (or, at an open-air starport, holds F655's cleared pad hand-off
+    /// for the descent).
     pub final_leg: bool,
+    /// The game clock of the last F655 request at an open-air starport, so a
+    /// refusal is retried at a readable rate rather than every frame.
+    clearance_at: Option<f64>,
     /// The body whose motion carries the ship between refreshes (the original's
     /// frame of reference, chosen here by distance): the target on its final
     /// approach, a nearby station, or the planet or moon the ship is near.
@@ -1188,8 +1332,14 @@ const STATION_APPROACH: f64 = 0xfa0 as f64 * 1024.0;
 /// F741's open-air starport approach: `[0, 0x1770, 0]` in the port's frame, whose
 /// words F593 scales by `0x400` (1024 mm), so 6,144,000 mm above its centre.
 const STARPORT_APPROACH: f64 = 0x1770 as f64 * 1024.0;
-/// How close to the approach point the autopilot's first leg stops.
+/// How close to the approach point the autopilot's first leg stops: F610's
+/// distance exponent 6, the band from 524,288 mm to 1,024,000 mm below which
+/// F742 runs F745.
 const APPROACH_STOP: f64 = 1.0e6;
+/// Transfers in a row before the autopilot flies the remaining leg in real time.
+/// The counter is not reset between whole transfers (the old reset let a fast
+/// target teleport on every frame); engaging or locking a target clears it.
+const MAX_SKIPS: u32 = 4;
 /// Within this of a station, its motion carries the ship (200 km).
 const STATION_FRAME: f64 = 2.0e8;
 /// Within this many radii of a planet or moon, its motion carries the ship.
@@ -1570,6 +1720,7 @@ impl Navigator {
                 .unwrap_or_default(),
             drive: None,
             final_leg: false,
+            clearance_at: None,
             frame: None,
             ports: HashMap::new(),
             memory: Memory::default(),
@@ -1872,9 +2023,35 @@ impl Navigator {
 
     /// The docking port of a station body (`None` for any other body).
     pub fn port(&self, index: usize) -> Option<Port> {
-        let body = self.bodies.get(index).filter(|b| b.kind == Kind::Station)?;
+        let body = self.bodies.get(index)?;
+        self.port_for(body)
+    }
+
+    /// The docking port of a body's model (`None` for a non-station).
+    fn port_for(&self, body: &Body) -> Option<Port> {
+        if body.kind != Kind::Station {
+            return None;
+        }
         let (front, radius) = self.ports.get(&body.model).copied().unwrap_or((None, None));
         Some(Port::new(body, front, radius))
+    }
+
+    /// F741's long-leg destination offset for a body in the system frame: the
+    /// station's docking axis or the starport's up row. The offset follows the
+    /// body's orientation, which the system generator turns by F866, so a long
+    /// approach tracks the moving slot rather than a point fixed at the start.
+    fn long_leg_offset(&self, body: &Body) -> [f64; 3] {
+        match body.kind {
+            Kind::Station => self
+                .port_for(body)
+                .map(|port| port.axis.map(|a| a * (port.front + STATION_APPROACH)))
+                .unwrap_or([0.0; 3]),
+            Kind::Starport => {
+                let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
+                up.map(|v| v * STARPORT_APPROACH)
+            }
+            _ => [0.0; 3],
+        }
     }
 
     /// F741's autopilot approach point at an open-air starport: `0x1770` words
@@ -2471,6 +2648,8 @@ impl Navigator {
         }
         self.target = None;
         self.final_leg = false;
+        self.clearance_at = None;
+        self.skips = 0;
         self.sequence = Some(Sequence {
             station: index,
             stages: Stages::touched(false),
@@ -2561,6 +2740,8 @@ impl Navigator {
         }
         self.target = None;
         self.final_leg = false;
+        self.clearance_at = None;
+        self.skips = 0;
         self.landed = Some(Landed {
             landing: Landing::on_surface(),
             index,
@@ -2585,6 +2766,8 @@ impl Navigator {
         self.starport(index).reset();
         self.target = None;
         self.final_leg = false;
+        self.clearance_at = None;
+        self.skips = 0;
         self.landed = Some(Landed {
             landing: Landing::at_starport(),
             index,
@@ -3675,6 +3858,8 @@ impl Navigator {
         self.docked = Some(index);
         self.target = None;
         self.final_leg = false;
+        self.clearance_at = None;
+        self.skips = 0;
     }
 
     /// The nearest planet or moon to a point (what the ship faces on launch).
@@ -4055,6 +4240,7 @@ impl Navigator {
         self.target = Some(index);
         self.locked = Some(index);
         self.final_leg = false;
+        self.clearance_at = None;
         self.memory = Memory::default();
         self.skips = 0;
         self.view = View::Closed;
@@ -4090,6 +4276,7 @@ impl Navigator {
         let index = self.locked?;
         self.target = Some(index);
         self.final_leg = false;
+        self.clearance_at = None;
         self.memory = Memory::default();
         self.skips = 0;
         self.view = View::Closed;
@@ -4139,9 +4326,25 @@ impl Navigator {
         })
     }
 
-    pub fn disengage(&mut self) {
+    /// F1018's cancel: drop the autopilot's destination and every per-leg state.
+    /// The caller also zeroes the set speed (F1018 sets `DATA_008918` from
+    /// `DATA_008866`, which the flight model starts at 0), otherwise the ship
+    /// keeps coasting at the speed the autopilot had set.
+    pub fn cancel(&mut self) -> bool {
+        let engaged = self.target.is_some() || self.final_leg;
         self.target = None;
         self.final_leg = false;
+        self.clearance_at = None;
+        self.memory = Memory::default();
+        self.skips = 0;
+        self.notice = None;
+        engaged
+    }
+
+    /// Drop the autopilot's target (the pre-F1018 keep-braking form). Prefer
+    /// [`Self::cancel`], which also clears the rest of the leg.
+    pub fn disengage(&mut self) {
+        self.cancel();
     }
 
     /// The autopilot's command for this frame, when engaged.
@@ -4153,46 +4356,71 @@ impl Navigator {
         let index = self.target?;
         let body = self.bodies.get(index)?.clone();
         // A station is flown to in two legs, as the original's autopilot docks: to
-        // a point out on the docking axis, then (with clearance) into the slot.
-        // An open-air starport is F741's approach: above the port. The pad touch
-        // is the original's thruster-level AI (F741/F745/F746 with F599/F600),
-        // which is not ported, so the autopilot hands off there with clearance.
+        // a point out on the docking axis (F741), then (with clearance, F745)
+        // into the slot on the current axis (F746). An open-air starport stops at
+        // F741's point above the port and hands F655's cleared pad to the descent.
         let port = self.port(index);
         let starport = body.kind == Kind::Starport;
+        if self.final_leg && port.is_none() && !starport {
+            // A final leg belongs to a station or starport; a target changed
+            // without re-engaging must not leave the autopilot holding for a
+            // slot on a planet.
+            self.final_leg = false;
+            self.clearance_at = None;
+        }
+        let ship = flight.player().motion.position;
         let (offset, stop) = if starport {
             let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
             (up.map(|v| v * STARPORT_APPROACH), APPROACH_STOP)
         } else {
             match port {
-                Some(port) if self.final_leg => ([0.0; 3], port.front * 0.92),
-                Some(port) => (
-                    port.axis.map(|a| a * (port.front + STATION_APPROACH)),
-                    APPROACH_STOP,
-                ),
+                Some(port) if self.final_leg => slot_leg(&port, ship),
+                Some(_) => (self.long_leg_offset(&body), APPROACH_STOP),
                 None => ([0.0; 3], standoff(&body)),
             }
         };
         let aim = |at: [i64; 3]| -> [i64; 3] {
             std::array::from_fn(|k| at[k] + offset[k].round() as i64)
         };
-        let mut command = autopilot(flight, aim(body.position), stop, &mut self.memory);
-        if starport && command.arrived {
-            // F745: at the approach the autopilot runs F655 and gets a pad.
-            self.memory = Memory::default();
-            self.notice = Some(
-                match self.starport(index).request_docking(PLAYER, true, 0) {
-                    Reply::Granted(bay) => format!(
-                        "{}: clearance granted (bay {}). The pad approach is manual: \
-                     the original's thruster autopilot (F745/F746) is not ported.",
-                        body.name,
-                        bay.index + 1
-                    ),
-                    other => format!("{}: {}.", body.name, refusal(other)),
-                },
-            );
+        let destination = match port {
+            Some(port) if !self.final_leg => station_route(&port, ship, aim(body.position)),
+            _ => aim(body.position),
+        };
+        let mut command = autopilot(flight, destination, stop, &mut self.memory);
+        // F742/F745: at the approach point (F610's distance exponent 6, a
+        // standoff of at most 1,024,000 mm) the autopilot asks F655. A refusal
+        // holds and asks again; the source does not fly in without clearance.
+        if starport && command.arrived && !self.final_leg {
+            let owed = self.fine_at(index);
+            let wait = self.clearance_at.is_some_and(|at| self.clock - at < 2.0);
+            if wait {
+                command.arrived = false;
+                command.keys.slower = true;
+            } else {
+                self.memory = Memory::default();
+                self.clearance_at = Some(self.clock);
+                match self.starport(index).request_docking(PLAYER, true, owed) {
+                    Reply::Granted(bay) => {
+                        // Hand the cleared pad to the descent (F745's state 0x23)
+                        // and keep the target, so the leg can still be cancelled.
+                        self.final_leg = true;
+                        self.notice = Some(format!(
+                            "{}: clearance granted (bay {}). Descending to the pad.",
+                            body.name,
+                            bay.index + 1
+                        ));
+                        command.arrived = false;
+                    }
+                    other => {
+                        self.notice = Some(format!("{}: {}.", body.name, refusal(other)));
+                        command.arrived = false;
+                        command.keys.slower = true;
+                    }
+                }
+            }
         }
         if port.is_some() && command.arrived && !self.final_leg {
-            // The approach point: ask for clearance and fly in.
+            // The approach point: ask for clearance and fly into the slot.
             self.memory = Memory::default();
             let owes = self.fine_at(index);
             match self.starport(index).request_docking(PLAYER, true, owes) {
@@ -4202,42 +4430,49 @@ impl Navigator {
                 }
                 other => {
                     self.notice = Some(format!("{}: {}.", body.name, refusal(other)));
-                    command.arrived = true;
+                    command.arrived = false;
+                    command.keys.slower = true;
                 }
             }
         }
-        if let Some((_, seconds)) = command.skip {
-            // The body moves while the ship travels: aim for where it will be.
-            let ship = flight.absolute_position();
-            let mut seconds = seconds;
-            let mut future = body.position;
-            for _ in 0..6 {
-                let Ok(list) = bodies(
-                    cache,
-                    &self.entries[self.current],
-                    clock_words(self.clock + seconds),
-                ) else {
-                    break;
-                };
-                let Some(there) = list.get(index) else { break };
-                future = aim(there.position);
-                let range = distance(ship, future);
-                seconds = transfer_seconds((range - stop - APPROACH).max(0.0) / 1000.0);
+        if self.final_leg {
+            // The contact (F652) or the starport descent ends the leg; dropping
+            // the target here would leave the ship stopped off the pad. On the
+            // starport, hold at F741's point for the descent's hand-off.
+            command.arrived = false;
+            if starport {
+                command.keys.slower = true;
             }
-            let range = distance(ship, future);
-            let landing: [i64; 3] = std::array::from_fn(|k| {
-                let unit = (future[k] - ship[k]) as f64 / range.max(1.0);
-                future[k] - (unit * (stop + APPROACH)) as i64
+        }
+        if let Some((_, initial)) = command.skip {
+            // The body moves while the ship travels. Solve the rendezvous rather
+            // than iterating from the current position (which diverges for a
+            // fast planet and made the autopilot transfer in circles).
+            let stop_cover = stop + APPROACH;
+            let ship = flight.player().motion.position;
+            let entry = &self.entries[self.current];
+            let solution = intercept_time(ship, stop_cover, initial, |t| {
+                let list = bodies(cache, entry, clock_words(self.clock + t)).ok()?;
+                let there = list.get(index)?;
+                let offset = self.long_leg_offset(there);
+                Some(std::array::from_fn(|k| {
+                    there.position[k] + offset[k].round() as i64
+                }))
             });
             self.skips += 1;
-            if self.skips > 3 {
-                // A target that outruns the transfers: fly the rest.
-                command.skip = None;
-            } else {
-                command.skip = Some((landing, seconds));
+            match solution {
+                Some((seconds, future)) if self.skips <= MAX_SKIPS => {
+                    let range = distance(ship, future).max(1.0);
+                    let landing: [i64; 3] = std::array::from_fn(|k| {
+                        let unit = (future[k] - ship[k]) as f64 / range;
+                        future[k] - (unit * stop_cover) as i64
+                    });
+                    command.skip = Some((landing, seconds));
+                }
+                // A target the transfers cannot catch, or too many in a row:
+                // fly the rest of the leg rather than teleporting forever.
+                _ => command.skip = None,
             }
-        } else {
-            self.skips = 0;
         }
         Some((command, body))
     }
@@ -4428,5 +4663,131 @@ mod tests {
         assert_eq!(starport_witness(&bodies, [0; 3]), Some(0));
         let far = [body(Kind::Starport, [1_000_000_000_000, 0, 0])];
         assert_eq!(starport_witness(&far, [0; 3]), None);
+    }
+
+    /// The long-leg rendezvous: a body moving around a circle is met where it
+    /// really is at the advanced clock. The old fixed-point loop oscillated for
+    /// a fast planet (Sirius' Lucifer, Test-4 1) and never homed.
+    #[test]
+    fn intercept_time_meets_a_moving_target_without_orbiting() {
+        use std::f64::consts::TAU;
+        let radius = 4.0e8_f64;
+        let period = 4_000.0_f64;
+        let omega = TAU / period;
+        let ship = [0_i64; 3];
+        let stop_cover = 1.5e9;
+        let aim = |t: f64| {
+            let angle = omega * t;
+            Some([
+                (radius * angle.cos()).round() as i64,
+                (radius * angle.sin()).round() as i64,
+                0,
+            ])
+        };
+        let (seconds, at) =
+            intercept_time(ship, stop_cover, 300.0, aim).expect("a rendezvous exists");
+        assert!(seconds > 0.0 && seconds < period, "{seconds}");
+        let expected = transfer_seconds((distance(ship, at) - stop_cover).max(0.0) / 1000.0);
+        assert!(
+            (seconds - expected).abs() < 1.0,
+            "{seconds} vs {expected}: the landing point is not at the transfer time"
+        );
+        assert!(
+            distance(at, aim(seconds).unwrap()) < 1.0,
+            "the destination is not the body's position at that time"
+        );
+    }
+
+    /// F745/F746's final leg follows the current slot: off the axis it lines up
+    /// on a gate outside the face, and once in the corridor it enters along the
+    /// axis and brakes for the 250 m/s limit. Aiming at the centre alone crossed
+    /// a spinning station's hull (the port's cleared-but-never-docks bug).
+    #[test]
+    fn the_final_slot_leg_tracks_the_station_axis() {
+        let mut station = body(Kind::Station, [100_000_000; 3]);
+        station.orientation = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let front = 200_000.0;
+        let port = Port::new(&station, Some(front), Some(1_000_000.0));
+        let gate = front + 4.0 * port.corridor() + 1.0e6;
+        // Off to the side: line up on the outside gate.
+        let side = [
+            station.position[0] + 5_000_000,
+            station.position[1],
+            station.position[2],
+        ];
+        let (offset, stop) = slot_leg(&port, side);
+        assert!((offset[2] - gate).abs() < 1.0, "{offset:?} gate {gate}");
+        assert_eq!(stop, 0.0);
+        // In front of the face: enter along the axis, braking by the face.
+        let ahead = [
+            station.position[0],
+            station.position[1],
+            station.position[2] + (front * 2.0) as i64,
+        ];
+        let (offset, stop) = slot_leg(&port, ahead);
+        assert!((offset[2] - front * 0.2).abs() < 1.0, "{offset:?}");
+        assert!((stop - front * 0.8).abs() < 1.0, "{stop}");
+        // Behind the station is still the gate, not a short cut through the hull.
+        let behind = [
+            station.position[0],
+            station.position[1],
+            station.position[2] - 2_000_000,
+        ];
+        let (offset, _) = slot_leg(&port, behind);
+        assert!((offset[2] - gate).abs() < 1.0, "{offset:?}");
+    }
+
+    /// Homing and arrival in real time: the nose comes onto a target behind the
+    /// ship, the set speed follows the braking curve, and the ship stops at the
+    /// standoff without passing it and turning back (the old orbiting symptom).
+    #[test]
+    fn autopilot_homes_brakes_and_stops_at_the_standoff() {
+        use crate::flight::{Flight, Mode};
+        let start = Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        };
+        let mut flight = OriginalFlight::from_flight(&start, None);
+        let target = [0_i64; 3];
+        let stop = 1.0e6;
+        flight.teleport([0, 0, 20_000_000]);
+        flight.set_time_acceleration(0);
+        let mut memory = Memory::default();
+        let mut closest = f64::MAX;
+        let mut turned_away = false;
+        let mut arrived = false;
+        for _ in 0..200_000 {
+            let command = autopilot(&flight, target, stop, &mut memory);
+            if let Some(face) = command.face {
+                flight.turn_toward(face, 0.05, 1.0);
+            }
+            flight.step(0.05, &command.keys).unwrap();
+            let range = distance(flight.player().motion.position, target);
+            closest = closest.min(range);
+            let velocity = flight.player().motion.velocity;
+            let speed = (velocity.iter().map(|c| f64::from(*c).powi(2)).sum::<f64>()).sqrt()
+                * MM_PER_SECOND
+                / 1000.0;
+            if range > closest + 2.0e6 && closest <= stop * 1.2 {
+                turned_away = true;
+            }
+            if command.arrived {
+                arrived = true;
+                break;
+            }
+            assert!(speed < 1.0e6, "the model ran away at {speed} m/s");
+        }
+        assert!(arrived, "did not arrive; closest {}", describe(closest));
+        let range = distance(flight.player().motion.position, target);
+        assert!(
+            (range - stop).abs() < 2.0e6,
+            "stopped at {} rather than {}",
+            describe(range),
+            describe(stop)
+        );
+        assert!(
+            !turned_away,
+            "the ship passed the standoff and came back (an orbit)"
+        );
     }
 }

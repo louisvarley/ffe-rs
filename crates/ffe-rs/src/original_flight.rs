@@ -495,6 +495,14 @@ impl OriginalFlight {
         f64::from(self.player.set_speed) * MM_PER_SECOND / 1000.0
     }
 
+    /// F1018's autopilot cancel: the set speed falls to `DATA_008866`, which the
+    /// flight model starts at 0, so the engines brake the ship instead of it
+    /// coasting on at the speed the autopilot had chosen. The target and the
+    /// navigator's leg are the caller's to clear ([`crate::navigation::Navigator::cancel`]).
+    pub fn halt(&mut self) {
+        self.player.set_speed = 0;
+    }
+
     /// Tell the model which view is showing (2 and 3 are the turrets, whose
     /// angles the steering keys then turn) and the turret angles.
     pub fn set_view(&mut self, view: u8, turret: [i16; 2]) {
@@ -687,5 +695,35 @@ impl OriginalFlight {
         let limit = f64::from(self.forward_limit.max(1));
         flight.thrust = (f64::from(motion.thrust[2]) / limit).clamp(-1.0, 1.0);
         flight.ticks = flight.ticks.wrapping_add(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::flight::{Flight, Mode};
+
+    /// F1018's cancel drops the set speed to DATA_008866 (0), so the model brakes
+    /// the ship rather than coasting on at the autopilot's chosen speed.
+    #[test]
+    fn halt_zeroes_the_set_speed_and_the_ship_brakes() {
+        let state = Flight {
+            mode: Mode::Flight,
+            velocity: [0.0, 0.0, 500.0],
+            ..Flight::default()
+        };
+        let mut flight = OriginalFlight::from_flight(&state, None);
+        assert!(flight.set_speed_metres() > 400.0);
+        let start = flight.set_speed_metres();
+        flight.halt();
+        assert_eq!(flight.set_speed_units(), 0);
+        for _ in 0..1_000 {
+            flight.step(0.05, &Keys::default()).unwrap();
+        }
+        let velocity = flight.player().motion.velocity;
+        let speed = (velocity.iter().map(|c| f64::from(*c).powi(2)).sum::<f64>()).sqrt()
+            * MM_PER_SECOND
+            / 1000.0;
+        assert!(speed < start * 0.2, "{speed} m/s after halt from {start}");
     }
 }
