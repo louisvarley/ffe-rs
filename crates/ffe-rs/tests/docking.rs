@@ -8,6 +8,7 @@ fn station() -> Body {
         name: "Test Station".to_owned(),
         kind: Kind::Station,
         position: [2_000_000, 0, 0],
+        velocity: [0;3],
         radius: 1_000_000,
         inner_radius: 1_000_000,
         parent: None,

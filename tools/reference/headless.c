@@ -5794,8 +5794,39 @@ static int object_instance_vectors(void)
 }
 #endif
 
+
+extern void ref_autopilot_request(unsigned char *, unsigned char *, long, long *, long *, long, long, long *, void *);
+extern void ref_autopilot_turn(unsigned char *);
+extern unsigned long ref_time_accel_index;
+static unsigned long ap_random = 0x12345678;
+static long ap_next(void) { ap_random ^= ap_random << 13; ap_random ^= ap_random >> 17; ap_random ^= ap_random << 5; return (long)ap_random; }
+static void ap_vec(long *v, int n) { int k; printf("["); for(k=0;k<n;k++) printf("%s%ld", k?",":"",v[k]); printf("]"); }
+static int autopilot_vectors(void) {
+    int n,k; unsigned char object[0x200], target[0x200];
+    ref_time_accel_index=0;
+    for(n=0;n<512;n++) {
+        long matrix[9], position[3], velocity[3], pos[3], vel[3], cap[3], turns[3];
+        long distance, shift=(n%36), vshift=(n%30)-14, modifier=(n%5)-2;
+        memset(object,0,sizeof(object)); memset(target,0,sizeof(target));
+        for(k=0;k<9;k++) matrix[k]= (k%4==0 ? 0x7f000000 : 0);
+        if(n&1) { matrix[0]=-matrix[0]; matrix[8]=-matrix[8]; }
+        for(k=0;k<3;k++) { position[k]=(ap_next()&0x3fff)-0x2000; velocity[k]=(ap_next()&0x7fff)-0x4000; pos[k]=position[k]; vel[k]=velocity[k]; }
+        memcpy(object,matrix,sizeof(matrix));
+        ref_autopilot_request(object,target,modifier,&distance,vel,vshift,shift,pos,0);
+        for(k=0;k<3;k++) { memcpy(&cap[k],object+0xf2+4*k,4); *(short *)(object+0x108+2*k)=(short)position[k]; }
+        ref_autopilot_turn(object);
+        for(k=0;k<3;k++) turns[k]=*(short *)(object+0x110+2*k);
+        printf("{\"matrix\":");ap_vec(matrix,9);printf(",\"position\":");ap_vec(position,3);printf(",\"velocity\":");ap_vec(velocity,3);
+        printf(",\"shift\":%ld,\"vshift\":%ld,\"modifier\":%ld,\"request\":",shift,vshift,modifier);ap_vec(vel,3);
+        printf(",\"cap\":");ap_vec(cap,3);printf(",\"turns\":");ap_vec(turns,3);printf("}\n");
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if(argc==2 && !strcmp(argv[1],"--autopilot")) return autopilot_vectors();
+
     const char *count;
     if (argc == 2 && (!strcmp(argv[1], "--sysgen") || !strcmp(argv[1], "--worldgen"))) {
         /* Uninitialised stack in F877 holds addresses: fix them so traces repeat. */

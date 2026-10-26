@@ -592,3 +592,11 @@ _ref_msgindex equ DATA_005099
 ; Game-over probe: F953's damage routine.
 GLOBAL _ref_damage
 _ref_damage equ FUNC_000953
+
+; Source autopilot arithmetic oracle (no gameplay or rendering overrides).
+GLOBAL _ref_autopilot_request
+GLOBAL _ref_autopilot_turn
+GLOBAL _ref_time_accel_index
+_ref_autopilot_request equ FUNC_000597
+_ref_autopilot_turn equ FUNC_000587
+_ref_time_accel_index equ DATA_009013
