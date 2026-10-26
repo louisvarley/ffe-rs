@@ -1571,6 +1571,25 @@ const APPROACH_STOP: f64 = 1.0e6;
 /// target teleport on every frame); engaging or locking a target clears it.
 const MAX_SKIPS: u32 = 4;
 /// Within this of a station, its motion carries the ship (200 km).
+/// The port's detour: how far above a blocking body's surface a line must pass
+/// (a fraction of its radius, at least the margin), and the least distance to
+/// the climb waypoint (millimetres).
+const DETOUR_CLEARANCE: f64 = 0.1;
+const DETOUR_MARGIN: f64 = 5.0e6;
+const DETOUR_STEP: f64 = 5.0e7;
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn unit3(v: [f64; 3]) -> [f64; 3] {
+    let length = dot3(v, v).sqrt().max(1e-9);
+    v.map(|c| c / length)
+}
+
+/// F208's `DATA_009013` for each time acceleration step (1x .. 10000x): the
+/// shift F597 compares the destination's distance shift against.
+const ACCELERATION_SHIFTS: [i32; 5] = [0, 3, 7, 10, 12];
 const STATION_FRAME: f64 = 2.0e8;
 /// Within this many radii of a planet or moon, its motion carries the ship.
 const WORLD_FRAME_RADII: f64 = 50.0;
@@ -4665,6 +4684,30 @@ impl Navigator {
     }
 
     fn choose_frame(&self, ship: [i64; 3]) -> Option<usize> {
+        // A ship inside a world's atmosphere moves with that world (or a port on
+        // its surface), never with an engaged target in orbit: carrying it along
+        // a station's orbit from just above the ground threw it into the terrain.
+        let world = (0..self.bodies.len())
+            .filter(|i| matches!(self.bodies[*i].kind, Kind::Planet | Kind::Moon))
+            .filter(|i| distance(ship, self.bodies[*i].position) <= self.bodies[*i].radius as f64)
+            .min_by(|a, b| {
+                distance(ship, self.bodies[*a].position)
+                    .total_cmp(&distance(ship, self.bodies[*b].position))
+            });
+        if let Some(world) = world {
+            let port = (0..self.bodies.len())
+                .filter(|i| {
+                    let body = &self.bodies[*i];
+                    body.kind == Kind::Starport
+                        && body.parent == Some(world)
+                        && distance(ship, body.position) <= STATION_FRAME
+                })
+                .min_by(|a, b| {
+                    distance(ship, self.bodies[*a].position)
+                        .total_cmp(&distance(ship, self.bodies[*b].position))
+                });
+            return Some(port.unwrap_or(world));
+        }
         if let Some(t) = self.target {
             if let Some(body) = self.bodies.get(t) {
                 if distance(ship, body.position) <= 10.0 * APPROACH + standoff(body) {
@@ -4791,11 +4834,44 @@ impl Navigator {
         } else {
             [0; 3]
         };
+        let modifier = if self.final_leg { -2 } else { 0 };
         let mut guidance = if station {
-            flight.guidance(point, velocity, if self.final_leg { -2 } else { 0 })
+            flight.guidance(point, velocity, modifier)
         } else {
             flight.body_guidance(point, velocity, body.radius)
         };
+        // F597's accelerated branch (F596 passes F612's relative-velocity shift
+        // and F592's distance shift): with time accelerated by `DATA_009013`,
+        // once the destination is within a few doublings of what one
+        // accelerated frame covers, the ship is put at F741's offset point with
+        // the target's velocity and no thrust. Without it a 10000x frame near a
+        // station overshoots back and forth and never closes to clearance range.
+        // Only targets with F741's offset words (stations and starports) take it.
+        let shift = ACCELERATION_SHIFTS[flight.acceleration_step().min(4)];
+        let mut arrived = false;
+        if station && shift != 0 {
+            let motion = flight.player().motion.velocity;
+            let mut relative: [i32; 3] =
+                std::array::from_fn(|k| velocity[k].wrapping_sub(motion[k]));
+            let velocity_shift = ffe_core::autopilot::normalise_velocity(&mut relative);
+            let gap = guidance.distance_shift - velocity_shift.max(2) - (shift + (shift >> 2));
+            if gap < 6 {
+                flight.teleport(point);
+                guidance = flight.guidance(point, velocity, modifier);
+                arrived = true;
+            }
+        }
+        // Port addition (not in F741/F742/F610): a straight line to the
+        // destination that runs through a planet, moon or star flies the ship
+        // into it, which is every trip between two ports of one planet. While
+        // the line is blocked, climb up and forward instead. F597's accelerated
+        // arrival above goes first: the original puts the ship there directly.
+        if !arrived {
+            if let Some(waypoint) = self.detour(flight.absolute_position(), point, index) {
+                let guidance = flight.guidance(waypoint, [0; 3], 0);
+                return Some((guidance, body));
+            }
+        }
         // F746's accelerated near-pad completion, not the prototype's
         // long-distance transfer. F652 must accept the allocated bay first.
         if self.final_leg && guidance.distance_shift <= 0 && flight.acceleration_step() != 0 {
@@ -4829,6 +4905,12 @@ impl Navigator {
                 Reply::Granted(_) => {
                     self.final_leg = true;
                     self.autopilot_notice(format!("{}: clearance granted.", body.name));
+                    // The original's next accelerated AI tick runs F745/F746 at
+                    // once; one accelerated frame of physics in between would
+                    // drop the ship from the approach point onto the port.
+                    if arrived {
+                        return self.source_command(_cache, flight);
+                    }
                 }
                 other => {
                     let text = format!("{}: {}.", body.name, refusal(other));
@@ -4837,6 +4919,66 @@ impl Navigator {
             }
         }
         Some((guidance, body))
+    }
+
+    /// The up-and-forward waypoint while the line from `ship` to `point` runs
+    /// through a star, planet or moon other than the target `index` (its
+    /// closest interior point below its outer radius plus a tenth of it); `None` when the
+    /// line is clear.
+    fn detour(&self, ship: [i64; 3], point: [i64; 3], index: usize) -> Option<[i64; 3]> {
+        let s = ship.map(|v| v as f64);
+        let d: [f64; 3] = std::array::from_fn(|k| (point[k] - ship[k]) as f64);
+        let length2 = dot3(d, d);
+        if length2 < 1.0 {
+            return None;
+        }
+        let blocker = self
+            .bodies
+            .iter()
+            .enumerate()
+            .filter(|(i, b)| {
+                *i != index && matches!(b.kind, Kind::Star | Kind::Planet | Kind::Moon)
+            })
+            .filter_map(|(_, b)| {
+                let c = b.position.map(|v| v as f64);
+                let to_centre: [f64; 3] = std::array::from_fn(|k| c[k] - s[k]);
+                let t = dot3(to_centre, d) / length2;
+                if t <= 0.0 || t >= 0.999 {
+                    return None;
+                }
+                let closest: [f64; 3] = std::array::from_fn(|k| s[k] + d[k] * t - c[k]);
+                // The outer radius bounds the terrain: `inner_radius` is only its
+                // lowest point, and a world's mountains can stand thousands of
+                // kilometres above it.
+                let surface = b.radius as f64;
+                // The lowest point of a dipping line is below both ends, so a
+                // generous clearance only holds back lines that skim the world
+                // between two high points (gravity sags those into the ground);
+                // an approach down to a port bottoms out at the port itself.
+                let clearance = (surface * DETOUR_CLEARANCE).max(DETOUR_MARGIN);
+                (dot3(closest, closest).sqrt() < surface + clearance).then_some((b, surface))
+            })
+            .min_by(|a, b| distance(ship, a.0.position).total_cmp(&distance(ship, b.0.position)))?;
+        let (body, surface) = blocker;
+        let away: [f64; 3] = std::array::from_fn(|k| s[k] - body.position[k] as f64);
+        let up = unit3(away);
+        let across = dot3(d, up);
+        let mut along: [f64; 3] = std::array::from_fn(|k| d[k] - up[k] * across);
+        if dot3(along, along) < 1.0 {
+            // Straight through the centre: any direction across the surface.
+            along = if up[0].abs() < 0.9 {
+                [1.0, 0.0, 0.0]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
+            let across = dot3(along, up);
+            along = std::array::from_fn(|k| along[k] - up[k] * across);
+        }
+        let forward = unit3(along);
+        let step = (surface * 0.05).max(DETOUR_STEP);
+        Some(std::array::from_fn(|k| {
+            ship[k] + ((up[k] + forward[k]) * step) as i64
+        }))
     }
 
     /// The autopilot's command for this frame, when engaged.

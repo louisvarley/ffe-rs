@@ -778,6 +778,9 @@ fn write_save_capture(cache: &ffe_content::VerifiedCache, dir: &Path) -> Result<
         .map_err(|error| format!("Cannot write save evidence: {error}"))
 }
 
+/// The highest time acceleration step (100x) within a world's terrain sphere.
+const NEAR_WORLD_ACCELERATION: usize = 2;
+
 fn run() -> Result<(), String> {
     let options = options()?;
     let cache = ffe_content::read(&read_cache(&options.root.join("data.bin"))?)?;
@@ -931,6 +934,8 @@ fn run() -> Result<(), String> {
     let mut mouse_accumulator = input::MouseAccumulator::default();
     // The console's time acceleration step (0 = 1x .. 4 = 10000x).
     let mut acceleration = 0usize;
+    // The step the near-world hold lowered, restored once clear of the world.
+    let mut held_acceleration: Option<usize> = None;
     // F2's status/equipment page (`F1120`, `DATA_008871 & 8`).
     let mut status_page = false;
     // F5's console icon (action 0xf5): the parked ship's engines/equipment page. Off by
@@ -1418,6 +1423,21 @@ fn run() -> Result<(), String> {
             value.tick(elapsed);
         }
         let death_control = state.death.is_some();
+        if trace_flight
+            && (session.total * 2.0).floor() != ((session.total - elapsed) * 2.0).floor()
+        {
+            eprintln!(
+                "trace state t={:.1} mode={:?} dead={} hull={:?} docked={:?} landed={:?} sequence={} log={:?}",
+                session.total,
+                state.mode,
+                death_control,
+                state.hull,
+                nav.as_ref().and_then(|nav| nav.docked).and_then(|i| nav.as_ref().map(|n| n.bodies[i].name.clone())),
+                nav.as_ref().and_then(|nav| nav.landed_state()),
+                nav.as_ref().is_some_and(|nav| nav.sequence.is_some()),
+                message,
+            );
+        }
         // F152/F224: the game clock runs every frame the simulation is live, in
         // every module (flight, the pad, the landed view, stations and the
         // services board). It used to be advanced only inside the original
@@ -1647,6 +1667,50 @@ fn run() -> Result<(), String> {
                     "Time acceleration {} (applies to the original flight model).",
                     ACCELERATION_NAMES[step]
                 );
+            }
+        }
+        // Port rule (not the source's): within a world's terrain sphere (its
+        // outer radius) the time acceleration is held at 100x. One 10000x frame
+        // is nearly three minutes of world time, and thrust fixed for that long
+        // beside the ground of a 2 g world flies the ship into it.
+        // The chosen step comes back once the ship is clear of the world.
+        if chosen_step.is_some() {
+            held_acceleration = None;
+        }
+        if let (Some(model), Some(nav)) = (original.as_mut(), nav.as_ref()) {
+            let at = model.absolute_position();
+            let world = nav
+                .bodies
+                .iter()
+                .find(|body| {
+                    matches!(body.kind, NavKind::Planet | NavKind::Moon)
+                        && ffe_rs::navigation::distance(at, body.position) <= body.radius as f64
+                })
+                .filter(|_| {
+                    state.mode == ffe_rs::flight::Mode::Flight
+                        && !model.on_pad()
+                        && nav.landed_state().is_none()
+                });
+            match world {
+                Some(world) if acceleration > NEAR_WORLD_ACCELERATION => {
+                    held_acceleration = Some(acceleration);
+                    acceleration = NEAR_WORLD_ACCELERATION;
+                    model.set_time_acceleration(acceleration);
+                    message = format!(
+                        "Time acceleration held at {} near {}.",
+                        ACCELERATION_NAMES[acceleration], world.name
+                    );
+                }
+                None => {
+                    if let Some(step) = held_acceleration.take() {
+                        if acceleration == NEAR_WORLD_ACCELERATION {
+                            acceleration = step;
+                            model.set_time_acceleration(acceleration);
+                            message = format!("Time acceleration {}.", ACCELERATION_NAMES[step]);
+                        }
+                    }
+                }
+                Some(_) => {}
             }
         }
         if console_click == Some(Click::Pause) {
@@ -4039,8 +4103,43 @@ fn run() -> Result<(), String> {
                                     .as_ref()
                                     .and_then(|nav| nav.frame().and_then(|f| nav.bodies.get(f)))
                                     .map(|body| body.name.as_str());
+                                let at = model.absolute_position();
+                                let world = nav.as_ref().and_then(|nav| {
+                                    nav.bodies
+                                        .iter()
+                                        .filter(|b| {
+                                            matches!(b.kind, NavKind::Planet | NavKind::Moon)
+                                        })
+                                        .map(|b| {
+                                            let range =
+                                                ffe_rs::navigation::distance(at, b.position);
+                                            (
+                                                b.name.as_str(),
+                                                ((range - b.inner_radius as f64) / 1.0e6) as i64,
+                                            )
+                                        })
+                                        .min_by_key(|(_, km)| *km)
+                                });
+                                let scan = nav.as_ref().and_then(|nav| {
+                                    let body = nav.bodies.get(nav.landing_parent(at, 0)?)?;
+                                    Some((
+                                        body.name.as_str(),
+                                        body.kind,
+                                        body.radius,
+                                        body.inner_radius,
+                                    ))
+                                });
+                                let target = nav.as_ref().and_then(|nav| {
+                                    let body = nav.bodies.get(nav.target?)?;
+                                    let range = ffe_rs::navigation::distance(at, body.position);
+                                    Some((
+                                        body.name.as_str(),
+                                        ffe_rs::navigation::describe(range),
+                                        nav.final_leg,
+                                    ))
+                                });
                                 eprintln!(
-                                    "trace t={:.1} keys={:?} mode={:#x} pad={} gear={} set={} thrust={:?} vel={:?} contact={:?} frame={:?}",
+                                    "trace t={:.1} keys={:?} mode={:#x} pad={} gear={} set={} thrust={:?} vel={:?} contact={:?} frame={:?} scan={:?} world_km={:?} target={:?} at={:?}",
                                     session.total,
                                     (keys.faster, keys.slower, keys.pitch_up, keys.pitch_down),
                                     player.mode,
@@ -4051,6 +4150,10 @@ fn run() -> Result<(), String> {
                                     player.motion.velocity,
                                     contact.as_ref().map(|c| (c.altitude(), c.flags)),
                                     frame,
+                                    scan,
+                                    world,
+                                    target,
+                                    at,
                                 );
                             }
                         }

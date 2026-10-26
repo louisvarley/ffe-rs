@@ -43,20 +43,32 @@ start.
 
 ## The autopilot
 
-`autopilot(flight, target, stop, memory) -> Command` each frame. It turns the nose with
-the pitch and yaw keys (the keys build a turn rate and their amounts grow the longer they
-are held, so they are pulsed and released), then raises or lowers the set speed with
-Return/Shift to follow a braking envelope `sqrt(2 * 0.4 * 90 * distance)` (the reverse
-thrust slows the ship by about 90 m/s per second; forward thrust gives about 300).
+The live autopilot is the source's AI path (`Navigator::source_command`): F741's
+destination (a station's `0xfa0` offset, a starport's point `0x1770` up its row, a
+planet's centre less F610's radius), F592/F596/F597's guidance and F587's turns
+(`ffe_core::autopilot`), F745's clearance and F746's pad leg. The older
+`prototype_command` (time-skip transfers) is kept for development tests only.
 
-Legs longer than 1.5 million km (`APPROACH` 1.5e9 mm beyond the standoff) cannot be flown
-in real time with the nose staying true (time acceleration multiplies every turn-rate
-error: at 1000x a hair of drift swings the ship round). Once the nose is on the target the
-command carries `skip = Some((landing, world_seconds))`: a transfer the caller carries out
-by placing the ship at the approach point at rest and advancing the game clock by
-`transfer_seconds` (full thrust up to the speed the braking can stop, then the braking).
-The last 1.5 million km are flown for real. Tests: Sol's Pluto (39 AU: a 412,844 s
-transfer then about 300 s of flight), Mercury and Daedalus.
+- **F597's accelerated arrival.** With time accelerated (`DATA_009013`: 0, 3, 7, 10, 12
+  for 1x..10000x), once `distance shift - max(velocity shift, 2) - (accel + accel/4)`
+  drops below 6, the ship is put at the destination point with the target's velocity
+  and no thrust. A clearance granted on that arrival runs F745/F746 at once, as the
+  original's next accelerated AI tick does. Without it a 10000x frame near a station
+  overshot back and forth ("jumping around") and never reached clearance range.
+- **Port rule: detour.** F741/F742/F610 fly a straight line, which runs through the
+  planet between two ports of one world. While the line's lowest interior point is
+  within a world's outer radius plus a tenth of it (the outer radius bounds the
+  terrain; `inner_radius` is only its lowest point), the autopilot steers at a point up
+  and forward of the ship instead. F597's arrival takes precedence.
+- **Port rule: time acceleration near worlds.** Inside a planet's or moon's outer
+  radius the acceleration is held at 100x: one 10000x frame is nearly three minutes of
+  thrust in a fixed direction beside the ground of a 2 g world.
+- **Frames.** Inside a world's atmosphere the ship moves with that world (or a starport
+  on it within 200 km), never with an orbiting target; carrying it along a station's
+  orbit from just above the ground threw it into the terrain.
+
+`FFE_TRACE=1` prints the flight state (mode, velocity, contact, frame, target and range)
+ten times a second, which with `--replay` shows exactly what a recorded flight did.
 
 ## Keys (the playable)
 

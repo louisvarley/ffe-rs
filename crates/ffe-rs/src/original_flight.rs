@@ -867,13 +867,15 @@ impl OriginalFlight {
         }
 
         // The original enters the planet's rotating frame once (F570/F572) and
-        // stays there; this world is rebuilt every frame, so the switch and the
-        // F573 return below run every frame. Each round trip truncates the
+        // stays there; this world is rebuilt every frame, so the ship enters it
+        // and returns (F573) every frame. Each round trip truncates the
         // position to 28 bits and turns it by the planet's integrated rows, which
         // are a hair under unit length: at a surface port that pulled the ship
         // about 2 m a frame toward the planet's centre (the takeoff that settles
-        // back on the ground). Measure this frame's round trip on the start state
-        // and take it back out when the tick made it.
+        // back on the ground). Make exactly one round trip a frame here, F572
+        // before the tick (so F570 has no switch of its own to make, which with
+        // a starport sibling it otherwise made twice) and F573 after it, and
+        // take the error that pair makes on the start state back out.
         let round_trip = {
             let mut dry = world.clone();
             dry.to_rotating(1, 2);
@@ -883,6 +885,10 @@ impl OriginalFlight {
                 std::array::from_fn(|k| dry.body[1].velocity[k] - motion.velocity[k]);
             (moved, turned)
         };
+        world.to_rotating(1, 2);
+        // F570's own switch waits while the delay runs, as after any switch.
+        world.body[1].delay = 0x7f;
+        world.body[1].give_motion(&mut self.player.motion);
         let contact = tick_guided(
             &mut self.player,
             self.guidance,
@@ -893,20 +899,25 @@ impl OriginalFlight {
         // Undo the per-frame landing margin so it does not accumulate, and put
         // the player back in the system frame even when the scan fails (an
         // undecodable starport pad must not leave it parent-relative).
-        // F570 may have entered the rotating frame. Returning to root
-        // coordinates also requires F573's orientation/velocity conversion;
-        // clearing only +0x57 silently leaves those vectors in the old frame.
-        if self.player.motion.rotating != 0 {
-            world.body[1].take_motion(&self.player.motion);
+        // Returning to root coordinates also requires F573's orientation/velocity
+        // conversion; clearing only +0x57 silently leaves those vectors in the
+        // old frame. Far from the planet F570 may already have made it.
+        world.body[1].take_motion(&self.player.motion);
+        if world.body[1].rotating != 0 {
             world.to_linear(1, 2);
-            let body = &mut world.body[1];
-            for k in 0..3 {
-                body.position[k] -= round_trip.0[k];
-                body.velocity[k] = body.velocity[k].wrapping_sub(round_trip.1[k]);
-            }
-            world.body[1].give_motion(&mut self.player.motion);
         }
+        let body = &mut world.body[1];
+        for k in 0..3 {
+            body.position[k] -= round_trip.0[k];
+            body.velocity[k] = body.velocity[k].wrapping_sub(round_trip.1[k]);
+        }
+        world.body[1].give_motion(&mut self.player.motion);
         self.player.motion.renormalise();
+        // The scan may have cached the ship's absolute position mid-tick (F1677
+        // for a pair across frames, the starport's); recompute it from the
+        // corrected linear position rather than return that stale value.
+        world.stamp = world.stamp.wrapping_add(1);
+        world.body[1].stamp = world.stamp.wrapping_sub(1);
         let absolute = world.absolute(1).unwrap_or(vector);
         self.player.motion.position = absolute;
         self.player.motion.parent = 0;

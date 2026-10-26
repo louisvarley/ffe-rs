@@ -687,6 +687,93 @@ fn a_ship_at_rest_above_the_surface_does_not_sink_through_the_frame_round_trip()
     assert!(sunk.abs() < 1_000.0, "moved {sunk} mm toward the centre");
 }
 
+/// F603 after a take-off: with the engines held at zero thrust, the planet's
+/// pull on a ship above the start port points at the planet's centre and falls
+/// off with the square of the distance.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn gravity_pulls_toward_the_planet_and_falls_off_with_distance() {
+    use ffe_rs::navigation::{landing_body, Library, Navigator};
+    let cache = cache();
+    let nav = Navigator::new_game(&cache, 0).unwrap();
+    let index = nav.docked.expect("the start starport");
+    let new_game = nav.new_game.expect("a new game");
+    let port = nav.bodies[index].clone();
+    let planet = nav.bodies[port.parent.expect("a parent planet")].clone();
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = ffe_core::objects::ModelInfo::read(records, stats, new_game.ship).unwrap();
+    let planet_body = landing_body(
+        &planet,
+        &ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap(),
+    );
+    let library = Library(&cache);
+    let tools = ffe_core::surface::SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
+    let up = port.orientation[1];
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    // Metres per second squared toward the centre, and the cosine between the
+    // pull and the direction to the centre, over one second from rest.
+    let pull = |height: f64| {
+        let start: [i64; 3] = std::array::from_fn(|k| new_game.seat[k] + (up[k] * height) as i64);
+        let flight = Flight {
+            mode: Mode::Flight,
+            system_flight: true,
+            ship: new_game.ship,
+            position: start.map(|v| v as f64 / unit),
+            axes: Some(port.orientation),
+            ..Flight::default()
+        };
+        let mut model = OriginalFlight::from_flight(&flight, None);
+        model.set_thrust_override(Some([0; 3]));
+        for _ in 0..50 {
+            model
+                .step_landing(
+                    0.02,
+                    &Default::default(),
+                    &planet_body,
+                    planet.position,
+                    &info,
+                    Some(&tools),
+                )
+                .expect("the contact scan");
+        }
+        let velocity = model
+            .player()
+            .motion
+            .velocity
+            .map(|v| f64::from(v) * ffe_rs::original_flight::MM_PER_SECOND / 1000.0);
+        let centre: [f64; 3] = std::array::from_fn(|k| (planet.position[k] - start[k]) as f64);
+        let range = centre.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let speed = velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let cosine = (0..3).map(|k| velocity[k] * centre[k]).sum::<f64>() / (speed * range);
+        (speed, cosine, range)
+    };
+    let (low, low_cosine, low_range) = pull(600_000.0);
+    let (high, high_cosine, high_range) = pull(600_000_000.0);
+    eprintln!(
+        "{}: {low:.2} m/s2 at {:.0} km, {high:.2} m/s2 at {:.0} km",
+        planet.name,
+        low_range / 1.0e6,
+        high_range / 1.0e6
+    );
+    assert!(low > 1.0 && low < 50.0, "surface gravity {low} m/s2");
+    assert!(
+        low_cosine > 0.99 && high_cosine > 0.99,
+        "{low_cosine} {high_cosine}"
+    );
+    let expected = (low_range / high_range).powi(2);
+    assert!(
+        ((high / low) / expected - 1.0).abs() < 0.05,
+        "inverse square: {} vs {expected}",
+        high / low
+    );
+}
+
 /// F1012/F1047's landed handlers call F1014/F1015, which run F1037 (set speed)
 /// and F1041 (orientation/thrust) through the contact scan. The port used to
 /// copy the mode word and stop, so Enter/Shift/W/S did nothing in the landed
