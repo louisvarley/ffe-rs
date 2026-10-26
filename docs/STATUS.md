@@ -1,5 +1,17 @@
 # Status and handoff
 
+## Source-parity audit — 2026-10-26 (current acceptance gate)
+
+The owner requires original gameplay, with Port Options as the only general
+extension. Experimental deviations and component-test passes do not constitute
+acceptance of changed gameplay. [The audit](audits/gameplay-parity-2026-10-26.md)
+records 24 new implementation items (8 P0) and 14 reopened completion claims;
+102 work items remain. This is an audit, not another claim that launch/docking
+or destruction is fixed. The F938 whole-second/event versus per-frame physics
+tic mismatch is confirmed and is the first fuel/acceleration blocker. The
+Hope starting image and third-person death explosion require matched source
+state/frame traces before their exact visual causes can be closed.
+
 ## Idle start and services correction — 2026-10-26
 
 Enter/default start stays on Hope at Old Blackelk in Gateway. Corrected the

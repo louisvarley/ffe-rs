@@ -19,6 +19,37 @@ window.FFE_BURNDOWN = {
   updated: "2026-10-26",
   milestones: [
     {
+      id: "parity-audit",
+      title: "Source gameplay parity blockers — 2026-10-26 audit",
+      status: "planned",
+      tasks: [
+        {"id": "parity-01", "title": "[P0] Repair F938/F929 event units for fuel, shields and hull repair", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-01"},
+        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
+        {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
+        {"id": "parity-04", "title": "[P0] Translate the complete F1013 takeoff handler and same-frame mode order", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-04"},
+        {"id": "parity-05", "title": "[P0] Replace launch altitude substitution and collision grace with source frame/contact rules", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-05"},
+        {"id": "parity-06", "title": "[P0] Verify original set-speed controls, input gates and speed persistence end to end", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-06"},
+        {"id": "parity-07", "title": "[P0] Match the original Hope starting state and cockpit view to the supplied image", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-07"},
+        {"id": "parity-08", "title": "[P0] Restore the complete third-person player explosion before GAME OVER", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-08"},
+        {"id": "parity-09", "title": "[P1] Replace orbital docking corridor tests and harmless pushes with source contacts", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-09"},
+        {"id": "parity-10", "title": "[P1] Use original indoor departure placement and moving lift/door state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-10"},
+        {"id": "parity-11", "title": "[P1] Complete source autopilot world and target adapters", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-11"},
+        {"id": "parity-12", "title": "[P1] Unify source event clocks, time acceleration and physical integration", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-12"},
+        {"id": "parity-13", "title": "[P1] Complete hyperjump initiation, transit, misjump and source arrival", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-13"},
+        {"id": "parity-14", "title": "[P1] Verify source fuel scooping gates and capacity changes", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-14"},
+        {"id": "parity-15", "title": "[P1] Replace NPC speed caps and simplified flight state transitions", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-15"},
+        {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
+        {"id": "parity-17", "title": "[P1] Restore source RNG state and call order for gameplay", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-17"},
+        {"id": "parity-18", "title": "[P1] Persist and restore the complete live simulation state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-18"},
+        {"id": "parity-19", "title": "[P1] Remove the non-source 7-tonne starting hold and reconcile fitted capacity", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-19"},
+        {"id": "parity-20", "title": "[P1] Replay market, shipyard, BBS and daily mission events using source state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-20"},
+        {"id": "parity-21", "title": "[P1] Drive all explosion, debris and hit effects from source object states", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-21"},
+        {"id": "parity-22", "title": "[P1] Replay missile, ECM, escape and legal outcomes in the complete event loop", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-22"},
+        {"id": "parity-23", "title": "[P1] Remove silent fallback to the synthetic playable from normal starts/loads", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-23"},
+        {"id": "parity-24", "title": "[P1] Use the same source new-game setup after death and on every resume path", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-24"}
+      ]
+    },
+    {
       id: "foundation",
       title: "Foundation, evidence and tooling (phases 0-2)",
       status: "done",
@@ -118,9 +149,9 @@ window.FFE_BURNDOWN = {
         { id: "flight-8", title: "Player events and state machine (cplayer, plstate)", status: "in-progress", version: "v0.68" },
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
-        { id: "flight-11", title: "Launch sequence", status: "done", version: "v0.55" },
+        { id: "flight-11", title: "Launch sequence", status: "in-progress", version: "reopened-source-audit" },
         { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "in-progress", version: "flight-reference" },
-        { id: "flight-13", title: "Open-air starport takeoff (F1013 0x24, F1031/F1032 bay release, F573 return)", status: "done", version: "v0.59" },
+        { id: "flight-13", title: "Open-air starport takeoff (F1013 0x24, F1031/F1032 bay release, F573 return)", status: "in-progress", version: "reopened-source-audit" },
         { id: "flight-14", title: "Original autopilot: verified guidance, avoidance, rotating frames and full route replay", status: "in-progress", version: "source-guidance" }
       ]
     },
@@ -133,7 +164,7 @@ window.FFE_BURNDOWN = {
         { id: "world-2", title: "System generation: stars, planets and station placement (csysgen)", status: "done", version: "v0.51i" },
         { id: "world-3", title: "System object types and orbits (csystem)", status: "todo" },
         { id: "world-4", title: "Galaxy generation and the RNG stream question (KNOWN_ISSUES F1476)", status: "in-progress", version: "galaxy-v21" },
-        { id: "world-5", title: "Planet surfaces and landing approach", status: "done", version: "v0.54" },
+        { id: "world-5", title: "Planet surfaces and landing approach", status: "in-progress", version: "reopened-source-audit" },
         { id: "world-6", title: "Starports: services and events (cstarport)", status: "in-progress", version: "v0.73" },
         { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-8", title: "Navigation: system and galaxy maps", status: "todo" },
@@ -141,7 +172,7 @@ window.FFE_BURNDOWN = {
         { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" },
         { id: "world-11", title: "Terrain distance query and complex-shape collisions (F1876 mode 1, F576-F583), starports placed on planets", status: "done", version: "v0.51e" },
         { id: "world-12", title: "Surface landing 0x32/0x34, F1050/F1054 landed view and L takeoff", status: "done", version: "v0.68" },
-        { id: "world-13", title: "Surface radius: inner on approach, outer when landed, inside-shell culling", status: "done", version: "v0.76" }
+        { id: "world-13", title: "Source model scale and near-surface radius/frame transitions", status: "in-progress", version: "reopened-source-audit" }
       ]
     },
     {
@@ -155,7 +186,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.73" },
         { id: "gameplay-4", title: "Lasers and hit detection (claser)", status: "done", version: "v0.57" },
         { id: "gameplay-5", title: "Missiles and countermeasures", status: "in-progress", version: "v0.67" },
-        { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "done", version: "v0.72" },
+        { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-7", title: "Police, pirates and other encounters", status: "in-progress", version: "v0.63" },
         { id: "gameplay-8", title: "Combat scenario replay against the reference", status: "todo" },
         { id: "gameplay-9", title: "Bulletin board and missions (cbbs)", status: "todo" },
@@ -167,15 +198,15 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-15", title: "Time-driven events over a long run (daily market/BBS/shipyard/deadline tick)", status: "done", version: "v0.99" },
         { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" },
         { id: "gameplay-17", title: "Equipment table, fitted loadout, player shields/hull and F991/F1120 icon state", status: "done", version: "v0.62" },
-        { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "done", version: "v0.63" },
+        { id: "gameplay-18", title: "NPC flight/combat AI (DATA_006258), ship fire, police/wanted and jump persistence", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-19", title: "Player missiles, missile lock and F1120 pylon lamps", status: "done", version: "v0.67" },
         { id: "gameplay-20", title: "Starport tech level, Upgrades Fit/Remove, fuel-scoop gate and repairs rows", status: "done", version: "v0.73" },
         { id: "gameplay-21", title: "Laser muzzle origin, hit-box entry and 50/60 Hz tics", status: "done", version: "v0.80" },
         { id: "gameplay-22", title: "F1100 fixed-point ranges, 4,096/6,144 km hand-offs and starport land_at_starport", status: "done", version: "v0.82" },
         { id: "gameplay-23", title: "New-game pad spawn safety: SpawnOptions, no forced near-player pirate, landed freeze", status: "done", version: "v0.83" },
         { id: "gameplay-24", title: "Unlawful-fire fines, witness jurisdiction, wanted/alert and F655 debt refusal", status: "done", version: "v0.84" },
-        { id: "gameplay-25", title: "F1104 death hold, F1098 escape craft, capsule launch and GAME OVER strings", status: "done", version: "v0.85" },
-        { id: "gameplay-26", title: "Saker Mk III default arm, F2 loadout and start records", status: "done", version: "v0.90" },
+        { id: "gameplay-25", title: "F1104 death hold, F1098 escape craft, capsule launch and GAME OVER strings", status: "in-progress", version: "reopened-source-audit" },
+        { id: "gameplay-26", title: "Saker Mk III default arm, F2 loadout and start records", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-27", title: "Escape F224 order, F4 pad services, three-body pad and 120-frame grace", status: "done", version: "v0.91" },
         { id: "gameplay-28", title: "Mission-gated Thargoid traffic, DATA_006197 models and F774 lasers", status: "done", version: "v0.92" },
         { id: "gameplay-29", title: "Persistent hyperspace destination, H jump and F908/F909 gates", status: "done", version: "v0.93" },
@@ -183,13 +214,13 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-31", title: "ECM/naval ECM, F719 effect, decoys and the F10 missile view", status: "done", version: "v0.95" },
         { id: "gameplay-32", title: "Seven-category fitting, capacity/drive sync and old-save drive migration", status: "done", version: "v1.01" },
         { id: "gameplay-33", title: "Black market, F640 trap, F233 smuggling scan and F236 recording", status: "done", version: "v1.02" },
-        { id: "gameplay-34", title: "Subsystem damage, F938/F929 repair rows and crash damage", status: "done", version: "v1.03" },
+        { id: "gameplay-34", title: "Subsystem damage, F938/F929 repair rows and crash damage", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-35", title: "Mission state, BBS accept/complete/expire, journal/comms/military pages", status: "done", version: "v1.05" },
         { id: "gameplay-36", title: "F691 station-bay shuttles, bay release and MAX_SHIPS=9/MAX_BAY_SHIPS=3", status: "done", version: "v1.06" },
         { id: "gameplay-37", title: "NPC missile launches, chaff/ECM evasion and NPC pylon fit", status: "done", version: "v1.07" },
-        { id: "gameplay-38", title: "Runtime: module clock, source F3 map, F4 pad board and live pad speed/thrust", status: "done", version: "v1.11" },
-        { id: "gameplay-39", title: "Autopilot intercept bisection, slot law, hull detour and cancel", status: "done", version: "v1.12" },
-        { id: "gameplay-40", title: "Starport pad descent F741-F746/F652 with 0x59 geometry import", status: "done", version: "v1.13" },
+        { id: "gameplay-38", title: "Runtime module clock, source F3/F4 and landed/flight event routing", status: "in-progress", version: "reopened-source-audit" },
+        { id: "gameplay-39", title: "Source autopilot runtime: retire intercept/slot substitutes and verify cancel", status: "in-progress", version: "reopened-source-audit" },
+        { id: "gameplay-40", title: "Starport pad descent F741-F746/F652 with 0x59 geometry import", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-41", title: "F575 crash damage via F953 and source bounce flags", status: "done", version: "v1.14" }
       ]
     },
@@ -205,12 +236,12 @@ window.FFE_BURNDOWN = {
         { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "done", version: "v0.56" },
         { id: "ui-5", title: "Menu and text rendering for every screen", status: "in-progress", version: "v0.58" },
         { id: "ui-6", title: "Galaxy and system map screens", status: "done", version: "v0.48n" },
-        { id: "ui-7", title: "Intro and new-game flow", status: "done", version: "v0.64" },
+        { id: "ui-7", title: "Intro and new-game flow", status: "in-progress", version: "reopened-source-audit" },
         { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
         { id: "ui-9", title: "Options, key bindings screen", status: "done", version: "v0.48p" },
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "in-progress", version: "v0.71" },
         { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "in-progress", version: "v0.68" },
-        { id: "ui-12", title: "Hit particles, explosions and debris (F939/F942/F926)", status: "done", version: "v0.66" },
+        { id: "ui-12", title: "Hit particles, explosions and debris (F939/F942/F926)", status: "in-progress", version: "reopened-source-audit" },
         { id: "ui-13", title: "Ship labels at F1108's pen with F1584/F1598 top clipping", status: "done", version: "v0.75" },
         { id: "ui-14", title: "Navigation list geometry, markers, names and autopilot input", status: "done", version: "v0.77" },
         { id: "ui-15", title: "Message log layout, dated entries, scroll and km/h speed lines", status: "done", version: "v0.78" },
@@ -875,6 +906,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-26",
       remaining: 64,
       note: "Idle boot and services repaired: F994 mode 0x30 now selects F1011/F1012 parked handling, not gravity/collision integration; fixed the u8 absolute-position stamp alias after 256 frames. Enter/default start stays Gateway/Hope/Old Blackelk. Twelve-second idle plus subsequent climb regression passes. Pad-board mouse routing now accepts services buttons while Flight mode stays landed. No milestone count change."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 102,
+      note: "Owner source-parity audit: 24 new implementation items (8 P0), 14 done items reopened where live source equivalence is not established; remaining 64 -> 102. Confirmed F938 whole-seconds versus 49700-tics fuel/recharge bug, F1013 integration/order mismatch, orbital docking substitutes, source starting-view/death-camera gaps and broader RNG/NPC/save/jump changes. Audit and acceptance backlog only; no runtime fixes or source/asset changes in this commit. See docs/audits/gameplay-parity-2026-10-26.md."
     }
   ]
 };

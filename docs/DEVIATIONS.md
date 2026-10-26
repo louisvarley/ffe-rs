@@ -1,5 +1,16 @@
 # Deviations from the reference / original
 
+> **Current owner requirement — 26 October 2026:** original source gameplay;
+> Port Options are the only general permitted extension. Historical SIM/EXP
+> rows below describe prior decisions and implemented scaffolding. They are
+> not waivers for altered gameplay under this requirement. In particular the
+> 7 t start, prototype docking, separate gameplay RNG streams, simplified AI,
+> incomplete persistence and transition substitutes require removal or source
+> parity, not acceptance as finished. Any earlier explicitly requested input
+> guard must remain disclosed and be reconciled in PAR-06; no new exception is
+> inferred. See [the audit](audits/gameplay-parity-2026-10-26.md).
+
+
 This is the register of intentional differences between `ffe-rs` and the selected
 reference: **JJFFE 2.8a7** (owner decision, 2026-10-20).
 FFED3D/Aniso was the earlier proposal, not the approved baseline.

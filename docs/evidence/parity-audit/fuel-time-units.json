@@ -1,0 +1,16 @@
+{
+  "scenario": "F938-event-unit-audit",
+  "source_event_path": "F152 -> F151 event 6 -> F1007 -> F938 -> F929",
+  "source_second_divisor": 49710,
+  "port_frame_rate": 50,
+  "port_frame_tics": 994,
+  "mass": 28,
+  "up_thrust": 3270,
+  "initial_reserve": 536870912,
+  "source_cost_per_second": 178,
+  "port_cost_per_second": 8846600,
+  "inflation": 49700,
+  "source_constant_thrust_empty_seconds": 3016128.7191011235,
+  "port_constant_thrust_empty_seconds": 60.68669454931838,
+  "limits": "Static source/call-site and exact integer arithmetic evidence; continuous constant thrust assumption, no shots/refills/timewarp. Not a complete flight replay."
+}

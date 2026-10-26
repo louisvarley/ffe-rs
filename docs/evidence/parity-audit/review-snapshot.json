@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-26",
+  "head": "340ef30985cb3e98ca91a9fec2d114d097a95cde",
+  "dirty_review": true,
+  "files": {
+    "crates/ffe-rs/src/main.rs": "11c137ea4625a12c89259db13bbfd828c10d8c471f6c3a2f8485f2e6038a09ab",
+    "crates/ffe-rs/src/original_flight.rs": "ad98f61619ada20826e842049367362861becebfaa59b6519d005a05df5f67eb",
+    "crates/ffe-rs/src/navigation.rs": "bf77856ca19dd4df78832df87368ff8325c7b5872ef78c8fae260e4cda627968",
+    "crates/ffe-rs/src/flight.rs": "9f19dc42c9eb214136fe74122f8e0ad00a612b507eb49133bd74f1f1210e8011",
+    "crates/ffe-rs/src/death.rs": "3a6555ee470da0b923ddf98b0fa2cc5a6ea774f12f9ba3a3677f60c59943bffb",
+    "crates/ffe-rs/src/screen.rs": "1642ba5c79dd8caa762440963d9c516b38df7c19beafbf11c2bfa02b0ddf2190",
+    "crates/ffe-rs/src/model_viewer.rs": "47601bcc937f3ab14150ec546462bdb2c45c9bf04cf16363346cfe934cc6eec9",
+    "crates/ffe-rs/src/docking.rs": "d024bd6990f35c4f1ed757806916d2eec6bb4ba2df2deddc16261f2167a428b3",
+    "crates/ffe-core/src/npc.rs": "f816558b8d94f565dd963981e8605aa04d02145c4e2477edd45728ebc3a2efa8",
+    "crates/ffe-core/src/effects.rs": "79777cb85f7dd90d076f4d6d015d4dbc5bb6403e7d81177a3d1c0d20bb897280",
+    "crates/ffe-core/src/hyperspace.rs": "37c9eaf70baf04bfd836cbd389a41761ce9ba69a4871625df89f23251d8b334e"
+  }
+}

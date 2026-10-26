@@ -1,5 +1,18 @@
 # Port log
 
+## 2026-10-26 — owner source-gameplay parity audit and backlog
+
+Reviewed launch/docking/set speed, fuel/hyperjumps, the Hope starting view,
+player destruction and the main gameplay adapters. Confirmed F938 consumes
+whole-second event deltas in the original but per-frame physics tics in the
+live port; this can drain the internal reserve about 49,700 times too fast.
+Recorded additional source-order/integrator, contact, camera, RNG, NPC,
+persistence, new-game and jump differences without claiming them fixed.
+Added 24 work items with source/port references, priorities, dependencies and
+acceptance traces; reopened 14 done labels. Remaining 64 -> 102. Current
+acceptance is original gameplay apart from Port Options; old experimental
+deviations are not exemptions. Full report: docs/audits/gameplay-parity-2026-10-26.md.
+
 ## 2026-10-26 — Hope start and launch ground
 
 Fixed model-to-world terrain scaling from source scale offsets; restored the
