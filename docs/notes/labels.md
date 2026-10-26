@@ -22,8 +22,11 @@ Bitmap ids below 96 are the primary table; from 96 they are
 33x23, the navigation pair 25x25), not palettes of one image. `FUNC_000991`
 shows button 0x10 unconditionally and 0x11 only with the navigation-computer
 equipment bit (`[ship+0xc8]` bit 0x20); `FUNC_000261` draws each visible button's
-current image in table order. The icons face the right-hand cockpit recesses at
-the bottom of the 320x200 screen.
+current image in table order. It never shows 0x0f: no `F263` call in the
+executable names that record, so the hyperspace swirl (bitmap 153) is never a
+flight-page button — the record stays hidden and only its `DATA_007684` hot area
+(300-315) answers a click. The icons face the right-hand cockpit recesses at the
+bottom of the 320x200 screen.
 
 ## Text labels (`l`, action 0x6c)
 
@@ -117,10 +120,14 @@ was wrong.
 ## In ffe-rs
 
 - `console::RIGHT_BUTTONS` holds the three table rows; `screen::draw` blits
-  idle/lit images in table order. The labels button is lit while
-  `ConsoleState::labels` is set, the navigation button while the list is open.
-  The hyperspace image has no lit state in the original's code, so it is
-  always idle here.
+  idle/lit images in table order. The visible page is `F991`'s: 0x10 (labels)
+  always, 0x11 (navigation computer) only with equipment bit 5, and 0x0f
+  (hyperspace) never — the port showed all three until 2026-10-26, which put
+  the swirl (bitmap 153) on every flight and pad page. The labels button is lit
+  while `ConsoleState::labels` is set, the navigation button while the list is
+  open. The hyperspace image has no lit state in the original's code, so its
+  record is always idle; nothing draws it now, though `Click::Hyperspace`
+  (hot area 300-315, key `H`) still works.
 - `main.rs` maps `l` and the labels icon to `ConsoleState::labels`; the flag
   starts off, as the player flag does. `Screen::labels` carries the names and
   camera positions; `body_label_positions` applies F989's bounds and F1108's

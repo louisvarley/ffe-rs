@@ -146,6 +146,33 @@ fn the_right_hand_buttons_are_the_originals_table_entries() {
     assert_eq!(Click::Navigation.unported(), None);
     let console = ConsoleState::default();
     assert!(!console.labels && !console.navigation);
+    // F991 (`ffe.asm:73475-73488`) makes 0x10 visible unconditionally and 0x11
+    // only with the navigation computer (general bit 5). Record 0x0f's
+    // hyperspace swirl (bitmap 153) is never the target of an `F263` call, so
+    // the flight page must leave it hidden even though its hot area (300-315)
+    // still answers.
+    let mut page = ffe_rs::console::Console::new();
+    page.apply_flight(
+        ffe_rs::camera::ViewMode::Front,
+        &ConsoleState::default(),
+        &ffe_rs::console::ShipSystems::default(),
+    );
+    assert!(
+        !page.is_visible(0x0f),
+        "the hyperspace swirl is not a flight page button"
+    );
+    assert!(page.is_visible(0x10), "the labels button is always shown");
+    assert!(!page.is_visible(0x11), "0x11 needs the navigation computer");
+    page.apply_flight(
+        ffe_rs::camera::ViewMode::Front,
+        &ConsoleState::default(),
+        &ffe_rs::console::ShipSystems {
+            general: 1 << 5,
+            ..ffe_rs::console::ShipSystems::default()
+        },
+    );
+    assert!(page.is_visible(0x10) && page.is_visible(0x11));
+    assert!(!page.is_visible(0x0f));
 }
 
 #[test]

@@ -18,7 +18,7 @@ index order (`FUNC_000261`). The flight console shows:
 | Buttons | Where | What |
 |---|---|---|
 | 0x0b-0x0e | 107,164 / 91,165 / 70,166 / 60,172 | the screen buttons F4 (phone), F3 (map), F2 (clipboard), F1 (eye); F1 starts lit |
-| 0x26-0x2b | 40,192 / 41,187 / 43,180 / 44,173 / 45,165 / 48,158 | the **time acceleration meter**: a pause mark and five steps, grey with a red lit twin, one lit at a time |
+| 0x25 / 0x26-0x2b | 40,192 (0x25 and 0x26) / 41,187 / 43,180 / 44,173 / 45,165 / 48,158 | the **time acceleration meter**: the pause mark (0x26), five steps (0x27-0x2b) and, at the pause mark's own spot, the system menu's red block (0x25); grey with a red lit twin, one lit at a time |
 | 0x15-0x19 | 198,165 .. 125,163 | the view buttons (front, rear, turret, external, missile, combat), see `views.md` |
 | 0x0f-0x11 | 296,178 / 274,178 / 261,177 | the right-hand buttons: hyperspace (0x99/0xa8), text labels (0x9a/0xa9) and navigation computer (0x9b/0xaa); see `labels.md` |
 | 0x37-0x39 | 52,185 / 71,189 / 87,188 | the three ship lamps; 0x38/0x46 images follow `player+0xe9` bit 1, 0x39 lights with `e8 == 2` |
@@ -33,6 +33,30 @@ the game steps by (`DATA_009155`, `DATA_008868`) is scaled by it; the key time
 (`DATA_009122`) is a real-time accumulator, so steering stays responsive. The
 original also subtracts 0xc22e from `DATA_008808` on a step above 1x (not yet
 understood, not ported).
+
+### Stopping time (`F220`, `F224`)
+
+`F1439` (`ffe.asm:86154-86178`) shows records 0x26-0x2b on every flight/pad page;
+it does **not** show 0x25. Record 0x26's images are `243`/`252` — a grey and a red
+pair whose glyph is the two pause bars divided by a grey column — and 0x25's are
+`253`/`253`, a solid red block at the same 40,192 spot.
+
+`F220` stops time, calls `F207`, and sets 0x25 to image 1; that image is
+identical to 0x25's image 0, so its visual effect is radio-group 3's reset: the
+acceleration step 0x27-0x2b goes out. `F224` then finishes the page:
+
+| `F224` branch | Condition | Records |
+|---|---|---|
+| 1 (`18321-18332`) | time running, Escape | hide 0x25, show 0x26, image 1 → the red pause bars |
+| 2 (`18333-18348`) | time stopped, module-3 escape | same as 1: hide 0x25, show 0x26, image 1 |
+| 3 (`18357-18366`) | time stopped, Escape opens the system menu | hide 0x26, show 0x25, image 1 → the red block |
+
+So **pause lights 0x26 and leaves 0x25 hidden**; 0x25 is the system menu's own
+mark, not the pause mark. Resuming goes through `F217`/`F227`
+(`ffe.asm:18038-18070`, `18474-18492`), which light 0x27 + step and reset the
+radio group. The port's `ConsoleState::lit_step()` reproduces this: 0 while
+`paused`, else 1 + the acceleration step; the port's preference pages are drawn
+over the screen, so its 0x25 equivalent is not a console record.
 
 There is no speed or engine button in this build, and no key sets the engines-off
 bit: it is only set by combat mode. The set speed is keyboard only.

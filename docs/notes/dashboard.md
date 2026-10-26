@@ -162,8 +162,8 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 3 | Low palette / colour | `F1601` etc.; low palette asset | partial | `screen.rs:206-264`, `palette_rgb6` | Runtime upper palette and original text colours unknown (`STATUS.md` item 2) |
 | 4 | Screen buttons F4,F3,F2,F1 (0x0b-0x0e) | `DATA_005100` 0x0b-0x0e; `F261`; `F1439` | partial | `console.rs` table; `main.rs` F1/F2/F3/F4 clicks; `tests/console_table.rs` | F1 views, F2 status page, F3 map and F4 services (`F343`, from `0x2a`/`0x30`) are consumed; F5 writes "not ported" into the log. The DOS F2 key itself is not established; the console record is the original's |
 | 5 | View buttons front/rear/turret/external (0x15-0x18) | `F1001/F1002/F1003`; `views.md` | done (4 of 6) | `screen.rs:198-203,732-743`; `tests/views.rs` | Missile (0x14) and combat (0x13) hidden by absent equipment; turret shown only >2 mounts as original |
-| 6 | Time-acceleration meter 0x26-0x2b | `F208` `ffe.asm:17066`; `F1439` | done | `console.rs:19-28`; `screen.rs:725-730`; `tests/console.rs:14-74` | 0x25 duplicate pause mark not drawn; `DATA_008808 -= 0xc22e` quirk not ported |
-| 7 | Right-hand buttons 0x0f-0x12 / 0x00-0x0a | `DATA_005100`; hot areas 0x6e/0x6c/0x48; `NAVIGATION.md` | done (drawing) | `console_table.rs`; `console.rs` table draw; `main.rs` H/labels/nav clicks | Table-driven icons; hyperspace/labels/navigation are consumed; capsule and other unported actions keep only the transient note |
+| 6 | Time-acceleration meter 0x26-0x2b | `F208` `ffe.asm:17066`; `F1439`; `F224` | done | `console.rs:19-28`; `screen.rs:725-730`; `tests/console.rs:14-74` | Pause lights 0x26 (bitmap 252) as `F224`; 0x25 is the system menu's red block (bitmap 253) and is not drawn; `DATA_008808 -= 0xc22e` quirk not ported |
+| 7 | Right-hand buttons 0x0f-0x12 / 0x00-0x0a | `DATA_005100`; hot areas 0x6e/0x6c/0x48; `NAVIGATION.md` | done (drawing) | `console_table.rs`; `console.rs` table draw; `main.rs` H/labels/nav clicks | Table-driven icons; `F991` shows only 0x10 and (with the navigation computer) 0x11, so 0x0f is hidden; hyperspace/labels/navigation are consumed; capsule and other unported actions keep only the transient note |
 | 8 | Autopilot/STOP/TARGET buttons | none (port addition) | removed | — | The port block that held them is retired; the autopilot indication is the original F1099 line and lamp 0x47 |
 | 9 | Button table/state engine (82 records, radios, visibility) | `DATA_005100` `ffedat.asm:4601`; `F261/262/263/264` `ffe.asm:20336-20490` | done | `console_table.rs` (82 records, generated), `console.rs` (`F261` draw, `F262` radio reset, `F263/264`), `tests/console_table.rs` | Byte-exact table; flight-page visibility derived from view/meter/labels/systems |
 | 10 | Three bar gauges | `F270` `ffe.asm:20554-20622` | done | `combat.rs` (`GAUGE_BITMAPS`), `screen.rs` `draw_gauges`, `laser::gauge_height`; `combat_view` local frames | Energy (`+0x11e`), heat (`+0xea`) and the third (`DATA_008921`, always zero) drawn at x249/242/237; the original art is secondary 179/178/177 |
@@ -268,8 +268,8 @@ idx  x   y   bitmaps                                  vis cur radio
 22  162 163 198/209                                   0   0   1
 23  142 163 199/210                                   0   0   1
 24  125 163 200/211                                   0   0   1
-25   40 192 253/253                                   0   0   3   pause duplicate
-26   40 192 243/252                                   0   0   3   pause mark
+25   40 192 253/253                                   0   0   3   system menu block (F224 #3)
+26   40 192 243/252                                   0   0   3   pause mark (F224 #1)
 27   41 187 242/251                                   0   0   3   1x
 28   43 180 241/250                                   0   0   3   10x
 29   44 173 240/249                                   0   0   3   100x

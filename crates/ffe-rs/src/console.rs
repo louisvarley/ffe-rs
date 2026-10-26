@@ -119,6 +119,7 @@ pub const MAP_EXTRA_HOT_AREA: (i32, i32, i32, i32) = (268, 156, 319, 177);
 /// navigation computer 0x9b/0xaa at 261,177. Their hot areas (`DATA_007684`)
 /// are 15 pixels wide and skip the artwork's left edge: 300-315, 280-295 and
 /// 265-280 respectively, at y 178-197 (177-196 for the navigation computer).
+/// `F991` shows only 0x10 and 0x11, so 0x0f is a hot area with no visible icon.
 pub const RIGHT_BUTTONS: [(i32, i32, u16, u16, Click); 3] = [
     (296, 178, 0x99, 0xa8, Click::Hyperspace),
     (274, 178, 0x9a, 0xa9, Click::Labels),
@@ -148,7 +149,15 @@ pub struct ConsoleState {
 }
 
 impl ConsoleState {
-    /// The meter step that is lit: the pause mark, or the acceleration's step.
+    /// The meter step that is lit, as an offset from record 0x26: 0 while
+    /// paused, else 1 + the acceleration step.
+    ///
+    /// `F208` (`ffe.asm:17137-17186`) lights 0x27 + the 1x..10000x step, so the
+    /// five acceleration marks are 0x27-0x2b. `F224`'s stop-time branch
+    /// (`ffe.asm:18321-18332`) hides 0x25, shows 0x26 and gives it image 1 — the
+    /// light `243`/`252` pair, whose lit image is the red pause bars at 40,192.
+    /// Record 0x25 (bitmaps `253`/`253`, a red block) is shown only while the
+    /// system menu is open (`ffe.asm:18357-18366`), never by the flight page.
     pub fn lit_step(&self) -> usize {
         if self.paused {
             0
@@ -624,11 +633,13 @@ impl Console {
             self.set_image(id, 0);
         }
         self.set_image(0x26 + console.lit_step(), 1);
-        // The right-hand buttons 0x0f-0x11 (their images are the original's
-        // labels/navigation on states; hyperspace has no lit twin).
-        for id in 0x0fusize..=0x11 {
-            self.show(id);
-        }
+        // The right-hand buttons' images: labels image 1 while `l` is on, the
+        // navigation computer image 1 while its list is open. F991
+        // (`ffe.asm:73475-73488`) shows 0x10 unconditionally and 0x11 only with
+        // the navigation computer, and never shows record 0x0f: it is the
+        // hyperspace swirl (bitmap 153), which no `F263` call in the executable
+        // names, so the flight page leaves it hidden. `apply_view_row` below is
+        // F991's own 0x10/0x11 handling, so neither is shown here.
         self.set_image(0x10, u8::from(console.labels));
         self.set_image(0x11, u8::from(console.navigation));
         self.apply_view_row(view, systems, console);
@@ -754,6 +765,56 @@ mod tests {
         // F969's extra area is recorded but is not one of the console's clicks.
         let (x0, y0, x1, y1) = MAP_EXTRA_HOT_AREA;
         assert_eq!(super::click((x0 + x1) / 2, (y0 + y1) / 2), None);
+    }
+
+    #[test]
+    fn f224s_pause_mark_is_the_meters_bottom_record() {
+        // F224's stop-time branch (`ffe.asm:18321-18332`) hides 0x25, shows
+        // 0x26 and gives it image 1: the light 243/252 pair, whose lit image is
+        // the red pause bars at 40,192. F220's `ConsoleSetButtonImage(0x25, 1)`
+        // (`ffe.asm:18240-18245`) is radio-group 3's reset, so the acceleration
+        // step goes out while paused.
+        let paused = ConsoleState {
+            paused: true,
+            acceleration: 2,
+            ..ConsoleState::default()
+        };
+        let mut console = Console::new();
+        console.apply_flight(
+            crate::camera::ViewMode::Front,
+            &paused,
+            &ShipSystems::default(),
+        );
+        assert!(!console.is_visible(0x25), "0x25 is the system menu's mark");
+        assert!(console.is_visible(0x26), "F224 shows 0x26 while paused");
+        assert_eq!(console.image(0x26), Some(252), "the red pause bars");
+        for id in 0x27usize..=0x2b {
+            assert_eq!(
+                console.image(id),
+                Some(BAR[id - 0x26].2),
+                "{id:#x} is grey while paused"
+            );
+        }
+        // Running: the acceleration's step is lit (F208's 0x27 + step) and the
+        // pause mark keeps its grey image.
+        let running = ConsoleState {
+            acceleration: 2,
+            ..ConsoleState::default()
+        };
+        console.apply_flight(
+            crate::camera::ViewMode::Front,
+            &running,
+            &ShipSystems::default(),
+        );
+        assert!(!console.is_visible(0x25));
+        assert_eq!(console.image(0x26), Some(243));
+        assert_eq!(console.image(0x28), Some(241), "10x is grey");
+        assert_eq!(console.image(0x29), Some(249), "100x is lit");
+        // The flight page never shows the hyperspace record 0x0f: no `F263`
+        // call names it (F991 shows only 0x10 and, with the navigation
+        // computer, 0x11).
+        assert!(!console.is_visible(0x0f), "the hyperspace swirl is hidden");
+        assert!(console.is_visible(0x10), "the labels button is shown");
     }
 
     #[test]
