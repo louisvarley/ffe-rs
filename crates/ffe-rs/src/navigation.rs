@@ -1152,6 +1152,9 @@ pub struct Navigator {
     pub docked: Option<usize>,
     /// Each station's traffic record (F654 and friends), made when first needed.
     traffic: HashMap<usize, Starport>,
+    /// F381 has granted launch permission at the open-air starport (the launch action
+    /// needs it).
+    pub launch_cleared: bool,
     /// The NPC traffic of the current system (F688/F635), ticked in flight.
     pub ships: Vec<NpcShip>,
     /// The space-dust field (F1035/F769), ticked in flight and drawn by the
@@ -1952,6 +1955,7 @@ impl Navigator {
             altitude: i32::MAX,
             docked: None,
             traffic: HashMap::new(),
+            launch_cleared: false,
             ships: Vec::new(),
             dust: dust::Field::new(seed.0, seed.1),
             legal: npc::Legal::default(),
@@ -2947,6 +2951,36 @@ impl Navigator {
         true
     }
 
+    /// Whether the launch action (action 9) must wait for F381's permission: the ship is
+    /// on an open-air starport's pad (state 0x30) and has not been cleared.
+    pub fn launch_needs_permission(&self) -> bool {
+        let on_starport = self
+            .landed_body()
+            .or(self.docked)
+            .and_then(|index| self.bodies.get(index))
+            .is_some_and(|b| b.kind == Kind::Starport);
+        on_starport && (self.on_pad() || self.landed.is_some()) && !self.launch_cleared
+    }
+
+    /// F381: ask the open-air starport's traffic control (F654) for launch permission.
+    /// The ship stays on its pad; the launch action (engines on) starts the climb.
+    pub fn request_launch(&mut self) -> Result<String, String> {
+        let index = self
+            .landed_body()
+            .or(self.docked)
+            .or_else(|| first_station(&self.bodies))
+            .ok_or("No station to launch from.")?;
+        if self.takeoff.is_some() {
+            return Err("Already launching.".to_owned());
+        }
+        if !self.starport(index).request(PLAYER) {
+            return Err("Launch refused: traffic control is busy.".to_owned());
+        }
+        self.docked = Some(index);
+        self.launch_cleared = true;
+        Ok("Launch permission granted. Click the engines to turn them on.".to_owned())
+    }
+
     /// Ask the station the player is docked at for permission to launch (F654) and
     /// begin the launch stages. `Err` says why not.
     pub fn begin_launch(&mut self) -> Result<(), String> {
@@ -2970,6 +3004,7 @@ impl Navigator {
             .is_some_and(|b| b.kind == Kind::Starport)
         {
             self.takeoff = Some(Takeoff::taking_off());
+            self.launch_cleared = false;
             return Ok(());
         }
         self.sequence = Some(Sequence {
@@ -3140,6 +3175,7 @@ impl Navigator {
             .begin_launch()
             .ok_or_else(|| "Not landed on a surface.".to_owned())?;
         self.takeoff = Some(takeoff);
+        self.launch_cleared = false;
         self.landed = None;
         Ok(())
     }

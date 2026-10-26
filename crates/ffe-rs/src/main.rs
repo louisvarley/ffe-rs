@@ -2593,9 +2593,46 @@ fn run() -> Result<(), String> {
                     // flight `L` is the original's text-label toggle instead.
                     let landed = nav.as_ref().and_then(|nav| nav.landed_state());
                     let pad_landed = nav.as_ref().is_some_and(|nav| nav.on_pad());
-                    let launch =
-                        pressed(Key::L) || pressed(Key::Tab) || (capture_start && frames == 70);
-                    if launch && (landed.is_some() || pad_landed) {
+                    // Action 9 (engines on) is also a click on either engine nozzle of
+                    // the parked ship's dashboard page (`DATA_007258`).
+                    let systems_click = if nav.as_ref().is_some_and(|nav| nav.landed_view()) {
+                        click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
+                    } else {
+                        None
+                    };
+                    let launch = pressed(Key::L)
+                        || pressed(Key::Tab)
+                        || systems_click == Some(ffe_rs::console::SystemsClick::EnginesOn)
+                        || (capture_start && frames == 70);
+                    // `u` (action 0x75), or a click on a wing of the page: the undercarriage.
+                    // F1056 ignores it while the takeoff's climb (0x24) is running.
+                    if pressed(Key::U)
+                        || systems_click == Some(ffe_rs::console::SystemsClick::Undercarriage)
+                    {
+                        let climbing =
+                            nav.as_ref().and_then(|nav| nav.takeoff_state()) == Some(0x24);
+                        if let Some(model) = original.as_mut().filter(|_| !climbing) {
+                            model.set_gear(!model.gear_down());
+                            message = if model.gear_down() {
+                                "Undercarriage down.".to_owned()
+                            } else {
+                                "Undercarriage up.".to_owned()
+                            };
+                        }
+                    }
+                    if launch
+                        && (landed.is_some() || pad_landed)
+                        && nav
+                            .as_ref()
+                            .is_some_and(|nav| nav.launch_needs_permission())
+                    {
+                        // F1056 action 9 at state 0x30 without F381's permission: the
+                        // original shows its message and the ship stays on the pad.
+                        pending_log.add(
+                            Source::Launch,
+                            "Request launch permission first (services, phone icon).",
+                        );
+                    } else if launch && (landed.is_some() || pad_landed) {
                         if let Some(nav) = nav.as_mut() {
                             if landed.is_some() {
                                 match nav.begin_surface_launch() {
@@ -3110,7 +3147,28 @@ fn run() -> Result<(), String> {
                 if let Some(station_action) = dock_action {
                     match station_action {
                         StationAction::Launch => {
-                            if let Some(nav) = nav.as_mut() {
+                            // F381 at an open-air starport only asks F654: the ship stays
+                            // on its pad and the engines (action 9) start the climb.
+                            let pad_request = nav.as_ref().is_some_and(|nav| {
+                                (nav.on_pad() || nav.landed_body().is_some())
+                                    && nav
+                                        .landed_body()
+                                        .or(nav.docked)
+                                        .and_then(|index| nav.bodies.get(index))
+                                        .is_some_and(|b| b.kind == NavKind::Starport)
+                            });
+                            if pad_request {
+                                if let Some(nav) = nav.as_mut() {
+                                    match nav.request_launch() {
+                                        Ok(text) => {
+                                            pending_log.add(Source::Launch, text);
+                                            pad_board = false;
+                                            sound.play(Cue::UiBeep);
+                                        }
+                                        Err(error) => message = error,
+                                    }
+                                }
+                            } else if let Some(nav) = nav.as_mut() {
                                 // F233's event-5 customs scan runs before the
                                 // launch request (the original triggers it from
                                 // the special-slot write that enters flight).
@@ -4573,7 +4631,8 @@ fn run() -> Result<(), String> {
                 .map(|model| model.set_speed_metres().round() as i32),
             labels,
             navigation: nav.as_ref().is_some_and(|nav| nav.view == NavView::Places),
-            status_page: status_page && status_section == 0,
+            status_page: (status_page && status_section == 0)
+                || nav.as_ref().is_some_and(|nav| nav.landed_view()),
         };
         // Launching from the station puts the ship out from it in this system, on the
         // original flight model (which the navigation moves).

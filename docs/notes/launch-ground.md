@@ -44,3 +44,19 @@ reproduces an ordinary 1x launch. Player acceleration controls are unchanged.
 This establishes the reported Hope start/first-three-seconds regression and
 near-pad source arithmetic. It is not a pixel-identical whole-game claim;
 whole-frame lighting/depth and other planets still require broader traces.
+
+## Launch from the pad: permission, engines, undercarriage (2026-10-26)
+
+From `ffe.asm` (F1056's handlers, the `DATA_007258` hot areas): services' Launch
+Request (F381) only asks F654 for permission at an open-air starport; the ship stays
+on its pad. The climb (state `0x24`, F1013) starts with **action 9**, which on the
+parked ship's dashboard page (the ship diagram) is a click on either engine nozzle
+(0..13, 186..196 and 28..40, 186..196). Action 9 at state `0x30` without permission
+only shows F349's message (`0x9938`). Action `0x75` (`u`, or a click on a wing:
+0..18, 170..184 and 33..43, 170..184) toggles the undercarriage, except while the
+`0x24` climb runs. After the hand-off the player flies: gear up, pitch up, speed.
+
+ffe-rs: `Navigator::request_launch` / `launch_needs_permission`, `console::systems_click`,
+`OriginalFlight::set_gear` (the landing test reads it). Launch Request logs "Launch
+permission granted. Click the engines to turn them on."; Tab/L or an engine click
+without it logs "Request launch permission first (services, phone icon)."

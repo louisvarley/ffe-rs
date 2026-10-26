@@ -67,6 +67,8 @@ pub struct OriginalFlight {
     /// seat and F612's radius distance: the descent aims at the pad's surface
     /// point raised by it, so the collision sphere touches rather than sinks.
     collision_radius: i64,
+    /// The undercarriage (`+0x9e` word 1): down until the player raises it (`u`).
+    gear_down: bool,
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -185,10 +187,20 @@ impl OriginalFlight {
             pad_world: None,
             guidance: None,
             collision_radius: 0,
+            gear_down: true,
         }
     }
 
     /// The same model at a time acceleration step.
+    pub fn gear_down(&self) -> bool {
+        self.gear_down
+    }
+
+    /// The undercarriage toggle (`u`, action 0x75).
+    pub fn set_gear(&mut self, down: bool) {
+        self.gear_down = down;
+    }
+
     pub fn with_time_acceleration(mut self, step: usize) -> Self {
         self.set_time_acceleration(step);
         self
@@ -296,8 +308,8 @@ impl OriginalFlight {
         world.live[2] = true;
         world.physical[2] = true;
         let mut words = Words::default();
-        // The landing gear is down (`+0x9e` word 1 = 0xffff).
-        words.0[1] = 0xffff;
+        // The landing gear (`+0x9e` word 1 = 0xffff when down).
+        words.0[1] = if self.gear_down { 0xffff } else { 0 };
         world.body[1] = Body {
             position: vector,
             velocity: motion.velocity,
@@ -816,9 +828,9 @@ impl OriginalFlight {
         world.physical[2] = true;
         let motion = self.player.motion;
         let mut words = Words::default();
-        // The landing gear is down (`+0x9e` word 1 = 0xffff): a slow, level touch
-        // lands instead of crashing.
-        words.0[1] = 0xffff;
+        // The landing gear (`+0x9e` word 1 = 0xffff when down): with it down a slow,
+        // level touch lands instead of crashing.
+        words.0[1] = if self.gear_down { 0xffff } else { 0 };
         world.body[1] = Body {
             position: vector,
             velocity: motion.velocity,
