@@ -45,10 +45,17 @@ pub const CLIP_TOP: usize = 158;
 pub const CLIP_BOTTOM: usize = 200;
 /// The five 8-pixel rows from y 159 to y 199.
 pub const VISIBLE_ROWS: usize = (CLIP_BOTTOM - TEXT_Y) / LINE_HEIGHT;
-/// `F273` clamps the scroll to 0x18 pixels.
+/// `F273` scrolls at most 0x18 pixels at a time toward older lines.
 pub const MAX_SCROLL: i32 = 0x18;
-/// `F273` auto-scrolls to the newest entry after 0x3cae6 tics.
+/// `F273`'s idle time before the window slides its message away: 0x3cae6
+/// `DATA_008799` tics, five game seconds.
 pub const AUTO_SCROLL_TICS: u32 = 0x3cae6;
+/// `F271`/`F273`'s resting scroll for `lines` CRs of the newest entry: the
+/// header and the entry's lines sit at the bottom of the five-row window.
+/// With no entry held (`DATA_005094` = -1) only the header is left showing.
+fn rest(lines: i32) -> i32 {
+    lines * LINE_HEIGHT as i32 - 0x18
+}
 
 /// Every producer of a log entry in the port. Port-only UI (unported button
 /// notices, view names, pause/status toggles, debug and capture text) has no
@@ -232,16 +239,44 @@ pub struct Line {
     pub header: bool,
 }
 
-/// The ten-entry ring (`DATA_008681`), the scroll word (`DATA_005096`) and its
-/// animation/auto-scroll state (`DATA_005092`/`DATA_008677`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// The ten-entry ring (`DATA_008681`) and `F273`'s scroll state.
+///
+/// The text is drawn from y `TEXT_Y - scroll` (`F272`'s `DATA_008684`), so a
+/// negative scroll moves it down the five-row window. A new entry slides the
+/// window until the header and the entry's lines fill its bottom; five game
+/// seconds later (`AUTO_SCROLL_TICS`) `F273` slides it on until only the
+/// date/time header is left, which is how a message leaves the console. A
+/// replace-flagged entry (a running readout) is held in view instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageLog {
     entries: VecDeque<Entry>,
-    /// Pixels the content is scrolled up from the newest position.
+    /// `DATA_005096`: pixels the text is moved up from y 159.
     scroll: i32,
-    /// Tics since the player last scrolled; `F273` returns to the newest at
-    /// `0x3cae6`.
+    /// `DATA_005092`: pixels left to slide, two a frame.
+    remaining: i32,
+    /// `DATA_008677`: the slide direction, +1 or -1.
+    direction: i32,
+    /// `DATA_005094`: the CRs of the held entry, -1 when none is held.
+    held: i32,
+    /// `DATA_008799 - DATA_005093`: tics since the last entry or scroll.
     idle: u32,
+    /// A new entry whose wrapped line count the next [`Self::tick`] measures
+    /// (`F271` wraps it at 0x78 pixels); `true` when it is replace-flagged.
+    fresh: Option<bool>,
+}
+
+impl Default for MessageLog {
+    fn default() -> Self {
+        Self {
+            entries: VecDeque::new(),
+            scroll: 0,
+            remaining: 0,
+            direction: 0,
+            held: -1,
+            idle: 0,
+            fresh: None,
+        }
+    }
 }
 
 impl MessageLog {
@@ -250,8 +285,8 @@ impl MessageLog {
         Self::default()
     }
 
-    /// `F271` (`flag 0`): append one entry, dropping the oldest beyond ten and
-    /// returning to the newest. Untagged; use [`Self::record`] for game events.
+    /// `F271` (`flag 0`): append one entry, dropping the oldest beyond ten.
+    /// Untagged; use [`Self::record`] for game events.
     pub fn push(&mut self, text: impl Into<String>, stamp: impl Into<String>) {
         self.insert(text, stamp, false, None);
     }
@@ -280,12 +315,15 @@ impl MessageLog {
     }
 
     /// `F271` with a NULL string: remove the newest entry only when it carries
-    /// the replace flag (`ffe.asm:20760-20783`). A normal entry stays.
+    /// the replace flag (`ffe.asm:20760-20792`). A normal entry stays. The
+    /// window is no longer held, so the idle slide takes the header down.
     pub fn clear_current(&mut self) -> bool {
         if self.entries.back().is_some_and(|entry| entry.replace) {
             self.entries.pop_back();
-            self.scroll = 0;
-            self.idle = 0;
+            self.held = -1;
+            if self.fresh.is_some() {
+                self.fresh = Some(false);
+            }
             true
         } else {
             false
@@ -336,7 +374,7 @@ impl MessageLog {
             }
             self.entries.push_back(entry);
         }
-        self.scroll = 0;
+        self.fresh = Some(replace);
         self.idle = 0;
     }
 
@@ -352,43 +390,73 @@ impl MessageLog {
         self.entries.is_empty()
     }
 
-    /// The scroll offset in pixels, 0 at the newest (top) position.
+    /// `DATA_005096`: pixels the text is moved up from y 159 (negative moves
+    /// it down).
     pub fn scroll(&self) -> i32 {
         self.scroll
     }
 
-    /// `F273`: scroll the log up or down by `pixels`, clamped to the content and
-    /// the original's 0x18-pixel limit. Any manual scroll restarts the idle
-    /// timer. Returns whether the offset changed. Positive values move the text
-    /// up and reveal older entries; the window is top-anchored like `F272`.
-    pub fn scroll_by(&mut self, pixels: i32, content_height: usize, _window: usize) -> bool {
-        let max = self.max_scroll(content_height);
-        let next = (self.scroll + pixels).clamp(0, max);
-        let changed = next != self.scroll;
-        self.scroll = next;
+    /// Slide toward `target` (`F271`/`F273`: `DATA_005092` and `DATA_008677`).
+    fn aim(&mut self, target: i32) {
+        self.remaining = (target - self.scroll).abs();
+        self.direction = if target < self.scroll { -1 } else { 1 };
+    }
+
+    /// `F273`'s action 0xf (Page Up): when no slide is running and older lines
+    /// are below the window, slide up toward them, at most 0x18 pixels unless
+    /// fewer than 0x20 are left. `content_lines` is `F272`'s CR count
+    /// (`DATA_008685`). Any scroll key restarts the idle time.
+    pub fn scroll_older(&mut self, content_lines: usize) -> bool {
+        let last = content_lines as i32 * LINE_HEIGHT as i32 - LINE_HEIGHT as i32;
+        let moved = self.remaining == 0 && last > self.scroll;
+        if moved {
+            let left = last - self.scroll;
+            self.remaining = if left < 0x20 { left } else { MAX_SCROLL };
+            self.direction = 1;
+        }
         self.idle = 0;
-        changed
+        moved
     }
 
-    /// The furthest the content can scroll: `F273` allows up to
-    /// `line_count * 8 - 8`, capped at its 0x18. `window` is accepted by
-    /// `scroll_by` for the callers/tests that still pass it but does not limit
-    /// the original's scroll.
-    pub fn max_scroll(&self, content_height: usize) -> i32 {
-        let last_line = content_height.saturating_sub(LINE_HEIGHT) as i32;
-        last_line.min(MAX_SCROLL)
+    /// `F273`'s action 0xe (Page Down): when no slide is running and the text
+    /// is above -0x18, slide down by 0x20 (or to -0x20 from a negative scroll).
+    pub fn scroll_newer(&mut self) -> bool {
+        let moved = self.remaining == 0 && self.scroll > -0x18;
+        if moved {
+            self.remaining = if self.scroll < 0 {
+                self.scroll + 0x20
+            } else {
+                0x20
+            };
+            self.direction = -1;
+        }
+        self.idle = 0;
+        moved
     }
 
-    /// `F273`'s auto-scroll: after 0x3cae6 tics with no manual scroll, return to
-    /// the newest entry.
-    pub fn tick(&mut self, tics: u32) {
-        if self.scroll == 0 {
-            return;
+    /// One `F273` frame: measure a new entry (`F271`'s target), slide two
+    /// pixels, then after `AUTO_SCROLL_TICS` idle tics slide to the held
+    /// entry's rest, or below the last entry when none is held.
+    pub fn tick(&mut self, tics: u32, font: &crate::indexed::BitmapFont) {
+        if let Some(replace) = self.fresh.take() {
+            let lines = self
+                .entries
+                .back()
+                .map_or(1, |entry| wrap(font, &entry.text, ENTRY_WRAP).len())
+                as i32
+                - 1;
+            self.held = if replace { lines } else { -1 };
+            self.aim(rest(lines));
+        }
+        for _ in 0..2 {
+            if self.remaining != 0 {
+                self.remaining -= 1;
+                self.scroll += self.direction;
+            }
         }
         self.idle = self.idle.saturating_add(tics);
-        if self.idle >= AUTO_SCROLL_TICS {
-            self.scroll = 0;
-            self.idle = 0;
+        if self.idle > AUTO_SCROLL_TICS && self.scroll != rest(self.held) {
+            self.aim(rest(self.held));
         }
     }
 
@@ -442,13 +510,6 @@ impl MessageLog {
             );
         }
         lines
-    }
-
-    /// The first line index and its pixel offset for the current scroll. `F272`
-    /// draws line 0 at `TEXT_Y - scroll`, so the window starts at the top.
-    pub fn first_line(&self) -> (usize, i32) {
-        let scroll = self.scroll.max(0) as usize;
-        (scroll / LINE_HEIGHT, (scroll % LINE_HEIGHT) as i32)
     }
 }
 
@@ -613,63 +674,90 @@ mod tests {
         assert!(font.width(&lines[0].text).unwrap() <= WRAP);
     }
 
+    /// Run `frames` of F273 with `tics` each.
+    fn frames(log: &mut MessageLog, font: &crate::indexed::BitmapFont, frames: usize, tics: u32) {
+        for _ in 0..frames {
+            log.tick(tics, font);
+        }
+    }
+
     #[test]
-    fn the_window_is_top_anchored_at_the_header() {
+    fn the_header_leads_the_newest_entry_and_older_dated_entries() {
         let font = font();
         let mut log = MessageLog::new();
         for n in 0..10 {
             log.push(format!("message {n}"), "1-Jan-3250");
         }
         let lines = log.lines(&font, "1-Jan-3250 12:00:00");
-        assert_eq!(log.first_line(), (0, 0));
         assert_eq!(lines[0].text, "1-Jan-3250 12:00:00");
         assert_eq!(lines[1].text, "message 9");
-        // A five-row window shows the header, the newest entry, its date line
-        // and the two lines of the next older entry.
-        assert_eq!(VISIBLE_ROWS, 5);
+        assert!(lines[2].header);
         assert_eq!(lines[3].text, "message 8");
-        assert!(lines[4].header);
+        assert_eq!(VISIBLE_ROWS, 5);
     }
 
     #[test]
-    fn scroll_clamps_and_auto_scrolls_after_f273s_ticks() {
+    fn a_new_message_slides_in_then_leaves_after_five_game_seconds() {
+        let font = font();
+        let mut log = MessageLog::new();
+        log.push("Landed at Old Blackelk.", "1-Jan-3200 12:00");
+        // F271: the one-line entry rests at -0x18, header and text in the
+        // window's bottom two rows, sliding two pixels a frame.
+        log.tick(0, &font);
+        assert_eq!(log.scroll(), -2);
+        frames(&mut log, &font, 20, 0);
+        assert_eq!(log.scroll(), -0x18);
+        // F273: at 0x3cae6 tics it is still shown; past them it slides down to
+        // -0x20, leaving only the date/time header.
+        frames(&mut log, &font, 1, AUTO_SCROLL_TICS);
+        assert_eq!(log.scroll(), -0x18);
+        frames(&mut log, &font, 10, 1);
+        assert_eq!(log.scroll(), -0x20);
+        // The next message brings the window back.
+        log.push("Launch permission granted.", "1-Jan-3200 12:01");
+        frames(&mut log, &font, 10, 0);
+        assert_eq!(log.scroll(), -0x18);
+    }
+
+    #[test]
+    fn a_replace_flagged_readout_is_held_until_cleared() {
+        let font = font();
+        let mut log = MessageLog::new();
+        log.update("Set: 100 km", "1-Jan-3200 12:00");
+        frames(&mut log, &font, 20, 0);
+        frames(&mut log, &font, 20, AUTO_SCROLL_TICS);
+        assert_eq!(log.scroll(), -0x18);
+        assert!(log.clear_current());
+        frames(&mut log, &font, 10, 1);
+        assert_eq!(log.scroll(), -0x20);
+    }
+
+    #[test]
+    fn page_up_slides_toward_older_lines_and_page_down_back() {
+        let font = font();
         let mut log = MessageLog::new();
         for n in 0..10 {
             log.push(format!("message {n}"), "1-Jan-3250");
         }
-        // Ten entries plus header: 11 lines = 88 pixels; F273 caps at 0x18.
-        let content = 11 * LINE_HEIGHT;
-        assert_eq!(log.max_scroll(content), MAX_SCROLL);
-        assert!(log.scroll_by(10_000, content, VISIBLE_ROWS * LINE_HEIGHT));
-        assert_eq!(log.scroll(), MAX_SCROLL);
-        log.tick(AUTO_SCROLL_TICS - 1);
-        assert_eq!(log.scroll(), MAX_SCROLL);
-        log.tick(1);
+        frames(&mut log, &font, 20, 0);
+        let lines = log.lines(&font, "1-Jan-3250 12:00:00").len();
+        assert!(log.scroll_older(lines));
+        // A slide in progress ignores the key.
+        assert!(!log.scroll_older(lines));
+        frames(&mut log, &font, 12, 0);
         assert_eq!(log.scroll(), 0);
-    }
-
-    #[test]
-    fn scroll_moves_the_line_zero_origin() {
-        let mut log = MessageLog::new();
-        for n in 0..10 {
-            log.push(format!("message {n}"), "1-Jan-3250");
-        }
-        let content = 11 * LINE_HEIGHT;
-        let window = VISIBLE_ROWS * LINE_HEIGHT;
-        assert!(log.scroll_by(10, content, window));
-        // Ten pixels is one line and two pixels: the header moves above the
-        // clip and the next line starts at 159 - 2.
-        assert_eq!(log.first_line(), (1, 2));
-    }
-
-    #[test]
-    fn f273_allows_a_two_line_log_to_scroll_one_line() {
-        let mut log = MessageLog::new();
-        log.push("Landed at Olympus Village.", "1-Jan-3250 12:26:56");
-        let content = 2 * LINE_HEIGHT;
-        assert_eq!(log.max_scroll(content), LINE_HEIGHT as i32);
-        assert!(log.scroll_by(8, content, VISIBLE_ROWS * LINE_HEIGHT));
-        assert_eq!(log.first_line(), (1, 0));
+        assert!(log.scroll_older(lines));
+        frames(&mut log, &font, 12, 0);
+        assert_eq!(log.scroll(), MAX_SCROLL);
+        // Page Down: 0x20 down from a non-negative scroll.
+        assert!(log.scroll_newer());
+        frames(&mut log, &font, 16, 0);
+        assert_eq!(log.scroll(), MAX_SCROLL - 0x20);
+        // At or below -0x18 it stops.
+        assert!(log.scroll_newer());
+        frames(&mut log, &font, 16, 0);
+        assert_eq!(log.scroll(), -0x20);
+        assert!(!log.scroll_newer());
     }
 
     #[test]
@@ -764,6 +852,7 @@ mod tests {
 
     #[test]
     fn the_channel_keeps_the_ten_entry_ring_and_resets_scroll() {
+        let font = font();
         let mut log = MessageLog::new();
         let mut channel = Channel::default();
         for n in 0..12 {
@@ -777,14 +866,16 @@ mod tests {
         assert_eq!(log.entries()[0].text, "message 2");
         assert_eq!(log.entries()[9].text, "message 11");
 
-        let content = 11 * LINE_HEIGHT;
-        assert!(log.scroll_by(10_000, content, VISIBLE_ROWS * LINE_HEIGHT));
-        assert_eq!(log.scroll(), MAX_SCROLL);
+        frames(&mut log, &font, 20, 0);
+        assert!(log.scroll_older(11 * 3));
+        frames(&mut log, &font, 20, 0);
+        assert_eq!(log.scroll(), 0);
         channel.post(
             &mut log,
             Event::new(Source::Combat, "message 12"),
             "1-Jan-3250 12:00:01",
         );
-        assert_eq!(log.scroll(), 0, "a new entry returns to the newest");
+        frames(&mut log, &font, 20, 0);
+        assert_eq!(log.scroll(), -0x18, "a new entry slides back to the newest");
     }
 }

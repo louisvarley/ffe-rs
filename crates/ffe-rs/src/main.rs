@@ -6293,11 +6293,12 @@ fn run() -> Result<(), String> {
                 sound.play(Cue::Message);
             }
         }
-        // F273's auto-scroll timer runs on the world tics.
+        // F273's idle timer runs on DATA_008799, the accelerated game tics.
+        // TIME_ACCELERATION is DATA_009122's tics per 1/50 s frame (994 at 1x).
         let log_tics =
             (elapsed * 50.0 * f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])).max(0.0)
                 as u32;
-        screen.messages.tick(log_tics);
+        screen.tick_messages(log_tics);
         // F273's Page Up/Down scroll the message log while flying (the original's
         // keyboard map: "PgUp/Dn Scroll the Message Log").
         if active
@@ -6308,10 +6309,10 @@ fn run() -> Result<(), String> {
             && model_lab.is_none()
             && model_viewer.is_none()
         {
-            let older = i32::from(inp.is_key_pressed(Key::PageUp, KeyRepeat::Yes)) * 8;
-            let newer = i32::from(inp.is_key_pressed(Key::PageDown, KeyRepeat::Yes)) * 8;
+            let older = inp.is_key_pressed(Key::PageUp, KeyRepeat::Yes);
+            let newer = inp.is_key_pressed(Key::PageDown, KeyRepeat::Yes);
             if older != newer {
-                screen.scroll_messages(older - newer);
+                screen.scroll_messages(older);
             }
         }
         if launching_scene {

@@ -103,14 +103,18 @@ fn multi_entry_log_frame() {
     draw(&mut screen, ViewState::default());
     save(&screen, "log-multi.ppm");
 
-    // Scroll to the oldest: F273's 0x18 clamp moves the header off the top and
-    // the older entries into the window.
-    let content = screen
-        .messages
-        .lines(&screen_font(&cache), &screen.clock)
-        .len()
-        * ffe_rs::messages::LINE_HEIGHT;
-    assert!(screen.messages.scroll_by(10_000, content, 40));
+    // Scroll toward the oldest: from the newest's rest (-0x18), two of F273's
+    // 0x18 slides move the header off the top and older entries into view.
+    let settle = |screen: &mut Screen| {
+        for _ in 0..40 {
+            screen.tick_messages(0);
+        }
+    };
+    settle(&mut screen);
+    for _ in 0..2 {
+        assert!(screen.scroll_messages(true));
+        settle(&mut screen);
+    }
     assert_eq!(screen.messages.scroll(), ffe_rs::messages::MAX_SCROLL);
     draw(&mut screen, ViewState::default());
     save(&screen, "log-multi-scrolled.ppm");
@@ -221,8 +225,4 @@ fn port_only_clicks_and_view_changes_leave_the_log_clean() {
         );
         assert_clean(&screen, "view change");
     }
-}
-
-fn screen_font(cache: &ffe_content::VerifiedCache) -> ffe_rs::indexed::BitmapFont {
-    ffe_rs::indexed::BitmapFont::new(cache.asset("base:font/main").unwrap()).unwrap()
 }

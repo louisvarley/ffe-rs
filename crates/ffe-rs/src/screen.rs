@@ -1383,14 +1383,20 @@ impl Screen {
         self.text_bytes_rows(x, y, &bytes, colour, top, bottom);
     }
 
-    /// `F273`'s Page Up/Down: scroll the message log by `pixels` (`F273`'s
-    /// actions 0xe/0xf move in 8-pixel steps). Positive values reveal older
-    /// entries, negative return to the newest.
-    pub fn scroll_messages(&mut self, pixels: i32) -> bool {
-        let content =
-            self.messages.lines(&self.font, &self.clock).len() * crate::messages::LINE_HEIGHT;
-        let window = crate::messages::VISIBLE_ROWS * crate::messages::LINE_HEIGHT;
-        self.messages.scroll_by(pixels, content, window)
+    /// `F273`'s Page Up/Down (actions 0xf/0xe): `older` slides the log up
+    /// toward older lines, otherwise down toward the newest.
+    pub fn scroll_messages(&mut self, older: bool) -> bool {
+        if older {
+            let lines = self.messages.lines(&self.font, &self.clock).len();
+            self.messages.scroll_older(lines)
+        } else {
+            self.messages.scroll_newer()
+        }
+    }
+
+    /// One `F273` frame of the message log with `tics` of `DATA_008799`.
+    pub fn tick_messages(&mut self, tics: u32) {
+        self.messages.tick(tics, &self.font);
     }
 
     /// `F272`'s message window at x 196, y 159: the date/time header, the newest

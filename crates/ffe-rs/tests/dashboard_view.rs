@@ -88,15 +88,28 @@ fn the_message_log_draws_only_in_the_original_right_hand_window() {
     let full = screen.logical_pixels().to_vec();
     save(&screen, "dashboard-messages-full.ppm");
 
-    // F273's scroll: 0x18 pixels up, clamped even when asked for more.
-    assert!(screen.messages.scroll_by(10_000, 1000, 41));
-    assert_eq!(screen.messages.scroll(), 0x18);
+    // F271's slide: the header and the one-line newest entry settle at the
+    // bottom of the window, two pixels a frame.
+    let settle = |screen: &mut Screen, tics: u32| {
+        for _ in 0..40 {
+            screen.tick_messages(tics);
+        }
+    };
+    settle(&mut screen, 0);
+    assert_eq!(screen.messages.scroll(), -0x18);
+    draw(&mut screen, &state, ViewState::default());
+    let full = screen.logical_pixels().to_vec();
+    // F273's Page Up: 0x18 pixels toward the older lines.
+    assert!(screen.scroll_messages(true));
+    settle(&mut screen, 0);
+    assert_eq!(screen.messages.scroll(), 0);
     draw(&mut screen, &state, ViewState::default());
     save(&screen, "dashboard-messages-scrolled.ppm");
     assert!(changed(&full, screen.logical_pixels(), 195, 320, 158, 200) > 40);
-    // The auto-scroll returns to the newest entry after 0x3cae6 tics.
-    screen.messages.tick(0x3cae6);
-    assert_eq!(screen.messages.scroll(), 0);
+    // After 0x3cae6 idle tics the message slides away, leaving the header.
+    screen.tick_messages(0x3cae7);
+    settle(&mut screen, 0);
+    assert_eq!(screen.messages.scroll(), -0x20);
 }
 
 #[test]
