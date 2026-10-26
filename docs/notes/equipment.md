@@ -175,12 +175,13 @@ shield generators, missiles, the drive and the mining machines). F390 subtracts
 it from `DATA_008889` on fit and F391 adds it back on remove; the free-space
 check is `DATA_008889 - DATA_008891`. The port's `Loadout::capacity(base,
 delivered, lasers)` applies the **difference from the delivered loadout**:
-F998's new game already prices its 6 t (plus the drive) into the 1 t
-`Navigator::hold`, while a hull bought later (F441 clears the equipment) uses the
-model's cargo statistic. `trade::capacity` is the single reader used by the
-market, the Upgrades free-space check and the cash/cargo/cabins line. This is
-why the Saker starts with a 1 t hold and why removing the delivered 10 t drive
-frees 10 t (the source's F391 quirk, because F998 never charged for it).
+F998's new game already prices its 6 t (plus the drive) into the delivered
+`Navigator::hold` (7 t under EXP-019; the executed original's fitted page is
+1 t), while a hull bought later (F441 clears the equipment) uses the model's
+cargo statistic. `trade::capacity` is the single reader used by the market, the
+Upgrades free-space check and the cash/cargo/cabins line. This is why the Saker
+starts with a 7 t hold and why removing the delivered 10 t drive frees 10 t (the
+source's F391 quirk, because F998 never charged for it).
 
 ## The new game's fitted loadout (`F998`, `ffe.asm:74028`)
 
@@ -199,7 +200,9 @@ The DOS default is F998's **type-0** arm: the Saker Mk III (model `0x1f`).
 - cash `DATA_008888 = 0x2710` (10,000 credit units). The F2 page's free hold is
   1 t: the Saker's 23 t statistic less F998's `0x10` allowance and the 6 t of
   fitted items (laser 1, missiles 2, Scanner 1, Automatic Pilot 1, Atmospheric
-  Shielding 1; Navigation computer 0).
+  Shielding 1; Navigation computer 0). EXP-019 overrides the port's default
+  start's hold to 7 t (F998's subtraction without the fitted 6 t); the cash and
+  fitted loadout itself are unchanged.
 - The type-1 arm uses `0x40240000` (the same three bits without the navigation
   computer) and the same missiles/combat words.
 

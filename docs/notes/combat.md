@@ -262,6 +262,9 @@ Ross 154 arm, and **type 0 is the DOS default** (`F147(0)`). The default arm at
 - `sub [DATA_008889],0x10` for the drive/equipment allowance, then the F2 page
   subtracts the 6 t of fitted items and shows **1 t free hold**.
 
+The port's default start keeps this ship, loadout and cash but overrides the
+hold to 7 t by owner decision (EXP-019).
+
 The executed default arm confirms model 31, mounts 2, lasers `[136,0,0,0]`,
 missiles `[130,130,0,0,0,0]`, drive 2, shields `[0,0]`, hull 112 and cash
 10000 (`docs/evidence/saker/`). The type-1 Ross 154 arm keeps model `0x17`

@@ -298,7 +298,8 @@ fn a_pirate_close_to_the_player_follows_a_jump() {
 fn firing_at_hope_is_fined_and_shows_f236s_message() {
     let cache = cache();
     // F829 record 0 / F998's default arm: Gateway [-1,4], planet Hope,
-    // starport Old Blackelk, state 0x30, Saker Mk III, 10,000 CR.
+    // starport Old Blackelk, state 0x30, Saker Mk III, 10,000 CR (EXP-019
+    // changes the hold, not the cash).
     let mut nav = Navigator::new_game(&cache, 0).unwrap();
     let new_game = nav.new_game.expect("the new game state");
     assert_eq!(new_game.start_type, 0);

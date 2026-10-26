@@ -16,7 +16,7 @@ use ffe_rs::outfitting::{self, Limits};
 
 const TECH: u16 = 0xfd;
 
-/// A synthetic roomy hull, so the 25 t Class 2 drive fits: the Saker's real 1 t
+/// A synthetic roomy hull, so the 25 t Class 2 drive fits: the Saker's real 7 t
 /// hold (plus the 10 t its delivered drive frees) would make F386 refuse it, as
 /// the source's space check does. F394's fuel-scoop mounting is clear here so the
 /// scoop test can turn it on explicitly.
@@ -48,7 +48,8 @@ fn scripted_fit_effect_remove_sequence() {
     assert_eq!(class_one, 34);
     assert_eq!(class_two, 44);
 
-    // F998 delivers the Saker with drive class 2 and 1 t of hold.
+    // F998 delivers the Saker with drive class 2; against the executed
+    // original's 1 t status-page base the delivered loadout leaves 1 t free.
     assert_eq!(loadout.drive, 2);
     assert_eq!(loadout.mass(&combat.lasers), 16);
     assert_eq!(loadout.capacity(1, &delivered, &combat.lasers), 1);

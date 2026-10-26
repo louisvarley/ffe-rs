@@ -80,7 +80,8 @@ impl PendingLog {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Boot {
     /// The DOS default: Hope in Gateway with F998's type-0 Saker Mk III
-    /// (model 0x1f), 10,000 CR. `--start 1` keeps Ross 154's Eagle.
+    /// (model 0x1f), 10,000 CR and a 7 t hold (EXP-019). `--start 1` keeps
+    /// Ross 154's Eagle.
     NewGame(u8),
     /// The existing Sol/Mars High sandbox (`--start sol`).
     Sandbox,
@@ -3710,6 +3711,23 @@ fn run() -> Result<(), String> {
                     if gameover.is_some() || state.death.is_some() {
                         message = "SAVE REFUSED: the commander is dead.".to_owned();
                     } else {
+                        // Reconcile the ship with the current clock before saving:
+                        // the clock may have advanced past the last orbital refresh,
+                        // and the saved position must match the bodies a load
+                        // regenerates from that clock. Without this, a landed ship
+                        // resumes displaced by the planet's orbital motion and can
+                        // fall through the surface.
+                        if let (Some(model), Some(nav)) = (original.as_mut(), nav.as_mut()) {
+                            nav.refresh(&cache);
+                            if let Some(moved) = nav.follow(model.absolute_position()) {
+                                if !model.on_pad() {
+                                    model.shift(moved);
+                                }
+                            }
+                            state.position = model
+                                .absolute_position()
+                                .map(|p| p as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
+                        }
                         let save = build_save(
                             &commander,
                             &state,
@@ -6091,10 +6109,30 @@ fn run() -> Result<(), String> {
                 )
             }),
         };
+        // `player+0xe8` (DATA_008870) is the flight mode word F1116 reads for the
+        // status lamps: 0x30 on the new game's pad, 0x34/0x30 landed, 0x24/0x26
+        // the takeoff climb, a docking/launch stage, 0x02 with the autopilot
+        // engaged, else 0x00 free flight. Distinguishing only the autopilot left
+        // `e8` below 0x28 at every landed state, so the 0x48 warning lamp stayed
+        // lit while docked.
+        let mode_word = nav
+            .as_ref()
+            .and_then(|nav| {
+                if nav.on_pad() {
+                    Some(ffe_core::traffic::state::LANDED)
+                } else {
+                    nav.landed_state()
+                        .or_else(|| nav.takeoff_state())
+                        .or_else(|| nav.sequence.map(|sequence| sequence.stages.state))
+                }
+            })
+            .unwrap_or(if autopilot {
+                ffe_core::traffic::state::AUTOPILOT
+            } else {
+                ffe_core::traffic::state::FREE
+            });
         screen.systems = ShipSystems {
-            // `player+0xe8 == 2` is the autopilot/engine state F1099 and F1116
-            // test; 2 lights 0x39 and draws the Autopilot line.
-            e8: if autopilot { 2 } else { 0 },
+            e8: mode_word,
             e9: if labels { 4 } else { 0 },
             mounts: stats.map_or(1, |stats| stats.gun_mounts),
             slots: state.combat.missiles,
@@ -6587,7 +6625,7 @@ fn buy_ship(
             state.credits = u32::try_from(purchase.cash_tenths).unwrap_or(0);
             state.ship = purchase.model;
             state.loadout = ffe_core::equipment::Loadout::default();
-            // The new hull's hold is no longer F998's new-game 1 t: F441 clears
+            // The new hull's hold is no longer F998's new-game hold: F441 clears
             // the equipment and F2 quotes the new model's cargo statistic.
             nav.new_game = None;
             state.combat = Combat::default();

@@ -91,7 +91,9 @@ offence is recorded, so the port also leaves `Flight::credits` alone.
   `0x13`.
 - `crates/ffe-rs/tests/npc_ai.rs::firing_at_hope_is_fined_and_shows_f236s_message`
   (ignored/local cache): the **default start** (start type 0, Gateway, Hope,
-  Old Blackelk, state `0x30`, Saker `0x1f`, 10,000 CR) is a starport witness;
+  Old Blackelk, state `0x30`, Saker `0x1f`, 10,000 CR in the port (EXP-019
+  changes the hold, not the cash; the executed original's probe is also
+  10,000 CR) is a starport witness;
   the message and 6000 fine, `wanted`, police hostility, F783 clear and the
   frame `docs/evidence/legal/legal-hope.png`.
 - `docs/evidence/legal/original-legal-probe-default.jsonl`: the executed

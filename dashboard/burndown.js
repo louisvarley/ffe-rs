@@ -840,5 +840,10 @@ window.FFE_BURNDOWN = {
       remaining: 63,
       note: "Crash merged (v1.14): F575's contact tail applies F953 damage (shields-hull-F942/F1104), the invented crash message is gone, bounce only per source, and 0x40 landing vs 0x80 crash are separated; 28 non-lethal/181 lethal GAME OVER and launch traces. Reconciled with repair's damage API and death/gameover. Owner decisions: silent bounce, launch UX, capsule-at-zero, Contact.damage sum, EXP-016. One item added and completed (gameplay-41), so the remaining count is unchanged."
     },
+    {
+      date: "2026-10-26",
+      remaining: 63,
+      note: "Default new-game start changed by owner decision (EXP-019): the Saker Mk III on Hope at Old Blackelk still boots, but with 10,000 CR (unchanged) and 7 t free hold (was 1 t). The 7 t is F998's own 23 t less 0x10 subtraction, without the executed original's 6 t fitted-equipment deduction. Ship, start record, state 0x30 and the type-1 Ross 154 arm are unchanged; gate tests updated. No burndown item completion, so the remaining count is unchanged."
+    },
   ]
 };

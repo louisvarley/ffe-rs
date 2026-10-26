@@ -574,7 +574,9 @@ fighter** (F1533 `DATA_002655`: 2 mounts, 28 t mass, 23 t cargo, front gun
 missiles, drive byte 2, `0x20000000` energy, `0x40240020` general equipment,
 10,000 CR and a 1 t free hold (`docs/notes/combat.md` 4; confirmed against the
 executed original by the local default-arm `--state-combat` probe and the F2
-page in `docs/evidence/saker/`). Only the front mount has a laser: the gunsight
+page in `docs/evidence/saker/`). The port's default start now uses 10,000 CR
+(unchanged) and a 7 t hold by owner decision (EXP-019); the ship, laser and loadout are
+unchanged. Only the front mount has a laser: the gunsight
 and firing are front-only in the playable, while the rear/turret paths are
 tested with a synthetic loadout. `--start 1` keeps Ross 154's Eagle (model 23,
 one mount, 1000 CR); earlier notes that called start type 1 a Sidewinder are

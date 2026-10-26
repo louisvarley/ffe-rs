@@ -844,7 +844,7 @@ mod tests {
         let lasers = [0x88, 0, 0, 0];
         let delivered = Loadout::new_game();
         assert_eq!(loadout.mass(&lasers), 16);
-        // A new game's 1 t hold is the delivered loadout's capacity.
+        // A 1 t base is fully free with the delivered loadout fitted.
         assert_eq!(loadout.capacity(1, &delivered, &lasers), 1);
         // F390: a 4 t shield generator, a 5 t cabin and a 30 t mining machine.
         loadout.shield_generators = 1;

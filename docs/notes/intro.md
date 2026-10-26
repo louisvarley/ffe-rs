@@ -32,12 +32,17 @@ piece is called out below.
   `0x80000000`). `Navigator::new_game` starts there; the calendar subtracts
   that start, so the console shows 1 Jan 3250, noon. The development sandbox
   keeps a 0-based clock (`start_clock`), so the date stays right in both.
-- **F998's default (type 0)**: 10,000 CR (`DATA_008888 = 0x2710`), ship 31
-  (the Saker Mk III fighter, `0x1f`), a 1 t free hold, time acceleration 994
-  (`DATA_009012`), player state `0x30` and `DATA_008857 = 87`. The F2 page
-  shows the Saker, Scanner/Automatic Pilot/Atmospheric Shielding/Navigation
-  computer, the 1MW pulse front mount, Cargo Space 1 t, no shield generators
-  and `--start` type 0's Gateway/Hope/Old Blackelk seat (`slot 0x6a`).
+- **F998's default (type 0)**: 10,000 CR (unchanged) and a 7 t free hold in the
+  port, by the owner's EXP-019 override of the hold only. The verified original
+  is 10,000 CR
+  (`DATA_008888 = 0x2710`) with a 1 t free hold (the Saker's 23 t less F998's
+  `0x10` allowance and 6 t of fitted items); the port keeps F998's subtraction
+  but not the fitted-equipment deduction. Ship 31 (the Saker Mk III fighter,
+  `0x1f`), time acceleration 994 (`DATA_009012`), player state `0x30` and
+  `DATA_008857 = 87` are unchanged. The F2 page shows the Saker,
+  Scanner/Automatic Pilot/Atmospheric Shielding/Navigation computer and the 1MW
+  pulse front mount, no shield generators, and `--start` type 0's
+  Gateway/Hope/Old Blackelk seat (`slot 0x6a`).
   F998's type-1 arm is still available with `--start 1`: 1000 CR, ship 23
   (the Eagle long range fighter, `0x17`), 8 t hold, player index 107 and
   starport `slot 0x6e`. Types 2-5 are unverified and map to type 1.
@@ -97,7 +102,7 @@ piece is called out below.
 | Start types 2-5 | F998's other branches | Unverified against DOS; mapped to 1 with a note. |
 | The 18 credit strings and their windows/positions | `ffedat.asm:4272-4332`, F962 | Agree with the DOS string table; verified by `--intro`. |
 | Model 177 then 176, the primary bitmap, the animation | F961/F962 | Data shared by the release; same oracle. |
-| New-game state (Ross 154 or the Saker default, cash, ship, hold, clock, state 0x30) | F829/F998/F994 | Same as DOS; `--state` reports state 48, time 994, and for start type 1 index 107 / cash 1000; the default type 0 probes index 87 / cash 10000 / ship 0x1f. |
+| New-game state (Ross 154 or the Saker default, cash, ship, hold, clock, state 0x30) | F829/F998/F994 | Same as DOS except EXP-019's owner override of the default arm's hold (port 10,000 CR / 7 t; DOS 10,000 CR / 1 t). `--state` reports state 48, time 994, and for start type 1 index 107 / cash 1000; the default type 0 probes index 87 / cash 10000 / ship 0x1f. |
 
 ## Takeoff from the starport (F1013/F1031/F1032, 2026-10-25)
 

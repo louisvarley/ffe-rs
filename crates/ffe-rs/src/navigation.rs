@@ -1458,15 +1458,18 @@ pub const NEW_GAME_STARPORT_SLOT: usize = 0x6e;
 pub const DEFAULT_START_TYPE: u8 = 0;
 /// The Saker Mk III fighter, model slot `0x1f`.
 pub const DEFAULT_SHIP: u32 = 0x1f;
-/// F998's `DATA_008888` for the default arm: `0x2710` (10,000 CR).
+/// F998's `DATA_008888` for the default arm: `0x2710` (10,000 CR, shown as
+/// 1000.0 credits). Unchanged by EXP-019, which changes only the starting hold.
 pub const DEFAULT_CASH: i32 = 10_000;
-/// F998's default arm subtracts `0x10` t from the Saker's 23 t statistic.
+/// F998's default arm subtracts `0x10` t from the Saker's 23 t statistic,
+/// leaving 7 t.
 pub const DEFAULT_HOLD_LOSS: i32 = 0x10;
-/// The verified free hold on the executed original's F2 status page after the
-/// default start: the Saker's 23 t less F998's `0x10` allowance and the 6 t of
-/// fitted items (1MW laser 1, two KL760 2, Scanner 1, Automatic Pilot 1,
-/// Atmospheric Shielding 1; Navigation computer 0).
-pub const DEFAULT_CARGO: i32 = 1;
+/// The default start's free hold: the Saker's 23 t less F998's `0x10`
+/// allowance (7 t). The executed original's F2 status page shows 1 t because
+/// its 6 t of fitted items (1MW laser 1, two KL760 2, Scanner 1, Automatic
+/// Pilot 1, Atmospheric Shielding 1; Navigation computer 0) are already taken;
+/// EXP-019 deliberately leaves those 6 t out so the owner starts with 7 t.
+pub const DEFAULT_CARGO: i32 = 7;
 /// F998's default starport: Old Blackelk, physics slot `0x6a`.
 pub const DEFAULT_STARPORT_SLOT: usize = 0x6a;
 /// F994's player index for the default arm (`DATA_008857`).
@@ -1882,8 +1885,9 @@ impl Navigator {
             up,
         )?;
         let cargo = if default_arm {
-            // The executed original's F2 status page shows 1 t free after the
-            // default start; F998's `0x10` subtraction alone would leave 7 t.
+            // F998's `0x10` subtraction from the Saker's 23 t leaves 7 t. The
+            // executed original's F2 status page shows 1 t because its fitted
+            // items take 6 t; EXP-019 starts with the 7 t instead.
             DEFAULT_CARGO
         } else {
             (models.cargo_space(ship).unwrap_or(0) - NEW_GAME_HOLD_LOSS).max(0)
@@ -2014,7 +2018,11 @@ impl Navigator {
         nav.missiles = crate::missile::MissileField::default();
         nav.effects.clear();
         nav.spawned = None;
-        nav.refreshed = 0.0;
+        // The bodies above were already placed at `save.clock`, so the next
+        // orbital refresh must not run until the clock has actually moved on
+        // from it; otherwise the first frame after a load advances the body
+        // positions while the restored ship stays behind.
+        nav.refreshed = save.clock;
         nav.drift = [0; 3];
         nav.skips = 0;
         nav.carry = 0.0;
@@ -4728,8 +4736,13 @@ mod tests {
         assert_eq!(DEFAULT_STARPORT_SLOT, 0x6a);
         assert_eq!(DEFAULT_SHIP, 0x1f);
         assert_eq!(DEFAULT_CASH, 10_000);
-        assert_eq!(DEFAULT_CARGO, 1);
+        assert_eq!(DEFAULT_CARGO, 7);
         assert_eq!(DEFAULT_HOLD_LOSS, 0x10);
+        assert_eq!(
+            DEFAULT_CARGO,
+            23 - DEFAULT_HOLD_LOSS,
+            "the Saker's 23 t statistic less F998's allowance"
+        );
         assert_eq!(DEFAULT_PLAYER_INDEX, 87);
     }
 
