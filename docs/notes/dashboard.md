@@ -194,7 +194,7 @@ behaviour), **missing**. Evidence is a file:line, a test, or a capture folder.
 | 35 | Autopilot indicator | `F1099` 0x8618 at (2,139); `F1116` 0x47 | done | `hud.rs`, `screen.rs`, `main.rs`; `dashboard_view` local frames | "Autopilot" at (2,139) and lamp 0x47 when the autopilot targets; the nav target's tunnels are F1100/F1113's |
 | 36 | Text metrics / clipping | `F1586` `ffe.asm:93785`; font asset 9 rows | partial | `indexed.rs`, `messages.rs` wrap; `dashboard_view` local frames | The console log uses the 124-pixel wrap and y 158 clip; other port text still wraps by 308 px at x3 with 9/10 px spacing |
 | 37 | Hot areas | `DATA_007684` `ffedat.asm:23641`; `F1439`; mouse poll `ffe.asm:86045-86070` | done (22/22) | `console.rs`; `tests/console.rs` | Exact coordinates/order; clicks without a handler keep only the transient note, not a dated F271 entry |
-| 38 | Keys | `F1056`; `DATA_007688`; JJFFE 6-0 | partial | `views.md`; `main.rs` | F2 (status page) added, but its DOS mapping is unverified; F3 still toggles Modern/Classic (the original F3 is the map, available by click); F1/F6-F10, F12 and plain F4 match; F11 has no action until combat view 6 is ported; the old dev keys are `--dev` Ctrl chords |
+| 38 | Keys | `F1056`; `DATA_007688`; JJFFE 6-0 | partial | `views.md`; `main.rs` | F2 (status page) added, but its DOS mapping is unverified; **F3 is the source map now** (the preset moved to Port Options); F1/F6-F10, F12 and plain F4 match; F11 has no action until combat view 6 is ported; the old dev keys are `--dev` Ctrl chords |
 | 39 | Port-only top bar/status block/map buttons | none | retired | `screen.rs` | Removed in the HUD merge; the original HUD, message window and scanner own those rows |
 | 40 | Radio groups | `F262` `ffe.asm:20369-20413`; table | done | `console.rs` `F262`, `tests/console_table.rs` | Set-image-with-radio-reset implemented over the 82-record table |
 | 41 | Contact colours | `DATA_008683` `ffedat.asm:27855`; `F275` | done | `scanner.rs` `CONTACT_COLOURS`, unit test | 19-colour table from F259, indexed by the mass word `>> 4`; default 0x0f |
@@ -658,8 +658,8 @@ the user asked; the console record is the original's.
   (`ffe.asm:17066`, `add eax,0xffffffca ; was ffffff3f`); DOS uses
   Shift+F1..F5. The port uses 6-0. JJFFE also moves F to FPS, R to refuel,
   `;`/Insert to ECM and adds numpad thrust (`jjffe28.txt`).
-- **Port key deviations**: F3 toggles modern/classic controls
-  (`main.rs`) although the original F3 is the map; F2 is the port's status page
+- **Port key deviations**: F3 is the source galaxy map (the Modern/Classic preset
+  lives on Port Options); F2 is the port's status page
   (DOS mapping unverified). F1/F6-F10 match the source (F10 is now the missile
   view). F11 is left for the unported combat computer and F12 is the source
   escape capsule; the old F11/F12 dev keys live behind `--dev` Ctrl chords.
@@ -847,8 +847,7 @@ port block are **done** (`hud`, `combat` and earlier rounds). What remains:
 4. **Altitude and speed conversion** (`F1393`). The HUD draws Set/Act in the
    flight model's m/s; the original's conversion and `km`/`m` suffixes and a
    real altitude are not modelled.
-5. **Fix F3**: the original F3 is the map (the console click already opens it);
-   the F3 *key* still toggles Modern/Classic. Move that to a non-original key.
+5. **F3**: done. The source F3 opens the map and the preset moved to Port Options.
 6. **F2 mapping**: the DOS F2 key is not established; the port binds F2 (as the
    owner asked) and the console record `0x0c` is the original's.
 7. **Message log controls**: wire `DATA_008810`'s on/off flag and the 0xe/0xf

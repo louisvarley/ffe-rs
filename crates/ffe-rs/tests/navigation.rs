@@ -621,6 +621,224 @@ fn pad_takeoff_hands_over_and_falls_back_under_gravity() {
     assert_ne!(pad_flags & 0x20, 0, "{pad_flags:#x}");
 }
 
+/// F1012/F1047's landed handlers call F1014/F1015, which run F1037 (set speed)
+/// and F1041 (orientation/thrust) through the contact scan. The port used to
+/// copy the mode word and stop, so Enter/Shift/W/S did nothing in the landed
+/// view and F1099's Set stayed zero. This pins the source path the playable now
+/// calls while landed.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn landed_set_speed_runs_f1037_and_accelerates() {
+    use ffe_rs::navigation::{landing_body, Library, Navigator};
+    use ffe_rs::original_flight::Keys as OriginalKeys;
+    let cache = cache();
+    let nav = Navigator::new_game(&cache, 0).unwrap();
+    let index = nav.docked.expect("the start starport");
+    let new_game = nav.new_game.expect("a new game");
+    let body = nav.bodies[index].clone();
+    let planet = nav.bodies[body.parent.expect("a parent planet")].clone();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let mut flight = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: new_game.ship,
+        ..Flight::default()
+    };
+    flight.position = new_game.seat.map(|v| v as f64 / unit);
+    flight.axes = Some(body.orientation);
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    model.set_mode(ffe_core::traffic::state::LANDED);
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = ffe_core::objects::ModelInfo::read(records, stats, new_game.ship).unwrap();
+    let planet_body = landing_body(
+        &planet,
+        &ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap(),
+    );
+    let library = Library(&cache);
+    let tools = cache
+        .asset("base:terrain/tables")
+        .zip(cache.asset("base:terrain/maps"))
+        .map(
+            |(terrain_table, terrain_maps)| ffe_core::surface::SurfaceTools {
+                shapes: &library,
+                terrain_table,
+                terrain_maps,
+                detail: 0,
+            },
+        );
+    let keys = OriginalKeys {
+        faster: true,
+        ..OriginalKeys::default()
+    };
+    for _ in 0..50 {
+        model
+            .step_landing(
+                0.02,
+                &keys,
+                &planet_body,
+                planet.position,
+                &info,
+                tools.as_ref(),
+            )
+            .expect("the landed contact scan");
+    }
+    assert!(
+        model.set_speed_metres() > 0.0,
+        "Enter/W must raise F1099's Set while landed"
+    );
+    assert!(
+        model
+            .player()
+            .motion
+            .velocity
+            .iter()
+            .any(|value| *value != 0),
+        "the set speed must produce thrust through F1041/F601"
+    );
+    // Shift lowers it again through the same F1037 path.
+    let slower = OriginalKeys {
+        slower: true,
+        ..OriginalKeys::default()
+    };
+    let before = model.set_speed_units();
+    for _ in 0..20 {
+        model
+            .step_landing(
+                0.02,
+                &slower,
+                &planet_body,
+                planet.position,
+                &info,
+                tools.as_ref(),
+            )
+            .expect("the landed contact scan");
+    }
+    assert!(model.set_speed_units() < before, "Shift must lower Set");
+}
+
+/// F152's clock is not a flight-only counter: the green date must move while the
+/// ship is on the pad, landed or in a station. `Navigator::advance` is the one
+/// clock step `main` now calls every live frame; time acceleration scales it.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_clock_advances_with_and_without_a_flight_model() {
+    use ffe_rs::navigation::Navigator;
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let start = nav.elapsed();
+    let date = nav.date_text();
+    // One second on the pad is enough for the display's second field.
+    nav.advance(&cache, 1.0);
+    assert!(
+        (nav.elapsed() - (start + 1.0)).abs() < 0.01,
+        "the clock must move by the live frame"
+    );
+    assert_ne!(nav.date_text(), date, "the green date must tick");
+    // The 10000x meter step multiplies the same one-second frame.
+    let before = nav.elapsed();
+    let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[4])
+        / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
+    nav.advance(&cache, factor);
+    // The absolute clock is ~10^13 seconds, so the subtraction of the start
+    // clock leaves a few microseconds of f64 rounding at this magnitude.
+    assert!(
+        (nav.elapsed() - (before + factor)).abs() < 0.01,
+        "before {before}, factor {factor}, after {}",
+        nav.elapsed()
+    );
+}
+
+/// F1011's open-air pad calls F1014 at a starport, which runs F1037/F1041. The
+/// playable now builds the pad's `OriginalFlight` at start-up and steps it with
+/// `step_pad`, so the pad is not the synthetic prototype and Enter/W updates
+/// F1099's Set before the launch action.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn pad_set_speed_runs_in_the_pad_world_before_launch() {
+    use ffe_rs::navigation::{landing_body, Library, Navigator};
+    use ffe_rs::original_flight::Keys as OriginalKeys;
+    let cache = cache();
+    let nav = Navigator::new_game(&cache, 0).unwrap();
+    let index = nav.docked.expect("the start starport");
+    let new_game = nav.new_game.expect("a new game");
+    let station = nav.bodies[index].clone();
+    let planet = nav.bodies[station.parent.expect("a parent planet")].clone();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let mut flight = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: new_game.ship,
+        ..Flight::default()
+    };
+    flight.position = new_game.seat.map(|v| v as f64 / unit);
+    flight.axes = Some(station.orientation);
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = ffe_core::objects::ModelInfo::read(records, stats, new_game.ship).unwrap();
+    let station_info = ffe_core::objects::ModelInfo::read(records, stats, station.model).unwrap();
+    let planet_info = ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap();
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    model.begin_pad_takeoff(
+        &landing_body(&planet, &planet_info),
+        planet.position,
+        &landing_body(&station, &station_info),
+        station.position,
+        &info,
+    );
+    // The pad world follows the navigator's bodies: a planet move must carry
+    // the ship with it (F994 parents the player to the planet).
+    let before = model.absolute_position();
+    let moved_planet = [
+        planet.position[0] + 1_000,
+        planet.position[1],
+        planet.position[2],
+    ];
+    let moved_station = [
+        station.position[0] + 1_000,
+        station.position[1],
+        station.position[2],
+    ];
+    model.set_pad_bodies(moved_planet, moved_station);
+    let after = model.absolute_position();
+    assert_eq!(after[0] - before[0], 1_000, "the pad must follow the body");
+    model.set_pad_bodies(planet.position, station.position);
+    let library = Library(&cache);
+    let tools = cache
+        .asset("base:terrain/tables")
+        .zip(cache.asset("base:terrain/maps"))
+        .map(
+            |(terrain_table, terrain_maps)| ffe_core::surface::SurfaceTools {
+                shapes: &library,
+                terrain_table,
+                terrain_maps,
+                detail: 0,
+            },
+        );
+    let keys = OriginalKeys {
+        faster: true,
+        ..OriginalKeys::default()
+    };
+    for _ in 0..25 {
+        model
+            .step_pad(0.02, &keys, tools.as_ref())
+            .expect("the pad contact");
+    }
+    assert!(
+        model.set_speed_metres() > 0.0,
+        "Enter/W must raise F1099's Set on the pad"
+    );
+    assert!(
+        model
+            .player()
+            .motion
+            .velocity
+            .iter()
+            .any(|value| *value != 0),
+        "the pad's F1041/F601 must apply the set speed"
+    );
+}
+
 /// The map state the keys drive: open, choose, jump, fly.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]

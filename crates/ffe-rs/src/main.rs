@@ -1028,6 +1028,42 @@ fn run() -> Result<(), String> {
                     new_game.acceleration
                 );
             }
+            // F994/F1011: the new game's open-air pad already has its flight
+            // model. F1011 calls F1014 at a starport, and F1014 runs F1037
+            // (set speed) and F1041 (thrust), so Enter/Shift/W/S and F1099's
+            // Set work before the launch action. Without this the pad ran the
+            // synthetic prototype (no Set word) and every speed key looked dead.
+            if let Some(index) = nav.docked {
+                let station = nav.bodies[index].clone();
+                let planet = station
+                    .parent
+                    .and_then(|parent| nav.bodies.get(parent))
+                    .cloned()
+                    .unwrap_or_else(|| station.clone());
+                let player_info =
+                    ffe_core::objects::ModelInfo::read(model_records, model_stats, state.ship);
+                let station_info =
+                    ffe_core::objects::ModelInfo::read(model_records, model_stats, station.model);
+                let planet_info =
+                    ffe_core::objects::ModelInfo::read(model_records, model_stats, planet.model);
+                if let (Some(info), Some(port_info), Some(planet_info)) =
+                    (player_info, station_info, planet_info)
+                {
+                    let stats = scene
+                        .as_ref()
+                        .and_then(|scene| scene.ship_stats(state.ship));
+                    let mut model = OriginalFlight::from_flight(&state, stats.as_ref());
+                    model.begin_pad_takeoff(
+                        &ffe_rs::navigation::landing_body(&planet, &planet_info),
+                        planet.position,
+                        &ffe_rs::navigation::landing_body(&station, &port_info),
+                        station.position,
+                        &info,
+                    );
+                    model.apply(&mut state);
+                    original = Some(model);
+                }
+            }
         }
     }
     if options.skip_intro {
@@ -1358,6 +1394,7 @@ fn run() -> Result<(), String> {
         let controls_enabled = active
             && !prefs.open
             && !paused
+            && !pad_board
             && state.death.is_none()
             && model_lab.is_none()
             && model_viewer.is_none()
@@ -1418,6 +1455,35 @@ fn run() -> Result<(), String> {
             value.tick(elapsed);
         }
         let death_control = state.death.is_some();
+        // F152/F224: the game clock runs every frame the simulation is live, in
+        // every module (flight, the pad, the landed view, stations and the
+        // services board). It used to be advanced only inside the original
+        // flight model's branch, so the green date froze whenever there was no
+        // model to tick. Time acceleration scales it; pause, the preference
+        // pages, focus loss and the death/game-over hold stop it.
+        if clock_runs(
+            active,
+            paused,
+            prefs.open,
+            death_control,
+            model_lab.is_some(),
+            model_viewer.is_some(),
+        ) {
+            if let Some(nav) = nav.as_mut() {
+                let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
+                    / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
+                nav.advance(&cache, elapsed * factor);
+            }
+        }
+        // The pad world is planet-relative: keep its planet/starport in step with
+        // the navigator even while the services board is open (the flight step is
+        // paused there), so F1 returns to the same pad instead of snapping the
+        // ship across the body's orbital motion.
+        if let Some(model) = original.as_mut().filter(|model| model.on_pad()) {
+            if let Some((planet, station)) = nav.as_ref().and_then(pad_bodies) {
+                model.set_pad_bodies(planet, station);
+            }
+        }
         if state
             .death
             .as_ref()
@@ -1602,9 +1668,16 @@ fn run() -> Result<(), String> {
         .find(|(key, _)| pressed(*key))
         .and_then(|(_, digit)| acceleration_for_digit(digit))
         .filter(|_| active && !death_control && state.mode == ffe_rs::flight::Mode::Flight);
-        let chosen_step = match console_click {
-            Some(Click::Acceleration(step)) => Some(step),
-            _ => digit_step,
+        let chosen_step = if capture_start && frames == 75 {
+            // The scripted start flow exercises the dashboard's fastest meter
+            // step (the `0` key) once the launch has begun: the green clock and
+            // the navigator must leap with it while the flight model still ticks.
+            Some(4)
+        } else {
+            match console_click {
+                Some(Click::Acceleration(step)) => Some(step),
+                _ => digit_step,
+            }
         };
         if let Some(step) = chosen_step {
             acceleration = step;
@@ -1630,6 +1703,7 @@ fn run() -> Result<(), String> {
         // status page only while it is open.
         if active
             && state.mode == ffe_rs::flight::Mode::Flight
+            && !pad_board
             && model_lab.is_none()
             && model_viewer.is_none()
             && (pressed(Key::F2) || console_click == Some(Click::Screen(2)))
@@ -1686,10 +1760,11 @@ fn run() -> Result<(), String> {
             }
         }
         // F4 is the original's station/comms action (F1056's action 0xf4,
-        // F343): from state 0x2a (docked) or 0x30 (landed at an open-air
-        // starport) it opens the services board, not a menu of its own. At the
-        // pad the landed view stays the default until F4 is pressed; F1 (the
-        // console's screen button) or Backspace returns to it.
+        // F343): from state 0x2a (docked) or 0x30 (an open-air starport pad, the
+        // new game's start or a landing after flight) it opens the services
+        // board. It is drawn over the landed view, not as a docked state:
+        // F1003's return (F1) only closes it, so the flight model, HUD and
+        // console are never torn down.
         if active
             && !death_control
             && model_lab.is_none()
@@ -1698,9 +1773,24 @@ fn run() -> Result<(), String> {
                 || console_click == Some(Click::Screen(4))
                 || (capture_start && frames == 50))
         {
+            let pad_services = nav.as_ref().is_some_and(|nav| {
+                nav.on_pad()
+                    || nav.landed_body().is_some_and(|index| {
+                        nav.bodies
+                            .get(index)
+                            .is_some_and(|body| body.kind == NavKind::Starport)
+                    })
+            });
             match state.mode {
-                ffe_rs::flight::Mode::Flight if nav.as_ref().is_some_and(|nav| nav.on_pad()) => {
-                    state.mode = ffe_rs::flight::Mode::Docked;
+                ffe_rs::flight::Mode::Flight if pad_services => {
+                    // A landed starport after flight is also source state 0x30,
+                    // but keeps a landed record; select its station for the
+                    // board. The new game's pad already has it.
+                    if let Some(nav) = nav.as_mut() {
+                        if let Some(index) = nav.landed_body() {
+                            nav.docked = Some(index);
+                        }
+                    }
                     dock.open(StationScreen::Services);
                     pad_board = true;
                     message = station::SERVICES_HINT.to_owned();
@@ -1788,17 +1878,9 @@ fn run() -> Result<(), String> {
                     input::DevCommand::PrototypeFlight => {}
                 }
             }
-            if pressed(Key::F3) {
-                prefs.toggle_modern();
-                held_controls.disarm(&keys_down);
-                mouse_accumulator.reset();
-                message = if prefs.modern {
-                    "Modern controls: W/S thrust, arrows steer, Q/E roll."
-                } else {
-                    "Classic controls: hold right mouse to steer, Enter/Shift thrust."
-                }
-                .to_owned();
-            }
+            // F3 is the source galaxy map (the console's map icon): handled with
+            // G and the icon below. It no longer toggles the control preset; that
+            // choice lives on `Escape` -> `Port Options` only.
             // The hyperdrive's view of the ship and its fuel (the galaxy list and the jump).
             if let Some(nav) = nav.as_mut() {
                 nav.drive = drive_state(scene.as_ref(), &state);
@@ -1807,6 +1889,7 @@ fn run() -> Result<(), String> {
             // flies to the body (or jumps to the system), Backspace stops the autopilot.
             if let Some(nav) = nav.as_mut().filter(|_| {
                 state.mode == ffe_rs::flight::Mode::Flight
+                    && !pad_board
                     && model_lab.is_none()
                     && model_viewer.is_none()
             }) {
@@ -1830,7 +1913,11 @@ fn run() -> Result<(), String> {
                     toggle(nav, NavView::Places);
                     held_controls.disarm(&keys_down);
                 }
-                if pressed(Key::G) || console_click == Some(Click::Screen(3)) {
+                if [Key::F3, Key::G]
+                    .into_iter()
+                    .any(|key| input::galaxy_map_key(key) && pressed(key))
+                    || console_click == Some(Click::Screen(3))
+                {
                     toggle(nav, NavView::Galaxy);
                     held_controls.disarm(&keys_down);
                 }
@@ -2583,7 +2670,7 @@ fn run() -> Result<(), String> {
                     .as_ref()
                     .and_then(|scene| scene.ship_stats(state.ship))
                     .map_or(0, |stats| stats.gun_mounts);
-                if state.mode == ffe_rs::flight::Mode::Flight {
+                if state.mode == ffe_rs::flight::Mode::Flight && !pad_board {
                     // F1056's launch action (its action 9, Tab: scancode 0x0f
                     // maps to action 0x09) from a landed state: `0x34` goes
                     // straight to F1013's climb. The new game's `0x30` open-air
@@ -2782,7 +2869,7 @@ fn run() -> Result<(), String> {
                     })
                 };
                 let elapsed_ms = (elapsed * 1000.0) as u32;
-                if views.mode.is_turret() && original.is_none() {
+                if views.mode.is_turret() && original.is_none() && !pad_board {
                     // FUNC_001038: the preset's steering keys aim the turret;
                     // Classic also aims with the right-button mouse. The ship
                     // holds its course.
@@ -2798,7 +2885,7 @@ fn run() -> Result<(), String> {
                         .wrapping_add(mouse_yaw as i16);
                     views.mode = views.turret.step(views.mode, pitch, yaw, gun_mounts);
                 }
-                if views.mode == ViewMode::External {
+                if views.mode == ViewMode::External && !pad_board {
                     let keys = ExternalKeys {
                         left: held(&[Key::Left]),
                         right: held(&[Key::Right]),
@@ -2819,19 +2906,15 @@ fn run() -> Result<(), String> {
                 // console's screen button (action 0xf1, module 3's F1003 which
                 // returns to the flight view); Backspace is the port's
                 // convenience and only leaves from the root, so sub-screens
-                // still go back one level.
+                // still go back one level. The flight mode never changed, so
+                // closing the board simply reveals the landed view again.
                 if pad_board
-                    && state.mode == ffe_rs::flight::Mode::Docked
                     && (pressed(Key::F1)
                         || console_click == Some(Click::CycleView)
                         || (pressed(Key::Backspace) && dock.screen == StationScreen::Services)
                         || (capture_start && frames == 60))
                 {
                     pad_board = false;
-                    state.mode = ffe_rs::flight::Mode::Flight;
-                    // This is F1003's return to the landed view, not a launch:
-                    // do not run the docked-to-flight hand-off this frame.
-                    last_mode = ffe_rs::flight::Mode::Flight;
                     if let Some(nav) = nav.as_ref() {
                         let name = nav
                             .docked
@@ -2841,7 +2924,7 @@ fn run() -> Result<(), String> {
                     }
                     held_controls.disarm(&keys_down);
                 }
-                if state.mode == ffe_rs::flight::Mode::Docked
+                if (state.mode == ffe_rs::flight::Mode::Docked || pad_board)
                     && model_lab.is_none()
                     && model_viewer.is_none()
                 {
@@ -3138,14 +3221,46 @@ fn run() -> Result<(), String> {
                                         pending_log.add(Source::Legal, report.message);
                                     }
                                 }
-                                match nav.begin_launch() {
+                                let surface = nav.landed_body();
+                                let climb =
+                                    surface.and_then(|index| nav.bodies.get(index)).map(|body| {
+                                        (
+                                            original
+                                                .as_mut()
+                                                .map_or([0; 3], |model| model.absolute_position()),
+                                            body.orientation[1],
+                                        )
+                                    });
+                                let launch = if surface.is_some() {
+                                    nav.begin_surface_launch()
+                                } else {
+                                    nav.begin_launch()
+                                };
+                                match launch {
                                     Ok(()) if nav.takeoff.is_some() => {
                                         // F381 leaves the open-air starport's
                                         // ship on its pad; the launch button
-                                        // takes it to 0x24, so flight starts
-                                        // here and the next frame's launch
-                                        // block places the model on the pad.
+                                        // takes it to 0x24, so flight starts here
+                                        // and this frame's docked-to-flight block
+                                        // below places the model on the pad.
                                         acceleration = 0;
+                                        if surface.is_some() {
+                                            // F1013 from a landed starport: the
+                                            // model already exists and keeps its
+                                            // own landed/contact state.
+                                            takeoff_climb = climb;
+                                            if let Some(model) = original.as_mut() {
+                                                model.set_time_acceleration(0);
+                                                model.begin_takeoff();
+                                            } else {
+                                                last_mode = ffe_rs::flight::Mode::Docked;
+                                            }
+                                        } else {
+                                            // F994's pad hand-off: the docked-to-
+                                            // flight block below builds the
+                                            // original model and F1013's climb.
+                                            last_mode = ffe_rs::flight::Mode::Docked;
+                                        }
                                         state.mode = ffe_rs::flight::Mode::Flight;
                                         state.system_flight = true;
                                         pad_board = false;
@@ -3616,7 +3731,13 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        if active && !death_control && !paused && model_lab.is_none() && model_viewer.is_none() {
+        if active
+            && !death_control
+            && !paused
+            && !pad_board
+            && model_lab.is_none()
+            && model_viewer.is_none()
+        {
             // The original's "Reverse left-right controls" and "Reverse up-down
             // controls" (DATA_009021/DATA_009022, toggled by FUNC_000216).
             let reverse = [prefs.others[3], prefs.others[4]];
@@ -3702,17 +3823,20 @@ fn run() -> Result<(), String> {
                         // F654/F655's traffic-control refusal (`0x98b7..0x98b9`).
                         pending_log.add(Source::Docking, notice);
                     }
-                    let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
-                        / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
-                    nav.advance(&cache, elapsed * factor);
-                    let before = model.absolute_position();
-                    if let Some(moved) = nav.follow(before) {
-                        model.shift(moved);
-                        // The climb origin is in system coordinates too.
-                        if let Some((origin, _)) = takeoff_climb.as_mut() {
-                            for k in 0..3 {
-                                origin[k] =
-                                    origin[k].wrapping_add(moved[k].wrapping_sub(before[k]));
+                    let moved = nav.follow(model.absolute_position());
+                    // The pad world is planet-relative; its bodies are moved below
+                    // instead, because shifting the relative position by an
+                    // absolute drift would double the planet's motion.
+                    if !model.on_pad() {
+                        if let Some(moved) = moved {
+                            let before = model.absolute_position();
+                            model.shift(moved);
+                            // The climb origin is in system coordinates too.
+                            if let Some((origin, _)) = takeoff_climb.as_mut() {
+                                for k in 0..3 {
+                                    origin[k] =
+                                        origin[k].wrapping_add(moved[k].wrapping_sub(before[k]));
+                                }
                             }
                         }
                     }
@@ -3787,10 +3911,56 @@ fn run() -> Result<(), String> {
                             ))
                         })
                 };
+                // F1012/F1047's landed handlers (0x32/0x34) and F1011's pad view
+                // (0x30) still read the keyboard and run F1041/F1037: the source
+                // F1014/F1015 call F1037, F1041 and the contact scan, so Enter /
+                // Shift / W / S set the speed and the engine thrust applies even
+                // while the ship sits on the surface. The old branch only copied
+                // the mode word, which froze the HUD's Set and ignored every
+                // speed key until the player launched.
+                let landed_parent = nav.as_ref().and_then(|nav| {
+                    let index = nav.landed_body()?;
+                    let body = nav.bodies.get(index)?;
+                    let info =
+                        ffe_core::objects::ModelInfo::read(model_records, model_stats, body.model)?;
+                    Some((
+                        index,
+                        ffe_rs::navigation::landing_body(body, &info),
+                        body.position,
+                        info,
+                    ))
+                });
                 let mut landed_at = None;
                 let step_result = if let Some(mode) = landed_state {
                     model.set_mode(mode);
-                    Ok(None)
+                    if let Some((index, parent, at, info)) = landed_parent {
+                        model
+                            .step_landing(
+                                elapsed,
+                                &keys,
+                                &parent,
+                                at,
+                                &info,
+                                landing_tools.as_ref(),
+                            )
+                            .map(|contact| {
+                                if contact.flags & 0x40 != 0 {
+                                    landed_at = Some(index);
+                                } else if contact.flags & 0x80 != 0 {
+                                    pending_log.add(
+                                        Source::Collision,
+                                        format!(
+                                            "Crash: damage {}. The ship bounced off the surface.",
+                                            contact.damage.max(0)
+                                        ),
+                                    );
+                                    sound.play(Cue::HullDamage);
+                                }
+                                Some(contact)
+                            })
+                    } else {
+                        Ok(None)
+                    }
                 } else if model.on_pad() {
                     model
                         .step_pad(elapsed, &keys, landing_tools.as_ref())
@@ -4708,6 +4878,7 @@ fn run() -> Result<(), String> {
         screen.beam = None;
         let can_fire = active
             && !paused
+            && !pad_board
             && state.mode == ffe_rs::flight::Mode::Flight
             && model_lab.is_none()
             && model_viewer.is_none()
@@ -5173,7 +5344,8 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        if state.mode == ffe_rs::flight::Mode::Docked {
+        screen.pad_services = pad_board;
+        if state.mode == ffe_rs::flight::Mode::Docked || pad_board {
             if let Some(nav) = nav.as_mut() {
                 if let Some(station) = nav.docked {
                     let hold = trade::hold_of(&state, trade::capacity(nav, &cache, &state));
@@ -5805,7 +5977,10 @@ fn run() -> Result<(), String> {
         screen.hud = PlayerHud {
             shields: state.shields,
             hull: state.hull,
-            set_speed: Some(source_speed(views.console.set_speed.unwrap_or(0) as f64)),
+            set_speed: views
+                .console
+                .set_speed
+                .map(|speed| source_speed(f64::from(speed))),
             actual_speed: source_speed(state.speed()),
             altitude: Some(0),
             registration: parent_name,
@@ -6064,6 +6239,30 @@ fn drive_state(
 /// The models a generated station can have (F892's tables): their docking faces
 /// are read from their vertices at start-up.
 const STATION_MODELS: [u32; 10] = [69, 72, 73, 74, 75, 76, 77, 78, 79, 80];
+
+/// Whether F152's game clock runs this frame: the simulation is live, no
+/// preference page or death/game-over screen owns it, and the developer model
+/// tools are closed. Pausing (F224 or the meter) stops time; losing focus is the
+/// port's pause-without-catch-up rule. The clock is not tied to the flight model:
+/// it also runs on the pad, the landed view and the station/services screens.
+fn clock_runs(
+    active: bool,
+    paused: bool,
+    prefs_open: bool,
+    death: bool,
+    model_lab: bool,
+    model_viewer: bool,
+) -> bool {
+    active && !paused && !prefs_open && !death && !model_lab && !model_viewer
+}
+
+/// The current absolute positions of the planet and starport a new-game pad
+/// belongs to, for the pad world that follows the navigator's clock.
+fn pad_bodies(nav: &ffe_rs::navigation::Navigator) -> Option<([i64; 3], [i64; 3])> {
+    let station = nav.bodies.get(nav.docked?)?;
+    let planet = station.parent.and_then(|parent| nav.bodies.get(parent))?;
+    Some((planet.position, station.position))
+}
 
 /// The player's position in system millimetres: the original flight model's when
 /// it is running, else the prototype state's (the sandbox and the pre-launch

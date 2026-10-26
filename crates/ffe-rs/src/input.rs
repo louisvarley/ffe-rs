@@ -48,6 +48,13 @@ pub fn view_command(key: Key) -> Option<ViewCommand> {
     }
 }
 
+/// The source galaxy-map key. F3 is F1054's map action (`docs/CONTROLS.md`);
+/// the port also accepts G as its long-standing shortcut. The control preset is
+/// chosen only on `Escape` -> `Port Options`, never from a flight key.
+pub fn galaxy_map_key(key: Key) -> bool {
+    matches!(key, Key::F3 | Key::G)
+}
+
 /// The port's developer-only controls. None are bound in a player build: the
 /// caller passes `--dev` or `FFE_DEV=1` to enable them, and every one uses a
 /// Ctrl chord (or O) so no source key is taken.
@@ -578,6 +585,16 @@ mod tests {
         assert_eq!(accumulator.packed(), 0);
         accumulator.update(step(true, 1, 0));
         assert_eq!(accumulator.packed(), 1);
+    }
+
+    #[test]
+    fn f3_is_the_source_map_key_and_not_a_preset_switch() {
+        assert!(galaxy_map_key(Key::F3));
+        assert!(galaxy_map_key(Key::G));
+        // The source's other screen and view keys keep their own routes.
+        for key in [Key::F1, Key::F2, Key::F4, Key::F6, Key::F12] {
+            assert!(!galaxy_map_key(key), "{key:?} is not the map key");
+        }
     }
 
     #[test]

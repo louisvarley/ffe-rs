@@ -245,9 +245,16 @@ mod tests {
         // Autopilot: the Act-only twin, no Set.
         let autopilot = PlayerHud {
             autopilot: true,
-            ..hud
+            ..hud.clone()
         };
         assert_eq!(autopilot.speed_columns(&font()).0, ["Act:61.5 km{"]);
+        // No original model yet (the pad before launch): F1099 has no Set word,
+        // so only Act is drawn instead of a frozen `Set:0.0`.
+        let no_model = PlayerHud {
+            set_speed: None,
+            ..hud
+        };
+        assert_eq!(no_model.speed_columns(&font()).0, ["Act:61.5 km{"]);
     }
 
     #[test]

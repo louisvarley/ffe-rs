@@ -317,7 +317,6 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
             image, screen.pixels,
             "the removed help overlay must not draw a frame"
         );
-        screen.overlay("PAUSED", &["P RESUMES. F2 STATUS PAGE."]);
         let vertices = [1, 0, 10, 20, 30, 0];
         let lab = ffe_rs::model_lab::ModelLab::from_models([
             ffe_rs::model_lab::StationVertices::new(74, 2, 13, &vertices).unwrap(),

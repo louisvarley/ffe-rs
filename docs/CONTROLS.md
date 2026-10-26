@@ -1,7 +1,7 @@
 # Flight controls
 
 The port has two flight presets, chosen on the Escape pages' `Port Options` page
-or with **F3**:
+(the source **F3** is the galaxy map, not a preset switch):
 
 - **Modern** (default): the port's own WASD/arrow scheme.
 - **Classic**: the original's scheme. **Hold the right mouse button and move the
@@ -52,8 +52,8 @@ right button is the steering hold. The left button remains the console pointer
 | Launch from a station or landed state / toggle labels in flight | **L**, or the original action 9: **Tab** while landed |
 | System map | **Tab** (in flight only; on a pad or the surface Tab launches, as `F1056`'s action 9) |
 | Navigation computer (stations and starports) | **N** |
-| Galaxy map: choose the star at the centre as the jump destination | **G** |
-| Hyperspace to the chosen destination (also after G closes) | **H** |
+| Galaxy map: choose the star at the centre as the jump destination | **F3** (the source map screen; **G** is the port shortcut) |
+| Hyperspace to the chosen destination (also after the map closes) | **H** |
 | Re-centre the galaxy map | **C** |
 | Map page (while the map is open): controls / select / details / picture | **F5 / F6 / F7 / F8** |
 | Map page: details with next / previous; zoom in / out | **F9 / F10; F11 / F12** |
@@ -119,12 +119,12 @@ the yaw keys/axis and the pitch keys/axis, and flips the mouse x and y.
 
 ## Switching and persistence
 
-- **F3** and the two `Port Options` rows call `Prefs::toggle_modern` /
-  `Action::Modern`. The routing reads the new value on the next frame, so the
-  change applies immediately.
+- The two `Port Options` rows call `Action::Modern`. The routing reads the new
+  value on the next frame, so the change applies immediately. **F3 is the
+  source galaxy map**, not a preset switch.
 - Switching disarms every held key and resets the mouse accumulator; a key held
-  through the switch must be released and pressed again (the same rule as pause,
-  overlays and focus loss).
+  through the switch must be released and pressed again (the same rule as pause
+  and focus loss).
 - The choice is stored in `saves/controls.cfg` as `modern` or `classic`
   (`ffe_rs::settings`). A missing or malformed file falls back to Modern. The
   other preference values remain session-only.
@@ -178,8 +178,8 @@ combat-computer key and has no action until view 6 is ported.
   optional frame/input strip (set `FFE_RS_CONTROLS_CAPTURE`).
 - `crates/ffe-rs/tests/original_flight.rs`: the F1038 mouse word turns the
   original model, and a disabled mouse is ignored without a jump.
-- `crates/ffe-rs/tests/prefs.rs`: the Port Options rows and F3 switch, including
-  the radio marks on the page.
+- `crates/ffe-rs/tests/prefs.rs`: the Port Options rows, including the radio
+  marks on the page and no F3 preset route.
 - `crates/ffe-rs/src/settings.rs`: the `controls.cfg` round trip and malformed
   file fallback.
 - `crates/ffe-rs/src/display.rs` and `tests/prefs.rs`: fit rectangles, nearest
@@ -195,7 +195,9 @@ The player-facing build no longer has the `?` help page, the playtest scenario
 menu, the F11 screenshot, the F12 model viewer/Shift+F12 model lab or the O
 prototype-flight toggle. These were port additions, not source behaviour. F1 is
 the original view cycle again, F11 is left for the source combat computer (view 6
-is not ported yet) and F12 is the source escape-capsule action.
+is not ported yet) and F12 is the source escape-capsule action. The port's
+`PAUSED` overlay (with `P Resume` / `F2 status`) is also gone: pausing only stops
+time, as F224 does, and the game frame stays as it was.
 
 The developer capability is still available behind `--dev` or `FFE_DEV=1`:
 Ctrl+F11 screenshot, Ctrl+F12 model viewer, Ctrl+Shift+F12 model lab and O
