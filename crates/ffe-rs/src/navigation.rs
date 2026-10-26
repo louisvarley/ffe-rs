@@ -3229,7 +3229,10 @@ impl Navigator {
     /// F1012 path runs no flight step here and F829/F998 spawn no traffic.
     pub fn on_pad(&self) -> bool {
         self.new_game.is_some()
-            && self.docked.is_some()
+            && self
+                .docked
+                .and_then(|index| self.bodies.get(index))
+                .is_some_and(|body| body.kind == Kind::Starport)
             && self.takeoff.is_none()
             && self.sequence.is_none()
             && self.landed.is_none()

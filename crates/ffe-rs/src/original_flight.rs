@@ -263,6 +263,11 @@ impl OriginalFlight {
         self.player.set_speed
     }
 
+    /// Set the set speed (`DATA_008918`, `player+0x1b8`) in velocity units.
+    pub fn set_set_speed_units(&mut self, units: i32) {
+        self.player.set_speed = units;
+    }
+
     /// Replace the six thrust limits the flight step clamps against
     /// (`ship+0xbc..+0xc6`): a damaged or failed thruster changes how much of
     /// the request F598/F600 can deliver.

@@ -42,6 +42,8 @@ use minifb::{MouseButton, MouseMode};
 /// The window title, shared by every reopen.
 const WINDOW_TITLE: &str = "FFE-RS 0.9 - Depth-order helpers, experimental flight";
 
+/// F1088's set speed for a ship leaving a station's slot (`player+0x1b8`).
+const STATION_LAUNCH_SET_SPEED: i32 = 0xb5d;
 /// What the open-air launch tells the player: F1013/F1031 need thrust to climb
 /// out of the starport's effect region.
 const TAKEOFF_HINT: &str =
@@ -3658,7 +3660,13 @@ fn run() -> Result<(), String> {
                 if dock_action.is_some() || dock != dock_before {
                     sound.play(Cue::UiBeep);
                 }
-                let action = if pressed(Key::L) && state.mode == ffe_rs::flight::Mode::Docked {
+                // F1056's launch action does nothing while a docking or launch
+                // sequence is running (the lift, the door).
+                let sequence_running = nav.as_ref().is_some_and(|nav| nav.sequence.is_some());
+                let action = if pressed(Key::L)
+                    && state.mode == ffe_rs::flight::Mode::Docked
+                    && !sequence_running
+                {
                     if let Some(nav) = nav.as_mut() {
                         if let Some(report) = nav.smuggling_scan(&cache, &state.hold) {
                             if !report.message.is_empty() {
@@ -5030,8 +5038,17 @@ fn run() -> Result<(), String> {
                 } else if let Some(world) = nav.as_ref().and_then(|nav| nav.nearest_world(at)) {
                     model.face(world);
                 }
+                // F1088 sets `player+0x1b8`, the set speed, to 0xb5d, so the
+                // ship flies itself out of the slot (the Thargoid stations'
+                // reversed ship takes -0xb5d; the port faces every ship out).
+                model.set_set_speed_units(STATION_LAUNCH_SET_SPEED);
                 model.apply(&mut state);
                 state.system_flight = true;
+            }
+            // The ship has left: it is no longer docked, so the launch action
+            // cannot start the station's launch sequence again.
+            if let Some(nav) = nav.as_mut() {
+                nav.docked = None;
             }
             original = Some(model);
             message = if prefs.modern {
