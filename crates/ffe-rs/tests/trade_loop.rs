@@ -1,3 +1,4 @@
+// Developer transfer-controller scenario; source autopilot parity is tested separately.
 //! An end-to-end trade loop on the public playable APIs: buy hydrogen at the
 //! starting starport, hyperspace to Titican, dock at Argent, buy water, launch,
 //! jump home and sell the water at Old Blackelk.
@@ -264,7 +265,7 @@ fn autopilot_step(
     cache: &ffe_content::VerifiedCache,
     pilot: &mut OriginalFlight,
 ) -> bool {
-    let Some((command, _)) = nav.command(cache, pilot) else {
+    let Some((command, _)) = nav.prototype_command(cache, pilot) else {
         return false;
     };
     if let Some((landing, seconds)) = command.skip {
@@ -404,7 +405,7 @@ fn land_at_starport(
             pilot.teleport(seat);
             pilot.align_to(nav.bodies[index].orientation);
             pilot.set_thrust_override(None);
-            let _ = nav.command(cache, pilot);
+            let _ = nav.prototype_command(cache, pilot);
             assert_eq!(
                 nav.landed_body(),
                 Some(index),

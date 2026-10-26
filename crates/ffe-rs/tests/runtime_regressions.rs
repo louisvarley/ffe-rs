@@ -14,7 +14,9 @@ use std::path::Path;
 
 fn main_rs() -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(root.join("src/main.rs")).unwrap()
+    std::fs::read_to_string(root.join("src/main.rs"))
+        .unwrap()
+        .replace("\r\n", "\n")
 }
 
 #[test]

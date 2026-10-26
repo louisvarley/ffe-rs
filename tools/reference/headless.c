@@ -3862,6 +3862,15 @@ static void draw_mark_links(void)
     }
 }
 #endif
+static void surface_dump_done(FILE *stream,char *buffer,size_t size)
+{
+#ifdef _WIN32
+    (void)buffer; (void)size; fflush(stream); _exit(0);
+#else
+    fclose(stream); fwrite(buffer,1,size,stdout); fflush(stdout); _exit(0);
+#endif
+}
+static int surface_near_probe=0;
 static int surface_draw_vectors(int only)
 {
 #ifndef FFE_COMMAND_PROBE
@@ -3884,12 +3893,14 @@ static int surface_draw_vectors(int only)
         unsigned long *model;
         unsigned char *program;
         long index=surface_models[texture_random(0,38)];
+        if(surface_near_probe && n<4) index=131;
         long word0,kind,word8,word10,records=0,used=0,k,fault;
         long origin[3],vectors[9],detail=texture_random(-1,4);
         double rotation[9],radius=(double)(1UL<<texture_random(21,28))*(0.5+terrain_unit()),zf;
         unsigned char sky_in[3];
         unsigned long keys[16],consumed=0,words,i;
         int own=texture_random(0,9)<7;
+        if(surface_near_probe && n<4) own=1;
         model=ref_model(index);
         program=(unsigned char *)model[0];
         word0=(short)(program[2]|program[3]<<8);
@@ -3950,6 +3961,12 @@ static int surface_draw_vectors(int only)
         origin[2]=(long)(radius*zf);
         origin[0]=(long)((terrain_unit()-0.5)*radius*zf*(texture_random(0,2)?0.6:2.0));
         origin[1]=(long)((terrain_unit()-0.5)*radius*zf*(texture_random(0,2)?0.4:1.5));
+        if(surface_near_probe && n<4) {
+            static const long near_axes[9]={395900,-7682913,-8941984,11780791,607064,0,-460168,8930091,-7693144};
+            memcpy(vectors,near_axes,sizeof(near_axes));
+            origin[0]=344; origin[1]=-11581000-(long)n*4096; origin[2]=369;
+            detail=1;
+        }
         memset(instance,0,sizeof(instance));memset(globals,0,sizeof(globals));memset(object,0,sizeof(object));
         memset(slots,0,sizeof(slots));memset(normals,0,sizeof(normals));
         memcpy((char *)instance+0x14,identity,36);
@@ -3986,6 +4003,9 @@ static int surface_draw_vectors(int only)
         memset(draw_first,0,sizeof(draw_first));
         draw_dump=(only==(int)n);
         if(only>=0 && !draw_dump) continue;
+#ifdef _WIN32
+        if (!(surface_near_probe && only >= 0)) fail("Use --surface-near CASE on Windows (no fork).");
+#else
         {
             /* Each case runs in a child: an overflow or a fault leaves the original's
                state unusable, and a crash must not end the run. */
@@ -4000,9 +4020,14 @@ static int surface_draw_vectors(int only)
                 continue;
             }
         }
+#endif
         {
             char *buffer=0;size_t size=0;
+#ifdef _WIN32
+            draw_out=stdout;
+#else
             draw_out=open_memstream(&buffer,&size);
+#endif
         fprintf(draw_out,"{\"case\":%lu,\"model\":%ld,\"seed\":%lu,\"word0\":%ld,\"kind\":%ld,\"word8\":%ld,\"word10\":%ld,\"detail\":%ld,\"scale\":%ld,\"zoom\":%ld,\"origin\":[%ld,%ld,%ld],\"vectors\":[",n,index,seed,word0,kind,word8,word10,detail,(long)instance[0x148/4],(long)instance[0x130/4],origin[0],origin[1],origin[2]);
         for(k=0;k<9;++k) fprintf(draw_out,"%s%ld",k?",":"",vectors[k]);
         fprintf(draw_out,"],\"sky\":[%u,%u,%u],\"light\":[%ld,%ld,%ld],\"shades\":[",sky_in[0],sky_in[1],sky_in[2],(long)instance[0x134/4],(long)instance[0x138/4],(long)instance[0x13c/4]);
@@ -4018,7 +4043,7 @@ static int surface_draw_vectors(int only)
         }
         if(draw_dump) fprintf(draw_out,"]");
         words=(unsigned long)(ref_order_cursor-ref_order_base);
-        if(fault) {fprintf(draw_out,"%s\"fault\":true,\"overflow\":%d,\"signal\":%d}\n",draw_dump?",":"],",draw_overflow,draw_signal);fclose(draw_out);fwrite(buffer,1,size,stdout);fflush(stdout);_exit(0);}
+        if(fault) {fprintf(draw_out,"%s\"fault\":true,\"overflow\":%d,\"signal\":%d}\n",draw_dump?",":"],",draw_overflow,draw_signal);surface_dump_done(draw_out,buffer,size);}
         fprintf(draw_out,"%s\"fault\":false,\"emits\":%lu,\"hash\":\"%016llx\",\"nodes\":%lu,\"edges\":%lu,\"first\":[",draw_dump?",":"],",draw_emits,(unsigned long long)draw_hash,ref_tr_nodes_used,ref_tr_edges_used);
         for(i=0;i<draw_emits && i<48;++i) {
             unsigned long j;
@@ -4038,7 +4063,7 @@ static int surface_draw_vectors(int only)
             for(i=0;i<words && (i<600 || draw_dump);++i) fprintf(draw_out,"%s%lu",i?",":"",draw_handler(ref_order_base[i],i));
         }
         fprintf(draw_out,"]}\n");
-        fclose(draw_out);fwrite(buffer,1,size,stdout);fflush(stdout);_exit(0);
+        surface_dump_done(draw_out,buffer,size);
         }
     }
     (void)drew;
@@ -5916,8 +5941,46 @@ static int object_instance_vectors(void)
 }
 #endif
 
+
+extern void ref_autopilot_request(unsigned char *, unsigned char *, long, long *, long *, long, long, long *, void *);
+extern void ref_autopilot_turn(unsigned char *);
+extern void ref_autopilot_match(unsigned char *, unsigned char *, long);
+extern unsigned long ref_time_accel_index;
+static unsigned long ap_random = 0x12345678;
+static long ap_next(void) { ap_random ^= ap_random << 13; ap_random ^= ap_random >> 17; ap_random ^= ap_random << 5; return (long)ap_random; }
+static void ap_vec(long *v, int n) { int k; printf("["); for(k=0;k<n;k++) printf("%s%ld", k?",":"",v[k]); printf("]"); }
+static int autopilot_vectors(void) {
+    int n,k; unsigned char object[0x200], target[0x200];
+    ref_time_accel_index=0;
+    for(n=0;n<512;n++) {
+        long matrix[9], position[3], velocity[3], pos[3], vel[3], cap[3], turns[3], match_turns[3];
+        long target_matrix[9]={0,0,0x7f000000,0,0x7f000000,0,-0x7f000000,0,0};
+        long distance, shift=(n%36), vshift=(n%30)-14, modifier=(n%5)-2;
+        memset(object,0,sizeof(object)); memset(target,0,sizeof(target));
+        for(k=0;k<9;k++) matrix[k]= (k%4==0 ? 0x7f000000 : 0);
+        if(n&1) { matrix[0]=-matrix[0]; matrix[8]=-matrix[8]; }
+        for(k=0;k<3;k++) { position[k]=(ap_next()&0x3fff)-0x2000; velocity[k]=(ap_next()&0x7fff)-0x4000; pos[k]=position[k]; vel[k]=velocity[k]; }
+        memcpy(object,matrix,sizeof(matrix));
+        ref_autopilot_request(object,target,modifier,&distance,vel,vshift,shift,pos,0);
+        for(k=0;k<3;k++) { memcpy(&cap[k],object+0xf2+4*k,4); *(short *)(object+0x108+2*k)=(short)position[k]; }
+        ref_autopilot_turn(object);
+        for(k=0;k<3;k++) turns[k]=*(short *)(object+0x110+2*k);
+        printf("{\"matrix\":");ap_vec(matrix,9);printf(",\"position\":");ap_vec(position,3);printf(",\"velocity\":");ap_vec(velocity,3);
+        printf(",\"shift\":%ld,\"vshift\":%ld,\"modifier\":%ld,\"request\":",shift,vshift,modifier);ap_vec(vel,3);
+        printf(",\"cap\":");ap_vec(cap,3);printf(",\"turns\":");ap_vec(turns,3);
+        memcpy(target,target_matrix,sizeof(target_matrix));
+        printf(",\"target_matrix\":");ap_vec(target_matrix,9);
+        ref_autopilot_match(object,target,-1);
+        for(k=0;k<3;k++) match_turns[k]=*(short *)(object+0x110+2*k);
+        printf(",\"match_turns\":");ap_vec(match_turns,3);printf("}\n");
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if(argc==2 && !strcmp(argv[1],"--autopilot")) return autopilot_vectors();
+
     const char *count;
     if (argc == 2 && (!strcmp(argv[1], "--sysgen") || !strcmp(argv[1], "--worldgen"))) {
         /* Uninitialised stack in F877 holds addresses: fix them so traces repeat. */
@@ -5956,6 +6019,8 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--frames")) return frames_vectors();
     if (argc == 2 && !strcmp(argv[1], "--terrain-mid")) return terrain_mid_vectors();
     if (argc == 2 && !strcmp(argv[1], "--terrain")) return terrain_vectors();
+    if (argc == 2 && !strcmp(argv[1], "--surface-near")) {surface_near_probe=1;return surface_draw_vectors(-1);}
+    if (argc == 3 && !strcmp(argv[1], "--surface-near")) {surface_near_probe=1;return surface_draw_vectors(atoi(argv[2]));}
     if (argc == 2 && !strcmp(argv[1], "--surface-draw")) return surface_draw_vectors(-1);
     if (argc == 3 && !strcmp(argv[1], "--surface-draw")) return surface_draw_vectors(atoi(argv[2]));
     if (argc == 2 && !strcmp(argv[1], "--planet")) return planet_vectors();

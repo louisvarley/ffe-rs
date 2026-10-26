@@ -122,9 +122,6 @@ struct Pass<'t, 'e> {
     /// The midpoint routines for levels below five and from five on.
     coarse: usize,
     fine: usize,
-    /// The eye is inside the planet's base sphere: hide the shell's far side,
-    /// which is otherwise painted over the sky (there is no depth buffer).
-    inside: bool,
     emit: &'e mut dyn FnMut(&Terrain<'_>, Emission) -> Result<(), Fault>,
 }
 
@@ -191,11 +188,10 @@ impl Terrain<'_> {
             self.nodes[corner] = node;
         }
         let far = scene.origin[2] > longest.wrapping_mul(2);
-        let inside = distance < (longest as u32);
         let span = self.type_dword(scene.kind, 8) as usize;
         let slack = 0x1dcd_6500_i32 >> (scene.zoom & 31);
         let mut aborted = None;
-        let result = self.draw_faces(scene, &tree, far, inside, span, bound, slack, emit);
+        let result = self.draw_faces(scene, &tree, far, span, bound, slack, emit);
         if let Err(stop) = result {
             match stop {
                 Stop::Abort(Abort(code)) => aborted = Some(code),
@@ -211,7 +207,6 @@ impl Terrain<'_> {
         scene: &Scene,
         tree: &Tree,
         far: bool,
-        inside: bool,
         span: usize,
         bound: i32,
         slack: i32,
@@ -246,7 +241,6 @@ impl Terrain<'_> {
                 zoom: scene.zoom,
                 coarse,
                 fine,
-                inside,
                 emit,
             };
             self.descend(&mut pass, corners, sides, 0, bound, face_tree)?;
@@ -336,23 +330,6 @@ impl Terrain<'_> {
                     model_depth::key([na.x(), na.y(), na.z().wrapping_add(pass.slack)], pass.zoom);
                 let vector =
                     normal(pos(self, a), pos(self, b), pos(self, c)).map_err(Stop::Fault)?;
-                if pass.inside {
-                    // The eye is inside the base sphere. The near ground faces
-                    // toward it; the shell's far side faces away and has no
-                    // later triangle to cover it (there is no depth buffer).
-                    let (pa, pb, pc) = (pos(self, a), pos(self, b), pos(self, c));
-                    let centroid: [i64; 3] = std::array::from_fn(|k| {
-                        i64::from(pa[k])
-                            .wrapping_add(i64::from(pb[k]))
-                            .wrapping_add(i64::from(pc[k]))
-                    });
-                    let away = (0..3).fold(0i64, |sum, k| {
-                        sum.wrapping_add(i64::from(vector[k]).wrapping_mul(centroid[k]))
-                    });
-                    if away >= 0 {
-                        return Ok(());
-                    }
-                }
                 (pass.emit)(
                     self,
                     Emission {
@@ -365,10 +342,8 @@ impl Terrain<'_> {
                 .map_err(Stop::Fault)?;
                 return Ok(());
             }
-            if level < 2 && !pass.inside {
-                // A triangle wholly beyond the horizon is not drawn. (An eye
-                // inside the base sphere is already at the horizon; the original
-                // test would drop the ground under it.)
+            if level < 2 {
+                // F1868/F1869: a triangle wholly beyond the horizon is not drawn.
                 let vector =
                     normal(pos(self, a), pos(self, b), pos(self, c)).map_err(Stop::Fault)?;
                 let mut beyond = true;

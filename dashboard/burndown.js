@@ -120,7 +120,8 @@ window.FFE_BURNDOWN = {
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
         { id: "flight-11", title: "Launch sequence", status: "done", version: "v0.55" },
         { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "in-progress", version: "flight-reference" },
-        { id: "flight-13", title: "Open-air starport takeoff (F1013 0x24, F1031/F1032 bay release, F573 return)", status: "done", version: "v0.59" }
+        { id: "flight-13", title: "Open-air starport takeoff (F1013 0x24, F1031/F1032 bay release, F573 return)", status: "done", version: "v0.59" },
+        { id: "flight-14", title: "Original autopilot: verified guidance, avoidance, rotating frames and full route replay", status: "in-progress", version: "source-guidance" }
       ]
     },
     {
@@ -819,7 +820,7 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 63,
       note: "Launch investigation: fixed system/local position confusion and stale pad-world origin across the first orbital refresh (10.8 km jump reproduced at frame 50). Nearby autopilot and hand-off continuity checks pass. Empty Hope ground remains an unfinished ui-11/v0.48-14 case; existing tests counted buildings and did not prove terrain visibility. No milestone completion change."
-    },,
+    },
     {
       date: "2026-10-26",
       remaining: 63,
@@ -860,5 +861,15 @@ window.FFE_BURNDOWN = {
       remaining: 63,
       note: "Scripted flight trace merged (flight-v1): `--flight idle|takeoff|planet 900` runs the executed original from boot with scripted Y/start/launch/set-speed keys and emits one bounded JSONL row per frame (mode, F1013 altitude, F1121 set speed, player planet +0x56 with model/position, ship position/velocity, chained state hash). verify-flight.py runs all three twice, checks the hash chain, rejects 16 altered fields and an empty trace, and flight_reference.rs compares the idle pad, the 0x30 -> 0x24 -> 0x26 -> 0x00 machine, the retained planet model and the released bay with the port. This first slice covers the takeover report's idle boot, launch frame continuity and retained planet; approach/docking/traffic scenarios remain, so flight-12 is in-progress and the count is unchanged."
     },
+    {
+      date: "2026-10-26",
+      remaining: 64,
+      note: "Autopilot audit: live prototype transfers/direct turns replaced by source guidance (512-case F597/F587/F589 oracle), F727 integration, F1020 gates and F745 pad/fines flow. Old Blackelk 1x landing passes via corrected sibling frame. Full avoidance/frame/pursuit/event parity still open; added flight-14 in progress. See docs/notes/autopilot-source-audit.md."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 64,
+      note: "Hope launch ground repaired: source model scale offsets replace collision-bound radius scaling; original near-surface culling and atmosphere restored. Four executed-original near-pad cases match 168 triangles and queues. Actual Saker launch rises with visible terrain at 0/1/3 seconds across orbital refresh. Final 240-frame 1x launch capture passes; removed scripted 10000x stress action during takeoff. ui-11 remains in progress for broader approach fidelity."
+    }
   ]
 };

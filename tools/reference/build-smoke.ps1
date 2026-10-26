@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$Nasm,
+    [string]$SourceRoot,
     [string]$VcVars = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars32.bat'
 )
 
@@ -16,7 +17,7 @@ function Invoke-Native {
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$source = Join-Path $root 'jjffe-master'
+$source = if ($SourceRoot) { (Resolve-Path -LiteralPath $SourceRoot).Path } else { Join-Path $root 'jjffe-master' }
 $output = Join-Path $root '.cache\jjffe-reference'
 $nasmPath = (Resolve-Path -LiteralPath $Nasm).Path
 $vcPath = (Resolve-Path -LiteralPath $VcVars).Path

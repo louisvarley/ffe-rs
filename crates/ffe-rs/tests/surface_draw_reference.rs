@@ -153,6 +153,16 @@ fn mix(hash: &mut u64, value: u32) {
 #[test]
 #[ignore = "Local-only original world data; use tools/reference/verify-world.py"]
 fn executed_reference_surface_draw() {
+    compare_surface_vectors(350);
+}
+
+#[test]
+#[ignore = "Local-only near-pad original F1876 vectors: FFE_SURFACE_VECTORS"]
+fn executed_reference_near_surface_draw() {
+    compare_surface_vectors(3);
+}
+
+fn compare_surface_vectors(minimum: usize) {
     let (table, maps) = cache_terrain();
     let sine = cache_sine();
     let input = std::fs::read_to_string(std::env::var_os("FFE_SURFACE_VECTORS").unwrap()).unwrap();
@@ -308,7 +318,7 @@ fn executed_reference_surface_draw() {
         compared += 1;
         emitted += count;
     }
-    assert!(compared > 350, "too few cases: {compared} of {cases}");
+    assert!(compared > minimum, "too few cases: {compared} of {cases}");
     eprintln!(
         "compared {compared} of {cases} cases ({emitted} triangles); {queued} queues, {overflows} overflows"
     );

@@ -82,6 +82,8 @@ pub struct Body {
     pub kind: Kind,
     /// Position in the system frame (millimetres).
     pub position: [i64; 3],
+    /// F595/F594 native velocity words in the parent frame.
+    pub velocity: [i32; 3],
     /// The body's outer radius (`+0x138`, millimetres): the atmosphere's for a
     /// planet, the hull's for a station.
     pub radius: i64,
@@ -491,6 +493,7 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
             name: String::from_utf8_lossy(text).into_owned(),
             kind,
             position,
+            velocity: std::array::from_fn(|k| list.dword(slot, 0x8c + 4 * k) as i32),
             radius,
             inner_radius,
             parent: parent.checked_sub(1),
@@ -942,7 +945,7 @@ pub fn starport_descent(flight: &OriginalFlight, pad: [i64; 3], integral: [f64; 
 
 /// One frame of the autopilot: turn toward `target` with the steering keys, hold
 /// the set speed the distance allows and the time acceleration it can use.
-pub fn autopilot(
+pub fn prototype_autopilot(
     flight: &OriginalFlight,
     target: [i64; 3],
     stop: f64,
@@ -1102,6 +1105,7 @@ pub struct Navigator {
     pub selected: usize,
     /// The body the autopilot is flying to.
     pub target: Option<usize>,
+    autopilot_notice: Option<String>,
     /// The body the player has locked on (clicked in the view or cycled to): what the
     /// autopilot button flies to.
     pub locked: Option<usize>,
@@ -1904,6 +1908,7 @@ impl Navigator {
             view: View::Closed,
             selected: 0,
             target: None,
+            autopilot_notice: None,
             locked: None,
             destination: None,
             altitude: i32::MAX,
@@ -3000,6 +3005,7 @@ impl Navigator {
         }
         // F1048 calls F653: the traffic record is reset (the bay stays allocated).
         self.starport(index).reset();
+        self.docked = Some(index);
         self.target = None;
         self.final_leg = false;
         self.clearance_at = None;
@@ -3037,6 +3043,16 @@ impl Navigator {
             && self.takeoff.is_none()
             && self.sequence.is_none()
             && self.landed.is_none()
+    }
+
+    /// F343 services are available at the new-game pad and after a port landing.
+    pub fn at_starport_pad(&self) -> bool {
+        self.on_pad()
+            || self.landed.is_some_and(|landed| {
+                self.bodies
+                    .get(landed.index)
+                    .is_some_and(|body| body.kind == Kind::Starport)
+            })
     }
 
     /// The player is in a landed view: a surface `0x34`/`0x32`, the open-air
@@ -4485,8 +4501,12 @@ impl Navigator {
     /// action 0xd1+n stores the object's number in the player's target byte `+0xec`
     /// (ffe.asm 78362-78376); the port's `locked` is that target.
     pub fn engage(&mut self) -> Option<&Body> {
+        if self.landed_view() || self.sequence.is_some() {
+            return None;
+        }
         let index = self.selected_body()?;
         self.target = Some(index);
+        self.autopilot_notice = None;
         self.locked = Some(index);
         self.final_leg = false;
         self.clearance_at = None;
@@ -4522,8 +4542,13 @@ impl Navigator {
     /// Engage the autopilot on the locked body: it flies there and, at a station, asks
     /// for clearance and docks.
     pub fn engage_locked(&mut self) -> Option<&Body> {
+        if self.landed_view() || self.sequence.is_some() {
+            return None;
+        }
         let index = self.locked?;
+        self.bodies.get(index)?;
         self.target = Some(index);
+        self.autopilot_notice = None;
         self.final_leg = false;
         self.clearance_at = None;
         self.memory = Memory::default();
@@ -4596,8 +4621,136 @@ impl Navigator {
         self.cancel();
     }
 
+    /// F1020 changes takeoff to autopilot; F1032 releases the bay in 0x26.
+    pub fn autopilot_takeoff_handoff(&mut self) -> bool {
+        let Some(takeoff) = self.takeoff.take() else {
+            return false;
+        };
+        if takeoff.state == state::AFTER_TAKEOFF {
+            if let Some(index) = self.docked {
+                self.starport(index).release(PLAYER);
+            }
+        }
+        self.docked = None;
+        true
+    }
+
+    fn autopilot_notice(&mut self, text: String) {
+        if self.autopilot_notice.as_ref() != Some(&text) {
+            self.autopilot_notice = Some(text.clone());
+            self.notice = Some(text);
+        }
+    }
+
+    /// Player path: F741/F742 approach, F745 clearance, F746 pad guidance.
+    /// The older `prototype_command` method below is the developer transfer controller;
+    /// it is deliberately not called by the live player loop.
+    pub fn source_command(
+        &mut self,
+        _cache: &VerifiedCache,
+        flight: &mut OriginalFlight,
+    ) -> Option<(ffe_core::autopilot::Guidance, Body)> {
+        if self.landed_view() || self.sequence.is_some() {
+            return None;
+        }
+        let index = self.target?;
+        let body = self.bodies.get(index)?.clone();
+        let station = matches!(body.kind, Kind::Station | Kind::Starport);
+        if self.final_leg
+            && self
+                .traffic
+                .get(&index)
+                .and_then(|p| p.bay_of(PLAYER))
+                .is_none()
+        {
+            self.final_leg = false;
+        }
+        let point = if self.final_leg {
+            // F655/F650 gives the pad plane. F745 quantises the offset to
+            // signed words; F671 adds the ship radius only after touchdown.
+            // Using the launch seat here leaves the ship hovering one radius up.
+            let bay = self.traffic.get(&index)?.bay_of(PLAYER)?;
+            let offset = self
+                .pads
+                .as_ref()?
+                .position(body.model, bay, body.rows, body.open_air)
+                .ok()?;
+            std::array::from_fn(|k| {
+                body.position[k].wrapping_add(i64::from((offset[k] >> 10) as i16) << 10)
+            })
+        } else if body.kind == Kind::Starport {
+            // F741 stores signed offset words, then F593 shifts them by ten.
+            // Use the Q31 row, rather than a re-normalised floating point axis.
+            std::array::from_fn(|k| {
+                body.position[k]
+                    + i64::from((ffe_core::model::multiply(body.rows[3 + k], 0x1770) as i16) as i32)
+                        * 1024
+            })
+        } else if body.kind == Kind::Station {
+            // F741's indoor-station offset is the literal z word 0xfa0.
+            [
+                body.position[0],
+                body.position[1],
+                body.position[2] + 0xfa0 * 1024,
+            ]
+        } else {
+            body.position
+        };
+        let velocity = if !station && self.frame == body.parent && self.frame != Some(index) {
+            body.velocity
+        } else {
+            [0; 3]
+        };
+        let mut guidance = if station {
+            flight.guidance(point, velocity, if self.final_leg { -2 } else { 0 })
+        } else {
+            flight.body_guidance(point, velocity, body.radius)
+        };
+        // F746's accelerated near-pad completion, not the prototype's
+        // long-distance transfer. F652 must accept the allocated bay first.
+        if self.final_leg && guidance.distance_shift <= 0 && flight.acceleration_step() != 0 {
+            if body.kind == Kind::Starport && self.starport(index).touch(PLAYER) {
+                let info = ffe_core::objects::ModelInfo::read(
+                    _cache.asset("base:model/records")?,
+                    _cache.asset("base:ship/stats")?,
+                    flight.player().motion.model,
+                )?;
+                let seat = self.takeoff_seat(index, info.radii().1 as i32)?;
+                flight.settle_autopilot_pad(seat, body.rows);
+                self.land_at_starport(index);
+                return None;
+            } else if body.kind == Kind::Station && self.begin_docking(index) {
+                return None;
+            }
+        }
+        if self.final_leg {
+            let rows = body
+                .orientation
+                .map(|r| r.map(|v| (v * 2_147_483_647.0) as i32));
+            guidance.turns = ffe_core::autopilot::match_orientation(
+                flight.player().motion.orientation,
+                rows,
+                true,
+            );
+        } else if station && guidance.distance_shift <= 6 {
+            // A refusal does not silently disengage F742; F745 retries.
+            let fine = self.fine_at(index);
+            match self.starport(index).request_docking(PLAYER, true, fine) {
+                Reply::Granted(_) => {
+                    self.final_leg = true;
+                    self.autopilot_notice(format!("{}: clearance granted.", body.name));
+                }
+                other => {
+                    let text = format!("{}: {}.", body.name, refusal(other));
+                    self.autopilot_notice(text);
+                }
+            }
+        }
+        Some((guidance, body))
+    }
+
     /// The autopilot's command for this frame, when engaged.
-    pub fn command(
+    pub fn prototype_command(
         &mut self,
         cache: &VerifiedCache,
         flight: &OriginalFlight,
@@ -4683,7 +4836,7 @@ impl Navigator {
             };
             (at, stop, false)
         };
-        let mut command = autopilot(flight, target, stop, &mut self.memory);
+        let mut command = prototype_autopilot(flight, target, stop, &mut self.memory);
         if starport && command.arrived && !self.final_leg {
             // F742/F745: at the approach the autopilot runs F655 and gets a pad.
             // The source holds here and asks again when traffic control refuses;
@@ -4969,6 +5122,7 @@ mod tests {
             name: format!("{kind:?}"),
             kind,
             position,
+            velocity: [0; 3],
             radius: 1_000_000,
             inner_radius: 1_000_000,
             parent: None,
@@ -5090,7 +5244,7 @@ mod tests {
         let mut turned_away = false;
         let mut arrived = false;
         for _ in 0..200_000 {
-            let command = autopilot(&flight, target, stop, &mut memory);
+            let command = prototype_autopilot(&flight, target, stop, &mut memory);
             if let Some(face) = command.face {
                 flight.turn_toward(face, 0.05, 1.0);
             }

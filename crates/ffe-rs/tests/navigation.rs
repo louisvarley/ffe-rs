@@ -1,7 +1,7 @@
 use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::navigation::{
-    autopilot, bodies, describe, distance, galaxy, place_indices, standoff, Body, Kind, Memory,
-    Traffic,
+    bodies, describe, distance, galaxy, place_indices, prototype_autopilot as autopilot, standoff,
+    Body, Kind, Memory, Traffic,
 };
 use ffe_rs::original_flight::OriginalFlight;
 
@@ -872,7 +872,7 @@ fn navigator_flow() {
     flight.teleport(arrival);
     let mut arrived = false;
     for _ in 0..100_000 {
-        let (command, _) = nav.command(&cache, &flight).expect("engaged");
+        let (command, _) = nav.prototype_command(&cache, &flight).expect("engaged");
         if let Some((landing, seconds)) = command.skip {
             assert!(seconds > 0.0);
             flight.teleport(landing);
@@ -892,7 +892,7 @@ fn navigator_flow() {
             break;
         }
     }
-    let (last, body) = nav.command(&cache, &flight).unwrap();
+    let (last, body) = nav.prototype_command(&cache, &flight).unwrap();
     eprintln!(
         "stop {} set speed {} m/s aligned {} accel {} step {}",
         describe(standoff(&body)),
@@ -1066,7 +1066,7 @@ fn autopilot_after_every_jump() {
             let mut last_aligned = 0.0;
             let mut pushes = 0;
             for _ in 0..200_000 {
-                let Some((command, _)) = nav.command(&cache, &flight) else {
+                let Some((command, _)) = nav.prototype_command(&cache, &flight) else {
                     break;
                 };
                 steps += 1;
@@ -1181,7 +1181,7 @@ fn trace_station_approach() {
     );
     flight.teleport(arrival);
     for step in 0..60_000 {
-        let Some((command, _)) = nav.command(&cache, &flight) else {
+        let Some((command, _)) = nav.prototype_command(&cache, &flight) else {
             break;
         };
         if let Some((landing, seconds)) = command.skip {
@@ -1285,7 +1285,7 @@ fn starport_autopilot_lands_on_the_pad() {
             model.shift(moved);
         }
         nav.tick_traffic(2485, 0.05);
-        let Some((command, _body)) = nav.command(&cache, &model) else {
+        let Some((command, _body)) = nav.prototype_command(&cache, &model) else {
             break;
         };
         if let Some(notice) = nav.notice.take() {
@@ -1327,7 +1327,7 @@ fn starport_autopilot_lands_on_the_pad() {
     model.align_to(nav.bodies[index].orientation);
     model.set_thrust_override(None);
     model.apply(&mut state);
-    let _ = nav.command(&cache, &model);
+    let _ = nav.prototype_command(&cache, &model);
     assert_eq!(
         nav.landed_state(),
         Some(ffe_core::traffic::state::LANDED),
@@ -1595,7 +1595,7 @@ fn autopilot_docks_at_stations() {
         let mut pushed = 0;
         let mut elapsed = 0.0;
         while elapsed < 2_000.0 {
-            let Some((command, _)) = nav.command(&cache, &flight) else {
+            let Some((command, _)) = nav.prototype_command(&cache, &flight) else {
                 break;
             };
             if let Some((landing, seconds)) = command.skip {
@@ -1757,7 +1757,7 @@ fn autopilot_docks_at_stations_from_every_bearing() {
                 let mut steps = 0;
                 while steps < 30_000 {
                     steps += 1;
-                    let Some((command, _)) = nav.command(&cache, &flight) else {
+                    let Some((command, _)) = nav.prototype_command(&cache, &flight) else {
                         break;
                     };
                     if let Some((landing, seconds)) = command.skip {
@@ -1857,7 +1857,7 @@ fn cancelling_the_autopilot_stops_the_ship_and_clears_the_leg() {
     ];
     flight.teleport(start);
     for _ in 0..40 {
-        let (command, _) = nav.command(&cache, &flight).expect("engaged");
+        let (command, _) = nav.prototype_command(&cache, &flight).expect("engaged");
         if let Some(face) = command.face {
             flight.turn_toward(face, 0.05, 1.0);
         }
@@ -1877,7 +1877,7 @@ fn cancelling_the_autopilot_stops_the_ship_and_clears_the_leg() {
     );
     assert_eq!(flight.set_speed_metres(), 0.0);
     eprintln!("cancelled: target/leg cleared, set 0 m/s");
-    assert!(nav.command(&cache, &flight).is_none());
+    assert!(nav.prototype_command(&cache, &flight).is_none());
     let before = flight
         .player()
         .motion
@@ -2308,6 +2308,7 @@ fn the_place_list_is_stations_and_starports_in_system_order() {
         name: name.to_owned(),
         kind,
         position: [0; 3],
+        velocity: [0; 3],
         radius: 1,
         inner_radius: 1,
         parent: None,
@@ -2446,7 +2447,7 @@ fn pad_takeoff_stays_near_the_port_when_the_system_clock_advances() {
             "frame {frame}: pad now {range} mm away after orbital refresh"
         );
     }
-    let command = ffe_rs::navigation::autopilot(
+    let command = ffe_rs::navigation::prototype_autopilot(
         &model,
         nav.bodies[index].position,
         1_000_000.0,

@@ -1,5 +1,11 @@
 # Getting around: systems, maps and the autopilot (progress)
 
+> 2026-10-26: the player path now uses integer source guidance rather than the
+> sandbox transfer controller. See [the source audit](notes/autopilot-source-audit.md)
+> for the exact coverage, 512-case oracle and remaining gaps. Older sandbox
+> arrival/transfer claims below are historical developer evidence.
+
+
 Started 2026-10-24 at the owner's request: a system map, a way to move between the
 systems, and an autopilot to planets, stations and other bodies for testing.
 

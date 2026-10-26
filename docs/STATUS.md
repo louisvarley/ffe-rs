@@ -1,5 +1,24 @@
 # Status and handoff
 
+## Hope ground correction — 2026-10-26
+
+Fixed terrain scale from model scale offsets and removed the added inside-sphere
+cull/atmosphere suppression. Four original near-pad scenes match (168 triangles
+and complete queues); real Saker pad physics rises with visible ground at 0, 1
+and 3 seconds. See [launch-ground](notes/launch-ground.md).
+
+## Autopilot audit — 2026-10-26
+
+Player flight now uses F597/F587/F589 integer guidance, F599 limits and F727
+integration rather than the developer transfer controller. Clearance uses fines,
+F745 continues to the pad plane, and accelerated F746 completion is exercised.
+512 original-executable arithmetic cases match. Full autopilot parity is **not
+complete**: obstacle avoidance, high-acceleration frame matching, rotating-frame
+coupling and ship pursuit remain. Old Blackelk 1x approach now lands through
+the original contact path after correcting the sibling-frame adapter. See
+[the source audit](notes/autopilot-source-audit.md).
+
+
 Authoritative, current status of the reimplementation. This file supersedes the
 status snippets in `README.md`, `CLAUDE.MD` and `docs/PORT_LOG.md` where they
 disagree with it. Read this first, then `docs/MODEL_COMMANDS.md` for the opcode
@@ -11,8 +30,8 @@ Fixed planet-relative positions being read as system coordinates during pad
 takeoff, and carried the local origin/climb reference across orbital refresh.
 The new moving-world regression reproduces the original 10.8 km jump at frame
 50 and passes after the fix, including nearby autopilot and hand-off continuity.
-The planet ground/horizon is **still unresolved**: Hope's terrain-only near-pad
-view emits no ground. Station geometry masked that in previous tests. Prioritise
+Historical finding, resolved by the 2026-10-26 ground correction above: Hope's
+terrain-only view emitted no ground. Station geometry masked it. Prioritise
 ui-11 and whole-frame evidence; see TAKEOVER_ISSUES.md. Services console icons
 and clickable F1 return are restored separately.
 

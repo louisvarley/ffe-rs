@@ -1669,16 +1669,9 @@ fn run() -> Result<(), String> {
         .find(|(key, _)| pressed(*key))
         .and_then(|(_, digit)| acceleration_for_digit(digit))
         .filter(|_| active && !death_control && state.mode == ffe_rs::flight::Mode::Flight);
-        let chosen_step = if capture_start && frames == 75 {
-            // The scripted start flow exercises the dashboard's fastest meter
-            // step (the `0` key) once the launch has begun: the green clock and
-            // the navigator must leap with it while the flight model still ticks.
-            Some(4)
-        } else {
-            match console_click {
-                Some(Click::Acceleration(step)) => Some(step),
-                _ => digit_step,
-            }
+        let chosen_step = match console_click {
+            Some(Click::Acceleration(step)) => Some(step),
+            _ => digit_step,
         };
         if let Some(step) = chosen_step {
             acceleration = step;
@@ -2567,7 +2560,11 @@ fn run() -> Result<(), String> {
                         }
                     }
                     if pressed(Key::K) || console_click == Some(Click::Autopilot) {
-                        if nav.locked.is_none() {
+                        if state.loadout.general & (1 << 21) == 0 {
+                            message = "No autopilot fitted.".to_owned();
+                        } else if nav.landed_view() || nav.sequence.is_some() {
+                            message = "Launch before engaging the autopilot.".to_owned();
+                        } else if nav.locked.is_none() {
                             message = if nav.ship_lock.is_some() {
                                 "A ship cannot be followed by the autopilot.".to_owned()
                             } else {
@@ -3794,9 +3791,14 @@ fn run() -> Result<(), String> {
                     mouse_steer.held,
                     reverse,
                 );
-                // The default-start capture flies the manual takeoff: after the
-                // launch action (frame 70) it holds the set speed, as W does.
-                if capture_start && frames >= 80 {
+                // Reproduce the ordinary 1x launch before adding forward speed.
+                // Do not turn the pad capture into a 10000x launch stress test.
+                if capture_start
+                    && frames >= 80
+                    && nav
+                        .as_ref()
+                        .is_some_and(|nav| nav.takeoff.is_none() && !nav.landed_view())
+                {
                     keys.faster = true;
                 }
                 // The scripted launch capture flies the takeoff itself: F1013's
@@ -3810,8 +3812,6 @@ fn run() -> Result<(), String> {
                     keys.pitch_up = !climbing;
                     keys.faster = model.set_speed_metres() < 500.0;
                 }
-                let mut command_face = None;
-                let mut command_align = None;
                 if nav.as_ref().is_some_and(|nav| nav.holding()) {
                     keys = OriginalKeys::default();
                     model.teleport(model.absolute_position());
@@ -3820,41 +3820,37 @@ fn run() -> Result<(), String> {
                     // A landed ship has no autopilot input (F1012 runs no F1037
                     // and the target is cleared by F1021); the clock and the
                     // body's motion still carry it.
-                    model.set_thrust_override(None);
-                    if nav.landed.is_none() {
-                        if let Some((command, body)) = nav.command(&cache, model) {
-                            keys = command.keys;
-                            command_face = command.face;
-                            command_align = command.align;
-                            model.set_thrust_override(command.thrust);
-                            // F597's near-target capture and F746's pad touch
-                            // run at 1x (`DATA_007706 == 0x3e2`); the autopilot's
-                            // command carries that step.
-                            if command.acceleration != acceleration {
-                                acceleration = command.acceleration;
-                                model.set_time_acceleration(acceleration);
-                            }
-                            if let Some((landing, seconds)) = command.skip {
-                                model.teleport(landing);
-                                nav.transfer(&cache, seconds);
-                                // Capture-only teleport note; not a source line.
-                                message = format!("Transfer to {}: {:.0} s.", body.name, seconds);
-                            } else if command.arrived {
-                                pending_log
-                                    .add(Source::Navigation, format!("Arrived at {}.", body.name));
-                                nav.target = None;
-                            } else if nav.docking() {
-                                pending_log.replace(
-                                    Source::Autopilot,
-                                    format!("Autopilot: docking at {}.", body.name),
-                                );
+                    if nav.target.is_some()
+                        && !ffe_core::autopilot::can_engage(
+                            if nav.landed_view() {
+                                0x30
                             } else {
-                                pending_log.replace(
-                                    Source::Autopilot,
-                                    format!("Autopilot to {}.", body.name),
-                                );
-                            }
-                        }
+                                model.player().mode
+                            },
+                            true,
+                            state.loadout.general,
+                        )
+                    {
+                        nav.disengage();
+                        message = if state.loadout.general & (1 << 21) == 0 {
+                            "No autopilot fitted.".to_owned()
+                        } else {
+                            "Launch before engaging the autopilot.".to_owned()
+                        };
+                    }
+                    // F1019/F1018: entering combat mode disengages the AI.
+                    if model.player().combat {
+                        nav.disengage();
+                    }
+                    if nav.target.is_some() && nav.autopilot_takeoff_handoff() {
+                        model.end_pad_takeoff();
+                        takeoff_climb = None;
+                    }
+                    if let Some((guidance, _body)) = nav.source_command(&cache, model) {
+                        model.apply_guidance(guidance);
+                        keys = OriginalKeys::default();
+                    } else {
+                        model.clear_guidance();
                     }
                     if let Some(notice) = nav.notice.take() {
                         // F654/F655's traffic-control refusal (`0x98b7..0x98b9`).
@@ -3906,12 +3902,6 @@ fn run() -> Result<(), String> {
                     _ => 4,
                 };
                 model.set_view(view, [views.turret.yaw, views.turret.pitch]);
-                if let Some(target) = command_face {
-                    model.turn_toward(target, elapsed, 1.0);
-                }
-                if let Some(rows) = command_align {
-                    model.align_to(rows);
-                }
                 let ship_at = model.absolute_position();
                 let player_info =
                     ffe_core::objects::ModelInfo::read(model_records, model_stats, state.ship);

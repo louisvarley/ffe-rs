@@ -1,5 +1,26 @@
 # Port log
 
+## 2026-10-26 — Hope start and launch ground
+
+Fixed model-to-world terrain scaling from source scale offsets; restored the
+original F1868/F1869 culling and F1877 atmosphere record. Near-pad original
+oracle matches 168 triangles and all four queues; the Saker rises and ground
+stays visible through 0/1/3 s with orbital updates. The starting seat is unchanged.
+See [launch-ground](notes/launch-ground.md).
+
+## 2026-10-26 — source autopilot guidance audit
+
+Replaced the live prototype law/long-leg transfers with F597 requests/caps,
+F587/F589 turn words, F599 limits and F727 motion. Corrected F1020 state/equipment
+gates, F741 offsets, F745 fines/retries and F650 plane versus F671 seat. Added
+an executed-original arithmetic oracle (512 cases) and live controller tests.
+The oracle exposed F589 sign errors in the recovered notes. Accelerated F746
+near-pad completion passes. The Old Blackelk 1x route now lands with a real
+contact flag after putting ship and port as siblings under the planet. Full
+source parity remains open. Details and limitations:
+[autopilot-source-audit.md](notes/autopilot-source-audit.md).
+
+
 ## 2026-10-25 — launch orbital-frame regression (partial fix)
 
 New moving-clock test reproduced the one-second jump (port 10.8 km away at

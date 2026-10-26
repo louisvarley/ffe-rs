@@ -263,6 +263,8 @@ pub struct ModelViewer {
     /// The longest axis vector of the last surface drawn: the planet's radius in
     /// the model's units.
     pub surface_extent: std::cell::Cell<f64>,
+    /// F1533/F1536 model scale offsets: world millimetres per post-scale unit.
+    world_units: Vec<f64>,
     /// Descriptor +0x18 and +0x1c per table slot (cache v10); empty without it.
     descriptors: Vec<[i32; 2]>,
     ship_stats: Vec<Option<ShipStats>>,
@@ -471,6 +473,15 @@ impl ModelViewer {
         {
             viewer.lighting = lighting;
         }
+        if let Some(records) = cache.asset("base:model/records") {
+            viewer.world_units = records
+                .chunks_exact(20)
+                .map(|record| {
+                    let offset = i32::from_le_bytes(record[4..8].try_into().unwrap());
+                    2.0_f64.powi(offset)
+                })
+                .collect();
+        }
         if let Some(table) = cache.asset("base:model/descriptors") {
             viewer.descriptors = table
                 .chunks_exact(8)
@@ -624,6 +635,7 @@ impl ModelViewer {
             surface_detail: std::cell::Cell::new(1),
             haze_sky: std::cell::Cell::new(None),
             surface_extent: std::cell::Cell::new(0.0),
+            world_units: Vec::new(),
             descriptors: Vec::new(),
             ship_stats: Vec::new(),
             model_strings: Vec::new(),
@@ -968,6 +980,12 @@ impl ModelViewer {
     /// The matrix F1675 builds: yaw `a` about the vertical, then pitch `b` (binary angles).
     pub fn matrix_yzt(&self, a: i32, b: i32) -> [i32; 9] {
         ffe_core::model_animation::build_yzt(&self.table, a, b)
+    }
+
+    /// Physical conversion for F1536: geometry already includes descriptor scale;
+    /// the object's additional scale offset converts it to world millimetres.
+    pub fn world_units_per_model_unit(&self, index: u32) -> Option<f64> {
+        self.world_units.get(index as usize).copied()
     }
 
     /// F1686's cull radius of a model: its descriptor's radius shifted by its scale.
@@ -1507,25 +1525,11 @@ impl ModelViewer {
                 ((word0 >> 4) & 15) as u8,
                 (word0 & 15) as u8,
             ];
-            let extent = self.surface_extent.get();
-            let eye_squared = origin
-                .iter()
-                .map(|v| f64::from(*v) * f64::from(*v))
-                .sum::<f64>();
-            let eye_inside = extent > 0.0 && eye_squared < extent * extent;
             let record = Haze {
                 origin,
                 axes: scene.axes,
                 material,
-                // F1877's haze ring and sky are for an eye outside the planet.
-                // The landed view sits on the terrain, inside the base sphere;
-                // the original clears to the space colour there, so the ring is
-                // left out rather than painted over the sky and ground.
-                strength: if eye_inside {
-                    0
-                } else {
-                    i32::from(surface.parameters[1]).wrapping_shl(16)
-                },
+                strength: i32::from(surface.parameters[1]).wrapping_shl(16),
                 scale: i32::from(surface.parameters[2]),
                 light,
                 shades: self.lighting.shades,

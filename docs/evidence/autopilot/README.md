@@ -1,3 +1,7 @@
+> 2026-10-26: historical prototype evidence below. The live player now uses the
+> source arithmetic and collision path documented in
+> [the source audit](../../notes/autopilot-source-audit.md).
+
 # Autopilot: homing, arrival, station docking and cancel (2026-10-25)
 
 Source: `jjffe-master/ffe.asm` (`FUNC_000NNN` is `FNNN`). Cache v29

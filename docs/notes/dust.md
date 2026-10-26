@@ -35,7 +35,7 @@ F1035 is called once per flight frame from the flight module's frame handler
    F1016 → F1017, which are empty in both JJFFE and FFED3D. The port refuses
    below 20 km with `Refusal::BelowAltitude`.
 2. `cmp byte [DATA_009018], 0 / jz return` — **the detail preference**.
-   `DATA_009018` is the player block's `+0x3f51` byte (`ffedat.lst`: 
+   `DATA_009018` is the player block's `+0x3f51` byte (`ffedat.lst`:
    `DATA_008804 = 0x38a48`, `DATA_009018 = 0x3c999`, difference `0x3f51`), the
    first "Other Options" row, `DATA_004966`'s `Space dust, clouds etc`
    (`docs/notes/prefs.md`). `FUNC_000219_SysMenuInit` copies the defaults

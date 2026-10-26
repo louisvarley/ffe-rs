@@ -1323,13 +1323,9 @@ fn landing_reaches_the_surface_state_and_launches_again() {
     screen.draw(&view_state, ViewState::default(), Some(&viewer), true, "");
     save("surface-0000-landed.ppm", &view_state, &mut screen);
     let view = &screen.logical_pixels()[..320 * 158];
-    // F1052's background at this altitude is the space colour (`DATA_008814`
-    // stays 0: the eye is above the haze's surface), and the terrain/starport
-    // fill the rest of the upper view.
-    assert_eq!(
-        view[0], screen.sky,
-        "the surface background is the space colour"
-    );
+    // F1877 now receives the unmodified atmosphere record, including inside
+    // the base sphere. The previous space-colour assertion encoded a port-only
+    // suppression. The native haze oracle checks the resulting sky colour.
     let ground = view.iter().filter(|p| **p != screen.sky).count();
     assert!(ground > 4_000, "the surface view drew {ground} pixels");
 
@@ -1652,4 +1648,138 @@ fn new_game_hope_landed_surface_view() {
     dock.open(ffe_rs::station::Screen::Services);
     assert_eq!(dock.screen, ffe_rs::station::Screen::Services);
     assert_eq!(ffe_rs::station::SERVICES.len(), 4);
+}
+
+/// Check ground without station pixels masking a missing planet, including the
+/// first orbital refresh one second after the real pad takeoff begins.
+#[test]
+#[ignore = "Local-only: needs FFE_WORLD_CACHE"]
+fn hope_start_and_launch_keep_the_physical_ground_visible() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::{landing_body, Kind, Library, Navigator};
+    use ffe_rs::original_flight::{Keys, OriginalFlight, UNITS_PER_FLIGHT_UNIT as UNIT};
+    use ffe_rs::screen::Disc;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let start = nav.new_game.unwrap();
+    let index = nav.docked.unwrap();
+    let port = nav.bodies[index].clone();
+    let parent = nav.bodies[port.parent.unwrap()].clone();
+    assert_eq!((&*port.name, &*parent.name), ("Old Blackelk", "Hope"));
+    let info = |model| {
+        ffe_core::objects::ModelInfo::read(
+            cache.asset("base:model/records").unwrap(),
+            cache.asset("base:ship/stats").unwrap(),
+            model,
+        )
+        .unwrap()
+    };
+    let ship_info = info(start.ship);
+    let stats = ffe_rs::ships::ShipStats::from_block(&ship_info.stats.unwrap()).unwrap();
+    let mut state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: start.ship,
+        axes: Some(port.orientation),
+        position: start.seat.map(|v| v as f64 / UNIT),
+        ..Flight::default()
+    };
+    let mut model = OriginalFlight::from_flight(&state, Some(&stats));
+    model.begin_pad_takeoff(
+        &landing_body(&parent, &info(parent.model)),
+        parent.position,
+        &landing_body(&port, &info(port.model)),
+        port.position,
+        &ship_info,
+    );
+    let library = Library(&cache);
+    let tools = ffe_core::surface::SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
+    let viewer = ModelViewer::new(&cache).unwrap();
+    assert_eq!(viewer.world_units_per_model_unit(parent.model), Some(16.0));
+    eprintln!(
+        "source units: port {:?}, ship {:?}, inspector {:?}",
+        viewer.world_units_per_model_unit(port.model),
+        viewer.world_units_per_model_unit(start.ship),
+        ffe_rs::screen::model_scale(&viewer)
+    );
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.sky = ffe_rs::prefs::space_colour_rgb(4);
+    let height = |position: [i64; 3], port: &ffe_rs::navigation::Body| -> f64 {
+        (0..3)
+            .map(|k| (position[k] - port.position[k]) as f64 * port.orientation[1][k])
+            .sum()
+    };
+    let initial_height = height(model.absolute_position(), &port);
+    nav.begin_launch().unwrap();
+    model.begin_takeoff();
+    for frame in 0..=150 {
+        if frame != 0 {
+            nav.advance(&cache, 0.02);
+            if let Some(at) = nav.follow(model.absolute_position()) {
+                model.shift(at);
+            }
+            model
+                .step_pad(0.02, &Keys::default(), Some(&tools))
+                .unwrap();
+        }
+        if ![0, 50, 150].contains(&frame) {
+            continue;
+        }
+        model.apply(&mut state);
+        let current_height = height(model.absolute_position(), &nav.bodies[index]);
+        eprintln!("frame {frame}: height {current_height}, initial {initial_height}, velocity {:?}, thrust {:?}", model.player().motion.velocity, model.player().motion.thrust);
+        if frame == 150 {
+            assert!(
+                current_height > initial_height + 1000.0,
+                "takeoff must rise from the pad"
+            );
+        }
+        assert!(current_height >= initial_height - 1000.0,
+            "frame {frame}: ship fell below its pad: initial {initial_height}, now {current_height} mm");
+        screen.discs = nav
+            .bodies
+            .iter()
+            .filter(|b| matches!(b.kind, Kind::Star | Kind::Planet | Kind::Moon))
+            .map(|b| Disc {
+                centre: b.position.map(|v| v as f64 / UNIT),
+                radius: b.radius as f64 / UNIT,
+                light: [0.0, -1.0, 0.0],
+                colours: (12, 4),
+                star: b.kind == Kind::Star,
+                model: Some((b.model, b.seed)),
+                orientation: b.orientation,
+            })
+            .collect();
+        // No station models: they must not make a broken ground test pass.
+        for _ in 0..2 {
+            screen.draw(&state, ViewState::default(), Some(&viewer), true, "");
+        }
+        let ground = screen.logical_pixels()[80 * 320..140 * 320]
+            .iter()
+            .filter(|p| **p != screen.sky)
+            .count();
+        assert!(
+            ground > 8000,
+            "frame {frame}: Hope ground absent: {ground} non-space pixels"
+        );
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let mut ppm = b"P6\n320 200\n255\n".to_vec();
+            for p in screen.logical_pixels() {
+                ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+            }
+            std::fs::write(
+                std::path::Path::new(&dir).join(format!("hope-ground-{frame:04}.ppm")),
+                ppm,
+            )
+            .unwrap();
+        }
+    }
 }

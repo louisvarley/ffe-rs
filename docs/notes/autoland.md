@@ -1,3 +1,7 @@
+> 2026-10-26: historical prototype evidence below. The live player now uses the
+> source arithmetic and collision path documented in
+> [the source audit](autopilot-source-audit.md).
+
 # Starport auto-landing and the pad touch (2026-10-25)
 
 Status: the **pad contact path** is fixed and the autopilot's hand-off, clearance,

@@ -1,5 +1,6 @@
 //! Native simulation primitives: no I/O, wall clock, GPU, or legacy runtime.
 
+pub mod autopilot;
 pub mod bulletin;
 pub mod calendar;
 pub mod collision;

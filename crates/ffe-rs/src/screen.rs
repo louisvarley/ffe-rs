@@ -1064,7 +1064,10 @@ impl Screen {
                     let _ = viewer.render_scene(model, unit, [0.0, 0.0, 1.0e6], [0.0, 0.0, 1.0]);
                     let radius = viewer.surface_extent.get();
                     if radius > 0.0 {
-                        let factor = radius / disc.radius;
+                        let factor = viewer
+                            .world_units_per_model_unit(model)
+                            .map(|unit| crate::original_flight::UNITS_PER_FLIGHT_UNIT / unit)
+                            .unwrap_or(radius / disc.radius);
                         let mut position = camera.point(disc.centre).map(|v| v * factor);
                         viewer.surface_seed.set(seed);
                         let light = camera.direction(disc.light);

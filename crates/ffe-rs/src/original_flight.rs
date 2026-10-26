@@ -62,6 +62,7 @@ pub struct OriginalFlight {
     /// and orientation changes) persist from frame to frame while the ship is
     /// on the pad. Dropped when the takeoff clears.
     pad_world: Option<Bodies>,
+    guidance: Option<ffe_core::autopilot::Guidance>,
     /// The ship model's collision radius (`+0x140`), the lift F994 gives a pad
     /// seat and F612's radius distance: the descent aims at the pad's surface
     /// point raised by it, so the collision sphere touches rather than sinks.
@@ -117,6 +118,7 @@ impl OriginalFlight {
             forward_limit: limits.axes[2][0],
             acceleration: crate::console::TIME_ACCELERATION[0],
             pad_world: None,
+            guidance: None,
             collision_radius: 0,
         }
     }
@@ -297,13 +299,7 @@ impl OriginalFlight {
         // stamp, so it must change every frame.
         world.stamp = world.stamp.wrapping_add(1);
         world.frame_tics = world_tics;
-        self.player.tick_with(
-            &ThrusterKeys::default(),
-            i64::from(world_tics),
-            world,
-            1,
-            tools,
-        )
+        tick_guided(&mut self.player, self.guidance, world_tics, world, tools)
     }
 
     /// Move the pad world's planet and starport to their current navigator
@@ -543,12 +539,77 @@ impl OriginalFlight {
         (self.player.view, self.player.turret)
     }
 
+    /// Install the source AI's thrust, velocity caps and F587/F589 turn words.
+    pub fn apply_guidance(&mut self, guidance: ffe_core::autopilot::Guidance) {
+        self.guidance = Some(guidance);
+        self.player.mode = 2;
+    }
+
+    /// F746/F671's accelerated pad completion: copy the station rows and seat.
+    pub fn settle_autopilot_pad(&mut self, position: [i64; 3], rows: [i32; 9]) {
+        self.teleport(position);
+        self.player.motion.orientation =
+            std::array::from_fn(|r| std::array::from_fn(|c| rows[3 * r + c]));
+        self.player.motion.thrust = [0; 3];
+        self.player.motion.cap = [0; 3];
+        self.player.motion.fraction = [0; 3];
+        self.player.mode = 0x2e;
+        self.guidance = None;
+    }
+
+    pub fn clear_guidance(&mut self) {
+        if self.guidance.take().is_some() && self.player.mode == 2 {
+            // F1018: resume manual flight with actual speed as the set speed.
+            self.player.set_speed = ffe_core::model_math::length(self.player.motion.velocity)
+                .min(i32::MAX as u32) as i32;
+            self.player.mode = 0;
+        }
+    }
+
+    pub fn guidance(
+        &self,
+        target: [i64; 3],
+        velocity: [i32; 3],
+        modifier: i32,
+    ) -> ffe_core::autopilot::Guidance {
+        ffe_core::autopilot::guide(
+            &self.player.motion,
+            self.absolute_position(),
+            target,
+            velocity,
+            &self.player.limits,
+            modifier,
+        )
+    }
+
+    pub fn body_guidance(
+        &self,
+        target: [i64; 3],
+        velocity: [i32; 3],
+        radius: i64,
+    ) -> ffe_core::autopilot::Guidance {
+        ffe_core::autopilot::guide_to_radius(
+            &self.player.motion,
+            self.absolute_position(),
+            target,
+            velocity,
+            &self.player.limits,
+            0,
+            radius,
+        )
+    }
+
     /// One frame of `elapsed` seconds with `keys` held: F1037/F1038 then F1041,
     /// F601/F602 and F1512 over the elapsed time in the original's units.
     pub fn step(&mut self, elapsed: f64, keys: &Keys) -> Result<(), String> {
         let (_, world_tics) = self.prepare(elapsed, keys);
-        self.player
-            .step(&ThrusterKeys::default(), i64::from(world_tics))
+        if let Some(guidance) = self.guidance {
+            integrate_guidance(&mut self.player, guidance, world_tics, 0);
+            Ok(())
+        } else {
+            self.player
+                .step(&ThrusterKeys::default(), i64::from(world_tics))
+        }
     }
 
     /// One frame with F569's collision scan against `parent` (a planet, moon or
@@ -693,11 +754,11 @@ impl OriginalFlight {
             world.physical[3] = true;
         }
 
-        let contact = self.player.tick_with(
-            &ThrusterKeys::default(),
-            i64::from(world_tics),
+        let contact = tick_guided(
+            &mut self.player,
+            self.guidance,
+            world_tics,
             &mut world,
-            1,
             tools,
         );
         // Undo the per-frame landing margin so it does not accumulate, and put
@@ -720,6 +781,11 @@ impl OriginalFlight {
         // acceleration (`ms * acceleration / 20`, 994 per 20 ms at 1x).
         let tics = (elapsed.clamp(0.0, 0.1) * TICS_PER_SECOND) as u32;
         let world_tics = (elapsed.clamp(0.0, 0.1) * 50.0 * f64::from(self.acceleration)) as u32;
+        if self.guidance.is_some() {
+            self.player.input_time = tics;
+            self.player.frame_tics = world_tics;
+            return (tics, world_tics);
+        }
         let down = [
             keys.pitch_down,
             keys.pitch_up,
@@ -791,6 +857,46 @@ impl OriginalFlight {
         flight.thrust = (f64::from(motion.thrust[2]) / limit).clamp(-1.0, 1.0);
         flight.ticks = flight.ticks.wrapping_add(1);
     }
+}
+
+/// F727: gravity, capped acceleration, F585 with the AI flag, then F1512.
+fn integrate_guidance(
+    player: &mut Player,
+    guidance: ffe_core::autopilot::Guidance,
+    tics: u32,
+    mass: u32,
+) {
+    player.motion.thrust = guidance.thrust;
+    player.motion.cap = guidance.cap;
+    player.motion.autopilot = guidance.turns;
+    player.motion.gravity(mass, tics as i32);
+    player.motion.accelerate(tics);
+    player
+        .motion
+        .orient(tics as i32, true, tics as i32, &mut player.scanner);
+    player.motion.advance(i64::from(tics));
+}
+
+fn tick_guided(
+    player: &mut Player,
+    guidance: Option<ffe_core::autopilot::Guidance>,
+    tics: u32,
+    world: &mut Bodies,
+    tools: Option<&SurfaceTools>,
+) -> Result<Contact, String> {
+    let Some(guidance) = guidance else {
+        return player.tick_with(&ThrusterKeys::default(), i64::from(tics), world, 1, tools);
+    };
+    let mass = world.body[usize::from(player.motion.parent)].mass;
+    integrate_guidance(player, guidance, tics, mass);
+    world.body[1].take_motion(&player.motion);
+    let contact = world
+        .collide_with(1, tools, 0xff)
+        .ok_or("The autopilot contact needs the models' collision records.")?;
+    world.body[1].give_motion(&mut player.motion);
+    player.altitude = contact.altitude();
+    player.contact_flags = contact.flags;
+    Ok(contact)
 }
 
 #[cfg(test)]
