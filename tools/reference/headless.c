@@ -33,6 +33,8 @@ extern unsigned long ref_msgindex;
 extern unsigned char *ref_framebuffer;
 extern int ref_draw_char(int glyph, int colour, int x, int y, int min_y, int max_y);
 extern int ref_char_width(int code);
+extern unsigned long ref_pl_altitude;
+extern unsigned long ref_pl_set_speed;
 extern void ref_labels_989(unsigned char *list, void (*callback)(unsigned char *, int, int));
 extern void ref_labels_1108(unsigned char *object, int x, int y);
 extern void *ref_blit_index(void *buffer, int index, int x, int y);
@@ -518,6 +520,32 @@ static unsigned long death_trigger_frame = 250;
 static unsigned long death_trigger_at;
 static void (*death_text_original)(void);
 
+/* --flight <scenario> <frames>: the real game from boot with scripted input,
+   one bounded JSONL row of selected flight state per frame. The scenarios are
+   `idle` (boot and the new game untouched), `takeoff` (F1056's launch action at
+   frame 170, then F1013/F1031's 0x24 -> 0x26 -> 0x00 hand-off with the set-speed
+   keys held from frame 260) and `planet` (the same script run longer, to observe
+   the planet +0x56 through free flight). */
+static int flight_mode;
+static int flight_scenario; /* 0 idle, 1 takeoff, 2 planet */
+static int flight_launch_sent;
+static unsigned long flight_launch_frame = 170, flight_thrust_frame = 260;
+static uint64_t flight_previous_hash;
+static const char *flight_scenario_name(void)
+{
+    return flight_scenario == 1 ? "takeoff" : flight_scenario == 2 ? "planet" : "idle";
+}
+
+static uint64_t flight_hash_value(uint64_t hash, uint64_t value)
+{
+    int byte;
+    for (byte = 0; byte < 8; ++byte) {
+        hash ^= (value >> (8 * byte)) & 0xff;
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
 static unsigned long state_u32(size_t offset)
 {
     unsigned long value;
@@ -602,9 +630,81 @@ static long death_text_draw(long ffcode, void *vars, long colour, long x, long y
     return 1;
 }
 
+static long long get64(const unsigned char *object,unsigned long offset);
+static long get32(const unsigned char *object,unsigned long offset);
+
+/* One bounded row of the scripted flight trace. Every hashed value is an integer
+   chosen from the player and planet objects; no framebuffer or game data is
+   written. `state_hash` is FNV-1a over the documented order below, chained to the
+   previous row so a deletion or reordering is caught as well as an edit. */
+static void flight_trace_row(void)
+{
+    unsigned long player_index = state_u32(0xc0);
+    unsigned long player_pointer = state_u32(0xc8);
+    unsigned char *player = player_pointer ? (unsigned char *)player_pointer : NULL;
+    unsigned long planet_index = player ? (unsigned long)player[0x56] : 0;
+    unsigned char *planet = NULL;
+    unsigned long planet_model = 0;
+    unsigned long planet_parent = 0;
+    long long planet_position[3] = {0, 0, 0};
+    long long position[3] = {0, 0, 0};
+    long velocity[3] = {0, 0, 0};
+    unsigned long altitude = ref_pl_altitude;
+    unsigned long set_speed = ref_pl_set_speed;
+    uint64_t hash = UINT64_C(14695981039346656037);
+    uint64_t previous = flight_previous_hash;
+    int axis;
+    if (planet_index != 0 && ref_pl_object_list) {
+        planet = (unsigned char *)ref_pl_object_list + 0x74 + planet_index * 0x152;
+        planet_model = (unsigned long)get32(planet, 0x82);
+        planet_parent = (unsigned long)planet[0x56];
+        for (axis = 0; axis < 3; ++axis) planet_position[axis] = get64(planet, 0x3e + 8 * axis);
+    }
+    if (player) {
+        for (axis = 0; axis < 3; ++axis) {
+            position[axis] = get64(player, 0x3e + 8 * axis);
+            velocity[axis] = (long)get32(player, 0x8c + 4 * axis);
+        }
+    }
+    /* The hash order is fixed: scenario, frame, mode, tics, player, start type,
+       altitude, set speed, planet index/model/parent/position, ship position,
+       velocity, previous hash. The Rust test (`flight_reference.rs`) repeats it. */
+    hash = flight_hash_value(hash, (uint64_t)flight_scenario);
+    hash = flight_hash_value(hash, (uint64_t)frames);
+    hash = flight_hash_value(hash, (uint64_t)ref_pl_mode);
+    hash = flight_hash_value(hash, (uint64_t)ref_pl_frame_tics);
+    hash = flight_hash_value(hash, (uint64_t)player_index);
+    hash = flight_hash_value(hash, (uint64_t)state_u32(0xfa));
+    hash = flight_hash_value(hash, (uint64_t)altitude);
+    hash = flight_hash_value(hash, (uint64_t)set_speed);
+    hash = flight_hash_value(hash, (uint64_t)planet_index);
+    hash = flight_hash_value(hash, (uint64_t)planet_model);
+    hash = flight_hash_value(hash, (uint64_t)planet_parent);
+    for (axis = 0; axis < 3; ++axis) hash = flight_hash_value(hash, (uint64_t)planet_position[axis]);
+    for (axis = 0; axis < 3; ++axis) hash = flight_hash_value(hash, (uint64_t)position[axis]);
+    for (axis = 0; axis < 3; ++axis) hash = flight_hash_value(hash, (uint64_t)(long long)velocity[axis]);
+    hash = flight_hash_value(hash, previous);
+    flight_previous_hash = hash;
+    printf("{\"scenario\":\"%s\",\"frame\":%lu,\"mode\":%u,\"tics\":%lu,"
+           "\"player\":%lu,\"start_type\":%lu,\"altitude\":%lu,\"set_speed\":%lu,"
+           "\"planet\":{\"index\":%lu,\"model\":%lu,\"parent\":%lu,"
+           "\"position\":[%lld,%lld,%lld]},"
+           "\"position\":[%lld,%lld,%lld],\"velocity\":[%ld,%ld,%ld],"
+           "\"prev_hash\":\"%016llx\",\"state_hash\":\"%016llx\"}\n",
+           flight_scenario_name(), frames, (unsigned)ref_pl_mode,
+           (unsigned long)ref_pl_frame_tics, player_index, (unsigned long)state_u32(0xfa),
+           altitude, set_speed, planet_index, planet_model, planet_parent,
+           planet_position[0], planet_position[1], planet_position[2],
+           position[0], position[1], position[2],
+           velocity[0], velocity[1], velocity[2],
+           (unsigned long long)previous, (unsigned long long)hash);
+}
+
 void SystemInit(void)
 {
-    if (state_mode)
+    if (flight_mode)
+        fprintf(stderr, "JJFFE headless flight adapter: no audio, no video device, no saves; synthetic clock, scripted Y and start key. Bounded per-frame flight state only.\n");
+    else if (state_mode)
         fprintf(stderr, "JJFFE headless state adapter: no audio, no video device, no saves; synthetic clock, scripted Y and choice 1. Not a gameplay oracle.\n");
     else
         fprintf(stderr, "JJFFE headless smoke adapter: no audio, no video device, no saves; synthetic clock, scripted Y acceptance only. Not a gameplay oracle.\n");
@@ -653,17 +753,32 @@ void InputMouseReadMickeys(long *x, long *y) { *x = 0; *y = 0; }
 void InputMouseReadPos(long *x, long *y) { *x = 160; *y = 100; }
 void InputJoyReadPos(long *x, long *y) { *x = 0; *y = 0; }
 long InputJoyReadButtons(void) { return 0; }
-void InputKeybReadStates(UCHAR *keys) { memset(keys, 0x80, 256); }
+void InputKeybReadStates(UCHAR *keys)
+{
+    memset(keys, 0x80, 256);
+    /* F1037 reads Return (0x1c) to raise the set speed; F1043 reads numpad 8
+       (0x48) for forward thrust. Both are raw scancodes. */
+    if (flight_mode && flight_scenario != 0 && frames >= flight_thrust_frame) {
+        keys[0x1c] = 0;
+        keys[0x48] = 0;
+    }
+}
 long InputKeybGetLastKey(void)
 {
     if (!sent_accept && frames >= 2) {
         sent_accept = 1;
         return 0x15;
     }
-    if ((state_mode || game_frame_mode || death_probe_mode) && !sent_start && !no_intro_start && frames >= 160) {
+    if ((state_mode || game_frame_mode || death_probe_mode || flight_mode) && !sent_start && !no_intro_start && frames >= 160) {
         sent_start = 1;
         /* DOS 1 is start type 1; 0x39 ("any other key") is the default arm. */
         return (long)probe_start_key;
+    }
+    /* Action 9 (launch): the scancode table maps plain Tab (0x0f) to it. One
+       edge is enough; F1056's JUMP_004417 handles it. */
+    if (flight_mode && flight_scenario != 0 && !flight_launch_sent && frames >= flight_launch_frame) {
+        flight_launch_sent = 1;
+        return 0x0f;
     }
     if (game_frame_mode && game_key_next < game_key_count && frames >= game_key_frame) {
         game_key_frame = frames + 40;
@@ -863,6 +978,13 @@ void TimerFrameUpdate(void)
                 (unsigned long)(p[0x11e] | p[0x11f]<<8 | p[0x120]<<16 | p[0x121]<<24), state_u32(0x114));
             fflush(stdout);
         }
+        if (frames + 1 >= limit) exit(0);
+    } else if (flight_mode) {
+        /* The boot/intro frames, the scripted launch and the free-flight tail.
+           Frames before 140 are still covered by `--state`; this trace starts
+           where the intro first has a stable mode. */
+        if (frames >= 140) flight_trace_row();
+        fflush(stdout);
         if (frames + 1 >= limit) exit(0);
     } else if (state_mode) {
         printf("{\"frame\":%lu,\"clock_ms\":%lu,\"game_tics\":%lu,\"game_days\":%lu,\"rng_a\":%lu,\"rng_b\":%lu,\"player_state\":%u,\"player_index\":%lu,\"cash\":%lu,\"start_type\":%lu,\"time_accel\":%lu,\"system_counter\":%lu,\"accel_counter\":%lu,\"pixels_fnv1a64\":\"%016llx\",\"palette_fnv1a64\":\"%016llx\"}\n",
@@ -5903,6 +6025,20 @@ int main(int argc, char **argv)
         asmmain(0, NULL);
         return 2;
     }
+    if (argc == 4 && !strcmp(argv[1], "--flight")) {
+        char *end;
+        if (!strcmp(argv[2], "idle")) flight_scenario = 0;
+        else if (!strcmp(argv[2], "takeoff")) flight_scenario = 1;
+        else if (!strcmp(argv[2], "planet")) flight_scenario = 2;
+        else fail("unknown --flight scenario (idle, takeoff, planet)");
+        flight_mode = 1;
+        limit = strtoul(argv[3], &end, 10);
+        if (*end || limit < 200 || limit > 2000) fail("invalid --flight frame count");
+        fprintf(stderr, "JJFFE flight-v1: the real game from boot; scenario %s, %lu frames, selected player/planet state per frame, no framebuffer.\n",
+                flight_scenario_name(), limit);
+        asmmain(0, NULL);
+        return 2;
+    }
     state_combat_mode = argc == 3 && !strcmp(argv[1], "--state-combat");
     missile_probe_mode = argc == 3 && !strcmp(argv[1], "--missile-probe");
     laser_probe_mode = argc == 3 && !strcmp(argv[1], "--laser-probe");
@@ -5910,7 +6046,7 @@ int main(int argc, char **argv)
     if (legal_probe_mode && argc == 4) probe_start_key = strtoul(argv[3], 0, 0);
     state_mode = (argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode || laser_probe_mode)) || legal_probe_mode;
     if (argc != 2 && !state_mode)
-        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --laser-probe <frames> | --legal-probe <frames> [start-key] | --vectors | --font | --blit | --models");
+        fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --laser-probe <frames> | --legal-probe <frames> [start-key] | --flight <idle|takeoff|planet> <frames> | --vectors | --font | --blit | --models");
     count = argv[state_mode ? 2 : 1];
     {
         char *end;

@@ -90,6 +90,7 @@ $hashes = @($paths | ForEach-Object {
     text_submodel_adapter = 'text-submodel-v1'
     pads_adapter = 'pads-v1'
     intro_adapter = 'intro-v1'
+    flight_adapter = 'flight-v1'
     death_probe_adapter = 'death-probe-v1'
     command_probe_command = $probeCommand
     command_probe_sha256 = (Get-FileHash -LiteralPath (Join-Path $output 'jjffe-commands.exe') -Algorithm SHA256).Hash.ToLowerInvariant()

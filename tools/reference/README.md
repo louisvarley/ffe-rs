@@ -120,7 +120,33 @@ checkout.
 | `legal` (`--legal-probe`, local evidence) | firing once at the **default** Gateway/Hope/Old Blackelk pad (`--legal-probe 166 0x39`) and at Ross 154: `DATA_008860` bit 2, `DATA_008646` bit 0, `DATA_009095 += 6000`, unchanged cash and F236's exact `$600` message (`docs/evidence/legal/original-legal-probe-default.jsonl`) | local evidence |
 | `dashboard` (`verify-dashboard.py`) | F271's ten-entry message log in the 195..320 right-hand window, F273's scroll, F1099's HUD positions and F2/record 0x0c's lamps and engines-off page | PASS |
 | `takeoff` (`verify-takeoff.py`) | F1013's `0x26` hand-off above 200,000 units (or `DATA_008918 != 0`), F1031's `0x20`/station-bit decisions and the observed pad-to-flight modes `[0x24, 0x26] -> 0x00` | PASS |
+| `flight` (`verify-flight.py`) | the scripted new game from boot: the idle `0x30` pad, F1056's launch action and F1013/F1031's `0x30 -> 0x24 -> 0x26 -> 0x00` frame continuity, and the planet `+0x56` retained through free flight; the port's idle/takeoff scenarios match the same mode machine and planet model | PASS |
 | `prefs` (`verify-prefs.py`) | every page title, shape/space/sound/other/map label and music entry against `DATA_004963..67` (61 string checks) plus the six prefs unit tests (including the sound-row toggles and the captured space-colour ramp) | PASS |
+
+## Scripted flight scenarios (`--flight`)
+
+`--flight <scenario> <frames>` runs the real new game from boot with a scripted
+Y/start-key sequence instead of an in-process probe. Three scenarios cover the
+takeover report's flight items:
+
+| Scenario | Script | What the trace shows |
+|---|---|---|
+| `idle` | no game keys | the intro frames, then the new game's `0x30` pad: player index and planet identity unchanged, ship position constant and velocity zero |
+| `takeoff` | Tab (action 9, launch) at frame 170; Return (set speed) and keypad 8 from frame 260 | `0x30 -> 0x24` (F1056) -> `0x26` (F1013 at altitude > 0x30d40 or set speed != 0) -> `0x00` (F1031's cleared region) |
+| `planet` | the same, to frame 899 | the same hand-off and the planet `+0x56` still the player's parent after free flight |
+
+Each frame from 140 emits one JSONL row. The bounded fields are the frame,
+view mode, frame tics, player index and start type, `DATA_008867` (altitude) and
+`DATA_008918` (set speed), the player planet (`+0x56`: index, model, parent and
+64-bit position), the ship's 64-bit position and 32-bit velocity, and an FNV-1a
+`state_hash` chained through `prev_hash` over exactly those integers. No frame is
+pixel-dumped and no game data or memory is written; 900 frames produce 760 rows
+per scenario. `verify-flight.py` runs each scenario twice (byte equality),
+checks the hash chain and the documented mode/planet invariants, then runs
+`crates/ffe-rs/tests/flight_reference.rs`, which also flies the port's idle pad
+and `Navigator`/`OriginalFlight` takeoff and compares the mode machine, planet
+model and released bay. Every trace field, the chain and an empty trace must fail
+the Rust test.
 
 ## The Windows `--worldgen` fix
 
@@ -142,12 +168,16 @@ cannot run at all because its per-case fault catcher needs `fork` and
 
 ## Hashes
 
-No reference binary was rebuilt for this wave, so the recorded reference hashes
-in `docs/STATUS.md` are unchanged. The values checked here:
+No earlier oracle was re-run for this wave, so the recorded reference hashes
+that those oracles pin are unchanged. The reference **was** rebuilt for
+`--flight` (the adapter and `build-manifest.json` change); the new trace has no
+original pointers, so its hash below is stable across rebuilds. The values
+checked here:
 
 | Oracle | Trace SHA-256 | Note |
 |---|---|---|
 | `world-tick` | `4258a0b2756c09c53c102a805a365cce9e6b7c51770894d801875603fa43d6ac` | unchanged; cache v26 built from this checkout |
+| `flight` | `29eebd424848c391b6f9f6a1d5f83b7072949d971f1b3e0173228c0780abdd70` | new scripted trace (3 x 760 rows); no pointers, so it is stable across reference rebuilds |
 | `ship-types` | `ae421da6e844b377033ca95d094458ea0894575fc0a0f1ca7acc350e8391d2cd` | new source-pinned trace; the table fix below changes no other hash |
 | `worldgen` | varies with ASLR | the raw trace keeps the original's uninitialised name byte; read it by its counts (1,024 cases), not this hash |
 
