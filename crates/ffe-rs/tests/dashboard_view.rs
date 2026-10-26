@@ -85,7 +85,6 @@ fn the_message_log_draws_only_in_the_original_right_hand_window() {
     }
     assert_eq!(screen.messages.len(), 10);
     draw(&mut screen, &state, ViewState::default());
-    let full = screen.logical_pixels().to_vec();
     save(&screen, "dashboard-messages-full.ppm");
 
     // F271's slide: the header and the one-line newest entry settle at the
