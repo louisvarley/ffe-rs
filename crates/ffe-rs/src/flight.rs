@@ -443,13 +443,13 @@ impl Flight {
             .fold(0i32, |sum, word| sum.wrapping_add(i32::from(*word).abs()))
     }
 
-    /// F938 (`ffe.asm:70122`) for one frame: shield recharge
-    /// (`max * tics / 32`, halved without the Energy Booster) and the Hull
-    /// Auto-Repair System (`+0xc8` bit 31) adding `tics` hull points up to the
+    /// F938 (`ffe.asm:70122`) for a whole-second event: shield recharge
+    /// (`max * seconds / 32`, halved without the Energy Booster) and the Hull
+    /// Auto-Repair System (`+0xc8` bit 31) adding `seconds` hull points up to the
     /// full hull.
-    pub fn recharge(&mut self, tics: u32, hull_full: u16) {
+    pub fn recharge(&mut self, seconds: u32, hull_full: u16) {
         if self.shields[0] < self.shields[1] {
-            let mut added = (u64::from(self.shields[1]) * u64::from(tics) / 32) as u32;
+            let mut added = (u64::from(self.shields[1]) * u64::from(seconds) / 32) as u32;
             if !self.loadout.energy_booster() {
                 added /= 2;
             }
@@ -464,7 +464,7 @@ impl Flight {
             self.hull = [hull_full, hull_full];
         }
         if self.loadout.hull_auto_repair() && self.hull[0] < hull_full {
-            let added = u16::try_from(tics).unwrap_or(u16::MAX);
+            let added = u16::try_from(seconds).unwrap_or(u16::MAX);
             self.hull[0] = self.hull[0].saturating_add(added).min(hull_full);
         }
     }
@@ -562,13 +562,21 @@ impl Flight {
     /// empty (F929's `+0x15a`/`+0x15c` test).
     pub fn burn_fuel(&mut self) -> bool {
         let slot = self.fuel_slot();
-        match self.hold.get_mut(slot) {
-            Some(tonnes) if *tonnes > 0 => {
-                *tonnes -= 1;
-                true
-            }
-            _ => false,
+        let Some(tonnes) = self.hold.get_mut(slot).filter(|tonnes| **tonnes > 0) else {
+            return false;
+        };
+        *tonnes -= 1;
+        if slot == ffe_core::hyperspace::MILITARY_FUEL {
+            // F929 exchanges one tonne for one tonne of waste; unlike hydrogen,
+            // military refuelling does not free cargo space.
+            self.hold.resize(
+                self.hold.len().max(ffe_core::hyperspace::RADIOACTIVES + 1),
+                0,
+            );
+            let waste = &mut self.hold[ffe_core::hyperspace::RADIOACTIVES];
+            *waste = waste.wrapping_add(1);
         }
+        true
     }
 
     /// F929's empty pool: with the Auto Refueller fitted and fuel in the hold,
@@ -596,17 +604,18 @@ impl Flight {
         }
     }
 
-    /// F938's thrust energy (`mass * sum |thrust words| >> 9 * tics`) through
+    /// F938's thrust energy (`mass * sum |thrust words| >> 9 * seconds`) through
     /// F929. Returns true when the engine failed (no energy and no fuel).
-    pub fn spend_thrust_energy(&mut self, tics: u32, mass: u16, thrust_sum: i32) -> bool {
-        let cost = ((u64::from(mass) * u64::from(thrust_sum.max(0) as u32)) >> 9)
-            .saturating_mul(u64::from(tics));
+    pub fn spend_thrust_energy(&mut self, seconds: u32, mass: u16, thrust_sum: i32) -> bool {
+        // F938 uses signed model mass and the low 32 bits of both IMULs.
+        let cost = (i32::from(mass as i16).wrapping_mul(thrust_sum) >> 9)
+            .wrapping_mul(seconds as i32) as u32;
         if cost == 0 && self.combat.energy > 0 {
             self.damage.engine_failed = false;
             return false;
         }
-        if u64::from(self.combat.energy) > cost {
-            self.combat.energy -= u32::try_from(cost).unwrap_or(u32::MAX);
+        if self.combat.energy > cost {
+            self.combat.energy -= cost;
             self.damage.engine_failed = false;
             return false;
         }

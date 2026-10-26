@@ -1,5 +1,15 @@
 # Port log
 
+## 2026-10-26 — F938 fuel timing correction (PAR-01/02 in progress)
+
+Live thrust/recharge now consume whole-second events shared with laser cooling,
+not physics tics. Laser refire keeps physics tics. Thrust cost follows the source
+signed IMUL/SAR low-word arithmetic. Military reserve refuelling produces waste.
+27 fuel/combat tests, workspace tests, two cache-backed idle/pad regressions and
+Clippy pass; root release rebuilt for play.bat. Full source event traces and
+remaining scheduler/recharge boundaries are outstanding; neither item is closed.
+
+
 ## 2026-10-26 — owner source-gameplay parity audit and backlog
 
 Reviewed launch/docking/set speed, fuel/hyperjumps, the Hope starting view,

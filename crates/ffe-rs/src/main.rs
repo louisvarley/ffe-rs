@@ -4899,18 +4899,21 @@ fn run() -> Result<(), String> {
         if active && !death_control && !paused && state.mode == ffe_rs::flight::Mode::Flight {
             // F938 reads `ship+0xc8 & 1` (the laser cooling booster) directly.
             state.combat.cooling_booster = state.loadout.cooling_booster();
-            state.combat.tick(frame_tics, elapsed * acceleration_factor);
+            let event_seconds = state.combat.tick(frame_tics, elapsed * acceleration_factor);
             if let Some(stats) = player_stats {
                 state.ensure_thrusters(&stats);
                 // F938: shield recharge and the Hull Auto-Repair System.
-                state.recharge(frame_tics, stats.mass.saturating_mul(4));
+                state.recharge(event_seconds, stats.mass.saturating_mul(4));
                 // F938's engine load through F929: the sum of the three thrust
-                // words times the mass, scaled and charged per tic.
+                // words times the mass, scaled and charged per whole-second event.
                 let sum = original
                     .as_ref()
                     .map_or(0, |model| state.thrust_sum(model.thrust_words()));
                 let warned = state.damage.fuel_empty;
-                if state.spend_thrust_energy(frame_tics, stats.mass, sum) && !warned {
+                if event_seconds != 0
+                    && state.spend_thrust_energy(event_seconds, stats.mass, sum)
+                    && !warned
+                {
                     pending_log.add(Source::Combat, "WARNING: Internal Fuel Tank Empty.");
                 }
             }

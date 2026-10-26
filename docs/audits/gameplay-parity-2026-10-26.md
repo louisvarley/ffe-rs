@@ -315,3 +315,14 @@ Every item needs executed-original **end-to-end** evidence for its affected path
 ## Limits of the scan
 
 Some original arithmetic has meaningful differential tests: the ordinary autopilot guidance branch, collision helpers, F903 hyperdrive maths, parts of model execution and world generation. Those tests remain useful; they do not validate the runtime adapters above. Historical deviation descriptions can be stale, so this audit follows current call sites rather than treating every old EXP entry as still active. Developer-only prototype autopilot tests were not counted as live player defects; the reachable synthetic flight fallback was. No gameplay bug is marked fixed merely by adding these work items.
+
+
+### Implementation progress — 2026-10-26
+
+PAR-01 and PAR-02 are in progress. The live F938 call site now uses whole
+seconds from the existing cooling accumulator rather than per-frame physics
+tics. Thrust IMUL/SAR arithmetic retains the source low 32 bits. F929 military
+internal refuelling now creates one tonne of radioactive waste. The 27 fuel
+and combat tests pass, including multi-rate/time-acceleration reserve checks.
+Executed-source event traces, exact scheduler alignment and remaining recharge
+numeric boundaries are still required; neither work item is closed.

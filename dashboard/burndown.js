@@ -23,8 +23,8 @@ window.FFE_BURNDOWN = {
       title: "Source gameplay parity blockers — 2026-10-26 audit",
       status: "planned",
       tasks: [
-        {"id": "parity-01", "title": "[P0] Repair F938/F929 event units for fuel, shields and hull repair", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-01"},
-        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
+        {"id": "parity-01", "title": "[P0] Repair F938/F929 event units for fuel, shields and hull repair", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-01"},
+        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
         {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
         {"id": "parity-04", "title": "[P0] Translate the complete F1013 takeoff handler and same-frame mode order", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-04"},
         {"id": "parity-05", "title": "[P0] Replace launch altitude substitution and collision grace with source frame/contact rules", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-05"},

@@ -262,7 +262,7 @@ fn f938_charges_thrust_energy_and_refuels_a_charge_that_empties_the_pool() {
     flight.loadout.general |= ffe_core::equipment::AUTO_REFUELLER_BIT;
     flight.hold = vec![0; ffe_core::market::NAMES];
     flight.hold[ffe_core::hyperspace::HYDROGEN] = 1;
-    // mass 25 * sum 2000 / 512 = 97, * 1000 tics = 97000.
+    // mass 25 * sum 2000 / 512 = 97, * 1000 seconds = 97000.
     flight.combat.energy = 100_000;
     assert!(!flight.spend_thrust_energy(1000, 25, 2000));
     assert_eq!(flight.combat.energy, 100_000 - 97_000);
@@ -369,4 +369,61 @@ fn recharge_does_not_revive_a_destroyed_ship_or_erase_damage() {
     flight.hull = [0, 100];
     flight.recharge(994, 100);
     assert!(flight.destroyed());
+}
+
+#[test]
+fn f938_runtime_events_do_not_spend_physics_tics_as_seconds() {
+    // F152/F1007 deliver whole seconds; F938's Saker upward load is
+    // (28 * 3270) >> 9 = 178 per second. Physics still uses ~49700 tics/s.
+    for (fps, acceleration) in [(50, 1.0), (64, 1.0), (50, 10.0), (64, 10000.0)] {
+        let mut flight = self::flight();
+        flight.combat = ffe_rs::combat::Combat::new_game();
+        let start = flight.combat.energy;
+        let mut seconds = 0;
+        for _ in 0..fps * 60 {
+            let elapsed = 1.0 / f64::from(fps);
+            let event = flight.combat.tick(
+                ffe_rs::combat::frame_tics(elapsed, acceleration),
+                elapsed * acceleration,
+            );
+            seconds += event;
+            if event != 0 {
+                assert!(!flight.spend_thrust_energy(event, 28, 3270));
+            }
+        }
+        assert!((f64::from(seconds) - 60.0 * acceleration).abs() <= 1.0);
+        assert_eq!(flight.combat.energy, start - 178 * seconds);
+        assert!(!flight.damage.fuel_empty);
+        assert!(!flight.damage.engine_failed);
+    }
+}
+
+#[test]
+fn f938_preserves_imul_low_word_and_signed_shift() {
+    let mut flight = self::flight();
+    flight.combat.energy = u32::MAX;
+    // 32767 * (3 * abs(-32768)) wraps to -1073840128; SAR 9
+    // gives -2097344, then IMUL 2 gives cost 0xffbffe80.
+    assert!(!flight.spend_thrust_energy(2, 32767, 98304));
+    assert_eq!(flight.combat.energy, u32::MAX - 0xffbffe80);
+}
+
+#[test]
+fn f929_military_internal_refuelling_preserves_cargo_mass_as_waste() {
+    let mut flight = self::flight();
+    flight.loadout.general |= ffe_core::equipment::AUTO_REFUELLER_BIT;
+    flight.combat.drive = 10;
+    flight.hold = vec![0; ffe_core::market::NAMES];
+    flight.hold[ffe_core::hyperspace::MILITARY_FUEL] = 2;
+    flight.combat.energy = 0;
+    assert!(flight.refuel_energy());
+    assert_eq!(flight.hold[ffe_core::hyperspace::MILITARY_FUEL], 1);
+    assert_eq!(flight.hold[ffe_core::hyperspace::RADIOACTIVES], 1);
+    assert_eq!(flight.hold.iter().sum::<u16>(), 2);
+    flight.combat.energy = 0;
+    assert!(flight.refuel_energy());
+    assert_eq!(flight.hold[ffe_core::hyperspace::RADIOACTIVES], 2);
+    flight.combat.energy = 0;
+    assert!(!flight.refuel_energy());
+    assert_eq!(flight.hold[ffe_core::hyperspace::RADIOACTIVES], 2);
 }

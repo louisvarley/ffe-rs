@@ -3,25 +3,27 @@
     "id": "PAR-01",
     "priority": "P0",
     "title": "Repair F938/F929 event units for fuel, shields and hull repair",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed runtime mismatch",
     "finding": "main.rs passes combat::frame_tics into spend_thrust_energy/recharge. F152 divides elapsed tics by 0xc22e and dispatches event 6 through F151 to F1007; F1007 passes the whole-second count to F938. At 1x the port charges about 49,700 times the source rate. This explains early internal-fuel warnings and disabled acceleration.",
     "source": "F152/F151/F1007/F938/F929",
     "implementation": "crates/ffe-rs/src/main.rs:4892; crates/ffe-rs/src/flight.rs:460,615; crates/ffe-rs/src/combat.rs:149",
     "acceptance": "Trace one reserve from fresh type-0 boot through idle, 0x24 climb, full thrust, firing and 1x/10x/10000x. Match source event counts, energy, warning time, limit restoration, shields and repair; preserve wrapping arithmetic.",
-    "dependencies": "gameplay-3, flight-6, flight-8"
+    "dependencies": "gameplay-3, flight-6, flight-8",
+    "progress": "2026-10-26: live call site now shares whole-second events with cooling; physics tics retained for laser refire. Thrust arithmetic uses source low-32-bit IMUL/SAR. Multi-rate 60-second regressions pass at 1x/10x/10000x. Full source event trace and shield overflow parity remain acceptance gates."
   },
   {
     "id": "PAR-02",
     "priority": "P0",
     "title": "Make reserve refuelling and cargo fuel bookkeeping match F929/F903",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed bookkeeping mismatch; reserve initialisation is correct",
     "finding": "The internal reserve is object +0x11e and correctly starts at 0x20000000. It is distinct from cargo fuel, although thrust and lasers use the same source reserve. Flight::burn_fuel removes military fuel without adding radioactive waste; the jump helper does add it. Do not invent separate rechargeable laser and engine pools.",
     "source": "F929/F930/F903/F998",
     "implementation": "crates/ffe-rs/src/flight.rs:565; crates/ffe-rs/src/navigation.rs:1252; crates/ffe-core/src/hyperspace.rs",
     "acceptance": "Compare hydrogen and military auto-refill with/without Auto Refueller, full/empty reserve, zero-cost call, full hold, waste and cargo-used words, including after save/load. Verify jump cargo is debited exactly once.",
-    "dependencies": "PAR-01, gameplay-3"
+    "dependencies": "PAR-01, gameplay-3",
+    "progress": "2026-10-26: F929 military internal refuelling now exchanges fuel for radioactive waste, preserving cargo mass; normal refuelling and empty-reserve tests pass. Full F929/F903 trace remains outstanding."
   },
   {
     "id": "PAR-03",

@@ -121,8 +121,9 @@ impl Combat {
 
     /// F730 and F938 for one frame: the refire countdown and the heat cooling.
     /// `seconds` is accelerated world time; F938 takes whole seconds, so the
-    /// fraction is carried until it makes one.
-    pub fn tick(&mut self, frame_tics: u32, seconds: f64) {
+    /// fraction is carried until it makes one. Returns the whole-second event
+    /// delta shared by F938 thrust consumption, shields and hull repair.
+    pub fn tick(&mut self, frame_tics: u32, seconds: f64) -> u32 {
         let mut state = self.state();
         laser::tick_refire(&mut state, frame_tics);
         self.cool_carry += seconds.max(0.0);
@@ -132,6 +133,7 @@ impl Combat {
             self.cool_carry -= whole;
         }
         self.store(state);
+        whole as u32
     }
 
     /// F270's first gauge value.

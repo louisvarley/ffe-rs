@@ -1,5 +1,15 @@
 # Status and handoff
 
+## Fuel correction in progress — 2026-10-26
+
+The release call path now feeds F938 recharge/thrust consumption with the same
+whole-second events used for cooling, while laser refire keeps physics tics.
+Thrust cost preserves the original signed multiply/shift and low-word wrapping.
+Military internal refuelling now produces radioactive waste. Fuel/combat tests
+include 60 simulated seconds at multiple frame rates and 1x/10x/10000x.
+PAR-01 and PAR-02 remain open pending executed-source/full runtime traces;
+this correction alone does not establish launch, docking or hyperspace parity.
+
 ## Source-parity audit — 2026-10-26 (current acceptance gate)
 
 The owner requires original gameplay, with Port Options as the only general
