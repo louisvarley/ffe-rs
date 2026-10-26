@@ -2177,6 +2177,7 @@ fn hyperspace_uses_range_fuel_and_time() {
     );
     let before = nav.clock;
     let jumped = nav.hyperspace(&cache, centauri).unwrap();
+    nav.finish_transit(&cache);
     assert_eq!((jumped.distance, jumped.fuel), (435, 1));
     assert!(
         jumped.days > 0.5 && jumped.days < 2.0,
@@ -2201,6 +2202,69 @@ fn hyperspace_uses_range_fuel_and_time() {
         "{lines:?}"
     );
     assert!(lines.iter().any(|l| l.contains("TOO FAR")), "{lines:?}");
+}
+
+/// F908/F909/F1094: a jump builds the destination at once and puts the ship on
+/// F1507's orbit (an ffp radius of 0x4000-0x5fff, exponent 0x33: 7.5 to 11 AU)
+/// about the root; the clock then runs at the hyperspace rate through exactly
+/// the jump time while F1030 holds the ship, and the transit ends on time.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn hyperspace_transit_runs_the_jump_time_and_arrives_out_from_the_star() {
+    use ffe_rs::navigation::{DriveState, Navigator, HYPERSPACE_RATE};
+    let cache = cache();
+    let mut nav = Navigator::new(&cache).unwrap();
+    let centauri = (1..15)
+        .find(|i| nav.range_to(*i) == Some(435))
+        .expect("Alpha Centauri at 4.35 light years");
+    nav.drive = Some(DriveState {
+        mass: 16,
+        class: 10,
+        fuel: 3,
+    });
+    let before = nav.clock;
+    let jumped = nav.hyperspace(&cache, centauri).unwrap();
+    let transit = nav.transit.expect("mode 4 until the arrival time");
+    assert!((transit.total - jumped.days * 86_400.0).abs() < 1e-6);
+    assert_eq!(
+        nav.clock, before,
+        "the clock runs through the transit, not at once"
+    );
+    assert!(
+        nav.system_name().starts_with("Alpha Centauri"),
+        "F909 builds it at once"
+    );
+    // F912/F1507: 0x4000..0x5fff << (0x33 - 0x2e) times a unit vector.
+    let au = ffe_rs::navigation::AU_MM;
+    let range = jumped
+        .arrival
+        .iter()
+        .map(|v| (*v as f64).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(range > 7.4 * au && range < 11.3 * au, "{} AU", range / au);
+    assert_eq!(transit.animation(), 0);
+    // A sixtieth of a second at 2^18 is about 73 minutes of game time.
+    assert!(!nav.transit_step(&cache, 1.0 / 60.0));
+    assert!((nav.clock - before - HYPERSPACE_RATE / 60.0).abs() < 1e-3);
+    let half = nav.transit.unwrap();
+    assert!(half.animation() > 0 && half.animation() < 145 << 8);
+    assert!(
+        nav.hyperspace(&cache, 0).is_err(),
+        "no second jump in transit"
+    );
+    let mut frames = 1;
+    while !nav.transit_step(&cache, 1.0 / 60.0) {
+        frames += 1;
+        assert!(frames < 100_000);
+    }
+    assert!((nav.clock - before - jumped.days * 86_400.0).abs() < 1e-3);
+    eprintln!(
+        "{:.2} days in {frames} frames ({:.2} s), arrival {:.2} AU out",
+        jumped.days,
+        f64::from(frames) / 60.0,
+        range / au
+    );
 }
 
 /// F901's fuel burn: hydrogen for a civil drive, military fuel leaving the same
@@ -2362,6 +2426,7 @@ fn the_map_destination_survives_the_map_and_jumps() {
     });
     let before = nav.clock;
     let jumped = nav.hyperspace_to_destination(&cache).unwrap();
+    nav.finish_transit(&cache);
     assert_eq!((jumped.distance, jumped.fuel), (435, 1));
     assert_eq!(nav.current, target);
     assert!(nav.system_name().starts_with("Alpha Centauri"));

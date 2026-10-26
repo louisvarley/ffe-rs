@@ -127,6 +127,9 @@ pub struct MarketView {
 pub const MARKET_ROWS: usize = 13;
 
 /// The controls button in the top bar: left edge and right edge (logical pixels).
+/// F1066's hyperspace tunnel model.
+pub const HYPERSPACE_MODEL: u32 = 0xa5;
+
 pub const CONTROLS_BUTTON: (i32, i32) = (118, 236);
 
 /// The autopilot buttons beside them: target the next body, fly to the locked one (and dock
@@ -362,6 +365,9 @@ pub struct Screen {
     /// One-shot report for model 176's undefined-stack child basis (see
     /// `docs/notes/animation.md` section 1.2).
     intro_error_reported: bool,
+    /// F1066's hyperspace view: the transit's animation word (model 0xa5's
+    /// global 0) while a jump is under way; the caller sets it each frame.
+    pub hyperspace: Option<u16>,
     jitter: Jitter,
 }
 
@@ -796,6 +802,7 @@ impl Screen {
             intro_bitmap: None,
             intro_text: None,
             intro_error_reported: false,
+            hyperspace: None,
             jitter: Jitter::default(),
         })
     }
@@ -1742,6 +1749,34 @@ impl Screen {
                 self.draw_dock(&dock);
             } else if self.market.is_some() {
                 self.draw_market();
+            }
+        } else if let (Some(word), Some(viewer)) = (self.hyperspace.take(), scene) {
+            // F1066: the tunnel replaces the view while the ship is in mode 4.
+            // F1575 requests (0, 0, 4) for the clear; model 0xa5 stands at F959's
+            // object origin (0, 0, 0x14820) with F1093's 0x7f000000 rows and the
+            // transit's progress as global 0.
+            let colour = pack([0, 0, 4]) & 0xfff;
+            viewer.set_background(colour);
+            let clear = viewer
+                .palette_rgb(colour)
+                .map(|[r, g, b]| u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))
+                .unwrap_or(0);
+            self.frame[..320 * VIEW_HEIGHT].fill(clear);
+            let rows = [
+                [127.0 / 128.0, 0.0, 0.0],
+                [0.0, 127.0 / 128.0, 0.0],
+                [0.0, 0.0, 127.0 / 128.0],
+            ];
+            let mut inputs = AnimationInputs::original(0, 0, &viewer.shades());
+            inputs.globals[0] = word;
+            if let Ok(frame) = viewer.render_scene_with(
+                HYPERSPACE_MODEL,
+                rows,
+                [0.0, 0.0, 0x14820 as f64],
+                viewer.light_direction(),
+                &inputs,
+            ) {
+                self.draw_shapes(viewer, &frame.shapes);
             }
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);

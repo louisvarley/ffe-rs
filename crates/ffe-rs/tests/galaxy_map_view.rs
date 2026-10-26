@@ -218,6 +218,7 @@ fn the_map_key_script_selects_reimages_and_jumps() {
     assert!(nav.destination.is_some());
     save(&screen, "map-script-destination.ppm");
     let jumped = nav.hyperspace_to_destination(&cache).unwrap();
+    nav.finish_transit(&cache);
     assert!(nav.system_name().starts_with("Alpha Centauri"));
     assert_eq!(nav.destination, None);
     assert_eq!(nav.locked, None);
@@ -291,6 +292,7 @@ fn the_map_destination_and_jump_frames() {
     let before_system = nav.system_name().to_owned();
     let before_clock = nav.clock;
     let jumped = nav.hyperspace_to_destination(&cache).unwrap();
+    nav.finish_transit(&cache);
     assert!(nav.system_name().starts_with("Alpha Centauri"));
     assert_eq!(nav.locked, None);
     assert_eq!(nav.destination, None);

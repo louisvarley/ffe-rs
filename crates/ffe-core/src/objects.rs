@@ -369,6 +369,21 @@ fn direction(table: &SineTable, longitude: i32, angle: i32) -> [i32; 3] {
     ]
 }
 
+/// F1507's position: the point at `radius` (an ffp distance) on the orbit
+/// given by `longitude` and `phase` (the phase's high word, cut to multiples
+/// of 0x10), relative to the parent. F1508's in-step interpolation is not
+/// included; it needs the object's own orbit words.
+pub fn orbit_point(table: &SineTable, radius: Ffp, longitude: i32, phase: u32) -> [i64; 3] {
+    let angle = ((phase as i32) >> 16) & !0xf;
+    let first = direction(table, longitude, angle);
+    first.map(|v| {
+        shift64(
+            i64::from(radius.mantissa) * i64::from(v),
+            i32::from(radius.exponent) - 0x2e,
+        )
+    })
+}
+
 /// F1509 and F1510: the orbital phase, `((hi:lo) * rate) << 3` over the clock
 /// words as the original passes them (the low clock word in the high position).
 fn phase(rate: u32, high: u32, low: u32) -> i64 {
@@ -459,15 +474,14 @@ impl PhysList {
         let angle = ((phase as i32) >> 16) & !0xf;
         let first = direction(table, longitude, angle);
         let second = direction(table, longitude, angle + 0x10);
+        let position = orbit_point(table, radius, longitude, phase);
         for axis in 0..3 {
             self.set_dword(
                 object,
                 0x8c + 4 * axis,
                 second[axis].wrapping_sub(first[axis]) as u32,
             );
-            let product = i64::from(radius.mantissa) * i64::from(first[axis]);
-            let shifted = shift64(product, i32::from(radius.exponent) - 0x2e);
-            self.set_qword(object, 0x3e + 8 * axis, shifted);
+            self.set_qword(object, 0x3e + 8 * axis, position[axis]);
         }
         self.interpolate(object, phase & 0xfffff);
     }

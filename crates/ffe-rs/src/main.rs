@@ -778,6 +778,9 @@ fn write_save_capture(cache: &ffe_content::VerifiedCache, dir: &Path) -> Result<
         .map_err(|error| format!("Cannot write save evidence: {error}"))
 }
 
+/// F1094's exit speed along the system's z axis (`+0x94` = 0x71b7, about 2.8 km/s).
+const HYPERSPACE_EXIT_SPEED: i32 = 0x71b7;
+
 /// The highest time acceleration step (100x) within a world's terrain sphere.
 const NEAR_WORLD_ACCELERATION: usize = 2;
 
@@ -934,6 +937,8 @@ fn run() -> Result<(), String> {
     let mut mouse_accumulator = input::MouseAccumulator::default();
     // The console's time acceleration step (0 = 1x .. 4 = 10000x).
     let mut acceleration = 0usize;
+    // The jump under way (F908's mode 4), for F1094's arrival.
+    let mut in_transit: Option<ffe_rs::navigation::Jumped> = None;
     // The step the near-world hold lowered, restored once clear of the world.
     let mut held_acceleration: Option<usize> = None;
     // F2's status/equipment page (`F1120`, `DATA_008871 & 8`).
@@ -1444,6 +1449,7 @@ fn run() -> Result<(), String> {
         // flight model's branch, so the green date froze whenever there was no
         // model to tick. Time acceleration scales it; pause, the preference
         // pages, focus loss and the death/game-over hold stop it.
+        let mut transit_over = false;
         if clock_runs(
             active,
             paused,
@@ -1453,9 +1459,47 @@ fn run() -> Result<(), String> {
             model_viewer.is_some(),
         ) {
             if let Some(nav) = nav.as_mut() {
-                let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
-                    / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
-                nav.advance(&cache, elapsed * factor);
+                if nav.transit.is_some() {
+                    // F908's mode 4: the clock runs at the hyperspace rate until
+                    // the arrival time, which ends the transit (F1066/F1094).
+                    transit_over = nav.transit_step(&cache, elapsed);
+                } else {
+                    let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
+                        / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
+                    nav.advance(&cache, elapsed * factor);
+                }
+            }
+        }
+        // F1094: the jump time has run out. Mode 0 again at 1x (F217), the ship
+        // moving at 0x71b7 along the system's z axis; the system's traffic
+        // arrives with it. The exit cloud (model 0x9a, AI state 0x1e) the
+        // original leaves behind is not drawn yet.
+        if transit_over {
+            if let Some(nav) = nav.as_mut() {
+                nav.transit = None;
+                acceleration = 0;
+                if let Some(model) = original.as_mut() {
+                    model.set_time_acceleration(0);
+                    model.leave_hyperspace([0, 0, HYPERSPACE_EXIT_SPEED]);
+                    model.apply(&mut state);
+                }
+                let at = ship_position(&original, &state);
+                let forward = ship_axes(&state)[2];
+                nav.spawn_traffic(&cache, at, forward);
+                // F1094's song when the "Music after hyperspace" switch is on.
+                sound.hyperspace_music();
+                if let Some(jumped) = in_transit.take() {
+                    pending_log.add(
+                        Source::Navigation,
+                        format!(
+                            "Hyperspace: {} in {:.1} days, {} t of fuel. Arrived in the {} system.",
+                            ffe_rs::navigation::range_text(jumped.distance),
+                            jumped.days,
+                            jumped.fuel,
+                            nav.system_name()
+                        ),
+                    );
+                }
             }
         }
         // The pad world is planet-relative: keep its planet/starport in step with
@@ -2181,7 +2225,13 @@ fn run() -> Result<(), String> {
                         if hyperspace {
                             match nav.hyperspace_to_destination(&cache) {
                                 Ok(jumped) => {
+                                    // F912: at the arrival point with no velocity
+                                    // and no set speed; F1030 holds it there. The
+                                    // jump ends any autopilot (F909 cleared the
+                                    // system), so its guidance goes first or its
+                                    // release would copy the exit speed into Set.
                                     if let Some(model) = original.as_mut() {
+                                        model.clear_guidance();
                                         model.teleport(jumped.arrival);
                                     }
                                     ffe_rs::navigation::burn_fuel(
@@ -2189,22 +2239,9 @@ fn run() -> Result<(), String> {
                                         nav.drive,
                                         jumped.fuel,
                                     );
-                                    let forward = ship_axes(&state)[2];
-                                    nav.spawn_traffic(&cache, jumped.arrival, forward);
-                                    // F908's `0x21`; F656's song 15 when the
-                                    // "Music after hyperspace" switch is on.
+                                    // F908's sample `0x21`.
                                     sound.play(Cue::Hyperspace);
-                                    sound.hyperspace_music();
-                                    pending_log.add(
-                                        Source::Navigation,
-                                        format!(
-                                            "Hyperspace: {} in {:.1} days, {} t of fuel. Arrived in the {} system.",
-                                            ffe_rs::navigation::range_text(jumped.distance),
-                                            jumped.days,
-                                            jumped.fuel,
-                                            nav.system_name()
-                                        ),
-                                    );
+                                    in_transit = Some(jumped);
                                     nav.view = NavView::Closed;
                                 }
                                 Err(error) => message = format!("Jump refused: {error}"),
@@ -3836,6 +3873,7 @@ fn run() -> Result<(), String> {
             && !pad_board
             && model_lab.is_none()
             && model_viewer.is_none()
+            && nav.as_ref().is_none_or(|nav| nav.transit.is_none())
         {
             // The original's "Reverse left-right controls" and "Reverse up-down
             // controls" (DATA_009021/DATA_009022, toggled by FUNC_000216).
@@ -6307,6 +6345,10 @@ fn run() -> Result<(), String> {
             }
             screen.draw(&inside, views, scene.as_ref(), prefs.modern, &message);
         } else {
+            screen.hyperspace = nav
+                .as_ref()
+                .and_then(|nav| nav.transit)
+                .map(|t| t.animation());
             screen.draw(&state, views, scene.as_ref(), prefs.modern, &message);
         }
         if let Some(dir) = &options.capture {

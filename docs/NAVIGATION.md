@@ -70,6 +70,25 @@ planet's centre less F610's radius), F592/F596/F597's guidance and F587's turns
 `FFE_TRACE=1` prints the flight state (mode, velocity, contact, frame, target and range)
 ten times a second, which with `--replay` shows exactly what a recorded flight did.
 
+## Hyperspace (F908/F909/F1066/F1094)
+
+- **Initiation (F908).** From mode 0 or 0x24 with a destination, the altitude at least
+  0xb71b00 and F901's range and fuel; the fuel is burnt and sample 0x21 plays.
+- **F909/F912.** The destination system is built at once and the ship put at rest (no
+  set speed) on F1507's orbit about the root: ffp radius `random(0x2000) | 0x4000`,
+  exponent 0x33 (7.5 to 11 AU), longitude and phase from the random words. Any
+  autopilot ends. The original's random state is not reproduced.
+- **Transit (mode 4).** F1030 runs no physics; the clock runs at F908's 0xf880000
+  (2^18 x 1x) until the jump time is used, ending exactly on it (the main loop's
+  rollback). F1066 draws model 0xa5 on F1575's (0, 0, 4) with global 0 = elapsed share
+  x 145 << 8: about a third of a second a day of jump time.
+- **Exit (F1094).** Mode 0 at 1x, velocity 0x71b7 along the system's z axis, the
+  system's traffic, and the hyperspace song when that switch is on.
+- **Not yet:** F909's mis-jumps (one jump in 128 by `F1530 > 0xfe00`, or Left Alt held:
+  F910's outcomes from `DATA_007190` - the "Mis-Jump", "Forced Mis-Jump" and "Mis-Jump
+  - Drive Destroyed" messages, deep space with no system, F925), the exit cloud F1094
+  leaves (model 0x9a, AI state 0x1e) and the mission events at the special systems.
+
 ## Keys (the playable)
 
 The DOS default start is landed at Old Blackelk on Hope (`--start sol` keeps the

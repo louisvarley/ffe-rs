@@ -261,6 +261,7 @@ fn long_run_capture() {
         .expect("Alpha Centauri at 4.35 light years");
     let before = nav.day();
     let jumped = nav.hyperspace(&cache, centauri).unwrap();
+    nav.finish_transit(&cache);
     assert!(jumped.days > 0.5, "{jumped:?}");
     assert!(nav.day() >= before);
     let starport = nav.bodies.iter().position(|body| {

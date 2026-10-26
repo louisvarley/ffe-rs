@@ -1783,3 +1783,34 @@ fn hope_start_and_launch_keep_the_physical_ground_visible() {
         }
     }
 }
+
+/// F1066's hyperspace view: model 0xa5 at F959's origin with the transit's
+/// progress as global 0 draws at the start, middle and end of a jump.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_hyperspace_tunnel_draws_through_the_transit() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ffe_rs::model_viewer::ModelViewer::new(&cache).unwrap();
+    let rows = [
+        [127.0 / 128.0, 0.0, 0.0],
+        [0.0, 127.0 / 128.0, 0.0],
+        [0.0, 0.0, 127.0 / 128.0],
+    ];
+    for share in [0u16, 72, 144] {
+        let mut inputs = ffe_rs::model_viewer::AnimationInputs::original(0, 0, &viewer.shades());
+        inputs.globals[0] = share << 8;
+        let frame = viewer
+            .render_scene_with(
+                ffe_rs::screen::HYPERSPACE_MODEL,
+                rows,
+                [0.0, 0.0, 0x14820 as f64],
+                viewer.light_direction(),
+                &inputs,
+            )
+            .unwrap();
+        eprintln!("share {share}: {} shapes", frame.shapes.len());
+        assert!(!frame.shapes.is_empty(), "share {share}");
+    }
+}

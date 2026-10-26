@@ -636,6 +636,14 @@ impl OriginalFlight {
     /// flight model starts at 0, so the engines brake the ship instead of it
     /// coasting on at the speed the autopilot had chosen. The target and the
     /// navigator's leg are the caller's to clear ([`crate::navigation::Navigator::cancel`]).
+    /// F1094's hyperspace exit: the velocity in the system frame, thrust and
+    /// the thrust fractions cleared (`+0x8c..0x94`, `+0xf2..0xfa`).
+    pub fn leave_hyperspace(&mut self, velocity: [i32; 3]) {
+        self.player.motion.velocity = velocity;
+        self.player.motion.thrust = [0; 3];
+        self.player.motion.fraction = [0; 3];
+    }
+
     pub fn halt(&mut self) {
         self.player.set_speed = 0;
     }

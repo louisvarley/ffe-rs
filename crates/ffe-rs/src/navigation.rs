@@ -1210,6 +1210,8 @@ pub struct Navigator {
     pub notice: Option<String>,
     /// Game seconds not yet handed to the clearance countdowns.
     carry: f64,
+    /// F908's transit (mode 4) while a hyperspace jump runs.
+    pub transit: Option<Transit>,
     /// The market tables and names (cache v20), when the cache has them.
     market_tables: Vec<u8>,
     /// The galaxy tables (cache v21): star positions and the hyperdrive records.
@@ -1268,6 +1270,33 @@ pub struct Destination {
 /// F908's altitude floor (`DATA_008867 >= 0xb71b00`): a ship deeper than this in a
 /// planet's atmosphere cannot hyperspace.
 pub const HYPERSPACE_ALTITUDE: i32 = 0x00b7_1b00;
+
+/// F908's transit: the player in mode 4 while the clock runs at the hyperspace
+/// rate (`DATA_007706` = 0xf880000, 2^18 times 1x) through the jump time.
+/// F1066 counts it down and F1094 ends it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transit {
+    /// Game seconds of the jump still to run (`+0x106`).
+    pub remaining: f64,
+    /// The whole jump (`+0x532c`).
+    pub total: f64,
+}
+
+impl Transit {
+    /// F1066's animation word for model 0xa5: the elapsed share times 145, << 8.
+    pub fn animation(&self) -> u16 {
+        let elapsed = (self.total - self.remaining).clamp(0.0, self.total);
+        let share = if self.total > 0.0 {
+            elapsed * 145.0 / self.total
+        } else {
+            145.0
+        };
+        ((share as u16) << 8) & 0xff00
+    }
+}
+
+/// The clock rate in transit: F908's `0xf880000` against 1x's `0x3e2`.
+pub const HYPERSPACE_RATE: f64 = 262_144.0;
 
 /// A hyperspace jump made: where the ship arrives and what it cost.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1998,6 +2027,7 @@ impl Navigator {
                 .and_then(|bytes| Pads::from_bytes(bytes).ok()),
             notice: None,
             carry: 0.0,
+            transit: None,
             market_tables: cache
                 .asset("base:market/tables")
                 .map(<[u8]>::to_vec)
@@ -4432,6 +4462,9 @@ impl Navigator {
     /// game clock moves by the jump time; the caller burns `Jumped::fuel`. Refused with a
     /// reason when the system is out of range, the same system, or the hold has too little fuel.
     pub fn hyperspace(&mut self, cache: &VerifiedCache, index: usize) -> Result<Jumped, String> {
+        if self.transit.is_some() {
+            return Err("Already in hyperspace.".to_owned());
+        }
         // F903 only jumps from mode 0 or 0x24; a landed ship must launch first.
         if self.landed.is_some()
             || self
@@ -4461,19 +4494,69 @@ impl Navigator {
             });
         }
         let days = f64::from(report.jump_time.unwrap_or(0)) / 65_536.0;
-        self.clock += days * 86_400.0;
-        let arrival = self.jump(cache, index)?;
-        // F152's day event is dispatched on the next frame in the original; the
-        // jump time's days are still exactly one tick each. The destination's
-        // markets are made fresh on arrival (F622), so only the deadline hook
-        // and the marker have anything to do here.
-        self.tick_days(cache);
+        // F909 builds the destination at once (F860/F905) and F912 puts the
+        // ship on a random orbit about its root; F908 then leaves the clock to
+        // run through the jump time in mode 4 (see `transit_step`).
+        self.jump(cache, index)?;
+        let arrival = self.hyperspace_arrival(cache)?;
+        self.player_at = arrival;
+        self.transit = Some(Transit {
+            remaining: days * 86_400.0,
+            total: days * 86_400.0,
+        });
         Ok(Jumped {
             arrival,
             distance,
             fuel: report.fuel_needed,
             days,
         })
+    }
+
+    /// F909's arrival point: F922 draws the orbit's ffp mantissa
+    /// (`random(0x2000) | 0x4000`, exponent 0x33: about 7.5 to 11 AU), F912
+    /// advances F1530 and F1507 places the ship on that orbit about the
+    /// system's root with `DATA_008818` as the longitude and `DATA_008820` as
+    /// the phase. The original's random state is not reproduced; this one is
+    /// seeded from the system and the clock.
+    fn hyperspace_arrival(&self, cache: &VerifiedCache) -> Result<[i64; 3], String> {
+        let sine = SineTable::from_bytes(cache.asset("base:math/sine").ok_or("no sine table")?)?;
+        let code = self.entries[self.current].params.code;
+        let clock = clock_words(self.clock);
+        let mut rng = npc::Random::new(code ^ clock[0], clock[1].rotate_left(7) ^ 0x2f6b_3c91);
+        let mantissa = (rng.bounded(0x2000) | 0x4000) as i16;
+        rng.advance();
+        let radius = ffe_core::ffp::Ffp {
+            mantissa,
+            exponent: 0x33,
+        };
+        Ok(ffe_core::objects::orbit_point(
+            &sine,
+            radius,
+            rng.a as i32,
+            rng.b,
+        ))
+    }
+
+    /// One frame of F908's transit: the clock runs at [`HYPERSPACE_RATE`] for
+    /// `seconds` of real time, never past the arrival time (the main loop's
+    /// rollback sets the clock to it exactly). `true` when the jump time has
+    /// run out and F1094 should end the transit.
+    pub fn transit_step(&mut self, cache: &VerifiedCache, seconds: f64) -> bool {
+        let Some(mut transit) = self.transit else {
+            return false;
+        };
+        let step = (seconds * HYPERSPACE_RATE).min(transit.remaining).max(0.0);
+        self.advance(cache, step);
+        transit.remaining -= step;
+        self.transit = Some(transit);
+        transit.remaining <= 0.0
+    }
+
+    /// Run a transit to its arrival time at once (tests and scripted jumps); the
+    /// playable steps it frame by frame with [`Self::transit_step`].
+    pub fn finish_transit(&mut self, cache: &VerifiedCache) {
+        while self.transit.is_some() && !self.transit_step(cache, 1.0) {}
+        self.transit = None;
     }
 
     /// F908/F901 for the galaxy map's stored destination. `Err` carries the map's

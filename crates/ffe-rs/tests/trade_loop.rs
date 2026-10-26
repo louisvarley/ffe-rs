@@ -590,6 +590,7 @@ fn trade_loop_buys_fuel_warps_docks_and_sells() {
     let jumped = nav
         .hyperspace(&cache, titican)
         .expect("the jump to Titican");
+    nav.finish_transit(&cache);
     assert_eq!(nav.current_system(), titican);
     assert_eq!(nav.system_name(), "Titican");
     assert!(jumped.fuel >= 1, "F901 burns at least a tonne: {jumped:?}");
@@ -646,6 +647,7 @@ fn trade_loop_buys_fuel_warps_docks_and_sells() {
         .position(|entry| entry.name == "Gateway")
         .expect("Gateway among the systems on offer");
     let home = nav.hyperspace(&cache, gateway).expect("the jump home");
+    nav.finish_transit(&cache);
     assert_eq!(nav.current_system(), gateway);
     assert_eq!(nav.system_name(), "Gateway");
     burn_fuel(&mut state.hold, nav.drive, home.fuel);
