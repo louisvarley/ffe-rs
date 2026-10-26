@@ -185,7 +185,11 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-34", title: "Subsystem damage, F938/F929 repair rows and crash damage", status: "done", version: "v1.03" },
         { id: "gameplay-35", title: "Mission state, BBS accept/complete/expire, journal/comms/military pages", status: "done", version: "v1.05" },
         { id: "gameplay-36", title: "F691 station-bay shuttles, bay release and MAX_SHIPS=9/MAX_BAY_SHIPS=3", status: "done", version: "v1.06" },
-        { id: "gameplay-37", title: "NPC missile launches, chaff/ECM evasion and NPC pylon fit", status: "done", version: "v1.07" }
+        { id: "gameplay-37", title: "NPC missile launches, chaff/ECM evasion and NPC pylon fit", status: "done", version: "v1.07" },
+        { id: "gameplay-38", title: "Runtime: module clock, source F3 map, F4 pad board and live pad speed/thrust", status: "done", version: "v1.11" },
+        { id: "gameplay-39", title: "Autopilot intercept bisection, slot law, hull detour and cancel", status: "done", version: "v1.12" },
+        { id: "gameplay-40", title: "Starport pad descent F741-F746/F652 with 0x59 geometry import", status: "done", version: "v1.13" },
+        { id: "gameplay-41", title: "F575 crash damage via F953 and source bounce flags", status: "done", version: "v1.14" }
       ]
     },
     {
@@ -815,6 +819,26 @@ window.FFE_BURNDOWN = {
       date: "2026-10-25",
       remaining: 63,
       note: "Launch investigation: fixed system/local position confusion and stale pad-world origin across the first orbital refresh (10.8 km jump reproduced at frame 50). Nearby autopilot and hand-off continuity checks pass. Empty Hope ground remains an unfinished ui-11/v0.48-14 case; existing tests counted buildings and did not prove terrain visibility. No milestone completion change."
+    },,
+    {
+      date: "2026-10-26",
+      remaining: 63,
+      note: "Runtime merged (v1.11): F3 is the source map again (preset only in Port Options), the port PAUSED overlay is gone, F4 services overlays the landed view without wiping the console/HUD, the clock advances in every module scaled by TIME_ACCELERATION, and pad/landed set-speed/thrust are live with Set only when a model exists. Owner decisions: pad-speed carry, 10000x pad rotation, P key, save clock. One item added and completed (gameplay-38), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 63,
+      note: "Autopilot merged (v1.12): intercept-time bisection (no circling), F741/F745/F746 slot law and hull detour, 4,096 km station / 6,144 km starport hand-off, arrival slop, starport final_leg, Backspace cancel applying F1018 set-speed 0 and 1x capture; evidence logs. The preserved takeover source-arithmetic autopilot remains backup only. Owner decisions: transfer model, Backspace cancel, 1x. One item added and completed (gameplay-39), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 63,
+      note: "Autoland merged (v1.13): F741/F742/F745/F746/F744/F652 starport descent with F599/F650 bay/F746 orientation, the independent 0x59 geometry import (cache v29 now 1,815 assets / 1,816 entries; 465 geometries/464 programs), step_starport_landing three-body frame and pad-contact tests. Lateral capture remains approximate. Owner decisions: lateral capture, F575 0x40 flags. One item added and completed (gameplay-40), so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 63,
+      note: "Crash merged (v1.14): F575's contact tail applies F953 damage (shields-hull-F942/F1104), the invented crash message is gone, bounce only per source, and 0x40 landing vs 0x80 crash are separated; 28 non-lethal/181 lethal GAME OVER and launch traces. Reconciled with repair's damage API and death/gameover. Owner decisions: silent bounce, launch UX, capsule-at-zero, Contact.damage sum, EXP-016. One item added and completed (gameplay-41), so the remaining count is unchanged."
     },
   ]
 };

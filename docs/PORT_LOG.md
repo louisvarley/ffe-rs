@@ -43,6 +43,51 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+---
+
+## 2026-10-26 - Batch 3c: runtime, autopilot, autoland and crash
+
+- **Takeover work preserved.** A concurrent takeover stream had a source-arithmetic
+  autopilot (`ffe_core::autopilot` F587/F589/F592/F597, `source_command`, new tests)
+  in the working tree. It did not compile against the committed navigation API, so it
+  was committed verbatim on `backup/takeover-autopilot` (`3f8825d`) and `main` was
+  returned to the clean certified tip. It is a competing/duplicate autopilot and stays
+  backup only; the pushed `autopilot` branch is the one live implementation. No unique
+  fix from it was promoted (it was incomplete).
+- Merged, one at a time, each green and pushed: `runtime` (ef55331), `autopilot`
+  (4da64a3), `autoland` (f18e0b0) and `crash` (7057d6b).
+- **runtime (v1.11).** F3 is the source map again (the preset lives only in Port
+  Options), the port's PAUSED overlay is gone while source Escape/pause stays, F4
+  services overlays the landed view without wiping the console/HUD (F343/F1003), the
+  clock advances in every module scaled by TIME_ACCELERATION (F152), pad/landed
+  set-speed and thrust are live (F1037/F1041), and the HUD Set line needs a model.
+  Conflicts: pad model setup, message window/pad board, launch path, clock advance and
+  the mission tick; the duplicate `nav.advance` was removed (one frame clock).
+  Owner decisions: pad-speed carry, 10000x pad rotation, P key, save clock.
+- **autopilot (v1.12).** Intercept-time bisection, F741/F745/F746 slot law and hull
+  detour, 4,096 km station/6,144 km starport hand-off, arrival slop, starport
+  `final_leg`, Backspace cancel applying F1018 set-speed 0, 1x capture and evidence
+  logs. The old transfer block was dropped in favour of the intercept solver.
+  Owner decisions: transfer model, Backspace cancel, 1x.
+- **autoland (v1.13).** F741/F742/F745/F746/F744/F652 pad descent, F599/F650 bay and
+  F746 orientation, the independent 0x59 geometry import (cache v29 now **1,815
+  assets / 1,816 entries**, 465 geometries/464 programs), `step_starport_landing`'s
+  three-body frame and manual pad contact. Conflicts: the autopilot command body
+  (autoland pad target kept; station hull detour restored), original-flight helpers
+  (kept `set_pad_bodies` and added the collision/thrust accessors), navigation tests
+  and docs. `verify-assets.py` updated 1813/1814 -> 1815/1816. Owner decisions:
+  lateral capture, F575 0x40 flags.
+- **crash (v1.14).** F575's contact tail applies F953 damage (shields -> hull ->
+  F942/F1104), removes the invented crash message, keeps only the source bounce and
+  separates landing 0x40 from crash 0x80; 28 non-lethal/181 lethal GAME OVER cases and
+  the launch trace. Conflicts: `Flight` helpers (deduplicated `destroyed`), the landing
+  block (autoland's starport path kept with crash flags, damage moved to the shared
+  tail). Owner decisions: silent bounce, launch UX, capsule-at-zero, Contact.damage sum,
+  EXP-016.
+- Checks: workspace tests, clippy `-D warnings`, fmt, each branch's cached/ignored
+  suites and affected oracles. Cache v29 was rebuilt from the merged tools; the old
+  1813-asset file is kept as ignored `data-v29-1813.bin`.
+
 ## 2026-10-25 - Batch 3b: station shuttles, NPC missiles, saves, galaxy console and intro stars
 
 - Merged, one at a time, each green and pushed: `shuttles` (4108683),

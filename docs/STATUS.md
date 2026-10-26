@@ -141,13 +141,14 @@ ECM.
   sequence (`death.md`), music (`music.md`), the game-over tombstone
   (`gameover.md`), time and deadlines (`time.md`), ship names
   (`ship-names.md`), rank/reputation (`status.md`), missions
-  (`missions.md`), persistence (`persistence.md`), and the **ship dashboard
+  (`missions.md`), persistence (`persistence.md`), starport autoland
+  (`autoland.md`), surface collision (`collision.md`), and the **ship dashboard
   audit**
   (`dashboard.md`: the complete original console/HUD gap list, with the
   byte-validated DATA_005100 button and DATA_007684 hot-area tables). The port's
   own key bindings are in `docs/CONTROLS.md`.
 - `dashboard/` - the whole-port burndown at milestone level (`index.html`, data
-  in `burndown.js`; 14 milestones, 177 items, 114 done and 63 left on
+  in `burndown.js`; 14 milestones, 181 items, 118 done and 63 left on
   2026-10-25). **Update it in the same commit as any progress change**:
   statuses plus a new dated history point. Its last point is checked against the
   task lists.
@@ -347,14 +348,18 @@ capture produced by two repeat runs of the local reference.
 | v1.08 native save/load | JSON v2 quick/numbered saves, F5/Ctrl+F5/Shift+F5, intro L, `--load`, `--capture-save`, full Flight+Navigator+legal+rank+missions, atomic validation, legacy read-only, config migration; v1/pre-drive migration | `saves` (3), `fitting` (5), navigation (20), playable/workspace; `verify-prefs/takeoff/surface/station` PASS; `--capture-save` | six affected oracles PASS | - | owner decisions: legacy specimen, RNG, object array, mission/rank model, remap UI/dialog; `docs/notes/persistence.md` |
 | v1.09 galaxy map console | F834/F840 page (F5 controls, F6 select, F7 details, F8 picture, F9/F10 next/previous, F11/F12 zoom), map-local ownership for the 3D map, row clicks; `galaxy_map_view` | `galaxy_map_view` (5), navigation (20); `verify-galaxy-map/hyperspace/fills/textures/prefs` PASS | five affected oracles PASS | - | owner decisions: map-local keys, details/picture still unported; `docs/notes/galaxy-map.md` |
 | v1.10 intro nebula and star chains | primitive keys per shape (nebula behind planet), F1766/F1814 star chains through particle_clipped; prior text/ship/ring fixes retained; `intro_view` | `intro_view` (12), `planet_view` (22); `verify-intro/order/fills/textures/surface` PASS | five affected oracles PASS | - | global key-sort test relaxed to landmark ordering because the port's F1840 surface merge is outside verify-order's queue; owner decisions: chain-star density/cull branches |
+| v1.11 runtime clock, map and pad | F3 source map, no PAUSED overlay, F4 pad services over landed view (F343/F1003), module clock scaled by TIME_ACCELERATION, pad/landed set-speed and thrust (F1037/F1041), HUD Set only with a model; `runtime_regressions` | `runtime_regressions` (5), navigation (24), playable/station; `verify-prefs/takeoff/surface/station` PASS | six affected oracles PASS | - | owner decisions: pad-speed carry, 10000x pad rotation, P key, save clock; `docs/evidence/runtime/` |
+| v1.12 autopilot intercept and hand-off | intercept-time bisection, F741/F745/F746 slot law and hull detour, 4,096/6,144 km hand-offs, arrival slop, starport final_leg, Backspace cancel (F1018 set-speed 0), 1x capture; evidence logs | navigation (26), station_view (4); `verify-station/galaxy-map/surface/takeoff/prefs` PASS | seven affected oracles PASS | - | takeover source-arithmetic autopilot kept backup only; owner decisions: transfer model, Backspace cancel, 1x; `docs/evidence/autopilot/` |
+| v1.13 starport pad descent and v29 geometry | F741-F746/F744/F652 descent, F599/F650 bay/orientation, 0x59 geometry import (cache v29 1,815 assets/1,816 entries; 465 geometries/464 programs), step_starport_landing and manual pad contact | navigation (28), planet_view (22), station_view; `verify-assets/surface/takeoff/station` PASS | six affected oracles PASS | - | lateral capture still approximate; owner decisions: lateral capture, F575 0x40 flags; `docs/notes/autoland.md` |
+| v1.14 F575 crash damage and bounce | contact tail applies F953 damage (shields-hull-F942/F1104), invented crash message removed, source bounce/0x40 vs 0x80, 28 non-lethal/181 lethal GAME OVER and launch trace; `crash` | `crash` (3), navigation (28), planet_view (22), station_view; `verify-combat/surface/takeoff/station/prefs/assets` PASS | eight affected oracles PASS | - | owner decisions: silent bounce, launch UX, capsule-at-zero, Contact.damage sum, EXP-016; `docs/notes/collision.md`, `docs/evidence/crash/` |
 
 Facts verified on 2026-10-22 (test counts and the smoke launch re-checked
 for v0.47; the oracle figures are from the last full `verify-all.py` run):
 
 - `cargo test --workspace --locked` passes, as do `cargo fmt --check` and
-  `cargo clippy -D warnings`. 928 `#[test]` functions total; 213 are `#[ignore]`
+  `cargo clippy -D warnings`. 957 `#[test]` functions total; 224 are `#[ignore]`
   local-only tests; one more is `#[cfg(unix)]`. On Windows that is
-  **714 runnable synthetic tests** (715 on Linux).
+  **732 runnable synthetic tests** (733 on Linux).
 - Collision contacts: F575's soft landing, crash and bounce tail and F578's
   momentum response are ported (`ffe_core::landing`, `ffe_core::collision`) and
   **all 4,096 `--collide` cases and all 4,096 `--world-tick` cases match**,
@@ -394,7 +399,7 @@ for v0.47; the oracle figures are from the last full `verify-all.py` run):
 - The local reference build (`jjffe-smoke.exe`, `jjffe-commands.exe`) and its
   `build-manifest.json` exist under `.cache/jjffe-reference/`.
 - `game/` has 71 files; `jjffe-master/` and `ffed3d-master/` are present; root
-  `data.bin` is cache v29 (1813 assets, 462 of 466 models, 219 model strings,
+  `data.bin` is cache v29 (1815 assets, 462 of 466 models, 219 model strings,
   3 glyph sets, the F650 pad tables and the intro credits/char widths); `.cache/data-v1..v5-backup.bin`,
   `data-v10-backup.bin`, `data-v12-backup.bin` and `data-v13-backup.bin` are
   retained.
