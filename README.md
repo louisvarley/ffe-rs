@@ -37,7 +37,10 @@ The Windows executable is built in this checkout. From the repository root:
 **Easiest on Windows:** double-click `play.bat`. It builds the release game and
 tools, creates or updates `data.bin` from your files in `.\game` when it is
 missing or older than this build needs (currently cache v29), and launches the
-game; on any error the window stays open with the message. Rebuilding by hand:
+game; on any error the window stays open with the message. Every run also records
+your keyboard and mouse to `recordings\<date-time>.ffe-input`; `replay.bat recordings\FILE`
+(or `ffe-rs --replay FILE [--replay-exit]`) plays a recording back exactly, so a problem can
+be reproduced from the file. `ffe-rs --record FILE` records without the batch file. Rebuilding by hand:
 `cargo build --release --locked -p ffe-rs -p ffe-tools`.
 The root directory must contain your locally generated **v29** `data.bin` (build command
 below, or let `play.bat` make it). The game verifies it before opening a window.

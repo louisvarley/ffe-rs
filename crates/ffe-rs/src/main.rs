@@ -30,6 +30,7 @@ use ffe_rs::prefs::{
 use ffe_rs::saves;
 use ffe_rs::screen::ViewButton;
 use ffe_rs::screen::{Screen, HEIGHT, WIDTH};
+use ffe_rs::session::Session;
 use ffe_rs::settings;
 use ffe_rs::ships::ShipList;
 use ffe_rs::sound::{Cue, GameAudio};
@@ -132,6 +133,11 @@ struct Options {
     load: Option<PathBuf>,
     /// Directory for the save -> unload -> load -> resume evidence.
     capture_save: Option<PathBuf>,
+    /// `--record FILE`: write every frame's input; `--replay FILE`: play such a file back.
+    record: Option<PathBuf>,
+    replay: Option<PathBuf>,
+    /// `--replay-exit`: close the window when the recording ends.
+    replay_exit: bool,
 }
 
 fn options() -> Result<Options, String> {
@@ -151,6 +157,9 @@ fn options() -> Result<Options, String> {
     let mut dev = std::env::var_os("FFE_DEV").is_some_and(|value| value == "1");
     let mut load = None;
     let mut capture_save = None;
+    let mut record = None;
+    let mut replay = None;
+    let mut replay_exit = false;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" && root.is_none() {
@@ -228,6 +237,16 @@ fn options() -> Result<Options, String> {
             load = Some(PathBuf::from(
                 args.next().ok_or("--load requires a save file")?,
             ));
+        } else if arg == "--record" && record.is_none() {
+            record = Some(PathBuf::from(
+                args.next().ok_or("--record requires a file")?,
+            ));
+        } else if arg == "--replay" && replay.is_none() {
+            replay = Some(PathBuf::from(
+                args.next().ok_or("--replay requires a recorded file")?,
+            ));
+        } else if arg == "--replay-exit" {
+            replay_exit = true;
         } else if arg == "--capture-save" && capture_save.is_none() {
             capture_save = Some(PathBuf::from(
                 args.next().ok_or("--capture-save requires a directory")?,
@@ -244,7 +263,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--dev] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--dev] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR] [--record FILE] [--replay FILE [--replay-exit]]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -279,6 +298,9 @@ fn options() -> Result<Options, String> {
         dev,
         load,
         capture_save,
+        record,
+        replay,
+        replay_exit,
     })
 }
 
@@ -569,6 +591,7 @@ enum IntroExit {
 /// F919 runs around the same loop: song 0 (`QQFRONT`) starts with the intro,
 /// replays when `F1904` reports done, and stops on the leaving key (`ffe.asm`
 /// 68419-68428 and 68484).
+#[allow(clippy::too_many_arguments)]
 fn run_intro(
     window: &mut Window,
     presenter: &mut Presenter,
@@ -577,6 +600,7 @@ fn run_intro(
     scene: Option<&ModelViewer>,
     sound: &mut GameAudio,
     save_dir: &Path,
+    session: &mut Session,
 ) -> Result<IntroExit, String> {
     let intro = Intro::new();
     let mut tics = front_end::BOOT_TICS;
@@ -584,13 +608,16 @@ fn run_intro(
     let mut last = Instant::now();
     sound.front_end_music();
     loop {
-        if !window.is_open() {
+        if !window.is_open() || session.should_exit() {
             sound.leave_front_end();
             return Ok(IntroExit::Start(1));
         }
         screen.draw_intro(scene, tics, version)?;
         presenter.present(window, screen.logical_pixels(), display)?;
-        for key in window.get_keys_pressed(KeyRepeat::No) {
+        let real = last.elapsed().as_secs_f64().min(0.1);
+        last = Instant::now();
+        let inp = session.frame(window, real);
+        for key in inp.get_keys_pressed(KeyRepeat::No) {
             // The original's title has a Commander Load choice (F220/F222); the
             // port's front end is the intro, so L is its Load Commander key.
             if key == Key::L {
@@ -633,9 +660,7 @@ fn run_intro(
                 }
             }
         }
-        let now = Instant::now();
-        let elapsed = now.duration_since(last).as_millis().min(100) as u32;
-        last = now;
+        let elapsed = (inp.dt * 1000.0) as u32;
         // F1904/F232 and F919's replay: the same tick the game loop uses.
         sound.tick(std::time::Duration::from_millis(u64::from(elapsed)));
         tics = IntroTimeline::advance(tics, elapsed);
@@ -837,6 +862,13 @@ fn run() -> Result<(), String> {
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
     let mut presenter = Presenter::new();
+    // `--record FILE` writes every frame's input; `--replay FILE` plays one back.
+    let mut session = Session::new(
+        options.record.as_deref(),
+        options.replay.as_deref(),
+        &std::env::args().skip(1).collect::<Vec<_>>().join(" "),
+        options.replay_exit,
+    )?;
     // Sound effects and music. The original's cues (`F1906`/`F1907`) and songs
     // (`F1902`..`F1904`) are posted from the events below; captures and the
     // smoke test never open a device.
@@ -944,6 +976,7 @@ fn run() -> Result<(), String> {
             scene.as_ref(),
             &mut sound,
             &save_dir,
+            &mut session,
         )? {
             IntroExit::Start(start_type) => boot = Boot::NewGame(start_type),
             IntroExit::Load(path) => load_path = Some(path),
@@ -1177,10 +1210,13 @@ fn run() -> Result<(), String> {
     let mut held_controls = input::HeldControls::default();
     // Consume the intro/start key until it has been released.
     held_controls.disarm(&window.get_keys());
-    while window.is_open() {
-        let now = Instant::now();
-        let measured = now.duration_since(last).as_secs_f64().min(0.1);
-        last = now;
+    while window.is_open() && !session.should_exit() {
+        let real_now = Instant::now();
+        let real_dt = real_now.duration_since(last).as_secs_f64().min(0.1);
+        last = real_now;
+        // This frame's input and time: live, or the next recorded frame.
+        let inp = session.frame(&mut window, real_dt);
+        let measured = inp.dt;
         // The planet capture is scripted: a fixed 0.1 s (the original model's
         // largest frame) per presented frame, so the approach takes minutes of
         // world time in a minute of wall time.
@@ -1211,6 +1247,7 @@ fn run() -> Result<(), String> {
                         scene.as_ref(),
                         &mut sound,
                         &save_dir,
+                        &mut session,
                     )?
                 } else {
                     IntroExit::Start(ffe_rs::navigation::DEFAULT_START_TYPE)
@@ -1254,7 +1291,7 @@ fn run() -> Result<(), String> {
                 galaxy = None;
                 paused = false;
                 labels = false;
-                held_controls.disarm(&window.get_keys());
+                held_controls.disarm(&inp.get_keys());
                 last_mode = state.mode;
                 if nav.as_ref().is_some_and(|nav| nav.docked.is_some()) {
                     sound.play(Cue::Station);
@@ -1295,13 +1332,13 @@ fn run() -> Result<(), String> {
             window = fresh;
             request = wanted;
             presenter.reset();
-            held_controls.disarm(&window.get_keys());
+            held_controls.disarm(&inp.get_keys());
             mouse_point = None;
             mouse_was_down = false;
             right_was_down = false;
         }
-        let active = window.is_active();
-        let keys_down = window.get_keys();
+        let active = inp.is_active();
+        let keys_down = inp.get_keys();
         let controls_enabled = active
             && !prefs.open
             && !paused
@@ -1312,15 +1349,14 @@ fn run() -> Result<(), String> {
             && nav.as_ref().is_none_or(|nav| nav.view == NavView::Closed);
         held_controls.update(
             &keys_down,
-            &window.get_keys_pressed(KeyRepeat::No),
+            &inp.get_keys_pressed(KeyRepeat::No),
             controls_enabled,
         );
         // Mouse steering: only the Classic preset's right-button hold moves the
         // ship (`docs/CONTROLS.md`); the left button stays the console pointer.
         let raw_point = if active {
-            window
-                .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
+            inp.get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, inp.get_size()))
         } else {
             None
         };
@@ -1331,7 +1367,7 @@ fn run() -> Result<(), String> {
         // A pointer on the letterbox or outside the window restarts the delta so
         // re-entering cannot snap the ship.
         mouse_point = raw_point;
-        let right_down = controls_enabled && window.get_mouse_down(MouseButton::Right);
+        let right_down = controls_enabled && inp.get_mouse_down(MouseButton::Right);
         let mouse_pressed = right_down && !right_was_down;
         if mouse_pressed {
             // The press frame's delta is discarded: a fresh hold starts at zero.
@@ -1357,7 +1393,7 @@ fn run() -> Result<(), String> {
                 eprintln!("SETTINGS: {error}");
             }
         }
-        let pressed = |key| window.is_key_pressed(key, KeyRepeat::No);
+        let pressed = |key| inp.is_key_pressed(key, KeyRepeat::No);
         // F1104's death sequence: the external-view hold, then F917's spinning
         // tombstone. Flight controls and traffic stay held throughout; F1107's
         // timeout starts the screen. There are no game-over options here: the
@@ -1417,9 +1453,9 @@ fn run() -> Result<(), String> {
         if active
             && pressed(Key::Enter)
             && (display::alt_held()
-                || window.is_key_down(Key::LeftAlt)
-                || window.is_key_down(Key::RightAlt)
-                || window.is_key_down(Key::Menu))
+                || inp.is_key_down(Key::LeftAlt)
+                || inp.is_key_down(Key::RightAlt)
+                || inp.is_key_down(Key::Menu))
         {
             prefs.fullscreen = !prefs.fullscreen;
             sound.play(Cue::UiBeep);
@@ -1433,11 +1469,10 @@ fn run() -> Result<(), String> {
         // A console click on the mouse-down edge, in flight (client pixels against
         // the client size: get_mouse_pos divides by the creation scale only, which
         // breaks after a resize).
-        let mouse_down = window.get_mouse_down(MouseButton::Left);
+        let mouse_down = inp.get_mouse_down(MouseButton::Left);
         let edge_point = if active && mouse_down && !mouse_was_down {
-            window
-                .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
+            inp.get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, inp.get_size()))
         } else {
             None
         };
@@ -1468,7 +1503,7 @@ fn run() -> Result<(), String> {
             }
             sound.play(Cue::UiBeep);
             held_controls.disarm(&keys_down);
-            last = now;
+            last = Instant::now();
         }
         // While the pages are open the game is frozen: only the page state and
         // the page picture change. The original stops the clock in FUNC_000220.
@@ -1530,9 +1565,8 @@ fn run() -> Result<(), String> {
             && model_lab.is_none()
             && model_viewer.is_none()
         {
-            window
-                .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
+            inp.get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, inp.get_size()))
         } else {
             None
         };
@@ -1543,9 +1577,8 @@ fn run() -> Result<(), String> {
             && model_lab.is_none()
             && model_viewer.is_none()
         {
-            window
-                .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
+            inp.get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, inp.get_size()))
                 .and_then(|(x, y)| Screen::console_click(x, y))
         } else {
             None
@@ -1559,9 +1592,8 @@ fn run() -> Result<(), String> {
             && model_lab.is_none()
             && model_viewer.is_none()
         {
-            window
-                .get_unscaled_mouse_pos(MouseMode::Pass)
-                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, window.get_size()))
+            inp.get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, inp.get_size()))
         } else {
             None
         };
@@ -1726,9 +1758,8 @@ fn run() -> Result<(), String> {
             }
         }
         if active && !death_control {
-            let shift_down =
-                window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
-            let ctrl_down = window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
+            let shift_down = inp.is_key_down(Key::LeftShift) || inp.is_key_down(Key::RightShift);
+            let ctrl_down = inp.is_key_down(Key::LeftCtrl) || inp.is_key_down(Key::RightCtrl);
             // Developer-only commands. A player build binds none of these:
             // `--dev` (or `FFE_DEV=1`) enables Ctrl+F11 screenshot,
             // Ctrl+F12 model viewer, Ctrl+Shift+F12 model lab and O prototype
@@ -1855,7 +1886,7 @@ fn run() -> Result<(), String> {
                 }
                 let mut hyperspace = false;
                 if let Some(map) = galaxy.as_mut() {
-                    let held = |key| window.is_key_down(key);
+                    let held = |key| inp.is_key_down(key);
                     let slow = held(Key::LeftShift) || held(Key::RightShift);
                     let rate = if slow { 0.25 } else { 1.0 };
                     // Arrows move the centre (three quarters of a sector a second), Page Up/Down
@@ -1951,12 +1982,11 @@ fn run() -> Result<(), String> {
                     if pressed(Key::C) {
                         map.recentre();
                     }
-                    let point =
-                        window
-                            .get_unscaled_mouse_pos(MouseMode::Pass)
-                            .and_then(|(x, y)| {
-                                display::logical_point(&prefs.display, x, y, window.get_size())
-                            });
+                    let point = inp
+                        .get_unscaled_mouse_pos(MouseMode::Pass)
+                        .and_then(|(x, y)| {
+                            display::logical_point(&prefs.display, x, y, inp.get_size())
+                        });
                     if active && mouse_down {
                         if let (Some(before), Some(now)) = (map_drag, point) {
                             map.rotate((now.0 - before.0) as i16, (now.1 - before.1) as i16);
@@ -2122,8 +2152,8 @@ fn run() -> Result<(), String> {
                 if nav.view == NavView::Closed {
                     let ship = ship_position(&original, &state);
                     if pressed(Key::T) || console_click == Some(Click::Target) {
-                        let back = window.is_key_down(Key::LeftShift)
-                            || window.is_key_down(Key::RightShift);
+                        let back =
+                            inp.is_key_down(Key::LeftShift) || inp.is_key_down(Key::RightShift);
                         if state.loadout.auto_targetter() {
                             // F1054's 't' (action 0x74): with the Auto targetter
                             // (`ship+0xc8 & 0x80`) T toggles `DATA_007246` and
@@ -2534,7 +2564,7 @@ fn run() -> Result<(), String> {
                 held_controls.disarm(&keys_down);
             }
             if let Some(viewer) = model_viewer.as_mut() {
-                let repeated = |key| i32::from(window.is_key_pressed(key, KeyRepeat::Yes));
+                let repeated = |key| i32::from(inp.is_key_pressed(key, KeyRepeat::Yes));
                 viewer.step(repeated(Key::PageDown) - repeated(Key::PageUp));
                 viewer.turn(
                     repeated(Key::Right) - repeated(Key::Left),
@@ -2589,7 +2619,7 @@ fn run() -> Result<(), String> {
                 if pressed(Key::Key9) {
                     lab.set_animation(65535);
                 }
-                let repeated = |key| i32::from(window.is_key_pressed(key, KeyRepeat::Yes));
+                let repeated = |key| i32::from(inp.is_key_pressed(key, KeyRepeat::Yes));
                 lab.turn(
                     repeated(Key::Right) - repeated(Key::Left),
                     repeated(Key::Up) - repeated(Key::Down),
@@ -2702,7 +2732,7 @@ fn run() -> Result<(), String> {
                     // Ctrl+F12 is the developer model viewer instead, and F840
                     // owns F12 as zoom-out while the map page is open.
                     let ctrl_down =
-                        window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
+                        inp.is_key_down(Key::LeftCtrl) || inp.is_key_down(Key::RightCtrl);
                     if (pressed(Key::F12) && !ctrl_down && !map_page_open)
                         || (console_click == Some(Click::Capsule) && !map_page_open)
                     {
@@ -2814,9 +2844,9 @@ fn run() -> Result<(), String> {
                         message = note;
                     }
                 }
-                let now = Instant::now();
+                let now = session.now();
                 let mut held = |keys: &[Key]| {
-                    let down = keys.iter().find(|key| window.is_key_down(**key)).copied();
+                    let down = keys.iter().find(|key| inp.is_key_down(**key)).copied();
                     for key in keys {
                         if Some(*key) != down {
                             held_since.remove(key);
@@ -3404,8 +3434,8 @@ fn run() -> Result<(), String> {
                         }
                         StationAction::Trade { buy, row } => {
                             let station = nav.as_ref().and_then(|nav| nav.docked);
-                            let shift = window.is_key_down(Key::LeftShift)
-                                || window.is_key_down(Key::RightShift);
+                            let shift =
+                                inp.is_key_down(Key::LeftShift) || inp.is_key_down(Key::RightShift);
                             if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
                                 if dock.fake_market {
                                     // F554: on F640's fake advertisement a row
@@ -3563,8 +3593,7 @@ fn run() -> Result<(), String> {
                     // one-item trade otherwise.
                     let buying = pressed(Key::B);
                     let station = nav.as_ref().and_then(|nav| nav.docked);
-                    let shift =
-                        window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
+                    let shift = inp.is_key_down(Key::LeftShift) || inp.is_key_down(Key::RightShift);
                     match (nav.as_mut(), station) {
                         (Some(nav), Some(station))
                             if state.mode == ffe_rs::flight::Mode::Docked
@@ -3624,9 +3653,8 @@ fn run() -> Result<(), String> {
                         }
                     }
                 }
-                let shift =
-                    window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
-                let ctrl = window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
+                let shift = inp.is_key_down(Key::LeftShift) || inp.is_key_down(Key::RightShift);
+                let ctrl = inp.is_key_down(Key::LeftCtrl) || inp.is_key_down(Key::RightCtrl);
                 // Shift+F5 loads the quick save (or the newest numbered save when
                 // there is none). A load never falls back silently: a corrupt file
                 // leaves the live state alone and reports why.
@@ -6075,8 +6103,8 @@ fn run() -> Result<(), String> {
             && model_lab.is_none()
             && model_viewer.is_none()
         {
-            let older = i32::from(window.is_key_pressed(Key::PageUp, KeyRepeat::Yes)) * 8;
-            let newer = i32::from(window.is_key_pressed(Key::PageDown, KeyRepeat::Yes)) * 8;
+            let older = i32::from(inp.is_key_pressed(Key::PageUp, KeyRepeat::Yes)) * 8;
+            let newer = i32::from(inp.is_key_pressed(Key::PageDown, KeyRepeat::Yes)) * 8;
             if older != newer {
                 screen.scroll_messages(older - newer);
             }

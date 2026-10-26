@@ -30,6 +30,7 @@ pub mod prefs;
 pub mod saves;
 pub mod scanner;
 pub mod screen;
+pub mod session;
 pub mod settings;
 pub mod ships;
 pub mod sound;

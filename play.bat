@@ -41,7 +41,12 @@ if "%REBUILD%"=="1" (
 )
 
 echo === Starting the game ===
-target\release\ffe-rs.exe 
+rem Every run records its keyboard and mouse to recordings\<date-time>.ffe-input, so a
+rem problem can be replayed exactly (replay.bat recordings\<file>) or sent for a fix.
+if not exist recordings mkdir recordings
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set STAMP=%%i
+echo Recording this session to recordings\%STAMP%.ffe-input
+target\release\ffe-rs.exe --record "recordings\%STAMP%.ffe-input"
 if errorlevel 1 goto failed
 exit /b 0
 
