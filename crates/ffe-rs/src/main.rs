@@ -4043,31 +4043,14 @@ fn run() -> Result<(), String> {
                                 landing_tools.as_ref(),
                             )
                             .map(|contact| {
-                                if contact.flags & 0x40 != 0 && contact.flags & 0x20 != 0 {
+                                // F1019/F1021 test 0x40 first but ignore it when
+                                // 0x80 is set: a crash is not a landing. The pad
+                                // also needs F576's 0x20 touch flag.
+                                if contact.flags & 0x40 != 0
+                                    && contact.flags & 0x20 != 0
+                                    && contact.flags & 0x80 == 0
+                                {
                                     landed_at = Some(index);
-                                } else if contact.flags & 0x80 != 0 {
-                                    pending_log.add(
-                                        Source::Collision,
-                                        format!(
-                                            "Crash: damage {}. The ship bounced off the surface.",
-                                            contact.damage.max(0)
-                                        ),
-                                    );
-                                    sound.play(Cue::HullDamage);
-                                    // F575's tail hands F953 the crash damage.
-                                    if contact.damage > 0 {
-                                        let mass = scene
-                                            .as_ref()
-                                            .and_then(|scene| scene.ship_stats(state.ship))
-                                            .map_or(25, |stats| stats.mass);
-                                        let (_, system) = state.take_damage_with_systems(
-                                            u32::try_from(contact.damage).unwrap_or(u32::MAX),
-                                            mass,
-                                        );
-                                        if let Some(event) = system {
-                                            pending_log.add(Source::Collision, event.message());
-                                        }
-                                    }
                                 }
                                 Some(contact)
                             })
@@ -4082,30 +4065,8 @@ fn run() -> Result<(), String> {
                                 landing_tools.as_ref(),
                             )
                             .map(|contact| {
-                                if contact.flags & 0x40 != 0 {
+                                if contact.flags & 0x40 != 0 && contact.flags & 0x80 == 0 {
                                     landed_at = Some(index);
-                                } else if contact.flags & 0x80 != 0 {
-                                    pending_log.add(
-                                        Source::Collision,
-                                        format!(
-                                            "Crash: damage {}. The ship bounced off the surface.",
-                                            contact.damage.max(0)
-                                        ),
-                                    );
-                                    sound.play(Cue::HullDamage);
-                                    if contact.damage > 0 {
-                                        let mass = scene
-                                            .as_ref()
-                                            .and_then(|scene| scene.ship_stats(state.ship))
-                                            .map_or(25, |stats| stats.mass);
-                                        let (_, system) = state.take_damage_with_systems(
-                                            u32::try_from(contact.damage).unwrap_or(u32::MAX),
-                                            mass,
-                                        );
-                                        if let Some(event) = system {
-                                            pending_log.add(Source::Collision, event.message());
-                                        }
-                                    }
                                 }
                                 Some(contact)
                             })
@@ -4116,6 +4077,34 @@ fn run() -> Result<(), String> {
                 match step_result {
                     Ok(contact) => {
                         model.apply(&mut state);
+                        // F575's contact tail already bounced a crash (its
+                        // reflected velocity is in the model) and handed the
+                        // damage to F953: the shields take it first, then the
+                        // hull (`+0xe0`/`+0xe4`). F953 plays the shield or hull
+                        // sample; the source prints no message for a surface
+                        // impact. A used-up hull is F942's destruction, and the
+                        // destroyed-hull check later in the frame starts F1104
+                        // (the death hold or an escape craft).
+                        if let Some(contact) =
+                            contact.as_ref().filter(|contact| contact.flags & 0x80 != 0)
+                        {
+                            let mass = scene
+                                .as_ref()
+                                .and_then(|scene| scene.ship_stats(state.ship))
+                                .map_or(25, |stats| stats.mass);
+                            if state.death.is_none() {
+                                match state.take_contact_damage(contact, mass) {
+                                    Some(ffe_core::laser::Damage::Shields) => {
+                                        sound.play(Cue::ShieldHit);
+                                    }
+                                    Some(ffe_core::laser::Damage::Hull)
+                                    | Some(ffe_core::laser::Damage::Destroyed) => {
+                                        sound.play(Cue::HullDamage);
+                                    }
+                                    None => {}
+                                }
+                            }
+                        }
                         // F1033's `DATA_008867`: the altitude F908 tests before a
                         // hyperspace jump. With no contact (free space) the port
                         // leaves it at the original's "no surface" maximum.

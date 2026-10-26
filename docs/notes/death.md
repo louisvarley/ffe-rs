@@ -140,6 +140,10 @@ cleared.
     runs `death::begin`, rebuilds the original flight model for the new craft,
     sets the external view on the no-craft branch, and posts the cues/message.
     A second hit on a ship already in the hold is ignored (`81466`).
+  - A planet/starport surface crash reaches the same path from the flight step:
+    `Flight::take_contact_damage` applies F575's F953 amount, and the frame's
+    destroyed-hull check (`state.destroyed()`) starts F942/F1104. See
+    `docs/notes/collision.md`.
   - The F12 console icon (`Click::Capsule`) is F1056's F1098 call: it launches
     the fitted craft with sample `0x20`, or says `No escape capsule fitted.`
   - While `Flight::death` is set, the flight controls, NPC traffic and lasers

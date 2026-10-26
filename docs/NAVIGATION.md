@@ -235,8 +235,10 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   A two-body world (player 1, parent 2) gives F575/F576 the parent-relative position, so the
   terrain or the starport's collision stream runs with `SurfaceTools`; the landing gear word
   `+0x9e` is 0xffff. A slow, level touch (speed <= 0x258, dot >= 0x78000000) sets flag 0x40 and
-  settles the ship on the surface; a faster one sets 0x80 and bounces it (damage from F953's
-  amount is shown on the status line). Regression: `soft_touch_lands_and_fast_touch_bounces`.
+  settles the ship on the surface; a faster one sets 0x80 and bounces it, and F953 takes the
+  bounce's amount off the shields and then the hull (F942/F1104 destroy the ship when it is
+  used up: the game-over hold). The source prints no crash message, so the port no longer
+  does either (`docs/notes/collision.md`). Regression: `soft_touch_lands_and_fast_touch_bounces`.
 - **The landed state (2026-10-25).** The DOS default new game is record 0 of F829's
   start table: Gateway [-1,4] on the planet **Hope**, at the starport **Old Blackelk**
   (`slot 0x6a`), with F998's default Saker Mk III, 10,000 CR and state `0x30`. (Record 1

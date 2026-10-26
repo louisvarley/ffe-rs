@@ -736,6 +736,25 @@ impl Flight {
         self.hull[0] = state.hull;
         result
     }
+    /// F953's amount from F575's surface contact: the damage the bounce handed
+    /// to F953 (`+0xc` in `DATA_008548`), applied to the shields and then the
+    /// hull like a laser hit. `None` when the contact carried no damage (a soft
+    /// landing, or a touch whose F953 amount was zero or negative: F953 raises a
+    /// negative amount to `0x7fffffff`, but F575 only passes the bounce's
+    /// non-negative product, and -1 comes from the missile branch of another
+    /// body, not the player's).
+    pub fn take_contact_damage(
+        &mut self,
+        contact: &ffe_core::collision::Contact,
+        mass: u16,
+    ) -> Option<ffe_core::laser::Damage> {
+        match contact.damage {
+            damage if damage > 0 => {
+                Some(self.take_damage(damage.min(i64::from(u32::MAX)) as u32, mass))
+            }
+            _ => None,
+        }
+    }
 }
 
 fn length(vector: [f64; 3]) -> f64 {
@@ -744,4 +763,97 @@ fn length(vector: [f64; 3]) -> f64 {
         .map(|number| number * number)
         .sum::<f64>()
         .sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ffe_core::collision::Contact;
+    use ffe_core::laser::Damage;
+
+    /// F575's bounce damage reaches F953 as `contact.damage`; the Saker's hull is
+    /// the descriptor mass (28) times four.
+    fn contact(damage: i64) -> Contact {
+        Contact {
+            flags: 0x83,
+            distance: -1,
+            object: 2,
+            pad: 0,
+            touch: Some(ffe_core::landing::Touch::Crash {
+                damage: damage as i32,
+            }),
+            damage,
+        }
+    }
+
+    fn saker() -> Flight {
+        let mut state = Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        };
+        state.ensure_damage(112);
+        state
+    }
+
+    #[test]
+    fn a_surface_crash_applies_f953_to_the_hull() {
+        let mut state = saker();
+        // The bounce's minimum for a 28 t hull is the mass word itself; a
+        // sub-lethal hit takes it off the hull (the Saker has no generator).
+        assert_eq!(
+            state.take_contact_damage(&contact(28), 28),
+            Some(Damage::Hull)
+        );
+        assert_eq!(state.hull, [84, 112]);
+        assert!(!state.destroyed());
+    }
+
+    #[test]
+    fn shields_absorb_the_crash_before_the_hull() {
+        let mut state = saker();
+        state.shields = [64, 64];
+        assert_eq!(
+            state.take_contact_damage(&contact(80), 28),
+            Some(Damage::Hull)
+        );
+        assert_eq!(state.shields, [0, 64]);
+        assert_eq!(state.hull, [96, 112]);
+        // At or below the current shields nothing reaches the hull.
+        let mut state = saker();
+        state.shields = [64, 64];
+        assert_eq!(
+            state.take_contact_damage(&contact(64), 28),
+            Some(Damage::Shields)
+        );
+        assert_eq!((state.shields, state.hull), ([0, 64], [112, 112]));
+    }
+
+    #[test]
+    fn a_lethal_crash_uses_the_hull_up_and_destroys_the_ship() {
+        // A hull-speed impact (about 2,200 velocity units) gives F953 more than
+        // the Saker's 112 t of hull: F942 destroys the object and F1104 starts
+        // the death hold.
+        let mut state = saker();
+        assert_eq!(
+            state.take_contact_damage(&contact(112), 28),
+            Some(Damage::Destroyed)
+        );
+        assert!(state.destroyed());
+        assert_eq!(state.hull, [0, 112]);
+        assert!(state.death.is_none(), "F1104 is the caller's step");
+    }
+
+    #[test]
+    fn a_landing_or_an_empty_touch_deals_no_damage() {
+        let mut state = saker();
+        let mut landing = contact(0);
+        landing.flags = 0x42;
+        landing.touch = Some(ffe_core::landing::Touch::Landing);
+        assert_eq!(state.take_contact_damage(&landing, 28), None);
+        // The missile branch of another body passes F953 -1; the player's body
+        // never takes that path, and F575's squeeze is not damage to this ship.
+        assert_eq!(state.take_contact_damage(&contact(-1), 28), None);
+        assert_eq!(state.hull, [112, 112]);
+        assert!(!state.destroyed());
+    }
 }
