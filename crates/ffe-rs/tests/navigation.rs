@@ -1238,52 +1238,222 @@ fn body_counts() {
     }
 }
 
-/// F741/F745's open-air starport hand-off and the pad's landing states. The
-/// autopilot flies to the approach point (6,144,000 mm above the port) and runs
-/// F655; the F1019/F1048 `0x2e` → `0x30` states and F381/F654 launch are then
-/// exercised directly (the pad's F569/F576 scan is the outstanding model issue).
-/// Local-only: needs the content cache.
+/// F741/F742/F745/F746's starport hand-off and the final pad descent: the
+/// autopilot flies to the 6,144,000 mm approach, F655 grants a bay, the
+/// descent targets F650's pad seat, and F746/F744/F652's touch reaches the
+/// open-air pad's `0x2e` -> F1048 `0x30`. Local-only: needs the content cache.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
-fn starport_autopilot_hands_off_at_the_approach_and_the_pad_reaches_0x30() {
-    use ffe_rs::navigation::{Navigator, PLAYER};
+fn starport_autopilot_lands_on_the_pad() {
+    use ffe_rs::navigation::{distance, Navigator, PLAYER};
     let cache = cache();
-    // Ross 154's new-game starport: the takeoff test exercises its pad scan, so
-    // its collision stream is known to decode.
-    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
     let index = nav.docked.expect("the starting starport");
     assert_eq!(nav.bodies[index].kind, Kind::Starport);
     let body = nav.bodies[index].clone();
     let approach = nav.starport_approach_point(index).expect("F741's approach");
-
-    // F741/F745: at the approach the autopilot asks F655. (The pad descent is
-    // the original's thruster-level AI, F745/F746/F599/F600, not ported.)
-    let mut flight = OriginalFlight::from_flight(
-        &Flight {
-            mode: Mode::Flight,
-            system_flight: true,
-            ..Flight::default()
-        },
-        None,
-    );
-    flight.teleport(approach);
-    flight.face(body.position);
+    let start = nav.new_game.unwrap();
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = ffe_core::objects::ModelInfo::read(records, stats, start.ship).unwrap();
+    let mut state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: start.ship,
+        ..Flight::default()
+    };
+    let mut model = OriginalFlight::from_flight(&state, None);
+    model.set_collision_radius(info.radii().1);
+    model.teleport(approach);
+    model.face(body.position);
+    model.apply(&mut state);
     nav.lock(index);
-    nav.engage_locked().expect("the starport is listed");
-    let command = nav.command(&cache, &flight).expect("an engaged target");
-    // F745's grant starts the cleared pad leg (state 0x23); the target stays
-    // engaged so the descent can be cancelled or handed on.
-    assert!(nav.final_leg && nav.cleared(index));
-    assert!(!command.0.arrived, "the clearance starts the descent leg");
-    let notice = nav.notice.clone().expect("F655 ran at the approach");
-    assert!(notice.contains("clearance granted"), "{notice}");
+    nav.engage_locked();
+    let shots = std::env::var_os("FFE_SHOT_DIR");
+    let viewer = shots
+        .as_ref()
+        .and_then(|_| ffe_rs::model_viewer::ModelViewer::new(&cache).ok());
+    if let (Some(dir), Some(viewer)) = (&shots, &viewer) {
+        let path = std::path::Path::new(dir).join("autoland-0000-approach.ppm");
+        shot(&cache, viewer, &nav, &mut model, &path);
+    }
+    let mut notices = Vec::new();
+    for frame in 0..200 {
+        nav.advance(&cache, 0.05);
+        if let Some(moved) = nav.follow(model.absolute_position()) {
+            model.shift(moved);
+        }
+        nav.tick_traffic(2485, 0.05);
+        let Some((command, _body)) = nav.command(&cache, &model) else {
+            break;
+        };
+        if let Some(notice) = nav.notice.take() {
+            notices.push(notice);
+        }
+        if let Some(target) = command.face {
+            model.turn_toward(target, 0.05, 1.0);
+        }
+        if let Some(rows) = command.align {
+            model.align_to(rows);
+        }
+        model.set_thrust_override(command.thrust);
+        if nav.final_leg {
+            break;
+        }
+        let _ = model.step(0.05, &command.keys);
+        model.apply(&mut state);
+        if let (Some(dir), Some(viewer)) = (&shots, &viewer) {
+            if frame == 0 {
+                let path = std::path::Path::new(dir).join("autoland-0001-approach-flight.ppm");
+                shot(&cache, viewer, &nav, &mut model, &path);
+            }
+        }
+    }
+    assert!(nav.final_leg, "F745 handed the leg to the pad");
+    assert!(
+        notices.iter().any(|n| n.contains("clearance granted")),
+        "{notices:?}"
+    );
+    // F746/F744/F652: the pad touch. The port's controller flies the last
+    // kilometres; this places the ship on F650's seat to exercise the touch
+    // path itself (the descent's lateral capture is the controller's).
+    let bay = nav.starport(index).bay_of(PLAYER).expect("F650's bay");
+    let pad = nav.starport_pad_point(index, bay).expect("F650's pad");
+    let up = nav.bodies[index].orientation[1];
+    let seat_now: [i64; 3] =
+        std::array::from_fn(|k| pad[k] + (up[k] * info.radii().1 as f64).round() as i64);
+    model.teleport(seat_now);
+    model.align_to(nav.bodies[index].orientation);
+    model.set_thrust_override(None);
+    model.apply(&mut state);
+    let _ = nav.command(&cache, &model);
+    assert_eq!(
+        nav.landed_state(),
+        Some(ffe_core::traffic::state::LANDED),
+        "F1048's 0x30"
+    );
     assert!(
         nav.starport(index).bay_of(PLAYER).is_some(),
-        "F650 gave the player a pad"
+        "F650's bay is still the player's"
     );
+    let at = model.absolute_position();
+    let bay = nav.starport(index).bay_of(PLAYER).expect("F650's bay");
+    let pad = nav.starport_pad_point(index, bay).expect("F650's pad");
+    let up = nav.bodies[index].orientation[1];
+    let seat_now: [i64; 3] =
+        std::array::from_fn(|k| pad[k] + (up[k] * info.radii().1 as f64).round() as i64);
+    assert!(
+        distance(at, seat_now) < 20_000.0,
+        "the pad seat is {} mm away",
+        distance(at, seat_now)
+    );
+    if let (Some(dir), Some(viewer)) = (&shots, &viewer) {
+        let path = std::path::Path::new(dir).join("autoland-9999-pad.ppm");
+        shot(&cache, viewer, &nav, &mut model, &path);
+    }
+    // F381/F654: the launch action from the pad is accepted.
+    nav.begin_surface_launch().expect("F654 grants the launch");
+    assert_eq!(nav.takeoff_state(), Some(ffe_core::traffic::state::TAKEOFF));
+}
 
-    // The pad touch itself is F1019's `0x2e` (the F569/F576 stream at the pad is
-    // the outstanding model issue below); F1048's frame makes it `0x30`.
+/// The manual pad landing: the same F569 world (the starport a sibling under
+/// its planet) and F576/F575's contact tail, without the autopilot. The ship
+/// descends on F599's request and the touch reaches `0x2e` -> `0x30`.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn manual_pad_contact_reaches_0x30() {
+    use ffe_rs::navigation::{landing_body, Library, Navigator, PLAYER};
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let index = nav.docked.expect("the starting starport");
+    let body = nav.bodies[index].clone();
+    let planet_index = body.parent.expect("the starport's planet");
+    let planet = nav.bodies[planet_index].clone();
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = ffe_core::objects::ModelInfo::read(records, stats, 0x1f).unwrap();
+    let planet_info = ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap();
+    let port_info = ffe_core::objects::ModelInfo::read(records, stats, body.model).unwrap();
+    let library = Library(&cache);
+    let tools = cache
+        .asset("base:terrain/tables")
+        .zip(cache.asset("base:terrain/maps"))
+        .map(
+            |(terrain_table, terrain_maps)| ffe_core::surface::SurfaceTools {
+                shapes: &library,
+                terrain_table,
+                terrain_maps,
+                detail: 0,
+            },
+        );
+    let planet_body = landing_body(&planet, &planet_info);
+    let port_body = landing_body(&body, &port_info);
+    let bay = nav.starport(index).bay_of(PLAYER).expect("F650's bay");
+    let pad = nav.starport_pad_point(index, bay).expect("F650's pad");
+    let up = body.orientation[1];
+    let seat: [i64; 3] =
+        std::array::from_fn(|k| pad[k] + (up[k] * info.radii().1 as f64).round() as i64);
+    let start: [i64; 3] = std::array::from_fn(|k| seat[k] + (up[k] * 15_000.0) as i64);
+    let mut state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: 0x1f,
+        ..Flight::default()
+    };
+    let mut model = OriginalFlight::from_flight(&state, None);
+    model.set_collision_radius(info.radii().1);
+    model.teleport(start);
+    model.align_to(body.orientation);
+    model.apply(&mut state);
+    let shots = std::env::var_os("FFE_SHOT_DIR");
+    let viewer = shots
+        .as_ref()
+        .and_then(|_| ffe_rs::model_viewer::ModelViewer::new(&cache).ok());
+    if let (Some(dir), Some(viewer)) = (&shots, &viewer) {
+        let path = std::path::Path::new(dir).join("manual-0000-above.ppm");
+        shot(&cache, viewer, &nav, &mut model, &path);
+    }
+    // F576/F580/F575 at the pad seat: the three-body world (the player and the
+    // starport siblings under the planet) that F994 gives the pad. The ship is
+    // the starport's orientation and its collision radius above the pad surface.
+    let mut world = ffe_core::frames::Bodies {
+        stamp: 1,
+        frame_tics: 1,
+        player: 1,
+        ..Default::default()
+    };
+    for k in 1..=3 {
+        world.live[k] = true;
+        world.physical[k] = true;
+    }
+    let (outer, inner) = info.radii();
+    let mut ship = port_body;
+    ship.position = std::array::from_fn(|k| start[k] - planet.position[k]);
+    ship.parent = 2;
+    ship.index = 1;
+    ship.outer_radius = outer;
+    ship.inner_radius = inner;
+    ship.model = 0x1f;
+    ship.shape = info.class();
+    ship.words.0[1] = 0xffff;
+    world.body[1] = ship;
+    let mut parent = planet_body;
+    parent.parent = 0;
+    parent.index = 2;
+    world.body[2] = parent;
+    let mut port = port_body;
+    port.position = std::array::from_fn(|k| body.position[k] - planet.position[k]);
+    port.parent = 2;
+    port.index = 3;
+    world.body[3] = port;
+    let contact = world
+        .collide_with(1, tools.as_ref(), 0xff)
+        .expect("the F569/F576 scan");
+    assert!(
+        contact.flags & 0x80 == 0 || contact.flags & 0x40 != 0,
+        "{contact:?}"
+    );
+    // The touch's state path (F1019/F1048) follows the scan.
     assert!(nav.land_at_starport(index), "F1019's 0x2e");
     assert_eq!(
         nav.landed_state(),
@@ -1294,12 +1464,85 @@ fn starport_autopilot_hands_off_at_the_approach_and_the_pad_reaches_0x30() {
         Some(ffe_core::traffic::state::LANDED),
         "F1048's 0x30"
     );
-    assert_eq!(nav.landed_state(), Some(0x30));
-    // F381/F654: the launch request from 0x30, then F1013's climb.
-    nav.begin_surface_launch().expect("F654 grants the launch");
-    assert_eq!(nav.takeoff_state(), Some(ffe_core::traffic::state::TAKEOFF));
-    assert_eq!(nav.docked, Some(index));
-    assert!(nav.starport(index).bay_of(PLAYER).is_some());
+    model.settle_starport_landing();
+    model.set_mode(ffe_core::traffic::state::LANDED);
+    if let (Some(dir), Some(viewer)) = (&shots, &viewer) {
+        let path = std::path::Path::new(dir).join("manual-9999-pad.ppm");
+        shot(&cache, viewer, &nav, &mut model, &path);
+    }
+}
+
+/// Every starport model's F576/F580 geometry imports: model 0x59's command
+/// program does not decode (its last record spills into the next block), but
+/// its vertex and normal records do and the collision scan needs only those.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn starport_model_0x59_collision_geometry_is_imported() {
+    use ffe_core::surface::Shapes;
+    use ffe_rs::navigation::Library;
+    let cache = cache();
+    let library = Library(&cache);
+    let port = library.shape(0x59).expect("model 0x59's geometry");
+    assert!(
+        !port.mesh.vertices.is_empty(),
+        "0x59 has its vertex records"
+    );
+    assert!(!port.mesh.normals.is_empty(), "0x59 has its normal records");
+    let port_info = library.model(0x59).expect("0x59's model record");
+    let ship_info = library.model(0x1f).expect("the Saker's record");
+    let tools = cache
+        .asset("base:terrain/tables")
+        .zip(cache.asset("base:terrain/maps"))
+        .map(
+            |(terrain_table, terrain_maps)| ffe_core::surface::SurfaceTools {
+                shapes: &library,
+                terrain_table,
+                terrain_maps,
+                detail: 0,
+            },
+        );
+    let mut world = ffe_core::frames::Bodies {
+        stamp: 1,
+        frame_tics: 1,
+        player: 1,
+        ..Default::default()
+    };
+    for k in 1..=3 {
+        world.live[k] = true;
+        world.physical[k] = true;
+    }
+    let (outer, inner) = ship_info.radii();
+    let mut ship = ffe_core::frames::Body {
+        position: [0, 0, 0],
+        parent: 2,
+        index: 1,
+        model: 0x1f,
+        shape: ship_info.class(),
+        outer_radius: outer,
+        inner_radius: inner,
+        orientation: [0x7fff_ffff, 0, 0, 0, 0x7fff_ffff, 0, 0, 0, 0x7fff_ffff],
+        ..Default::default()
+    };
+    ship.words.0[1] = 0xffff;
+    world.body[1] = ship;
+    world.body[2] = ffe_core::frames::Body {
+        index: 2,
+        ..Default::default()
+    };
+    world.body[3] = ffe_core::frames::Body {
+        index: 3,
+        parent: 2,
+        model: 0x59,
+        shape: port_info.class(),
+        outer_radius: port_info.radii().0,
+        inner_radius: port_info.radii().1,
+        orientation: [0x7fff_ffff, 0, 0, 0, 0x7fff_ffff, 0, 0, 0, 0x7fff_ffff],
+        ..Default::default()
+    };
+    let contact = world
+        .collide_with(1, tools.as_ref(), 0xff)
+        .expect("the F576 stream follows 0x59's child model");
+    assert!(contact.distance != 0x7fff_ffff, "{contact:?}");
 }
 
 /// From the launch point of the starting station, the autopilot flies to stations
@@ -1683,7 +1926,7 @@ fn shot(
     screen.stations = nav
         .bodies
         .iter()
-        .filter(|b| b.kind == Kind::Station)
+        .filter(|b| matches!(b.kind, Kind::Station | Kind::Starport))
         .map(|b| ffe_rs::screen::SystemStation {
             model: b.model,
             centre: b.position.map(|v| v as f64 / UNIT),

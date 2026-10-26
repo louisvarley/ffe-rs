@@ -386,7 +386,8 @@ cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin
 cargo run --locked -p ffe-tools -- inspect-data --data .\data.bin --json
 ```
 
-**Cache v29** imports every model that decodes (462 of 466 on floppy 1.02) with
+**Cache v29** imports every model collision geometry that decodes (465 of 466
+on floppy 1.02) and 464 command programs, with
 its descriptor fields for child models, the original texture descriptor table and
 fixed-colour map, the original lighting tables (default light, shade tables), the
 original ship statistics, the full original string table (219 entries: model
@@ -405,7 +406,7 @@ The local cache has been generated on this checkout. It is ignored and must
 not be distributed. Unlike the reference smoke executable, the Rust importer
 does not need JJFFE sources, NASM, or execution of the original game.
 
-The versioned, deterministic ZIP now contains **1813 assets (cache v29)**:
+The versioned, deterministic ZIP now contains **1815 assets (cache v29)**:
 
 - 345 embedded indexed images, with original dimensions, signed drawing offsets,
   mask-zero flags, table/slot IDs and executable source offsets.

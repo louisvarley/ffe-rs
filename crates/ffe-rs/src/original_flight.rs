@@ -62,6 +62,10 @@ pub struct OriginalFlight {
     /// and orientation changes) persist from frame to frame while the ship is
     /// on the pad. Dropped when the takeoff clears.
     pad_world: Option<Bodies>,
+    /// The ship model's collision radius (`+0x140`), the lift F994 gives a pad
+    /// seat and F612's radius distance: the descent aims at the pad's surface
+    /// point raised by it, so the collision sphere touches rather than sinks.
+    collision_radius: i64,
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -113,6 +117,7 @@ impl OriginalFlight {
             forward_limit: limits.axes[2][0],
             acceleration: crate::console::TIME_ACCELERATION[0],
             pad_world: None,
+            collision_radius: 0,
         }
     }
 
@@ -319,6 +324,22 @@ impl OriginalFlight {
         world.stamp = world.stamp.wrapping_add(1);
     }
 
+    /// The ship model's collision radius (`+0x140`): F994 lifts a pad seat by
+    /// it and F612 measures the distance to a body's surface from it.
+    pub fn collision_radius(&self) -> i64 {
+        self.collision_radius
+    }
+
+    pub fn set_collision_radius(&mut self, radius: i64) {
+        self.collision_radius = radius;
+    }
+
+    /// F746/F599's thrust request for the next tick (body axes), or `None` to
+    /// return to the set-speed path. The starport descent sets it each frame.
+    pub fn set_thrust_override(&mut self, request: Option<[i32; 3]>) {
+        self.player.thrust_override = request;
+    }
+
     /// The ship is still in the pad world.
     pub fn on_pad(&self) -> bool {
         self.pad_world.is_some()
@@ -432,6 +453,14 @@ impl OriginalFlight {
         self.player.motion.orientation = [right, up, forward].map(|row| row.map(q));
     }
 
+    /// F746's copy of the target's orientation: the ship is set level with the
+    /// starport's rows for the last metres of the pad descent (the source copies
+    /// the target's nine dwords when its distance reaches zero).
+    pub fn align_to(&mut self, rows: [[f64; 3]; 3]) {
+        let q = |v: f64| (v * 2_147_483_647.0) as i32;
+        self.player.motion.orientation = rows.map(|row| row.map(q));
+    }
+
     /// Turn the ship to face a point (keeping it level against the system's y axis).
     pub fn face(&mut self, target: [i64; 3]) {
         let at = self.absolute_position();
@@ -537,6 +566,58 @@ impl OriginalFlight {
         player_model: &ModelInfo,
         tools: Option<&SurfaceTools>,
     ) -> Result<Contact, String> {
+        self.step_scan(
+            elapsed,
+            keys,
+            parent,
+            parent_position,
+            None,
+            player_model,
+            tools,
+        )
+    }
+
+    /// One frame with F569's collision scan against a starport's pad: the
+    /// original's F994 world has the player and the starport as siblings under
+    /// the planet, so F569 tests the player's spheres against the starport's
+    /// F576 collision stream (F580 children included) and F575's landing,
+    /// crash and bounce code. The player stays in the system frame between
+    /// frames; the three-body world is built for the tick and the absolute
+    /// position is restored after it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn step_starport_landing(
+        &mut self,
+        elapsed: f64,
+        keys: &Keys,
+        planet: &Body,
+        planet_position: [i64; 3],
+        port: &Body,
+        port_position: [i64; 3],
+        player_model: &ModelInfo,
+        tools: Option<&SurfaceTools>,
+    ) -> Result<Contact, String> {
+        self.step_scan(
+            elapsed,
+            keys,
+            planet,
+            planet_position,
+            Some((port, port_position)),
+            player_model,
+            tools,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn step_scan(
+        &mut self,
+        elapsed: f64,
+        keys: &Keys,
+        parent: &Body,
+        parent_position: [i64; 3],
+        sibling: Option<(&Body, [i64; 3])>,
+        player_model: &ModelInfo,
+        tools: Option<&SurfaceTools>,
+    ) -> Result<Contact, String> {
         let (_, world_tics) = self.prepare(elapsed, keys);
         let (outer_radius, inner_radius) = player_model.radii();
         let vector: [i64; 3] = std::array::from_fn(|k| {
@@ -550,8 +631,8 @@ impl OriginalFlight {
         self.player.motion.switch_delay = 0;
         self.player.motion.craft = 1;
         self.player.motion.position = vector;
-        // The two-body world is rebuilt every frame; do not let the original's
-        // 13-tick frame selector run against it.
+        // The world is rebuilt every frame; do not let the original's 13-tick
+        // frame selector run against it.
         self.player.reference_counter = 0xd;
         // A mathematically exact Q31 row set makes the landing dot product of two
         // unit vectors round past 0x7fffffff and wrap negative; the original's
@@ -597,6 +678,20 @@ impl OriginalFlight {
         planet.rotating = 0;
         planet.index = 2;
         world.body[2] = planet;
+        if let Some((port, port_position)) = sibling {
+            // F994: the starport is a sibling of the player in the planet's frame.
+            let mut station = *port;
+            station.position =
+                std::array::from_fn(|k| port_position[k].wrapping_sub(parent_position[k]));
+            station.parent = 2;
+            station.rotating = 0;
+            station.index = 3;
+            station.delay = 0;
+            station.stamp = 0;
+            world.body[3] = station;
+            world.live[3] = true;
+            world.physical[3] = true;
+        }
 
         let contact = self.player.tick_with(
             &ThrusterKeys::default(),

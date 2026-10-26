@@ -3793,6 +3793,7 @@ fn run() -> Result<(), String> {
                     keys.faster = model.set_speed_metres() < 500.0;
                 }
                 let mut command_face = None;
+                let mut command_align = None;
                 if nav.as_ref().is_some_and(|nav| nav.holding()) {
                     keys = OriginalKeys::default();
                     model.teleport(model.absolute_position());
@@ -3801,10 +3802,13 @@ fn run() -> Result<(), String> {
                     // A landed ship has no autopilot input (F1012 runs no F1037
                     // and the target is cleared by F1021); the clock and the
                     // body's motion still carry it.
+                    model.set_thrust_override(None);
                     if nav.landed.is_none() {
                         if let Some((command, body)) = nav.command(&cache, model) {
                             keys = command.keys;
                             command_face = command.face;
+                            command_align = command.align;
+                            model.set_thrust_override(command.thrust);
                             // F597's near-target capture and F746's pad touch
                             // run at 1x (`DATA_007706 == 0x3e2`); the autopilot's
                             // command carries that step.
@@ -3887,9 +3891,15 @@ fn run() -> Result<(), String> {
                 if let Some(target) = command_face {
                     model.turn_toward(target, elapsed, 1.0);
                 }
+                if let Some(rows) = command_align {
+                    model.align_to(rows);
+                }
                 let ship_at = model.absolute_position();
                 let player_info =
                     ffe_core::objects::ModelInfo::read(model_records, model_stats, state.ship);
+                if let Some(info) = player_info {
+                    model.set_collision_radius(info.radii().1);
+                }
                 // The original's landed handlers (F1011/F1012) run no flight
                 // step: no F1037/F1041, no F601/F603/F1512, and F1039 only sees
                 // the turret's input. The view (F1050/F1054) and F1056's input
@@ -3913,17 +3923,46 @@ fn run() -> Result<(), String> {
                             let info = player_info?;
                             let index = nav.landing_parent(ship_at, info.radii().0)?;
                             let body = nav.bodies.get(index)?;
-                            let parent_info = ffe_core::objects::ModelInfo::read(
-                                model_records,
-                                model_stats,
-                                body.model,
-                            )?;
-                            Some((
-                                index,
-                                ffe_rs::navigation::landing_body(body, &parent_info),
-                                body.position,
-                                info,
-                            ))
+                            if body.kind == NavKind::Starport {
+                                // F994/F569: the player is parented to the starport's
+                                // parent planet and the starport is a sibling, so the
+                                // scan runs F576/F580 against its collision stream.
+                                let planet_index = body.parent?;
+                                let planet = nav.bodies.get(planet_index)?;
+                                let planet_info = ffe_core::objects::ModelInfo::read(
+                                    model_records,
+                                    model_stats,
+                                    planet.model,
+                                )?;
+                                let port_info = ffe_core::objects::ModelInfo::read(
+                                    model_records,
+                                    model_stats,
+                                    body.model,
+                                )?;
+                                Some((
+                                    index,
+                                    ffe_rs::navigation::landing_body(planet, &planet_info),
+                                    planet.position,
+                                    info,
+                                    Some((
+                                        ffe_rs::navigation::landing_body(body, &port_info),
+                                        body.position,
+                                    )),
+                                ))
+                            } else {
+                                let parent_info = ffe_core::objects::ModelInfo::read(
+                                    model_records,
+                                    model_stats,
+                                    body.model,
+                                )?;
+                                Some((
+                                    index,
+                                    ffe_rs::navigation::landing_body(body, &parent_info),
+                                    body.position,
+                                    info,
+                                    None,
+                                ))
+                            }
                         })
                 };
                 // F1012/F1047's landed handlers (0x32/0x34) and F1011's pad view
@@ -3947,6 +3986,14 @@ fn run() -> Result<(), String> {
                 });
                 let mut landed_at = None;
                 let step_result = if let Some(mode) = landed_state {
+                    if nav
+                        .as_ref()
+                        .and_then(|nav| nav.landed_body())
+                        .and_then(|index| nav.as_ref()?.bodies.get(index))
+                        .is_some_and(|body| body.kind == NavKind::Starport)
+                    {
+                        model.settle_starport_landing();
+                    }
                     model.set_mode(mode);
                     if let Some((index, parent, at, info)) = landed_parent {
                         model
@@ -3980,41 +4027,89 @@ fn run() -> Result<(), String> {
                     model
                         .step_pad(elapsed, &keys, landing_tools.as_ref())
                         .map(Some)
-                } else if let Some((index, parent, at, info)) = landing {
-                    model
-                        .step_landing(elapsed, &keys, &parent, at, &info, landing_tools.as_ref())
-                        .map(|contact| {
-                            if contact.flags & 0x40 != 0 {
-                                landed_at = Some(index);
-                            } else if contact.flags & 0x80 != 0 {
-                                pending_log.add(
-                                    Source::Collision,
-                                    format!(
-                                        "Crash: damage {}. The ship bounced off the surface.",
-                                        contact.damage.max(0)
-                                    ),
-                                );
-                                sound.play(Cue::HullDamage);
-                                // F575's tail hands F953 the crash damage
-                                // (`mass * 4 * speed lost / 0x708`, at least
-                                // mass / 4), which the port previously only
-                                // logged.
-                                if contact.damage > 0 {
-                                    let mass = scene
-                                        .as_ref()
-                                        .and_then(|scene| scene.ship_stats(state.ship))
-                                        .map_or(25, |stats| stats.mass);
-                                    let (_, system) = state.take_damage_with_systems(
-                                        u32::try_from(contact.damage).unwrap_or(u32::MAX),
-                                        mass,
+                } else if let Some((index, parent, at, info, sibling)) = landing {
+                    if let Some((port, port_at)) = sibling {
+                        // The starport's pad: F994's planet frame with the port as
+                        // a sibling, so F569 runs F576/F580's contact stream.
+                        model
+                            .step_starport_landing(
+                                elapsed,
+                                &keys,
+                                &parent,
+                                at,
+                                &port,
+                                port_at,
+                                &info,
+                                landing_tools.as_ref(),
+                            )
+                            .map(|contact| {
+                                if contact.flags & 0x40 != 0 && contact.flags & 0x20 != 0 {
+                                    landed_at = Some(index);
+                                } else if contact.flags & 0x80 != 0 {
+                                    pending_log.add(
+                                        Source::Collision,
+                                        format!(
+                                            "Crash: damage {}. The ship bounced off the surface.",
+                                            contact.damage.max(0)
+                                        ),
                                     );
-                                    if let Some(event) = system {
-                                        pending_log.add(Source::Collision, event.message());
+                                    sound.play(Cue::HullDamage);
+                                    // F575's tail hands F953 the crash damage.
+                                    if contact.damage > 0 {
+                                        let mass = scene
+                                            .as_ref()
+                                            .and_then(|scene| scene.ship_stats(state.ship))
+                                            .map_or(25, |stats| stats.mass);
+                                        let (_, system) = state.take_damage_with_systems(
+                                            u32::try_from(contact.damage).unwrap_or(u32::MAX),
+                                            mass,
+                                        );
+                                        if let Some(event) = system {
+                                            pending_log.add(Source::Collision, event.message());
+                                        }
                                     }
                                 }
-                            }
-                            Some(contact)
-                        })
+                                Some(contact)
+                            })
+                    } else {
+                        model
+                            .step_landing(
+                                elapsed,
+                                &keys,
+                                &parent,
+                                at,
+                                &info,
+                                landing_tools.as_ref(),
+                            )
+                            .map(|contact| {
+                                if contact.flags & 0x40 != 0 {
+                                    landed_at = Some(index);
+                                } else if contact.flags & 0x80 != 0 {
+                                    pending_log.add(
+                                        Source::Collision,
+                                        format!(
+                                            "Crash: damage {}. The ship bounced off the surface.",
+                                            contact.damage.max(0)
+                                        ),
+                                    );
+                                    sound.play(Cue::HullDamage);
+                                    if contact.damage > 0 {
+                                        let mass = scene
+                                            .as_ref()
+                                            .and_then(|scene| scene.ship_stats(state.ship))
+                                            .map_or(25, |stats| stats.mass);
+                                        let (_, system) = state.take_damage_with_systems(
+                                            u32::try_from(contact.damage).unwrap_or(u32::MAX),
+                                            mass,
+                                        );
+                                        if let Some(event) = system {
+                                            pending_log.add(Source::Collision, event.message());
+                                        }
+                                    }
+                                }
+                                Some(contact)
+                            })
+                    }
                 } else {
                     model.step(elapsed, &keys).map(|()| None)
                 };

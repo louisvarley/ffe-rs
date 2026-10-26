@@ -215,7 +215,7 @@ contract, not the full schema/examples in sections 2.1 onward.
   back to the player's `MUSIC/` folder. See `docs/notes/music.md`.
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
-  v10); v26 1794; v27 1796; v28 1797; v29 1813. Tools read every version. The playable requires v2 font content;
+  v10); v26 1794; v27 1796; v28 1797; v29 1815. Tools read every version. The playable requires v2 font content;
   F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps
   points-only inspection; v4 adds declared-face inspection. The lab requires
   matching command/vertex model indices, counts and descriptor offsets.

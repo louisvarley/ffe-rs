@@ -198,22 +198,25 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
 - **Autopilot.** The source map is F1020 (engage: target byte and AI state 8), F741
   (state 8's set-up: the target's approach offset), F742/F610/F597/F599/F587 (distance,
   steering rates and thrust), F745 (F655 clearance and the pad vector), F746 (state
-  `0x23`'s final approach) and F1018 (cancel: mode 0 and set speed `DATA_008866` = 0).
-  A station target is flown in two legs: to F741's point 4,096,000 mm out on the current
-  docking axis, then, with clearance taken there, into the slot. F742's arrival test is
-  the distance exponent (F610's `+0x10e`, `dist_cam`), so the 1,024,000 mm standoff
-  (`distance_byte` 6) is the port's 1 km `APPROACH_STOP`. The final leg re-aims at
-  F650's slot on the **current** axis every frame (F745/F746): off the axis it lines up
-  on a gate outside the face, then enters along the axis braking for the 250 m/s slot
-  limit. A straight line to the approach point that would cut the hull (a jump arrival
-  on the station's far side) is routed around a safety sphere first. Sol's Daedalus,
-  Abraham Lincoln and Galileo dock from the start (`tests/navigation.rs`,
-  `autopilot_docks_at_stations`; `FFE_SHOT_DIR` saves frames on the way in), and the
-  eight-system, three-bearing run `autopilot_docks_at_stations_from_every_bearing`
-  docks at every orbital station without a hull push. An open-air starport target is
-  flown to F741's point 6,144,000 mm above the port and asks F655 there; F745's grant
-  keeps the target and marks `final_leg`, the hand-off the autoland stream's final pad
-  descent consumes (see the limits below).
+  `0x23`'s final approach and F650's pad descent) and F1018 (cancel: mode 0 and set
+  speed `DATA_008866` = 0). A station target is flown in two legs: to F741's point
+  4,096,000 mm out on the current docking axis, then, with clearance taken there, into
+  the slot. F742's arrival test is the distance exponent (F610's `+0x10e`, `dist_cam`),
+  so the 1,024,000 mm standoff (`distance_byte` 6) is the port's 1 km `APPROACH_STOP`.
+  The final leg re-aims at F650's slot on the **current** axis every frame
+  (F745/F746): off the axis it lines up on a gate outside the face, then enters along
+  the axis braking for the 250 m/s slot limit. A straight line to the approach point
+  that would cut the hull (a jump arrival on the station's far side) is routed around
+  a safety sphere first. Sol's Daedalus, Abraham Lincoln and Galileo dock from the
+  start (`tests/navigation.rs`, `autopilot_docks_at_stations`; `FFE_SHOT_DIR` saves
+  frames on the way in), and the eight-system, three-bearing run
+  `autopilot_docks_at_stations_from_every_bearing` docks at every orbital station
+  without a hull push. An open-air starport target is flown to F741's point 6,144,000
+  mm above the port and asks F655 there; F745's grant keeps the target and marks
+  `final_leg`, then F650's pad/F746's descent/F744/F652's touch reach F1048's `0x30`
+  (`starport_autopilot_lands_on_the_pad`; `docs/notes/autoland.md`). The port's `0x59`
+  collision geometry imports and the pad scan runs F576/F580 in F994's three-body
+  frame (`step_starport_landing`).
 - **Long legs and cancel.** The long leg is the port's own convenience (the source has
   no transfer). Its destination is the body's position at the advanced clock, solved by
   bracketing the transfer-time equation (`Navigator::intercept_time`), not by iterating
@@ -314,15 +317,19 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   `surface_and_landing_use_one_radius` checks both radii and `landing_body`'s outer
   radius. F1877's haze is left out for an eye inside the base so it cannot paint over
   the landed ground.
-- **Starport landings from flight.** The F1019/F1021 open-air `0x2e` -> `0x30` pair is now
+- **Starport landings from flight.** The F1019/F1021 open-air `0x2e` -> `0x30` pair is
   routed (`Navigator::land_at_starport`, F1048's frame, F654's launch request), and F1047/F1048
-  follow the source's music rules. The autopilot flies to F741's approach point and asks
-  F655; F745's grant keeps the target and `final_leg` for the autoland stream's descent
-  (`starport_descent`, `starport_pad_point`, `land_at_starport`), so this branch is the
-  hand-off point rather than the port's own pad descent. The F569/F576 scan at the exact pad
-  returns "needs the models' records" for the tested starport models (its stream references a
-  surface the decoded model lacks), so the pad touch is not reachable from ordinary flight there.
-  The new game's `0x30` and its F381 launch are the working path (`docs/notes/intro.md`).
+  follow the source's music rules. F745's grant keeps the target and the pad leg; the
+  autopilot then takes F650's pad and F746's descent. The F569/F576 scan now runs in
+  F994's three-body frame (`OriginalFlight::step_starport_landing`); the cache's
+  model-data gap is fixed (model `0x59`'s geometry imports even though its command
+  program does not, so F580's child anchor resolves for 0x51-0x60). Manual pad touches
+  and the F746/F744/F652 touch are tested. What remains is the automatic **lateral
+  capture**: the port's controller (F599's request plus the navigator's one-second
+  `follow` drift) can pass the pad ~100 m to the side and clip a building, so the
+  end-to-end test places the ship at F650's seat for the touch. F596/F597's exact
+  distance law and the rotating frame's velocity are the next step
+  (`docs/notes/autoland.md`).
 - **Landed dressing.** F253's undercarriage word (`+0x9e`) animation, the sounds and the
   player's AI mode byte (`player+0xff = 0x24`) are not modelled; the console is the flight one
   F1116 selects, as the original's is.
