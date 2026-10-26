@@ -866,6 +866,23 @@ impl OriginalFlight {
             world.physical[3] = true;
         }
 
+        // The original enters the planet's rotating frame once (F570/F572) and
+        // stays there; this world is rebuilt every frame, so the switch and the
+        // F573 return below run every frame. Each round trip truncates the
+        // position to 28 bits and turns it by the planet's integrated rows, which
+        // are a hair under unit length: at a surface port that pulled the ship
+        // about 2 m a frame toward the planet's centre (the takeoff that settles
+        // back on the ground). Measure this frame's round trip on the start state
+        // and take it back out when the tick made it.
+        let round_trip = {
+            let mut dry = world.clone();
+            dry.to_rotating(1, 2);
+            dry.to_linear(1, 2);
+            let moved: [i64; 3] = std::array::from_fn(|k| dry.body[1].position[k] - vector[k]);
+            let turned: [i32; 3] =
+                std::array::from_fn(|k| dry.body[1].velocity[k] - motion.velocity[k]);
+            (moved, turned)
+        };
         let contact = tick_guided(
             &mut self.player,
             self.guidance,
@@ -882,6 +899,11 @@ impl OriginalFlight {
         if self.player.motion.rotating != 0 {
             world.body[1].take_motion(&self.player.motion);
             world.to_linear(1, 2);
+            let body = &mut world.body[1];
+            for k in 0..3 {
+                body.position[k] -= round_trip.0[k];
+                body.velocity[k] = body.velocity[k].wrapping_sub(round_trip.1[k]);
+            }
             world.body[1].give_motion(&mut self.player.motion);
         }
         self.player.motion.renormalise();

@@ -851,6 +851,21 @@ fn run() -> Result<(), String> {
     // `config.cfg` is the version-2 form; the old `controls.cfg`/`display.cfg`
     // sidecars are read once as a migration when it is absent.
     let config = settings::load_config(&save_dir).unwrap_or_default();
+    // `--record FILE` writes every frame's input; `--replay FILE` plays one back.
+    let mut session = Session::new(
+        options.record.as_deref(),
+        options.replay.as_deref(),
+        &std::env::args().skip(1).collect::<Vec<_>>().join(" "),
+        &config.to_config(),
+        options.replay_exit,
+    )?;
+    // A replay runs with the preferences it was recorded with: the display
+    // mapping decides where each recorded click lands and the preset what
+    // each key does.
+    let config = session
+        .recorded_config()
+        .and_then(settings::Config::from_config)
+        .unwrap_or(config);
     prefs.modern = config.modern;
     prefs.display = config.display;
     prefs.space_colour = config.space_colour;
@@ -862,13 +877,10 @@ fn run() -> Result<(), String> {
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
     let mut presenter = Presenter::new();
-    // `--record FILE` writes every frame's input; `--replay FILE` plays one back.
-    let mut session = Session::new(
-        options.record.as_deref(),
-        options.replay.as_deref(),
-        &std::env::args().skip(1).collect::<Vec<_>>().join(" "),
-        options.replay_exit,
-    )?;
+    // `FFE_TRACE=1`: print the flight state ten times a second and every click's
+    // logical point to stderr (for diagnosing a replayed recording).
+    let trace_flight = std::env::var_os("FFE_TRACE").is_some();
+    let mut trace_clock = 0.0_f64;
     // Sound effects and music. The original's cues (`F1906`/`F1907`) and songs
     // (`F1902`..`F1904`) are posted from the events below; captures and the
     // smoke test never open a device.
@@ -1389,8 +1401,12 @@ fn run() -> Result<(), String> {
                 held_controls.disarm(&keys_down);
             }
             stored_config = next_config;
-            if let Err(error) = settings::save_config(&save_dir, &stored_config) {
-                eprintln!("SETTINGS: {error}");
+            // A replay runs with the recording's preferences; never write them
+            // over the player's own.
+            if !session.replaying() {
+                if let Err(error) = settings::save_config(&save_dir, &stored_config) {
+                    eprintln!("SETTINGS: {error}");
+                }
             }
         }
         let pressed = |key| inp.is_key_pressed(key, KeyRepeat::No);
@@ -1583,6 +1599,12 @@ fn run() -> Result<(), String> {
         } else {
             None
         };
+        if trace_flight && mouse_down && !mouse_was_down {
+            let logical = inp
+                .get_unscaled_mouse_pos(MouseMode::Pass)
+                .and_then(|(x, y)| display::logical_point(&prefs.display, x, y, inp.get_size()));
+            eprintln!("trace click logical={logical:?} console={console_click:?}");
+        }
         // A click on a docked screen's button (F328 hot areas) on the mouse-down edge.
         let dock_click = if active
             && !death_control
@@ -4008,6 +4030,30 @@ fn run() -> Result<(), String> {
                 match step_result {
                     Ok(contact) => {
                         model.apply(&mut state);
+                        if trace_flight {
+                            trace_clock += elapsed;
+                            if trace_clock >= 0.1 {
+                                trace_clock = 0.0;
+                                let player = model.player();
+                                let frame = nav
+                                    .as_ref()
+                                    .and_then(|nav| nav.frame().and_then(|f| nav.bodies.get(f)))
+                                    .map(|body| body.name.as_str());
+                                eprintln!(
+                                    "trace t={:.1} keys={:?} mode={:#x} pad={} gear={} set={} thrust={:?} vel={:?} contact={:?} frame={:?}",
+                                    session.total,
+                                    (keys.faster, keys.slower, keys.pitch_up, keys.pitch_down),
+                                    player.mode,
+                                    model.on_pad(),
+                                    model.gear_down(),
+                                    player.set_speed,
+                                    player.motion.thrust,
+                                    player.motion.velocity,
+                                    contact.as_ref().map(|c| (c.altitude(), c.flags)),
+                                    frame,
+                                );
+                            }
+                        }
                         // F575's contact tail already bounced a crash (its
                         // reflected velocity is in the model) and handed the
                         // damage to F953: the shields take it first, then the

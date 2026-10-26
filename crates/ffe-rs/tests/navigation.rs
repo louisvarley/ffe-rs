@@ -622,6 +622,71 @@ fn pad_takeoff_hands_over_and_falls_back_under_gravity() {
     assert_ne!(pad_flags & 0x20, 0, "{pad_flags:#x}");
 }
 
+/// The scan world is rebuilt every frame, so F570's switch into the planet's
+/// rotating frame and the F573 return run every frame instead of once. Each
+/// round trip truncated the position to 28 bits and turned it by the planet's
+/// integrated rows (a hair under unit length), pulling a ship at rest about
+/// 2 m a frame toward the planet's centre: every pad takeoff settled back on
+/// the ground. With F603's pull removed, a ship at rest must stay put.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn a_ship_at_rest_above_the_surface_does_not_sink_through_the_frame_round_trip() {
+    use ffe_rs::navigation::{landing_body, Library, Navigator};
+    let cache = cache();
+    let nav = Navigator::new_game(&cache, 0).unwrap();
+    let index = nav.docked.expect("the start starport");
+    let new_game = nav.new_game.expect("a new game");
+    let port = nav.bodies[index].clone();
+    let planet = nav.bodies[port.parent.expect("a parent planet")].clone();
+    let up = port.orientation[1];
+    // 600 m above the seat, out of the starport's own reach.
+    let start: [i64; 3] = std::array::from_fn(|k| new_game.seat[k] + (up[k] * 600_000.0) as i64);
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let flight = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        ship: new_game.ship,
+        position: start.map(|v| v as f64 / unit),
+        axes: Some(port.orientation),
+        ..Flight::default()
+    };
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let info = ffe_core::objects::ModelInfo::read(records, stats, new_game.ship).unwrap();
+    let planet_body = ffe_core::frames::Body {
+        mass: 0,
+        ..landing_body(
+            &planet,
+            &ffe_core::objects::ModelInfo::read(records, stats, planet.model).unwrap(),
+        )
+    };
+    let library = Library(&cache);
+    let tools = ffe_core::surface::SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: 0,
+    };
+    let height = |at: [i64; 3]| distance(at, planet.position);
+    let before = height(model.absolute_position());
+    for _ in 0..150 {
+        model
+            .step_landing(
+                0.02,
+                &Default::default(),
+                &planet_body,
+                planet.position,
+                &info,
+                Some(&tools),
+            )
+            .expect("the contact scan");
+    }
+    let sunk = before - height(model.absolute_position());
+    // Three seconds: the old round trip sank it about 370 m.
+    assert!(sunk.abs() < 1_000.0, "moved {sunk} mm toward the centre");
+}
+
 /// F1012/F1047's landed handlers call F1014/F1015, which run F1037 (set speed)
 /// and F1041 (orientation/thrust) through the contact scan. The port used to
 /// copy the mode word and stop, so Enter/Shift/W/S did nothing in the landed

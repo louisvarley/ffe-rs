@@ -40,7 +40,7 @@ missing or older than this build needs (currently cache v29), and launches the
 game; on any error the window stays open with the message. Every run also records
 your keyboard and mouse to `recordings\<date-time>.ffe-input`; `replay.bat recordings\FILE`
 (or `ffe-rs --replay FILE [--replay-exit]`) plays a recording back exactly, so a problem can
-be reproduced from the file. `ffe-rs --record FILE` records without the batch file. Rebuilding by hand:
+be reproduced from the file; a recording also stores the display and control preferences it was made with, so a replay maps every click and key as the player's game did (a replay never writes them to `saves`). `FFE_TRACE=1` prints the flight state and each click's logical point while it runs. `ffe-rs --record FILE` records without the batch file. Rebuilding by hand:
 `cargo build --release --locked -p ffe-rs -p ffe-tools`.
 The root directory must contain your locally generated **v29** `data.bin` (build command
 below, or let `play.bat` make it). The game verifies it before opening a window.

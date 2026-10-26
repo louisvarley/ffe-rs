@@ -16,6 +16,8 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
 const HEADER: &str = "ffe-rs input v1";
+/// The prefix of a recording's preference lines (the `saves/config.cfg` text).
+const CONFIG_PREFIX: &str = "# config: ";
 
 #[rustfmt::skip]
 const ALL_KEYS: &[Key] = &[
@@ -195,6 +197,8 @@ impl Frame {
 pub struct Session {
     record: Option<BufWriter<File>>,
     replay: Option<(Vec<Frame>, usize)>,
+    /// The preferences the recording was made with (`# config:` lines).
+    recorded_config: Option<String>,
     /// Seconds of game time so far (the sum of the frame times).
     pub total: f64,
     start: std::time::Instant,
@@ -207,6 +211,7 @@ impl Session {
         record: Option<&Path>,
         replay: Option<&Path>,
         arguments: &str,
+        config: &str,
         exit_when_done: bool,
     ) -> Result<Self, String> {
         let record = match record {
@@ -221,10 +226,16 @@ impl Session {
                 );
                 writeln!(file, "{HEADER}").map_err(|e| e.to_string())?;
                 writeln!(file, "# args: {arguments}").map_err(|e| e.to_string())?;
+                // The display and controls preferences decide where a click lands
+                // and what a key does, so a replay uses the recording's.
+                for line in config.lines() {
+                    writeln!(file, "{CONFIG_PREFIX}{line}").map_err(|e| e.to_string())?;
+                }
                 Some(file)
             }
             None => None,
         };
+        let mut recorded_config: Option<String> = None;
         let replay = match replay {
             Some(path) => {
                 let file =
@@ -236,6 +247,12 @@ impl Session {
                         if line != HEADER {
                             return Err(format!("{} is not an ffe-rs input file", path.display()));
                         }
+                        continue;
+                    }
+                    if let Some(setting) = line.strip_prefix(CONFIG_PREFIX) {
+                        let text = recorded_config.get_or_insert_with(String::new);
+                        text.push_str(setting);
+                        text.push('\n');
                         continue;
                     }
                     if line.is_empty() || line.starts_with('#') {
@@ -253,11 +270,18 @@ impl Session {
         Ok(Session {
             record,
             replay,
+            recorded_config,
             total: 0.0,
             start: std::time::Instant::now(),
             exit_when_done,
             written: 0,
         })
+    }
+
+    /// The preferences (`saves/config.cfg` text) the replayed recording was made
+    /// with; `None` when not replaying or for a recording that has none.
+    pub fn recorded_config(&self) -> Option<&str> {
+        self.recorded_config.as_deref()
     }
 
     /// `--replay-exit`: the recording has ended and the window should close.
@@ -345,6 +369,20 @@ mod tests {
         assert!((again.dt - frame.dt).abs() < 1e-6);
         let idle = Frame::default();
         assert_eq!(Frame::parse(&idle.line()).unwrap().down, Vec::<Key>::new());
+    }
+
+    #[test]
+    fn a_recording_carries_its_preferences() {
+        let dir = std::env::temp_dir().join(format!("ffe-session-{}", std::process::id()));
+        let path = dir.join("prefs.ffe-input");
+        let config = "version=2\naspect=square\nscale=4\n";
+        let mut session = Session::new(Some(&path), None, "--record x", config, false).unwrap();
+        session.flush();
+        drop(session);
+        let replay = Session::new(None, Some(&path), "", "", false).unwrap();
+        assert_eq!(replay.recorded_config(), Some(config));
+        assert!(replay.replaying());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
