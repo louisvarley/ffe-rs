@@ -25,12 +25,12 @@ window.FFE_BURNDOWN = {
       tasks: [
         {"id": "parity-01", "title": "[P0] Repair F938/F929 event units for fuel, shields and hull repair", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-01"},
         {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
-        {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
-        {"id": "parity-04", "title": "[P0] Translate the complete F1013 takeoff handler and same-frame mode order", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-04"},
-        {"id": "parity-05", "title": "[P0] Replace launch altitude substitution and collision grace with source frame/contact rules", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-05"},
-        {"id": "parity-06", "title": "[P0] Verify original set-speed controls, input gates and speed persistence end to end", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-06"},
-        {"id": "parity-07", "title": "[P0] Match the original Hope starting state and cockpit view to the supplied image", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-07"},
-        {"id": "parity-08", "title": "[P0] Restore the complete third-person player explosion before GAME OVER", "status": "todo", "version": "source-audit", "priority": "P0", "auditId": "PAR-08"},
+        {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
+        {"id": "parity-04", "title": "[P0] Translate the complete F1013 takeoff handler and same-frame mode order", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-04"},
+        {"id": "parity-05", "title": "[P0] Replace launch altitude substitution and collision grace with source frame/contact rules", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-05"},
+        {"id": "parity-06", "title": "[P0] Verify original set-speed controls, input gates and speed persistence end to end", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-06"},
+        {"id": "parity-07", "title": "[P0] Match the original Hope starting state and cockpit view to the supplied image", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-07"},
+        {"id": "parity-08", "title": "[P0] Restore the complete third-person player explosion before GAME OVER", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-08"},
         {"id": "parity-09", "title": "[P1] Replace orbital docking corridor tests and harmless pushes with source contacts", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-09"},
         {"id": "parity-10", "title": "[P1] Use original indoor departure placement and moving lift/door state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-10"},
         {"id": "parity-11", "title": "[P1] Complete source autopilot world and target adapters", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-11"},
@@ -41,12 +41,12 @@ window.FFE_BURNDOWN = {
         {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
         {"id": "parity-17", "title": "[P1] Restore source RNG state and call order for gameplay", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-17"},
         {"id": "parity-18", "title": "[P1] Persist and restore the complete live simulation state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-18"},
-        {"id": "parity-19", "title": "[P1] Remove the non-source 7-tonne starting hold and reconcile fitted capacity", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-19"},
+        {"id": "parity-19", "title": "[P1] Remove the non-source 7-tonne starting hold and reconcile fitted capacity", "status": "done", "version": "source-audit", "priority": "P1", "auditId": "PAR-19"},
         {"id": "parity-20", "title": "[P1] Replay market, shipyard, BBS and daily mission events using source state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-20"},
         {"id": "parity-21", "title": "[P1] Drive all explosion, debris and hit effects from source object states", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-21"},
         {"id": "parity-22", "title": "[P1] Replay missile, ECM, escape and legal outcomes in the complete event loop", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-22"},
-        {"id": "parity-23", "title": "[P1] Remove silent fallback to the synthetic playable from normal starts/loads", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-23"},
-        {"id": "parity-24", "title": "[P1] Use the same source new-game setup after death and on every resume path", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-24"}
+        {"id": "parity-23", "title": "[P1] Remove silent fallback to the synthetic playable from normal starts/loads", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-23"},
+        {"id": "parity-24", "title": "[P1] Use the same source new-game setup after death and on every resume path", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-24"}
       ]
     },
     {
@@ -911,6 +911,12 @@ window.FFE_BURNDOWN = {
       date: "2026-10-26",
       remaining: 102,
       note: "Owner source-parity audit: 24 new implementation items (8 P0), 14 done items reopened where live source equivalence is not established; remaining 64 -> 102. Confirmed F938 whole-seconds versus 49700-tics fuel/recharge bug, F1013 integration/order mismatch, orbital docking substitutes, source starting-view/death-camera gaps and broader RNG/NPC/save/jump changes. Audit and acceptance backlog only; no runtime fixes or source/asset changes in this commit. See docs/audits/gameplay-parity-2026-10-26.md."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 101,
+      note: "Source-parity implementation: restored source 1 t delivered hold (PAR-19 done); remaining touched items stay in progress. Corrected surface-port rotating coordinates, F994 bay sentinel/F997 starting view, F1013 integration/order, fitted drive failures, signed selected-speed saves, new commander restart and destruction camera. F938/F929 pass 192 executed-source cases. Source atmosphere, effect evolution and full route/event replay remain open."
+
     }
   ]
 };

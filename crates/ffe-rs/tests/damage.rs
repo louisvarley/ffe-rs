@@ -49,6 +49,7 @@ fn f950_thresholds_break_the_drive_or_one_named_thruster() {
     assert_eq!(damage, Damage::Hull);
     assert_eq!(event, Some(SystemEvent::DriveDamaged));
     assert_eq!(flight.combat.drive, 0);
+    assert_eq!(flight.loadout.drive, 0);
     assert_eq!(flight.combat.energy, 0);
     assert_eq!(event.unwrap().message(), "ATTENTION: Drive Damaged");
 
@@ -57,6 +58,7 @@ fn f950_thresholds_break_the_drive_or_one_named_thruster() {
     let (_, event) = flight.take_damage_roll(10, 25, 0x1000, 0);
     assert_eq!(event, Some(SystemEvent::DriveDamaged));
     assert_eq!(flight.combat.drive, 1);
+    assert_eq!(flight.loadout.drive, 1);
 
     // 0x4000 (0x1c71..0x5555): F949 zeroes the drawn thruster word.
     let mut flight = self::flight();
@@ -300,6 +302,7 @@ fn the_daily_servicing_roll_can_break_equipment_or_the_drive() {
     let events = flight.service_day(100);
     assert!(!events.is_empty());
     assert_eq!(flight.combat.drive, 0);
+    assert_eq!(flight.loadout.drive, 0);
     assert!(events
         .iter()
         .any(|event| *event == SystemEvent::DriveFailure

@@ -89,6 +89,22 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 
 ---
 
+## 2026-10-26 - Game-over tombstone spin follows F917
+
+- **Fixed the tombstone's rotation.** `F917` calls
+  `F1675_MatBuildYZT(matrix, 0, counter >> 1)` with the second argument 0 and
+  the third the yaw; the port had passed `(angle, 0)`, turning the slab in the
+  screen plane (a roll) instead of about its vertical axis. It also now draws
+  the object at F917's `z = max(counter, 0x88b8)` (the slab approaches for
+  215,000 tics, then holds) and uses F917's light `DATA_007201..3`
+  `(0x5a82, 0, 0x5a82)`; the 30°/-20° camera and the `angle & 0x8000`
+  face-selection workaround are gone because the text records' own normals pick
+  the visible face. The 320 frames now match the reference `death-frame-800`
+  (obituary) and `death-frame-990` (GAME OVER) geometry; regenerated the
+  evidence images including a fresh live `--capture-gameover` frame. Details in
+  [notes/gameover.md](notes/gameover.md).
+
+
 ## 2026-10-26 - Batch 3c: runtime, autopilot, autoland and crash
 
 - **Takeover work preserved.** A concurrent takeover stream had a source-arithmetic

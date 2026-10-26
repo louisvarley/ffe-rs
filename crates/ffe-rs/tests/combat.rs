@@ -86,6 +86,7 @@ fn the_equipment_loadout_survives_a_save_and_old_saves_load_empty() {
         ..Flight::default()
     };
     state.loadout = Loadout::new_game();
+    state.combat.drive = state.loadout.drive;
     state.shields = [64, 64];
     state.hull = [4608, 4608];
     let bytes = ffe_rs::saves::encode(&state).unwrap();
@@ -96,7 +97,13 @@ fn the_equipment_loadout_survives_a_save_and_old_saves_load_empty() {
     let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     json["state"].as_object_mut().unwrap().remove("loadout");
     let old = ffe_rs::saves::decode(&serde_json::to_vec(&json).unwrap()).unwrap();
-    assert_eq!(old.loadout, Loadout::default());
+    assert_eq!(
+        old.loadout,
+        Loadout {
+            drive: state.combat.drive,
+            ..Loadout::default()
+        }
+    );
     assert_eq!(old.shields, [64, 64], "the damage words still round-trip");
     assert_eq!(old.hull, [4608, 4608]);
     // A save from before the damage model has neither field; the defaults load

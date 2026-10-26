@@ -263,7 +263,7 @@ impl Default for Prefs {
             ],
             maps: [true; 5],
             sound: [true; 10],
-            modern: true,
+            modern: false,
             display: DisplaySettings::default(),
             fullscreen: false,
         }

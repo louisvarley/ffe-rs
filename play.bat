@@ -41,7 +41,7 @@ if "%REBUILD%"=="1" (
 )
 
 echo === Starting the game ===
-target\release\ffe-rs.exe --root .
+target\release\ffe-rs.exe 
 if errorlevel 1 goto failed
 exit /b 0
 

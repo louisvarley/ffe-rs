@@ -39,8 +39,15 @@ strings. Model 172's text records select them through the FF9C handler.
 2. **Timeout** (`F1107`): after 5.0 s, `F918(1)` runs `F917`.
 3. **Tombstone** (`F917`): black 320×200 frame with model 172 rotating about
    its vertical axis. The loop starts at `0x3d090`, subtracts `DATA_009155`
-   every frame and passes `remaining >> 1` as F1675's yaw; it ends at
-   `-0xAAE60` (about 19.1 s at 1x). The box has two engraved faces:
+   every frame and ends at `-0xAAE60` (about 19.1 s at 1x). Each frame builds a
+   stand-alone display object (`F1683`) at `(0, 0, max(counter, 0x88b8))` — the
+   slab approaches out of the distance for 215,000 tics, then stays 0x88b8
+   away — and calls `F1675_MatBuildYZT(matrix, 0, counter >> 1)`: the second
+   argument is 0, the third is the yaw, so the slab turns about its vertical
+   axis. The counter falls every frame, so the yaw decreases (wrapping through
+   `Sin32`'s 16-bit angle) and the slab turns the way the original does. Its
+   light (+0x134) is `DATA_007201..3` = `(0x5a82, 0, 0x5a82)`. The box has two
+   engraved faces:
    - **obituary face** (text normal 2, vertex 0): `RIP` (`0x4086`) and
      `COMMANDER <name> DIED <date>` (`0x9c01`), with the cross/flower strings
      `0x4085`/`0x4087`;
@@ -71,14 +78,13 @@ stream owns F1098; the port's `GameOver` is only entered when its outcome is
 - `GameOver::draw` sets the commander/date on `ModelViewer` and calls
   `Screen::draw_game_over`.
 - `ModelViewer::set_game_over_text` expands FF9C00..`03` for the model text
-  records. `Screen::draw_game_over` renders model 172/175 on black, applies the
-  external view's 30°/-20° camera, and uses a full 320×200 clip
+  records. `Screen::draw_game_over` takes F917's loop counter, renders model
+  172/175 on black at `z = max(counter, TOMBSTONE_NEAREST)`, yaws it with the
+  original argument order (`MatBuildYZT(matrix, 0, counter >> 1)`), gives it
+  `DATA_007201..3` as the light and uses a full 320×200 clip
   (`ViewHeightGuard`) because the slab reaches below the flight view's y=158.
-- The port's glyph normals for model 172's text are degenerate (the culled
-  obituary normal never flips), so the screen selects the face from the spin's
-  half-turn: yaw bit 0x8000 -> obituary face (normal 2), otherwise GAME OVER
-  (normal 4). This is the one documented reconstruction, not an invented
-  screen.
+  The text records' own normal culling picks the visible face (2 = obituary,
+  4 = GAME OVER); no face-selection workaround is needed.
 - This branch is rebased on the `death` stream's F1104/F1098 port. Its
   `Death::Exploding` hold is kept; when `Death::is_game_over()` becomes true,
   `main` starts `GameOver::tombstone` and the screen owns the frame until its

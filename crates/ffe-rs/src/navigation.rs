@@ -402,6 +402,16 @@ pub fn galaxy_around(
 
 /// A system's bodies at a game clock.
 pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<Vec<Body>, String> {
+    bodies_since(cache, entry, clock, clock)
+}
+
+/// Source system creation followed by F866's elapsed-time evolution.
+pub fn bodies_since(
+    cache: &VerifiedCache,
+    entry: &Entry,
+    created: [u32; 2],
+    clock: [u32; 2],
+) -> Result<Vec<Body>, String> {
     let blob = cache
         .asset("base:world/system-tables")
         .ok_or("no system tables")?;
@@ -439,10 +449,13 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
     };
     let mut list = PhysList {
         stamp: 1,
-        clock,
+        clock: created,
         ..PhysList::default()
     };
-    placement.create(&mut list, &mut system, clock);
+    placement.create(&mut list, &mut system, created);
+    if clock != created {
+        placement.advance(&mut list, clock);
+    }
     let mut out: Vec<Body> = Vec::new();
     let mut offsets: Vec<[i64; 3]> = Vec::new();
     let count = generator.count as usize;
@@ -475,8 +488,27 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
         let inner_radius = ((u64::from(list.dword(slot, 0x144)) << 32
             | u64::from(list.dword(slot, 0x140))) as i64)
             .max(1_000_000);
-        // Positions are relative to the parent body (the system is a tree).
+        // F879 stores surface ports in their planet's rotating frame (+0x57).
+        // F1677 turns that local position before adding the parent's origin.
+        // Treating it as linear places both the port and its pad over a different
+        // terrain point, while the planet is still rendered with its true spin.
         let mut position = [coordinate(0), coordinate(1), coordinate(2)];
+        let mut rows: [i32; 9] = std::array::from_fn(|k| list.dword(slot, 4 * k) as i32);
+        if list.byte(slot, 0x57) != 0 && parent != 0 {
+            let parent_at = (parent - 1) * OBJECT_BYTES;
+            let parent_slot = u32::from_le_bytes(
+                system[parent_at + 0x18..parent_at + 0x1c]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+            let matrix = std::array::from_fn(|k| list.dword(parent_slot, 4 * k) as i32);
+            let (vector, shift) = ffe_core::frames::truncate(position, 0x1c);
+            position = ffe_core::frames::shift_up(
+                ffe_core::frames::vec_mat_mul(vector.map(|v| v as i32), &matrix),
+                shift,
+            );
+            rows = ffe_core::frames::mat_mat_mul(&rows, &matrix);
+        }
         if parent != 0 {
             let base = offsets.get(parent - 1).copied().unwrap_or([0; 3]);
             for k in 0..3 {
@@ -487,7 +519,6 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
         if kind_code == 0 {
             continue;
         }
-        let rows: [i32; 9] = std::array::from_fn(|k| list.dword(slot, 4 * k) as i32);
         let class = list.byte(slot, 0x14c);
         out.push(Body {
             name: String::from_utf8_lossy(text).into_owned(),
@@ -1093,6 +1124,7 @@ pub struct Navigator {
     /// The clock this game began at: the new game's absolute start, or 0 for the
     /// sandbox. Dates and the market's day use the difference.
     pub start_clock: f64,
+    world_epoch: f64,
     /// The original's new-game fields, when this navigator started one.
     pub new_game: Option<NewGameState>,
     /// How far the engaged target has moved since the ship last followed it.
@@ -1556,12 +1588,12 @@ fn dust_seed(code: u32) -> (u32, u32) {
     (code ^ 0x6d5f_1b00, code.rotate_left(13) ^ 0x00d0_5700)
 }
 
-/// World seconds to the original's clock words: whole days, then the fraction of a
-/// day in 2^-32ths (the orbits turn once in 365 days).
+/// World seconds to the original's low/high clock words: fractional day first,
+/// then whole days (F880/F1509/F1510; one day is 2^32 low-word ticks).
 pub fn clock_words(seconds: f64) -> [u32; 2] {
     let days = seconds.max(0.0) / 86_400.0;
     let whole = days.floor();
-    [whole as u32, ((days - whole) * 4_294_967_296.0) as u32]
+    [((days - whole) * 4_294_967_296.0) as u32, whole as u32]
 }
 
 /// F829's start-system table (`DATA_006820`): five 20-byte records of galaxy x, y
@@ -1604,17 +1636,14 @@ pub const DEFAULT_START_TYPE: u8 = 0;
 /// The Saker Mk III fighter, model slot `0x1f`.
 pub const DEFAULT_SHIP: u32 = 0x1f;
 /// F998's `DATA_008888` for the default arm: `0x2710` (10,000 CR, shown as
-/// 1000.0 credits). Unchanged by EXP-019, which changes only the starting hold.
+/// 1000.0 credits).
 pub const DEFAULT_CASH: i32 = 10_000;
 /// F998's default arm subtracts `0x10` t from the Saker's 23 t statistic,
 /// leaving 7 t.
 pub const DEFAULT_HOLD_LOSS: i32 = 0x10;
-/// The default start's free hold: the Saker's 23 t less F998's `0x10`
-/// allowance (7 t). The executed original's F2 status page shows 1 t because
-/// its 6 t of fitted items (1MW laser 1, two KL760 2, Scanner 1, Automatic
-/// Pilot 1, Atmospheric Shielding 1; Navigation computer 0) are already taken;
-/// EXP-019 deliberately leaves those 6 t out so the owner starts with 7 t.
-pub const DEFAULT_CARGO: i32 = 7;
+/// Delivered free hold after F998's allowance and the six tonnes of fitted
+/// equipment (laser, missiles, scanner, autopilot and atmospheric shielding).
+pub const DEFAULT_CARGO: i32 = 1;
 /// F998's default starport: Old Blackelk, physics slot `0x6a`.
 pub const DEFAULT_STARPORT_SLOT: usize = 0x6a;
 /// F994's player index for the default arm (`DATA_008857`).
@@ -1742,6 +1771,8 @@ pub struct NavigatorSave {
     pub clock: f64,
     pub start_clock: f64,
     #[serde(default)]
+    pub world_epoch: Option<f64>,
+    #[serde(default)]
     pub new_game: Option<NewGameState>,
     pub page: usize,
     pub view: View,
@@ -1798,6 +1829,12 @@ impl NavigatorSave {
     /// Scalar checks that do not need the generated body list. The caller
     /// checks indices against the regenerated system.
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .world_epoch
+            .is_some_and(|epoch| !epoch.is_finite() || !(0.0..=1.0e12).contains(&epoch))
+        {
+            return Err("Invalid system creation clock.".to_owned());
+        }
         if !self.clock.is_finite() || !self.start_clock.is_finite() {
             return Err("Save has a non-finite navigation clock.".to_owned());
         }
@@ -1901,6 +1938,7 @@ impl Navigator {
             bodies,
             clock: 0.0,
             start_clock: 0.0,
+            world_epoch: 0.0,
             new_game: None,
             drift: [0; 3],
             skips: 0,
@@ -2029,9 +2067,13 @@ impl Navigator {
                 .ok_or("no pad tables (cache v26)")?,
         )?;
         let mut port = ffe_core::traffic::Starport::new(bodies[index].bays);
-        let bay = port
-            .allocate(PLAYER)
-            .ok_or("the start starport has no free bay")?;
+        // F994 temporarily marks station +0xd1 occupied before F650 and
+        // clears it afterward. Omitting that sentinel selects bay 1 rather
+        // than bay 0 at both original starts, facing a different part of town.
+        port.pads[1] = 0xff;
+        let bay = port.allocate(PLAYER);
+        port.pads[1] = 0;
+        let bay = bay.ok_or("the start starport has no free bay")?;
         let body = &bodies[index];
         let models = Models {
             records: cache
@@ -2061,9 +2103,7 @@ impl Navigator {
             up,
         )?;
         let cargo = if default_arm {
-            // F998's `0x10` subtraction from the Saker's 23 t leaves 7 t. The
-            // executed original's F2 status page shows 1 t because its fitted
-            // items take 6 t; EXP-019 starts with the 7 t instead.
+            // The delivered equipment consumes six of the remaining seven tonnes.
             DEFAULT_CARGO
         } else {
             (models.cargo_space(ship).unwrap_or(0) - NEW_GAME_HOLD_LOSS).max(0)
@@ -2072,6 +2112,7 @@ impl Navigator {
         nav.pads = Some(pads);
         nav.clock = NEW_GAME_CLOCK;
         nav.start_clock = NEW_GAME_CLOCK;
+        nav.world_epoch = NEW_GAME_CLOCK;
         nav.calendar = Calendar::at(nav.day());
         nav.docked = Some(index);
         nav.traffic.insert(index, port);
@@ -2100,6 +2141,7 @@ impl Navigator {
             system_code: self.entries[self.current].params.code,
             clock: self.clock,
             start_clock: self.start_clock,
+            world_epoch: Some(self.world_epoch),
             new_game: self.new_game,
             page: self.page,
             view: self.view,
@@ -2154,7 +2196,13 @@ impl Navigator {
                 })?;
             nav.current = index;
         }
-        nav.bodies = bodies(cache, &nav.entries[nav.current], clock_words(save.clock))?;
+        nav.world_epoch = save.world_epoch.unwrap_or(save.clock);
+        nav.bodies = bodies_since(
+            cache,
+            &nav.entries[nav.current],
+            clock_words(nav.world_epoch),
+            clock_words(save.clock),
+        )?;
         nav.clock = save.clock;
         nav.start_clock = save.start_clock;
         nav.new_game = save.new_game;
@@ -4203,7 +4251,12 @@ impl Navigator {
     }
 
     pub fn refresh(&mut self, cache: &VerifiedCache) {
-        if let Ok(list) = bodies(cache, &self.entries[self.current], clock_words(self.clock)) {
+        if let Ok(list) = bodies_since(
+            cache,
+            &self.entries[self.current],
+            clock_words(self.world_epoch),
+            clock_words(self.clock),
+        ) {
             if list.len() == self.bodies.len() {
                 if let Some(t) = self.frame {
                     for k in 0..3 {
@@ -4390,6 +4443,7 @@ impl Navigator {
             return Err("no such system".to_owned());
         }
         self.current = index;
+        self.world_epoch = self.clock;
         self.bodies = bodies(cache, &self.entries[index], clock_words(self.clock))?;
         self.jurisdiction = jurisdiction_of(cache, self.entries[index].params.code);
         self.refreshed = self.clock;
@@ -4933,7 +4987,13 @@ impl Navigator {
             let ship = flight.player().motion.position;
             let entry = &self.entries[self.current];
             let solution = intercept_time(ship, stop_cover, initial, |t| {
-                let list = bodies(cache, entry, clock_words(self.clock + t)).ok()?;
+                let list = bodies_since(
+                    cache,
+                    entry,
+                    clock_words(self.world_epoch),
+                    clock_words(self.clock + t),
+                )
+                .ok()?;
                 let there = list.get(index)?;
                 let offset = self.long_leg_offset(there);
                 Some(std::array::from_fn(|k| {
@@ -5057,6 +5117,14 @@ mod tests {
     /// word is the 16.16 -56832 the DOS start table holds, not the rounded -222
     /// an earlier transcription kept.
     #[test]
+    fn clock_words_match_the_source_low_fraction_high_day_order() {
+        assert_eq!(clock_words(0.0), [0, 0]);
+        assert_eq!(clock_words(43200.0), [0x80000000, 0]);
+        assert_eq!(clock_words(86400.0), [0, 1]);
+        assert_eq!(clock_words(NEW_GAME_CLOCK), [0x80000000, 0x121cf7]);
+    }
+
+    #[test]
     fn the_default_start_record_is_f998s_and_f829s() {
         let (x, y, z, star, extra) = START_SYSTEMS[0];
         assert_eq!(
@@ -5073,12 +5141,12 @@ mod tests {
         assert_eq!(DEFAULT_STARPORT_SLOT, 0x6a);
         assert_eq!(DEFAULT_SHIP, 0x1f);
         assert_eq!(DEFAULT_CASH, 10_000);
-        assert_eq!(DEFAULT_CARGO, 7);
+        assert_eq!(DEFAULT_CARGO, 1);
         assert_eq!(DEFAULT_HOLD_LOSS, 0x10);
         assert_eq!(
             DEFAULT_CARGO,
-            23 - DEFAULT_HOLD_LOSS,
-            "the Saker's 23 t statistic less F998's allowance"
+            23 - DEFAULT_HOLD_LOSS - 6,
+            "the Saker allowance and delivered equipment"
         );
         assert_eq!(DEFAULT_PLAYER_INDEX, 87);
     }

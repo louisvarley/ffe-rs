@@ -501,7 +501,14 @@ fn trade_loop_buys_fuel_warps_docks_and_sells() {
     };
     assert_eq!(state.credits, 10_000, "1000.0 credits");
     let start_cash = state.credits;
-    assert_eq!(nav.hold(&cache, state.ship), 7, "EXP-019's 7 t hold");
+    assert_eq!(
+        nav.hold(&cache, state.ship),
+        1,
+        "source delivered free hold"
+    );
+    // This multi-jump trading scenario needs a larger hold than the source
+    // start. Expand only this test fixture, after asserting the real start.
+    nav.new_game.as_mut().unwrap().cargo = 7;
     assert_eq!(
         trade::capacity(&nav, &cache, &state),
         7,

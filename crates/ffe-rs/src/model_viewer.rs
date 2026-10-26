@@ -279,11 +279,6 @@ pub struct ModelViewer {
     /// game date FFE's game-over models engrave on model 172/175.
     commander: Vec<u8>,
     game_date: Vec<u8>,
-    /// When drawing a tombstone, only this face's text records are drawn. FFE
-    /// selects them with the text record's normal (2 = RIP/obituary, 4 =
-    /// GAME OVER); the port's glyph normals are degenerate, so the model's own
-    /// spin angle decides the face instead (see `screen::draw_game_over`).
-    tombstone_face: Option<u8>,
     /// Global word 15 (the ship's forward thrust, object +0xba); `None` leaves it
     /// to the animation input. See [`ModelViewer::set_thrust`].
     thrust: Option<u16>,
@@ -643,7 +638,6 @@ impl ModelViewer {
             registration: Vec::new(),
             commander: Vec::new(),
             game_date: Vec::new(),
-            tombstone_face: None,
             thrust: None,
             jitter: JITTER_SEED,
             jitter_next: Cell::new(JITTER_SEED),
@@ -822,13 +816,6 @@ impl ModelViewer {
     pub fn set_game_over_text(&mut self, commander: &[u8], date: &[u8]) {
         self.commander = commander.to_vec();
         self.game_date = date.to_vec();
-    }
-
-    /// Draw only the tombstone face whose text records name `normal` (2 for the
-    /// RIP/obituary face, 4 for the GAME OVER face). `None` draws every record
-    /// and applies the ordinary culling.
-    pub fn set_tombstone_face(&mut self, normal: Option<u8>) {
-        self.tombstone_face = normal;
     }
 
     /// Supply the glyph sets for synthetic viewers (index = font model slot).
@@ -1913,7 +1900,9 @@ impl ModelViewer {
                     let behind = emission.screen.contains(&NEAR_SENTINEL);
                     let on_view = !behind
                         && emission.screen.iter().all(|[x, y]| {
-                            (0..320).contains(&i32::from(*x)) && (0..158).contains(&i32::from(*y))
+                            (0..320).contains(&i32::from(*x))
+                                && (0..ffe_core::model_execute::view_height())
+                                    .contains(&i32::from(*y))
                         });
                     let textured_entry = descriptors.is_some()
                         && count >= 3
@@ -2184,18 +2173,7 @@ impl ModelViewer {
         out: &mut Vec<Execution>,
     ) -> Result<(), String> {
         for emission in &result.texts {
-            let tombstone_text = matches!(emission.text.string, 0x9c00..=0x9c03 | 0x4085..=0x4089);
-            if let Some(face) = self.tombstone_face {
-                if tombstone_text && emission.text.normal != face {
-                    continue;
-                }
-                // The selected face's glyph records must be drawn even when the
-                // degenerate font normals cull them; the face was chosen by the
-                // model's spin angle in `Screen::draw_game_over`.
-                if !tombstone_text && emission.culled {
-                    continue;
-                }
-            } else if emission.culled {
+            if emission.culled {
                 continue;
             }
             let text = &emission.text;

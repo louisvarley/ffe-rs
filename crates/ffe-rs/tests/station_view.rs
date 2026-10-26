@@ -995,7 +995,10 @@ fn default_start_services_board_is_old_blackelk() {
         cash: state.cash,
         ..station::Status::default()
     };
-    assert_eq!(status.cargo_capacity, 7, "the Saker's 7 t EXP-019 hold");
+    assert_eq!(
+        status.cargo_capacity, 1,
+        "the source Saker delivered free hold"
+    );
     let rows = station::SERVICES
         .iter()
         .map(|entry| DockRow {

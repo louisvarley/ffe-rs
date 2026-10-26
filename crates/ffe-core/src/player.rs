@@ -375,8 +375,15 @@ impl Player {
         world: &mut Bodies,
         index: usize,
     ) -> Result<(), String> {
+        // F1013 tests the previous contact altitude after F1037 updates set
+        // speed, before F1041 chooses its thrust. It always integrates with
+        // F602, even on the frame that changes mode to 0x26.
+        let takeoff = self.mode == crate::traffic::state::TAKEOFF;
+        if takeoff && (self.altitude > crate::traffic::TAKEOFF_ALTITUDE || self.set_speed != 0) {
+            self.mode = crate::traffic::state::AFTER_TAKEOFF;
+        }
         self.orient_and_thrust_in(keys, world, index)?;
-        if self.flags & 1 != 0 {
+        if takeoff || self.flags & 1 != 0 {
             self.motion.accelerate_uncapped(time as u32);
         } else {
             self.motion.accelerate(time as u32);
@@ -435,5 +442,41 @@ impl Player {
         }
         self.motion.advance(time);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+
+    #[test]
+    fn f1013_tests_prior_altitude_and_signed_set_speed_before_thrust() {
+        for (altitude, set_speed, mode) in [
+            (200_000, 0, 0x24),
+            (200_001, 0, 0x26),
+            (0, 1, 0x26),
+            (0, -1, 0x26),
+        ] {
+            let mut player = Player {
+                mode: 0x24,
+                altitude,
+                set_speed,
+                limits: Limits {
+                    axes: [[10000, -10000]; 3],
+                },
+                reference_counter: 13,
+                frame_tics: 994,
+                ..Player::default()
+            };
+            player
+                .step_in(&ThrusterKeys::default(), 994, &mut Bodies::default(), 1)
+                .unwrap();
+            assert_eq!(player.mode, mode);
+            if mode == 0x24 {
+                assert_eq!(player.motion.thrust, [0, 0xcc6, 0]);
+            } else {
+                assert_ne!(player.motion.thrust, [0, 0xcc6, 0]);
+            }
+        }
     }
 }

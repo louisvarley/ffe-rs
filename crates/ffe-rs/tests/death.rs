@@ -197,10 +197,6 @@ fn the_death_page_uses_datas_commander_lines() {
         ["COMMANDER", "   Jameson", "     DIED"]
     );
     assert_eq!(
-        death::destroyed_message("Pirate"),
-        "Pirate destroys your ship. No escape craft fitted: GAME OVER."
-    );
-    assert_eq!(
         death::escaped_message("Pirate", EscapeCraft::Capsule),
         "Pirate destroys your ship. Escape Capsule launched."
     );
@@ -253,4 +249,39 @@ fn f953_reaches_the_destroyed_outcome_before_f1104() {
     assert_eq!(state.take_damage(50, 25), Damage::Destroyed);
     assert!(state.destroyed());
     assert_eq!(death::begin(&mut state, None), Outcome::Destroyed);
+}
+
+#[test]
+fn f1105_external_camera_follows_the_explosion_instead_of_the_old_hull() {
+    use ffe_rs::camera::{Camera, ViewMode, ViewState};
+    let mut state = Flight::free_flight();
+    state.position = [-10.0, 7.0, 100.0];
+    assert_eq!(death::begin(&mut state, None), Outcome::Destroyed);
+    let effect = ffe_core::effects::Effect {
+        kind: ffe_core::effects::Kind::Explosion,
+        model: ffe_core::effects::EXPLOSION_MODEL,
+        position: [97000, 194000, 291000],
+        velocity: [9700.0, 0.0, 0.0],
+        forward: [1.0, 0.0, 0.0],
+        up: [0.0, 1.0, 0.0],
+        age: 0.0,
+        life: 1.0,
+    };
+    state.death.as_mut().unwrap().track_explosion(&effect);
+    let mut views = ViewState {
+        mode: ViewMode::External,
+        ..ViewState::default()
+    };
+    views.external.distance = death::DEATH_CAMERA_DISTANCE;
+    let camera = Camera::new(&state, &views, None, 9700.0);
+    let centre = camera.point([10.0, 20.0, 30.0]);
+    assert!(centre[0].abs() < 1.0e-10 && centre[1].abs() < 1.0e-10);
+    assert!(centre[2] > 0.0);
+    state.death.as_mut().unwrap().tick(0.5);
+    assert_eq!(
+        state.death.unwrap().reference.unwrap().position,
+        [10.5, 20.0, 30.0]
+    );
+    assert_eq!(state.position, [-10.0, 7.0, 100.0]);
+    assert_eq!(death::DEATH_CAMERA_DISTANCE as u32, 0xf9000000);
 }

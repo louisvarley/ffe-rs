@@ -10,7 +10,7 @@
     "implementation": "crates/ffe-rs/src/main.rs:4892; crates/ffe-rs/src/flight.rs:460,615; crates/ffe-rs/src/combat.rs:149",
     "acceptance": "Trace one reserve from fresh type-0 boot through idle, 0x24 climb, full thrust, firing and 1x/10x/10000x. Match source event counts, energy, warning time, limit restoration, shields and repair; preserve wrapping arithmetic.",
     "dependencies": "gameplay-3, flight-6, flight-8",
-    "progress": "2026-10-26: live call site now shares whole-second events with cooling; physics tics retained for laser refire. Thrust arithmetic uses source low-32-bit IMUL/SAR. Multi-rate 60-second regressions pass at 1x/10x/10000x. Full source event trace and shield overflow parity remain acceptance gates."
+    "progress": "2026-10-26: F938/F929 executed-source comparison now passes 192 cases (reserve, shields, hull, wrapping arithmetic, fuel and waste). Whole-second live events retained; exact F152 scheduler alignment remains open."
   },
   {
     "id": "PAR-02",
@@ -23,79 +23,85 @@
     "implementation": "crates/ffe-rs/src/flight.rs:565; crates/ffe-rs/src/navigation.rs:1252; crates/ffe-core/src/hyperspace.rs",
     "acceptance": "Compare hydrogen and military auto-refill with/without Auto Refueller, full/empty reserve, zero-cost call, full hold, waste and cargo-used words, including after save/load. Verify jump cargo is debited exactly once.",
     "dependencies": "PAR-01, gameplay-3",
-    "progress": "2026-10-26: F929 military internal refuelling now exchanges fuel for radioactive waste, preserving cargo mass; normal refuelling and empty-reserve tests pass. Full F929/F903 trace remains outstanding."
+    "progress": "2026-10-26: 192 executed F938/F929 cases match reserve, hydrogen, military fuel and waste. Existing jump tests retain F903 cargo burn. Full warning/limit restoration and scheduler traces remain."
   },
   {
     "id": "PAR-03",
     "priority": "P0",
     "title": "Use one authoritative fitted-drive and failure state",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed runtime mismatch",
     "finding": "Damage/service code changes combat.drive while drive_state prefers nonzero loadout.drive. Thus a damaged/destroyed drive can still supply the old hyperdrive class, and reserve fuel selection can disagree with the jump report.",
     "source": "F947/F948/F934/F408/F410/F903",
     "implementation": "crates/ffe-rs/src/flight.rs:532,645; crates/ffe-rs/src/main.rs:6309; crates/ffe-rs/src/outfitting.rs:62",
     "acceptance": "Destroy, degrade, service, remove and fit each drive; compare engine limits, gauge, fuel type, range, jump refusal and reload with the original object +0xd0.",
-    "dependencies": "PAR-01, PAR-02, gameplay-2"
+    "dependencies": "PAR-01, PAR-02, gameplay-2",
+    "progress": "2026-10-26: Jump class now reads object drive state without resurrecting a removed/integral drive from statistics. Damage, degradation, servicing, save migration and escape inheritance agree with that state. Damage/save/outfitting checks pass; full source scenario trace remains."
   },
   {
     "id": "PAR-04",
     "priority": "P0",
     "title": "Translate the complete F1013 takeoff handler and same-frame mode order",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed runtime mismatch",
     "finding": "F1013 runs F1037, changes 0x24 to 0x26 before F1041 when its tests pass, and explicitly calls F602. The port updates Takeoff after its physics tick and Player::step_in normally chooses capped F601 when engines are on. The fixed up-thrust is therefore not sufficient evidence of source launch behaviour.",
     "source": "F1013/F1037/F1041/F602/F1046/F1033",
     "implementation": "crates/ffe-rs/src/main.rs:3975,4123; crates/ffe-rs/src/original_flight.rs:303; crates/ffe-core/src/player.rs:371; crates/ffe-core/src/traffic.rs:320",
     "acceptance": "Replay type-0 and type-1 launches: no keys, held Return/Shift or selected port control mapping, speed change at threshold, engine-off and failure cases. Compare every frame mode, set/actual speed, thrust, cap, velocity and position.",
-    "dependencies": "PAR-01, PAR-03, flight-13"
+    "dependencies": "PAR-01, PAR-03, flight-13",
+    "progress": "2026-10-26: F1013 now transitions on previous altitude/current set speed before F1041 and always uses uncapped F602, including transition frame. Runtime defers F1031 until the next handler. Boundary and real Hope launch regressions pass; full source frame replay remains."
   },
   {
     "id": "PAR-05",
     "priority": "P0",
     "title": "Replace launch altitude substitution and collision grace with source frame/contact rules",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed runtime mismatch",
     "finding": "The runtime substitutes climb from a stored seat for DATA_008867, suppresses landing scans for 120 presented frames, and inhibits the source frame selector in its small pad world. Launch safety consequently depends on frame rate and adapters rather than source contacts.",
     "source": "F1031/F1032/F1033/F569/F572/F573/F604-F606",
     "implementation": "crates/ffe-rs/src/main.rs:1184,3917,4127,4162; crates/ffe-rs/src/original_flight.rs:206,621",
     "acceptance": "Prove pad release, planet retained, rotating/linear transforms, re-touch, high acceleration and return-to-pad on real ports; compare F1033 altitude and flags. Remove grace only when those traces pass.",
-    "dependencies": "PAR-04, flight-9, flight-10"
+    "dependencies": "PAR-04, flight-9, flight-10",
+    "progress": "2026-10-26: Confirmed omitted F1677 rotation in navigator surface-port positions/orientations. Corrected rotating-to-root conversion removes immediate 680 m false contact altitude. Live handoff no longer uses measured seat climb. Collision grace/frame-selector suppression remain open."
   },
   {
     "id": "PAR-06",
     "priority": "P0",
     "title": "Verify original set-speed controls, input gates and speed persistence end to end",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed differences; reported dead acceleration also depends on PAR-01",
     "finding": "Modern W/S is default while source Return/Shift is selectable. HeldControls adds release gates. Landed F1039 correctly excludes throttle, but launch must enable F1037 immediately. OriginalFlight reconstruction derives nonnegative set speed from actual forward velocity, losing negative or independently selected speed; cancel has both halt-to-zero and actual-speed paths.",
     "source": "F1037/F1038/F1039/F1018/F1121",
     "implementation": "crates/ffe-rs/src/input.rs:283; crates/ffe-rs/src/original_flight.rs:86,284,557,590; crates/ffe-rs/src/main.rs:2188,2690",
     "acceptance": "Record physical key -> mapped key -> active/mode -> F1121 set speed -> thrust -> actual velocity. Test fresh key after intro, held intro key, launch, autopilot cancel, engines off, reverse speed, menus and reload. Source controls are default; optional mappings belong only in Port Options.",
-    "dependencies": "PAR-01, PAR-04, flight-5"
+    "dependencies": "PAR-01, PAR-04, flight-5",
+    "progress": "2026-10-26: Signed selected speed persists independently of actual velocity through save/model rebuild. New settings default to Classic; saved preferences preserved. Remaining input/cancel/source-replay checks are open."
   },
   {
     "id": "PAR-07",
     "priority": "P0",
     "title": "Match the original Hope starting state and cockpit view to the supplied image",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed visual mismatch; exact spatial cause not yet established",
     "finding": "Correct system/planet names do not prove matching bay, seat, rotating frame, eye offset, city model, orientation or lighting. Current source F994 copies station rows, sets +0x57=1 and calls F650; the port uses a fresh bay allocation and a linear pad world. The screenshot shows the expected broad city/runway view, unlike the close building face. Do not guess a new coordinate or camera angle.",
     "source": "F829/F880/F879/F998/F994/F650/F1050/F1054/F1536",
     "implementation": "crates/ffe-rs/src/navigation.rs:1965; crates/ffe-core/src/pads.rs:109; crates/ffe-rs/src/camera.rs:281; crates/ffe-rs/src/screen.rs:2672",
     "acceptance": "Dump actual default type 0, not the Ross 154 type-1 probe: clock/RNG, station slot/model, bay table, ship rows/frame, seat, eye, visible objects and projection. Compare identical 320x200 front frames at 12:00:01 against executed original and the user image.",
-    "dependencies": "PAR-05, PAR-17, ui-7, ui-11"
+    "dependencies": "PAR-05, PAR-17, ui-7, ui-11",
+    "progress": "2026-10-26: Original executable default-start frame reproduced and matches user image. Found and fixed missing F997 half-turn and missing F994 temporary bay-1 sentinel (wrong bay 1 vs source bay 0). Camera now faces source city layout. Atmosphere/ground colours and exact projection remain visually different."
   },
   {
     "id": "PAR-08",
     "priority": "P0",
     "title": "Restore the complete third-person player explosion before GAME OVER",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed lifecycle/camera mismatches; exact blue-mesh primitive needs capture",
     "finding": "F1104/F1105 select the explosion object as camera reference and set external distance 0xf9000000. The port switches view but retains the old ship as reference, keeps ordinary own-ship rendering and its existing external distance. Effects use a fixed lifetime and forced global 4=0x4000 rather than source object evolution. This is not equivalent to F942 followed by the external explosion hold.",
     "source": "F953/F942/F926/F764/F1104/F1105/F1054/F1107/F917",
     "implementation": "crates/ffe-rs/src/main.rs:6390,4674; crates/ffe-rs/src/death.rs:232,288; crates/ffe-rs/src/screen.rs:1784,2641; crates/ffe-core/src/effects.rs:120",
     "acceptance": "Capture non-capsule player death at source event-relative times: removed old ship, correct explosion reference/distance, animated fragments, debris, palette/depth, sounds and 0x3cae6 wait, then tombstone. Identify the blue mesh by model/primitive trace; test crash, laser and missile death separately.",
-    "dependencies": "PAR-17, PAR-21, gameplay-25, ui-12"
+    "dependencies": "PAR-17, PAR-21, gameplay-25, ui-12",
+    "progress": "2026-10-26: F1105 camera now follows explosion axes/motion, uses source 0xf9000000 external distance and suppresses removed player hull. Effect age, mass-global and lifecycle parity remain open; no claim that blue mesh is fixed."
   },
   {
     "id": "PAR-09",
@@ -221,13 +227,14 @@
     "id": "PAR-19",
     "priority": "P1",
     "title": "Remove the non-source 7-tonne starting hold and reconcile fitted capacity",
-    "status": "todo",
+    "status": "done",
     "certainty": "Confirmed explicit prior deviation, now superseded by owner parity requirement",
     "finding": "DEFAULT_CARGO=7 bypasses the six tonnes of fitted items; the verified original default status shows 1 t free. Cash numeric 10000 is in tenths and is not evidence that starting cash is wrong. Keep the same Saker, Gateway/Hope/Old Blackelk and source loadout.",
     "source": "F998/F994/F413/F383/F558",
     "implementation": "crates/ffe-rs/src/navigation.rs:2060; crates/ffe-core/src/equipment.rs; docs/DEVIATIONS.md EXP-019",
     "acceptance": "Compare fresh F2/services cargo/cabins, fitted item mass, used/free hold, cash units, internal reserve and cargo fuel with the type-0 original before any trade or launch.",
-    "dependencies": "PAR-07, gameplay-26"
+    "dependencies": "PAR-07, gameplay-26",
+    "progress": "2026-10-26: Restored one tonne delivered free hold. Starting-state and trading-capacity assertions updated; extended multi-jump trade fixture explicitly enlarges only its test hold. Historical EXP-019 superseded by current source-parity instruction."
   },
   {
     "id": "PAR-20",
@@ -269,24 +276,26 @@
     "id": "PAR-23",
     "priority": "P1",
     "title": "Remove silent fallback to the synthetic playable from normal starts/loads",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed reachable fallback path",
     "finding": "Navigation/model creation converts errors to None and original=None permits Flight::step synthetic physics. That alternative must remain developer-only; a missing asset/frame adapter must not silently change player movement, safety or docking rules.",
     "source": "F998/F994/F1031/F1021 and source module dispatch",
     "implementation": "crates/ffe-rs/src/main.rs:874,986,4268; crates/ffe-rs/src/flight.rs:335",
     "acceptance": "Inject missing/invalid essential cache records and unsupported saves; the normal game must report a concrete error or source-equivalent recovery, never enter prototype physics. Dev tools remain explicitly gated.",
-    "dependencies": "PAR-07, PAR-18, flight-8"
+    "dependencies": "PAR-07, PAR-18, flight-8",
+    "progress": "2026-10-26: Source navigation initialization and flight errors propagate instead of silently falling back to prototype. Legacy/prototype save and developer entry paths still need complete audit."
   },
   {
     "id": "PAR-24",
     "priority": "P1",
     "title": "Use the same source new-game setup after death and on every resume path",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed restart mismatch",
     "finding": "After GAME OVER the new-game branch sets cash/ship and Mode::Docked, original=None, but does not apply the initial pad seat/rows/model setup used by the first boot. This can restart in a different view/state and expose the synthetic fallback.",
     "source": "F917/F998/F994/F1098/F1011",
     "implementation": "crates/ffe-rs/src/main.rs:1284-1323 versus 1004-1064",
     "acceptance": "Compare initial Enter boot, post-death Enter boot, alternate start, intro load and escape/resume paths: identical source fields, seat/rows/frame, HUD, model, input release, fuel and services before the first tick.",
-    "dependencies": "PAR-07, PAR-08, PAR-18, PAR-23"
+    "dependencies": "PAR-07, PAR-08, PAR-18, PAR-23",
+    "progress": "2026-10-26: Initial boot and post-Game-Over new commander call one source pad/equipment/ship initializer. Both start types remain parked for 600 frames; F997 and bay sentinel also apply after restart. Full live death/restart/resume replay remains."
   }
 ]

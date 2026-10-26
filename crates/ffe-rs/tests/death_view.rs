@@ -152,13 +152,15 @@ fn f1104s_death_hold_and_tombstone() {
         .map(|effect| effect.model);
     assert_eq!(model, Some(effects::EXPLOSION_MODEL));
 
-    // F1104's 0x3cae6 hold ends at F917's spinning tombstone (model 172).
+    // F1104's 0x3cae6 hold ends at F917's spinning tombstone (model 172), caught
+    // here 501 tombstone frames in: the slab is at TOMBSTONE_NEAREST and shows
+    // its GAME OVER face (the original's `death-frame-990`).
     state.death.as_mut().unwrap().tick(death::GAME_OVER_SECONDS);
     assert!(state.death.unwrap().is_game_over());
     let game = GameOver::tombstone(death::COMMANDER_NAME.to_ascii_uppercase(), "1-JAN-3250");
     viewer.set_game_over_text(game.commander().as_bytes(), game.date().as_bytes());
     screen
-        .draw_game_over(&mut viewer, gameover::TOMBSTONE_MODEL, 0)
+        .draw_game_over(&mut viewer, gameover::TOMBSTONE_MODEL, -272_543)
         .unwrap();
     save(&screen, "death-gameover.ppm");
     let game_over = screen.logical_pixels().to_vec();

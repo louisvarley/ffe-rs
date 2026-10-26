@@ -230,13 +230,10 @@ pub fn encode_game(save: &SaveGame) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// A save from before `Loadout::drive` kept the one drive byte only in
-/// `Combat`; the drive was not removable then, so the combat byte is
-/// authoritative when the loadout has none.
+/// Object +0xd0 (Combat) is authoritative, including zero after F947.
+/// Older versions could leave a stale loadout class after damage or servicing.
 fn migrate_drive(state: &mut Flight) {
-    if state.loadout.drive == 0 && state.combat.drive != 0 {
-        state.loadout.drive = state.combat.drive;
-    }
+    state.loadout.drive = state.combat.drive;
 }
 
 /// Decode a full save, accepting a version-1 snapshot as a migrated v2 document.
@@ -581,11 +578,24 @@ mod tests {
     use crate::flight::Mode;
     use std::io::Write;
 
+    #[test]
+    fn stale_loadout_cannot_restore_a_destroyed_or_degraded_drive() {
+        for class in [0, 1, 2, 10, 14] {
+            let mut state = Flight::default();
+            state.loadout.drive = 14;
+            state.combat.drive = class;
+            migrate_drive(&mut state);
+            assert_eq!(state.loadout.drive, class);
+            assert_eq!(state.combat.drive, class);
+        }
+    }
+
     fn sample_navigation() -> NavigatorSave {
         NavigatorSave {
             system_code: 0x1234_5678,
             clock: 1234.5,
             start_clock: 100.0,
+            world_epoch: Some(100.0),
             new_game: None,
             page: 2,
             view: crate::navigation::View::Places,

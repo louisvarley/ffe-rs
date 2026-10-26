@@ -1,5 +1,17 @@
 # Front end and a new game
 
+Current source-parity correction (2026-10-26): the default Saker has **1 t free
+hold**, source bay 0 via F994's temporary bay-1 reservation, and F998/F997's
+half-turn after pad placement. Older 7 t/EXP-019 statements below are historical.
+See [implementation record](parity-ground-drive-2026-10-26.md).
+
+
+Current source-parity correction (2026-10-26): the default Saker has **1 t free
+hold**, source bay 0 via F994's temporary bay-1 reservation, and F998/F997's
+half-turn after pad placement. Older 7 t/EXP-019 statements below are historical.
+See [implementation record](parity-ground-drive-2026-10-26.md).
+
+
 Record for the intro screens and the original's new-game state. The DOS FFE
 1.02 release is the source of truth; the executed JJFFE reference is used only
 where its data and behaviour agree with that release, and every JJFFE-only

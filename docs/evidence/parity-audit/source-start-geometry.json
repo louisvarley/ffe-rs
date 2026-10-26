@@ -1,0 +1,110 @@
+{
+  "source": "JJFFE 2.8a7, unmodified ffe.asm executed by local reference adapter",
+  "command": "--flight idle 200 --start-key=28 --geometry",
+  "frame": 170,
+  "note": "Numeric source output only; image matches user Hope screenshot. Raw rotating-frame coordinates, not absolute root coordinates.",
+  "hope": {
+    "geometry": true,
+    "ship_model": 31,
+    "ship_rotating": 1,
+    "ship_radius": 4000,
+    "bay": 0,
+    "port_model": 86,
+    "port_rotating": 1,
+    "ship_rows": [
+      83271549,
+      -2144627582,
+      -72648104,
+      1615981266,
+      110512706,
+      -1409820950,
+      1411698452,
+      0,
+      1618133318
+    ],
+    "ship_position": [
+      4462565600,
+      305378278,
+      -3892980009
+    ],
+    "port_position": [
+      4462436639,
+      305174297,
+      -3893137127
+    ],
+    "port_rows": [
+      -83271549,
+      2144627582,
+      72648104,
+      1615981266,
+      110512706,
+      -1409820950,
+      -1411698452,
+      0,
+      -1618133318
+    ],
+    "planet_rows": [
+      2147483626,
+      0,
+      0,
+      0,
+      2147483637,
+      0,
+      0,
+      0,
+      2147483637
+    ]
+  },
+  "ross154": {
+    "geometry": true,
+    "ship_model": 23,
+    "ship_rotating": 1,
+    "ship_radius": 5200,
+    "bay": 0,
+    "port_model": 85,
+    "port_rotating": 1,
+    "ship_rows": [
+      -906354405,
+      1945245414,
+      76650739,
+      -1938310550,
+      -909597149,
+      163923668,
+      180966058,
+      0,
+      2139827798
+    ],
+    "ship_position": [
+      -5594992173,
+      -2625307481,
+      473426443
+    ],
+    "port_position": [
+      -5594900439,
+      -2625536702,
+      473162879
+    ],
+    "port_rows": [
+      -906354405,
+      1945245414,
+      76650739,
+      -1938310550,
+      -909597149,
+      163923668,
+      180966058,
+      0,
+      2139827798
+    ],
+    "planet_rows": [
+      -2147483627,
+      0,
+      0,
+      0,
+      2147483637,
+      0,
+      0,
+      0,
+      -2147483637
+    ]
+  }
+}

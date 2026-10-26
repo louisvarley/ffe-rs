@@ -172,12 +172,24 @@ pub enum DeathPhase {
     GameOver,
 }
 
+/// F1104's external distance word (F1105 selects the player's explosion).
+pub const DEATH_CAMERA_DISTANCE: i32 = 0xf900_0000u32 as i32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CameraReference {
+    pub position: [f64; 3],
+    pub velocity: [f64; 3],
+    pub axes: [[f64; 3]; 3],
+}
+
 /// The player's death state (`DATA_008870 = 0x2c` and F1104's timer).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Death {
     pub phase: DeathPhase,
     /// Seconds left in the external-view hold (`DATA_008884`).
     pub remaining: f64,
+    #[serde(default)]
+    pub reference: Option<CameraReference>,
 }
 
 impl Death {
@@ -186,6 +198,7 @@ impl Death {
         Self {
             phase: DeathPhase::Exploding,
             remaining: GAME_OVER_SECONDS,
+            reference: None,
         }
     }
 
@@ -194,13 +207,29 @@ impl Death {
         Self {
             phase: DeathPhase::Exploding,
             remaining: seconds.max(0.0),
+            reference: None,
         }
+    }
+
+    /// F1105 changes DATA_008861 to the destruction object, not the old hull.
+    pub fn track_explosion(&mut self, effect: &ffe_core::effects::Effect) {
+        let unit = crate::original_flight::UNITS_PER_FLIGHT_UNIT;
+        self.reference = Some(CameraReference {
+            position: effect.position.map(|v| v as f64 / unit),
+            velocity: effect.velocity.map(|v| v / unit),
+            axes: effect.axes(),
+        });
     }
 
     /// Advance the hold; the game-over page follows at zero.
     pub fn tick(&mut self, seconds: f64) {
         if self.phase != DeathPhase::Exploding || !seconds.is_finite() || seconds <= 0.0 {
             return;
+        }
+        if let Some(reference) = self.reference.as_mut() {
+            for axis in 0..3 {
+                reference.position[axis] += reference.velocity[axis] * seconds;
+            }
         }
         self.remaining = (self.remaining - seconds).max(0.0);
         if self.remaining == 0.0 {
@@ -245,7 +274,7 @@ pub fn begin(state: &mut Flight, craft_stats: Option<&ShipStats>) -> Outcome {
 /// F1098's new-ship setup, without the equipment check. Used by the automatic
 /// death path and the F12 console icon.
 pub fn board(state: &mut Flight, craft: EscapeCraft, stats: Option<&ShipStats>) {
-    let old_drive = state.loadout.drive.max(state.combat.drive);
+    let old_drive = state.combat.drive;
     let old_cabins = state.loadout.cabins;
     let mass = stats.map_or(0, |stats| stats.mass);
 
@@ -333,13 +362,6 @@ pub fn died_lines(name: &str) -> [String; 3] {
         format!("   {name}"),
         "     DIED".to_owned(),
     ]
-}
-
-/// The port's log line for F1104's no-craft branch. The original's death path
-/// does not print a message (F351's bong is for object events); the port names
-/// the outcome so the log explains why the game-over page appeared.
-pub fn destroyed_message(killer: &str) -> String {
-    format!("{killer} destroys your ship. No escape craft fitted: GAME OVER.")
 }
 
 /// The log line for F1098's launch, with the source craft name.

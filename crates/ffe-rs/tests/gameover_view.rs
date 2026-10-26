@@ -63,9 +63,11 @@ fn the_tombstone_draws_game_over_and_the_obituary() {
     assert_eq!(game.tombstone_kind().model(), TOMBSTONE_MODEL);
     viewer.set_game_over_text(game.commander().as_bytes(), game.date().as_bytes());
 
-    // Face 4 (GAME OVER) at the start of a turn.
+    // The `GAME OVER` face at F917's 501st tombstone frame, where the slab is at
+    // `TOMBSTONE_NEAREST` and the counter is -272543: the same view as the
+    // original's `death-frame-990`.
     screen
-        .draw_game_over(&mut viewer, TOMBSTONE_MODEL, 0)
+        .draw_game_over(&mut viewer, TOMBSTONE_MODEL, -272_543)
         .unwrap();
     write_ppm(&screen, "gameover-game-over.ppm");
     assert!(
@@ -80,9 +82,11 @@ fn the_tombstone_draws_game_over_and_the_obituary() {
     );
     let front = screen.logical_pixels()[..320 * 200].to_vec();
 
-    // Half a turn later the other face's obituary is readable.
+    // Half a turn later the other face's obituary is readable. A counter of
+    // -74374 is F917's loop 155.7 degrees round with the slab at
+    // `TOMBSTONE_NEAREST` (the same frame as the original's `death-frame-800`).
     screen
-        .draw_game_over(&mut viewer, TOMBSTONE_MODEL, 0xa000)
+        .draw_game_over(&mut viewer, TOMBSTONE_MODEL, -74_374)
         .unwrap();
     write_ppm(&screen, "gameover-obituary.ppm");
     assert!(
@@ -102,7 +106,7 @@ fn the_rare_variant_is_the_other_tombstone_model() {
     let game = GameOver::tombstone("JAMESON", "1-JAN-3250").with_variant(Tombstone::Rare);
     viewer.set_game_over_text(game.commander().as_bytes(), game.date().as_bytes());
     screen
-        .draw_game_over(&mut viewer, game.tombstone_kind().model(), 0x2000)
+        .draw_game_over(&mut viewer, game.tombstone_kind().model(), -272_543)
         .unwrap();
     write_ppm(&screen, "gameover-rare.ppm");
     // Model 175's flowers/centre are visible at F917's pitch-0 spin; the normal

@@ -142,7 +142,7 @@ fn port_page_switches_modern_and_classic_controls() {
     let mut prefs = Prefs::default();
     prefs.escape();
     prefs.page = PORT;
-    assert!(prefs.modern);
+    assert!(!prefs.modern);
     assert_eq!(prefs.click(34, 48), Activate::None);
     assert!(!prefs.modern);
     assert_eq!(prefs.click(34, 38), Activate::None);
@@ -155,6 +155,8 @@ fn the_port_page_flips_the_preset_and_shows_it() {
     use ffe_rs::prefs::Mark;
 
     let mut prefs = Prefs::default();
+    assert_eq!(Preset::from_modern(prefs.modern), Preset::Classic);
+    prefs.toggle_modern();
     assert_eq!(Preset::from_modern(prefs.modern), Preset::Modern);
     prefs.toggle_modern();
     assert_eq!(Preset::from_modern(prefs.modern), Preset::Classic);

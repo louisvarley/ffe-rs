@@ -80,6 +80,69 @@ fn to_q31(value: f64) -> i32 {
 }
 
 impl OriginalFlight {
+    /// F998/F994: the common new-commander entry, including after Game Over.
+    /// Build the parked simulation from the same delivered equipment and pad
+    /// state used by the cockpit; missing source data must fail explicitly.
+    pub fn new_commander(
+        cache: &ffe_content::VerifiedCache,
+        nav: &crate::navigation::Navigator,
+    ) -> Result<(Flight, Self), String> {
+        let start = nav.new_game.ok_or("No source new-game record.")?;
+        let index = nav.docked.ok_or("New commander has no starting port.")?;
+        let station = nav.bodies.get(index).ok_or("Starting port is missing.")?;
+        let planet = station
+            .parent
+            .and_then(|i| nav.bodies.get(i))
+            .unwrap_or(station);
+        let records = cache
+            .asset("base:model/records")
+            .ok_or("Missing model records.")?;
+        let stats = cache
+            .asset("base:ship/stats")
+            .ok_or("Missing ship statistics.")?;
+        let info = |model| ModelInfo::read(records, stats, model).ok_or("Missing new-game model.");
+        let ship_info = info(start.ship)?;
+        let port_info = info(station.model)?;
+        let planet_info = info(planet.model)?;
+        let stats = ship_info
+            .stats
+            .as_ref()
+            .and_then(|block| ShipStats::from_block(block))
+            .ok_or("Missing new-game ship statistics.")?;
+        let mut state = Flight {
+            credits: u32::try_from(start.cash).map_err(|_| "Invalid starting cash.")?,
+            ship: start.ship,
+            mode: crate::flight::Mode::Flight,
+            system_flight: true,
+            position: start.seat.map(|v| v as f64 / UNITS_PER_FLIGHT_UNIT),
+            velocity: [0.0; 3],
+            axes: Some(station.orientation),
+            combat: crate::combat::Combat::new_game(),
+            loadout: ffe_core::equipment::Loadout::new_game(),
+            ..Flight::default()
+        };
+        // F998's type-0 arm calls F997 after F994: reverse the right and
+        // forward rows, preserving up. Without it the cockpit faces the nearby
+        // hangar wall instead of looking out across Hope's city.
+        if start.start_type == 0 {
+            if let Some(axes) = state.axes.as_mut() {
+                axes[0] = axes[0].map(|v| -v);
+                axes[2] = axes[2].map(|v| -v);
+            }
+        }
+        let mut model = Self::from_flight(&state, Some(&stats));
+        model.set_mode(start.player_state);
+        model.begin_pad_takeoff(
+            &crate::navigation::landing_body(planet, &planet_info),
+            planet.position,
+            &crate::navigation::landing_body(station, &port_info),
+            station.position,
+            &ship_info,
+        );
+        model.apply(&mut state);
+        Ok((state, model))
+    }
+
     /// Start from a flight state: its position, velocity and orientation, the
     /// set speed at the current speed along the nose (F1018's switch to manual),
     /// and the ship's limits and gun mounts when the cache has them.
@@ -103,7 +166,9 @@ impl OriginalFlight {
                 ..Motion::default()
             },
             limits,
-            set_speed: to_units(forward_speed).round().max(0.0) as i32,
+            set_speed: flight
+                .set_speed
+                .unwrap_or_else(|| to_units(forward_speed).round() as i32),
             altitude: i32::MAX,
             reference_counter: 0xd,
             active: true,
@@ -151,6 +216,11 @@ impl OriginalFlight {
     /// ordinary flight paths apply.
     pub fn set_mode(&mut self, mode: u8) {
         self.player.mode = mode;
+    }
+
+    /// Current DATA_008870 after the flight handler's same-frame transitions.
+    pub fn mode(&self) -> u8 {
+        self.player.mode
     }
 
     /// F1021's landing: F1042 zeroes the velocity, the turn rates, the thrust
@@ -794,6 +864,14 @@ impl OriginalFlight {
         // Undo the per-frame landing margin so it does not accumulate, and put
         // the player back in the system frame even when the scan fails (an
         // undecodable starport pad must not leave it parent-relative).
+        // F570 may have entered the rotating frame. Returning to root
+        // coordinates also requires F573's orientation/velocity conversion;
+        // clearing only +0x57 silently leaves those vectors in the old frame.
+        if self.player.motion.rotating != 0 {
+            world.body[1].take_motion(&self.player.motion);
+            world.to_linear(1, 2);
+            world.body[1].give_motion(&mut self.player.motion);
+        }
         self.player.motion.renormalise();
         let absolute = world.absolute(1).unwrap_or(vector);
         self.player.motion.position = absolute;
@@ -873,6 +951,7 @@ impl OriginalFlight {
         let axes: [[f64; 3]; 3] = motion
             .orientation
             .map(|row| row.map(|v| f64::from(v) / 2_147_483_648.0));
+        flight.set_speed = Some(self.player.set_speed);
         flight.position = position.map(|p| p as f64 / UNITS_PER_FLIGHT_UNIT);
         flight.velocity = motion
             .velocity
@@ -933,6 +1012,25 @@ fn tick_guided(
 mod tests {
     use super::*;
     use crate::flight::{Flight, Mode};
+
+    #[test]
+    fn selected_signed_speed_survives_save_and_model_reconstruction() {
+        for selected in [-1_000_000, -1, 0, 1, 1_000_000] {
+            let state = Flight {
+                mode: Mode::Flight,
+                velocity: [0.0, 0.0, 50.0],
+                set_speed: Some(selected),
+                ..Flight::default()
+            };
+            let bytes =
+                crate::saves::encode_game(&crate::saves::SaveGame::from_flight(&state)).unwrap();
+            let mut loaded = crate::saves::decode_game(&bytes).unwrap().state;
+            let mut model = OriginalFlight::from_flight(&loaded, None);
+            assert_eq!(model.set_speed_units(), selected);
+            model.apply(&mut loaded);
+            assert_eq!(loaded.set_speed, Some(selected));
+        }
+    }
 
     /// F1018's cancel drops the set speed to DATA_008866 (0), so the model brakes
     /// the ship rather than coasting on at the autopilot's chosen speed.

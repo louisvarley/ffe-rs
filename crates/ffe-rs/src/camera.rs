@@ -282,6 +282,17 @@ impl Camera {
         stats: Option<&ShipStats>,
         model_scale: f64,
     ) -> Self {
+        // F1105's camera reference is the explosion, whose axes and motion
+        // differ from the destroyed player's object.
+        let mut reference_state;
+        let state = if let Some(reference) = state.death.and_then(|death| death.reference) {
+            reference_state = state.clone();
+            reference_state.position = reference.position;
+            reference_state.axes = Some(reference.axes);
+            &reference_state
+        } else {
+            state
+        };
         let [right, up, forward] = ship_axes(state);
         // FUNC_001053/FUNC_001054: the eye is `along` the forward axis and `above`
         // along the up axis, each word times the axis' top 16 bits (1.0 = 0x7fff)

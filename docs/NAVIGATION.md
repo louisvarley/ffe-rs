@@ -1,5 +1,11 @@
 # Getting around: systems, maps and the autopilot (progress)
 
+Current source-parity correction (2026-10-26): the default Saker has **1 t free
+hold**, source bay 0 via F994's temporary bay-1 reservation, and F998/F997's
+half-turn after pad placement. Older 7 t/EXP-019 statements below are historical.
+See [implementation record](notes/parity-ground-drive-2026-10-26.md).
+
+
 > 2026-10-26: the player path now uses integer source guidance rather than the
 > sandbox transfer controller. See [the source audit](notes/autopilot-source-audit.md)
 > for the exact coverage, 512-case oracle and remaining gaps. Older sandbox

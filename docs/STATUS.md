@@ -1,5 +1,15 @@
 # Status and handoff
 
+## Ground, drive and source startup corrections — 2026-10-26
+
+See [implementation evidence](notes/parity-ground-drive-2026-10-26.md). Fixed the
+surface-port rotating-frame conversion, source F994 bay reservation and F997
+starting half-turn, launch integrator/mode order, drive disagreement, selected
+speed persistence and post-death new-commander setup. F938/F929 match 192 executed
+source cases. Death camera now references the explosion at source distance;
+effect evolution remains open. PAR-19 restores 1 t starting free hold; 101 work
+items remain. Other touched audit items remain open for full replay acceptance.
+
 ## Fuel correction in progress — 2026-10-26
 
 The release call path now feeds F938 recharge/thrust consumption with the same
@@ -16,7 +26,7 @@ The owner requires original gameplay, with Port Options as the only general
 extension. Experimental deviations and component-test passes do not constitute
 acceptance of changed gameplay. [The audit](audits/gameplay-parity-2026-10-26.md)
 records 24 new implementation items (8 P0) and 14 reopened completion claims;
-102 work items remain. This is an audit, not another claim that launch/docking
+101 work items remain. This is an audit, not another claim that launch/docking
 or destruction is fixed. The F938 whole-second/event versus per-frame physics
 tic mismatch is confirmed and is the first fuel/acceleration blocker. The
 Hope starting image and third-person death explosion require matched source

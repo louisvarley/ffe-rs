@@ -527,6 +527,7 @@ static void (*death_text_original)(void);
    keys held from frame 260) and `planet` (the same script run longer, to observe
    the planet +0x56 through free flight). */
 static int flight_mode;
+static int geometry_mode;
 static int flight_scenario; /* 0 idle, 1 takeoff, 2 planet */
 static int flight_launch_sent;
 static unsigned long flight_launch_frame = 170, flight_thrust_frame = 260;
@@ -698,6 +699,17 @@ static void flight_trace_row(void)
            position[0], position[1], position[2],
            velocity[0], velocity[1], velocity[2],
            (unsigned long long)previous, (unsigned long long)hash);
+    if(geometry_mode && player && frames==170) {
+        unsigned char *port=(unsigned char *)state_u32(0xcc);
+        printf("{\"geometry\":true,\"ship_model\":%ld,\"ship_rotating\":%u,\"ship_radius\":%lld,\"bay\":%u,\"port_model\":%ld,\"port_rotating\":%u,\"ship_rows\":[",get32(player,0x82),(unsigned)player[0x57],get64(player,0x140),(unsigned)ref_state[0xf4],port?get32(port,0x82):0,port?(unsigned)port[0x57]:0);
+        for(axis=0;axis<9;++axis) printf("%s%ld",axis?",":"",get32(player,4*axis));
+        printf("],\"ship_position\":[%lld,%lld,%lld],\"port_position\":[%lld,%lld,%lld],\"port_rows\":[",position[0],position[1],position[2],port?get64(port,0x3e):0,port?get64(port,0x46):0,port?get64(port,0x4e):0);
+        for(axis=0;axis<9;++axis) printf("%s%ld",axis?",":"",port?get32(port,4*axis):0);
+        printf("],\"planet_rows\":[");
+        for(axis=0;axis<9;++axis) printf("%s%ld",axis?",":"",planet?get32(planet,4*axis):0);
+        printf("]}\n");
+    }
+
 }
 
 void SystemInit(void)
@@ -5977,8 +5989,92 @@ static int autopilot_vectors(void) {
     return 0;
 }
 
+
+extern void ref_recharge(unsigned char *ship, unsigned long seconds);
+static int recharge_vectors(void)
+{
+    static unsigned char ship[0x160];
+    static const unsigned long deltas[]={0,1,2,8,32,60,10000,65535,65536,1000000,0x7fffffffUL,0xffffffffUL};
+    unsigned long n;
+    fprintf(stderr,"JJFFE recharge-v1: original F938/F929, 192 whole-second events and reserve/cargo states.\n");
+    for(n=0;n<192;++n) {
+        unsigned long seconds=deltas[n%12], general=(n&1?0x10000000UL:0)|(n&2?0x80000000UL:0)|(n&4?2:0);
+        unsigned long energy=(n%4==0?0:n%4==1?1:n%4==2?0x20000000UL:0xffffffffUL);
+        unsigned short current=(n%3==0?0:n%3==1?31:65534), full=(n%3==0?64:n%3==1?320:65535);
+        short thrust[3]={(short)(n%2?3270:32767),(short)(n%3?-2000:-32768),(short)(n%4?0:32767)};
+        unsigned short hull=23;
+        unsigned long *model=ref_model(31);
+        unsigned short mass=*(unsigned short *)(model[0x38/4]+6);
+        memset(ship,0,sizeof(ship));
+        put32(ship,0x82,31);ship[0x86]=7;ship[0xd0]=(unsigned char)(n&8?10:2);
+        put32(ship,0xc8,(long)general);put32(ship,0x11e,(long)energy);
+        memcpy(ship+0xe0,&current,2);memcpy(ship+0xe2,&full,2);memcpy(ship+0xe4,&hull,2);
+        memcpy(ship+0xb6,thrust,6);
+        state_set_u32(0xc0,7);state_set_u32(0x120,2);
+        *(unsigned short *)(ref_state+0xc6)=1; /* warning already latched: no text side effects */
+        *(unsigned short *)(ref_state+0x15a)=(unsigned short)(n%3);
+        *(unsigned short *)(ref_state+0x15c)=(unsigned short)(n%3);
+        *(unsigned short *)(ref_state+0x16e)=0;
+        ref_recharge(ship,seconds);
+        printf("{\"case\":%lu,\"seconds\":%lu,\"general\":%lu,\"drive\":%u,\"mass\":%u,\"energy_in\":%lu,\"shield_in\":%u,\"shield_max\":%u,\"fuel_in\":%lu,\"thrust\":[%d,%d,%d],\"energy\":%lu,\"shield\":%u,\"hull\":%u,\"hydrogen\":%u,\"military\":%u,\"waste\":%u,\"used\":%lu}\n",
+            n,seconds,general,(unsigned)ship[0xd0],mass,energy,current,full,n%3,thrust[0],thrust[1],thrust[2],
+            (unsigned long)get32(ship,0x11e),*(unsigned short *)(ship+0xe0),*(unsigned short *)(ship+0xe4),
+            *(unsigned short *)(ref_state+0x15a),*(unsigned short *)(ref_state+0x15c),*(unsigned short *)(ref_state+0x16e),state_u32(0x120));
+    }
+    return fflush(stdout)?2:0;
+}
+
+
+extern void ref_body_update(void *packet);
+static int body_update_vectors(void)
+{
+    static unsigned char object[0x152],before[0x152];
+    unsigned long n,k;
+    struct {unsigned long low,high;unsigned char *object;} packet;
+    fprintf(stderr,"JJFFE body-update-v1: original F866 geometric phase/orbit/spin update, 256 synthetic states.\n");
+    texture_rng=0x34567128UL;
+    for(n=0;n<256;++n) {
+        unsigned long initial_low=(unsigned long)texture_random(0,0x7fffffff),initial_high=0x121cf7UL;
+        unsigned long delta=(unsigned long)texture_random(0,1000000);
+        memset(object,0,sizeof(object));
+        for(k=0;k<9;++k) put32(object,k*4,k%4==0?0x7fffffff:0);
+        put32(object,0xa8,(long)initial_low);put32(object,0xac,(long)initial_high);
+        put32(object,0xb0,0x00324000L);
+        put32(object,0xba,texture_random(0,0x7fffffff));put32(object,0xbe,texture_random(0,0x7fffffff));
+        put32(object,0xc2,texture_random(1,0x7fffffff));
+        *(unsigned short *)(object+0xc6)=(unsigned short)texture_random(0,65535);
+        object[0xc8]=(unsigned char)(n%5==0?0:n%5==1?1:n%5==2?4:n%5==3?8:0xff);
+        *(unsigned short *)(object+0xcc)=(unsigned short)texture_random(0,65535);
+        memcpy(before,object,sizeof(object));
+        packet.low=initial_low+delta;packet.high=initial_high+(packet.low<initial_low);packet.object=object;
+        ref_body_update(&packet);
+        printf("{\"clock\":[%lu,%lu],\"before\":[",packet.low,packet.high);
+        for(k=0;k<sizeof(object);++k) printf("%s%u",k?",":"",(unsigned)before[k]);
+        printf("],\"after\":[");
+        for(k=0;k<sizeof(object);++k) printf("%s%u",k?",":"",(unsigned)object[k]);
+        printf("]}\n");
+    }
+    return fflush(stdout)?2:0;
+}
+
 int main(int argc, char **argv)
 {
+    int option;
+    for(option=1;option<argc;++option) {
+        if(!strcmp(argv[option],"--geometry")) {
+            int k;geometry_mode=1;
+            for(k=option;k<argc-1;++k) argv[k]=argv[k+1];
+            --argc;--option;continue;
+        }
+        if(!strncmp(argv[option],"--start-key=",12)) {
+            int k;
+            probe_start_key=strtoul(argv[option]+12,0,0);
+            for(k=option;k<argc-1;++k) argv[k]=argv[k+1];
+            --argc;--option;
+        }
+    }
+    if(argc==2 && !strcmp(argv[1],"--recharge")) return recharge_vectors();
+    if(argc==2 && !strcmp(argv[1],"--body-update")) return body_update_vectors();
     if(argc==2 && !strcmp(argv[1],"--autopilot")) return autopilot_vectors();
 
     const char *count;

@@ -139,7 +139,7 @@ fn systems_and_autopilot() {
 
 /// The DOS default new game (F829 record 0): Gateway [-1,4], the planet Hope and
 /// the starport Old Blackelk, with F998's default Saker Mk III, 10,000 CR
-/// (shown as 1000.0 credits) and a 7 t hold (EXP-019), and state 0x30. F832's seed/mass for
+/// (shown as 1000.0 credits) and a 1 t free hold, and state 0x30. F832's seed/mass for
 /// the record are checked against the executed original's `--state` probe
 /// (seed `0x8d17f528`, mass 170,000,000, tech 230).
 #[test]
@@ -157,8 +157,8 @@ fn new_game_starts_on_hope_in_gateway() {
     assert_eq!(state.cash, 10_000);
     assert_eq!(state.ship, 0x1f);
     assert_eq!(
-        state.cargo, 7,
-        "the Saker's 23 t less F998's 0x10 allowance (EXP-019)"
+        state.cargo, 1,
+        "the source delivered loadout leaves one tonne free"
     );
     assert_eq!(state.acceleration, 994);
     let index = nav.docked.expect("landed at the start starport");
@@ -268,7 +268,7 @@ fn start_record_one_is_ross_154() {
 }
 
 /// The DOS default start: F998's type 0, the Saker Mk III on Hope at Old
-/// Blackelk in Gateway [-1,4], with 10,000 CR and a 7 t hold (EXP-019).
+/// Blackelk in Gateway [-1,4], with 10,000 CR and a 1 t free hold.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn new_game_default_is_the_saker_at_hope() {
@@ -289,8 +289,8 @@ fn new_game_default_is_the_saker_at_hope() {
     assert_eq!(state.ship, DEFAULT_SHIP);
     assert_eq!(state.ship, 0x1f, "the Saker Mk III");
     assert_eq!(state.cargo, DEFAULT_CARGO);
-    assert_eq!(state.cargo, 7, "23 t less F998's 0x10 allowance (EXP-019)");
-    assert_eq!(nav.hold(&cache, state.ship), 7);
+    assert_eq!(state.cargo, 1, "23 t less F998's 0x10 allowance (EXP-019)");
+    assert_eq!(nav.hold(&cache, state.ship), 1);
     assert_eq!(state.acceleration, 994);
     let index = nav.docked.expect("docked at the start starport");
     let body = &nav.bodies[index];

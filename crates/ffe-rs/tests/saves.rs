@@ -149,6 +149,7 @@ fn quick_save_round_trip_rejects_a_corrupt_file_without_touching_it() {
         system_code: 0,
         clock: 10.0,
         start_clock: 0.0,
+        world_epoch: None,
         new_game: None,
         page: 0,
         view: ffe_rs::navigation::View::Closed,

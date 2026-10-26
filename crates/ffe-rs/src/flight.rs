@@ -19,6 +19,10 @@ pub enum Mode {
 #[serde(deny_unknown_fields)]
 pub struct Flight {
     pub mode: Mode,
+    /// DATA_008918, in original signed velocity units. Older saves infer it
+    /// from motion once; new saves preserve a selected speed independently.
+    #[serde(default)]
+    pub set_speed: Option<i32>,
     pub position: [f64; 3],
     pub velocity: [f64; 3],
     pub yaw: f64,
@@ -122,6 +126,7 @@ impl Default for Flight {
     fn default() -> Self {
         Self {
             mode: Mode::Docked,
+            set_speed: None,
             position: [0.0, 0.0, -60.0],
             velocity: [0.0; 3],
             yaw: 0.0,
@@ -170,6 +175,18 @@ impl Flight {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        // The prototype boundary keeps the ship near the origin and caps the
+        // speed at the prototype's own limits. System flight carries the
+        // original's 64-bit system coordinates (scaled by
+        // `UNITS_PER_FLIGHT_UNIT`) and its signed 32-bit velocity words, which
+        // are far larger; only finiteness and a generous corruption bound apply
+        // there. The original flight model (key O) itself reaches a few
+        // thousand flight units per second in the prototype.
+        let (position_limit, velocity_limit) = if self.system_flight {
+            (1.0e12, 1.0e8)
+        } else {
+            (1_000_000.0, 5000.0)
+        };
         if !self
             .position
             .iter()
@@ -179,11 +196,12 @@ impl Flight {
             || self
                 .position
                 .iter()
-                .any(|number| number.abs() > 1_000_000.0)
-            // The prototype step caps itself at 250; the original flight model
-            // (key O) reaches a few thousand flight units per second.
-            || self.velocity.iter().any(|number| number.abs() > 5000.0)
-            || self.speed() > 5000.0000001
+                .any(|number| number.abs() > position_limit)
+            || self
+                .velocity
+                .iter()
+                .any(|number| number.abs() > velocity_limit)
+            || self.speed() > velocity_limit * 1.0000001
             || !(0.0..std::f64::consts::TAU).contains(&self.yaw)
             || self.pitch.abs() > 1.4
             || self.cargo > CARGO_CAPACITY
@@ -193,7 +211,8 @@ impl Flight {
             || !(self.thrust.is_finite() && self.thrust.abs() <= 1.0)
             || self.axes.is_some_and(|axes| {
                 axes.iter().any(|row| {
-                    row.iter().any(|value| !value.is_finite() || value.abs() > 1.5)
+                    row.iter()
+                        .any(|value| !value.is_finite() || value.abs() > 1.5)
                         || !(0.9..=1.1).contains(&length(*row))
                 })
             })
@@ -448,14 +467,19 @@ impl Flight {
     /// Auto-Repair System (`+0xc8` bit 31) adding `seconds` hull points up to the
     /// full hull.
     pub fn recharge(&mut self, seconds: u32, hull_full: u16) {
-        if self.shields[0] < self.shields[1] {
-            let mut added = (u64::from(self.shields[1]) * u64::from(seconds) / 32) as u32;
+        if self.shields[0] != self.shields[1] {
+            // F938: IMUL keeps the low dword, SAR is signed, the optional
+            // halving is logical, and the clamp compares the wrapped sum.
+            let mut added = (i32::from(self.shields[1]).wrapping_mul(seconds as i32) >> 5) as u32;
             if !self.loadout.energy_booster() {
-                added /= 2;
+                added >>= 1;
             }
-            self.shields[0] = self.shields[0]
-                .saturating_add(u16::try_from(added).unwrap_or(u16::MAX))
-                .min(self.shields[1]);
+            self.shields[0] =
+                if u32::from(self.shields[0]).wrapping_add(added) > u32::from(self.shields[1]) {
+                    self.shields[1]
+                } else {
+                    self.shields[0].wrapping_add(added as u16)
+                };
         }
         if hull_full != 0 && self.hull[1] == 0 {
             // An uninitialised new ship is intact. F938 runs before the
@@ -463,9 +487,13 @@ impl Flight {
             // would make that later call preserve a zero hull and trigger death.
             self.hull = [hull_full, hull_full];
         }
-        if self.loadout.hull_auto_repair() && self.hull[0] < hull_full {
-            let added = u16::try_from(seconds).unwrap_or(u16::MAX);
-            self.hull[0] = self.hull[0].saturating_add(added).min(hull_full);
+        if self.loadout.hull_auto_repair() && self.hull[0] != hull_full {
+            let total = u32::from(self.hull[0]).wrapping_add(seconds) as i32;
+            self.hull[0] = if i32::from(hull_full) < total {
+                hull_full
+            } else {
+                self.hull[0].wrapping_add(seconds as u16)
+            };
         }
     }
 
@@ -522,11 +550,13 @@ impl Flight {
                 .map(SystemEvent::EquipmentDamaged)
         } else if roll < 0x888 {
             self.combat.drive = 0;
+            self.loadout.drive = 0;
             self.combat.energy = 0;
             Some(SystemEvent::DriveDamaged)
         } else if roll < 0x1c71 {
             if self.combat.drive != 0 {
                 self.combat.drive = 1;
+                self.loadout.drive = 1;
             }
             Some(SystemEvent::DriveDamaged)
         } else if self.damage.break_thruster(usize::from(thruster)) {
@@ -656,6 +686,7 @@ impl Flight {
                     }
                 } else if self.combat.drive != 0 {
                     self.combat.drive = 0;
+                    self.loadout.drive = 0;
                     self.combat.energy = 0;
                     events.push(SystemEvent::DriveFailure);
                 }

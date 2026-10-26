@@ -182,10 +182,11 @@ cleared.
 ## 4. Deviations and remaining owner decisions
 
 - **Screen art/layout.** The port renders F917's real model 172/175 and its
-  model-text records; `docs/notes/gameover.md` records the one reconstruction
-  (the font's degenerate text normals make the face selection use the spin's
-  half-turn). The earlier text-page placeholder and its `N`/`Q` options are
-  gone.
+  model-text records through the same call F917 makes (the counter is the
+  distance and `MatBuildYZT`'s third argument), so the slab turns about its
+  vertical axis; the text records' own normals pick the visible face. Palette
+  values and the exact obituary line anchors are still not pixel-exact. The
+  earlier text-page placeholder and its `N`/`Q` options are gone.
 - **Commander name.** The port has no commander-name entry; it uses the
   original's default `Jameson` (`DATA_004963`), uppercased on the tombstone as
   the source's font does. Decide whether to add a name field to

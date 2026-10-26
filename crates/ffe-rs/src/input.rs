@@ -648,6 +648,8 @@ mod tests {
     #[test]
     fn switching_the_prefs_preset_changes_the_route_immediately() {
         let mut prefs = Prefs::default();
+        assert_eq!(Preset::from_modern(prefs.modern), Preset::Classic);
+        prefs.toggle_modern();
         assert_eq!(Preset::from_modern(prefs.modern), Preset::Modern);
         assert_eq!(
             controls(Preset::from_modern(prefs.modern), &[Key::W]).thrust,

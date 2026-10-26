@@ -437,3 +437,49 @@ fn executed_reference_worldgen() {
     assert!(compared > 900, "too few systems: {compared}");
     eprintln!("compared {compared} created systems ({bodies} physics objects)");
 }
+
+#[test]
+#[ignore = "Local-only F866 original vectors and FFE_WORLD_CACHE"]
+fn executed_reference_body_update() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let tables = Tables::new(cache.asset("base:world/system-tables").unwrap()).unwrap();
+    let models = Models {
+        records: cache.asset("base:model/records").unwrap(),
+        stats: cache.asset("base:ship/stats").unwrap(),
+        gameplay: cache.asset("base:gameplay/tables").unwrap(),
+    };
+    let sine = SineTable::from_bytes(cache.asset("base:math/sine").unwrap()).unwrap();
+    let placement = Placement {
+        tables: &tables,
+        models: &models,
+        sine: &sine,
+        surface: None,
+    };
+    #[derive(Deserialize)]
+    struct Case {
+        clock: [u32; 2],
+        before: Vec<u8>,
+        after: Vec<u8>,
+    }
+    let input =
+        std::fs::read_to_string(std::env::var_os("FFE_BODY_UPDATE_VECTORS").unwrap()).unwrap();
+    let mut count = 0;
+    for line in input.lines() {
+        let case: Case = serde_json::from_str(line).unwrap();
+        let mut list = PhysList::default();
+        list.bytes[1] = 0x1d;
+        let at = ffe_core::objects::FIRST_OBJECT + ffe_core::objects::OBJECT_BYTES;
+        assert_eq!(case.before.len(), ffe_core::objects::OBJECT_BYTES);
+        list.bytes[at..at + case.before.len()].copy_from_slice(&case.before);
+        placement.advance(&mut list, case.clock);
+        assert_eq!(
+            &list.bytes[at..at + case.after.len()],
+            case.after.as_slice(),
+            "F866 case {count}"
+        );
+        count += 1;
+    }
+    assert_eq!(count, 256);
+}

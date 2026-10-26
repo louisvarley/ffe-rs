@@ -78,7 +78,7 @@ fn intro_enter_then_idle_keeps_the_ship_on_its_pad() {
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
         detail: 0,
     };
-    for _ in 0..100 {
+    for tick in 0..100 {
         nav.advance(&cache, 0.02);
         model.set_pad_bodies(
             nav.bodies[port.parent.unwrap()].position,
@@ -87,6 +87,13 @@ fn intro_enter_then_idle_keeps_the_ship_on_its_pad() {
         model
             .step_pad(0.02, &Keys::default(), Some(&tools))
             .unwrap();
+        if tick == 0 {
+            assert!(
+                model.player().altitude < 200_000,
+                "the first ground contact must not end the launch climb: {} mm",
+                model.player().altitude
+            );
+        }
     }
     let current = model.absolute_position();
     let rise: f64 = (0..3)
@@ -119,4 +126,49 @@ fn parked_input_allows_turrets_without_throttle_or_body_motion() {
     assert!(model.view().1[1] < 0, "F1039 still steers the turret");
     assert_eq!(model.set_speed_units(), 0);
     assert_eq!(model.player().motion.orientation, orientation);
+}
+
+#[test]
+#[ignore = "Local-only: FFE_WORLD_CACHE"]
+fn new_commander_and_restart_share_complete_pad_initialization() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    for start_type in [0, 1] {
+        let nav = Navigator::new_game(&cache, start_type).unwrap();
+        let start = nav.new_game.unwrap();
+        assert_eq!(
+            start.bay, 0,
+            "F994 reserves +0xd1 while assigning the player"
+        );
+        let (first, first_model) = OriginalFlight::new_commander(&cache, &nav).unwrap();
+        let (restart, mut model) = OriginalFlight::new_commander(&cache, &nav).unwrap();
+        assert_eq!(first, restart);
+        assert_eq!(first.mode, Mode::Flight);
+        assert!(first.system_flight);
+        assert_eq!(first.ship, start.ship);
+        assert_eq!(first.credits, start.cash as u32);
+        assert_eq!(first.combat, ffe_rs::combat::Combat::new_game());
+        assert_eq!(first.loadout, ffe_core::equipment::Loadout::new_game());
+        assert_eq!(model.player().mode, 0x30);
+        let port = &nav.bodies[nav.docked.unwrap()];
+        let axes = first.axes.unwrap();
+        for (row, values) in axes.iter().enumerate() {
+            let sign = if start_type == 0 && row != 1 {
+                -1.0
+            } else {
+                1.0
+            };
+            for (value, expected) in values.iter().zip(port.orientation[row]) {
+                assert!((*value - sign * expected).abs() < 1.0e-8);
+            }
+        }
+        assert_eq!(model.absolute_position(), first_model.absolute_position());
+        let position = model.absolute_position();
+        for _ in 0..600 {
+            model.step_landed(0.02, &Keys::default(), start.player_state);
+        }
+        assert_eq!(model.absolute_position(), position);
+        assert_eq!(model.player().motion.velocity, [0; 3]);
+    }
 }

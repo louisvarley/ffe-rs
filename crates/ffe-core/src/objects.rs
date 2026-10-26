@@ -785,6 +785,57 @@ impl Placement<'_> {
         }
     }
 
+    /// F866's geometric update for F880's system objects. The initial phase
+    /// uses F880's argument convention; subsequent deltas use the ordinary
+    /// low-fraction/high-day clock. Recreating F880 is not a world tick.
+    pub fn advance(&self, list: &mut PhysList, clock: [u32; 2]) {
+        for object in 1..OBJECTS {
+            if list.bytes[object] == 0 {
+                continue;
+            }
+            let before = [list.dword(object, 0xa8), list.dword(object, 0xac)];
+            list.set_dword(object, 0xa8, clock[0]);
+            list.set_dword(object, 0xac, clock[1]);
+            if list.byte(object, 0x14c) & 0x20 != 0 {
+                continue;
+            }
+            let time = |words: [u32; 2]| (u64::from(words[1]) << 32) | u64::from(words[0]);
+            let delta = time(clock).wrapping_sub(time(before));
+            let old =
+                (u64::from(list.dword(object, 0xbe)) << 32) | u64::from(list.dword(object, 0xba));
+            let phase = old.wrapping_add(
+                delta
+                    .wrapping_mul(u64::from(list.dword(object, 0xc2)))
+                    .wrapping_shl(3),
+            );
+            list.set_dword(object, 0xba, phase as u32);
+            list.set_dword(object, 0xbe, (phase >> 32) as u32);
+            if phase >> 32 != old >> 32 {
+                let radius = Ffp::from_dword(list.dword(object, 0xb0));
+                let longitude = i32::from(list.word(object, 0xc6) as i16);
+                list.place_on_orbit(self.sine, object, radius, longitude, (phase >> 32) as u32);
+            }
+            let spin = list.byte(object, 0xc8) as i8;
+            if spin == 0 {
+                continue;
+            }
+            let shift = (i32::from(spin) - 1).max(0) as u32;
+            let old_spin = before[0].wrapping_shl(shift);
+            let new_spin = clock[0].wrapping_shl(shift);
+            if old_spin >> 20 != new_spin >> 20 {
+                let tilt = i32::from(list.word(object, 0xcc) as i16);
+                let angle = (new_spin >> 16) as i32;
+                let rows = if list.byte(object, 0x14c) & 0x10 != 0 {
+                    matrix_yzt(self.sine, angle, tilt)
+                } else {
+                    matrix_yzt(self.sine, tilt, angle)
+                };
+                list.set_matrix(object, rows);
+            }
+        }
+        list.clock = clock;
+    }
+
     fn orbit(&self, list: &mut PhysList, object: usize, radius: Ffp, longitude: i32, phase: u32) {
         list.place_on_orbit(self.sine, object, radius, longitude, phase);
     }

@@ -603,3 +603,10 @@ _ref_time_accel_index equ DATA_009013
 
 GLOBAL _ref_autopilot_match
 _ref_autopilot_match equ FUNC_000589
+
+; F938/F929 whole-second reserve and recharge oracle.
+GLOBAL _ref_recharge
+_ref_recharge equ FUNC_000938
+
+GLOBAL _ref_body_update
+_ref_body_update equ FUNC_000866
