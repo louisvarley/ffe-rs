@@ -1022,7 +1022,7 @@ fn run() -> Result<(), String> {
                 shapes: &landing_library,
                 terrain_table,
                 terrain_maps,
-                detail: 0,
+                detail: ffe_core::surface::DEFAULT_DETAIL,
             },
         );
     let model_records = cache.asset("base:model/records").unwrap_or(&[]);
@@ -1507,8 +1507,8 @@ fn run() -> Result<(), String> {
         // paused there), so F1 returns to the same pad instead of snapping the
         // ship across the body's orbital motion.
         if let Some(model) = original.as_mut().filter(|model| model.on_pad()) {
-            if let Some((planet, station)) = nav.as_ref().and_then(pad_bodies) {
-                model.set_pad_bodies(planet, station);
+            if let Some(pad) = nav.as_ref().and_then(pad_bodies) {
+                model.move_pad_bodies(pad.planet, pad.planet_rows, pad.station, pad.station_rows);
             }
         }
         if state
@@ -2766,10 +2766,10 @@ fn run() -> Result<(), String> {
                     let landed = nav.as_ref().and_then(|nav| nav.landed_state());
                     let pad_landed = nav.as_ref().is_some_and(|nav| nav.on_pad());
                     // Action 9 (engines on) is also a click on either engine nozzle of
-                    // the parked ship's dashboard page (`DATA_007258`).
-                    let systems_click = if nav.as_ref().is_some_and(|nav| nav.landed_view())
-                        && (engines_page || (status_page && status_section == 0))
-                    {
+                    // the ship diagram, and 0x75 (undercarriage) on either wing:
+                    // F1005 installs those areas (`DATA_007259`) with F1117's normal
+                    // page; F1120's equipment page (F5) swaps them for its own.
+                    let systems_click = if !engines_page && !(status_page && status_section == 0) {
                         click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
                     } else {
                         None
@@ -2804,13 +2804,17 @@ fn run() -> Result<(), String> {
                             .as_ref()
                             .is_some_and(|nav| nav.launch_needs_permission())
                     {
-                        // F1056 action 9 at state 0x30 without F381's permission: the
-                        // original shows its message and the ship stays on the pad.
-                        pending_log.add(
-                            Source::Launch,
-                            "Request launch permission first (services, phone icon).",
-                        );
-                    } else if launch && (landed.is_some() || pad_landed) {
+                        // F1056 action 9 at 0x30 without F654's clearance still
+                        // launches; F237 records the offence (and the unpaid-fine
+                        // one when this port's ledger is already over 5000).
+                        if let Some(nav) = nav.as_mut() {
+                            for text in nav.unauthorised_launch() {
+                                pending_log.add(Source::Legal, text);
+                            }
+                            nav.launch_cleared = true;
+                        }
+                    }
+                    if launch && (landed.is_some() || pad_landed) {
                         if let Some(nav) = nav.as_mut() {
                             if landed.is_some() {
                                 match nav.begin_surface_launch() {
@@ -2830,9 +2834,19 @@ fn run() -> Result<(), String> {
                                 match nav.begin_launch() {
                                     Ok(()) => {
                                         acceleration = 0;
-                                        // The docked-to-flight block below builds
-                                        // F994's pad model and F1013's climb.
-                                        last_mode = ffe_rs::flight::Mode::Docked;
+                                        match original.as_mut().filter(|model| model.on_pad()) {
+                                            // F1056 action 9 at 0x30 sets 0x24 and
+                                            // F1013 climbs from where the ship
+                                            // stands: no new seat.
+                                            Some(model) => {
+                                                model.set_time_acceleration(0);
+                                                model.begin_takeoff();
+                                                message = TAKEOFF_HINT.to_owned();
+                                            }
+                                            // No pad world yet: the docked-to-flight
+                                            // block below builds F994's pad model.
+                                            None => last_mode = ffe_rs::flight::Mode::Docked,
+                                        }
                                     }
                                     Err(why) => message = why,
                                 }
@@ -4134,14 +4148,18 @@ fn run() -> Result<(), String> {
                         model.apply(&mut state);
                         if trace_flight {
                             trace_clock += elapsed;
-                            if trace_clock >= 0.1 {
+                            if trace_clock >= 0.1 || std::env::var_os("FFE_TRACE_ALL").is_some() {
                                 trace_clock = 0.0;
                                 let player = model.player();
+                                let at = model.absolute_position();
                                 let frame = nav
                                     .as_ref()
                                     .and_then(|nav| nav.frame().and_then(|f| nav.bodies.get(f)))
-                                    .map(|body| body.name.as_str());
-                                let at = model.absolute_position();
+                                    .map(|body| {
+                                        let rel: [i64; 3] =
+                                            std::array::from_fn(|k| at[k] - body.position[k]);
+                                        (body.name.as_str(), rel, body.rows[3..6].to_vec())
+                                    });
                                 let world = nav.as_ref().and_then(|nav| {
                                     nav.bodies
                                         .iter()
@@ -6500,12 +6518,29 @@ fn clock_runs(
     active && !paused && !prefs_open && !death && !model_lab && !model_viewer
 }
 
-/// The current absolute positions of the planet and starport a new-game pad
+/// Where the pad world's planet and starport are now.
+struct PadBodies {
+    planet: [i64; 3],
+    planet_rows: [i32; 9],
+    station: [i64; 3],
+    station_rows: [i32; 9],
+}
+
+/// The current absolute positions and rows of the planet and starport a pad
 /// belongs to, for the pad world that follows the navigator's clock.
-fn pad_bodies(nav: &ffe_rs::navigation::Navigator) -> Option<([i64; 3], [i64; 3])> {
+fn pad_bodies(nav: &ffe_rs::navigation::Navigator) -> Option<PadBodies> {
     let station = nav.bodies.get(nav.docked?)?;
     let planet = station.parent.and_then(|parent| nav.bodies.get(parent))?;
-    Some((planet.position, station.position))
+    // The rows as `landing_body` gives them to the pad world.
+    let rows = |body: &ffe_rs::navigation::Body| -> [i32; 9] {
+        std::array::from_fn(|k| (body.orientation[k / 3][k % 3] * 2_147_483_647.0) as i32)
+    };
+    Some(PadBodies {
+        planet: planet.position,
+        planet_rows: rows(planet),
+        station: station.position,
+        station_rows: rows(station),
+    })
 }
 
 /// The player's position in system millimetres: the original flight model's when

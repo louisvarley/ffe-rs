@@ -439,7 +439,7 @@ pub fn bodies_since(
             .asset("base:terrain/tables")
             .ok_or("no terrain tables")?,
         terrain_maps: cache.asset("base:terrain/maps").ok_or("no terrain maps")?,
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     let placement = Placement {
         tables: &tables_view,
@@ -3786,6 +3786,25 @@ impl Navigator {
     /// `DATA_009095[DATA_008996]`. `body` is unused beyond the station check.
     pub fn fine_at(&self, _body: usize) -> u32 {
         self.legal.owed(Some(self.jurisdiction))
+    }
+
+    /// F1056's action 9 from the pad without F654's clearance (`player+0xf0`
+    /// zero): the launch goes ahead, and F237 reports "Launching without
+    /// clearance" here and, when this jurisdiction's ledger (`+0x50f8`) is then
+    /// over 0x1388, "Evading payment of fine". Returns the messages to log.
+    pub fn unauthorised_launch(&mut self) -> Vec<String> {
+        let here = Some(self.jurisdiction);
+        let mut messages = Vec::new();
+        if let Some(report) = self.legal.record(npc::LAUNCHING_WITHOUT_CLEARANCE, here) {
+            messages.push(report.message);
+        }
+        if self.legal.owed(here) > 0x1388 {
+            if let Some(report) = self.legal.record(npc::EVADING_FINE, here) {
+                messages.push(report.message);
+            }
+        }
+        messages.retain(|m| !m.is_empty());
+        messages
     }
 
     /// The fine the local police would collect, `DATA_009095[DATA_008996]`.

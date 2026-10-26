@@ -534,7 +534,7 @@ static unsigned long flight_launch_frame = 170, flight_thrust_frame = 260;
 static uint64_t flight_previous_hash;
 static const char *flight_scenario_name(void)
 {
-    return flight_scenario == 1 ? "takeoff" : flight_scenario == 2 ? "planet" : "idle";
+    return flight_scenario == 1 ? "takeoff" : flight_scenario == 2 ? "planet" : flight_scenario == 3 ? "hover" : "idle";
 }
 
 static uint64_t flight_hash_value(uint64_t hash, uint64_t value)
@@ -5776,6 +5776,8 @@ static void capture_instance(void *instance, int kind)
     unsigned char *c = (unsigned char *)instance;
     unsigned char *owner = *(unsigned char **)(c + 0x14c);
     long slot;
+    /* Flight mode keeps no framebuffer, so drawing is skipped there. */
+    if (!object_capture_mode && flight_mode) return;
     if (!object_capture_mode) fail("instance capture outside the object-instance mode");
     if (owner == display_target) slot = 0;
     else {
@@ -6191,7 +6193,9 @@ int main(int argc, char **argv)
         if (!strcmp(argv[2], "idle")) flight_scenario = 0;
         else if (!strcmp(argv[2], "takeoff")) flight_scenario = 1;
         else if (!strcmp(argv[2], "planet")) flight_scenario = 2;
-        else fail("unknown --flight scenario (idle, takeoff, planet)");
+        /* hover: the takeoff launch with no keys afterwards (F1013's own hand-off). */
+        else if (!strcmp(argv[2], "hover")) { flight_scenario = 3; flight_thrust_frame = ~0UL; }
+        else fail("unknown --flight scenario (idle, takeoff, planet, hover)");
         flight_mode = 1;
         limit = strtoul(argv[3], &end, 10);
         if (*end || limit < 200 || limit > 2000) fail("invalid --flight frame count");

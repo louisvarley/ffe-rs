@@ -188,7 +188,7 @@ fn fly_source_pad(acceleration: usize) {
         shapes: &library,
         terrain_table: cache.asset("base:terrain/tables").unwrap(),
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     model.set_time_acceleration(acceleration);
     if acceleration != 0 {

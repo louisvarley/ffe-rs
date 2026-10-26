@@ -359,7 +359,7 @@ fn takes_off_from_the_pad(start_type: u8) {
                 shapes: &library,
                 terrain_table,
                 terrain_maps,
-                detail: 0,
+                detail: ffe_core::surface::DEFAULT_DETAIL,
             },
         );
     let planet_body = landing_body(
@@ -554,7 +554,7 @@ fn pad_takeoff_hands_over_and_falls_back_under_gravity() {
                 shapes: &library,
                 terrain_table,
                 terrain_maps,
-                detail: 0,
+                detail: ffe_core::surface::DEFAULT_DETAIL,
             },
         );
     let planet_body = landing_body(
@@ -666,7 +666,7 @@ fn a_ship_at_rest_above_the_surface_does_not_sink_through_the_frame_round_trip()
         shapes: &library,
         terrain_table: cache.asset("base:terrain/tables").unwrap(),
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     let height = |at: [i64; 3]| distance(at, planet.position);
     let before = height(model.absolute_position());
@@ -712,7 +712,7 @@ fn gravity_pulls_toward_the_planet_and_falls_off_with_distance() {
         shapes: &library,
         terrain_table: cache.asset("base:terrain/tables").unwrap(),
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     let up = port.orientation[1];
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
@@ -817,7 +817,7 @@ fn landed_set_speed_runs_f1037_and_accelerates() {
                 shapes: &library,
                 terrain_table,
                 terrain_maps,
-                detail: 0,
+                detail: ffe_core::surface::DEFAULT_DETAIL,
             },
         );
     let keys = OriginalKeys {
@@ -965,7 +965,7 @@ fn pad_set_speed_runs_in_the_pad_world_before_launch() {
                 shapes: &library,
                 terrain_table,
                 terrain_maps,
-                detail: 0,
+                detail: ffe_core::surface::DEFAULT_DETAIL,
             },
         );
     let keys = OriginalKeys {
@@ -1536,7 +1536,7 @@ fn manual_pad_contact_reaches_0x30() {
                 shapes: &library,
                 terrain_table,
                 terrain_maps,
-                detail: 0,
+                detail: ffe_core::surface::DEFAULT_DETAIL,
             },
         );
     let planet_body = landing_body(&planet, &planet_info);
@@ -1651,7 +1651,7 @@ fn starport_model_0x59_collision_geometry_is_imported() {
                 shapes: &library,
                 terrain_table,
                 terrain_maps,
-                detail: 0,
+                detail: ffe_core::surface::DEFAULT_DETAIL,
             },
         );
     let mut world = ffe_core::frames::Bodies {
@@ -2647,7 +2647,7 @@ fn pad_takeoff_stays_near_the_port_when_the_system_clock_advances() {
         shapes: &library,
         terrain_table: cache.asset("base:terrain/tables").unwrap(),
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     for frame in 0..150 {
         nav.advance(&cache, 0.02);

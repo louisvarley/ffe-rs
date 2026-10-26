@@ -252,20 +252,21 @@ impl Click {
     }
 }
 
-/// The engines-off page's own hot areas (`DATA_007258`): the two engine nozzles of the
-/// ship diagram are action 9 (the launch action: engines on) and the two wings action
-/// `0x75` (the undercarriage). They exist while that page is up (the ship parked).
+/// The normal console's ship-diagram hot areas (`DATA_007259`, installed by F1005
+/// from F1117): the two engine nozzles are action 9 (the launch action: engines on)
+/// and the two wings action `0x75` (the undercarriage). F1120's equipment page
+/// removes them and installs its own (`DATA_007258`).
 pub const ENGINE_AREAS: [(i32, i32, i32, i32); 2] = [(0, 186, 13, 196), (28, 186, 40, 196)];
 pub const GEAR_AREAS: [(i32, i32, i32, i32); 2] = [(0, 170, 18, 184), (33, 170, 43, 184)];
 
-/// What a click on the engines-off page asks for.
+/// What a click on the ship diagram asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemsClick {
     EnginesOn,
     Undercarriage,
 }
 
-/// The engines-off page's click under logical pixel (x, y), if any.
+/// The ship diagram's click under logical pixel (x, y), if any.
 pub fn systems_click(x: i32, y: i32) -> Option<SystemsClick> {
     let inside = |areas: &[(i32, i32, i32, i32); 2]| {
         areas

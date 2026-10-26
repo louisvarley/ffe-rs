@@ -33,7 +33,7 @@ fn tools<'a>(
             shapes: library,
             terrain_table,
             terrain_maps,
-            detail: 0,
+            detail: ffe_core::surface::DEFAULT_DETAIL,
         })
 }
 

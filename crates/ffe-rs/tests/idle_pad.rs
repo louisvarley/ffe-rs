@@ -76,7 +76,7 @@ fn intro_enter_then_idle_keeps_the_ship_on_its_pad() {
         shapes: &library,
         terrain_table: cache.asset("base:terrain/tables").unwrap(),
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     for tick in 0..100 {
         nav.advance(&cache, 0.02);

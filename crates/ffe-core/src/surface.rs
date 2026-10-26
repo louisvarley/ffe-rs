@@ -105,6 +105,14 @@ pub struct Hull {
     pub words: Vec<u16>,
 }
 
+/// The game's detail setting (`DATA_008812`) at its default: the Graphic
+/// Detail page's "High" shape detail, stored one less than the row (F917).
+/// F879's terrain probes and the flight contact scan both read it, so a
+/// starport placed at another detail sits at a different height (Old Blackelk
+/// is 94.5 m lower at 0 than at 1, burying its pads under the terrain the
+/// takeoff then measures).
+pub const DEFAULT_DETAIL: i32 = 1;
+
 /// What the complex shapes need: where the models' collision data comes from, the
 /// terrain tables and height maps, and the game's detail setting.
 pub struct SurfaceTools<'a> {

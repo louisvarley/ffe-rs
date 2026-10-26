@@ -403,25 +403,83 @@ impl OriginalFlight {
     }
 
     /// Move the pad world's planet and starport to their current navigator
-    /// positions. The player's position in the pad world is relative to the
-    /// planet (F994's `+0x56`), so the ship follows the body while the game
-    /// clock runs; without this the ship stayed at the start-of-game absolute
-    /// spot and the surface slid away at the planet's orbital speed.
+    /// positions, keeping their orientations. See [`Self::move_pad_bodies`].
     pub fn set_pad_bodies(&mut self, planet_position: [i64; 3], station_position: [i64; 3]) {
+        let (planet_rows, station_rows) =
+            self.pad_world.as_ref().map_or(([0; 9], [0; 9]), |world| {
+                (world.body[2].orientation, world.body[3].orientation)
+            });
+        self.move_pad_bodies(planet_position, planet_rows, station_position, station_rows);
+    }
+
+    /// Move the pad world's planet and starport to their current navigator
+    /// positions and rows. The planet's rows turn its terrain: they must follow
+    /// the planet's spin with the starport, or the ground under a ship carried
+    /// with the port is terrain from kilometres away (the navigator's spin step
+    /// at Old Blackelk moved it 10 km, and the contact then reported a hill
+    /// 237 m higher under a hovering ship). F994 puts the player in the planet's
+    /// rotating frame (`+0x57`), so a ship on or over the pad turns with the
+    /// planet; this world keeps the ship linear (one exact frame), so it is
+    /// carried rigidly with the starport instead: the same turn and shift for
+    /// its position, velocity and orientation. A shift alone (the old carry)
+    /// left the pad surface swinging away as the planet turned, 80 m in three
+    /// seconds at Old Blackelk, which the first contact then made up at once.
+    pub fn move_pad_bodies(
+        &mut self,
+        planet_position: [i64; 3],
+        planet_rows: [i32; 9],
+        station_position: [i64; 3],
+        station_rows: [i32; 9],
+    ) {
         let Some(world) = self.pad_world.as_mut() else {
             return;
         };
         world.body[2].position = planet_position;
+        world.body[2].orientation = planet_rows;
         if world.live[3] {
-            if matches!(self.player.mode, 0x2e | 0x30 | 0x32 | 0x34) {
+            let next: [i64; 3] =
+                std::array::from_fn(|k| station_position[k].wrapping_sub(planet_position[k]));
+            let old = world.body[3].position;
+            let old_rows = world.body[3].orientation;
+            if station_rows == old_rows {
+                // A shift alone: Q31 rows are not exactly orthonormal, so
+                // turning through them when they have not changed would creep
+                // the parked ship by millimetres a frame.
+                let motion = &mut self.player.motion;
                 for k in 0..3 {
-                    let next = station_position[k].wrapping_sub(planet_position[k]);
-                    self.player.motion.position[k] = self.player.motion.position[k]
-                        .wrapping_add(next.wrapping_sub(world.body[3].position[k]));
+                    motion.position[k] =
+                        motion.position[k].wrapping_add(next[k].wrapping_sub(old[k]));
+                }
+            } else {
+                let q = |v: i32| f64::from(v) / 2_147_483_648.0;
+                // Into the old starport axes, out along the new ones.
+                let turn = |v: [f64; 3]| -> [f64; 3] {
+                    let local: [f64; 3] = std::array::from_fn(|i| {
+                        (0..3).map(|j| q(old_rows[3 * i + j]) * v[j]).sum::<f64>()
+                    });
+                    std::array::from_fn(|j| {
+                        (0..3)
+                            .map(|i| q(station_rows[3 * i + j]) * local[i])
+                            .sum::<f64>()
+                    })
+                };
+                let motion = &mut self.player.motion;
+                let offset: [f64; 3] =
+                    std::array::from_fn(|k| motion.position[k].wrapping_sub(old[k]) as f64);
+                let turned = turn(offset);
+                for k in 0..3 {
+                    motion.position[k] = next[k].wrapping_add(turned[k].round() as i64);
+                }
+                let velocity = turn(motion.velocity.map(f64::from));
+                motion.velocity = velocity.map(|v| v.round() as i32);
+                for row in &mut motion.orientation {
+                    let turned = turn(row.map(f64::from));
+                    *row =
+                        turned.map(|v| v.round().clamp(-2_147_483_648.0, 2_147_483_647.0) as i32);
                 }
             }
-            world.body[3].position =
-                std::array::from_fn(|k| station_position[k].wrapping_sub(planet_position[k]));
+            world.body[3].position = next;
+            world.body[3].orientation = station_rows;
         }
         // F1677's absolute-position cache is keyed by the frame stamp.
         world.stamp = world.stamp.wrapping_add(1);

@@ -1927,6 +1927,10 @@ pub const UNLAWFUL_DISCHARGE: usize = 3;
 pub const TRADING_ILLEGAL: usize = 5;
 /// "Smuggling illegal goods" (F233's event-5 scan).
 pub const SMUGGLING: usize = 7;
+/// `DATA_005039` record 1: F1056's action 9 from the pad without clearance.
+pub const LAUNCHING_WITHOUT_CLEARANCE: usize = 1;
+/// `DATA_005039` record 2: F1056 adds it when the starport's ledger is over 5000.
+pub const EVADING_FINE: usize = 2;
 /// The police fine F543 adds for a fake smuggler advertisement (`0x1388` in
 /// tenths of a credit: 500.0 CR).
 pub const POLICE_FINE: u32 = 0x1388;

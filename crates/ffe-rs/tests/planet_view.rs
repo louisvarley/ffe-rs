@@ -953,7 +953,7 @@ fn soft_touch_lands_and_fast_touch_bounces() {
         shapes: &library,
         terrain_table: cache.asset("base:terrain/tables").unwrap(),
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     let up: [f64; 3] = std::array::from_fn(|k| (port.position[k] - planet.position[k]) as f64);
     let length = up.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -1219,7 +1219,7 @@ fn landing_reaches_the_surface_state_and_launches_again() {
         shapes: &library,
         terrain_table: cache.asset("base:terrain/tables").unwrap(),
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     let to_port: [f64; 3] = std::array::from_fn(|k| (port.position[k] - planet.position[k]) as f64);
     let radius = to_port.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -1700,7 +1700,7 @@ fn hope_start_and_launch_keep_the_physical_ground_visible() {
         shapes: &library,
         terrain_table: cache.asset("base:terrain/tables").unwrap(),
         terrain_maps: cache.asset("base:terrain/maps").unwrap(),
-        detail: 0,
+        detail: ffe_core::surface::DEFAULT_DETAIL,
     };
     let viewer = ModelViewer::new(&cache).unwrap();
     assert_eq!(viewer.world_units_per_model_unit(parent.model), Some(16.0));
@@ -1718,14 +1718,26 @@ fn hope_start_and_launch_keep_the_physical_ground_visible() {
             .sum()
     };
     let initial_height = height(model.absolute_position(), &port);
+    // A parked frame, as the game runs before the launch: F1011's pad state
+    // keeps DATA_008867 at zero, so F1013 does not hand off at once.
+    model.step_landed(0.02, &Keys::default(), start.player_state);
     nav.begin_launch().unwrap();
     model.begin_takeoff();
     for frame in 0..=150 {
         if frame != 0 {
             nav.advance(&cache, 0.02);
-            if let Some(at) = nav.follow(model.absolute_position()) {
-                model.shift(at);
-            }
+            // As the game loop does on the pad: the planet and port move and
+            // turn, and the planet-relative pad world follows them.
+            let rows = |body: &ffe_rs::navigation::Body| -> [i32; 9] {
+                std::array::from_fn(|k| (body.orientation[k / 3][k % 3] * 2_147_483_647.0) as i32)
+            };
+            let (planet_now, port_now) = (&nav.bodies[port.parent.unwrap()], &nav.bodies[index]);
+            model.move_pad_bodies(
+                planet_now.position,
+                rows(planet_now),
+                port_now.position,
+                rows(port_now),
+            );
             model
                 .step_pad(0.02, &Keys::default(), Some(&tools))
                 .unwrap();
