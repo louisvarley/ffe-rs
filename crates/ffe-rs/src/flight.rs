@@ -170,6 +170,18 @@ impl Flight {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        // The prototype boundary keeps the ship near the origin and caps the
+        // speed at the prototype's own limits. System flight carries the
+        // original's 64-bit system coordinates (scaled by
+        // `UNITS_PER_FLIGHT_UNIT`) and its signed 32-bit velocity words, which
+        // are far larger; only finiteness and a generous corruption bound apply
+        // there. The original flight model (key O) itself reaches a few
+        // thousand flight units per second in the prototype.
+        let (position_limit, velocity_limit) = if self.system_flight {
+            (1.0e12, 1.0e8)
+        } else {
+            (1_000_000.0, 5000.0)
+        };
         if !self
             .position
             .iter()
@@ -179,11 +191,12 @@ impl Flight {
             || self
                 .position
                 .iter()
-                .any(|number| number.abs() > 1_000_000.0)
-            // The prototype step caps itself at 250; the original flight model
-            // (key O) reaches a few thousand flight units per second.
-            || self.velocity.iter().any(|number| number.abs() > 5000.0)
-            || self.speed() > 5000.0000001
+                .any(|number| number.abs() > position_limit)
+            || self
+                .velocity
+                .iter()
+                .any(|number| number.abs() > velocity_limit)
+            || self.speed() > velocity_limit * 1.0000001
             || !(0.0..std::f64::consts::TAU).contains(&self.yaw)
             || self.pitch.abs() > 1.4
             || self.cargo > CARGO_CAPACITY

@@ -3710,6 +3710,23 @@ fn run() -> Result<(), String> {
                     if gameover.is_some() || state.death.is_some() {
                         message = "SAVE REFUSED: the commander is dead.".to_owned();
                     } else {
+                        // Reconcile the ship with the current clock before saving:
+                        // the clock may have advanced past the last orbital refresh,
+                        // and the saved position must match the bodies a load
+                        // regenerates from that clock. Without this, a landed ship
+                        // resumes displaced by the planet's orbital motion and can
+                        // fall through the surface.
+                        if let (Some(model), Some(nav)) = (original.as_mut(), nav.as_mut()) {
+                            nav.refresh(&cache);
+                            if let Some(moved) = nav.follow(model.absolute_position()) {
+                                if !model.on_pad() {
+                                    model.shift(moved);
+                                }
+                            }
+                            state.position = model
+                                .absolute_position()
+                                .map(|p| p as f64 / ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
+                        }
                         let save = build_save(
                             &commander,
                             &state,

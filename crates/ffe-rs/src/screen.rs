@@ -2771,45 +2771,39 @@ impl Screen {
     }
 
     /// The tombstone screen (`F917`): a black 320x200 frame with the spinning
-    /// model and its engraved FF9C text. `angle` is F1675's binary yaw; the
-    /// original starts it at `0x3d090 >> 1` and decreases it with the loop tics.
+    /// model and its engraved FF9C text. `remaining` is F917's loop counter.
+    ///
+    /// F917 builds a stand-alone display object (`F1683`) at the origin,
+    /// `remaining` deep along +z (clamped to `TOMBSTONE_NEAREST`) and calls
+    /// `F1675_MatBuildYZT(matrix, 0, remaining >> 1)`. The second argument is 0
+    /// and the third is the angle, so the slab yaws about the vertical axis; the
+    /// screen vector countdown also brings it closer for the first 215,000 tics.
+    /// The light is `DATA_007201..3` (0x5a82, 0, 0x5a82). No camera rotation is
+    /// applied: F1683 copies the object matrix straight into the camera frame.
     pub fn draw_game_over(
         &mut self,
         viewer: &mut ModelViewer,
         model: u32,
-        angle: i32,
+        remaining: i64,
     ) -> Result<(), String> {
         self.frame[..320 * LOGICAL_HEIGHT].fill(0x00_00_00_00);
         // F917 draws on the full 320x200 logical screen, not the 320x158 flight
         // view: the tombstone's lower text would otherwise be clipped.
         let _full_screen = ffe_core::model_execute::ViewHeightGuard::full_screen();
-        // FFE picks the tombstone face from the text record's normal (2 = the
-        // RIP/obituary face, 4 = GAME OVER). The port's font normals are not
-        // reliable, so use the spin's current half-turn instead.
-        viewer.set_tombstone_face(Some(if angle & 0x8000 != 0 { 2 } else { 4 }));
-        let matrix = viewer.matrix_yzt(angle, 0);
-        let model_rows: [[f64; 3]; 3] = std::array::from_fn(|k| {
+        let matrix = viewer.matrix_yzt(0, (remaining >> 1) as i32);
+        if std::env::var_os("FFE_TEXT_DEBUG").is_some() {
+            eprintln!("--- draw remaining {remaining} yaw {}", (remaining >> 1) & 0xffff);
+        }
+        let rows: [[f64; 3]; 3] = std::array::from_fn(|k| {
             std::array::from_fn(|j| f64::from(matrix[3 * k + j]) / 2_147_483_648.0)
         });
-        // F917 inherits the external view's camera. The captured original looks
-        // at the slab about 30 degrees round and 20 down, not straight on.
-        let (yaw, pitch) = (30f64.to_radians(), (-20f64).to_radians());
-        let rotate = |[x, y, z]: [f64; 3]| {
-            let (rx, rz) = (x * yaw.cos() - z * yaw.sin(), x * yaw.sin() + z * yaw.cos());
-            [
-                rx,
-                y * pitch.cos() - rz * pitch.sin(),
-                y * pitch.sin() + rz * pitch.cos(),
-            ]
-        };
-        let rows = model_rows.map(rotate);
-        // The original draws the object at the camera origin with the current
-        // external-view camera; the frame at 320x200 fills about two thirds of
-        // the height. `model_radius` is in the same units as the vertex space.
-        let radius = viewer.model_radius(model).unwrap_or(0x10000) as f64;
-        let distance = (radius * 1.6).max(1.0);
-        let frame = viewer.render_scene(model, rows, [0.0, 0.0, distance], [0.0, 0.0, -1.0])?;
-        viewer.set_tombstone_face(None);
+        let distance = remaining.max(crate::gameover::TOMBSTONE_NEAREST) as f64;
+        let frame = viewer.render_scene(
+            model,
+            rows,
+            [0.0, 0.0, distance],
+            crate::gameover::TOMBSTONE_LIGHT,
+        )?;
         self.draw_shapes_full(viewer, &frame.shapes);
         self.present();
         Ok(())

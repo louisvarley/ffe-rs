@@ -2014,7 +2014,11 @@ impl Navigator {
         nav.missiles = crate::missile::MissileField::default();
         nav.effects.clear();
         nav.spawned = None;
-        nav.refreshed = 0.0;
+        // The bodies above were already placed at `save.clock`, so the next
+        // orbital refresh must not run until the clock has actually moved on
+        // from it; otherwise the first frame after a load advances the body
+        // positions while the restored ship stays behind.
+        nav.refreshed = save.clock;
         nav.drift = [0; 3];
         nav.skips = 0;
         nav.carry = 0.0;

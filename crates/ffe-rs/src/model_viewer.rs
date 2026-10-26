@@ -1198,6 +1198,18 @@ impl ModelViewer {
             },
         )?;
         let padded;
+        if std::env::var_os("FFE_NORMAL_DEBUG").is_some() && model.index == 172 {
+            let culled: Vec<usize> = normals
+                .iter()
+                .enumerate()
+                .filter(|(_, normal)| normal.culled)
+                .map(|(i, _)| i)
+                .collect();
+            eprintln!(
+                "normals172 count {} observer {observer:?} culled {culled:?}",
+                model.normal_count
+            );
+        }
         let mut vertices = match (stars, &self.stars) {
             (Some((field, records)), Some(tables)) => {
                 if field.types.len() > records.len() / 6 || records.len() > model.vertices.len() {
@@ -1907,9 +1919,10 @@ impl ModelViewer {
                         continue;
                     }
                     let behind = emission.screen.contains(&NEAR_SENTINEL);
+                    let height = ffe_core::model_execute::view_height();
                     let on_view = !behind
                         && emission.screen.iter().all(|[x, y]| {
-                            (0..320).contains(&i32::from(*x)) && (0..158).contains(&i32::from(*y))
+                            (0..320).contains(&i32::from(*x)) && (0..height).contains(&i32::from(*y))
                         });
                     let textured_entry = descriptors.is_some()
                         && count >= 3
@@ -1930,6 +1943,12 @@ impl ModelViewer {
                         && matches!(count, 3 | 4)
                         && emission.views.len() == count
                     {
+                        if std::env::var_os("FFE_FACE_DEBUG").is_some() {
+                            eprintln!(
+                                "outline face material {:#x} colour {rgb:?} screen {:?} behind {behind}",
+                                face.material, emission.screen
+                            );
+                        }
                         let vertices: Vec<([i16; 2], [i32; 3])> = emission
                             .screen
                             .iter()
@@ -2180,6 +2199,20 @@ impl ModelViewer {
         out: &mut Vec<Execution>,
     ) -> Result<(), String> {
         for emission in &result.texts {
+            if std::env::var_os("FFE_TEXT_DEBUG").is_some() {
+                eprintln!(
+                    "text {:#06x} normal {} culled {} shade {:?} material {:#x} colour {:?} glyphs {} size {} vertex {}",
+                    emission.text.string,
+                    emission.text.normal,
+                    emission.culled,
+                    emission.shade,
+                    emission.text.material,
+                    emission.context.colour,
+                    emission.text.glyphs,
+                    emission.text.size,
+                    emission.text.vertex
+                );
+            }
             let tombstone_text = matches!(emission.text.string, 0x9c00..=0x9c03 | 0x4085..=0x4089);
             if let Some(face) = self.tombstone_face {
                 if tombstone_text && emission.text.normal != face {
@@ -2306,6 +2339,18 @@ impl ModelViewer {
                 detail: [0, 0],
                 normals: &normals,
             };
+            if std::env::var_os("FFE_TEXT_DEBUG").is_some() {
+                let culled: Vec<usize> = normals
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, normal)| normal.culled)
+                    .map(|(i, _)| i)
+                    .collect();
+                eprintln!(
+                    "  glyphs {} size {size} font scale {} normals {} culled {:?} observer {observer:?} light {light:?}",
+                    text.glyphs, font.scale, font.normal_count, culled
+                );
+            }
             let mut generation = 2u32;
             for &code in &string {
                 if code < 0x20 {

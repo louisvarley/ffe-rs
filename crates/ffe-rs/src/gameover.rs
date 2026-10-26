@@ -21,6 +21,13 @@ pub const DEATH_VIEW_TICS: i64 = 0x3cae6;
 /// `F917`'s start (0x3d090) and end (-0xAAE60) for the tombstone loop.
 pub const TOMBSTONE_START_TICS: i64 = 0x3d090;
 pub const TOMBSTONE_END_TICS: i64 = -0xAAE60;
+/// `F917` draws the model at `z = max(remaining, 0x88b8)`; past this floor the
+/// slab stops approaching and fills the frame for the rest of the spin.
+pub const TOMBSTONE_NEAREST: i64 = 0x88b8;
+/// `F917` writes `DATA_007201..3` (0x5a82, 0, 0x5a82) into the instance's light
+/// (+0x134): a light from the right and in front, not the default
+/// `DATA_007231` upper-left one.
+pub const TOMBSTONE_LIGHT: [f64; 3] = [0x5a82 as f64, 0.0, 0x5a82 as f64];
 /// The model the normal game-over screen draws; model 175 is the rare variant
 /// `F917` selects when `DATA_008885 == 0xeb6973d`.
 pub const TOMBSTONE_MODEL: u32 = 172;
@@ -173,10 +180,9 @@ impl GameOver {
     /// still renders the external wreck, which is the `death` stream's frame.
     pub fn draw(&self, screen: &mut Screen, viewer: &mut ModelViewer) -> Result<(), String> {
         match self.phase {
-            Phase::Tombstone { .. } => {
+            Phase::Tombstone { remaining } => {
                 viewer.set_game_over_text(self.commander.as_bytes(), self.date.as_bytes());
-                let angle = self.angle().unwrap_or(0);
-                screen.draw_game_over(viewer, self.tombstone.model(), angle)
+                screen.draw_game_over(viewer, self.tombstone.model(), remaining)
             }
             Phase::DeathView { .. } => {
                 // F1104 clears/flips once and then the flight module keeps
