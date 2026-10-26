@@ -178,7 +178,8 @@ tables.
 - Pages 0-4 use the original labels, order, coordinates, colours, defaults and
   hot areas; the on/off icons are the original primary bitmaps.
 - Applied: space colour, background stars, lock external view to ship, reverse
-  left-right/up-down, Modern vs Classic controls (port page 5). Everything else
+  left-right/up-down, the space-dust/cloud switch (`DATA_009018`, F1035's
+  spawn gate), and Modern vs Classic controls (port page 5). Everything else
   keeps the original label, default and icon but is greyed and inert, with a
   page footnote.
 - Port additions (grey/yellow, documented): page 5 `Port Options` in the empty

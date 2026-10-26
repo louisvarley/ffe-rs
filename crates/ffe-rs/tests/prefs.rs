@@ -97,8 +97,14 @@ fn others_page_applies_stars_and_reverse_and_keeps_the_rest_inert() {
     assert!(prefs.others[3]);
     prefs.click(34, 68);
     assert!(prefs.others[4]);
-    // Space dust (0), elite control (5) and video (9) are not implemented.
-    for (y, index) in [(28, 0), (78, 5), (118, 9)] {
+    // Space dust (index 0) now gates F1035's spawn; elite control (5) and
+    // video (9) remain inert.
+    assert!(prefs.others[0]);
+    prefs.click(34, 28);
+    assert!(!prefs.others[0]);
+    prefs.click(34, 28);
+    assert!(prefs.others[0]);
+    for (y, index) in [(78, 5), (118, 9)] {
         let before = prefs.others[index];
         prefs.click(34, y);
         assert_eq!(prefs.others[index], before);

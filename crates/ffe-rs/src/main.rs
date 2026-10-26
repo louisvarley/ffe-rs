@@ -4457,6 +4457,29 @@ fn run() -> Result<(), String> {
                         .map_or(10_000, i64::from)
                 };
                 let events = nav.tick_ships(elapsed * factor, tics, player, radius);
+                // F1035/F769: the space-dust spawn and lifecycle for this
+                // flight frame. `DATA_009018` is the first "Other Options" row
+                // ("Space dust, clouds etc"); `DATA_008867` is the altitude
+                // F1033 measured above; `DATA_009123` is zero in normal flight
+                // (F908's `0x12` belongs to the hyperspace exit effect, which
+                // the port does not run). The dust's own stream is seeded from
+                // the system code (EXP-020).
+                let velocity = state.velocity.map(|value| {
+                    (value * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT
+                        / ffe_rs::original_flight::MM_PER_SECOND) as i64
+                });
+                nav.tick_dust(
+                    elapsed,
+                    &ffe_core::dust::Spawn {
+                        position: player,
+                        velocity,
+                        altitude: nav.altitude,
+                        detail: prefs.others[0],
+                        flight_active: true,
+                        time_running: true,
+                        speed: 0,
+                    },
+                );
                 let mass = scene
                     .as_ref()
                     .and_then(|scene| scene.ship_stats(state.ship))

@@ -8,6 +8,7 @@ use crate::original_flight::{Keys, OriginalFlight, MM_PER_SECOND, UNITS_PER_FLIG
 use ffe_content::VerifiedCache;
 use ffe_core::bulletin;
 use ffe_core::calendar::Calendar;
+use ffe_core::dust;
 use ffe_core::effects::{self, Effect};
 use ffe_core::galaxy::{tables, Tables};
 use ffe_core::hyperspace::{plan as jump_plan, Report};
@@ -1117,6 +1118,9 @@ pub struct Navigator {
     traffic: HashMap<usize, Starport>,
     /// The NPC traffic of the current system (F688/F635), ticked in flight.
     pub ships: Vec<NpcShip>,
+    /// The space-dust field (F1035/F769), ticked in flight and drawn by the
+    /// follow-up. Its own stream is seeded from the system code (EXP-020).
+    pub dust: dust::Field,
     /// The player's legal standing (`DATA_008646` bit 0 / `DATA_008647`): the
     /// police alert that makes police and military ships hostile.
     pub legal: npc::Legal,
@@ -1541,6 +1545,13 @@ fn jurisdiction_of(cache: &VerifiedCache, code: u32) -> usize {
         .map_or(0, |tables| (tables.details(code).allegiance >> 6) as usize)
 }
 
+/// The dust field's own stream (EXP-020), keyed by the system code so the same
+/// system always draws the same dust without touching F922/F1530's traffic
+/// rolls. F1035 itself uses the game's shared `DATA_008818`/`DATA_008820`.
+fn dust_seed(code: u32) -> (u32, u32) {
+    (code ^ 0x6d5f_1b00, code.rotate_left(13) ^ 0x00d0_5700)
+}
+
 /// World seconds to the original's clock words: whole days, then the fraction of a
 /// day in 2^-32ths (the orbits turn once in 365 days).
 pub fn clock_words(seconds: f64) -> [u32; 2] {
@@ -1879,6 +1890,7 @@ impl Navigator {
         bodies: Vec<Body>,
     ) -> Result<Self, String> {
         let jurisdiction = jurisdiction_of(cache, entries[current].params.code);
+        let seed = dust_seed(entries[current].params.code);
         Ok(Self {
             entries,
             current,
@@ -1898,6 +1910,7 @@ impl Navigator {
             docked: None,
             traffic: HashMap::new(),
             ships: Vec::new(),
+            dust: dust::Field::new(seed.0, seed.1),
             legal: npc::Legal::default(),
             career: npc::Career::default(),
             jurisdiction,
@@ -3283,6 +3296,16 @@ impl Navigator {
         self.effects.retain(Effect::alive);
     }
 
+    /// One flight frame of F1035's spawn and F769's lifetime. `elapsed` is the
+    /// presented (unaccelerated) frame time: F1035 attempts at the original's
+    /// 20 ms timer cadence, and F769's day ticks are real seconds because the
+    /// time acceleration scales both the day rate and F769's limit. The caller
+    /// supplies the player's position/velocity, F1033's altitude and the
+    /// "Space dust, clouds etc" option.
+    pub fn tick_dust(&mut self, elapsed: f64, spawn: &dust::Spawn) {
+        self.dust.advance(elapsed, spawn);
+    }
+
     /// One frame of NPC traffic: the flight AI, F931's fire and F927's recycle of
     /// ships that are dead, fled or too far from the player. `tics` are the
     /// frame's game tics and `player_radius` the player's interaction radius
@@ -4368,6 +4391,9 @@ impl Navigator {
         // F675: the pirates close to the player are carried through the jump.
         self.persisted = npc::persist(&self.ships, self.player_at);
         self.ships.clear();
+        // F674/F909 clear the system's objects; dust is a system-local object.
+        let (dust_a, dust_b) = dust_seed(self.entries[index].params.code);
+        self.dust.reset(dust_a, dust_b);
         self.spawned = None;
         self.docked = None;
         self.traffic.clear();

@@ -3,6 +3,7 @@
 pub mod bulletin;
 pub mod calendar;
 pub mod collision;
+pub mod dust;
 pub mod effects;
 pub mod equipment;
 mod equipment_table;

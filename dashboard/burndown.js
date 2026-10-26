@@ -16,7 +16,7 @@
 window.FFE_BURNDOWN = {
   project: "ffe-rs",
   unit: "work items",
-  updated: "2026-10-25",
+  updated: "2026-10-26",
   milestones: [
     {
       id: "foundation",
@@ -119,7 +119,7 @@ window.FFE_BURNDOWN = {
         { id: "flight-9", title: "Entering and leaving the rotating station frame", status: "in-progress", version: "v0.49n" },
         { id: "flight-10", title: "Docking rules and station position/orientation", status: "in-progress", version: "nav-docking" },
         { id: "flight-11", title: "Launch sequence", status: "done", version: "v0.55" },
-        { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "todo" },
+        { id: "flight-12", title: "Scripted flight scenarios traced against the reference", status: "in-progress", version: "flight-reference" },
         { id: "flight-13", title: "Open-air starport takeoff (F1013 0x24, F1031/F1032 bay release, F573 return)", status: "done", version: "v0.59" }
       ]
     },
@@ -148,7 +148,7 @@ window.FFE_BURNDOWN = {
       title: "Gameplay systems (phase 4)",
       status: "planned",
       tasks: [
-        { id: "gameplay-dust", title: "Source space-dust spawning, lifetime and moving flight rendering", status: "todo" },
+        { id: "gameplay-dust", title: "Source space-dust spawning, lifetime and moving flight rendering", status: "in-progress" },
         { id: "gameplay-1", title: "Market and economy tables, pricing and cargo", status: "in-progress", version: "market-v20" },
         { id: "gameplay-2", title: "Equipment and ship purchase (shipyard, outfitting)", status: "in-progress", version: "v0.73" },
         { id: "gameplay-3", title: "Fuel, damage and repair", status: "in-progress", version: "v0.73" },
@@ -849,6 +849,16 @@ window.FFE_BURNDOWN = {
       date: "2026-10-26",
       remaining: 63,
       note: "Gateway neighbours merged: Navigator::new_game now offers its start system's real galaxy-table neighbours within 30 LY (navigation::galaxy_around), generated exactly as a map destination is (F852/F860 select the star and F841 type word, F832's position seed/mass/stars, F830/F869 name and population) instead of only the 12 hand-coded and four test systems. The default start can now jump to Titican (4.42 LY, code 0x12a53716), whose bodies include the station Argent; the local trade-loop test now completes all 8 steps (Gateway -> Titican -> Gateway). One existing item's scope advanced but world-7/world-8 (jump scene, maps) are not complete, so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 63,
+      note: "Space-dust core: ffe_core::dust implements F1035's spawn (20 km altitude, DATA_009018 'Space dust, clouds etc' preference, flight-module byte, one-in-five 0x3332 draw, stopped-time gate, F928/F1533 clone, F1675 orientation, F1517 velocity<<7 offset, +0x7e distance word), F769's age (four day ticks) and +0x88 F1680 cull, and F715's empty movement. The playable wires it through Navigator::tick_dust in the flight frame; prefs::other_applied now includes row 0; eleven cache-free dust tests and the updated Others-page test pass. gameplay-dust stays in progress because the moving flight rendering is a separate follow-up, so the remaining count is unchanged."
+    },
+    {
+      date: "2026-10-26",
+      remaining: 63,
+      note: "Scripted flight trace merged (flight-v1): `--flight idle|takeoff|planet 900` runs the executed original from boot with scripted Y/start/launch/set-speed keys and emits one bounded JSONL row per frame (mode, F1013 altitude, F1121 set speed, player planet +0x56 with model/position, ship position/velocity, chained state hash). verify-flight.py runs all three twice, checks the hash chain, rejects 16 altered fields and an empty trace, and flight_reference.rs compares the idle pad, the 0x30 -> 0x24 -> 0x26 -> 0x00 machine, the retained planet model and the released bay with the port. This first slice covers the takeover report's idle boot, launch frame continuity and retained planet; approach/docking/traffic scenarios remain, so flight-12 is in-progress and the count is unchanged."
     },
   ]
 };

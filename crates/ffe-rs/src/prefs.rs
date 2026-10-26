@@ -220,10 +220,11 @@ pub enum Activate {
 }
 
 /// Which settings the port applies. The original's `FUNC_000216` toggles the
-/// player flags at `+0x3f51..5a` (`DATA_004904`); only these three move the
-/// port's renderer.
+/// player flags at `+0x3f51..5a` (`DATA_004904`); the space-dust/cloud switch
+/// (row 0, `DATA_009018`) gates F1035's spawn, and these four move the port's
+/// renderer or controls.
 pub fn other_applied(index: usize) -> bool {
-    (1..=4).contains(&index)
+    (0..=4).contains(&index)
 }
 
 /// The Escape preference state. The defaults are `FUNC_000219_SysMenuInit`'s
