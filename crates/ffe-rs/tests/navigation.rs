@@ -2691,3 +2691,38 @@ fn pad_takeoff_stays_near_the_port_when_the_system_clock_advances() {
         );
     }
 }
+
+/// F1019/F1021/F1024: a soft touch inside Old Blackelk's region lands only with
+/// the autopilot engaged or with clearance on the allocated pad; in free flight
+/// it is F1013's climb again, with F1022's warning once.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn a_touch_in_a_starport_region_lands_only_with_the_autopilot_or_clearance() {
+    use ffe_rs::navigation::{Navigator, RegionTouch};
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let port = nav.docked.unwrap();
+    assert_eq!(nav.bodies[port].name, "Old Blackelk");
+    nav.takeoff = None;
+    assert!(!nav.cleared(port));
+    // Free flight, no clearance: no landing, the climb again, one warning.
+    match nav.region_touch(port, 0) {
+        RegionTouch::Climb(Some(warning)) => assert!(warning.contains("Old Blackelk")),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(nav.takeoff_state(), Some(ffe_core::traffic::state::TAKEOFF));
+    assert_eq!(nav.region_touch(port, 0), RegionTouch::Climb(None));
+    // The autopilot (mode 2) lands on the touch.
+    nav.target = Some(port);
+    assert_eq!(nav.region_touch(port, 0), RegionTouch::Land);
+    nav.target = None;
+    // With clearance (mode 6) the allocated pad or no pad lands; another pad
+    // does not.
+    let at = nav.bodies[port].position;
+    let (cleared, _) = nav.request_clearance(at).unwrap();
+    assert_eq!(cleared, port);
+    assert!(nav.cleared(port));
+    assert_eq!(nav.region_touch(port, 0), RegionTouch::Land);
+    let other = (0..7u8).find(|pad| !matches!(nav.region_touch(port, pad + 1), RegionTouch::Land));
+    assert!(other.is_some(), "some pad is not the allocated bay");
+}

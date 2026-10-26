@@ -1155,6 +1155,9 @@ pub struct Navigator {
     /// F381 has granted launch permission at the open-air starport (the launch action
     /// needs it).
     pub launch_cleared: bool,
+    /// F1022 has warned about an uncleared touch at this port (`DATA_008873`
+    /// set to 6), so it does not repeat until the next landing.
+    warned_at: Option<usize>,
     /// The NPC traffic of the current system (F688/F635), ticked in flight.
     pub ships: Vec<NpcShip>,
     /// The space-dust field (F1035/F769), ticked in flight and drawn by the
@@ -1573,6 +1576,20 @@ pub struct Attack {
     pub police: bool,
     /// F942 destroyed the ship.
     pub destroyed: bool,
+}
+
+/// What a soft touch inside a starport's region (F1033's `0x20` with `0x40`)
+/// does in flight.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegionTouch {
+    /// F1019 (autopilot, mode 2) or F1024 (manual with clearance, mode 6):
+    /// the ship lands on the port.
+    Land,
+    /// F1021 (free flight): the ship is not landed; the mode goes back to
+    /// F1013's `0x24` climb. Without clearance F1022 warns once.
+    Climb(Option<String>),
+    /// F1024: a pad other than the allocated bay; F1022 warns once.
+    WrongPad(Option<String>),
 }
 
 /// Why traffic control said no (the original's 0x98b7..0x98b9 messages).
@@ -2001,6 +2018,7 @@ impl Navigator {
             docked: None,
             traffic: HashMap::new(),
             launch_cleared: false,
+            warned_at: None,
             ships: Vec::new(),
             dust: dust::Field::new(seed.0, seed.1),
             legal: npc::Legal::default(),
@@ -2413,10 +2431,11 @@ impl Navigator {
         self.pad_point(index, bay)
     }
 
-    /// The nearest station within clearance range of `ship`.
+    /// The nearest station or open-air starport within clearance range of
+    /// `ship` (F655 asks either).
     pub fn nearest_station(&self, ship: [i64; 3]) -> Option<usize> {
         (0..self.bodies.len())
-            .filter(|i| self.bodies[*i].kind == Kind::Station)
+            .filter(|i| matches!(self.bodies[*i].kind, Kind::Station | Kind::Starport))
             .map(|i| (i, distance(ship, self.bodies[i].position)))
             .filter(|(_, range)| *range <= CLEARANCE_RANGE)
             .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -3119,6 +3138,47 @@ impl Navigator {
         true
     }
 
+    /// A soft touch inside starport `index`'s region: F1019 with the autopilot
+    /// engaged, F1024 with clearance (F657: the port's `+0xca` is the player),
+    /// else F1021, whose touch is no landing but F1013's `0x24` climb again.
+    /// `pad` is F1033's pad byte (one more than the pad, zero off the pads).
+    pub fn region_touch(&mut self, index: usize, pad: u8) -> RegionTouch {
+        if self.target.is_some() {
+            return RegionTouch::Land;
+        }
+        let name = self.bodies.get(index).map_or("", |b| b.name.as_str());
+        // F1022 posts its message only while DATA_008873 is clear, then sets
+        // it; the port keeps that per port until the next landing or launch.
+        let warning = (self.warned_at != Some(index)).then(|| {
+            // Message 0x98be; the comms strings are not in the cache, so this
+            // is the port's wording.
+            format!("{name}: you have no clearance to land here.")
+        });
+        if self.cleared(index) {
+            let bay = self
+                .traffic
+                .get(&index)
+                .and_then(|port| port.bay_of(PLAYER))
+                .map(i32::from);
+            let touched = i32::from(pad) - 1;
+            if (0..7).contains(&touched) && Some(touched) != bay {
+                if warning.is_some() {
+                    self.warned_at = Some(index);
+                }
+                return RegionTouch::WrongPad(warning);
+            }
+            return RegionTouch::Land;
+        }
+        if self.takeoff.is_none() {
+            self.takeoff = Some(Takeoff::taking_off());
+            self.launch_cleared = false;
+        }
+        if warning.is_some() {
+            self.warned_at = Some(index);
+        }
+        RegionTouch::Climb(warning)
+    }
+
     /// F1019's open-air starport touch (`0x2e`): the port's pad. F1048's view
     /// function then turns it into `0x30` and resets the traffic record. A station
     /// hull or a planet is not this state.
@@ -3134,6 +3194,7 @@ impl Navigator {
         }
         // F1048 calls F653: the traffic record is reset (the bay stays allocated).
         self.starport(index).reset();
+        self.warned_at = None;
         self.docked = Some(index);
         self.target = None;
         self.final_leg = false;

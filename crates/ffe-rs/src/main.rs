@@ -3708,15 +3708,30 @@ fn run() -> Result<(), String> {
                         }
                         Some(nav) => match nav.request_clearance(ship) {
                             Some((index, Reply::Granted(bay))) => format!(
-                                "{}: docking clearance {} (bay {}). Enter the slot on the docking face.",
+                                "{}: {} clearance {} (bay {}). {}",
                                 nav.bodies[index].name,
-                                if bay.fresh { "granted" } else { "already granted" },
-                                bay.index + 1
+                                if nav.bodies[index].kind == NavKind::Starport {
+                                    "landing"
+                                } else {
+                                    "docking"
+                                },
+                                if bay.fresh {
+                                    "granted"
+                                } else {
+                                    "already granted"
+                                },
+                                bay.index + 1,
+                                if nav.bodies[index].kind == NavKind::Starport {
+                                    "Land on that pad."
+                                } else {
+                                    "Enter the slot on the docking face."
+                                }
                             ),
                             Some((index, other)) => {
                                 format!("{}: {}.", nav.bodies[index].name, refusal(other))
                             }
-                            None => "No station within 100 km to ask for clearance.".to_owned(),
+                            None => "No station or starport within 100 km to ask for clearance."
+                                .to_owned(),
                         },
                         None => "No stations: navigation is unavailable.".to_owned(),
                     };
@@ -4089,6 +4104,7 @@ fn run() -> Result<(), String> {
                         })
                 };
                 let mut landed_at = None;
+                let mut region_touch = None;
                 let step_result = if let Some(mode) = landed_state {
                     model.step_landed(elapsed, &keys, mode);
                     Ok(None)
@@ -4113,13 +4129,14 @@ fn run() -> Result<(), String> {
                             )
                             .map(|contact| {
                                 // F1019/F1021 test 0x40 first but ignore it when
-                                // 0x80 is set: a crash is not a landing. The pad
-                                // also needs F576's 0x20 touch flag.
+                                // 0x80 is set: a crash is not a landing. Inside
+                                // the port's 0x20 region the mode decides
+                                // (`Navigator::region_touch`).
                                 if contact.flags & 0x40 != 0
                                     && contact.flags & 0x20 != 0
                                     && contact.flags & 0x80 == 0
                                 {
-                                    landed_at = Some(index);
+                                    region_touch = Some((index, contact.pad));
                                 }
                                 Some(contact)
                             })
@@ -4251,6 +4268,23 @@ fn run() -> Result<(), String> {
                             } else {
                                 contact.as_ref().map_or(i32::MAX, |c| c.altitude())
                             };
+                        }
+                        if let (Some((index, pad)), Some(nav)) = (region_touch, nav.as_mut()) {
+                            match nav.region_touch(index, pad) {
+                                ffe_rs::navigation::RegionTouch::Land => landed_at = Some(index),
+                                ffe_rs::navigation::RegionTouch::Climb(warning) => {
+                                    // F1021: no landing, F1013's climb again.
+                                    model.set_mode(ffe_core::traffic::state::TAKEOFF);
+                                    if let Some(warning) = warning {
+                                        pending_log.add(Source::Docking, warning);
+                                    }
+                                }
+                                ffe_rs::navigation::RegionTouch::WrongPad(warning) => {
+                                    if let Some(warning) = warning {
+                                        pending_log.add(Source::Docking, warning);
+                                    }
+                                }
+                            }
                         }
                         // F1021's rough landing (`0x32`) then F1047's view frame
                         // (`0x34`): the ship is settled, its motion is F1042's

@@ -376,7 +376,13 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   F994's three-body frame (`OriginalFlight::step_starport_landing`); the cache's
   model-data gap is fixed (model `0x59`'s geometry imports even though its command
   program does not, so F580's child anchor resolves for 0x51-0x60). Manual pad touches
-  and the F746/F744/F652 touch are tested. What remains is the automatic **lateral
+  and the F746/F744/F652 touch are tested. A soft touch inside the port's `0x20` region
+  lands only as the source's mode allows (`Navigator::region_touch`): F1019 with the
+  autopilot (mode 2), F1024 with clearance (mode 6; another pad than the allocated bay
+  only gets F1022's warning), and in free flight F1021 sets F1013's `0x24` climb again
+  with F1022's warning once (message `0x98be`, in the port's wording). Before this any
+  touch on a roof or the ground near a port "docked" the ship. The `D` clearance request
+  (F655) now asks an open-air starport as well as a station. What remains is the automatic **lateral
   capture**: the port's controller (F599's request plus the navigator's one-second
   `follow` drift) can pass the pad ~100 m to the side and clip a building, so the
   end-to-end test places the ship at F650's seat for the touch. F596/F597's exact
