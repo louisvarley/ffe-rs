@@ -58,8 +58,13 @@ planet's centre less F610's radius), F592/F596/F597's guidance and F587's turns
 - **Port rule: detour.** F741/F742/F610 fly a straight line, which runs through the
   planet between two ports of one world. While the line's lowest interior point is
   within a world's outer radius plus a tenth of it (the outer radius bounds the
-  terrain; `inner_radius` is only its lowest point), the autopilot steers at a point up
-  and forward of the ship instead. F597's arrival takes precedence.
+  terrain; `inner_radius` is only its lowest point), the autopilot steers elsewhere:
+  below that clearance shell it climbs at 45 degrees toward the target's side, to a
+  point as far ahead as the shell is above it; on or above the shell it aims at the
+  line's closest point pushed out to the shell, which lies between the ship and the
+  target, so the target stays ahead. (A waypoint a fixed step ahead of the ship, the
+  first version, held the ship to a crawl away from the planet with the target behind
+  it.) F597's arrival takes precedence.
 - **Port rule: time acceleration near worlds.** Inside a planet's or moon's outer
   radius the acceleration is held at 100x: one 10000x frame is nearly three minutes of
   thrust in a fixed direction beside the ground of a 2 g world.

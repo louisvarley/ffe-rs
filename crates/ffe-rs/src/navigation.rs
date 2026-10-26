@@ -1599,13 +1599,10 @@ const APPROACH_STOP: f64 = 1.0e6;
 /// The counter is not reset between whole transfers (the old reset let a fast
 /// target teleport on every frame); engaging or locking a target clears it.
 const MAX_SKIPS: u32 = 4;
-/// Within this of a station, its motion carries the ship (200 km).
 /// The port's detour: how far above a blocking body's surface a line must pass
-/// (a fraction of its radius, at least the margin), and the least distance to
-/// the climb waypoint (millimetres).
+/// (a fraction of its radius, at least the margin in millimetres).
 const DETOUR_CLEARANCE: f64 = 0.1;
 const DETOUR_MARGIN: f64 = 5.0e6;
-const DETOUR_STEP: f64 = 5.0e7;
 
 fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -5023,10 +5020,15 @@ impl Navigator {
         Some((guidance, body))
     }
 
-    /// The up-and-forward waypoint while the line from `ship` to `point` runs
-    /// through a star, planet or moon other than the target `index` (its
-    /// closest interior point below its outer radius plus a tenth of it); `None` when the
-    /// line is clear.
+    /// The waypoint while the line from `ship` to `point` runs through a star,
+    /// planet or moon other than the target `index` (its closest interior point
+    /// below its outer radius plus a tenth of it). Below that clearance shell
+    /// the ship climbs at 45 degrees toward the target's side, to a point as
+    /// far ahead as the shell is above it (a nearer point, recomputed each
+    /// frame, held the ship to a crawl). On or above the shell it aims at the
+    /// line's closest point pushed out to the shell: that lies between the ship
+    /// and the target, round the world's curve, so the target stays ahead.
+    /// `None` when the line is clear.
     fn detour(&self, ship: [i64; 3], point: [i64; 3], index: usize) -> Option<[i64; 3]> {
         let s = ship.map(|v| v as f64);
         let d: [f64; 3] = std::array::from_fn(|k| (point[k] - ship[k]) as f64);
@@ -5034,7 +5036,7 @@ impl Navigator {
         if length2 < 1.0 {
             return None;
         }
-        let blocker = self
+        let (body, clear, offset) = self
             .bodies
             .iter()
             .enumerate()
@@ -5057,29 +5059,46 @@ impl Navigator {
                 // generous clearance only holds back lines that skim the world
                 // between two high points (gravity sags those into the ground);
                 // an approach down to a port bottoms out at the port itself.
-                let clearance = (surface * DETOUR_CLEARANCE).max(DETOUR_MARGIN);
-                (dot3(closest, closest).sqrt() < surface + clearance).then_some((b, surface))
+                let clear = surface + (surface * DETOUR_CLEARANCE).max(DETOUR_MARGIN);
+                (dot3(closest, closest).sqrt() < clear).then_some((b, clear, closest))
             })
             .min_by(|a, b| distance(ship, a.0.position).total_cmp(&distance(ship, b.0.position)))?;
-        let (body, surface) = blocker;
         let away: [f64; 3] = std::array::from_fn(|k| s[k] - body.position[k] as f64);
-        let up = unit3(away);
-        let across = dot3(d, up);
-        let mut along: [f64; 3] = std::array::from_fn(|k| d[k] - up[k] * across);
-        if dot3(along, along) < 1.0 {
-            // Straight through the centre: any direction across the surface.
-            along = if up[0].abs() < 0.9 {
+        let height = dot3(away, away).sqrt();
+        if height < clear {
+            let up = unit3(away);
+            let across = dot3(d, up);
+            let mut along: [f64; 3] = std::array::from_fn(|k| d[k] - up[k] * across);
+            if dot3(along, along) < 1.0 {
+                // Straight through the centre: any direction across the surface.
+                along = if up[0].abs() < 0.9 {
+                    [1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 1.0, 0.0]
+                };
+                let across = dot3(along, up);
+                along = std::array::from_fn(|k| along[k] - up[k] * across);
+            }
+            let forward = unit3(along);
+            let step = (clear - height).max(DETOUR_MARGIN);
+            return Some(std::array::from_fn(|k| {
+                ship[k] + ((up[k] + forward[k]) * step) as i64
+            }));
+        }
+        let mut out = offset;
+        if dot3(out, out) < 1.0 {
+            // Straight through the centre: any direction across the line.
+            out = if d[0].abs() < d[1].abs().max(d[2].abs()) {
                 [1.0, 0.0, 0.0]
             } else {
                 [0.0, 1.0, 0.0]
             };
-            let across = dot3(along, up);
-            along = std::array::from_fn(|k| along[k] - up[k] * across);
+            let along = dot3(out, d) / length2;
+            out = std::array::from_fn(|k| out[k] - d[k] * along);
         }
-        let forward = unit3(along);
-        let step = (surface * 0.05).max(DETOUR_STEP);
+        let out = unit3(out);
         Some(std::array::from_fn(|k| {
-            ship[k] + ((up[k] + forward[k]) * step) as i64
+            body.position[k] + (out[k] * clear) as i64
         }))
     }
 

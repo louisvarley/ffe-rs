@@ -4195,7 +4195,7 @@ fn run() -> Result<(), String> {
                                     ))
                                 });
                                 eprintln!(
-                                    "trace t={:.1} keys={:?} mode={:#x} pad={} gear={} set={} thrust={:?} vel={:?} contact={:?} frame={:?} scan={:?} world_km={:?} target={:?} at={:?}",
+                                    "trace t={:.1} keys={:?} mode={:#x} pad={} gear={} set={} thrust={:?} vel={:?} contact={:?} frame={:?} scan={:?} world_km={:?} target={:?} behind={:?} at={:?}",
                                     session.total,
                                     (keys.faster, keys.slower, keys.pitch_up, keys.pitch_down),
                                     player.mode,
@@ -4209,6 +4209,7 @@ fn run() -> Result<(), String> {
                                     scan,
                                     world,
                                     target,
+                                    screen.target_hud.as_ref().map(|hud| hud.behind),
                                     at,
                                 );
                             }
