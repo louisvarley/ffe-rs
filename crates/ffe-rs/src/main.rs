@@ -889,6 +889,9 @@ fn run() -> Result<(), String> {
     let mut acceleration = 0usize;
     // F2's status/equipment page (`F1120`, `DATA_008871 & 8`).
     let mut status_page = false;
+    // F5's console icon (action 0xf5): the parked ship's engines/equipment page. Off by
+    // default; the engine and wing clicks work while it is up.
+    let mut engines_page = false;
     // F2's sub-page: 0 is `F1120`'s ship/equipment page, 1 is F312's profile.
     let mut status_section = 0u8;
     // The single route into the original's ten-entry log. Port-only notices
@@ -1618,6 +1621,22 @@ fn run() -> Result<(), String> {
                 status_section = 0;
                 message = "Status: ship systems (F2 returns, F7 commander profile).".to_owned();
             }
+            held_controls.disarm(&keys_down);
+        }
+        if active
+            && state.mode == ffe_rs::flight::Mode::Flight
+            && !pad_board
+            && model_lab.is_none()
+            && model_viewer.is_none()
+            && console_click == Some(Click::Screen(5))
+        {
+            // F1056's action 0xf5 swaps F1117's normal page and F1120's engines-off page.
+            engines_page = !engines_page;
+            message = if engines_page {
+                "Ship systems: the engines and the undercarriage are on the diagram.".to_owned()
+            } else {
+                "Flight console.".to_owned()
+            };
             held_controls.disarm(&keys_down);
         }
         if active
@@ -2595,7 +2614,9 @@ fn run() -> Result<(), String> {
                     let pad_landed = nav.as_ref().is_some_and(|nav| nav.on_pad());
                     // Action 9 (engines on) is also a click on either engine nozzle of
                     // the parked ship's dashboard page (`DATA_007258`).
-                    let systems_click = if nav.as_ref().is_some_and(|nav| nav.landed_view()) {
+                    let systems_click = if nav.as_ref().is_some_and(|nav| nav.landed_view())
+                        && (engines_page || (status_page && status_section == 0))
+                    {
                         click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
                     } else {
                         None
@@ -2619,6 +2640,10 @@ fn run() -> Result<(), String> {
                                 "Undercarriage up.".to_owned()
                             };
                         }
+                    }
+                    // F1119: the climb puts the normal flight page back.
+                    if nav.as_ref().is_some_and(|nav| nav.takeoff.is_some()) {
+                        engines_page = false;
                     }
                     if launch
                         && (landed.is_some() || pad_landed)
@@ -4631,8 +4656,7 @@ fn run() -> Result<(), String> {
                 .map(|model| model.set_speed_metres().round() as i32),
             labels,
             navigation: nav.as_ref().is_some_and(|nav| nav.view == NavView::Places),
-            status_page: (status_page && status_section == 0)
-                || nav.as_ref().is_some_and(|nav| nav.landed_view()),
+            status_page: (status_page && status_section == 0) || engines_page,
         };
         // Launching from the station puts the ship out from it in this system, on the
         // original flight model (which the navigation moves).

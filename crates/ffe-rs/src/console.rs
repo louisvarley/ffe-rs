@@ -235,6 +235,8 @@ impl Click {
             Click::Screen(2)
             | Click::Screen(3)
             | Click::Screen(4)
+            // F5's icon (action 0xf5) swaps the normal page and the engines-off page.
+            | Click::Screen(5)
             | Click::Navigation
             | Click::Hyperspace => None,
             Click::Screen(_) => Some("F5 (comms) is not ported yet."),
