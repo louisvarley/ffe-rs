@@ -5117,16 +5117,15 @@ impl Navigator {
                 }),
             }
         } else if body.kind == Kind::Station {
-            // F741's indoor-station offset is the literal z word 0xfa0; the
-            // Docking Options distance (a port addition) replaces it.
+            // F741's indoor-station offset is the z word 0xfa0. F593 adds it in
+            // the frame F1678 gives the station, the station's own, so it lies
+            // along the docking axis (the station's z row), not the system's z.
+            // The Docking Options distance (a port addition) replaces it.
             let offset = self
                 .station_approach_km
-                .map_or(0xfa0 * 1024, |km| i64::from(km) * 1_000_000);
-            [
-                body.position[0],
-                body.position[1],
-                body.position[2] + offset,
-            ]
+                .map_or(f64::from(0xfa0 * 1024), |km| f64::from(km) * 1.0e6);
+            let axis = unit(body.orientation[2]);
+            std::array::from_fn(|k| body.position[k] + (axis[k] * offset).round() as i64)
         } else {
             body.position
         };
