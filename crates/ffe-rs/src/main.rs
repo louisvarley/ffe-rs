@@ -5251,6 +5251,8 @@ fn run() -> Result<(), String> {
         };
         screen.cargo_inventory =
             (status_shown && status_section == 3).then(|| cargo_inventory(&cache, &state));
+        screen.roster = (status_shown && status_section == 4).then(|| mission_roster(&state));
+        screen.contracts = (status_shown && status_section == 5).then(|| mission_contracts(&state));
         views.console = ConsoleState {
             acceleration,
             paused,
@@ -7165,6 +7167,66 @@ fn jettison_canister(
     ));
 }
 
+/// F295's rows: every active passenger, parcel and military package.
+fn mission_roster(state: &Flight) -> Vec<ffe_rs::screen::RosterRow> {
+    use ffe_core::missions::Kind;
+    state
+        .missions
+        .active()
+        .filter(|m| {
+            matches!(
+                m.kind,
+                Kind::Passenger | Kind::Parcel | Kind::MilitaryDelivery
+            )
+        })
+        .map(|m| {
+            let (client, group) = match m.kind {
+                Kind::Passenger => (m.client.clone(), m.passengers.to_string()),
+                Kind::Parcel => (m.client.clone(), "Parcel".to_owned()),
+                _ => {
+                    let navy = if m.basic_data & 0x4000 != 0 {
+                        "Imp. Navy"
+                    } else {
+                        "Fed.Military"
+                    };
+                    (
+                        format!("{navy} (by {})", mission_date(m.deadline_day)),
+                        "-".to_owned(),
+                    )
+                }
+            };
+            ffe_rs::screen::RosterRow {
+                client,
+                group,
+                destination: m.destination_name.clone(),
+                reward: m.reward,
+            }
+        })
+        .collect()
+}
+
+/// F316's rows: every active removal job.
+fn mission_contracts(state: &Flight) -> Vec<ffe_rs::screen::ContractRow> {
+    state
+        .missions
+        .active()
+        .filter(|m| m.kind == ffe_core::missions::Kind::Assassination)
+        .map(|m| ffe_rs::screen::ContractRow {
+            contract: format!("Kill {}, return to {}", m.cargo, m.origin_name),
+            system: m.destination_name.clone(),
+            station: m.origin_name.clone(),
+            time: mission_date(m.deadline_day),
+            reward: m.reward,
+        })
+        .collect()
+}
+
+/// A contract day as the status pages print it (`1-Jan-3250`).
+fn mission_date(day: u32) -> String {
+    let full = ffe_rs::galaxy_map::date_text(f64::from(day) * 86_400.0);
+    full.split(' ').next().unwrap_or("").to_owned()
+}
+
 /// F310's cargo, cabins and cash (`DATA_008888..8892`).
 fn status_hold(
     cache: &ffe_content::VerifiedCache,
@@ -7190,8 +7252,14 @@ fn status_sections(
     state: &Flight,
     nav: Option<&ffe_rs::navigation::Navigator>,
 ) -> [bool; 7] {
+    use ffe_core::missions::Kind;
     let cargo = status_hold(cache, state, nav).cargo_used > 0;
-    [true, true, false, cargo, false, false, false]
+    let active = |kinds: &[Kind]| state.missions.active().any(|m| kinds.contains(&m.kind));
+    // F286: page 4 needs DATA_009073's contracts (passengers, parcels and
+    // military packages), page 5 DATA_009084's (the removal jobs).
+    let roster = active(&[Kind::Passenger, Kind::Parcel, Kind::MilitaryDelivery]);
+    let contracts = active(&[Kind::Assassination]);
+    [true, true, false, cargo, roster, contracts, false]
 }
 
 /// F294's list: each commodity in the hold (`DATA_008896` order) and its tonnes.

@@ -316,6 +316,30 @@ pub fn equipment_scroll_click(x: i32, y: i32) -> Option<i32> {
     }
 }
 
+/// One line of F295's roster (`0x9c15`..`0x9c18`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterRow {
+    /// The client, or "Fed.Military (by <date>)" / "Imp. Navy (by <date>)".
+    pub client: String,
+    /// The group size, "Parcel" or "-".
+    pub group: String,
+    pub destination: String,
+    /// Whole credits.
+    pub reward: u32,
+}
+
+/// One two-line entry of F316's outstanding contracts (`0x9c1e`..`0x9c22`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractRow {
+    /// "Kill <target>, return to <station>", wrapped to 120 pixels.
+    pub contract: String,
+    pub system: String,
+    pub station: String,
+    /// The deadline date.
+    pub time: String,
+    pub reward: u32,
+}
+
 /// F286's seven status pages in section order, as the port's console note
 /// names them (F318's titles are `0x9c04..0x9c0a`).
 pub const STATUS_TITLES: [&str; 7] = [
@@ -497,6 +521,10 @@ pub struct Screen {
     pub profile: Option<ffe_core::status::Profile>,
     /// F294's page: each commodity carried and its tonnes.
     pub cargo_inventory: Option<Vec<(String, u16)>>,
+    /// F295's passenger and small items roster.
+    pub roster: Option<Vec<RosterRow>>,
+    /// F316's outstanding contracts.
+    pub contracts: Option<Vec<ContractRow>>,
     /// The cabin, model and cargo block under any status page.
     pub status_backdrop: Option<StatusBackdrop>,
     /// F2's page 0, F283's ship equipment status (drawn over the view).
@@ -950,6 +978,8 @@ impl Screen {
             messages_visible: true,
             profile: None,
             cargo_inventory: None,
+            roster: None,
+            contracts: None,
             status_backdrop: None,
             equipment_status: None,
             clock: String::new(),
@@ -1644,6 +1674,85 @@ impl Screen {
         }
     }
 
+    /// F295's roster: F318's `0x9c06` title at (30,5) and its headings at
+    /// (6,25) with the `0xfd` tab stops 72, 100 and 162 ("Client", "Group",
+    /// "Destination", "To pay"), then up to thirteen contracts from (2,35) in
+    /// 10-pixel lines: the client, the group at 80 (a passenger's count) or
+    /// 72 ("Parcel"; "-" at 84 for a military package), the destination at 100
+    /// and the payment at 162.
+    fn draw_roster(&mut self, rows: &[RosterRow]) {
+        const TEXT: u8 = 0x0f;
+        self.shadow_text(30, 5, "PASSENGER AND SMALL ITEMS ROSTER", STATUS_TITLE);
+        for (x, heading) in [
+            (6, "Client"),
+            (72, "Group"),
+            (100, "Destination"),
+            (162, "To pay"),
+        ] {
+            self.shadow_text(x, 25, heading, STATUS_TITLE);
+        }
+        for (index, row) in rows.iter().take(13).enumerate() {
+            let y = 35 + index as i32 * 10;
+            self.shadow_text(2, y, &row.client, TEXT);
+            let group_x = match row.group.as_str() {
+                "Parcel" => 72,
+                "-" => 84,
+                _ => 80,
+            };
+            let cursor = 2 + self.font.width(&row.client).unwrap_or(0) as i32;
+            self.shadow_text(cursor.max(group_x), y, &row.group, TEXT);
+            self.shadow_text(100, y, &row.destination, TEXT);
+            let pay = format!("${}", row.reward);
+            self.shadow_text(162, y, &pay, TEXT);
+        }
+    }
+
+    /// F316's outstanding contracts: F318's `0x9c09` title tabbed to x 120,
+    /// its headings at (2,15) with the tab stops 124, 202, 232 and 292
+    /// ("Contract", "Location", "Time", "Other Info", "To Pay"), then each
+    /// contract from y 27 in 24-pixel entries: the job wrapped to 120 pixels
+    /// at x 2 (`0x9c1e`), the system and station at 124 (`0x9c21`), the
+    /// deadline at 202 and the payment at 292 (`0x9c22`/`0x9c28`).
+    fn draw_contracts(&mut self, rows: &[ContractRow]) {
+        const TEXT: u8 = 0x0f;
+        self.shadow_text(120, 5, "OUTSTANDING CONTRACTS", STATUS_TITLE);
+        for (x, heading) in [
+            (2, "Contract"),
+            (124, "Location"),
+            (202, "Time"),
+            (232, "Other Info"),
+            (292, "To Pay"),
+        ] {
+            self.shadow_text(x, 15, heading, STATUS_TITLE);
+        }
+        for (index, row) in rows.iter().take(5).enumerate() {
+            let y = 27 + index as i32 * 24;
+            let mut line = String::new();
+            let mut line_y = y;
+            for word in row.contract.split(' ') {
+                let candidate = if line.is_empty() {
+                    word.to_owned()
+                } else {
+                    format!("{line} {word}")
+                };
+                if self.font.width(&candidate).unwrap_or(0) > 120 && !line.is_empty() {
+                    self.shadow_text(2, line_y, &line, TEXT);
+                    line_y += 10;
+                    line = word.to_owned();
+                } else {
+                    line = candidate;
+                }
+            }
+            if !line.is_empty() {
+                self.shadow_text(2, line_y, &line, TEXT);
+            }
+            self.shadow_text(124, y, &format!("{},", row.system), TEXT);
+            self.shadow_text(124, y + 10, &row.station, TEXT);
+            self.shadow_text(202, y, &row.time, TEXT);
+            self.shadow_text(292, y, &format!("${}", row.reward), TEXT);
+        }
+    }
+
     /// F294's cargo inventory: F318's `0x9c05` title at (30,5) with its
     /// "Refuel" heading at (140,15) beside F1621's button (bitmap 0x31) at
     /// (120,15), the two "Jettison" headings at (2,25) and (88,25), and each
@@ -2260,6 +2369,12 @@ impl Screen {
             }
             if let Some(items) = self.cargo_inventory.clone() {
                 self.draw_cargo_inventory(&items);
+            }
+            if let Some(rows) = self.roster.clone() {
+                self.draw_roster(&rows);
+            }
+            if let Some(rows) = self.contracts.clone() {
+                self.draw_contracts(&rows);
             }
         }
         if state.mode == Mode::Docked {

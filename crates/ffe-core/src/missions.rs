@@ -99,6 +99,9 @@ pub struct Mission {
     pub seed: u32,
     /// The raw F638/F643 data word, kept for the source record.
     pub basic_data: u32,
+    /// F295's client name (saved; older saves have none).
+    #[serde(default)]
+    pub client: String,
     pub status: Status,
     pub settled_day: Option<u32>,
 }
@@ -263,6 +266,9 @@ pub struct Offer {
     /// The row/page text: the BBS post for a civilian offer, F493's 0x9854
     /// mission description for a military one.
     pub text: String,
+    /// F295's client (`0x9203`: F791's name of kind 3 from the seed); empty
+    /// for a military package, which has no name.
+    pub client: String,
 }
 
 /// Read F453's row variables back into a contract. The post's variables are
@@ -328,6 +334,7 @@ pub fn offer(post: &Post, world: &World<'_>) -> Option<Offer> {
         basic_data,
         deadline_days: ACCEPT_DAYS,
         text: post.text.clone(),
+        client: bulletin::client_name(world, seed),
     })
 }
 
@@ -408,6 +415,7 @@ pub fn military_offers(
             basic_data: 0x2000 | (tier * 0x100),
             deadline_days,
             text,
+            client: String::new(),
         });
     }
     offers
@@ -527,6 +535,7 @@ impl State {
             cargo: offer.cargo.clone(),
             seed: offer.seed,
             basic_data: offer.basic_data,
+            client: offer.client.clone(),
             status: Status::Active,
             settled_day: None,
         };
@@ -1093,6 +1102,7 @@ mod tests {
             basic_data: 0x2000,
             deadline_days: ACCEPT_DAYS,
             text: "Deliver a message to the Hope system.".to_owned(),
+            client: String::new(),
         };
         state.accept(&offer, 0, 1, "Ross 154").unwrap();
         assert!(state.is_offer_active(&offer));

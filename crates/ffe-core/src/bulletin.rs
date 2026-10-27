@@ -177,6 +177,11 @@ fn text(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| char::from(*byte)).collect()
 }
 
+/// F295's `0x9203` client: F791's name of kind 3 for a contract's seed.
+pub fn client_name(world: &World<'_>, seed: u32) -> String {
+    named(world, 3, seed)
+}
+
 fn named(world: &World<'_>, kind: u32, seed: u32) -> String {
     world
         .names
