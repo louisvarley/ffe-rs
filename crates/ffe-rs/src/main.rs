@@ -1445,7 +1445,7 @@ fn run() -> Result<(), String> {
             && (session.total * 2.0).floor() != ((session.total - elapsed) * 2.0).floor()
         {
             eprintln!(
-                "trace state t={:.1} mode={:?} dead={} hull={:?} docked={:?} landed={:?} sequence={} dust={} log={:?}",
+                "trace state t={:.1} mode={:?} dead={} hull={:?} docked={:?} landed={:?} sequence={} dust={} locked={:?} log={:?}",
                 session.total,
                 state.mode,
                 death_control,
@@ -1454,6 +1454,7 @@ fn run() -> Result<(), String> {
                 nav.as_ref().and_then(|nav| nav.landed_state()),
                 nav.as_ref().is_some_and(|nav| nav.sequence.is_some()),
                 nav.as_ref().map_or(0, |nav| nav.dust.particles().len()),
+                nav.as_ref().map(|nav| (nav.locked, nav.locked_ship().map(|ship| ship.id))),
                 message,
             );
         }
@@ -4070,9 +4071,16 @@ fn run() -> Result<(), String> {
                     keys.pitch_up = !climbing;
                     keys.faster = model.set_speed_metres() < 500.0;
                 }
-                if nav.as_ref().is_some_and(|nav| nav.holding()) {
+                if let Some(nav) = nav.as_mut().filter(|nav| nav.holding()) {
                     keys = OriginalKeys::default();
                     model.teleport(model.absolute_position());
+                    // The docking stages keep the ship in the station's frame
+                    // (F1067's stage objects are station-relative): carry it
+                    // with the station's orbit, or the closed lift is left
+                    // kilometres behind in open space.
+                    if let Some(moved) = nav.follow(model.absolute_position()) {
+                        model.shift(moved);
+                    }
                 }
                 if let Some(nav) = nav.as_mut().filter(|nav| !nav.holding()) {
                     // A landed ship has no autopilot input (F1012 runs no F1037
@@ -4383,7 +4391,7 @@ fn run() -> Result<(), String> {
                                     ))
                                 });
                                 eprintln!(
-                                    "trace t={:.1} keys={:?} mode={:#x} pad={} gear={} set={} thrust={:?} vel={:?} contact={:?} frame={:?} scan={:?} world_km={:?} target={:?} behind={:?} at={:?}",
+                                    "trace t={:.1} keys={:?} mode={:#x} pad={} gear={} set={} thrust={:?} vel={:?} contact={:?} frame={:?} scan={:?} world_km={:?} target={:?} behind={:?} station_m={:?} at={:?}",
                                     session.total,
                                     (keys.faster, keys.slower, keys.pitch_up, keys.pitch_down),
                                     player.mode,
@@ -4398,6 +4406,13 @@ fn run() -> Result<(), String> {
                                     world,
                                     target,
                                     screen.target_hud.as_ref().map(|hud| hud.behind),
+                                    nav.as_ref().and_then(|nav| {
+                                        nav.bodies
+                                            .iter()
+                                            .filter(|b| matches!(b.kind, NavKind::Station | NavKind::Starport))
+                                            .map(|b| (b.name.as_str(), (ffe_rs::navigation::distance(at, b.position) / 1000.0) as i64))
+                                            .min_by_key(|(_, m)| *m)
+                                    }),
                                     at,
                                 );
                             }
@@ -5186,6 +5201,11 @@ fn run() -> Result<(), String> {
             });
             if let Some(at) = at {
                 model.teleport(at);
+                // The seat is the station's current place: the orbital drift
+                // the navigator gathered while the ship was docked is spent.
+                if let Some(nav) = nav.as_mut() {
+                    nav.clear_drift();
+                }
                 // Out of the slot along the docking axis, else toward the nearest world.
                 let port = nav
                     .as_ref()
@@ -5252,7 +5272,10 @@ fn run() -> Result<(), String> {
             }
         }
         if last_mode != ffe_rs::flight::Mode::Docked && state.mode == ffe_rs::flight::Mode::Docked {
-            dock.open(StationScreen::Services);
+            // Docked (0x2a): F1092's view of the bay behind the cabin. The
+            // services board is the console's to open (F4 or its icon); it
+            // does not open by itself.
+            station_eye = true;
             // F964's leave-flight path clears the current replace-mode message
             // (the autopilot/docking progress line) instead of dating it.
             pending_log.clear(Source::Autopilot);
@@ -5786,7 +5809,10 @@ fn run() -> Result<(), String> {
                 objects,
                 seed: station.map_or(0, |body| body.seed),
                 starport: station.is_some_and(|body| body.kind == NavKind::Starport),
-                world: true,
+                // The stage view functions (F1069-F1087, F1092) only queue the
+                // lift's objects through F1070; none runs F1054's scene, so the
+                // lift is drawn alone, docking and launching alike.
+                world: false,
                 tics: ffe_core::model_animation::START_TICS.wrapping_add(
                     (nav.as_ref().map_or(0.0, |nav| nav.clock) * 49_700.0) as u64 as u32,
                 ),

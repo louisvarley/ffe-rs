@@ -4896,6 +4896,12 @@ impl Navigator {
         (drift != [0; 3]).then(|| std::array::from_fn(|k| ship[k] + drift[k]))
     }
 
+    /// Drop the frame drift gathered since the last [`Navigator::follow`]: the
+    /// ship has just been placed at the frame body's current position.
+    pub fn clear_drift(&mut self) {
+        self.drift = [0; 3];
+    }
+
     /// The body whose frame the ship is in (F1678's `player+0x56`), as chosen by
     /// the last [`Navigator::follow`]. The scanner's same-frame filter and the
     /// player's frame body use it.
@@ -4908,6 +4914,10 @@ impl Navigator {
         // the body by (F1012 keeps it in `+0x57`'s rotating frame).
         if let Some(landed) = self.landed {
             return Some(landed.index);
+        }
+        // So is a ship in a station's docking or launching stages.
+        if let Some(sequence) = self.sequence {
+            return Some(sequence.station);
         }
         // A ship inside a world's atmosphere moves with that world (or a port on
         // its surface), never with an engaged target in orbit: carrying it along

@@ -68,8 +68,8 @@ const STATION_DRAW_RANGE: f64 = 2.0e9;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiftView {
     pub objects: Vec<ffe_core::lift::Object>,
-    /// Draw the stars, planets, stations and the ship first (docking, outside); false
-    /// inside the station (launching) where only the lift is drawn.
+    /// Draw the stars, planets, stations and the ship first; false where only
+    /// the lift is drawn (every stage view, F1069-F1087 and F1092).
     pub world: bool,
     /// The game tics the models' time word reads.
     pub tics: u32,
@@ -2678,13 +2678,14 @@ impl Screen {
             inputs.globals[2] = lift.seed as u16;
             inputs.globals[3] = (lift.seed >> 16) as u16;
             inputs.globals[4] = u16::from(!lift.starport);
-            if let Ok(frame) = scene.render_scene_with(
+            let r = scene.render_scene_with(
                 object.model,
                 scene.lift_rows(object.angle),
                 position,
                 light,
                 &inputs,
-            ) {
+            );
+            if let Ok(frame) = r {
                 self.jitter.cursor = frame.jitter;
                 self.draw_shapes(scene, &frame.shapes);
             }

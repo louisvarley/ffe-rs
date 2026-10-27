@@ -13,6 +13,10 @@ pub enum LoopMode {
     Loop,
 }
 
+/// General MIDI's channel volume (CC 7) after a reset. A song that never sets
+/// a channel's volume plays it at this level, as on the original's GM device.
+const GM_RESET_VOLUME: u8 = 100;
+
 #[derive(Debug)]
 struct PlayingSong {
     index: usize,
@@ -20,6 +24,8 @@ struct PlayingSong {
     positions: Vec<usize>,
     elapsed_us: u128,
     finished: bool,
+    /// The song's own CC 7 per channel, before the music volume scales it.
+    channel_volume: [u8; 16],
 }
 
 impl PlayingSong {
@@ -31,6 +37,7 @@ impl PlayingSong {
             positions,
             elapsed_us: 0,
             finished: false,
+            channel_volume: [GM_RESET_VOLUME; 16],
         }
     }
 
@@ -153,6 +160,7 @@ impl MusicPlayer {
             playing.positions.fill(0);
             playing.elapsed_us = 0;
             playing.finished = false;
+            playing.channel_volume = [GM_RESET_VOLUME; 16];
             setup_channels(sink, settings);
             if pump(playing, sink, settings) {
                 // A song whose whole content is at tick zero cannot loop.
@@ -169,15 +177,20 @@ impl MusicPlayer {
         true
     }
 
-    /// Re-apply the channel volume without restarting the song.
+    /// Re-apply the music volume without restarting the song: each channel's
+    /// own level scaled again, so the song's balance (its drums included) holds.
     pub fn set_settings(&mut self, settings: AudioSettings, sink: &mut dyn MidiSink) {
         if !settings.music_on {
             self.stop(sink);
             return;
         }
-        if self.playing.is_some() {
-            for channel in 0..16u8 {
-                sink.send(&[0xb0 | channel, 7, settings.music_midi_volume()]);
+        if let Some(playing) = self.playing.as_ref() {
+            for (channel, volume) in playing.channel_volume.iter().enumerate() {
+                sink.send(&[
+                    0xb0 | channel as u8,
+                    7,
+                    scale_volume(*volume, settings.music_volume),
+                ]);
             }
         }
     }
@@ -186,7 +199,11 @@ impl MusicPlayer {
 fn setup_channels(sink: &mut dyn MidiSink, settings: AudioSettings) {
     for channel in 0..16u8 {
         sink.send(&[0xb0 | channel, 123, 0]);
-        sink.send(&[0xb0 | channel, 7, settings.music_midi_volume()]);
+        sink.send(&[
+            0xb0 | channel,
+            7,
+            scale_volume(GM_RESET_VOLUME, settings.music_volume),
+        ]);
     }
 }
 
@@ -212,7 +229,13 @@ fn pump(playing: &mut PlayingSong, sink: &mut dyn MidiSink, settings: AudioSetti
                     status,
                     data1,
                     data2,
-                } => send_midi(sink, *status, *data1, *data2, settings),
+                } => {
+                    if *status & 0xf0 == 0xb0 && *data1 == 7 {
+                        playing.channel_volume[usize::from(*status & 0x0f)] =
+                            data2.unwrap_or(0).min(127);
+                    }
+                    send_midi(sink, *status, *data1, *data2, settings)
+                }
                 HmpEventKind::Meta { .. } => {}
             }
             playing.positions[track_index] += 1;
@@ -303,7 +326,8 @@ mod tests {
             ..AudioSettings::default()
         };
         player.play(song(), 0, &mut sink, settings);
-        assert!(sink.contains(&[0xb0, 7, 63]));
+        // GM's reset level, 100, at half volume.
+        assert!(sink.contains(&[0xb0, 7, 50]));
         assert!(sink.contains(&[0x90, 60, 100]));
         assert!(!sink.contains(&[0x80, 60, 0]));
         assert!(!player.song_done());
@@ -357,8 +381,39 @@ mod tests {
             },
             &mut sink,
         );
-        assert!(sink.contains(&[0xb0, 7, 12]));
+        assert!(sink.contains(&[0xb0, 7, 10]));
         assert!(sink.messages().len() > before);
         assert_eq!(sink.count(&[0x90, 60, 100]), 1);
+    }
+
+    #[test]
+    fn a_volume_change_keeps_each_channels_own_level() {
+        let mut sink = RecordingMidiSink::new();
+        let mut player = MusicPlayer::new();
+        let settings = AudioSettings::default();
+        let mut quiet = song();
+        quiet.tracks[0].events.insert(
+            0,
+            HmpEvent {
+                tick: 0,
+                kind: HmpEventKind::Midi {
+                    status: 0xb1,
+                    data1: 7,
+                    data2: Some(40),
+                },
+            },
+        );
+        player.play(quiet, 0, &mut sink, settings);
+        sink.clear();
+        player.set_settings(
+            AudioSettings {
+                music_volume: 50,
+                ..settings
+            },
+            &mut sink,
+        );
+        // Channel 2 set its own 40; the drums (channel 10) keep GM's 100.
+        assert!(sink.contains(&[0xb1, 7, 20]));
+        assert!(sink.contains(&[0xb9, 7, 50]));
     }
 }
