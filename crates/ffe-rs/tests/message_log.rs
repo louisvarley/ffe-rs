@@ -179,18 +179,18 @@ fn port_only_notices_never_enter_the_log_channel() {
 }
 
 #[test]
-fn the_boot_line_is_only_the_source_start_message() {
+fn no_landed_at_line_reaches_the_log() {
+    // F994 (the start) and F1047/F1048 (landings) post no message; the
+    // console shows the clock and F1099's altitude and body text instead.
     let source = main_rs();
-    assert!(
-        source.contains("format!(\"Landed at {name}.\")"),
-        "the boot entry is not the source start line"
-    );
-    assert!(
-        !source.contains("Landed at {name}, "),
-        "the boot line still carries the port's system/hint suffix"
-    );
-    assert!(
-        !source.contains("L launches.") && !source.contains("L asks for launch clearance."),
-        "port launch hints are still part of a log entry"
-    );
+    for call in calls(source, "pending_log.") {
+        assert!(
+            !call.contains("Landed at"),
+            "a landing line reaches the log: {call}"
+        );
+        assert!(
+            !call.contains("Landed on"),
+            "a landing line reaches the log: {call}"
+        );
+    }
 }

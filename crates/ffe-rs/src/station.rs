@@ -50,6 +50,22 @@ pub enum Screen {
     Military,
 }
 
+impl Screen {
+    pub const ALL: [Screen; 11] = [
+        Screen::Services,
+        Screen::Shipyard,
+        Screen::Market,
+        Screen::Upgrades,
+        Screen::Repairs,
+        Screen::Ships,
+        Screen::Bulletin,
+        Screen::Police,
+        Screen::Journal,
+        Screen::Comms,
+        Screen::Military,
+    ];
+}
+
 /// What activating a row does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -842,6 +858,14 @@ pub fn row_count(
         Screen::Comms => comms_rows,
         Screen::Military => military_rows,
     }
+}
+
+/// Is `text` one of the station screens' prompts ([`hint`])?
+pub fn is_prompt(text: &str) -> bool {
+    !text.is_empty()
+        && Screen::ALL
+            .iter()
+            .any(|screen| (0..2).any(|rows| (0..2).any(|ships| hint(*screen, rows, ships) == text)))
 }
 
 /// The title of the console line shown when a screen opens.

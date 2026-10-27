@@ -54,28 +54,26 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-/// One frame's F271 write. `main` only puts source-faithful game events here;
-/// port-only notices stay in `message` (the docked/port note) and never get a
-/// date stamp. The last event of a frame wins, as the old `message = ...` chain
-/// did.
+/// The frame's F271 writes, in order. `main` only puts source-faithful game
+/// events here; port-only notices stay in `message` and are never shown.
 #[derive(Default)]
-struct PendingLog(Option<LogEvent>);
+struct PendingLog(std::collections::VecDeque<LogEvent>);
 
 impl PendingLog {
     fn add(&mut self, source: Source, text: impl Into<String>) {
-        self.0 = Some(LogEvent::new(source, text));
+        self.0.push_back(LogEvent::new(source, text));
     }
 
     fn replace(&mut self, source: Source, text: impl Into<String>) {
-        self.0 = Some(LogEvent::replace(source, text));
+        self.0.push_back(LogEvent::replace(source, text));
     }
 
     fn clear(&mut self, source: Source) {
-        self.0 = Some(LogEvent::clear(source));
+        self.0.push_back(LogEvent::clear(source));
     }
 
     fn take(&mut self) -> Option<LogEvent> {
-        self.0.take()
+        self.0.pop_front()
     }
 }
 
@@ -954,6 +952,7 @@ fn run() -> Result<(), String> {
     // (`message` below) never enter it.
     let mut log_channel = Channel::default();
     let mut pending_log = PendingLog::default();
+    let mut last_prompt = String::new();
     let mut model_viewer: Option<ModelViewer> = None;
     // F1104/F917: the game-over screen. The death stream starts it from its own
     // destruction event; the current F953 path below uses the same API.
@@ -1211,14 +1210,8 @@ fn run() -> Result<(), String> {
         state.system_flight = true;
         last_mode = ffe_rs::flight::Mode::Docked;
     }
-    // F994's start state names the body the commander is standing on. This is
-    // the original's start message; the boot log has no other entry.
-    if let Some(name) = nav
-        .as_ref()
-        .and_then(|nav| nav.docked.map(|index| nav.bodies[index].name.clone()))
-    {
-        pending_log.add(Source::Start, format!("Landed at {name}."));
-    }
+    // F994's start state posts no log message: the console shows only the
+    // date and time and F1099's altitude/body text.
     if let Some(name) = &captured_planet {
         message = format!("Capture: autopilot to {name} from three radii.");
     }
@@ -4378,18 +4371,8 @@ fn run() -> Result<(), String> {
                                     if let Some(mode) = nav.landing_frame() {
                                         model.set_mode(mode);
                                     }
+                                    // F1047/F1048 post no message.
                                     model.apply(&mut state);
-                                    if starport {
-                                        pending_log.add(
-                                            Source::Landing,
-                                            format!("Landed at {}.", nav.bodies[index].name),
-                                        );
-                                    } else {
-                                        pending_log.add(
-                                            Source::Landing,
-                                            format!("Landed on {}.", nav.bodies[index].name),
-                                        );
-                                    }
                                 }
                             }
                         }
@@ -6304,9 +6287,10 @@ fn run() -> Result<(), String> {
             }
         }
         let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
-        // F1099 prints DATA_009124, the parent object's name: at the new game it
-        // is Hope, the planet under Old Blackelk. A surface landing names the
-        // body itself; in free flight the port falls back to the system.
+        // F1099 prints DATA_009124, the name of the player's parent object
+        // (`+0x56`): at the new game Hope, the planet under Old Blackelk; in
+        // flight the body whose frame the ship is in. A surface landing names
+        // the body itself.
         let parent_name = nav
             .as_ref()
             .and_then(|nav| {
@@ -6317,6 +6301,19 @@ fn run() -> Result<(), String> {
                         .and_then(|p| nav.bodies.get(p))
                         .map_or_else(|| body.name.clone(), |parent| parent.name.clone()),
                 )
+            })
+            .or_else(|| {
+                nav.as_ref().and_then(|nav| {
+                    let body = nav.bodies.get(nav.frame()?)?;
+                    // A starport's frame is its planet's.
+                    Some(match body.kind {
+                        NavKind::Starport | NavKind::Station => body
+                            .parent
+                            .and_then(|p| nav.bodies.get(p))
+                            .map_or_else(|| body.name.clone(), |p| p.name.clone()),
+                        _ => body.name.clone(),
+                    })
+                })
             })
             .unwrap_or_else(|| {
                 nav.as_ref()
@@ -6334,7 +6331,16 @@ fn run() -> Result<(), String> {
                 .set_speed
                 .map(|speed| source_speed(f64::from(speed))),
             actual_speed: source_speed(state.speed()),
-            altitude: Some(0),
+            // `player+0xdc`, F1033's altitude in mm, printed in metres; F1099
+            // leaves the line out beyond 0xea60 m (and in free space, where
+            // F1033 stores 0x7fffffff).
+            altitude: nav.as_ref().and_then(|nav| {
+                if nav.landed_view() {
+                    Some(0)
+                } else {
+                    (nav.altitude != i32::MAX).then(|| nav.altitude.max(0) / 1000)
+                }
+            }),
             registration: parent_name,
             autopilot,
             turret: views.mode.is_turret().then(|| {
@@ -6406,7 +6412,15 @@ fn run() -> Result<(), String> {
         // buttons, view names, pause/status toggles, debug text); those stay in
         // `message` and are not dated. F351's bong accompanies a newly shown
         // message, not a replace-flag update (`ffe.asm:20776-20792`).
-        if let Some(event) = pending_log.take() {
+        // A station screen's prompt (F343/F327's line) is a log entry: white,
+        // under the date and time.
+        if message != last_prompt {
+            if station::is_prompt(&message) {
+                pending_log.add(Source::Station, message.clone());
+            }
+            last_prompt = message.clone();
+        }
+        while let Some(event) = pending_log.take() {
             // F349, the comms message (traffic control, clearance, fines,
             // contracts), calls F217 first: time goes back to 1x unless the
             // ship is in hyperspace (mode 4). A clearance on the approach

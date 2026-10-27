@@ -64,9 +64,6 @@ fn rest(lines: i32) -> i32 {
 /// one and that `main` has a single writer for all of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
-    /// The F994 start state's line on the game's first frame (`Landed at
-    /// <body>.`; see `docs/NAVIGATION.md`).
-    Start,
     /// F982's autopilot actions and `F350`'s replace flag
     /// (`ffe.asm:27076-27156`, `72772-72791`).
     Autopilot,
@@ -78,8 +75,6 @@ pub enum Source {
     /// F654/F655 traffic control and F863's docking/launch progress
     /// (`ffe.asm:44601-44656`, `60421-60481`).
     Docking,
-    /// F1019/F1021/F1047 landing (`ffe.asm` collision/landing stream).
-    Landing,
     /// F381 clearance and F1088/F1089 launch (`ffe.asm:44601-44656`).
     Launch,
     /// F953/F942 hull collisions (`ffe.asm:70650`, `71190`).
@@ -94,16 +89,16 @@ pub enum Source {
     Death,
     /// F290/F303/F349: an accepted or settled BBS contract's page.
     Mission,
+    /// F343/F327: a station screen's prompt ("Which service do you require?").
+    Station,
 }
 
 impl Source {
-    pub const ALL: [Source; 13] = [
-        Source::Start,
+    pub const ALL: [Source; 12] = [
         Source::Autopilot,
         Source::Target,
         Source::Navigation,
         Source::Docking,
-        Source::Landing,
         Source::Launch,
         Source::Collision,
         Source::Combat,
@@ -111,17 +106,16 @@ impl Source {
         Source::Trade,
         Source::Death,
         Source::Mission,
+        Source::Station,
     ];
 
     /// The DOS FFE label/line that writes the entry.
     pub fn citation(self) -> &'static str {
         match self {
-            Source::Start => "F994 start state; F271 start line (docs/NAVIGATION.md)",
             Source::Autopilot => "F982 'a' + F350 replace flag (ffe.asm:27076-27156, 72772-72791)",
             Source::Target => "F982 't' 0x8a01 replace (ffe.asm:72772-72791)",
             Source::Navigation => "F352 + F350/F351 (ffe.asm:27185-27207)",
             Source::Docking => "F654/F655 + F863 replace progress (ffe.asm:44601, 60421)",
-            Source::Landing => "F1019/F1021/F1047 landing (ffe.asm)",
             Source::Launch => "F381/F654/F655 + F1088/F1089 launch (ffe.asm:44601)",
             Source::Collision => "F953/F942 collision (ffe.asm:70650, 71190)",
             Source::Combat => "F931/F941/F953 lasers, missiles, hits (ffe.asm:71190)",
@@ -129,6 +123,7 @@ impl Source {
             Source::Trade => "F323/F328 market (ffe.asm station stream)",
             Source::Death => "F1104/F1098 death and escape (ffe.asm:81458)",
             Source::Mission => "F290 contract, F303 settle, F349/F350 page (ffe.asm:22592-27185)",
+            Source::Station => "F343/F327 station screen prompt (docs/notes/station.md)",
         }
     }
 }
@@ -762,7 +757,7 @@ mod tests {
 
     #[test]
     fn every_source_has_a_dos_citation() {
-        assert_eq!(Source::ALL.len(), 13);
+        assert_eq!(Source::ALL.len(), 12);
         for source in Source::ALL {
             let citation = source.citation();
             assert!(!citation.is_empty(), "{source:?} has no citation");
@@ -782,13 +777,13 @@ mod tests {
         assert_eq!(
             channel.post(
                 &mut log,
-                Event::new(Source::Start, "Landed at Old Blackelk."),
+                Event::new(Source::Station, "Which service do you require?"),
                 "1-Jan-3250 12:00:00"
             ),
             Post::Added
         );
         assert_eq!(log.len(), 1);
-        assert_eq!(log.entries()[0].source, Some(Source::Start));
+        assert_eq!(log.entries()[0].source, Some(Source::Station));
         assert!(!log.entries()[0].replace);
 
         assert_eq!(
@@ -819,7 +814,7 @@ mod tests {
         let mut channel = Channel::default();
         channel.post(
             &mut log,
-            Event::new(Source::Start, "Landed at Old Blackelk."),
+            Event::new(Source::Station, "Which service do you require?"),
             "1-Jan-3250 12:00:00",
         );
         channel.post(
@@ -836,7 +831,7 @@ mod tests {
             Post::Cleared
         );
         assert_eq!(log.len(), 1);
-        assert_eq!(log.entries()[0].text, "Landed at Old Blackelk.");
+        assert_eq!(log.entries()[0].text, "Which service do you require?");
 
         // A normal entry is not replace-flagged, so a NULL F271 leaves it.
         assert_eq!(

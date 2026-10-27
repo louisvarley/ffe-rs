@@ -1532,10 +1532,21 @@ impl Screen {
         if hud.autopilot {
             self.text(AUTOPILOT_POS.0, AUTOPILOT_POS.1, "Autopilot", HUD_COLOUR);
         }
-        for (index, line) in hud.speed_lines(&self.font).iter().enumerate() {
+        // F1099's `0x8622`: Set/Act at (2,148), then the position code puts
+        // Alt and the parent body's name at (266,139).
+        let (left, right) = hud.speed_columns(&self.font);
+        for (index, line) in left.iter().enumerate() {
             self.text(
                 SPEED_POS.0,
                 SPEED_POS.1 + index * crate::messages::LINE_HEIGHT,
+                line,
+                HUD_COLOUR,
+            );
+        }
+        for (index, line) in right.iter().enumerate() {
+            self.text(
+                crate::hud::SPEED_RIGHT_POS.0,
+                crate::hud::SPEED_RIGHT_POS.1 + index * crate::messages::LINE_HEIGHT,
                 line,
                 HUD_COLOUR,
             );
@@ -1663,7 +1674,9 @@ impl Screen {
         views: ViewState,
         scene: Option<&ModelViewer>,
         _modern: bool,
-        message: &str,
+        // The port's notices are not drawn: the original's console shows only
+        // F272's log and F1099's texts. Prompts and game events reach the log.
+        _message: &str,
     ) {
         self.indexed.fill(0);
         self.panel.blit(&mut self.indexed, 0, 158);
@@ -1940,25 +1953,6 @@ impl Screen {
             // date/time header stays live under it (the source's station screen
             // shows the clock advancing).
             self.draw_messages();
-            let mut lines = Vec::new();
-            let mut line = String::new();
-            for ch in message.chars() {
-                let ch = if ch.is_ascii() && !ch.is_ascii_control() {
-                    ch
-                } else {
-                    '?'
-                };
-                line.push(ch);
-                if self.font.width(&line).is_ok_and(|measured| measured >= 124) {
-                    lines.push(std::mem::take(&mut line));
-                }
-            }
-            if !line.is_empty() {
-                lines.push(line);
-            }
-            for (index, line) in lines.iter().take(2).enumerate() {
-                self.text(195, 184 + index * 10, line, 18);
-            }
         } else {
             // F272's text window: date/time header, ten entries, 124-pixel wrap,
             // shadow at (195, y-1) and text at (196, y), clipped to y 158..199.
@@ -1966,27 +1960,6 @@ impl Screen {
                 // The pad services board keeps it, so the green clock stays visible
                 // over the console (F272 runs in the station screens too).
                 self.draw_messages();
-                if self.pad_services {
-                    let mut lines = Vec::new();
-                    let mut line = String::new();
-                    for ch in message.chars() {
-                        let ch = if ch.is_ascii() && !ch.is_ascii_control() {
-                            ch
-                        } else {
-                            '?'
-                        };
-                        line.push(ch);
-                        if self.font.width(&line).is_ok_and(|measured| measured >= 124) {
-                            lines.push(std::mem::take(&mut line));
-                        }
-                    }
-                    if !line.is_empty() {
-                        lines.push(line);
-                    }
-                    for (index, line) in lines.iter().take(2).enumerate() {
-                        self.text(195, 184 + index * 10, line, 18);
-                    }
-                }
             }
         }
         self.present();

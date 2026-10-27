@@ -170,7 +170,7 @@ fn port_only_clicks_and_view_changes_leave_the_log_clean() {
     assert_eq!(
         channel.post(
             &mut screen.messages,
-            Event::new(Source::Start, "Landed at Old Blackelk."),
+            Event::new(Source::Station, "Which service do you require?"),
             &screen.clock,
         ),
         Post::Added
@@ -178,8 +178,8 @@ fn port_only_clicks_and_view_changes_leave_the_log_clean() {
     let assert_clean = |screen: &Screen, frame: &str| {
         let entries = screen.messages.entries();
         assert_eq!(entries.len(), 1, "{frame} gained a log entry: {entries:?}");
-        assert_eq!(entries[0].text, "Landed at Old Blackelk.");
-        assert_eq!(entries[0].source, Some(Source::Start));
+        assert_eq!(entries[0].text, "Which service do you require?");
+        assert_eq!(entries[0].source, Some(Source::Station));
     };
 
     let draw = |screen: &mut Screen, views: ViewState, name: &str| {

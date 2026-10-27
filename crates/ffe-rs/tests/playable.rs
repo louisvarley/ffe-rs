@@ -294,7 +294,6 @@ fn renderer_covers_each_screen_without_mutating_simulation() {
         );
         let image = screen.pixels.clone();
         assert_eq!(image.len(), 640 * 480);
-        assert!(image.contains(&18));
         assert_eq!(screen.logical_pixels()[158 * 320], 2);
         for y in 0..480 {
             for x in 0..640 {
