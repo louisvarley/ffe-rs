@@ -960,6 +960,8 @@ fn run() -> Result<(), String> {
     let mut gear_warned = false;
     // How much longer the last shot's beam is drawn.
     let mut beam_time = 0.0f64;
+    // A landed ship's pose in its body's axes, and that body.
+    let mut landed_pose: Option<(usize, ffe_rs::original_flight::LandedPose)> = None;
     // The sine table F1675 builds the dust's orientation with.
     let dust_sine = cache
         .asset("base:math/sine")
@@ -2864,7 +2866,24 @@ fn run() -> Result<(), String> {
                     if launch && (landed.is_some() || pad_landed) {
                         if let Some(nav) = nav.as_mut() {
                             if landed.is_some() {
+                                let starport = nav
+                                    .landed_body()
+                                    .and_then(|index| nav.bodies.get(index))
+                                    .is_some_and(|body| body.kind == NavKind::Starport);
                                 match nav.begin_surface_launch() {
+                                    Ok(()) if starport => {
+                                        // An open-air starport's pad: the same F994
+                                        // seat and planet-relative pad world as the
+                                        // new game's, built by the docked-to-flight
+                                        // block below.
+                                        acceleration = 0;
+                                        last_mode = ffe_rs::flight::Mode::Docked;
+                                        // The system-world model takes no step on
+                                        // this frame: the hand-off replaces it.
+                                        if let Some(mut model) = original.take() {
+                                            model.apply(&mut state);
+                                        }
+                                    }
                                     Ok(()) => {
                                         acceleration = 0;
                                         if let Some(model) = original.as_mut() {
@@ -4106,6 +4125,36 @@ fn run() -> Result<(), String> {
                             model.shift(moved);
                         }
                     }
+                    // A landed ship turns with its body (F1012 keeps it in the
+                    // body's rotating frame): pinned to the pose it landed in,
+                    // so no clock step leaves it behind as the planet spins.
+                    let landed_body = nav
+                        .landed_body()
+                        .filter(|_| !model.on_pad())
+                        .and_then(|index| Some((index, nav.bodies.get(index)?)));
+                    landed_pose = match (landed_body, landed_pose) {
+                        (Some((index, body)), Some((pinned, pose))) if pinned == index => {
+                            model.pin_to_body(&pose, body.position, body.rows);
+                            Some((index, pose))
+                        }
+                        (Some((index, body)), _) => {
+                            // An open-air starport's landing sits on F994's pad
+                            // seat for the bay, the seat its launch climbs from.
+                            if body.kind == NavKind::Starport {
+                                let radius = ffe_core::objects::ModelInfo::read(
+                                    model_records,
+                                    model_stats,
+                                    state.ship,
+                                )
+                                .map_or(0, |info| info.radii().1 as i32);
+                                if let Some(seat) = nav.takeoff_seat(index, radius) {
+                                    model.place(seat, body.rows);
+                                }
+                            }
+                            Some((index, model.pose_in_body(body.position, body.rows)))
+                        }
+                        (None, _) => None,
+                    };
                     // The planet capture continues to the nearest open-air
                     // starport once the planet's standoff is reached, so the saved
                     // frames show the buildings on the surface.

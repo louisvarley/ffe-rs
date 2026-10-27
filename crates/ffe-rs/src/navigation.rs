@@ -3013,6 +3013,10 @@ impl Navigator {
             return false;
         }
         self.target = None;
+        // F1007 (landed, AI state 0x20) and F1025 (docked) clear the
+        // navigation and combat targets (`+0xec`, `+0xed`).
+        self.locked = None;
+        self.ship_lock = None;
         self.final_leg = false;
         self.clearance_at = None;
         self.skips = 0;
@@ -3136,6 +3140,10 @@ impl Navigator {
             return false;
         }
         self.target = None;
+        // F1007 (landed, AI state 0x20) and F1025 (docked) clear the
+        // navigation and combat targets (`+0xec`, `+0xed`).
+        self.locked = None;
+        self.ship_lock = None;
         self.final_leg = false;
         self.clearance_at = None;
         self.skips = 0;
@@ -3204,6 +3212,10 @@ impl Navigator {
         self.warned_at = None;
         self.docked = Some(index);
         self.target = None;
+        // F1007 (landed, AI state 0x20) and F1025 (docked) clear the
+        // navigation and combat targets (`+0xec`, `+0xed`).
+        self.locked = None;
+        self.ship_lock = None;
         self.final_leg = false;
         self.clearance_at = None;
         self.skips = 0;
@@ -3279,13 +3291,17 @@ impl Navigator {
             .get(landed.index)
             .is_some_and(|body| body.kind == Kind::Starport);
         if starport {
-            // F381: an open-air starport's launch asks F654 first. The bay is
-            // the one the landing's F650 allocated, so mark the port as the
+            // F381: an open-air starport's launch asks F654 first, then it is
+            // the pad's launch (0x30 -> 0x24), the same as the new game's: the
+            // bay is the one the landing's F650 allocated, and the port is the
             // docked one for F1032's release.
-            if !self.starport(landed.index).request(PLAYER) {
-                return Err("Launch refused: traffic control is busy.".to_owned());
-            }
             self.docked = Some(landed.index);
+            self.landed = None;
+            let launched = self.begin_launch();
+            if launched.is_err() {
+                self.landed = Some(landed);
+            }
+            return launched;
         }
         let takeoff = landed
             .landing
@@ -4339,6 +4355,10 @@ impl Navigator {
     pub fn dock(&mut self, index: usize) {
         self.docked = Some(index);
         self.target = None;
+        // F1007 (landed, AI state 0x20) and F1025 (docked) clear the
+        // navigation and combat targets (`+0xec`, `+0xed`).
+        self.locked = None;
+        self.ship_lock = None;
         self.final_leg = false;
         self.clearance_at = None;
         self.skips = 0;
@@ -4884,6 +4904,11 @@ impl Navigator {
     }
 
     fn choose_frame(&self, ship: [i64; 3]) -> Option<usize> {
+        // A landed ship is in its body's frame whatever the clock step moved
+        // the body by (F1012 keeps it in `+0x57`'s rotating frame).
+        if let Some(landed) = self.landed {
+            return Some(landed.index);
+        }
         // A ship inside a world's atmosphere moves with that world (or a port on
         // its surface), never with an engaged target in orbit: carrying it along
         // a station's orbit from just above the ground threw it into the terrain.
@@ -5083,7 +5108,11 @@ impl Navigator {
                 )?;
                 let seat = self.takeoff_seat(index, info.radii().1 as i32)?;
                 flight.settle_autopilot_pad(seat, body.rows);
-                self.land_at_starport(index);
+                // F1019's `0x2e`, then F1048's view frame `0x30`: the landed
+                // state the launch action accepts.
+                if self.land_at_starport(index) {
+                    self.landing_frame();
+                }
                 return None;
             } else if body.kind == Kind::Station && self.begin_docking(index) {
                 return None;

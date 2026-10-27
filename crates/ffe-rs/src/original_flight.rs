@@ -407,6 +407,10 @@ impl OriginalFlight {
         // 13-tick selector runs during the climb.
         self.player.motion.switch_delay = 0x7f;
         self.player.motion.updated = 0;
+        // The ship stands on the pad: F1033's last contact altitude is the
+        // pad's, so F1013 climbs from 0x24 instead of reading a new model's
+        // "no contact" as already above 0x30d40.
+        self.player.altitude = 0;
         self.pad_world = Some(world);
     }
 
@@ -783,6 +787,61 @@ impl OriginalFlight {
         self.player.motion.fraction = [0; 3];
         self.player.mode = 0x2e;
         self.guidance = None;
+        // F1008 lowers the undercarriage for AI states past 0x1e, the pad
+        // descent and the landed state included; the accelerated touchdown
+        // leaves no frames to animate it, so it is down on the pad.
+        self.gear_down = true;
+        self.gear_word = 0xffff;
+    }
+
+    /// F994's pad seat: the ship at `position` with the port's `rows` as its
+    /// axes, at rest.
+    pub fn place(&mut self, position: [i64; 3], rows: [i32; 9]) {
+        self.teleport(position);
+        self.player.motion.orientation =
+            std::array::from_fn(|r| std::array::from_fn(|c| rows[3 * r + c]));
+        self.player.motion.rate = [0; 3];
+        self.player.motion.thrust = [0; 3];
+    }
+
+    /// A landed ship's pose in a body's axes (`rows`, Q31, one axis per row)
+    /// relative to the body at `origin`: the position offset and the ship's
+    /// three axes, for [`Self::pin_to_body`].
+    pub fn pose_in_body(&self, origin: [i64; 3], rows: [i32; 9]) -> LandedPose {
+        let at = self.absolute_position();
+        let local = |v: [f64; 3]| -> [f64; 3] {
+            std::array::from_fn(|i| (0..3).map(|j| q31(rows[3 * i + j]) * v[j]).sum())
+        };
+        let offset = local(std::array::from_fn(|k| {
+            at[k].wrapping_sub(origin[k]) as f64
+        }));
+        let axes = self
+            .player
+            .motion
+            .orientation
+            .map(|axis| local(axis.map(q31)));
+        LandedPose { offset, axes }
+    }
+
+    /// Place a landed ship back on its body: F1012's landed handlers keep the
+    /// player in the body's rotating frame (`+0x57`), so the ship turns with
+    /// the planet (and its port) however far the clock jumps.
+    pub fn pin_to_body(&mut self, pose: &LandedPose, origin: [i64; 3], rows: [i32; 9]) {
+        let world = |v: [f64; 3]| -> [f64; 3] {
+            std::array::from_fn(|j| (0..3).map(|i| q31(rows[3 * i + j]) * v[i]).sum())
+        };
+        let offset = world(pose.offset);
+        self.teleport(std::array::from_fn(|k| {
+            origin[k].wrapping_add(offset[k].round() as i64)
+        }));
+        self.player.motion.orientation = pose.axes.map(|axis| {
+            world(axis).map(|v| {
+                (v * 2_147_483_648.0)
+                    .round()
+                    .clamp(-2_147_483_647.0, 2_147_483_647.0) as i32
+            })
+        });
+        self.player.motion.rate = [0; 3];
     }
 
     pub fn clear_guidance(&mut self) {
@@ -1217,4 +1276,16 @@ mod tests {
             / 1000.0;
         assert!(speed < start * 0.2, "{speed} m/s after halt from {start}");
     }
+}
+
+/// A landed ship's position offset and axes in its body's axes; see
+/// [`OriginalFlight::pin_to_body`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LandedPose {
+    pub offset: [f64; 3],
+    pub axes: [[f64; 3]; 3],
+}
+
+fn q31(v: i32) -> f64 {
+    f64::from(v) / 2_147_483_648.0
 }
