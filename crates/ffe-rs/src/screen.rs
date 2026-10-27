@@ -306,6 +306,30 @@ pub const STATUS_KEY_SECTIONS: [u8; 7] = [0, 1, 2, 4, 3, 5, 6];
 /// through F12's 3).
 pub const STATUS_BUTTONS: [usize; 7] = [9, 8, 7, 5, 6, 4, 3];
 
+/// A click on F294's cargo page (its hot areas).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CargoClick {
+    /// The Refuel button at (120,15) (action `'r'`).
+    Refuel,
+    /// The jettison button beside the listed item (actions `0x80 + i`).
+    Jettison(usize),
+}
+
+/// F294's hot areas for a page listing `items` commodities: the refuel button
+/// (120..128, 15..23) and each item's button 12..4 pixels left of its name,
+/// rows of 10 from y 35, twelve to a column at x 18 and 106. Edges inclusive.
+pub fn cargo_click(x: i32, y: i32, items: usize) -> Option<CargoClick> {
+    if (120..=128).contains(&x) && (15..=23).contains(&y) {
+        return Some(CargoClick::Refuel);
+    }
+    (0..items.min(24)).find_map(|index| {
+        let column = if index < 12 { 18 } else { 106 };
+        let top = 35 + (index % 12) as i32 * 10;
+        ((column - 12..=column - 4).contains(&x) && (top..=top + 8).contains(&y))
+            .then_some(CargoClick::Jettison(index))
+    })
+}
+
 /// F308: the page after `current` that has something to show, wrapping to
 /// the equipment page. The profile always follows the equipment page.
 pub fn next_status_section(current: u8, sections: &[bool; 7]) -> u8 {
@@ -3378,4 +3402,22 @@ fn decode_cabin(png: &[u8]) -> Result<Vec<u32>, String> {
         .chunks_exact(channels)
         .map(|p| (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2]))
         .collect())
+}
+
+#[cfg(test)]
+mod cargo_page_tests {
+    use super::{cargo_click, CargoClick};
+
+    #[test]
+    fn f294_hot_areas() {
+        assert_eq!(cargo_click(124, 19, 0), Some(CargoClick::Refuel));
+        // Item 0's button is 12..4 pixels left of x 18 on row 35.
+        assert_eq!(cargo_click(6, 35, 1), Some(CargoClick::Jettison(0)));
+        assert_eq!(cargo_click(14, 43, 1), Some(CargoClick::Jettison(0)));
+        assert_eq!(cargo_click(15, 35, 1), None);
+        // Row 2 of the first column and the second column's first item.
+        assert_eq!(cargo_click(10, 56, 3), Some(CargoClick::Jettison(2)));
+        assert_eq!(cargo_click(98, 36, 13), Some(CargoClick::Jettison(12)));
+        assert_eq!(cargo_click(98, 36, 12), None);
+    }
 }

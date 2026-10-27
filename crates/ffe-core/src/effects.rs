@@ -349,6 +349,36 @@ pub fn explosion(
     effects
 }
 
+/// F291's jettisoned canister: model 0x99 in F926's drifting state `0x16`
+/// (no sparks), pushed out behind the ship. `push` is the velocity F291
+/// takes off the ship's (its forward row `>> 11` plus a random word, `>> 12`).
+pub fn canister(
+    position: [i64; 3],
+    velocity: [f64; 3],
+    axes: [[f64; 3]; 3],
+    push: [f64; 3],
+    rng: &mut Random,
+) -> Effect {
+    let (forward, up) = random_axes(axes[2], rng);
+    Effect {
+        kind: Kind::Debris,
+        model: DEBRIS_MODEL,
+        position,
+        velocity: [
+            velocity[0] - push[0],
+            velocity[1] - push[1],
+            velocity[2] - push[2],
+        ],
+        forward,
+        up,
+        timer: 0,
+        countdown: -1,
+        think: 0,
+        alive: true,
+        shift: 0,
+    }
+}
+
 /// A random orientation like F1675_MatBuildYZT's two random binary angles: the
 /// given forward tilted away from `base` by a random yaw and pitch.
 fn random_axes(base: [f64; 3], rng: &mut Random) -> ([f64; 3], [f64; 3]) {

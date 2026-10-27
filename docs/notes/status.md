@@ -135,8 +135,12 @@ witness/range test only.
   equipment (F283), profile (F312) and cargo inventory (F294). The crew,
   passenger, contract and mining pages (F313, F295, F316, F317) need state
   the port does not keep yet, so their buttons stay hidden as F276 hides
-  them for an empty list. F294's refuel and jettison buttons are drawn but
-  not yet live.
+  them for an empty list. F294's buttons are live: Refuel (and 'r' on any
+  status page) is F289, a tonne of hydrogen (military fuel from class 10)
+  into the drive's tank (`DATA_005111`) with "Internal fuel tank full" at
+  the limit; Jettison is F291, one tonne out as a drifting model-0x99
+  canister behind the ship, refused with `0x9c30` unless in free flight.
+  The canister cannot be scooped back yet.
 - **Police spawns.** F238/F239's extra police objects still need F927's slot
   allocator and the F239 object template. The port provokes every existing
   police/military ship and sets `alert`; it does not spawn a new patrol. This is

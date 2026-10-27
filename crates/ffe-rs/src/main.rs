@@ -1866,6 +1866,51 @@ fn run() -> Result<(), String> {
                 status_left = true;
                 message = "Flight console.".to_owned();
             }
+            // F292: 'r' (action 0x72) refuels from any page; F294's buttons
+            // refuel and jettison on the cargo page.
+            let items = cargo_inventory(&cache, &state);
+            let cargo_click = click_point
+                .filter(|_| status_page && status_section == 3)
+                .and_then(|(x, y)| ffe_rs::screen::cargo_click(x, y, items.len()));
+            if status_page
+                && (pressed(Key::R) || cargo_click == Some(ffe_rs::screen::CargoClick::Refuel))
+            {
+                match state.refuel_from_hold() {
+                    ffe_rs::flight::Refuel::TankFull
+                    | ffe_rs::flight::Refuel::Refuelled { full: true } => {
+                        pending_log.add(Source::Trade, "Internal fuel tank full");
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(ffe_rs::screen::CargoClick::Jettison(index)) = cargo_click {
+                let commodity = state
+                    .hold
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tonnes)| **tonnes != 0)
+                    .nth(index)
+                    .map(|(commodity, _)| commodity);
+                let free_flight = nav.as_ref().is_some_and(|nav| {
+                    nav.docked.is_none() && nav.landed_body().is_none() && !nav.on_pad()
+                });
+                if let Some(commodity) = commodity {
+                    if !free_flight {
+                        pending_log.add(
+                            Source::Trade,
+                            "Cargo can only be jettisoned when in free flight.",
+                        );
+                    } else if state.jettison(commodity) {
+                        let name = items[index].0.clone();
+                        pending_log
+                            .add(Source::Trade, format!("Jettisoning {name} from cargo bay."));
+                        if let Some(nav) = nav.as_mut() {
+                            jettison_canister(nav, &original, &state, scene.as_ref());
+                        }
+                        sound.play(Cue::Launch);
+                    }
+                }
+            }
         }
         // Every console click beeps (F1056). A click whose screen is not ported
         // gets only the port's transient note: the source writes no F271 entry
@@ -7038,6 +7083,37 @@ fn equipment_status(
         equipment,
         lasers,
     }
+}
+
+/// F291's canister: model 0x99 behind the ship, its collision radius out
+/// along `-forward`, with the ship's velocity less F291's push (the forward
+/// row `>> 11` plus a random word, `>> 12`, in velocity units of
+/// 49 700 / 512 mm/s, about 25 m/s).
+fn jettison_canister(
+    nav: &mut ffe_rs::navigation::Navigator,
+    original: &Option<OriginalFlight>,
+    state: &Flight,
+    scene: Option<&ModelViewer>,
+) {
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let axes = ffe_rs::camera::ship_axes(state);
+    let forward = axes[2];
+    let radius = scene
+        .and_then(|scene| scene.model_radius(state.ship))
+        .map_or(0.0, f64::from);
+    let at = ship_position(original, state);
+    let position: [i64; 3] = std::array::from_fn(|i| at[i] - (forward[i] * radius).round() as i64);
+    let seed = (nav.clock * 1000.0) as u32 ^ 0x0099_0000;
+    let mut rng = ffe_core::npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
+    let unit_speed = 49_700.0 / 512.0;
+    let push: [f64; 3] = std::array::from_fn(|i| {
+        let jitter = f64::from(rng.bounded(0x1_0000)) - 32_768.0;
+        (forward[i] * f64::from(0x7fff_ffff_u32 >> 11) + jitter) / 4096.0 * unit_speed
+    });
+    let velocity = state.velocity.map(|v| v * unit);
+    nav.effects.push(ffe_core::effects::canister(
+        position, velocity, axes, push, &mut rng,
+    ));
 }
 
 /// F310's cargo, cabins and cash (`DATA_008888..8892`).

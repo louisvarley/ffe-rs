@@ -15,6 +15,37 @@ pub enum Mode {
     Flight,
 }
 
+/// `DATA_005111`: the internal fuel tank's energy for each drive class
+/// (`+0xd0`), the limit F289 refuels to.
+pub const FUEL_TANK: [u32; 15] = [
+    0,
+    0x2000_0000,
+    0x2000_0000,
+    0x4000_0000,
+    0x6000_0000,
+    0x8000_0000,
+    0xa000_0000,
+    0xc000_0000,
+    0xe000_0000,
+    0xffff_ffff,
+    0x2000_0000,
+    0x4000_0000,
+    0x6000_0000,
+    0x8000_0000,
+    0x2000_0000,
+];
+
+/// What F289's refuel did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refuel {
+    /// "Internal fuel tank full" before anything was burned.
+    TankFull,
+    /// No fuel in the hold: F289 only redraws the page.
+    NoFuel,
+    /// A tonne was burned; `full` when the tank stopped it (the message).
+    Refuelled { full: bool },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Flight {
@@ -614,6 +645,47 @@ impl Flight {
         true
     }
 
+    /// F289, the cargo page's Refuel button ('r'): stop with "Internal fuel
+    /// tank full" (`0x99e3`) within `0x1999999` of the drive's tank
+    /// (`DATA_005111`), do nothing without fuel, else burn a tonne (F929's
+    /// slots), clear the empty/engine-failure state and add `0x20000000`,
+    /// stopping at the tank with the same message.
+    pub fn refuel_from_hold(&mut self) -> Refuel {
+        let tank = FUEL_TANK
+            .get(usize::from(self.combat.drive))
+            .copied()
+            .unwrap_or(0);
+        let before = self.combat.energy;
+        if before >= tank.wrapping_sub(0x0199_9999) {
+            return Refuel::TankFull;
+        }
+        if !self.burn_fuel() {
+            return Refuel::NoFuel;
+        }
+        self.damage.fuel_empty = false;
+        self.damage.engine_failed = false;
+        let after = before.wrapping_add(crate::damage::ENERGY_PER_TONNE);
+        if tank >= after && before < after {
+            self.combat.energy = after;
+            Refuel::Refuelled { full: false }
+        } else {
+            self.combat.energy = tank;
+            Refuel::Refuelled { full: true }
+        }
+    }
+
+    /// F291's hold side of a jettison: one tonne of `commodity` leaves the
+    /// hold. False when there is none.
+    pub fn jettison(&mut self, commodity: usize) -> bool {
+        match self.hold.get_mut(commodity).filter(|tonnes| **tonnes > 0) {
+            Some(tonnes) => {
+                *tonnes -= 1;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// F929's empty pool: with the Auto Refueller fitted and fuel in the hold,
     /// burn one tonne and add `0x20000000` energy. Otherwise latch the empty
     /// warning and F929's engine failure.
@@ -815,6 +887,44 @@ mod tests {
     use super::*;
     use ffe_core::collision::Contact;
     use ffe_core::laser::Damage;
+
+    #[test]
+    fn f289_refuels_a_tonne_up_to_the_drive_tank() {
+        let hydrogen = ffe_core::hyperspace::HYDROGEN;
+        let mut state = Flight::free_flight();
+        state.combat.drive = 3;
+        state.hold = vec![0; ffe_core::market::NAMES];
+        state.hold[hydrogen] = 2;
+        state.combat.energy = 0;
+        // No room left: the message, and nothing burned.
+        state.combat.energy = FUEL_TANK[3] - 0x0100_0000;
+        assert_eq!(state.refuel_from_hold(), Refuel::TankFull);
+        assert_eq!(state.hold[hydrogen], 2);
+        // A tonne goes in and the hold loses it.
+        state.combat.energy = 0;
+        assert_eq!(state.refuel_from_hold(), Refuel::Refuelled { full: false });
+        assert_eq!(state.combat.energy, 0x2000_0000);
+        assert_eq!(state.hold[hydrogen], 1);
+        // The next tonne would pass the class 3 tank: it stops there.
+        state.combat.energy = 0x3000_0000;
+        assert_eq!(state.refuel_from_hold(), Refuel::Refuelled { full: true });
+        assert_eq!(state.combat.energy, FUEL_TANK[3]);
+        assert_eq!(state.hold[hydrogen], 0);
+        // An empty hold does nothing.
+        state.combat.energy = 0;
+        assert_eq!(state.refuel_from_hold(), Refuel::NoFuel);
+        assert_eq!(state.combat.energy, 0);
+    }
+
+    #[test]
+    fn f291_jettisons_one_tonne() {
+        let mut state = Flight::free_flight();
+        state.hold = vec![0; ffe_core::market::NAMES];
+        state.hold[4] = 1;
+        assert!(state.jettison(4));
+        assert_eq!(state.hold[4], 0);
+        assert!(!state.jettison(4));
+    }
 
     /// F575's bounce damage reaches F953 as `contact.damage`; the Saker's hull is
     /// the descriptor mass (28) times four.
