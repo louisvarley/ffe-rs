@@ -955,6 +955,8 @@ fn run() -> Result<(), String> {
     let mut last_prompt = String::new();
     // `player+0xc6` bit 1: F1008's micrometeorite warning has been given.
     let mut gear_warned = false;
+    // The galaxy map while it is closed, with the system it was opened in.
+    let mut parked_galaxy = None;
     let mut model_viewer: Option<ModelViewer> = None;
     // F1104/F917: the game-over screen. The death stream starts it from its own
     // destruction event; the current F953 path below uses the same API.
@@ -1308,6 +1310,7 @@ fn run() -> Result<(), String> {
                 status_page = false;
                 launch_grace = None;
                 galaxy = None;
+                parked_galaxy = None;
                 paused = false;
                 labels = false;
                 held_controls.disarm(&inp.get_keys());
@@ -2003,13 +2006,21 @@ fn run() -> Result<(), String> {
                 if nav.view == NavView::Galaxy {
                     if galaxy.is_none() && sector_tables.is_some() {
                         if let Some(home) = nav.current_position() {
-                            galaxy = Some(GalaxyMap::new(home, nav.reach().unwrap_or(0)));
+                            // The map reopens where it was left (its camera and
+                            // selection persist in the player's data), unless the
+                            // ship has jumped since.
+                            galaxy = match parked_galaxy.take() {
+                                Some((at, map)) if at == home => Some(map),
+                                _ => Some(GalaxyMap::new(home, nav.reach().unwrap_or(0))),
+                            };
                             // F834: a fresh map page with the map icon lit.
                             map_console = ffe_rs::console::MapConsole::default();
                         }
                     }
-                } else {
-                    galaxy = None;
+                } else if let Some(map) = galaxy.take() {
+                    if let Some(home) = nav.current_position() {
+                        parked_galaxy = Some((home, map));
+                    }
                 }
                 let mut hyperspace = false;
                 if let Some(map) = galaxy.as_mut() {
