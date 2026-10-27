@@ -1887,6 +1887,9 @@ impl Screen {
     ) {
         self.indexed.fill(0);
         self.panel.blit(&mut self.indexed, 0, 158);
+        let dying = state
+            .death
+            .is_some_and(|death| death.phase == crate::death::DeathPhase::Exploding);
         let mut views = views;
         views.lock_external = self.lock_external;
         let view = views.mode;
@@ -2156,21 +2159,26 @@ impl Screen {
             if world && views.console.labels {
                 self.draw_body_labels(&camera);
             }
-            // F1100's range and F1099's target shields/hull, then the player's own
-            // shields, hull, Autopilot and Set/Act/Alt at their original spots.
-            self.draw_target_hud();
-            self.draw_player_hud(view);
-            // F1100's targeting tunnels (F1113/F1114), then F1111's fixed
-            // gunsight (bitmap 97) and its blinking targetter cursor, then
-            // F1112's velocity marker (bitmap 98, front view only).
-            self.draw_target_tunnels();
-            self.draw_gunsight(view);
-            if view == ViewMode::Front {
-                self.draw_velocity_marker(state, &camera);
+            // F1104's death hold shows the external view alone: it clears the
+            // whole screen once (F1577) and nothing redraws the console, the
+            // HUD texts or the scanner (the executed probe's frames).
+            if !dying {
+                // F1100's range and F1099's target shields/hull, then the
+                // player's own shields, hull, Autopilot and Set/Act/Alt.
+                self.draw_target_hud();
+                self.draw_player_hud(view);
+                // F1100's targeting tunnels (F1113/F1114), then F1111's fixed
+                // gunsight (bitmap 97) and its blinking targetter cursor, then
+                // F1112's velocity marker (bitmap 98, front view only).
+                self.draw_target_tunnels();
+                self.draw_gunsight(view);
+                if view == ViewMode::Front {
+                    self.draw_velocity_marker(state, &camera);
+                }
+                // F274/F275's scanner contacts own the console's scanner area
+                // and may reach over its top row into the view.
+                self.draw_scanner_contacts();
             }
-            // F274/F275's scanner contacts own the console's scanner area and
-            // may reach over its top row into the view.
-            self.draw_scanner_contacts();
         }
         // The original HUD now owns the top rows and the lower left: the port's
         // top bar, controls button, SPEED line and status/map/autopilot block are
@@ -2199,11 +2207,14 @@ impl Screen {
         } else {
             // F272's text window: date/time header, ten entries, 124-pixel wrap,
             // shadow at (195, y-1) and text at (196, y), clipped to y 158..199.
-            if self.profile.is_none() {
+            if self.profile.is_none() && !dying {
                 // The pad services board keeps it, so the green clock stays visible
                 // over the console (F272 runs in the station screens too).
                 self.draw_messages();
             }
+        }
+        if dying {
+            self.frame[320 * VIEW_HEIGHT..].fill(0);
         }
         self.present();
     }
