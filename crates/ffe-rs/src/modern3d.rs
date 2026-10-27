@@ -46,8 +46,10 @@ pub struct World {
 pub struct WorldTexture {
     pub bitmap: u32,
     pub slots: Vec<[u8; 3]>,
-    pub size: u32,
-    pub pixels: Vec<u32>,
+    pub width: u32,
+    pub height: u32,
+    /// Shared: the screen keeps recent textures between frames.
+    pub pixels: std::sync::Arc<[u32]>,
 }
 
 /// The GPU, opened on first use. A machine without one keeps the classic picture: the game only
@@ -79,16 +81,19 @@ impl TextureCache {
         {
             return done.clone();
         }
-        let (mut size, mut pixels) = (texture.size as usize, texture.pixels.clone());
-        while size < ffe_render::TEXTURE_SIZE as usize && pixels.len() == size * size {
-            pixels = scale2x(&pixels, size, size);
-            size *= 2;
+        let (mut width, mut height) = (texture.width as usize, texture.height as usize);
+        let mut pixels = texture.pixels.to_vec();
+        let layer = ffe_render::TEXTURE_SIZE as usize;
+        while width < layer && height < layer && pixels.len() == width * height {
+            pixels = scale2x(&pixels, width, height);
+            (width, height) = (width * 2, height * 2);
         }
         self.next += 1;
         let done = ffe_render::Texture {
             id: self.next,
-            size: size as u32,
-            pixels,
+            width: width as u32,
+            height: height as u32,
+            pixels: pixels.into(),
         };
         // The original's palette changes slot colours over time; keep the recent ones.
         if self.known.len() >= 256 {
@@ -210,11 +215,16 @@ pub fn scene(
             .iter()
             .position(|known| known.bitmap == texture.bitmap && known.slots == texture.slots)?;
         // Texel centres: the original's corner 0 and corner 63 (or 127) are whole texels.
-        let size = texture.size as f32;
+        let (width, height) = (texture.width as f32, texture.height as f32);
         let uv: Vec<[f32; 2]> = texture
             .uv
             .iter()
-            .map(|[u, v]| [(f32::from(*u) + 0.5) / size, (f32::from(*v) + 0.5) / size])
+            .map(|[u, v]| {
+                [
+                    (f32::from(*u) + 0.5) / width,
+                    (f32::from(*v) + 0.5) / height,
+                ]
+            })
             .collect();
         (uv.len() == solid.views.len()).then_some((index as u32, uv))
     };
@@ -284,7 +294,8 @@ mod tests {
                         bitmap: 7,
                         slots: vec![[1, 2, 3]],
                         uv: vec![[0, 0], [63, 0], [63, 63], [0, 63]],
-                        size: 64,
+                        width: 64,
+                        height: 64,
                     }),
                 },
                 Solid {
@@ -296,8 +307,9 @@ mod tests {
             textures: vec![WorldTexture {
                 bitmap: 7,
                 slots: vec![[1, 2, 3]],
-                size: 64,
-                pixels: vec![0xff010203; 64 * 64],
+                width: 64,
+                height: 64,
+                pixels: vec![0xff010203; 64 * 64].into(),
             }],
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
@@ -309,7 +321,10 @@ mod tests {
         assert_eq!((background.width, background.height), (640, 316));
         assert_eq!(background.pixels.len(), 640 * 316);
         // The quad's texture is enlarged to 256 and its fan keeps the corners' coordinates.
-        assert_eq!(scene.textures[0].size, 256);
+        assert_eq!(
+            (scene.textures[0].width, scene.textures[0].height),
+            (256, 256)
+        );
         let half = 0.5 / 64.0;
         assert_eq!(
             scene.batches[0].triangles[1].texture,

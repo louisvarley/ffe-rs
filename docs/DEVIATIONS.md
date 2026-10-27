@@ -131,7 +131,7 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 |---|---|---|---|
 | ENH-021 | Modern graphics engine switch (`modern::Graphics`): Classic / Modern on Port Options and Ctrl+G, persisted as `graphics=` | implemented | Presentation only: the engine reads the finished 320x200 frame and never touches game state; Classic is the default and unchanged. First technique: edge-directed 4x upscaling (Scale2x twice) and a smooth fit. See `docs/notes/modern-graphics.md`. |
 | ENH-001 | HD textures (`upscaled.bin`, per-asset fallback) | proposed | Classic ignores the pack. |
-| ENH-002 | Native-resolution rendering | implemented for the flight view's models | Modern graphics with a GPU: the executor's faces are drawn by `ffe-render` (wgpu) at the window's view size with the original's projection, over the original's frame, under its HUD. Planets, stars and dots stay the original's pixels for now. See `docs/notes/modern-graphics.md`. |
+| ENH-002 | Native-resolution rendering | implemented for the flight view's models | Modern graphics with a GPU: the executor's faces and the planet surfaces' triangles (recorded in view space beside F1840's queue, which is unchanged) are drawn by `ffe-render` (wgpu) at the window's view size with the original's projection, over the original's frame, under its HUD. The atmosphere ring, stars and dots stay the original's pixels for now. See `docs/notes/modern-graphics.md`. |
 | ENH-003 | Smooth texture filtering | implemented for model textures | Perspective-correct, mipmapped; textures enlarged with Scale2x first. |
 | ENH-004 | Anisotropic filtering | implemented for model textures (8x) | smooth-filtering |
 | ENH-005 | MSAA | implemented (4x) for the GPU 3-D view | native-res |

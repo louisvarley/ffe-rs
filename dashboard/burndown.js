@@ -928,6 +928,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-27",
       remaining: 101,
       note: "Modern graphics GPU 3-D view: new ffe-render crate (wgpu, offscreen, 4x MSAA, reversed-Z depth, perspective-correct mipmapped anisotropic textures) draws the flight view's model faces at the window's resolution with the original's projection, over the original's frame and under its HUD; Classic is unchanged. Planets, stars and dots not yet on the GPU, so enhanced-1 is in progress. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-27",
+      remaining: 101,
+      note: "Modern graphics: planet surfaces on the GPU. The terrain emitter records each queued entry's view-space corners beside the unchanged queue; the surface is one depth-tested, textured batch from orbit to the ground (covers 99.9% of the original's planet pixels). Textures persist between frames (256-layer GPU array). Atmosphere ring, stars and dots still classic; enhanced-1 stays in progress. Remaining count unchanged."
     }
   ]
 };

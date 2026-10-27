@@ -59,7 +59,7 @@ Classic unchanged and blocky, Modern smooth only on edges). The presentation evi
 
 ## GPU 3-D view: the models at the window's resolution
 
-Status (2026-10-27): **implemented for the flight view's models** (stations, ships, the lift, the
+Status (2026-10-27): **implemented for the flight view's models and planets** (stations, ships, the lift, the
 beam, effects). `crates/ffe-render` (the GPU renderer, no game knowledge), `crates/ffe-rs/src/modern3d.rs`
 (the bridge), `Screen::draw_frame` and `model_viewer::Solid`. Deviation ENH-002/003/004/005.
 
@@ -103,14 +103,40 @@ executor (unchanged) ──► Frame { shapes, solids }      solids: each face's
   `modern3d::tests` (fans, texture coordinates, and the GPU picture landing where F1479 projects
   with the HUD left on top). GPU tests skip themselves on a machine without an adapter.
 
-Not yet on the GPU (still the original's pixels behind the models): planets and their surfaces,
-the background nebula and stars, dots and particles, thruster glows and the hyperspace tunnel.
-Lines are one window pixel wide.
+### Planets
+
+Status (2026-10-27): **implemented** (planet surfaces from orbit to the ground).
+
+The surface is the original's own: F1876 subdivides the planet for the view and F1840 queues each
+triangle with screen points only, but the subdivision's nodes carry their view-space positions
+(`terrain::Node` `+4..+0xc`). `terrain_emit::Queue::views`, a recording the port adds and the
+original does not have, keeps each queued entry's corners in view space as the emitter writes it,
+including the sea-level crossings F1837 makes (`crossing_point`, the point F1479 then projects).
+Recording never changes the queue (`surface_draw_reference` checks the words and that each corner
+projects to the entry's own screen point, against the executed original). `model_viewer::surface_shapes`
+pairs each entry with its corners as a `Solid`: the textured entries (F1805/F1807 with the corner
+table, F1806/F1808 with their own coordinates, F1840's height-band textures) carry their bitmap and
+slot colours, the flat ones their colour. The planet is then one batch: its hills hide each other by
+depth on the GPU, at the window's resolution, with the same textures as the original.
+
+- The atmosphere ring (F1877/F1879) and the planet seen as a disc from far away stay the original's
+  pixels, behind the GPU surface.
+- Textures are remembered between frames (the screen keeps the last 256 images, the renderer a
+  256-layer GPU array, uploading only new ones), so a planet's hundred or so cost about 0.4 ms each
+  only when they first appear. A steady frame of a planet costs about 2.5 ms at 1280x800.
+- Evidence: `tests/modern_planet.rs` (local cache and GPU) frames Earth at 3, 1.5, 1.2, 1.05 and 1
+  radii, checks the GPU covers every pixel where the original drew the planet (over 99.9 %), and with
+  `FFE_SHOT_DIR` writes `classic-k*.png`/`modern-k*.png`. `FFE_CAPTURE_MODERN=1` with
+  `--capture-planet` also saves `planet-XXXX-modern.png` beside each shot.
+
+Not yet on the GPU (still the original's pixels behind the models): the atmosphere ring, the
+background nebula and stars, dots and particles, thruster glows and the hyperspace tunnel. Lines are
+one window pixel wide.
 
 ## What comes next
 
-1. **Planets on the GPU** (their curved surfaces as tessellated meshes, as FFED3D does), so a ship
-   can pass in front of and behind a planet by depth, then atmosphere (ENH: enhanced-3).
+1. **A smooth GPU atmosphere** in place of the dithered ring (FFED3D's `DrawAtmosphere` spheres;
+   enhanced-3), from F1877's own haze colour and strength.
 2. **Per-pixel lighting** from the faces' normals and the star direction instead of the original's
    flat shade, and glows/stars as sprites (ENH-014/015), then modest bloom.
 3. **Presentation through a wgpu surface** instead of reading the picture back into the minifb buffer

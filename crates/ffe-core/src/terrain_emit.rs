@@ -39,6 +39,10 @@ pub struct Queue {
     in_group: bool,
     /// The words the queue may hold (`QUEUE_WORDS` unless the viewer enlarges it).
     limit: usize,
+    /// Not the original's: when set, each surface entry's corners in view space, by the
+    /// position of the entry's words, for a renderer that draws them itself (the port's
+    /// modern engine). Recording never changes the queue.
+    pub views: Option<Vec<(usize, Vec<[i32; 3]>)>>,
 }
 
 impl Default for Queue {
@@ -48,6 +52,7 @@ impl Default for Queue {
             head: 0,
             in_group: false,
             limit: QUEUE_WORDS,
+            views: None,
         }
     }
 }
@@ -65,6 +70,22 @@ impl Queue {
             head: 0,
             in_group: false,
             limit,
+            views: None,
+        }
+    }
+
+    /// [`Self::record`] for the entry queued last (its words end the queue).
+    fn record_last(&mut self, corners: &[[i32; 3]]) {
+        if self.views.is_some() {
+            let at = self.words.len() - 0xc;
+            self.record(at, corners);
+        }
+    }
+
+    /// Keep the entry at `at`'s view-space corners when [`Self::views`] is on.
+    fn record(&mut self, at: usize, corners: &[[i32; 3]]) {
+        if let Some(views) = &mut self.views {
+            views.push((at, corners.to_vec()));
         }
     }
 
@@ -250,6 +271,14 @@ fn pairs(queue: &mut Queue, at: usize, blend: &Blend, table: &[u32], count: usiz
 /// F1837: the screen position (a dword of two words) where the edge from `x` to
 /// `y` crosses sea level.
 fn crossing(t: &Terrain<'_>, x: usize, y: usize) -> u32 {
+    match project(crossing_point(t, x, y)) {
+        Some([a, b]) => u32::from(a as u16) | u32::from(b as u16) << 16,
+        None => 0,
+    }
+}
+
+/// [`crossing`]'s point in view space, before F1479 projects it.
+fn crossing_point(t: &Terrain<'_>, x: usize, y: usize) -> [i32; 3] {
     let (nx, ny) = (t.node(x), t.node(y));
     let height = ny.height();
     let step = height >> 3;
@@ -260,15 +289,17 @@ fn crossing(t: &Terrain<'_>, x: usize, y: usize) -> u32 {
     let far = 0x7fff_ffff - near;
     let lifted =
         |at: usize, vector: usize| ny.dword(at).wrapping_sub(multiply(ny.dword(vector), step));
-    let point = [
+    [
         multiply(nx.dword(4), far).wrapping_add(multiply(lifted(4, 0x28), near)),
         multiply(nx.dword(8), far).wrapping_add(multiply(lifted(8, 0x2c), near)),
         multiply(nx.dword(0xc), far).wrapping_add(multiply(lifted(0xc, 0x30), near)),
-    ];
-    match project(point) {
-        Some([a, b]) => u32::from(a as u16) | u32::from(b as u16) << 16,
-        None => 0,
-    }
+    ]
+}
+
+/// A node's position in view space.
+fn view(t: &Terrain<'_>, node: usize) -> [i32; 3] {
+    let n = t.node(node);
+    [n.x(), n.y(), n.z()]
 }
 
 fn screen(t: &Terrain<'_>, node: usize) -> u32 {
@@ -321,6 +352,7 @@ fn plain(
     colour = colour.wrapping_add(u32::from(r) | u32::from(g) << 8 | u32::from(b) << 16);
     let at = queue.entry(emission.key, 5)?;
     let [a, b, c] = emission.nodes;
+    queue.record(at, &[view(t, a), view(t, b), view(t, c)]);
     queue.words[at..at + 5].copy_from_slice(&[
         FLAT_TRIANGLE,
         screen(t, a),
@@ -354,6 +386,7 @@ fn banded(
     }
     let [a, b, c] = nodes;
     let at = queue.entry(emission.key, 0x19)?;
+    queue.record(at, &[view(t, a), view(t, b), view(t, c)]);
     queue.words[at..at + 4].copy_from_slice(&[
         DETAIL_TRIANGLE,
         screen(t, a),
@@ -472,6 +505,7 @@ fn surface(
         || (key > 0x1fff_ffff && below == 3)
         || (key > 0x7fff_ffff && height(a).wrapping_sub(height(c)) < 0x1fff_ffff);
     let (sa, sb, sc) = (screen(t, a), screen(t, b), screen(t, c));
+    let (va, vb, vc) = (view(t, a), view(t, b), view(t, c));
     if flat {
         let index = {
             let t18 = height(a) >> 18;
@@ -493,6 +527,7 @@ fn surface(
             colour = colour.wrapping_add(table);
         }
         let at = queue.entry(key, 5)?;
+        queue.record(at, &[va, vb, vc]);
         queue.words[at..at + 5].copy_from_slice(&[
             FLAT_TRIANGLE,
             sa,
@@ -506,6 +541,7 @@ fn surface(
         0 => {
             if height(a).wrapping_sub(height(c)) < 0x40_0000 {
                 let at = queue.entry(key, 0xc)?;
+                queue.record(at, &[va, vb, vc]);
                 queue.words[at..at + 5].copy_from_slice(&[TEXTURE_TRIANGLE, sa, sb, sc, 0x40]);
                 let row = {
                     let v = (height(c) >> 18).wrapping_mul(7).wrapping_mul(3);
@@ -514,6 +550,7 @@ fn surface(
                 slots(queue, at + 5, &blend, &colours.land[row]);
             } else {
                 let at = queue.entry(key, 0x14)?;
+                queue.record(at, &[va, vb, vc]);
                 queue.words[at..at + 4].copy_from_slice(&[DETAIL_TRIANGLE, sa, sb, sc]);
                 let words = [
                     0,
@@ -538,13 +575,16 @@ fn surface(
             // triangle of C and the crossings.
             let first = crossing(t, c, b);
             let second = crossing(t, c, a);
+            let crossings = [crossing_point(t, c, b), crossing_point(t, c, a)];
             if height(a) < 0x40_0000 {
                 let at = queue.entry(key, 0xd)?;
+                queue.record(at, &[va, vb, crossings[0], crossings[1]]);
                 queue.words[at..at + 5].copy_from_slice(&[TEXTURE_QUAD, sa, sb, first, second]);
                 queue.words[at + 5] = 0x40;
                 slots(queue, at + 6, &blend, &colours.land[0]);
             } else {
                 let at = queue.entry(key, 0x16)?;
+                queue.record(at, &[va, vb, crossings[0], crossings[1]]);
                 queue.words[at..at + 5].copy_from_slice(&[DETAIL_QUAD, sa, sb, first, second]);
                 let words = [
                     0,
@@ -566,17 +606,21 @@ fn surface(
                 pairs(queue, at + 11, &blend, &colours.steps, 0x16);
             }
             sea_triangle(queue, key, &blend, colours, [sc, first, second])?;
+            queue.record_last(&[vc, crossings[0], crossings[1]]);
         }
         2 => {
             // B and C are below the sea.
             let first = crossing(t, b, a);
             let second = crossing(t, c, a);
+            let crossings = [crossing_point(t, b, a), crossing_point(t, c, a)];
             let at = queue.entry(key, 0xd)?;
+            queue.record(at, &[vc, vb, crossings[0], crossings[1]]);
             queue.words[at..at + 5].copy_from_slice(&[TEXTURE_QUAD, sc, sb, first, second]);
             queue.words[at + 5] = 0x121;
             slots(queue, at + 6, &blend, &colours.sea[3]);
             if height(a) < 0x40_0000 {
                 let at = queue.entry(key, 0xc)?;
+                queue.record(at, &[crossings[0], crossings[1], va]);
                 queue.words[at..at + 5].copy_from_slice(&[
                     TEXTURE_TRIANGLE,
                     first,
@@ -587,6 +631,7 @@ fn surface(
                 slots(queue, at + 5, &blend, &colours.land[0]);
             } else {
                 let at = queue.entry(key, 0x14)?;
+                queue.record(at, &[crossings[0], crossings[1], va]);
                 queue.words[at..at + 4].copy_from_slice(&[DETAIL_TRIANGLE, first, second, sa]);
                 let words = [0, 0, 0x3f, 0, 0, band(height(a)), 0x5e, 0];
                 for k in 0..4 {
@@ -601,6 +646,7 @@ fn surface(
             let sum = height(b).wrapping_add(height(a)).wrapping_add(height(c));
             let row = ((sum >> 25) + 3).max(0) as usize;
             let at = queue.entry(key, 0xc)?;
+            queue.record(at, &[va, vb, vc]);
             queue.words[at..at + 5].copy_from_slice(&[TEXTURE_TRIANGLE, sa, sb, sc, 0x121]);
             slots(queue, at + 5, &blend, &colours.sea[row.min(3)]);
         }

@@ -32,19 +32,24 @@ pub struct Projection {
     pub near: f32,
 }
 
-/// A square texture, `0xAARRGGBB` words row after row; texels with alpha below a half are holes.
-/// Every texture of a scene is resampled to [`TEXTURE_SIZE`] if it is not that size already.
+/// A texture, `0xAARRGGBB` words row after row; texels with alpha below a half are holes. Every
+/// texture of a scene is resampled to a [`TEXTURE_SIZE`] square layer if it is not one already
+/// (coordinates are 0..1 either way).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Texture {
-    /// Equal non-zero ids promise equal pixels, so an unchanged set of textures is not
-    /// uploaded again; 0 compares the pixels themselves.
+    /// Equal non-zero ids promise equal pixels, so a texture already on the GPU is not
+    /// uploaded again; 0 uploads it every time.
     pub id: u64,
-    pub size: u32,
-    pub pixels: Vec<u32>,
+    pub width: u32,
+    pub height: u32,
+    /// Shared, so a caller's cached texture is handed over without a copy.
+    pub pixels: std::sync::Arc<[u32]>,
 }
 
 /// The side of the GPU's texture layers.
 pub const TEXTURE_SIZE: u32 = 256;
+/// The textures kept on the GPU at once (about 90 MB with their mip levels).
+pub const TEXTURE_LAYERS: u32 = 256;
 
 /// A triangle in view space, its corners' colours (RGBA, 0..1), and optionally a texture of the
 /// scene's [`Scene::textures`] with the corners' coordinates in it (0..1), which replaces the
@@ -203,8 +208,8 @@ pub struct Renderer {
     background: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     face_sampler: wgpu::Sampler,
-    /// The last scene's textures (a hash of them) and their GPU array, reused while unchanged.
-    face_textures: Option<(u64, wgpu::TextureView)>,
+    /// The GPU array the scenes' textures are kept in between frames.
+    face_textures: Option<FaceTextures>,
     targets: Option<Targets>,
     /// The adapter's name, for the options page and the logs.
     pub adapter: String,
@@ -454,8 +459,8 @@ impl Renderer {
     pub fn render(&mut self, scene: &Scene) -> Result<Vec<u32>, String> {
         let (width, height) = (scene.width.max(1), scene.height.max(1));
         self.targets(width, height);
-        self.upload_textures(&scene.textures);
-        let face_view = &self.face_textures.as_ref().unwrap().1;
+        let layers = self.upload_textures(&scene.textures);
+        let face_view = &self.face_textures.as_ref().unwrap().view;
         let device = &self.device;
         let targets = self.targets.as_ref().unwrap();
         let uniforms = Uniforms {
@@ -530,9 +535,10 @@ impl Renderer {
             let first = vertices.len() as u32;
             for (index, t) in batch.triangles.iter().enumerate() {
                 let layer = index.min(LAYERS) as f32;
-                let textures = scene.textures.len() as u32;
                 let (texture, uvs) = match t.texture {
-                    Some((texture, uvs)) if texture < textures => (texture as f32, uvs),
+                    Some((texture, uvs)) if (texture as usize) < layers.len() => {
+                        (layers[texture as usize] as f32, uvs)
+                    }
                     _ => (-1.0, [[0.0; 2]; 3]),
                 };
                 vertices.extend((0..3).map(|k| Vertex {
@@ -679,95 +685,114 @@ impl Renderer {
 impl Renderer {
     /// Put the scene's textures in a GPU array with their mip levels, unless they are the
     /// previous scene's.
-    fn upload_textures(&mut self, textures: &[Texture]) {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        textures.len().hash(&mut hasher);
-        for texture in textures {
-            texture.id.hash(&mut hasher);
-            if texture.id == 0 {
-                texture.size.hash(&mut hasher);
-                texture.pixels.hash(&mut hasher);
+    /// Put the scene's textures in the GPU array, uploading (with mip levels) only those not
+    /// already there; returns each one's layer. Layers are reused least recently used first.
+    fn upload_textures(&mut self, textures: &[Texture]) -> Vec<u32> {
+        let device = &self.device;
+        let faces = self.face_textures.get_or_insert_with(|| {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("face textures"),
+                size: wgpu::Extent3d {
+                    width: TEXTURE_SIZE,
+                    height: TEXTURE_SIZE,
+                    depth_or_array_layers: TEXTURE_LAYERS,
+                },
+                mip_level_count: TEXTURE_SIZE.ilog2() + 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: COLOUR_FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                ..Default::default()
+            });
+            FaceTextures {
+                texture,
+                view,
+                layers: vec![None; TEXTURE_LAYERS as usize],
+                frame: 0,
             }
+        });
+        faces.frame += 1;
+        let frame = faces.frame;
+        let mut out = Vec::with_capacity(textures.len());
+        for source in textures {
+            let known = (source.id != 0)
+                .then(|| {
+                    faces
+                        .layers
+                        .iter()
+                        .position(|layer| layer.is_some_and(|(id, _)| id == source.id))
+                })
+                .flatten();
+            let layer = match known {
+                Some(layer) => layer,
+                None => {
+                    // An empty layer, else the one used longest ago.
+                    let layer = (0..faces.layers.len())
+                        .min_by_key(|&k| faces.layers[k].map_or(0, |(_, used)| used))
+                        .unwrap_or(0);
+                    upload(&self.queue, &faces.texture, layer as u32, source);
+                    layer
+                }
+            };
+            faces.layers[layer] = Some((source.id, frame));
+            out.push(layer as u32);
         }
-        let hash = hasher.finish();
-        if self
-            .face_textures
-            .as_ref()
-            .is_some_and(|(old, _)| *old == hash)
-        {
-            return;
-        }
-        let blank = [Texture {
-            id: 0,
-            size: 1,
-            pixels: vec![0],
-        }];
-        let textures = if textures.is_empty() {
-            &blank[..]
-        } else {
-            textures
-        };
-        let levels = TEXTURE_SIZE.ilog2() + 1;
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("face textures"),
-            size: wgpu::Extent3d {
-                width: TEXTURE_SIZE,
-                height: TEXTURE_SIZE,
-                depth_or_array_layers: textures.len() as u32,
+        out
+    }
+}
+
+/// The face textures' GPU array and which texture each layer holds: `(id, frame last used)`.
+struct FaceTextures {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    layers: Vec<Option<(u64, u64)>>,
+    frame: u64,
+}
+
+/// Upload one texture into `layer` of the array, with its mip levels.
+fn upload(queue: &wgpu::Queue, texture: &wgpu::Texture, layer: u32, source: &Texture) {
+    let levels = TEXTURE_SIZE.ilog2() + 1;
+    let mut level = resample(source, TEXTURE_SIZE);
+    for mip in 0..levels {
+        let size = TEXTURE_SIZE >> mip;
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: mip,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: layer,
+                },
+                aspect: wgpu::TextureAspect::All,
             },
-            mip_level_count: levels,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: COLOUR_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        for (layer, source) in textures.iter().enumerate() {
-            let mut level = resample(source, TEXTURE_SIZE);
-            for mip in 0..levels {
-                let size = TEXTURE_SIZE >> mip;
-                self.queue.write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &texture,
-                        mip_level: mip,
-                        origin: wgpu::Origin3d {
-                            x: 0,
-                            y: 0,
-                            z: layer as u32,
-                        },
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    &level,
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(size * 4),
-                        rows_per_image: Some(size),
-                    },
-                    wgpu::Extent3d {
-                        width: size,
-                        height: size,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                level = halve(&level, size);
-            }
-        }
-        let view = texture.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        });
-        self.face_textures = Some((hash, view));
+            &level,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size * 4),
+                rows_per_image: Some(size),
+            },
+            wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+        );
+        level = halve(&level, size);
     }
 }
 
 /// A texture as BGRA bytes at `size` by `size` (nearest texel when it is another size).
 fn resample(texture: &Texture, size: u32) -> Vec<u8> {
-    let source = texture.size.max(1);
+    let (width, height) = (texture.width.max(1), texture.height.max(1));
     let mut out = Vec::with_capacity((size * size * 4) as usize);
     for y in 0..size {
         for x in 0..size {
-            let at = (y * source / size) * source + x * source / size;
+            let at = (y * height / size) * width + x * width / size;
             let p = texture.pixels.get(at as usize).copied().unwrap_or(0);
             out.extend_from_slice(&p.to_le_bytes());
         }
@@ -902,8 +927,9 @@ mod tests {
             }],
             textures: vec![Texture {
                 id: 0,
-                size: 4,
-                pixels: texture,
+                width: 4,
+                height: 4,
+                pixels: texture.into(),
             }],
             ..layered
         };

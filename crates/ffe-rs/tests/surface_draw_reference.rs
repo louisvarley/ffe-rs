@@ -313,6 +313,24 @@ fn compare_surface_vectors(minimum: usize) {
                 case.queue_hash,
                 "{context}: queue hash"
             );
+            // The modern engine's recording of each entry's view-space corners leaves
+            // the queue as it was, and each corner projects to the entry's own point.
+            let mut recorded = Queue::default();
+            recorded.views = Some(Vec::new());
+            let _ = planet(&case, &scene, &table, &maps, &sine, &mut recorded);
+            assert_eq!(
+                recorded.words, queue.words,
+                "{context}: recording changed the queue"
+            );
+            for (at, corners) in recorded.views.as_ref().unwrap() {
+                for (k, corner) in corners.iter().enumerate() {
+                    let word = queue.words[at + 1 + k];
+                    let point = [word as i16, (word >> 16) as i16];
+                    if let Some(projected) = ffe_core::model_instance::project(*corner) {
+                        assert_eq!(projected, point, "{context}: entry {at} corner {k}");
+                    }
+                }
+            }
             queued += 1;
         }
         compared += 1;

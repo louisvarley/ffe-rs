@@ -87,14 +87,17 @@ pub struct Solid {
 }
 
 /// A textured face's bitmap, its slot colours (as [`Textured`]) and each corner's texel
-/// coordinates in the bitmap (F1644/F1647's corner table), in the face's vertex order.
+/// coordinates in the bitmap (F1644/F1647's corner table, or the entry's own for the planet
+/// surface's F1806/F1808), in the face's vertex order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SolidTexture {
     pub bitmap: u32,
     pub slots: Vec<[u8; 3]>,
     pub uv: Vec<[i16; 2]>,
-    /// The bitmap's row stride and side: 64, or 128 for the others (F1643).
-    pub size: u32,
+    /// The bitmap's row stride (64, or 128 for the others: F1643) and its rows (at least
+    /// the stride, so the corner table stays inside it).
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -196,6 +199,9 @@ pub const SURFACE_QUEUE_WORDS: usize = 0x2_0000;
 struct SurfaceBatch {
     words: Vec<u32>,
     order: Vec<(u32, usize)>,
+    /// Each entry's corners in view space (by the position of its words), for the
+    /// modern engine.
+    views: std::collections::HashMap<usize, Vec<[i32; 3]>>,
 }
 
 /// One textured surface entry before palette resolution: its screen points, the
@@ -581,14 +587,37 @@ impl ModelViewer {
     /// Texels without a slot colour (7 and above, never written by face entries;
     /// stale `DATA_009252` contents in the original) are drawn black, the zeroed
     /// start-up value. Returns false when the bitmap is missing.
-    /// A textured face's bitmap as a square `0xAARRGGBB` image (its stride by its stride) in
-    /// the slot colours, for the modern engine. Masked texel 0 is transparent; rows the bitmap
-    /// does not have are transparent too.
+    /// A textured shape's [`SolidTexture`], with `uv` its own texel coordinates or, for
+    /// `None`, the corner table F1644/F1647 use. `None` when the bitmap is missing.
+    pub fn solid_texture(
+        &self,
+        textured: &Textured,
+        uv: Option<&[[i16; 2]]>,
+    ) -> Option<SolidTexture> {
+        let map = self.textures.map(textured.bitmap & 0xfff)?;
+        let width = if map.width == 64 { 64 } else { 128 };
+        let uv = match (uv, textured.points.len()) {
+            (Some(uv), _) => uv.to_vec(),
+            (None, 3) => triangle_uv(map.width).to_vec(),
+            (None, 4) => quad_uv(map.width, (textured.bitmap >> 12 & 7) as u8).to_vec(),
+            _ => return None,
+        };
+        Some(SolidTexture {
+            bitmap: textured.bitmap,
+            slots: textured.slots.clone(),
+            uv,
+            width,
+            height: (map.texels.len() as u32 / width).max(width),
+        })
+    }
+
+    /// A textured face's bitmap as a `width` by `height` `0xAARRGGBB` image in the slot
+    /// colours, for the modern engine. Masked texel 0 is transparent; rows the bitmap does
+    /// not have are transparent too.
     pub fn texture_argb(&self, texture: &SolidTexture) -> Option<Vec<u32>> {
         let map = self.textures.map(texture.bitmap & 0xfff)?;
-        let size = texture.size as usize;
         Some(
-            (0..size * size)
+            (0..(texture.width * texture.height) as usize)
                 .map(|at| match map.texels.get(at) {
                     Some(&texel) if !(map.masked_zero && texel == 0) => {
                         let [r, g, b] = texture
@@ -1605,6 +1634,7 @@ impl ModelViewer {
             };
             let mut terrain = Terrain::new(table, maps);
             let mut queue = Queue::with_limit(SURFACE_QUEUE_WORDS);
+            queue.views = Some(Vec::new());
             // An overflow of the original's arenas or queue ends the drawing early;
             // what was queued stands.
             let word0 = i32::from(surface.word);
@@ -1651,6 +1681,7 @@ impl ModelViewer {
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
             batches.push(SurfaceBatch {
+                views: queue.views.take().unwrap_or_default().into_iter().collect(),
                 words: queue.words,
                 order,
             });
@@ -1733,7 +1764,7 @@ impl ModelViewer {
     /// build. Flat entries are F1804 triangles; the rest are F1805/F1807
     /// descriptor textures or F1806/F1808 explicit-coordinate textures, drawn by
     /// F1644/F1647. F1877's haze ring entries keep the group's key.
-    fn surface_shapes(&self, batches: &[SurfaceBatch]) -> Vec<(u32, Shape)> {
+    fn surface_shapes(&self, batches: &[SurfaceBatch]) -> Vec<(u32, Shape, Option<Solid>)> {
         let mut shapes = Vec::new();
         for batch in batches {
             let w = &batch.words;
@@ -1760,7 +1791,7 @@ impl ModelViewer {
                                 if let Some(texture) =
                                     self.terrain_texture(w, pos - 2, key, 4, false)
                                 {
-                                    shapes.push((key, self.texture_shape(&texture)));
+                                    shapes.push((key, self.texture_shape(&texture), None));
                                     pos += 13;
                                     continue;
                                 }
@@ -1775,6 +1806,7 @@ impl ModelViewer {
                                         vec![points[0], points[1], points[2]],
                                         vec![colours[0], colours[1], colours[2]],
                                     ),
+                                    None,
                                 ));
                                 shapes.push((
                                     key,
@@ -1782,12 +1814,13 @@ impl ModelViewer {
                                         vec![points[0], points[2], points[3]],
                                         vec![colours[0], colours[2], colours[3]],
                                     ),
+                                    None,
                                 ));
                                 pos += 13;
                             }
                             10 => {
                                 let points = vec![point(1), point(2), point(3), point(4)];
-                                shapes.push((key, Shape::Fill(points, colour(w[pos + 5]))));
+                                shapes.push((key, Shape::Fill(points, colour(w[pos + 5])), None));
                                 pos += 6;
                             }
                             _ => break,
@@ -1810,8 +1843,27 @@ impl ModelViewer {
                 // coordinates, the planet surface) draw the real bitmap when the
                 // cache carries it. Without it, the old flat/gouraud stand-in runs.
                 let explicit = matches!(handler & 0xff, 6 | 8);
+                // The entry's corners in view space, for the modern engine.
+                let views = batch.views.get(&(at + 2)).filter(|v| v.len() == corners);
                 if let Some(texture) = self.terrain_texture(w, at, key, corners, explicit) {
-                    shapes.push((texture.key, self.texture_shape(&texture)));
+                    let shape = self.texture_shape(&texture);
+                    let solid = views.and_then(|views| {
+                        let (textured, uv) = match &shape {
+                            Shape::Textured(textured) => (textured, None),
+                            Shape::TexturedUv(textured, uv) => (textured, Some(&uv[..])),
+                            _ => return None,
+                        };
+                        Some(Solid {
+                            views: views.clone(),
+                            rgb: textured
+                                .slots
+                                .get(textured.slots.len() / 2)
+                                .copied()
+                                .unwrap_or_default(),
+                            texture: Some(self.solid_texture(textured, uv)?),
+                        })
+                    });
+                    shapes.push((texture.key, shape, solid));
                     continue;
                 }
                 // The detail entries (F1808, F1806) colour each corner from the 22-step
@@ -1826,7 +1878,7 @@ impl ModelViewer {
                             .into_iter()
                             .map(colour)
                             .collect::<Vec<_>>();
-                        shapes.push((key, Shape::Gouraud(points, colours)));
+                        shapes.push((key, Shape::Gouraud(points, colours), None));
                     }
                     6 => {
                         let colours = self.surface_fallback_colours(w, at, 6);
@@ -1836,6 +1888,7 @@ impl ModelViewer {
                                 vec![points[0], points[1], points[2]],
                                 vec![colour(colours[0]), colour(colours[1]), colour(colours[2])],
                             ),
+                            None,
                         ));
                         shapes.push((
                             key,
@@ -1843,11 +1896,18 @@ impl ModelViewer {
                                 vec![points[0], points[2], points[3]],
                                 vec![colour(colours[0]), colour(colours[2]), colour(colours[3])],
                             ),
+                            None,
                         ));
                     }
                     other => {
                         let colours = self.surface_fallback_colours(w, at, other);
-                        shapes.push((key, Shape::Fill(points, self.textures.rgb(colours[0]))));
+                        let rgb = self.textures.rgb(colours[0]);
+                        let solid = views.map(|views| Solid {
+                            views: views.clone(),
+                            rgb,
+                            texture: None,
+                        });
+                        shapes.push((key, Shape::Fill(points, rgb), solid));
                     }
                 }
             }
@@ -1861,11 +1921,11 @@ impl ModelViewer {
     /// own, so a near ship draws over a far planet as the original's one queue
     /// does. Equal keys keep the primitive before the surface, and surfaces in
     /// their queue order.
-    fn merge_surface_shapes(frame: &mut Frame, shapes: Vec<(u32, Shape)>) {
+    fn merge_surface_shapes(frame: &mut Frame, shapes: Vec<(u32, Shape, Option<Solid>)>) {
         if !shapes.is_empty() {
             frame.solids.resize(frame.shapes.len(), None);
         }
-        for (key, shape) in shapes {
+        for (key, shape, solid) in shapes {
             let at = frame
                 .keys
                 .iter()
@@ -1873,7 +1933,7 @@ impl ModelViewer {
                 .unwrap_or(frame.keys.len());
             frame.keys.insert(at, key);
             frame.shapes.insert(at, shape);
-            frame.solids.insert(at, None);
+            frame.solids.insert(at, solid);
         }
     }
 
@@ -2087,31 +2147,15 @@ impl ModelViewer {
                                 .iter()
                                 .map(|c| self.textures.rgb(*c))
                                 .collect();
-                            if let (Some(solid), Some(map)) =
-                                (solid.as_mut(), self.textures.map(entry.bitmap & 0xfff))
-                            {
-                                let uv = match points.len() {
-                                    3 => Some(triangle_uv(map.width).to_vec()),
-                                    4 => Some(
-                                        quad_uv(map.width, (entry.bitmap >> 12 & 7) as u8).to_vec(),
-                                    ),
-                                    _ => None,
-                                };
-                                solid.texture = uv.map(|uv| SolidTexture {
-                                    bitmap: entry.bitmap,
-                                    slots: slots.clone(),
-                                    uv,
-                                    size: if map.width == 64 { 64 } else { 128 },
-                                });
+                            let textured = Textured {
+                                points,
+                                bitmap: entry.bitmap,
+                                slots,
+                            };
+                            if let Some(solid) = solid.as_mut() {
+                                solid.texture = self.solid_texture(&textured, None);
                             }
-                            push!(
-                                Shape::Textured(Textured {
-                                    points,
-                                    bitmap: entry.bitmap,
-                                    slots,
-                                }),
-                                solid
-                            );
+                            push!(Shape::Textured(textured), solid);
                             continue;
                         }
                     }

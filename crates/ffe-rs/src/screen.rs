@@ -446,6 +446,8 @@ pub struct Screen {
     batches: Vec<Vec<Solid>>,
     /// Their textures so far this frame, each (bitmap, slot colours) once.
     textures: Vec<crate::modern3d::WorldTexture>,
+    /// The textures of recent frames, so a planet's hundred are not rebuilt every frame.
+    texture_memory: Vec<crate::modern3d::WorldTexture>,
     /// Shapes an object draws after its first set-aside face (lights, glows, labels): in the
     /// original's painter order they lie over its faces, so they are drawn after the world
     /// phase, over the 3-D view.
@@ -964,6 +966,7 @@ impl Screen {
             capture: false,
             batches: Vec::new(),
             textures: Vec::new(),
+            texture_memory: Vec::new(),
             deferred: Vec::new(),
             world: None,
             discs: Vec::new(),
@@ -1319,7 +1322,7 @@ impl Screen {
                             .orientation
                             .map(|axis| camera.direction(axis).map(|v| v * shrunk));
                         if let Ok(frame) = viewer.render_scene(model, rows, position, light) {
-                            self.draw_shapes(viewer, &frame.shapes);
+                            self.draw_frame(viewer, &frame);
                             continue;
                         }
                     }
@@ -2695,19 +2698,41 @@ impl Screen {
                             known.bitmap == texture.bitmap && known.slots == texture.slots
                         });
                         if !known {
-                            if let Some(pixels) = viewer.texture_argb(texture) {
-                                self.textures.push(crate::modern3d::WorldTexture {
-                                    bitmap: texture.bitmap,
-                                    slots: texture.slots.clone(),
-                                    size: texture.size,
-                                    pixels,
-                                });
-                            }
+                            let remembered = self.texture_memory.iter().position(|known| {
+                                known.bitmap == texture.bitmap && known.slots == texture.slots
+                            });
+                            let made = match remembered {
+                                Some(at) => Some(self.texture_memory[at].clone()),
+                                None => viewer.texture_argb(texture).map(|pixels| {
+                                    let made = crate::modern3d::WorldTexture {
+                                        bitmap: texture.bitmap,
+                                        slots: texture.slots.clone(),
+                                        width: texture.width,
+                                        height: texture.height,
+                                        pixels: pixels.into(),
+                                    };
+                                    if self.texture_memory.len() >= 256 {
+                                        self.texture_memory.remove(0);
+                                    }
+                                    self.texture_memory.push(made.clone());
+                                    made
+                                }),
+                            };
+                            self.textures.extend(made);
                         }
                     }
                     batch.push(solid.clone());
                 }
-                None if !batch.is_empty() => self.deferred.push(shape.clone()),
+                // Lights, particles and labels an object draws after its faces lie over
+                // them; its other shapes (a planet's atmosphere ring) stay behind.
+                None if !batch.is_empty()
+                    && matches!(
+                        shape,
+                        Shape::Point(..) | Shape::Spans(..) | Shape::Label(..) | Shape::Line(..)
+                    ) =>
+                {
+                    self.deferred.push(shape.clone())
+                }
                 None => self.draw_shapes(viewer, std::slice::from_ref(shape)),
             }
         }

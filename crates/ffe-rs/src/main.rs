@@ -453,6 +453,27 @@ fn write_png(path: &Path, pixels: &[u32], width: usize, height: usize) -> Result
 /// The presentation evidence: the same 320x200 frame through the real display
 /// scaler at the supported sizes. `display.cfg` and the window's live size do
 /// not affect these images, and no capture (`--capture*`) is touched.
+/// The screen's last frame through Modern graphics at 1920x1440: the upscaled frame and, when
+/// the flight view set faces aside, the GPU 3-D view.
+fn write_modern_png(
+    path: &Path,
+    screen: &Screen,
+    gpu: &mut ffe_rs::modern3d::Gpu3d,
+) -> Result<(), String> {
+    let (width, height) = (1920, 1440);
+    let settings = DisplaySettings {
+        graphics: ffe_rs::modern::Graphics::Modern,
+        ..DisplaySettings::default()
+    };
+    let rect = settings.rect((width, height));
+    let mut target = vec![0; width * height];
+    ffe_rs::modern::ModernRenderer::new().render(screen.logical_pixels(), &mut target, width, rect);
+    if let Some(world) = screen.world() {
+        gpu.render(screen.logical_pixels(), world, &mut target, width, rect)?;
+    }
+    write_png(path, &target, width, height)
+}
+
 /// The flight frame through Modern graphics' GPU 3-D view (`modern3d`) at 1920x1440, with the
 /// models set aside; skipped with a note on a machine without a GPU.
 fn write_modern_3d_capture(
@@ -1170,6 +1191,9 @@ fn run() -> Result<(), String> {
     // few radii out on the same side as the starting station, flying the same
     // autopilot and original flight model the playable uses.
     let mut captured_planet: Option<String> = None;
+    let mut capture_modern = (options.capture_planet.is_some()
+        && std::env::var_os("FFE_CAPTURE_MODERN").is_some())
+    .then(ffe_rs::modern3d::Gpu3d::new);
     let mut capture_port = false;
     if let Some(dir) = &options.capture_planet {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
@@ -6925,8 +6949,10 @@ fn run() -> Result<(), String> {
         }
         // Modern graphics draw the flight view's models on the GPU (`modern3d`) when it opened;
         // otherwise the frame keeps them and the modern engine only upscales it.
-        let modern_3d =
-            prefs.display.graphics == ffe_rs::modern::Graphics::Modern && presenter.gpu_available();
+        // `FFE_CAPTURE_MODERN=1` with `--capture-planet` also saves each shot through it.
+        let modern_3d = (prefs.display.graphics == ffe_rs::modern::Graphics::Modern
+            || capture_modern.is_some())
+            && presenter.gpu_available();
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();
@@ -6993,6 +7019,10 @@ fn run() -> Result<(), String> {
             // the approach, plus the first frame.
             if frames % 100 == 0 {
                 write_shot(dir, &format!("planet-{frames:04}.ppm"), &screen);
+                if let Some(gpu) = capture_modern.as_mut() {
+                    let path = dir.join(format!("planet-{frames:04}-modern.png"));
+                    write_modern_png(&path, &screen, gpu)?;
+                }
             }
         } else if let Some(dir) = &options.capture_traffic {
             if matches!(frames, 0 | 10 | 11 | 20 | 21 | 40 | 79) {
