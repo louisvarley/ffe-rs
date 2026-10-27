@@ -191,8 +191,10 @@ fn port_only_clicks_and_view_changes_leave_the_log_clean() {
 
     // The unported console buttons only produce the port's transient note (or
     // nothing); none is an F271 entry. F4 is the services board since
-    // start-flow, so it is not in this list.
-    for (index, click) in [Click::Screen(5), Click::Missile, Click::Combat]
+    // start-flow and F5 the engines page (F1056's action 0xf5), so neither is
+    // in this list.
+    assert_eq!(Click::Screen(5).unported(), None);
+    for (index, click) in [Click::Missile, Click::Combat]
         .into_iter()
         .enumerate()
     {

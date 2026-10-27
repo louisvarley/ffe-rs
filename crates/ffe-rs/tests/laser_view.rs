@@ -162,7 +162,7 @@ fn a_60hz_pulse_sequence_aims_fires_and_damages_an_npc() {
     let stats = viewer.ship_stats(state.ship);
     let mut shot_frames: Vec<usize> = Vec::new();
     let mut outcomes = Vec::new();
-    let mut muzzle_changed = 0;
+    let mut ray_changed = 0;
     for frame in 0..80 {
         combat.tick(tics, dt);
         let Ok(shot) = combat.fire(0, tics) else {
@@ -202,7 +202,7 @@ fn a_60hz_pulse_sequence_aims_fires_and_damages_an_npc() {
         let with_beam = screen.logical_pixels().to_vec();
         screen.beam = None;
         screen.draw(&state, views, Some(&viewer), true, "");
-        muzzle_changed += changed(&with_beam, screen.logical_pixels());
+        ray_changed += changed(&with_beam, screen.logical_pixels());
         save(&screen, &format!("laser-hit-{}.ppm", shot_frames.len()));
         if shot_frames.len() == 1 {
             assert!(
@@ -220,7 +220,9 @@ fn a_60hz_pulse_sequence_aims_fires_and_damages_an_npc() {
             laser::Damage::Hull
         ]
     );
-    assert_eq!(muzzle_changed, 0, "the front view invented a muzzle flash");
+    // F1776's model 0x9c draws the ray from the gun to the target (global 37,
+    // F931's length) in the front view; its muzzle sits behind the eye.
+    assert!(ray_changed > 0, "the front view did not draw the ray");
     let ship = nav.ships.iter().find(|ship| ship.id == id).unwrap();
     assert_eq!(ship.damage.shields, 0);
     assert_eq!(ship.damage.hull, 50);
