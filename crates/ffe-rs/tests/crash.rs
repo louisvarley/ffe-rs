@@ -243,10 +243,10 @@ fn launch_reaches_free_flight_outside_the_collision_surface() {
         "free flight starts {inner:.0} mm inside the collision surface"
     );
     // The playable's 120-frame grace after F1031's clear: no landing scan while
-    // the ship leaves the starport. The planet's scan then runs while the ship is
-    // still at pad altitude: a level flight into the local rise is a real
-    // surface contact (F1013's fixed up-thrust is the only climb), not a
-    // placement that starts the ship inside the surface.
+    // the ship leaves the starport. The planet's scan then runs; the ship must
+    // never be inside the collision surface. A contact, if the path meets a
+    // rise, is a real crash that carries F953's amount (the pad hand-off now
+    // climbs clear, so the 400 frames need not meet one).
     let library = Library(&l.cache);
     let tools = tools(&l.cache, &library);
     let records = l.cache.asset("base:model/records").unwrap();
@@ -285,7 +285,9 @@ fn launch_reaches_free_flight_outside_the_collision_surface() {
             break;
         }
     }
-    let (frame, contact) = first.expect("the level flight meets the rise");
+    let Some((frame, contact)) = first else {
+        return;
+    };
     eprintln!(
         "post-launch contact frame {frame} flags {:#04x} touch {:?} damage {}",
         contact.flags, contact.touch, contact.damage

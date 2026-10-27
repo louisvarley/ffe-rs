@@ -54,11 +54,11 @@ fn land_on_planet(
     let ship_model = ModelInfo::read(records, stats, state.ship).unwrap();
     let mut model = OriginalFlight::from_flight(state, None);
     model.face(planet_body.position);
-    for _ in 0..40_000 {
-        let keys = Keys {
-            slower: true,
-            ..Keys::default()
-        };
+    // The seat is on the starport, on the surface. With no keys the flight
+    // model holds the ship there (holding Shift would set a negative speed
+    // and back it away into space); a short settle is enough.
+    for _ in 0..500 {
+        let keys = Keys::default();
         let contact = model
             .step_landing(
                 0.02,
