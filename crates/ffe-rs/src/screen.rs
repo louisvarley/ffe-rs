@@ -285,6 +285,35 @@ pub struct EquipmentStatus {
     pub equipment: Vec<(String, bool)>,
     /// The gun mounts: mount name (`0x9870..`), laser(s), and the tab x.
     pub lasers: Vec<(String, String, usize)>,
+    /// `DATA_008686`: the first row each column shows when the list scrolls.
+    pub scroll: usize,
+}
+
+/// F283's list layout for `count` fitted items: rows shown per column, the
+/// column break and the furthest scroll (`DATA_008687`). Up to 16 items show
+/// eight to a column; more scroll seven rows of two `(count + 1) / 2` columns.
+pub fn equipment_rows(count: usize) -> (usize, usize, usize) {
+    if count > 16 {
+        let half = count.div_ceil(2);
+        (7, half, half - 7)
+    } else {
+        (8, 8, 0)
+    }
+}
+
+/// F286's page-0 hot areas (`DATA_005108`): (20..28, 112..123) is action 6,
+/// one row on; (32..40, 112..123) is action 5, one row back.
+pub fn equipment_scroll_click(x: i32, y: i32) -> Option<i32> {
+    if !(112..=123).contains(&y) {
+        return None;
+    }
+    if (20..=28).contains(&x) {
+        Some(1)
+    } else if (32..=40).contains(&x) {
+        Some(-1)
+    } else {
+        None
+    }
 }
 
 /// F286's seven status pages in section order, as the port's console note
@@ -1569,21 +1598,32 @@ impl Screen {
                 self.shadow_text(x, y, part, TEXT);
             }
         }
-        let per_column = if page.equipment.len() > 16 {
-            page.equipment.len().div_ceil(2)
-        } else {
-            8
-        };
+        // F283: the scroll arrows (bitmap 0x30 while more rows follow, 0x2f
+        // once scrolled), then each column's visible rows from y 47.
+        let (shown, per_column, last) = equipment_rows(page.equipment.len());
+        let scroll = page.scroll.min(last);
+        let palette = self.palette;
+        if last > scroll {
+            if let Some(Some(icon)) = self.dock_icons.get(2) {
+                icon.blit_rgb(&mut self.frame, &palette, 0x14, 0x70);
+            }
+        }
+        if scroll > 0 {
+            if let Some(Some(icon)) = self.dock_icons.get(1) {
+                icon.blit_rgb(&mut self.frame, &palette, 0x20, 0x70);
+            }
+        }
         for (index, (name, damaged)) in page.equipment.iter().enumerate() {
-            let (x, y) = if index < per_column {
-                (5, 47 + index * 9)
+            let (x, row) = if index < per_column {
+                (5, index)
             } else {
-                (0x60, 47 + (index - per_column) * 9)
+                (0x60, index - per_column)
             };
-            if y + 8 > 125 {
+            if row < scroll || row >= scroll + shown {
                 continue;
             }
-            self.shadow_text(x, y as i32, name, if *damaged { 0x10 } else { 0x11 });
+            let y = 47 + (row - scroll) as i32 * 9;
+            self.shadow_text(x, y, name, if *damaged { 0x10 } else { 0x11 });
         }
         for (row, (mount, laser, tab)) in page.lasers.iter().enumerate() {
             let y = 125 + row as i32 * 10;
@@ -3406,7 +3446,17 @@ fn decode_cabin(png: &[u8]) -> Result<Vec<u32>, String> {
 
 #[cfg(test)]
 mod cargo_page_tests {
-    use super::{cargo_click, CargoClick};
+    use super::{cargo_click, equipment_rows, equipment_scroll_click, CargoClick};
+
+    #[test]
+    fn f283_scrolls_a_long_equipment_list() {
+        assert_eq!(equipment_rows(16), (8, 8, 0));
+        // 21 items: two columns of 11, seven rows showing, four rows to scroll.
+        assert_eq!(equipment_rows(21), (7, 11, 4));
+        assert_eq!(equipment_scroll_click(24, 115), Some(1));
+        assert_eq!(equipment_scroll_click(36, 112), Some(-1));
+        assert_eq!(equipment_scroll_click(36, 124), None);
+    }
 
     #[test]
     fn f294_hot_areas() {

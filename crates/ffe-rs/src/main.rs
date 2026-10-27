@@ -955,6 +955,8 @@ fn run() -> Result<(), String> {
     let mut engines_page = false;
     // F2's sub-page: 0 is `F1120`'s ship/equipment page, 1 is F312's profile.
     let mut status_section = 0u8;
+    // F283's equipment list scroll (`DATA_008686`).
+    let mut equipment_scroll = 0usize;
     // F308's next page (`+0x4a39`): F285 reopens the screen on it.
     let mut status_next = 0u8;
     // F293 turns the status model only while the screen is up (DATA_009068/9).
@@ -1865,6 +1867,17 @@ fn run() -> Result<(), String> {
                 status_section = 0;
                 status_left = true;
                 message = "Flight console.".to_owned();
+            }
+            // F292's page-0 actions 5 and 6 move F283's list a row.
+            if let Some(step) = click_point
+                .filter(|_| status_page && status_section == 0)
+                .and_then(|(x, y)| ffe_rs::screen::equipment_scroll_click(x, y))
+            {
+                let count = equipment_status(&cache, &state, nav.as_ref(), scene.as_ref())
+                    .equipment
+                    .len();
+                let (_, _, last) = ffe_rs::screen::equipment_rows(count);
+                equipment_scroll = (equipment_scroll as i32 + step).clamp(0, last as i32) as usize;
             }
             // F292: 'r' (action 0x72) refuels from any page; F294's buttons
             // refuel and jettison on the cargo page.
@@ -5199,8 +5212,11 @@ fn run() -> Result<(), String> {
             spin: (status_spin * 65_536.0) as u32,
             gear: state.gear,
         });
-        screen.equipment_status = (status_shown && status_section == 0)
-            .then(|| equipment_status(&cache, &state, nav.as_ref(), scene.as_ref()));
+        screen.equipment_status = (status_shown && status_section == 0).then(|| {
+            let mut page = equipment_status(&cache, &state, nav.as_ref(), scene.as_ref());
+            page.scroll = equipment_scroll;
+            page
+        });
         screen.profile = if status_shown && status_section == 1 {
             nav.as_ref().map(|nav| nav.profile(death::COMMANDER_NAME))
         } else {
@@ -7082,6 +7098,7 @@ fn equipment_status(
         status,
         equipment,
         lasers,
+        scroll: 0,
     }
 }
 
