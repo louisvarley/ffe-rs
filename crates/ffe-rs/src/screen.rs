@@ -2797,6 +2797,12 @@ impl Screen {
             let rows = effect.axes.map(|axis| camera.direction(axis));
             let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
             inputs.globals[ffe_core::effects::EXPLOSION_MASS_GLOBAL] = effect.mass;
+            // F942 writes `+0x9e = 0xffff` (global 1) on the explosion: model
+            // 155 scales its fragments by it (`global1 >> 7`), so a zero word
+            // collapses every fragment onto the centre pixel.
+            if effect.mass != 0 {
+                inputs.globals[1] = ffe_core::effects::EXPLOSION_SIZE;
+            }
             inputs.jitter = self.jitter.cursor;
             if let Ok(frame) = scene.render_scene_with(effect.model, rows, origin, light, &inputs) {
                 if !frame.shapes.is_empty() {

@@ -82,6 +82,11 @@ pub const EXPLOSION_MASS_GLOBAL: usize = 4;
 /// FFP 1.0, the value at which model 155 selects all twelve fragment calls.
 pub const EXPLOSION_MASS: u16 = 0x4000;
 
+/// F942's `+0x9e` (object global word 1) on the explosion, `0xffff`
+/// (`ffe.asm:70730`). Model 155's first instruction is `local5 = global1 >> 7`,
+/// the fragments' size.
+pub const EXPLOSION_SIZE: u16 = 0xffff;
+
 /// Which spawn created an effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
