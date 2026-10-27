@@ -193,3 +193,14 @@ one `attempt` per 20 ms of F1035, then `tick` (F769). `attempt` returns a
 
 `crates/ffe-rs/tests/prefs.rs`'s `others_page_applies_stars_and_reverse_and_keeps_the_rest_inert`
 now asserts that row 0 toggles (it was inert before this slice).
+
+## Rendering scale (2026-10-27)
+
+The playable draws each particle as model `0x6d` through the effect path with
+`+0x7e` applied as a shift on the model's own scale (as for F939's sparks):
+`scale = model.scale + distance_bias`, so -7..-4. Model 0x6d's radius is 65 km
+at its own scale (opcode-24 F1766 chains behind three opcode-12 branches), so
+a cloud is 0.5..4 km across. The first wiring passed no scale, which drew
+every cloud 16..128 times too large: the camera sat inside it and almost no
+dot reached the screen. `effects_view::dust_is_drawn_ahead_at_speed` checks
+the dots are drawn at 5 km/s.

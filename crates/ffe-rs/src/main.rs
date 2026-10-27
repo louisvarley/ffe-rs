@@ -5897,7 +5897,14 @@ fn run() -> Result<(), String> {
                                 }),
                                 timer: 0,
                                 size: 0,
-                                scale: None,
+                                // F1035's distance word `+0x7e` (-7..-4) is a
+                                // shift on the model's own scale.
+                                scale: scene
+                                    .as_ref()
+                                    .and_then(|scene| scene.find(particle.model))
+                                    .map(|model| {
+                                        (model.scale as i32 + particle.distance_bias).max(0) as u32
+                                    }),
                             }
                         },
                     ));

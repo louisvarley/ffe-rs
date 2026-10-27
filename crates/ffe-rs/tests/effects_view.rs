@@ -295,3 +295,65 @@ fn model_155_fragments_are_gated_on_global_4() {
         .unwrap();
     assert!(frame.shapes.len() >= 6, "{}", frame.shapes.len());
 }
+
+/// F1035's dust is model 0x6d drawn with its distance word (`+0x7e`, -7..-4)
+/// as a shift on the model's own scale: each cloud is 0.5..4 km of F1766
+/// chain dots ahead of the ship. At the model's native scale (65 km) the
+/// camera sits inside every cloud and almost nothing is drawn.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn dust_is_drawn_ahead_at_speed() {
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let sine = ffe_core::model_math::SineTable::from_bytes(cache.asset("base:math/sine").unwrap())
+        .unwrap();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let speed_mm = 5_000_000.0;
+    let velocity = (speed_mm / ffe_rs::original_flight::MM_PER_SECOND) as i64;
+    let mut position = [7.0e15f64, 3.0e15, 1.0e15];
+    for _ in 0..50 {
+        position[2] += speed_mm * 0.02;
+        let at = position.map(|v| v as i64);
+        nav.tick_dust(
+            0.02,
+            &ffe_core::dust::Spawn::deep_space(at, [0, 0, velocity], true),
+        );
+    }
+    let state = Flight {
+        mode: Mode::Flight,
+        position: position.map(|v| v / unit),
+        system_flight: true,
+        ship: NEW_GAME_SHIP,
+        axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        ..Flight::default()
+    };
+    let views = ViewState::default();
+    screen.draw(&state, views, Some(&viewer), true, "");
+    let empty = screen.logical_pixels().to_vec();
+    screen.effects = nav
+        .dust
+        .particles()
+        .iter()
+        .map(|particle| {
+            let rows = particle.orientation(&sine);
+            ffe_rs::screen::SystemEffect {
+                model: particle.model,
+                centre: particle.position.map(|v| v as f64 / unit),
+                axes: std::array::from_fn(|r| {
+                    std::array::from_fn(|c| f64::from(rows[3 * r + c]) / 2_147_483_648.0)
+                }),
+                timer: 0,
+                size: 0,
+                scale: viewer
+                    .find(particle.model)
+                    .map(|model| (model.scale as i32 + particle.distance_bias).max(0) as u32),
+            }
+        })
+        .collect();
+    screen.draw(&state, views, Some(&viewer), true, "");
+    save(&screen, "effects-dust.ppm");
+    let dots = changed(&empty, screen.logical_pixels());
+    assert!(dots > 50, "only {dots} dust pixels");
+}
