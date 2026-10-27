@@ -100,6 +100,8 @@ pub mod sample {
 /// `shipexp`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Cue {
+    /// F1056's `u`: the undercarriage motor (`0x0c`).
+    Undercarriage,
     /// A GUI button/hot-area click (`F150`, `F209`, `F216`, `F361`, `F1056`).
     UiBeep,
     /// A selection/icon change (`F380`, `F983`, `F1059`..`F1065`).
@@ -196,6 +198,7 @@ impl Cue {
             Self::Camera => (sample::CAMERA, -1),
             Self::Door => (sample::DOCKING, -1),
             Self::Docking => (sample::DOCKING, -1),
+            Self::Undercarriage => (sample::AIRLOCK, -1),
             Self::Engine => {
                 if !flags.engine_sound {
                     return None;

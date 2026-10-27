@@ -2723,11 +2723,11 @@ impl Screen {
         let rows = ship_axes(state).map(|axis| camera.direction(axis));
         let origin = camera.point(state.position).map(|v| v * scale);
         let light = self.scene_light(scene, camera);
-        // The original inputs over flight time (gear up), with global 15 as the
+        // The original inputs over flight time, global 1 the undercarriage, global 15 the
         // object's z thrust word the engine glows read: the throttle scaled to the
         // ship's own limits (F600). Without statistics (a cache before v12), full
         // thrust maps to 4095, where ship models stop lengthening the plume.
-        let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
+        let mut inputs = AnimationInputs::original(flight_tics(state), state.gear, &scene.shades());
         inputs.globals[THRUST_GLOBAL] = match scene.ship_stats(state.ship) {
             Some(stats) => stats.thrust_word(state.thrust),
             None => (state.thrust.max(0.0) * 4095.0) as u16,

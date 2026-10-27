@@ -67,8 +67,14 @@ pub struct OriginalFlight {
     /// seat and F612's radius distance: the descent aims at the pad's surface
     /// point raised by it, so the collision sphere touches rather than sinks.
     collision_radius: i64,
-    /// The undercarriage (`+0x9e` word 1): down until the player raises it (`u`).
+    /// The undercarriage command, `player+0xe9` bit 1 clear (down) or set
+    /// (raised): F1056's `u` toggles it and F1008 sets it under the
+    /// autopilot. A new game starts with it down.
     gear_down: bool,
+    /// `ship+0x9e`, F1008's undercarriage extension: 0 raised, 0xffff down,
+    /// moved half the frame's tics a frame toward the command. The models
+    /// read it as animation global 1 and F575's landing test needs 0xffff.
+    gear_word: u16,
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -194,6 +200,7 @@ impl OriginalFlight {
             guidance: None,
             collision_radius: 0,
             gear_down: true,
+            gear_word: 0xffff,
         }
     }
 
@@ -202,9 +209,25 @@ impl OriginalFlight {
         self.gear_down
     }
 
-    /// The undercarriage toggle (`u`, action 0x75).
+    /// The undercarriage command (`u`, action 0x75, or F1008's autopilot).
     pub fn set_gear(&mut self, down: bool) {
         self.gear_down = down;
+    }
+
+    /// `ship+0x9e`: the undercarriage's extension, 0 raised to 0xffff down.
+    pub fn gear_word(&self) -> u16 {
+        self.gear_word
+    }
+
+    /// F1008's per-frame undercarriage: the extension moves half of
+    /// `DATA_009155` (the frame's tics) toward the command.
+    pub fn animate_gear(&mut self) {
+        let step = (self.player.frame_tics >> 1).min(0xffff) as u16;
+        self.gear_word = if self.gear_down {
+            self.gear_word.saturating_add(step)
+        } else {
+            self.gear_word.saturating_sub(step)
+        };
     }
 
     pub fn with_time_acceleration(mut self, step: usize) -> Self {
@@ -336,7 +359,7 @@ impl OriginalFlight {
         world.physical[2] = true;
         let mut words = Words::default();
         // The landing gear (`+0x9e` word 1 = 0xffff when down).
-        words.0[1] = if self.gear_down { 0xffff } else { 0 };
+        words.0[1] = self.gear_word;
         world.body[1] = Body {
             position: vector,
             velocity: motion.velocity,
@@ -923,7 +946,7 @@ impl OriginalFlight {
         let mut words = Words::default();
         // The landing gear (`+0x9e` word 1 = 0xffff when down): with it down a slow,
         // level touch lands instead of crashing.
-        words.0[1] = if self.gear_down { 0xffff } else { 0 };
+        words.0[1] = self.gear_word;
         world.body[1] = Body {
             position: vector,
             velocity: motion.velocity,
@@ -1090,6 +1113,7 @@ impl OriginalFlight {
             .orientation
             .map(|row| row.map(|v| f64::from(v) / 2_147_483_648.0));
         flight.set_speed = Some(self.player.set_speed);
+        flight.gear = self.gear_word;
         flight.position = position.map(|p| p as f64 / UNITS_PER_FLIGHT_UNIT);
         flight.velocity = motion
             .velocity

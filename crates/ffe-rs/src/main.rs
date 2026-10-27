@@ -953,6 +953,8 @@ fn run() -> Result<(), String> {
     let mut log_channel = Channel::default();
     let mut pending_log = PendingLog::default();
     let mut last_prompt = String::new();
+    // `player+0xc6` bit 1: F1008's micrometeorite warning has been given.
+    let mut gear_warned = false;
     let mut model_viewer: Option<ModelViewer> = None;
     // F1104/F917: the game-over screen. The death stream starts it from its own
     // destruction event; the current F953 path below uses the same API.
@@ -2794,12 +2796,11 @@ fn run() -> Result<(), String> {
                         let climbing =
                             nav.as_ref().and_then(|nav| nav.takeoff_state()) == Some(0x24);
                         if let Some(model) = original.as_mut().filter(|_| !climbing) {
+                            // F1056 toggles `player+0xe9` bit 1, clears the
+                            // warning bit and plays 0x0c then 0x14.
                             model.set_gear(!model.gear_down());
-                            message = if model.gear_down() {
-                                "Undercarriage down.".to_owned()
-                            } else {
-                                "Undercarriage up.".to_owned()
-                            };
+                            gear_warned = false;
+                            sound.play(Cue::Undercarriage);
                         }
                     }
                     // F1119: the climb puts the normal flight page back.
@@ -4230,6 +4231,29 @@ fn run() -> Result<(), String> {
                 };
                 match step_result {
                     Ok(contact) => {
+                        // F1008: under the autopilot (mode 2) the gear follows
+                        // the approach (raised in transit, lowered for the final
+                        // leg, the port's stand-in for the AI state test
+                        // `ship+0xff > 0x1e`); outside it, a lowered gear at
+                        // 0x186a0 or more of `player+0xd8` posts 0x98ce once.
+                        if let Some(nav) = nav.as_ref() {
+                            if nav.target.is_some() {
+                                gear_warned = false;
+                                model.set_gear(nav.final_leg);
+                            } else if model.gear_down()
+                                && !nav.landed_view()
+                                && state.speed() * 1000.0 / ffe_rs::original_flight::MM_PER_SECOND
+                                    >= f64::from(0x186a0)
+                                && !gear_warned
+                            {
+                                gear_warned = true;
+                                pending_log.add(
+                                    Source::Ship,
+                                    "Undercarriage is lowered: it will be damaged by micrometeorites unless retracted.",
+                                );
+                            }
+                        }
+                        model.animate_gear();
                         model.apply(&mut state);
                         if trace_flight {
                             trace_clock += elapsed;
@@ -6388,8 +6412,14 @@ fn run() -> Result<(), String> {
             });
         screen.systems = ShipSystems {
             e8: mode_word,
-            // Bit 2 the labels, bit 0 the engines off (F1116's 0x48 image).
+            // Bit 2 the labels, bit 1 the undercarriage raised (0x38/0x46),
+            // bit 0 the engines off (F1116's 0x48 image).
             e9: if labels { 4 } else { 0 }
+                | if original.as_ref().is_some_and(|model| !model.gear_down()) {
+                    2
+                } else {
+                    0
+                }
                 | u8::from(original.as_ref().is_some_and(|model| !model.engines_on())),
             // F1116's jump icon (0x45): a destination (`+0x268`), F1033's
             // altitude at least 0xb71b00 (`+0xc6` bit 0x40) and F903's jump

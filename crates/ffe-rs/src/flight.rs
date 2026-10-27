@@ -55,6 +55,10 @@ pub struct Flight {
     /// load empty.
     #[serde(default)]
     pub hold: Vec<u16>,
+    /// `ship+0x9e`, the undercarriage's extension (0 raised, 0xffff down):
+    /// the ship model's animation global 1.
+    #[serde(default)]
+    pub gear: u16,
     /// The laser installation and its heat, energy and refire words. Saves from
     /// before combat load no lasers.
     #[serde(default)]
@@ -141,6 +145,7 @@ impl Default for Flight {
             axes: None,
             system_flight: false,
             hold: Vec::new(),
+            gear: 0,
             combat: crate::combat::Combat::default(),
             shields: [0; 2],
             hull: [0; 2],
