@@ -516,6 +516,7 @@ GLOBAL _ref_military_fuel
 GLOBAL _ref_radioactives
 GLOBAL _ref_cargo_used
 GLOBAL _ref_free_hold
+GLOBAL _ref_new_ship
 GLOBAL _ref_player_flags
 _ref_hyper equ FUNC_000903
 _ref_hydrogen equ DATA_008901
@@ -523,6 +524,7 @@ _ref_military_fuel equ DATA_008902
 _ref_radioactives equ DATA_008903
 _ref_cargo_used equ DATA_008891
 _ref_free_hold equ DATA_008889
+_ref_new_ship equ FUNC_000996
 _ref_player_flags equ DATA_008860
 
 ; System name oracle (--system-names): F830.
