@@ -253,33 +253,42 @@ impl Click {
 }
 
 /// The normal console's ship-diagram hot areas (`DATA_007259`, installed by F1005
-/// from F1117): the two engine nozzles are action 9 (the launch action: engines on)
-/// and the two wings action `0x75` (the undercarriage). F1120's equipment page
-/// removes them and installs its own (`DATA_007258`).
+/// from F1117), in the table's order: the two engine nozzles are action 9 (the
+/// launch action: engines on), `(24,158)` action `0x74` (`t`, the target lamp,
+/// which `DATA_007684` also covers), `(24,166)` action `0xd0` (not routed), the
+/// jump icon (record 0x45 at (17,174)) action `0x68` (`h`), and the two wings
+/// action `0x75` (`u`, the undercarriage). As in `DATA_007684`, a click inside
+/// several takes the last. F1120's equipment page removes them and installs its
+/// own (`DATA_007258`).
 pub const ENGINE_AREAS: [(i32, i32, i32, i32); 2] = [(0, 186, 13, 196), (28, 186, 40, 196)];
+pub const JUMP_AREA: (i32, i32, i32, i32) = (17, 174, 30, 188);
 pub const GEAR_AREAS: [(i32, i32, i32, i32); 2] = [(0, 170, 18, 184), (33, 170, 43, 184)];
+type Area = (i32, i32, i32, i32);
+const SYSTEMS_AREAS: [(Area, Option<SystemsClick>); 7] = [
+    (ENGINE_AREAS[0], Some(SystemsClick::EnginesOn)),
+    (ENGINE_AREAS[1], Some(SystemsClick::EnginesOn)),
+    ((24, 158, 41, 166), None),
+    ((24, 166, 41, 174), None),
+    (JUMP_AREA, Some(SystemsClick::Hyperspace)),
+    (GEAR_AREAS[0], Some(SystemsClick::Undercarriage)),
+    (GEAR_AREAS[1], Some(SystemsClick::Undercarriage)),
+];
 
 /// What a click on the ship diagram asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemsClick {
     EnginesOn,
+    Hyperspace,
     Undercarriage,
 }
 
 /// The ship diagram's click under logical pixel (x, y), if any.
 pub fn systems_click(x: i32, y: i32) -> Option<SystemsClick> {
-    let inside = |areas: &[(i32, i32, i32, i32); 2]| {
-        areas
-            .iter()
-            .any(|(x0, y0, x1, y1)| (*x0..=*x1).contains(&x) && (*y0..=*y1).contains(&y))
-    };
-    if inside(&ENGINE_AREAS) {
-        Some(SystemsClick::EnginesOn)
-    } else if inside(&GEAR_AREAS) {
-        Some(SystemsClick::Undercarriage)
-    } else {
-        None
-    }
+    SYSTEMS_AREAS
+        .iter()
+        .rev()
+        .find(|((x0, y0, x1, y1), _)| (*x0..=*x1).contains(&x) && (*y0..=*y1).contains(&y))
+        .and_then(|(_, click)| *click)
 }
 
 /// The console hot areas in the original's list order (`DATA_007684`):

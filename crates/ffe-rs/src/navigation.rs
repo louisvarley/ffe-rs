@@ -4541,6 +4541,19 @@ impl Navigator {
         Some((distance, report))
     }
 
+    /// F903's "jump possible" (`DATA_008860` bit 0x100, which F1116 reads as
+    /// `player+0xc7 & 1` for the jump icon): the stored destination is another
+    /// system on offer, within the drive's range, with the fuel for it.
+    pub fn jump_possible(&self) -> bool {
+        let Some(index) = self
+            .destination
+            .and_then(|destination| self.entry_for_code(destination.code))
+        else {
+            return false;
+        };
+        index != self.current && self.jump_report(index).is_some_and(|(_, r)| r.result >= 0)
+    }
+
     /// Jump to system `index` through the hyperdrive (F901): the fuel is checked and the
     /// game clock moves by the jump time; the caller burns `Jumped::fuel`. Refused with a
     /// reason when the system is out of range, the same system, or the hold has too little fuel.

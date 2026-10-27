@@ -990,15 +990,13 @@ fn default_start_services_board_is_old_blackelk() {
     let state = nav.new_game.expect("a new game state");
     assert_eq!(state.player_state, 0x30, "F994's landed state");
     let status = station::Status {
-        cargo_used: 0,
+        cargo_used: 1,
         cargo_capacity: nav.hold(&cache, state.ship),
         cash: state.cash,
         ..station::Status::default()
     };
-    assert_eq!(
-        status.cargo_capacity, 1,
-        "the source Saker delivered free hold"
-    );
+    // F558 at the start: 1 t used (F998's hydrogen) of a 7 t hold.
+    assert_eq!(status.cargo_capacity, 7, "F998's Saker hold");
     let rows = station::SERVICES
         .iter()
         .map(|entry| DockRow {

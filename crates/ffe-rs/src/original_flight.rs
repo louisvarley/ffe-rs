@@ -269,6 +269,22 @@ impl OriginalFlight {
         self.player.set_speed
     }
 
+    /// `player+0xe9` bit 0 (`DATA_008871`) clear: F1041 drives the ship to the
+    /// set speed (F607). Set, the engines are off and F1043's thrusters alone
+    /// move it.
+    pub fn engines_on(&self) -> bool {
+        self.player.flags & 1 == 0
+    }
+
+    /// F1056's action 9 / F1020: switch the set-speed engines on or off.
+    pub fn set_engines_on(&mut self, on: bool) {
+        if on {
+            self.player.flags &= !1;
+        } else {
+            self.player.flags |= 1;
+        }
+    }
+
     /// Set the set speed (`DATA_008918`, `player+0x1b8`) in velocity units.
     pub fn set_set_speed_units(&mut self, units: i32) {
         self.player.set_speed = units;

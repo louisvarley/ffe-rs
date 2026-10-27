@@ -2149,14 +2149,24 @@ fn run() -> Result<(), String> {
                         _ => nav.clear_destination(),
                     }
                 }
-                if console_click == Some(Click::Hyperspace) {
+                // F908's request: `h` (action 0x68), the ship diagram's jump
+                // icon (record 0x45 at (17,174), whose DATA_007259 area is the
+                // same action) or the right-hand hot area 0x0f, with or without
+                // the map open.
+                let jump_icon = !engines_page
+                    && !(status_page && status_section == 0)
+                    && click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
+                        == Some(ffe_rs::console::SystemsClick::Hyperspace);
+                if pressed(Key::H) || jump_icon || console_click == Some(Click::Hyperspace) {
                     if nav.destination.is_some() {
                         hyperspace = true;
                     } else {
                         message =
-                            "Open the map, choose a system, then press H or this icon.".to_owned();
+                            "No hyperspace destination: open the map (G) and choose a system."
+                                .to_owned();
                     }
                 }
+                let mut engage = false;
                 if nav.view != NavView::Closed {
                     // The ffe-rs system map and galaxy list take the arrow keys; the
                     // original navigation computer is a mouse list (its rows are hot
@@ -2196,63 +2206,52 @@ fn run() -> Result<(), String> {
                             }
                         }
                     }
-                    // F908's event 1 / console record 0x0f: `H` jumps to the stored
-                    // destination at any flight time, with or without the map open.
-                    if pressed(Key::H) {
-                        if nav.destination.is_some() {
-                            hyperspace = true;
-                        } else {
-                            message =
-                                "No hyperspace destination: open the map (G) and choose a system."
-                                    .to_owned();
-                        }
-                    }
                     if nav.view == NavView::Galaxy && enter && click_point.is_none() {
                         hyperspace = true;
                     }
-                    let engage = enter && matches!(nav.view, NavView::System | NavView::Places);
-                    if hyperspace || engage {
-                        held_controls.disarm(&keys_down);
-                        if original.is_none() {
-                            // Navigation moves the original flight model's ship: start it,
-                            // as O does.
-                            let stats = scene
-                                .as_ref()
-                                .and_then(|scene| scene.ship_stats(state.ship));
-                            original = Some(
-                                OriginalFlight::from_flight(&state, stats.as_ref())
-                                    .with_time_acceleration(acceleration),
-                            );
-                        }
-                        if hyperspace {
-                            match nav.hyperspace_to_destination(&cache) {
-                                Ok(jumped) => {
-                                    // F912: at the arrival point with no velocity
-                                    // and no set speed; F1030 holds it there. The
-                                    // jump ends any autopilot (F909 cleared the
-                                    // system), so its guidance goes first or its
-                                    // release would copy the exit speed into Set.
-                                    if let Some(model) = original.as_mut() {
-                                        model.clear_guidance();
-                                        model.teleport(jumped.arrival);
-                                    }
-                                    ffe_rs::navigation::burn_fuel(
-                                        &mut state.hold,
-                                        nav.drive,
-                                        jumped.fuel,
-                                    );
-                                    // F908's sample `0x21`.
-                                    sound.play(Cue::Hyperspace);
-                                    in_transit = Some(jumped);
-                                    nav.view = NavView::Closed;
+                    engage = enter && matches!(nav.view, NavView::System | NavView::Places);
+                }
+                if hyperspace || engage {
+                    held_controls.disarm(&keys_down);
+                    if original.is_none() {
+                        // Navigation moves the original flight model's ship: start it,
+                        // as O does.
+                        let stats = scene
+                            .as_ref()
+                            .and_then(|scene| scene.ship_stats(state.ship));
+                        original = Some(
+                            OriginalFlight::from_flight(&state, stats.as_ref())
+                                .with_time_acceleration(acceleration),
+                        );
+                    }
+                    if hyperspace {
+                        match nav.hyperspace_to_destination(&cache) {
+                            Ok(jumped) => {
+                                // F912: at the arrival point with no velocity
+                                // and no set speed; F1030 holds it there. The
+                                // jump ends any autopilot (F909 cleared the
+                                // system), so its guidance goes first or its
+                                // release would copy the exit speed into Set.
+                                if let Some(model) = original.as_mut() {
+                                    model.clear_guidance();
+                                    model.teleport(jumped.arrival);
                                 }
-                                Err(error) => message = format!("Jump refused: {error}"),
+                                ffe_rs::navigation::burn_fuel(
+                                    &mut state.hold,
+                                    nav.drive,
+                                    jumped.fuel,
+                                );
+                                // F908's sample `0x21`.
+                                sound.play(Cue::Hyperspace);
+                                in_transit = Some(jumped);
+                                nav.view = NavView::Closed;
                             }
-                        } else if let Some(body) = nav.engage() {
-                            pending_log
-                                .replace(Source::Autopilot, format!("Autopilot to {}.", body.name));
-                            nav.view = NavView::Closed;
+                            Err(error) => message = format!("Jump refused: {error}"),
                         }
+                    } else if let Some(body) = nav.engage() {
+                        pending_log
+                            .replace(Source::Autopilot, format!("Autopilot to {}.", body.name));
+                        nav.view = NavView::Closed;
                     }
                 }
                 if pressed(Key::Backspace) || console_click == Some(Click::AutopilotOff) {
@@ -2851,6 +2850,54 @@ fn run() -> Result<(), String> {
                                         }
                                     }
                                     Err(why) => message = why,
+                                }
+                            }
+                        }
+                    } else if systems_click == Some(ffe_rs::console::SystemsClick::EnginesOn)
+                        && original.is_some()
+                    {
+                        // F1056's action 9 in flight (`JUMP_004420`), from the
+                        // engine nozzles (plain Tab is the port's system map in
+                        // flight, docs/CONTROLS.md): the 0x24
+                        // climb becomes 0x26, the autopilot is cancelled (F1018),
+                        // else `player+0xe9` bit 0 toggles the engines; switching
+                        // them on runs F1020, which engages the autopilot on a
+                        // locked target when one is fitted.
+                        let climbing = nav.as_ref().is_some_and(|nav| {
+                            nav.takeoff_state() == Some(ffe_core::traffic::state::TAKEOFF)
+                        });
+                        let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
+                        if let (Some(model), Some(nav)) = (original.as_mut(), nav.as_mut()) {
+                            if climbing {
+                                if let Some(takeoff) = nav.takeoff.as_mut() {
+                                    takeoff.state = ffe_core::traffic::state::AFTER_TAKEOFF;
+                                }
+                                model.set_mode(ffe_core::traffic::state::AFTER_TAKEOFF);
+                                sound.play(Cue::Engine);
+                            } else if autopilot {
+                                if nav.cancel() {
+                                    model.halt();
+                                    message = "Autopilot off.".to_owned();
+                                    pending_log.clear(Source::Autopilot);
+                                }
+                            } else if model.engines_on() {
+                                model.set_engines_on(false);
+                                message =
+                                    "Engines off: the thrusters alone move the ship.".to_owned();
+                            } else {
+                                model.set_engines_on(true);
+                                sound.play(Cue::Engine);
+                                message = "Engines on.".to_owned();
+                                if state.loadout.general & (1 << 21) != 0
+                                    && nav.locked.is_some()
+                                    && !nav.landed_view()
+                                {
+                                    if let Some(body) = nav.engage_locked() {
+                                        pending_log.replace(
+                                            Source::Autopilot,
+                                            format!("Autopilot to {}.", body.name),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -6315,7 +6362,20 @@ fn run() -> Result<(), String> {
             });
         screen.systems = ShipSystems {
             e8: mode_word,
-            e9: if labels { 4 } else { 0 },
+            // Bit 2 the labels, bit 0 the engines off (F1116's 0x48 image).
+            e9: if labels { 4 } else { 0 }
+                | u8::from(original.as_ref().is_some_and(|model| !model.engines_on())),
+            // F1116's jump icon (0x45): a destination (`+0x268`), F1033's
+            // altitude at least 0xb71b00 (`+0xc6` bit 0x40) and F903's jump
+            // possible (`+0xc7` bit 0).
+            p268: u8::from(nav.as_ref().is_some_and(|nav| nav.destination.is_some())),
+            status: nav.as_ref().map_or(0, |nav| {
+                (if nav.altitude >= ffe_rs::navigation::HYPERSPACE_ALTITUDE {
+                    0x40
+                } else {
+                    0
+                }) | (if nav.jump_possible() { 0x100 } else { 0 })
+            }),
             mounts: stats.map_or(1, |stats| stats.gun_mounts),
             slots: state.combat.missiles,
             // DATA_007246/7247 are the armed targetters (F1054's T/Shift+T);

@@ -53,7 +53,8 @@ right button is the steering hold. The left button remains the console pointer
 | System map | **Tab** (in flight only; on a pad or the surface Tab launches, as `F1056`'s action 9) |
 | Navigation computer (stations and starports) | **N** |
 | Galaxy map: choose the star at the centre as the jump destination | **F3** (the source map screen; **G** is the port shortcut) |
-| Hyperspace to the chosen destination (also after the map closes) | **H** |
+| Hyperspace to the chosen destination (also after the map closes) | **H**, or the jump icon on the ship diagram (F1116's record 0x45, shown when the destination is in range with the fuel and the ship is at least 12,000 km out) |
+| Engines on/off in flight (F1056's action 9; cancels the autopilot when it is flying; switching on engages it on a locked target) | Click either engine nozzle on the ship diagram |
 | Re-centre the galaxy map | **C** |
 | Map page (while the map is open): controls / select / details / picture | **F5 / F6 / F7 / F8** |
 | Map page: details with next / previous; zoom in / out | **F9 / F10; F11 / F12** |
