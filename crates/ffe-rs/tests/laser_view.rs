@@ -73,8 +73,9 @@ fn ships(screen: &mut Screen, nav: &Navigator) {
             model: effect.model,
             centre: effect.position.map(|v| v as f64 / unit),
             axes: effect.axes(),
-            mass: if effect.kind == ffe_core::effects::Kind::Explosion {
-                ffe_core::effects::EXPLOSION_MASS
+            timer: effect.timer,
+            size: if effect.kind == ffe_core::effects::Kind::Explosion {
+                ffe_core::effects::EXPLOSION_SIZE
             } else {
                 0
             },

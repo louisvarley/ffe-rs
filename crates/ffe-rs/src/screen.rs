@@ -213,9 +213,12 @@ pub struct SystemEffect {
     pub model: u32,
     pub centre: [f64; 3],
     pub axes: [[f64; 3]; 3],
-    /// Object global word 4 (`+0xa4`): model 155's fragment gate. `0` for the
-    /// other effects, which do not read it.
-    pub mass: u16,
+    /// Object global word 4 (`+0xa4`): F708/F709's countdown, which model
+    /// 155's fragment branches read.
+    pub timer: u16,
+    /// Object global word 1 (`+0x9e`): F942's `0xffff` on the explosion,
+    /// model 155's fragment size (`global1 >> 7`); 0 otherwise.
+    pub size: u16,
 }
 
 /// A missile object (F941, models 4..13) drawn through the same object renderer
@@ -2906,12 +2909,12 @@ impl Screen {
             }
             let rows = effect.axes.map(|axis| camera.direction(axis));
             let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
-            inputs.globals[ffe_core::effects::EXPLOSION_MASS_GLOBAL] = effect.mass;
+            inputs.globals[ffe_core::effects::EXPLOSION_MASS_GLOBAL] = effect.timer;
             // F942 writes `+0x9e = 0xffff` (global 1) on the explosion: model
             // 155 scales its fragments by it (`global1 >> 7`), so a zero word
             // collapses every fragment onto the centre pixel.
-            if effect.mass != 0 {
-                inputs.globals[1] = ffe_core::effects::EXPLOSION_SIZE;
+            if effect.size != 0 {
+                inputs.globals[1] = effect.size;
             }
             inputs.jitter = self.jitter.cursor;
             if let Ok(frame) = scene.render_scene_with(effect.model, rows, origin, light, &inputs) {

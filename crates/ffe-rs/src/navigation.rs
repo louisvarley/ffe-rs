@@ -3530,11 +3530,32 @@ impl Navigator {
     /// death sequence stops the player's ship but still shows its explosion
     /// (F1104's external view), so `main` calls this while `Flight::death` is
     /// set.
-    pub fn tick_effects(&mut self, seconds: f64) {
+    ///
+    /// `seconds` and `tics` are the frame's game time. F708's explosion
+    /// window and F712's sparking pods each throw an F939 particle an update;
+    /// F939 keeps the source's velocity only above the `0x9c40` speed, which
+    /// the port takes as still, so the sparks stay where they were thrown.
+    pub fn tick_effects(&mut self, seconds: f64, tics: u32) {
+        let mut sparks = Vec::new();
         for effect in &mut self.effects {
-            effect.tick(seconds);
+            if effect.tick(seconds, tics) == effects::Update::Spark {
+                sparks.push((effect.position, effect.axes()));
+            }
         }
-        self.effects.retain(Effect::alive);
+        let player = self.player_at;
+        self.effects
+            .retain(|effect| effect.alive() && !effect.out_of_range(player));
+        if sparks.is_empty() {
+            return;
+        }
+        let seed = (self.clock * 1000.0) as u32
+            ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9)
+            ^ 0x2000_0000;
+        let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
+        for (position, axes) in sparks {
+            self.effects
+                .push(effects::hit(position, [0.0; 3], axes, 0.0, &mut rng));
+        }
     }
 
     /// One flight frame of F1035's spawn and F769's lifetime. `elapsed` is the
@@ -3562,7 +3583,7 @@ impl Navigator {
     ) -> Vec<ShipEvent> {
         self.player_at = player;
         let mut events = Vec::new();
-        self.tick_effects(seconds);
+        self.tick_effects(seconds, tics);
         if self.ships.is_empty() {
             return events;
         }

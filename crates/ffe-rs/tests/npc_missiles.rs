@@ -101,7 +101,8 @@ fn draw(screen: &mut Screen, nav: &Navigator, state: &Flight, viewer: &ModelView
             model: missile::DECOY_MODEL,
             centre: decoy.position.map(|v| v as f64 / unit),
             axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            mass: 0,
+            timer: 0,
+            size: 0,
         })
         .collect();
     screen.draw(state, ViewState::default(), Some(viewer), false, "");

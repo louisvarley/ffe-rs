@@ -264,8 +264,10 @@ fn f1105_external_camera_follows_the_explosion_instead_of_the_old_hull() {
         velocity: [9700.0, 0.0, 0.0],
         forward: [1.0, 0.0, 0.0],
         up: [0.0, 1.0, 0.0],
-        age: 0.0,
-        life: 1.0,
+        timer: 0xffff,
+        countdown: 0,
+        think: 0.0,
+        alive: true,
     };
     state.death.as_mut().unwrap().track_explosion(&effect);
     let mut views = ViewState {

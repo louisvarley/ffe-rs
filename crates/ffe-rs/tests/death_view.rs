@@ -95,8 +95,9 @@ fn stage_effects(screen: &mut Screen, nav: &Navigator) {
             model: effect.model,
             centre: effect.position.map(|v| v as f64 / unit),
             axes: effect.axes(),
-            mass: if effect.kind == effects::Kind::Explosion {
-                effects::EXPLOSION_MASS
+            timer: effect.timer,
+            size: if effect.kind == effects::Kind::Explosion {
+                ffe_core::effects::EXPLOSION_SIZE
             } else {
                 0
             },
@@ -201,7 +202,7 @@ fn f1098s_capsule_escape_frame() {
     assert_eq!(state.combat.lasers, [0; 4]);
     assert_eq!(state.combat.missiles, [0; 10]);
     assert_eq!(state.hull, [stats.mass * 4; 2]);
-    nav.tick_effects(0.1);
+    nav.tick_effects(0.1, 4_970);
     stage_effects(&mut screen, &nav);
     screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "death-capsule.ppm");

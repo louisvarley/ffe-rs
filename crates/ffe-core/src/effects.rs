@@ -42,11 +42,25 @@
 //!   `F948`/`F949` messages and sounds). The port leaves it out with the rest
 //!   of the equipment damage model.
 //!
-//! Lifetimes: the original removes these objects through their AI states (F927
-//! recycles a slot; F764/F769 run the explosion and particle timers). The port
-//! does not run those routines, so each effect carries a bounded lifetime that
-//! is long enough to be seen and short enough to read as a burst. The numbers
-//! are the port's, not the original's; see `docs/notes/combat.md`.
+//! Lifetimes are the AI table's (`DATA_006255..58`, four slots per `+0xff`
+//! state; the movement slot runs every update with the frame's game tics
+//! `DATA_009155`, 49,700 a second at 1x):
+//!
+//! - **F708** (state `0x1c`, the explosion): object global word 4 (`+0xa4`)
+//!   starts at `0xffff` and loses `tics >> 2` an update; the object goes when
+//!   that would pass zero, about 5.3 s at 1x. While the word is in
+//!   `0xbc00..0xc800` (about 1.15 to 1.4 s in) each update also throws an F939
+//!   spark from the explosion's centre.
+//! - **F709** (state `0x1a`, the hit particle): the word starts at
+//!   `F1530 | 0x8000` and loses `tics >> 1`, so a particle lives 1.3 to 2.6 s.
+//! - **F712** (state `0x15`, a debris pod) throws an F939 spark every update
+//!   and F768, on each event-6 tick, counts `+0x14e` down from 6; below zero
+//!   the pod becomes state `0x16`, where F713 only moves it and F767 removes
+//!   it once its distance class (`+0x88`) reaches `0xd`, about 67 km away.
+//!
+//! F764 (state `0x1d`) is not the explosion's: its `and` of the two clock
+//! words (the original executable has `23 c2` there too) always writes
+//! `0xffffffff`.
 //!
 //! The explosion model's own command stream gates its twelve fragment calls on
 //! object global word 4 (`+0xa4`): the arithmetic and bit branches in model 155
@@ -65,22 +79,29 @@ pub const EXPLOSION_MODEL: u32 = 0x9b;
 /// F926's debris model, `0x99` (153).
 pub const DEBRIS_MODEL: u32 = 0x99;
 
-/// Seconds a laser hit particle lives (port value; F939's object has no ported
-/// AI timer).
-pub const HIT_SECONDS: f64 = 0.4;
-/// Seconds the destruction object lives.
-pub const EXPLOSION_SECONDS: f64 = 1.0;
-/// Seconds a debris pod lives.
-pub const DEBRIS_SECONDS: f64 = 1.2;
+/// Game tics a second at 1x (`DATA_009155` per 20 ms is 994).
+pub const TICS_PER_SECOND: f64 = 49_700.0;
+/// F942's starting timer word (`+0xa4`).
+pub const EXPLOSION_TIMER: u16 = 0xffff;
+/// F708's spark window on the explosion's timer word.
+pub const SPARK_WINDOW: std::ops::Range<u16> = 0xbc00..0xc800;
+/// F926's `+0x14e`: the event-6 ticks a pod sparks for (it changes state once
+/// the count goes below zero).
+pub const DEBRIS_SPARK_TICKS: i8 = 6;
+/// The event-6 interval the port runs F768 at (the missile guidance cadence).
+pub const THINK_SECONDS: f64 = 0.4;
+/// F767's removal distance: distance class `0xd`, `2^(13 + 13)` mm.
+pub const DEBRIS_RANGE: i64 = 1 << 26;
+/// Seconds an explosion lives at 1x: F708's `0xffff` at `tics >> 2`.
+pub const EXPLOSION_SECONDS: f64 = 0x1_0000 as f64 * 4.0 / TICS_PER_SECOND;
 
 /// F939's speed cutoff (`DATA_008867` vs `0x9c40`): below it the particle does
 /// not inherit the ship's velocity.
 pub const PARTICLE_SPEED: f64 = 0x9c40 as f64;
 
-/// Object global word 4 (`+0xa4`), which model 155's fragment branches read.
+/// Object global word 4 (`+0xa4`): the explosion's and particle's timer,
+/// which model 155's fragment branches read.
 pub const EXPLOSION_MASS_GLOBAL: usize = 4;
-/// FFP 1.0, the value at which model 155 selects all twelve fragment calls.
-pub const EXPLOSION_MASS: u16 = 0x4000;
 
 /// F942's `+0x9e` (object global word 1) on the explosion, `0xffff`
 /// (`ffe.asm:70730`). Model 155's first instruction is `local5 = global1 >> 7`,
@@ -110,8 +131,21 @@ pub struct Effect {
     /// The object's forward and up axes (right is `up x forward`).
     pub forward: [f64; 3],
     pub up: [f64; 3],
-    pub age: f64,
-    pub life: f64,
+    /// Global word 4 (`+0xa4`): F708/F709's countdown. Unused by debris.
+    pub timer: u16,
+    /// F926's `+0x14e`: a pod's remaining event-6 spark ticks.
+    pub countdown: i8,
+    /// Seconds towards the next event-6 tick.
+    pub think: f64,
+    pub alive: bool,
+}
+
+/// What an update asks the caller for besides the object itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Update {
+    Nothing,
+    /// F939 from the object's centre (F708's window, F712's every update).
+    Spark,
 }
 
 impl Effect {
@@ -124,20 +158,62 @@ impl Effect {
         ]
     }
 
-    /// Advance the object: F1533's cloned velocity carries it, and the port's
-    /// lifetime removes it.
-    pub fn tick(&mut self, dt: f64) {
-        if dt <= 0.0 {
-            return;
+    /// One movement-slot update of `seconds` game seconds and `tics` game
+    /// tics: F1512 carries the object on its velocity, then F708 (explosion),
+    /// F709 (particle) or F712/F768 (debris) run their timers.
+    pub fn tick(&mut self, seconds: f64, tics: u32) -> Update {
+        if seconds <= 0.0 || !self.alive {
+            return Update::Nothing;
         }
         for axis in 0..3 {
-            self.position[axis] += (self.velocity[axis] * dt).round() as i64;
+            self.position[axis] += (self.velocity[axis] * seconds).round() as i64;
         }
-        self.age += dt;
+        let step = |shift: u32| (tics.wrapping_shl(16 - shift) >> 16) as u16;
+        match self.kind {
+            Kind::Explosion => {
+                let step = step(2);
+                if step > self.timer {
+                    self.alive = false;
+                    return Update::Nothing;
+                }
+                self.timer -= step;
+                if SPARK_WINDOW.contains(&self.timer) {
+                    return Update::Spark;
+                }
+                Update::Nothing
+            }
+            Kind::Hit => {
+                let step = step(1);
+                if step > self.timer {
+                    self.alive = false;
+                } else {
+                    self.timer -= step;
+                }
+                Update::Nothing
+            }
+            Kind::Debris => {
+                self.think += seconds;
+                while self.think >= THINK_SECONDS && self.countdown >= 0 {
+                    self.think -= THINK_SECONDS;
+                    self.countdown -= 1;
+                }
+                if self.countdown >= 0 {
+                    Update::Spark
+                } else {
+                    Update::Nothing
+                }
+            }
+        }
+    }
+
+    /// F767: a drifting pod goes once it is `DEBRIS_RANGE` from `player`.
+    pub fn out_of_range(&self, player: [i64; 3]) -> bool {
+        self.kind == Kind::Debris
+            && (0..3).any(|axis| (self.position[axis] - player[axis]).abs() >= DEBRIS_RANGE)
     }
 
     pub fn alive(&self) -> bool {
-        self.age < self.life
+        self.alive
     }
 }
 
@@ -151,6 +227,8 @@ pub fn hit(
     rng: &mut Random,
 ) -> Effect {
     let (forward, up) = random_axes(axes[2], rng);
+    // F939: `+0xa4 = F1530 | 0x8000`.
+    let timer = rng.bounded(0x1_0000) as u16 | 0x8000;
     Effect {
         kind: Kind::Hit,
         model: HIT_MODEL,
@@ -162,8 +240,10 @@ pub fn hit(
         },
         forward,
         up,
-        age: 0.0,
-        life: HIT_SECONDS,
+        timer,
+        countdown: 0,
+        think: 0.0,
+        alive: true,
     }
 }
 
@@ -180,8 +260,10 @@ pub fn missile_explosion(position: [i64; 3], axes: [[f64; 3]; 3], rng: &mut Rand
         velocity: [0.0; 3],
         forward,
         up,
-        age: 0.0,
-        life: EXPLOSION_SECONDS,
+        timer: EXPLOSION_TIMER,
+        countdown: 0,
+        think: 0.0,
+        alive: true,
     }
 }
 
@@ -204,8 +286,10 @@ pub fn explosion(
         velocity,
         forward,
         up,
-        age: 0.0,
-        life: EXPLOSION_SECONDS,
+        timer: EXPLOSION_TIMER,
+        countdown: 0,
+        think: 0.0,
+        alive: true,
     }];
     // F942: (F922(6) - 2) pods, then min(4, cargo >> 1) cargo pods.
     let pods = (rng.bounded(6) as i32 - 2).max(0) as usize;
@@ -229,8 +313,10 @@ pub fn explosion(
             ],
             forward,
             up,
-            age: 0.0,
-            life: DEBRIS_SECONDS,
+            timer: 0,
+            countdown: DEBRIS_SPARK_TICKS,
+            think: 0.0,
+            alive: true,
         });
     }
     effects
@@ -298,7 +384,7 @@ mod tests {
         assert_eq!(particle.kind, Kind::Hit);
         assert_eq!(particle.position, [10, 20, 30]);
         assert_eq!(particle.velocity, [100.0, 200.0, 300.0]);
-        assert_eq!(particle.life, HIT_SECONDS);
+        assert!(particle.timer >= 0x8000);
         // A slow source leaves the particle where it was hit (F939 zeroes it).
         let mut rng = Random::new(1, 2);
         let slow = hit([0; 3], [1.0, 2.0, 3.0], axes(), 0.0, &mut rng);
@@ -312,7 +398,7 @@ mod tests {
         let burst = &effects[0];
         assert_eq!(burst.model, EXPLOSION_MODEL);
         assert_eq!(burst.kind, Kind::Explosion);
-        assert_eq!(burst.life, EXPLOSION_SECONDS);
+        assert_eq!(burst.timer, EXPLOSION_TIMER);
         // F922(6) - 2 pods plus min(4, 8 >> 1) cargo pods.
         let debris = effects.iter().filter(|e| e.kind == Kind::Debris).count();
         assert!((4..=7).contains(&debris), "{debris}");
@@ -339,25 +425,59 @@ mod tests {
         assert_eq!(burst.kind, Kind::Explosion);
         assert_eq!(burst.position, [1, 2, 3]);
         assert_eq!(burst.velocity, [0.0; 3], "F719 leaves the velocity zero");
-        assert_eq!(burst.life, EXPLOSION_SECONDS);
+        assert_eq!(burst.timer, EXPLOSION_TIMER);
     }
 
     #[test]
     fn effects_move_and_expire() {
         let mut rng = Random::new(5, 6);
         let mut particle = hit([0; 3], [1000.0, 0.0, 0.0], axes(), PARTICLE_SPEED, &mut rng);
-        particle.tick(0.1);
+        particle.tick(0.1, 4970);
         assert_eq!(particle.position, [100, 0, 0]);
         assert!(particle.alive());
-        particle.tick(HIT_SECONDS);
+        // F709: at most 0xffff / (994 >> 1) updates of 20 ms, 2.6 s.
+        for _ in 0..132 {
+            particle.tick(0.02, 994);
+        }
         assert!(!particle.alive());
         // A zero-length frame does nothing.
         let before = particle.position;
-        particle.tick(0.0);
+        particle.tick(0.0, 0);
         assert_eq!(particle.position, before);
+    }
+
+    #[test]
+    fn f708_runs_the_explosion_timer_and_its_spark_window() {
         let mut rng = Random::new(7, 8);
-        let burst = explosion([0; 3], [0.0; 3], 10, axes(), &mut rng);
-        assert!(burst[0].life > HIT_SECONDS);
-        assert!(burst.iter().skip(1).all(|e| e.life >= EXPLOSION_SECONDS));
+        let mut burst = explosion([0; 3], [0.0; 3], 0, axes(), &mut rng).remove(0);
+        let mut sparks = Vec::new();
+        let mut updates = 0;
+        while burst.alive() {
+            if burst.tick(0.02, 994) == Update::Spark {
+                sparks.push(updates);
+            }
+            updates += 1;
+        }
+        // 0xffff / (994 >> 2 = 248) is 264 updates of 20 ms: 5.3 s.
+        assert_eq!(updates, 265);
+        // 0xffff - 0xc800 .. 0xffff - 0xbc00 at 248 a step.
+        assert_eq!(sparks.first(), Some(&57));
+        assert_eq!(sparks.last(), Some(&69));
+    }
+
+    #[test]
+    fn f926_pods_spark_for_seven_think_ticks_then_drift() {
+        let mut rng = Random::new(5, 6);
+        let mut pods = explosion([0; 3], [0.0; 3], 16, axes(), &mut rng);
+        let mut pod = pods.pop().unwrap();
+        assert_eq!(pod.kind, Kind::Debris);
+        let mut sparking = 0.0;
+        while pod.tick(0.02, 994) == Update::Spark {
+            sparking += 0.02;
+        }
+        assert!((sparking - 7.0 * THINK_SECONDS).abs() < 0.05, "{sparking}");
+        assert!(pod.alive());
+        assert!(!pod.out_of_range([0; 3]));
+        assert!(pod.out_of_range([2 * DEBRIS_RANGE, 0, 0]));
     }
 }

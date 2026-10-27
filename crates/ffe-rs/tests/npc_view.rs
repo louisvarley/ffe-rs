@@ -90,8 +90,9 @@ fn ships(screen: &mut Screen, nav: &Navigator) {
             model: effect.model,
             centre: effect.position.map(|v| v as f64 / unit),
             axes: effect.axes(),
-            mass: if effect.kind == ffe_core::effects::Kind::Explosion {
-                ffe_core::effects::EXPLOSION_MASS
+            timer: effect.timer,
+            size: if effect.kind == ffe_core::effects::Kind::Explosion {
+                ffe_core::effects::EXPLOSION_SIZE
             } else {
                 0
             },
@@ -418,12 +419,18 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
         changed(&kill_frame, screen.logical_pixels()) > 3,
         "the explosion effect did not draw"
     );
-    // The effects outlive the ship's slot and expire on their own lifetime;
-    // F927 recycles the slot on the same ticks.
+    // The explosion and its sparks outlive the ship's slot and expire on
+    // F708/F709's timers; F927 recycles the slot on the same ticks. F926's
+    // pods drift on until F767's range.
     screen.ships = Vec::new();
-    let shortest = ffe_core::effects::DEBRIS_SECONDS;
-    for _ in 0..(shortest / 0.02) as usize + 2 {
+    let seconds = ffe_core::effects::EXPLOSION_SECONDS + 3.0;
+    for _ in 0..(seconds / 0.02) as usize {
         nav.tick_ships(0.02, 994, from, 10_000);
     }
-    assert!(nav.effects.is_empty(), "the effects did not expire");
+    assert!(
+        nav.effects
+            .iter()
+            .all(|effect| effect.kind == ffe_core::effects::Kind::Debris),
+        "the explosion did not expire"
+    );
 }

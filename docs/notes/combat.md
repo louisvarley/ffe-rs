@@ -470,17 +470,22 @@ point; a kill spawns F942's model-0x9b explosion and F926's model-0x99 debris
 - **The port:** `effects::hit` spawns one model-0x9e effect at the hit point
   with the ship's velocity (above `PARTICLE_SPEED`) and a random orientation;
   `effects::explosion` spawns the model-0x9b object plus F942's debris count
-  from `Spec.cargo` (`+0x116`). Each carries a port lifetime (`HIT_SECONDS`
-  0.4 s, `EXPLOSION_SECONDS` 1.0 s, `DEBRIS_SECONDS` 1.2 s) because the
-  original's AI timers (F764/F769/F927) are not ported.
+  from `Spec.cargo` (`+0x116`). Their lifetimes are the AI table's movement
+  slots: F708 counts the explosion's global word 4 down from `0xffff` by
+  `tics >> 2` (about 5.3 s at 1x) and throws F939 sparks while it is in
+  `0xbc00..0xc800`; F709 counts a particle down from `F1530 | 0x8000` by
+  `tics >> 1` (1.3 to 2.6 s); F712 sparks a pod every update until F768 has
+  counted `+0x14e` below zero on seven event-6 ticks, after which F713 lets
+  it drift until F767's distance class `0xd` (about 67 km).
   `Navigator::effects` holds them, `tick_ships` ages and expires them, and
   `Screen::SystemEffect` renders them with `render_scene_with`.
 - **The model-155 gate.** Model 155's command stream is a chain of arithmetic
   (opcodes 13/29) and bit-branch (19/20) blocks around twelve child fragment
   calls (models 320..325). The branches read object **global word 4
   (`+0xa4`)**: they select no fragment for F942's `0xffffffff`, but all twelve
-  for FFP 1.0 (`0x4000`). The port passes `EXPLOSION_MASS = 0x4000` in
-  `SystemEffect.mass`, so F942's fragment set draws. The F1560/F1559/F1613 span
+  for FFP 1.0 (`0x4000`). F942's `0xffffffff` is only the start: F708's
+  countdown is the word the model reads, so the fragments appear and change as
+  the timer runs (`SystemEffect.timer`). The F1560/F1559/F1613 span
   fill is ported and wired (`docs/notes/fills.md`), so F1721 polygon entries
   fill in the playable, and `effects_view::explosion_fragment_polygons_fill`
   checks a model-155 fragment's polygons cover pixels. The line cloud still
@@ -573,11 +578,8 @@ set), missiles, and a shield generator for the player (the AI's fire is lethal i
 two hits without one). F1100's per-target text colour, two-decimal km /
 three-decimal AU format and off-view arrow forms are ported; the port's own
 lock brackets are gone. For
-the effects, decide whether their lifetimes should follow the
-original's AI timers (F764/F769/F927) rather than the port's per-effect seconds,
-and whether the model-155 explosion keeps the `EXPLOSION_MASS` word `0x4000`
-that selects its twelve fragments or follows F942's literal `0xffffffff` (which
-selects none). The fills now fill the fragments' polygons; the fragment anchors
+the effects, the lifetimes now follow the original's AI timers (F708, F709,
+F712/F768, F767) and model 155 reads F708's countdown. The fills now fill the fragments' polygons; the fragment anchors
 and the debris line records are separate questions (F942's distance word `+0x7e`
 is still not modelled).
 

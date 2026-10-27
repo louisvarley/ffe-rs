@@ -73,8 +73,9 @@ fn stage(screen: &mut Screen, nav: &Navigator) {
             model: effect.model,
             centre: effect.position.map(|v| v as f64 / unit),
             axes: effect.axes(),
-            mass: if effect.kind == Kind::Explosion {
-                effects::EXPLOSION_MASS
+            timer: effect.timer,
+            size: if effect.kind == Kind::Explosion {
+                ffe_core::effects::EXPLOSION_SIZE
             } else {
                 0
             },
@@ -182,10 +183,13 @@ fn hit_particle_explosion_and_frames() {
 
     // The effects live for their own lifetimes (debris the longest), then the
     // frame is clean again.
-    for _ in 0..(effects::DEBRIS_SECONDS / 0.05) as usize + 2 {
+    for _ in 0..((effects::EXPLOSION_SECONDS + 3.0) / 0.05) as usize {
         nav.tick_ships(0.05, 2_485, from_mm, 10_000);
     }
-    assert!(nav.effects.is_empty(), "the effects did not expire");
+    assert!(
+        nav.effects.iter().all(|effect| effect.kind == Kind::Debris),
+        "the explosion did not expire"
+    );
     stage(&mut screen, &nav);
     screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "effects-kill-after.ppm");
@@ -264,7 +268,15 @@ fn model_155_fragments_are_gated_on_global_4() {
     // F942 writes 0xffffffff into +0xa4: the model selects no fragment.
     assert_eq!(draw(0xffff), Ok(0));
     // FFP 1.0 selects the twelve fragment calls.
-    assert!(draw(effects::EXPLOSION_MASS).is_ok_and(|shapes| shapes >= 12));
+    assert!(draw(0x4000).is_ok_and(|shapes| shapes >= 12));
+    // Over F708's countdown the explosion shows fragments for most of its
+    // life.
+    let lit = (0..=0xffffu32)
+        .step_by(0x100)
+        .filter(|timer| draw(*timer as u16).is_ok_and(|shapes| shapes > 0))
+        .count();
+    eprintln!("model 155 draws at {lit} of 256 timer steps");
+    assert!(lit > 64, "{lit}");
     // The hit particle (model 0x9e) is not gated and draws its six shapes.
     let frame = viewer
         .render_scene(

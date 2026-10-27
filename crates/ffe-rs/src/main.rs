@@ -5102,7 +5102,8 @@ fn run() -> Result<(), String> {
             // F1104's external view: the traffic AI is off, but F942's explosion
             // (model 0x9b) and F926's debris still age and draw.
             if let Some(nav) = nav.as_mut() {
-                nav.tick_effects(elapsed);
+                let tics = (elapsed * ffe_core::effects::TICS_PER_SECOND) as u32;
+                nav.tick_effects(elapsed, tics);
             }
         }
         // A new state (docking, a scenario, a load) ends the original flight model.
@@ -5767,8 +5768,9 @@ fn run() -> Result<(), String> {
                         model: effect.model,
                         centre: effect.position.map(|v| v as f64 / unit),
                         axes: effect.axes(),
-                        mass: if effect.kind == ffe_core::effects::Kind::Explosion {
-                            ffe_core::effects::EXPLOSION_MASS
+                        timer: effect.timer,
+                        size: if effect.kind == ffe_core::effects::Kind::Explosion {
+                            ffe_core::effects::EXPLOSION_SIZE
                         } else {
                             0
                         },
@@ -5780,7 +5782,8 @@ fn run() -> Result<(), String> {
                     model: ffe_core::missile::DECOY_MODEL,
                     centre: decoy.position.map(|v| v as f64 / unit),
                     axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-                    mass: 0,
+                    timer: 0,
+                    size: 0,
                 }));
                 // F1035's space dust (model 0x6d): static objects the ship
                 // flies past, turned by F1675's YZT matrix.
@@ -5796,7 +5799,8 @@ fn run() -> Result<(), String> {
                                         f64::from(rows[3 * r + c]) / 2_147_483_648.0
                                     })
                                 }),
-                                mass: 0,
+                                timer: 0,
+                                size: 0,
                             }
                         },
                     ));
