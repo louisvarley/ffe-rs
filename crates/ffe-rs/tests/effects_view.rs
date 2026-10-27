@@ -268,6 +268,22 @@ fn model_155_fragments_are_gated_on_global_4() {
         .count();
     eprintln!("model 155 draws at {lit} of 256 timer steps");
     assert!(lit > 64, "{lit}");
+    // The fireball (320/322/323 -> 329..331) is a lit call inside an unlit
+    // child; every child must run so the orange fire is drawn.
+    for timer in [0x8000u16, 0xc000, 0xe69b] {
+        let mut inputs = AnimationInputs::original(0, 0, &viewer.shades());
+        inputs.globals[effects::EXPLOSION_MASS_GLOBAL] = timer;
+        let frame = viewer
+            .render_scene_with(
+                effects::EXPLOSION_MODEL,
+                rows,
+                [0.0, 0.0, 3000.0],
+                [0.0, 0.0, -1.0],
+                &inputs,
+            )
+            .unwrap();
+        assert_eq!(frame.children_error, None, "timer {timer:#x}");
+    }
     // The hit particle (model 0x9e) is not gated and draws its six shapes.
     let frame = viewer
         .render_scene(

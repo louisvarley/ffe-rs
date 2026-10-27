@@ -935,14 +935,13 @@ fn resolve_depth_key(
 
 /// Which instance fields hold defined values. Top-level instances define all of them
 /// (the caller supplies them); a child instance (F1750) starts without a basis or its
-/// handedness, and without observer/light/direction when its frame word has 0x4000.
+/// handedness, and without observer/direction when its frame word has 0x4000.
 #[derive(Debug, Clone, Copy)]
 struct Defined {
     basis: bool,
     handedness: bool,
     base_handedness: bool,
     direction: bool,
-    light: bool,
 }
 
 const ALL_DEFINED: Defined = Defined {
@@ -950,7 +949,6 @@ const ALL_DEFINED: Defined = Defined {
     handedness: true,
     base_handedness: true,
     direction: true,
-    light: true,
 };
 
 /// Development bound on child nesting; the original's own bound is the 0x8000-byte
@@ -1983,11 +1981,12 @@ fn call_child(
     // F1685 runs unless the frame word has 0x4000; F1774 then raises +0x44 to the
     // child scale - 8 if lower, shifting the observer.
     let lit = word & 0x4000 == 0;
-    if lit && !defined.light {
-        return Err(format!(
-            "Child call at {offset:#x} copies the light vector, undefined in this instance."
-        ));
-    }
+    // A lit call inside an unlit (0x4000) child copies that child's +0x134,
+    // which F1740 left as stale arena memory. The explosion's fire (model 155 ->
+    // 320/322/323 -> 329..331) depends on it; those children's materials are
+    // unlit, so only the normals' shade choice reads the vector. The port uses
+    // the vector the unlit child inherited, the last light written down the
+    // chain, rather than refusing the call.
     let mut observer = None;
     let mut direction = [0; 3];
     if lit {
@@ -2088,7 +2087,6 @@ fn call_child(
             handedness: false,
             base_handedness: base_handedness_defined,
             direction: lit,
-            light: lit,
         },
         light: frame.light,
         child: true,

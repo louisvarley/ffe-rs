@@ -491,6 +491,16 @@ point; a kill spawns F942's model-0x9b explosion and F926's model-0x99 debris
   checks a model-155 fragment's polygons cover pixels. The line cloud still
   visible in `effects-kill.ppm` is model 153's two-point face records (F926's
   debris pods); those are edges in the original too, not unfilled polygons.
+- **The fireball (2026-10-27).** The explosion's orange cloud is not model
+  158 (its colour command and texture 144's slots are greys; the reference
+  harness confirmed DATA_007811, bitmap 0x155 and the grey palette entries at
+  run time). It is model 155's fragments 320/322/323, whose lit child calls
+  (opcode 27/14 to models 329..331, unlit `0x2e41`/`0x2e00` fire materials)
+  sit inside a child with frame word `0x4000`. That child's `+0x134` light
+  vector is stale arena memory in the original; the port used to refuse the
+  call, which removed the whole fireball. It now passes on the inherited light
+  vector (`model_execute`'s child call), and `effects_view` checks that every
+  model-155 child runs at three timer values.
 
 **The AI shoots back (2026-10-25).** Hostile ships run the flight/combat states
 and call F931 with their front laser (`NpcShip::fire`): heat, energy and refire

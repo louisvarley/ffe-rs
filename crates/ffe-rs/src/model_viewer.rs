@@ -2468,6 +2468,11 @@ impl ViewerModel {
     }
 
     /// Largest object-space vertex distance at input 0, when evaluable alone.
+    /// The model's command stream.
+    pub fn commands(&self) -> &[u8] {
+        &self.commands
+    }
+
     pub fn radius(&self) -> Option<f64> {
         self.radius.as_ref().ok().copied()
     }
