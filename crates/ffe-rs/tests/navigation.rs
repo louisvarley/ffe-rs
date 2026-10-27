@@ -156,10 +156,7 @@ fn new_game_starts_on_hope_in_gateway() {
     assert_eq!(state.player_index, 87);
     assert_eq!(state.cash, 10_000);
     assert_eq!(state.ship, 0x1f);
-    assert_eq!(
-        state.cargo, 1,
-        "the source delivered loadout leaves one tonne free"
-    );
+    assert_eq!(state.cargo, 7, "F998's hold: 7 t, one tonne of it hydrogen");
     assert_eq!(state.acceleration, 994);
     let index = nav.docked.expect("landed at the start starport");
     let body = &nav.bodies[index];
@@ -289,8 +286,11 @@ fn new_game_default_is_the_saker_at_hope() {
     assert_eq!(state.ship, DEFAULT_SHIP);
     assert_eq!(state.ship, 0x1f, "the Saker Mk III");
     assert_eq!(state.cargo, DEFAULT_CARGO);
-    assert_eq!(state.cargo, 1, "23 t less F998's 0x10 allowance (EXP-019)");
-    assert_eq!(nav.hold(&cache, state.ship), 1);
+    assert_eq!(
+        state.cargo, 7,
+        "23 t less F998's 0x10 allowance; the reference reads 7 t"
+    );
+    assert_eq!(nav.hold(&cache, state.ship), 7);
     assert_eq!(state.acceleration, 994);
     let index = nav.docked.expect("docked at the start starport");
     let body = &nav.bodies[index];

@@ -34,6 +34,8 @@ extern unsigned char *ref_framebuffer;
 extern int ref_draw_char(int glyph, int colour, int x, int y, int min_y, int max_y);
 extern int ref_char_width(int code);
 extern unsigned long ref_pl_altitude;
+extern long ref_free_hold;
+extern unsigned long ref_cargo_used;
 extern unsigned long ref_pl_set_speed;
 extern void ref_labels_989(unsigned char *list, void (*callback)(unsigned char *, int, int));
 extern void ref_labels_1108(unsigned char *object, int x, int y);
@@ -701,6 +703,7 @@ static void flight_trace_row(void)
            (unsigned long long)previous, (unsigned long long)hash);
     if(geometry_mode && player && frames==170) {
         unsigned char *port=(unsigned char *)state_u32(0xcc);
+        printf("{\"free_hold\":%ld,\"cargo_used\":%lu}\n",ref_free_hold,ref_cargo_used);
         printf("{\"geometry\":true,\"ship_model\":%ld,\"ship_rotating\":%u,\"ship_radius\":%lld,\"bay\":%u,\"port_model\":%ld,\"port_rotating\":%u,\"ship_rows\":[",get32(player,0x82),(unsigned)player[0x57],get64(player,0x140),(unsigned)ref_state[0xf4],port?get32(port,0x82):0,port?(unsigned)port[0x57]:0);
         for(axis=0;axis<9;++axis) printf("%s%ld",axis?",":"",get32(player,4*axis));
         printf("],\"ship_position\":[%lld,%lld,%lld],\"port_position\":[%lld,%lld,%lld],\"port_rows\":[",position[0],position[1],position[2],port?get64(port,0x3e):0,port?get64(port,0x46):0,port?get64(port,0x4e):0);

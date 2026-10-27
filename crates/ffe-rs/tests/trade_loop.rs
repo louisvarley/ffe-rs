@@ -503,12 +503,9 @@ fn trade_loop_buys_fuel_warps_docks_and_sells() {
     let start_cash = state.credits;
     assert_eq!(
         nav.hold(&cache, state.ship),
-        1,
-        "source delivered free hold"
+        7,
+        "F998's hold (the reference game's DATA_008889)"
     );
-    // This multi-jump trading scenario needs a larger hold than the source
-    // start. Expand only this test fixture, after asserting the real start.
-    nav.new_game.as_mut().unwrap().cargo = 7;
     assert_eq!(
         trade::capacity(&nav, &cache, &state),
         7,

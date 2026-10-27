@@ -1706,9 +1706,13 @@ pub const DEFAULT_CASH: i32 = 10_000;
 /// F998's default arm subtracts `0x10` t from the Saker's 23 t statistic,
 /// leaving 7 t.
 pub const DEFAULT_HOLD_LOSS: i32 = 0x10;
-/// Delivered free hold after F998's allowance and the six tonnes of fitted
-/// equipment (laser, missiles, scanner, autopilot and atmospheric shielding).
-pub const DEFAULT_CARGO: i32 = 1;
+/// The default arm's hold (`DATA_008889`): F998 fits its equipment by setting
+/// the object's bytes, so nothing more is taken off the 7 t. The reference
+/// game reads 7 t here with 1 t used.
+pub const DEFAULT_CARGO: i32 = 23 - DEFAULT_HOLD_LOSS;
+/// The tonnes of hydrogen fuel F998's default arm puts in that hold
+/// (`DATA_008901 = 1`, `DATA_008891 = 1` cargo used).
+pub const DEFAULT_HYDROGEN: u16 = 1;
 /// F998's default starport: Old Blackelk, physics slot `0x6a`.
 pub const DEFAULT_STARPORT_SLOT: usize = 0x6a;
 /// F994's player index for the default arm (`DATA_008857`).
@@ -2171,7 +2175,6 @@ impl Navigator {
             up,
         )?;
         let cargo = if default_arm {
-            // The delivered equipment consumes six of the remaining seven tonnes.
             DEFAULT_CARGO
         } else {
             (models.cargo_space(ship).unwrap_or(0) - NEW_GAME_HOLD_LOSS).max(0)
@@ -5504,13 +5507,10 @@ mod tests {
         assert_eq!(DEFAULT_STARPORT_SLOT, 0x6a);
         assert_eq!(DEFAULT_SHIP, 0x1f);
         assert_eq!(DEFAULT_CASH, 10_000);
-        assert_eq!(DEFAULT_CARGO, 1);
+        // The reference game's DATA_008889 at Hope: 7 t, 1 t of it hydrogen.
+        assert_eq!(DEFAULT_CARGO, 7);
         assert_eq!(DEFAULT_HOLD_LOSS, 0x10);
-        assert_eq!(
-            DEFAULT_CARGO,
-            23 - DEFAULT_HOLD_LOSS - 6,
-            "the Saker allowance and delivered equipment"
-        );
+        assert_eq!(DEFAULT_HYDROGEN, 1);
         assert_eq!(DEFAULT_PLAYER_INDEX, 87);
     }
 

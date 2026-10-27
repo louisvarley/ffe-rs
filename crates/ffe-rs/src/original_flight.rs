@@ -111,7 +111,13 @@ impl OriginalFlight {
             .as_ref()
             .and_then(|block| ShipStats::from_block(block))
             .ok_or("Missing new-game ship statistics.")?;
+        // F998's default arm starts the hold with a tonne of hydrogen fuel.
+        let mut hold = vec![0u16; ffe_core::market::NAMES];
+        if start.start_type == crate::navigation::DEFAULT_START_TYPE {
+            hold[ffe_core::hyperspace::HYDROGEN] = crate::navigation::DEFAULT_HYDROGEN;
+        }
         let mut state = Flight {
+            hold,
             credits: u32::try_from(start.cash).map_err(|_| "Invalid starting cash.")?,
             ship: start.ship,
             mode: crate::flight::Mode::Flight,

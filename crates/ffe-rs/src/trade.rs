@@ -26,7 +26,7 @@ pub fn credits(value: i32) -> String {
 
 /// F390/F391's hold capacity: the ship's delivered capacity less the mass of
 /// the equipment fitted after delivery. A new game's `Navigator::hold` is
-/// F998's 1 t with the delivered loadout already priced in (`F998` does not run
+/// F998's 7 t with the delivered loadout already priced in (`F998` does not run
 /// F390 for its own equipment); a hull bought later uses the cargo statistic and
 /// all of the fitted mass.
 pub fn capacity(nav: &Navigator, cache: &VerifiedCache, state: &Flight) -> i32 {
