@@ -246,10 +246,10 @@ impl SystemEffect {
             centre: effect.position.map(|v| v as f64 / unit),
             axes: effect.axes(),
             timer: effect.timer,
-            size: if effect.kind == ffe_core::effects::Kind::Explosion {
-                ffe_core::effects::EXPLOSION_SIZE
-            } else {
-                0
+            size: match effect.kind {
+                ffe_core::effects::Kind::Explosion => ffe_core::effects::EXPLOSION_SIZE,
+                ffe_core::effects::Kind::Cloud => effect.size,
+                _ => 0,
             },
             scale,
         }

@@ -79,3 +79,28 @@ mass 16) reaches 18.75 light years.
   `e492b29f846e1c2aac4b88f7dc0b1ab89f9d777d6b73225c99e5fbd885b2c437`.
 - `verify-assets.py`: the imported tables equal JJFFE's `DATA_006793..6795`, `DATA_006799..6811` and the first 240 bytes
   of `DATA_007187`, and the executable's own bytes. Synthetic tests: `crates/ffe-core/tests/galaxy_map.rs`.
+
+## Hyperspace clouds (2026-10-27)
+
+Model `0x9a` is the cloud. It draws nine F1766 chains, each a single dot at
+vertex 0 (`7f 00` pairs) whose radius is local 1 from global 4, in rings of
+colour: red/orange for a departure cloud, blue for an exit cloud. F1766 tests
+a pair's high byte first and stops on 0x7f only before it is drawn, so `7f nn`
+still draws vertex nn; the port's chain loop stopped on either byte and drew
+nothing for the cloud (fixed in `model_execute`).
+
+- **Departure** (F761/F738): a ship that jumps out becomes the cloud
+  (`+0xff = 0x1d`, `+0x9e = 0xffff`, `+0xa4 = -1`, `+0x7e = 8`) until its
+  arrival time elsewhere (F764). The port's NPCs have no destination, so
+  `effects::departure_cloud` stands for one game day of jump time, spawned
+  where `npc::State::Escaped` is reached.
+- **Exit** (F1094 for the player, F740 for a ship): a new model-0x9a object at
+  the arrival point, identity matrix (F1093), `+0x9e = 1`, `+0xa4 = -1`,
+  state 0x1e. Its target time is its creation time, so F763 removes it at the
+  next control tick; the port gives it one tick period (`THINK_TICS`).
+- F735 ramps `+0x9e` by `tics >> 1` a frame: down to 0 below state 0x1e, up to
+  0xffff from it. Global 4 gates the drawing (a cloud at 0 draws nothing).
+
+`effects_view::hyperspace_clouds_draw_and_expire` draws both and checks their
+lifetimes. NPC arrivals mid-system (F740) are not modelled because the port's
+traffic does not jump in.

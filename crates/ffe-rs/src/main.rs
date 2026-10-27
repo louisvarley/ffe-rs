@@ -1627,8 +1627,8 @@ fn run() -> Result<(), String> {
         }
         // F1094: the jump time has run out. Mode 0 again at 1x (F217), the ship
         // moving at 0x71b7 along the system's z axis; the system's traffic
-        // arrives with it. The exit cloud (model 0x9a, AI state 0x1e) the
-        // original leaves behind is not drawn yet.
+        // arrives with it, and F1094 leaves the exit cloud (model 0x9a, AI
+        // state 0x1e) at the arrival point.
         if transit_over {
             if let Some(nav) = nav.as_mut() {
                 nav.transit = None;
@@ -1641,6 +1641,12 @@ fn run() -> Result<(), String> {
                 let at = ship_position(&original, &state);
                 let forward = ship_axes(&state)[2];
                 nav.spawn_traffic(&cache, at, forward);
+                // F1094: the exit cloud at the arrival point, removed by F763
+                // at the next control tick (after the traffic's fresh list).
+                nav.effects.push(ffe_core::effects::exit_cloud(
+                    at,
+                    u64::from(ffe_core::effects::THINK_TICS),
+                ));
                 // F1094's song when the "Music after hyperspace" switch is on.
                 sound.hyperspace_music();
                 if let Some(jumped) = in_transit.take() {

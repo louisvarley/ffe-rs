@@ -357,3 +357,57 @@ fn dust_is_drawn_ahead_at_speed() {
     let dots = changed(&empty, screen.logical_pixels());
     assert!(dots > 50, "only {dots} dust pixels");
 }
+
+/// F738's departure cloud and F1094's exit cloud: model 0x9a at distance word
+/// +8, global word 1 the size ramp. Both draw ahead of the camera, and a cloud
+/// expires once its game time is spent (F763/F764).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn hyperspace_clouds_draw_and_expire() {
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let at = [7_000_000_000_000_i64, 3_000_000_000_000, 1_000_000_000_000];
+    let state = Flight {
+        mode: Mode::Flight,
+        position: at.map(|v| v as f64 / unit),
+        system_flight: true,
+        ship: NEW_GAME_SHIP,
+        axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        ..Flight::default()
+    };
+    let views = ViewState::default();
+    screen.draw(&state, views, Some(&viewer), true, "");
+    let empty = screen.logical_pixels().to_vec();
+    let ahead = [at[0], at[1], at[2] + 20_000_000];
+    for (name, mut cloud) in [
+        (
+            "departure",
+            effects::departure_cloud(ahead, effects::TICS_PER_DAY),
+        ),
+        (
+            "exit",
+            effects::exit_cloud(ahead, u64::from(effects::THINK_TICS)),
+        ),
+    ] {
+        // Half a second of F735's ramp.
+        for _ in 0..25 {
+            cloud.tick(0.02, 994);
+        }
+        screen.effects = vec![ffe_rs::screen::SystemEffect::from_effect(
+            Some(&viewer),
+            &cloud,
+            unit,
+        )];
+        screen.draw(&state, views, Some(&viewer), true, "");
+        save(&screen, &format!("effects-cloud-{name}.ppm"));
+        let drawn = changed(&empty, screen.logical_pixels());
+        assert!(drawn > 50, "{name} cloud drew {drawn} pixels");
+        assert!(cloud.alive(), "{name} cloud expired early");
+        for _ in 0..100 {
+            cloud.tick(0.02, 994);
+        }
+        assert_eq!(cloud.alive(), name == "departure", "{name} cloud lifetime");
+    }
+}

@@ -1471,12 +1471,15 @@ fn run(
                             let size =
                                 crate::model_thruster::special_divide(size, instance.position[2])?;
                             // F1766 runs each pair's high byte and then its low
-                            // byte, stopping before a pair holding 0x7f.
-                            for pair in &chain.pairs {
-                                if pair[1] == 0x7f || pair[0] == 0x7f {
-                                    break;
-                                }
+                            // byte: it stops before a high byte of 0x7f, and after
+                            // the high byte when the low byte is 0x7f, so `7f nn`
+                            // still draws vertex nn (the hyperspace cloud's one
+                            // dot at its centre).
+                            'pairs: for pair in &chain.pairs {
                                 for index in [pair[1], pair[0]] {
+                                    if index == 0x7f {
+                                        break 'pairs;
+                                    }
                                     let point = live.resolve(
                                         index as i8,
                                         working,

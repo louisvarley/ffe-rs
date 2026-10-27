@@ -3723,6 +3723,13 @@ impl Navigator {
                 events.push(ShipEvent::Escaped {
                     name: ship.name.clone(),
                 });
+                // F761/F738: the ship becomes its own hyperspace cloud until it
+                // arrives elsewhere. The port's ships have no destination, so
+                // the cloud stands for one game day of jump time.
+                self.effects.push(effects::departure_cloud(
+                    ship.position,
+                    effects::TICS_PER_DAY,
+                ));
             }
         }
         // F927's recycle also frees a bay the leaving ship still held.

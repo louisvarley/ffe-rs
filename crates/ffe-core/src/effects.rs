@@ -118,6 +118,9 @@ pub enum Kind {
     Explosion,
     /// F926's model-0x99 pod.
     Debris,
+    /// A hyperspace cloud (model 0x9a): F738's departure cloud (AI state
+    /// 0x1d, F764) or F740/F1094's exit cloud (state 0x1e, F763).
+    Cloud,
 }
 
 /// One short-lived visual object in the system frame.
@@ -145,6 +148,12 @@ pub struct Effect {
     pub shift: i8,
     /// A canister's commodity (`+0x9e`): what F714 scoops into the hold.
     pub cargo: Option<u16>,
+    /// A cloud's global word 1 (`+0x9e`), the model's size ramp.
+    pub size: u16,
+    /// A cloud's game tics left before F763/F764 remove it (`+0xa8/+0xac`).
+    pub life: u64,
+    /// An exit cloud (state 0x1e) rather than a departure cloud (0x1d).
+    pub exit: bool,
 }
 
 /// F926's first pods (`0x8e0f + 0x7200`): commodity 15.
@@ -269,6 +278,25 @@ impl Effect {
                 }
                 Update::Nothing
             }
+            Kind::Cloud => {
+                // F735's `+0x9e` ramp, `tics >> 1` a frame: a departure cloud
+                // (below state 0x1e) shrinks it to 0, an exit cloud grows it
+                // to 0xffff.
+                let step = step(1);
+                self.size = if self.exit {
+                    self.size.saturating_add(step)
+                } else {
+                    self.size.saturating_sub(step)
+                };
+                // F763/F764 remove the cloud once the game time passes
+                // `+0xa8/+0xac`.
+                if u64::from(tics) >= self.life {
+                    self.alive = false;
+                } else {
+                    self.life -= u64::from(tics);
+                }
+                Update::Nothing
+            }
             Kind::Debris => {
                 self.think = self.think.saturating_add(tics);
                 while self.think >= THINK_TICS && self.countdown >= 0 {
@@ -342,6 +370,9 @@ pub fn hit(
         alive: true,
         shift: 0,
         cargo: None,
+        size: 0,
+        life: 0,
+        exit: false,
     }
 }
 
@@ -364,6 +395,9 @@ pub fn missile_explosion(position: [i64; 3], axes: [[f64; 3]; 3], rng: &mut Rand
         alive: true,
         shift: 0,
         cargo: None,
+        size: 0,
+        life: 0,
+        exit: false,
     }
 }
 
@@ -392,6 +426,9 @@ pub fn explosion(
         alive: true,
         shift: 0,
         cargo: None,
+        size: 0,
+        life: 0,
+        exit: false,
     }];
     // F942: (F922(6) - 2) pods, then min(4, cargo >> 1) cargo pods.
     // F942: F922(6) - 2 pods of commodity 15, then, when the ship has cargo
@@ -433,9 +470,55 @@ pub fn explosion(
             alive: true,
             shift: 0,
             cargo: Some(load),
+            size: 0,
+            life: 0,
+            exit: false,
         });
     }
     effects
+}
+
+/// The hyperspace cloud's model (`0x9a`).
+pub const CLOUD_MODEL: u32 = 0x9a;
+/// F738/F1094's distance word `+0x7e = 8` for a cloud.
+pub const CLOUD_SHIFT: i8 = 8;
+/// Game tics per game day: `DATA_008804` is the day's fraction in 2^-32.
+pub const TICS_PER_DAY: u64 = 1 << 32;
+
+/// F738/F761: the cloud a ship leaves when it jumps out. The ship itself
+/// becomes the model-0x9a object, with `+0x9e = 0xffff` and `+0xa4 = -1`, and
+/// stays until its arrival time elsewhere (`+0xa8/+0xac` plus the jump time
+/// `+0xfa`); `life` is that jump time in game tics.
+pub fn departure_cloud(position: [i64; 3], life: u64) -> Effect {
+    cloud(position, false, 0xffff, life)
+}
+
+/// F1094 (the player) and F740 (a ship): the exit cloud left at the arrival
+/// point, identity matrix (F1093), `+0x9e = 1` growing, `+0xa4 = -1`. F763
+/// removes it at the next control tick (its target time is the creation
+/// time), so `life` is the game tics to that tick.
+pub fn exit_cloud(position: [i64; 3], life: u64) -> Effect {
+    cloud(position, true, 1, life)
+}
+
+fn cloud(position: [i64; 3], exit: bool, size: u16, life: u64) -> Effect {
+    Effect {
+        kind: Kind::Cloud,
+        model: CLOUD_MODEL,
+        position,
+        velocity: [0.0; 3],
+        forward: [0.0, 0.0, 1.0],
+        up: [0.0, 1.0, 0.0],
+        timer: 0xffff,
+        countdown: -1,
+        think: 0,
+        alive: true,
+        shift: CLOUD_SHIFT,
+        cargo: None,
+        size,
+        life,
+        exit,
+    }
 }
 
 /// F291's jettisoned canister: model 0x99 in F926's drifting state `0x16`
@@ -467,6 +550,9 @@ pub fn canister(
         alive: true,
         shift: 0,
         cargo: Some(cargo),
+        size: 0,
+        life: 0,
+        exit: false,
     }
 }
 
