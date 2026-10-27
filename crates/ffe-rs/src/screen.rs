@@ -57,6 +57,10 @@ pub struct SystemStation {
     pub door: u16,
     /// The game tics the spin and the animation are taken at.
     pub tics: u32,
+    /// The object's random seed (`+0xa0`, global words 2 and 3). Global 2's
+    /// low bits pick the starport's pad colour (model 29's colour command,
+    /// textures 1..17).
+    pub seed: u32,
 }
 
 /// The farthest a station is drawn from (millimetres from the eye): the viewer's
@@ -3178,6 +3182,8 @@ impl Screen {
         // direction; the sign convention is `scene_light`'s.
         let light = self.scene_light(scene, camera);
         let mut inputs = AnimationInputs::original(station.tics, station.door, &scene.shades());
+        inputs.globals[2] = station.seed as u16;
+        inputs.globals[3] = (station.seed >> 16) as u16;
         inputs.jitter = self.jitter.cursor;
         match scene.render_scene_with(station.model, rows, origin, light, &inputs) {
             Ok(frame) => {

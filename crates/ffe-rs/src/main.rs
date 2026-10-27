@@ -987,7 +987,7 @@ fn run() -> Result<(), String> {
     let mut gameover_viewer: Option<ModelViewer> = None;
     // The flight view's station is the original model 74 when the cache has it;
     // otherwise the placeholder wireframe stays.
-    let scene = match ModelViewer::new(&cache) {
+    let mut scene = match ModelViewer::new(&cache) {
         Ok(scene) => Some(scene),
         Err(error) => {
             eprintln!("Station model unavailable, using the placeholder: {error}");
@@ -5765,6 +5765,15 @@ fn run() -> Result<(), String> {
                 .station()
                 .map_or_else(String::new, |(n, _)| n.to_owned());
         }
+        // F1535: the lighting star's class picks the shade table every model
+        // copies.
+        if let Some(viewer) = scene.as_mut() {
+            let class = nav
+                .as_ref()
+                .and_then(|nav| nav.bodies.iter().find(|b| b.kind == NavKind::Star))
+                .map(|star| star.class);
+            viewer.set_star_class(class);
+        }
         // The local star lights ships, stations and the lift scene in a system.
         screen.sun = nav.as_ref().and_then(|nav| {
             let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
@@ -5826,6 +5835,7 @@ fn run() -> Result<(), String> {
                         speed: b.spin,
                         door: nav.door(index),
                         tics,
+                        seed: b.seed,
                     })
                     .collect()
             }

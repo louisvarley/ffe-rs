@@ -888,6 +888,7 @@ fn surface_frame_shows_a_starport() {
             speed: 0,
             door: 0xffff,
             tics: 0,
+            seed: 0,
         }];
         screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
         let with = screen.logical_pixels().to_vec();
@@ -1151,6 +1152,7 @@ fn level_flight_near_the_surface_shows_the_horizon() {
         speed: 0,
         door: 0xffff,
         tics: 0,
+        seed: 0,
     }];
     screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
     let with = screen.logical_pixels().to_vec();
@@ -1303,6 +1305,7 @@ fn landing_reaches_the_surface_state_and_launches_again() {
             speed: b.spin,
             door: 0xffff,
             tics: 0,
+            seed: 0,
         })
         .collect();
     let shots = std::env::var_os("FFE_SHOT_DIR");
@@ -1473,6 +1476,7 @@ fn new_game_landed_surface_view() {
             speed: b.spin,
             door: 0xffff,
             tics,
+            seed: 0,
         })
         .collect();
     screen.sky = ffe_rs::prefs::space_colour_rgb(4);
@@ -1595,6 +1599,7 @@ fn new_game_hope_landed_surface_view() {
             speed: b.spin,
             door: 0xffff,
             tics,
+            seed: 0,
         })
         .collect();
     screen.sky = ffe_rs::prefs::space_colour_rgb(4);

@@ -156,11 +156,14 @@ pub struct PolygonEmission {
     pub context: VertexContext,
     pub outline: Outline,
     /// F1692/F1693 colour, as F1326 receives it for the F1799 fill; zero when culled
-    /// (not computed). For a textured material (`material(..).texture != 0`) F1691
-    /// also adds bytes +8..+10 of the record at `DATA_007811 + 30 * texture`, which
-    /// for most textures lies beyond that shade table in unrelated legacy data; that
-    /// addition is **not** applied here.
+    /// (not computed). For a textured material (`material(..).texture != 0`) F1721
+    /// also runs F1691, which adds the first colour of the texture's descriptor
+    /// (`DATA_007811 + 30 * texture + 8`); the executor has no descriptor table,
+    /// so the caller completes that colour from [`Self::shade`]
+    /// (`model_texture::flat_colour`).
     pub colour: [u8; 3],
+    /// The normal's colour F1693 adds (zero when culled).
+    pub shade: [u8; 3],
 }
 
 /// A sound request (opcode 15, F1759): sample `code >> 5 & 15` at volume
@@ -1200,12 +1203,14 @@ fn run(
                         context: working.clone(),
                         outline: Outline::default(),
                         colour: [0; 3],
+                        shade: [0; 3],
                     };
                     if !normal.culled {
                         let lighting = match (polygon.normal, result.normal_zero_colour) {
                             (0, Some(rgb)) => rgb,
                             _ => normal.colour,
                         };
+                        emission.shade = lighting;
                         emission.colour =
                             resolve_colour(polygon.material, working.colour, lighting);
                         // F1721 keys the outline by its first vertex's view (F1470), then

@@ -86,6 +86,7 @@ fn the_lift_scenes_draw() {
                     speed: b.spin,
                     door: 0xffff,
                     tics: 0x8000_0000,
+                    seed: 0,
                 })
                 .collect();
             screen.lift = Some(LiftView {
@@ -157,6 +158,7 @@ fn the_lift_scenes_draw() {
             speed: b.spin,
             door: 0xffff,
             tics: 0x8000_0000,
+            seed: 0,
         })
         .collect();
     let (mut last, mut frames, mut stages) = (0, 0u32, std::collections::BTreeSet::new());
@@ -197,6 +199,7 @@ fn stations(nav: &Navigator, tics: u32) -> Vec<SystemStation> {
             speed: b.spin,
             door: nav.door(index),
             tics,
+            seed: 0,
         })
         .collect()
 }

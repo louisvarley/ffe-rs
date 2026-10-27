@@ -98,6 +98,7 @@ fn frame(
             speed: body.spin,
             door: nav.door(index),
             tics,
+            seed: 0,
         })
         .collect();
     screen.labels = nav

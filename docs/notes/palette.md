@@ -233,3 +233,20 @@ clears to `#0c0c4c` and `space-black` to `#000000`. `landed-starport` changes
 - **No DAC upload:** the port resolves to RGB for its 32-bit framebuffer.
   `RuntimePalette::changed()`/`entry6()` expose what `F1331` would upload, and
   the alternation is kept in `bank()`/`upper6()`.
+
+## Star shade tables (F1535, 2026-10-27)
+
+Every model instance copies the eight shades at `DATA_008831` (locals 12..17),
+and a lit face takes `shades[(light . normal >> 27) & 7]`. F960 fills them
+from the default table `DATA_007234`, but F1535 replaces them with
+`DATA_007759 + 24 * (class & 7)` for the lighting star, its class byte
+`+0x14c`. The reference confirms it at the Merlin start: `DATA_008831` holds
+table 1 (7,6,3 / 7,5,2 / ... / 2,0,0) for Ross 154 (class `0x81`). The port
+used F960's grey table everywhere; `ModelViewer::set_star_class` now selects
+the star's table each frame (main's flight scene), so a red dwarf tints lit
+surfaces as in the original. Classes 6 and 7 read past the six defined tables
+in the original; the port keeps the default table for them.
+
+The starport's own colours also take its seed: `SystemStation.seed` (object
+`+0xa0`) is passed as global words 2 and 3, which the starport models' colour
+commands use to pick their pad and building materials.

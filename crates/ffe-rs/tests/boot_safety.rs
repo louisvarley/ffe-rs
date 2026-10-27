@@ -223,6 +223,7 @@ fn boot_frame_and_log_stay_clean() {
             speed: b.spin,
             door: 0xffff,
             tics,
+            seed: 0,
         })
         .collect();
     screen.sky = ffe_rs::prefs::space_colour_rgb(4);

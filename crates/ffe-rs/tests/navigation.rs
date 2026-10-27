@@ -2112,6 +2112,7 @@ fn shot(
             speed: b.spin,
             door: 0xffff,
             tics,
+            seed: 0,
         })
         .collect();
     screen.draw(

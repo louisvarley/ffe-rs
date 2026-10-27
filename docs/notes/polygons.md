@@ -105,9 +105,15 @@ F1560 (y clip at 0x9e, span insertion), F1559 and F1613 (fill) are not ported.
 
 ## Not ported
 
-- F1691's texture colour: for a textured material it adds bytes +8..+10 of
-  `DATA_007811 + 30 * texture`, which mostly lies beyond that shade table.
-  `PolygonEmission.colour` excludes it; the oracle does not compare those fills.
+- F1691's texture colour in the executor: for a textured material F1721 adds
+  bytes +8..+10 of `DATA_007811 + 30 * texture` (the descriptor's first slot
+  colour). `PolygonEmission.colour` excludes it because the executor has no
+  descriptor table, and the oracle does not compare those fills. The viewer
+  completes it (2026-10-27): `PolygonEmission.shade` keeps the normal colour
+  F1693 adds and `ModelViewer::polygon_colour` runs `flat_colour` on it. This
+  replaced a fixed grey stand-in that drew every starport pad 0x555 instead of
+  the original's 0x222 (Sirocco Station, Merlin: fixed palette entry 22,
+  (10, 10, 8), confirmed in the reference's start frame).
 - Rasterisation (F1560/F1559/F1613) and the palette conversion (F1326/F1327).
 
 ## Verification (Linux reference build)

@@ -21,7 +21,7 @@ use ffe_core::model_execute::{
 };
 use ffe_core::model_fill::near_outline;
 use ffe_core::model_instance::{Vertices, NEAR_SENTINEL};
-use ffe_core::model_lighting::{default_lighting, pack, Lighting};
+use ffe_core::model_lighting::{default_lighting, pack, star_shades, Lighting};
 use ffe_core::model_math::SineTable;
 use ffe_core::model_normals::{self, NormalContext};
 use ffe_core::model_texture::{
@@ -249,6 +249,10 @@ pub struct ModelViewer {
     door_state: i8,
     textures: TextureSet,
     lighting: Lighting,
+    /// F960's shade table (`DATA_007234`), kept while a star's table is in use.
+    default_shades: [[u8; 3]; 8],
+    /// `DATA_007759`: the six star shade tables F1535 selects from.
+    star_shades: Vec<[[u8; 3]; 8]>,
     /// The terrain tables and height maps (cache v17), for curved surfaces.
     terrain: Option<(Vec<u8>, Vec<u8>)>,
     /// The seed (`+0xa0`) of the surface being drawn, set by the caller.
@@ -467,6 +471,13 @@ impl ModelViewer {
             .and_then(|bytes| default_lighting(bytes).ok())
         {
             viewer.lighting = lighting;
+            viewer.default_shades = lighting.shades;
+        }
+        if let Some(tables) = cache
+            .asset("base:lighting/star-shades")
+            .and_then(|bytes| star_shades(bytes).ok())
+        {
+            viewer.star_shades = tables;
         }
         if let Some(records) = cache.asset("base:model/records") {
             viewer.world_units = records
@@ -625,6 +636,8 @@ impl ModelViewer {
             door_state: 0,
             textures: TextureSet::default(),
             lighting: FALLBACK_LIGHTING,
+            default_shades: FALLBACK_LIGHTING.shades,
+            star_shades: Vec::new(),
             terrain: None,
             surface_seed: std::cell::Cell::new(0),
             surface_detail: std::cell::Cell::new(1),
@@ -773,6 +786,17 @@ impl ModelViewer {
     /// The shades every instance copies (locals 12..17).
     pub fn shades(&self) -> [[u8; 3]; 8] {
         self.lighting.shades
+    }
+
+    /// F1535: the lighting star's class byte (`+0x14c`) picks its shade
+    /// table, `DATA_007759 + 24 * (class & 7)`, for every model drawn. `None`
+    /// (no star, or the two class values past the six defined tables, which
+    /// read the data after the table in the original) keeps F960's default.
+    pub fn set_star_class(&mut self, class: Option<u8>) {
+        self.lighting.shades = class
+            .and_then(|class| self.star_shades.get(usize::from(class & 7)))
+            .copied()
+            .unwrap_or(self.default_shades);
     }
 
     /// Set `DATA_008812`, the "Level of Shape Detail" F1876 reads. The original
@@ -1800,6 +1824,27 @@ impl ModelViewer {
         }
     }
 
+    /// F1721's fill colour: F1692/F1693, then F1691's descriptor colour for a
+    /// textured material (the flat path's [`flat_colour`]). Without the
+    /// descriptor table a textured polygon falls back to grey.
+    fn polygon_colour(&self, polygon: &ffe_core::model_execute::PolygonEmission) -> [u8; 3] {
+        if material(polygon.polygon.material).texture == 0 {
+            return polygon.colour;
+        }
+        self.textures
+            .descriptors()
+            .and_then(|table| {
+                flat_colour(
+                    polygon.polygon.material,
+                    polygon.context.colour,
+                    polygon.shade,
+                    table,
+                )
+                .ok()
+            })
+            .unwrap_or([5; 3])
+    }
+
     /// Register every colour the executed primitives resolve to, before the
     /// build. The original calls F1326 while queueing its fills, i.e. after
     /// executing the model and before F1330 draws with the palette.
@@ -1860,12 +1905,7 @@ impl ModelViewer {
                     [0; 3],
                 )),
                 Primitive::Polygon(polygon) => {
-                    let colour = if material(polygon.polygon.material).texture != 0 {
-                        [5; 3]
-                    } else {
-                        polygon.colour
-                    };
-                    self.register_frame_colour(colour);
+                    self.register_frame_colour(self.polygon_colour(polygon));
                 }
                 Primitive::Thruster(entry) => match &entry.shape {
                     ThrusterShape::Glow { colours, .. } => {
@@ -2101,15 +2141,11 @@ impl ModelViewer {
                 }
                 Primitive::Polygon(polygon) => {
                     // The original's queued entries and F1547 edge subdivision, filled
-                    // by its span rasteriser. Textured fills (F1691 texture colour not
-                    // ported) show grey. An abandoned outline has no entries.
+                    // by its span rasteriser in F1721's one colour. An abandoned
+                    // outline has no entries.
                     let edges = ffe_core::model_polygon::edges(&polygon.outline.entries)?;
                     if !edges.is_empty() {
-                        let colour = if material(polygon.polygon.material).texture != 0 {
-                            [5; 3]
-                        } else {
-                            polygon.colour
-                        };
+                        let colour = self.polygon_colour(polygon);
                         push!(Shape::Polygon(edges, self.rgb(colour)));
                     }
                 }
