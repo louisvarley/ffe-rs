@@ -3753,7 +3753,9 @@ fn run() -> Result<(), String> {
                     && state.mode == ffe_rs::flight::Mode::Flight
                 {
                     let ship = ship_position(&original, &state);
-                    message = match nav.as_mut() {
+                    // Traffic control's replies are F349 comms messages: the
+                    // log, not the port's status line.
+                    let reply = match nav.as_mut() {
                         Some(nav) if nav.sequence.is_some() => {
                             "Docking or launching is under way.".to_owned()
                         }
@@ -3790,6 +3792,7 @@ fn run() -> Result<(), String> {
                         },
                         None => "No stations: navigation is unavailable.".to_owned(),
                     };
+                    pending_log.add(Source::Docking, reply);
                     // F1020's docking-computer beep.
                     sound.play(Cue::UiBeep);
                     None
@@ -4048,6 +4051,9 @@ fn run() -> Result<(), String> {
                         keys = OriginalKeys::default();
                     } else {
                         model.clear_guidance();
+                    }
+                    if std::mem::take(&mut nav.clearance_granted) {
+                        sound.clearance_music();
                     }
                     if let Some(notice) = nav.notice.take() {
                         // F654/F655's traffic-control refusal (`0x98b7..0x98b9`).
@@ -6401,8 +6407,22 @@ fn run() -> Result<(), String> {
         // `message` and are not dated. F351's bong accompanies a newly shown
         // message, not a replace-flag update (`ffe.asm:20776-20792`).
         if let Some(event) = pending_log.take() {
+            // F349, the comms message (traffic control, clearance, fines,
+            // contracts), calls F217 first: time goes back to 1x unless the
+            // ship is in hyperspace (mode 4). A clearance on the approach
+            // therefore stops a 10000x run into the dock.
+            let comms = matches!(
+                event.source,
+                Source::Docking | Source::Launch | Source::Legal | Source::Mission
+            );
             if log_channel.post(&mut screen.messages, event, &screen.clock) == Post::Added {
                 sound.play(Cue::Message);
+                if comms && in_transit.is_none() && acceleration != 0 {
+                    acceleration = 0;
+                    if let Some(model) = original.as_mut() {
+                        model.set_time_acceleration(0);
+                    }
+                }
             }
         }
         // F273's idle timer runs on DATA_008799, the accelerated game tics.

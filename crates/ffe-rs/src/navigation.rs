@@ -1155,6 +1155,9 @@ pub struct Navigator {
     /// F381 has granted launch permission at the open-air starport (the launch action
     /// needs it).
     pub launch_cleared: bool,
+    /// Traffic control has just given the player clearance (F656's `0x98ba`
+    /// message, which plays the docking music); the game loop takes it.
+    pub clearance_granted: bool,
     /// F1022 has warned about an uncleared touch at this port (`DATA_008873`
     /// set to 6), so it does not repeat until the next landing.
     warned_at: Option<usize>,
@@ -2022,6 +2025,7 @@ impl Navigator {
             docked: None,
             traffic: HashMap::new(),
             launch_cleared: false,
+            clearance_granted: false,
             warned_at: None,
             ships: Vec::new(),
             dust: dust::Field::new(seed.0, seed.1),
@@ -2984,6 +2988,9 @@ impl Navigator {
         // F655: the player's outstanding fine at this starport (0x2710 refuses).
         let owes = self.fine_at(index);
         let reply = self.starport(index).request_docking(PLAYER, true, owes);
+        if matches!(reply, Reply::Granted(bay) if bay.fresh) {
+            self.clearance_granted = true;
+        }
         Some((index, reply))
     }
 
@@ -5083,6 +5090,7 @@ impl Navigator {
             match self.starport(index).request_docking(PLAYER, true, fine) {
                 Reply::Granted(_) => {
                     self.final_leg = true;
+                    self.clearance_granted = true;
                     self.autopilot_notice(format!("{}: clearance granted.", body.name));
                     // The original's next accelerated AI tick runs F745/F746 at
                     // once; one accelerated frame of physics in between would

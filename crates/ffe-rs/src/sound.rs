@@ -441,20 +441,24 @@ impl GameAudio {
         }
     }
 
-    /// `F908` + `F656`: after a jump, song 15 (`bluedan`) if "Music after
-    /// hyperspace" (`DATA_009033`) is set.
+    /// `F1094`: the hyperspace exit plays a random song (`F1902(-2)`) when
+    /// "Music on" (`player+0x3f5d`, `DATA_009029`) and "Music after
+    /// hyperspace" (`player+0x3f5f`, `DATA_009031`) are set.
     pub fn hyperspace_music(&mut self) {
         if self.audio.sound_flags().music_after_hyperspace && self.audio.settings().music_on {
-            let _ = self.audio.play_song(15);
+            let _ = self.audio.play_song(-1);
         }
     }
 
-    /// `F1094`: the end of a launch sequence chooses a random enabled song when
-    /// "Docking music" (`player+0x3f5f`) is set. A station *docked* state is
-    /// F1903's stop, not this call (`GameAudio::stop_song`).
-    pub fn sequence_end_music(&mut self) {
-        if self.audio.sound_flags().docking_music && self.audio.settings().music_on {
-            let _ = self.audio.play_song(-1);
+    /// `F656`: traffic control's clearance to the player (message `0x98ba`)
+    /// plays song 15 (`bluedan`) when "Docking music" (`DATA_009033`) is set
+    /// and it is not already playing.
+    pub fn clearance_music(&mut self) {
+        if self.audio.sound_flags().docking_music
+            && self.audio.settings().music_on
+            && self.current_song() != Some(15)
+        {
+            let _ = self.audio.play_song(15);
         }
     }
 
@@ -736,8 +740,8 @@ mod tests {
         assert_eq!(recorder.recorded().stops, 1);
 
         game.hyperspace_music();
-        game.sequence_end_music();
-        assert_eq!(recorder.recorded().songs, vec![14, 15, -1]);
+        game.clearance_music();
+        assert_eq!(recorder.recorded().songs, vec![14, -1, 15]);
 
         let mut flags = game.flags();
         flags.music_after_hyperspace = false;
@@ -745,7 +749,7 @@ mod tests {
         game.set_flags(flags);
         let before = recorder.recorded().songs.len();
         game.hyperspace_music();
-        game.sequence_end_music();
+        game.clearance_music();
         assert_eq!(recorder.recorded().songs.len(), before);
     }
 
@@ -797,12 +801,12 @@ mod tests {
         assert_eq!(recorder.recorded().stops, 2);
 
         game.hyperspace_music();
-        assert_eq!(game.current_song(), Some(15));
+        assert_eq!(recorder.recorded().songs.last(), Some(&-1));
         game.stop_for_sequence();
         assert_eq!(game.current_song(), None);
 
-        game.sequence_end_music();
-        assert_eq!(recorder.recorded().songs.last(), Some(&-1));
+        game.clearance_music();
+        assert_eq!(game.current_song(), Some(15));
     }
 
     #[test]
@@ -816,7 +820,7 @@ mod tests {
         game.front_end_music();
         game.start_battle();
         game.hyperspace_music();
-        game.sequence_end_music();
+        game.clearance_music();
         game.message_page_music();
         game.message_video_music();
         // The recorder accepts the calls (the engine gates them), so check the
