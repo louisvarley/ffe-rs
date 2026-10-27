@@ -9,7 +9,7 @@ use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOG
 use crate::intro_text::IntroText;
 use crate::messages::MessageLog;
 use crate::model_lab::{LabView, ModelLab};
-use crate::model_viewer::{AnimationInputs, ModelViewer, Shape, THRUST_GLOBAL};
+use crate::model_viewer::{AnimationInputs, Frame, ModelViewer, Shape, Solid, THRUST_GLOBAL};
 use crate::prefs::{self, Mark, Prefs};
 use crate::scanner;
 use crate::station::{self, DockRow, DockView, Screen as StationScreen, Status};
@@ -438,6 +438,20 @@ pub struct Screen {
     pub stars_visible: bool,
     /// The original's "Lock external view to ship" option (camera offset axis).
     pub lock_external: bool,
+    /// Modern graphics with a GPU: the flight view's model faces are set aside for the modern
+    /// engine (`crate::modern3d`) instead of being drawn into the frame. Set by the caller each
+    /// frame; Classic leaves it off and the frame is the original's.
+    pub capture: bool,
+    /// The faces set aside so far this frame, one batch per object.
+    batches: Vec<Vec<Solid>>,
+    /// Their textures so far this frame, each (bitmap, slot colours) once.
+    textures: Vec<crate::modern3d::WorldTexture>,
+    /// Shapes an object draws after its first set-aside face (lights, glows, labels): in the
+    /// original's painter order they lie over its faces, so they are drawn after the world
+    /// phase, over the 3-D view.
+    deferred: Vec<Shape>,
+    /// The last flight view's set-aside faces and world-phase frame (`capture` only).
+    world: Option<crate::modern3d::World>,
     /// The system's bodies as discs (set by the caller each frame).
     pub discs: Vec<Disc>,
     /// The system's stations (set by the caller each frame, in system flight).
@@ -947,6 +961,11 @@ impl Screen {
             surface_sky: None,
             stars_visible: true,
             lock_external: true,
+            capture: false,
+            batches: Vec::new(),
+            textures: Vec::new(),
+            deferred: Vec::new(),
+            world: None,
             discs: Vec::new(),
             stations: Vec::new(),
             ships: Vec::new(),
@@ -1057,7 +1076,7 @@ impl Screen {
             scene.render_scene_with(crate::combat::BEAM_MODEL, rows, origin, light, &inputs)
         {
             self.jitter.cursor = frame.jitter;
-            self.draw_shapes(scene, &frame.shapes);
+            self.draw_frame(scene, &frame);
         }
     }
 
@@ -1960,6 +1979,8 @@ impl Screen {
         tics: u32,
         version: bool,
     ) -> Result<(), String> {
+        // A whole screen of its own: no 3-D view for the modern engine.
+        self.world = None;
         use crate::front_end::{IntroTimeline, PRIMARY_BITMAP_Y, VERSION_LINE};
         let intro = IntroTimeline::at(tics);
         let background = pack(intro.background) & 0xfff;
@@ -2069,6 +2090,10 @@ impl Screen {
             .is_some_and(|death| death.phase == crate::death::DeathPhase::Exploding);
         let mut views = views;
         views.lock_external = self.lock_external;
+        self.batches.clear();
+        self.textures.clear();
+        self.deferred.clear();
+        self.world = None;
         let view = views.mode;
         // The original registers the effective background (space colour, or the
         // previous frame's haze) with F1326 before building the palette.
@@ -2331,6 +2356,18 @@ impl Screen {
             if let (Some(beam), Some(scene)) = (self.beam, scene) {
                 self.draw_beam(scene, state, &beam, &camera);
             }
+            // The world phase ends here: what is drawn from now on lies over the 3-D view.
+            if self.capture {
+                self.world = Some(crate::modern3d::World {
+                    batches: std::mem::take(&mut self.batches),
+                    textures: std::mem::take(&mut self.textures),
+                    snapshot: self.frame.clone(),
+                });
+                if let Some(scene) = scene {
+                    let deferred = std::mem::take(&mut self.deferred);
+                    self.draw_shapes(scene, &deferred);
+                }
+            }
             // Text labels (`l`): the original's F989 walks the live objects and
             // F1108 draws each name at its screen position (colour 15).
             if world && views.console.labels {
@@ -2408,6 +2445,8 @@ impl Screen {
     /// `0x2c`/`0x2d`, and every rectangle is `DATA_004903`..`DATA_004905`.
     /// A bullet marks the port's keyboard selection (the original is mouse-only).
     pub fn draw_prefs(&mut self, prefs: &Prefs) {
+        // A whole screen of its own: no 3-D view for the modern engine.
+        self.world = None;
         // The original only clears the upper view; the console below it stays
         // visible (`FUNC_000225` calls `FUNC_001618_ClearUpperBuf`).
         self.indexed.fill(0);
@@ -2533,6 +2572,8 @@ impl Screen {
     /// The navigation computer: a marker square and a name per body, nine rows in two
     /// columns; `rows` are (name, selected, locked on).
     pub fn draw_nav_list(&mut self, rows: &[(String, bool, bool)], detail: &str) {
+        // A whole screen of its own: no 3-D view for the modern engine.
+        self.world = None;
         self.rect(0, 0, 320, 158, 1);
         for (k, (name, selected, locked)) in rows.iter().enumerate() {
             let (x, y) = (if k < 9 { 10 } else { 230 }, 5 + 15 * (k % 9));
@@ -2585,6 +2626,8 @@ impl Screen {
         points: &[(f32, f32, crate::navigation::Kind, bool)],
         status: &str,
     ) {
+        // A whole screen of its own: no 3-D view for the modern engine.
+        self.world = None;
         use crate::navigation::Kind;
         self.rect(4, 4, 312, 152, 1);
         self.text(10, 8, title, 18);
@@ -2628,6 +2671,49 @@ impl Screen {
         }
         self.text(10, 146, status, 15);
         self.present();
+    }
+
+    /// The last flight view's set-aside faces, for the modern engine; `None` unless
+    /// [`Self::capture`] was on and the frame showed the flight view.
+    pub fn world(&self) -> Option<&crate::modern3d::World> {
+        self.world.as_ref()
+    }
+
+    /// One object of the flight view: its shapes in order, except that with [`Self::capture`]
+    /// on its model faces are set aside as one batch for the modern engine.
+    fn draw_frame(&mut self, viewer: &ModelViewer, frame: &Frame) {
+        if !self.capture {
+            self.draw_shapes(viewer, &frame.shapes);
+            return;
+        }
+        let mut batch = Vec::new();
+        for (index, shape) in frame.shapes.iter().enumerate() {
+            match frame.solids.get(index).and_then(Option::as_ref) {
+                Some(solid) => {
+                    if let Some(texture) = &solid.texture {
+                        let known = self.textures.iter().any(|known| {
+                            known.bitmap == texture.bitmap && known.slots == texture.slots
+                        });
+                        if !known {
+                            if let Some(pixels) = viewer.texture_argb(texture) {
+                                self.textures.push(crate::modern3d::WorldTexture {
+                                    bitmap: texture.bitmap,
+                                    slots: texture.slots.clone(),
+                                    size: texture.size,
+                                    pixels,
+                                });
+                            }
+                        }
+                    }
+                    batch.push(solid.clone());
+                }
+                None if !batch.is_empty() => self.deferred.push(shape.clone()),
+                None => self.draw_shapes(viewer, std::slice::from_ref(shape)),
+            }
+        }
+        if !batch.is_empty() {
+            self.batches.push(batch);
+        }
     }
 
     /// F6: every imported model executed by the verified port, in original order.
@@ -2995,7 +3081,7 @@ impl Screen {
         match scene.render_scene_with(STATION_MODEL, rows, origin, light, &inputs) {
             Ok(frame) => {
                 self.jitter.cursor = frame.jitter;
-                self.draw_shapes(scene, &frame.shapes);
+                self.draw_frame(scene, &frame);
                 true
             }
             Err(_) => false,
@@ -3025,7 +3111,7 @@ impl Screen {
             );
             if let Ok(frame) = r {
                 self.jitter.cursor = frame.jitter;
-                self.draw_shapes(scene, &frame.shapes);
+                self.draw_frame(scene, &frame);
             }
         }
     }
@@ -3092,7 +3178,7 @@ impl Screen {
                 if let Ok(frame) = scene.render_scene_with(ship.model, rows, origin, light, &inputs)
                 {
                     self.jitter.cursor = frame.jitter;
-                    self.draw_shapes(scene, &frame.shapes);
+                    self.draw_frame(scene, &frame);
                 }
             }
             if ship.flash {
@@ -3108,7 +3194,7 @@ impl Screen {
                     &inputs,
                 ) {
                     self.jitter.cursor = frame.jitter;
-                    self.draw_shapes(scene, &frame.shapes);
+                    self.draw_frame(scene, &frame);
                 }
             }
         }
@@ -3152,7 +3238,7 @@ impl Screen {
             ) {
                 if !frame.shapes.is_empty() {
                     self.jitter.cursor = frame.jitter;
-                    self.draw_shapes(scene, &frame.shapes);
+                    self.draw_frame(scene, &frame);
                 }
             }
         }
@@ -3188,7 +3274,7 @@ impl Screen {
         match scene.render_scene_with(station.model, rows, origin, light, &inputs) {
             Ok(frame) => {
                 self.jitter.cursor = frame.jitter;
-                self.draw_shapes(scene, &frame.shapes);
+                self.draw_frame(scene, &frame);
                 true
             }
             Err(_) => false,
@@ -3217,7 +3303,7 @@ impl Screen {
         match scene.render_scene_with(state.ship, rows, origin, light, &inputs) {
             Ok(frame) => {
                 self.jitter.cursor = frame.jitter;
-                self.draw_shapes(scene, &frame.shapes);
+                self.draw_frame(scene, &frame);
                 true
             }
             Err(_) => false,
@@ -3284,6 +3370,8 @@ impl Screen {
         model: u32,
         remaining: i64,
     ) -> Result<(), String> {
+        // A whole screen of its own: no 3-D view for the modern engine.
+        self.world = None;
         self.frame[..320 * LOGICAL_HEIGHT].fill(0x00_00_00_00);
         // F917 draws on the full 320x200 logical screen, not the 320x158 flight
         // view: the tombstone's lower text would otherwise be clipped.
@@ -3305,6 +3393,8 @@ impl Screen {
     }
 
     pub fn draw_model_viewer(&mut self, viewer: &ModelViewer) {
+        // A whole screen of its own: no 3-D view for the modern engine.
+        self.world = None;
         // Dark blue backdrop so black (unlit) faces stay visible as silhouettes.
         self.frame[..320 * VIEW_HEIGHT].fill(0x00_00_10_28);
         let model = viewer.model();
@@ -3371,6 +3461,8 @@ impl Screen {
     }
 
     pub fn draw_model_lab(&mut self, lab: &ModelLab) -> Result<(), String> {
+        // A whole screen of its own: no 3-D view for the modern engine.
+        self.world = None;
         self.rect(0, 0, 320, 158, 0);
         self.text(3, 1, "STATION MODEL LAB - GAME PAUSED", 18);
         let model = lab.model();

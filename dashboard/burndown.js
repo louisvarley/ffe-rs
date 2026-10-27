@@ -309,7 +309,7 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "enhanced-0", title: "Separate modern engine, the Classic/Modern switch and a first technique (edge-directed upscaling)", status: "done", version: "modern-1" },
-        { id: "enhanced-1", title: "Native resolution, filtering and MSAA", status: "todo" },
+        { id: "enhanced-1", title: "Native resolution, filtering and MSAA", status: "in-progress", version: "modern-2" },
         { id: "enhanced-2", title: "Modest bloom", status: "todo" },
         { id: "enhanced-3", title: "Planet atmosphere and shadows", status: "todo" },
         { id: "enhanced-4", title: "HDR output and temporal AA (deferred)", status: "todo" },
@@ -923,6 +923,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-27",
       remaining: 101,
       note: "Modern graphics engine, first slice: a separate presentation module (ffe_rs::modern) that reads the finished 320x200 frame and never touches game state; Classic/Modern rows on Port Options and Ctrl+G switch it live, persisted as graphics= in config.cfg; first technique is edge-directed 4x upscaling (Scale2x twice) with a smooth fit. One item added and completed (enhanced-0); packs-3 in progress. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-27",
+      remaining: 101,
+      note: "Modern graphics GPU 3-D view: new ffe-render crate (wgpu, offscreen, 4x MSAA, reversed-Z depth, perspective-correct mipmapped anisotropic textures) draws the flight view's model faces at the window's resolution with the original's projection, over the original's frame and under its HUD; Classic is unchanged. Planets, stars and dots not yet on the GPU, so enhanced-1 is in progress. Remaining count unchanged."
     }
   ]
 };

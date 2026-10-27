@@ -74,9 +74,35 @@ pub struct Textured {
     pub slots: Vec<[u8; 3]>,
 }
 
+/// A drawn face's corners in the executor's view space (x right, y up, z ahead; the
+/// original projects them as `160 + 256x/z`, `79 - 256y/z`) and its flat colour, kept for
+/// the modern engine (`crate::modern`), which draws the face itself at the window's
+/// resolution. The classic shape beside it is unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Solid {
+    pub views: Vec<[i32; 3]>,
+    pub rgb: [u8; 3],
+    /// The original's texture for a textured face (F1643's path), else `None`.
+    pub texture: Option<SolidTexture>,
+}
+
+/// A textured face's bitmap, its slot colours (as [`Textured`]) and each corner's texel
+/// coordinates in the bitmap (F1644/F1647's corner table), in the face's vertex order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SolidTexture {
+    pub bitmap: u32,
+    pub slots: Vec<[u8; 3]>,
+    pub uv: Vec<[i16; 2]>,
+    /// The bitmap's row stride and side: 64, or 128 for the others (F1643).
+    pub size: u32,
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub shapes: Vec<Shape>,
+    /// For each shape that is a model face, its [`Solid`] (aligned with
+    /// [`Self::shapes`]; may be shorter, the rest are `None`).
+    pub solids: Vec<Option<Solid>>,
     /// The F1777 depth key of each shape, aligned with [`Self::shapes`], in the
     /// original's far-to-near order. Curved-surface entries (F1840/F1841) are
     /// merged into this order, so a ship draws over a planet it is in front of.
@@ -555,6 +581,29 @@ impl ModelViewer {
     /// Texels without a slot colour (7 and above, never written by face entries;
     /// stale `DATA_009252` contents in the original) are drawn black, the zeroed
     /// start-up value. Returns false when the bitmap is missing.
+    /// A textured face's bitmap as a square `0xAARRGGBB` image (its stride by its stride) in
+    /// the slot colours, for the modern engine. Masked texel 0 is transparent; rows the bitmap
+    /// does not have are transparent too.
+    pub fn texture_argb(&self, texture: &SolidTexture) -> Option<Vec<u32>> {
+        let map = self.textures.map(texture.bitmap & 0xfff)?;
+        let size = texture.size as usize;
+        Some(
+            (0..size * size)
+                .map(|at| match map.texels.get(at) {
+                    Some(&texel) if !(map.masked_zero && texel == 0) => {
+                        let [r, g, b] = texture
+                            .slots
+                            .get(usize::from(texel))
+                            .copied()
+                            .unwrap_or([0; 3]);
+                        0xff00_0000 | u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
+                    }
+                    _ => 0,
+                })
+                .collect(),
+        )
+    }
+
     pub fn rasterise(&self, shape: &Textured, plot: impl FnMut(i32, i32, [u8; 3])) -> bool {
         self.rasterise_with(shape, None, plot)
     }
@@ -1813,6 +1862,9 @@ impl ModelViewer {
     /// does. Equal keys keep the primitive before the surface, and surfaces in
     /// their queue order.
     fn merge_surface_shapes(frame: &mut Frame, shapes: Vec<(u32, Shape)>) {
+        if !shapes.is_empty() {
+            frame.solids.resize(frame.shapes.len(), None);
+        }
         for (key, shape) in shapes {
             let at = frame
                 .keys
@@ -1821,6 +1873,7 @@ impl ModelViewer {
                 .unwrap_or(frame.keys.len());
             frame.keys.insert(at, key);
             frame.shapes.insert(at, shape);
+            frame.solids.insert(at, None);
         }
     }
 
@@ -1947,8 +2000,13 @@ impl ModelViewer {
             // shift the alignment between `shapes` and `keys`.
             macro_rules! push {
                 ($shape:expr) => {{
+                    push!($shape, None)
+                }};
+                ($shape:expr, $solid:expr) => {{
+                    frame.solids.resize(frame.shapes.len(), None);
                     frame.shapes.push($shape);
                     frame.keys.push(key);
+                    frame.solids.push($solid);
                 }};
             }
             match primitive {
@@ -1970,6 +2028,11 @@ impl ModelViewer {
                     if emission.screen.is_empty() || emission.screen.len() != count {
                         continue;
                     }
+                    let mut solid = (emission.views.len() == count && count >= 2).then(|| Solid {
+                        views: emission.views.clone(),
+                        rgb,
+                        texture: None,
+                    });
                     let behind = emission.screen.contains(&NEAR_SENTINEL);
                     let on_view = !behind
                         && emission.screen.iter().all(|[x, y]| {
@@ -2006,7 +2069,7 @@ impl ModelViewer {
                         let edges: Vec<[[i16; 2]; 2]> =
                             outline.windows(2).map(|pair| [pair[0], pair[1]]).collect();
                         if !edges.is_empty() {
-                            push!(Shape::Polygon(edges, rgb));
+                            push!(Shape::Polygon(edges, rgb), solid);
                         }
                         continue;
                     }
@@ -2019,25 +2082,49 @@ impl ModelViewer {
                     if let Some(table) = descriptors.filter(|_| points.len() >= 3) {
                         if textured_path(true, face.material, &screens) {
                             let entry = textured_colours(face.material, colour, shade, table)?;
-                            push!(Shape::Textured(Textured {
-                                points,
-                                bitmap: entry.bitmap,
-                                slots: entry
-                                    .colours
-                                    .iter()
-                                    .map(|c| self.textures.rgb(*c))
-                                    .collect(),
-                            }));
+                            let slots: Vec<[u8; 3]> = entry
+                                .colours
+                                .iter()
+                                .map(|c| self.textures.rgb(*c))
+                                .collect();
+                            if let (Some(solid), Some(map)) =
+                                (solid.as_mut(), self.textures.map(entry.bitmap & 0xfff))
+                            {
+                                let uv = match points.len() {
+                                    3 => Some(triangle_uv(map.width).to_vec()),
+                                    4 => Some(
+                                        quad_uv(map.width, (entry.bitmap >> 12 & 7) as u8).to_vec(),
+                                    ),
+                                    _ => None,
+                                };
+                                solid.texture = uv.map(|uv| SolidTexture {
+                                    bitmap: entry.bitmap,
+                                    slots: slots.clone(),
+                                    uv,
+                                    size: if map.width == 64 { 64 } else { 128 },
+                                });
+                            }
+                            push!(
+                                Shape::Textured(Textured {
+                                    points,
+                                    bitmap: entry.bitmap,
+                                    slots,
+                                }),
+                                solid
+                            );
                             continue;
                         }
                     }
-                    push!(if points.len() == 2 {
-                        Shape::Line(points[0], points[1], rgb)
-                    } else if on_view && matches!(points.len(), 3 | 4) {
-                        Shape::Flat(points, rgb)
-                    } else {
-                        Shape::Fill(points, rgb)
-                    });
+                    push!(
+                        if points.len() == 2 {
+                            Shape::Line(points[0], points[1], rgb)
+                        } else if on_view && matches!(points.len(), 3 | 4) {
+                            Shape::Flat(points, rgb)
+                        } else {
+                            Shape::Fill(points, rgb)
+                        },
+                        solid
+                    );
                 }
                 Primitive::Line(line) => {
                     let rgb = self.rgb(resolve_colour(line.material, line.context.colour, [0; 3]));
@@ -2120,8 +2207,9 @@ impl ModelViewer {
                         let mut glyphs = Frame::default();
                         self.draw_primitives(run, &mut glyphs, &[])?;
                         frame.skipped += glyphs.skipped;
-                        for shape in glyphs.shapes {
-                            push!(shape);
+                        glyphs.solids.resize(glyphs.shapes.len(), None);
+                        for (shape, solid) in glyphs.shapes.into_iter().zip(glyphs.solids) {
+                            push!(shape, solid);
                         }
                     }
                 }

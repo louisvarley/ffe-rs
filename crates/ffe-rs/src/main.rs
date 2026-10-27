@@ -453,6 +453,50 @@ fn write_png(path: &Path, pixels: &[u32], width: usize, height: usize) -> Result
 /// The presentation evidence: the same 320x200 frame through the real display
 /// scaler at the supported sizes. `display.cfg` and the window's live size do
 /// not affect these images, and no capture (`--capture*`) is touched.
+/// The flight frame through Modern graphics' GPU 3-D view (`modern3d`) at 1920x1440, with the
+/// models set aside; skipped with a note on a machine without a GPU.
+fn write_modern_3d_capture(
+    dir: &Path,
+    screen: &mut Screen,
+    state: &Flight,
+    scene: Option<&ModelViewer>,
+) -> Result<(), String> {
+    let mut gpu = ffe_rs::modern3d::Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("Modern 3-D capture skipped: {}", gpu.describe());
+        return Ok(());
+    }
+    screen.capture = true;
+    screen.draw(state, ViewState::default(), scene, true, "");
+    screen.capture = false;
+    let world = screen
+        .world()
+        .cloned()
+        .ok_or("The flight view set nothing aside for the 3-D view")?;
+    let (width, height) = (1920, 1440);
+    let settings = DisplaySettings {
+        graphics: ffe_rs::modern::Graphics::Modern,
+        ..DisplaySettings::default()
+    };
+    let rect = settings.rect((width, height));
+    let mut target = vec![0; width * height];
+    ffe_rs::modern::ModernRenderer::new().render(screen.logical_pixels(), &mut target, width, rect);
+    gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)?;
+    // The cost of a frame, after the first (which opens the pipelines and uploads textures).
+    let start = std::time::Instant::now();
+    for _ in 0..10 {
+        gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)?;
+    }
+    eprintln!(
+        "Modern 3-D capture on {}: {} objects, {} faces, {:.1} ms a frame",
+        gpu.describe(),
+        world.batches.len(),
+        world.batches.iter().map(Vec::len).sum::<usize>(),
+        start.elapsed().as_secs_f64() * 100.0
+    );
+    write_png(&dir.join("display-modern-3d.png"), &target, width, height)
+}
+
 fn write_display_capture(dir: &Path, cache: &ffe_content::VerifiedCache) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|error| format!("Cannot create {}: {error}", dir.display()))?;
     let mut screen = Screen::new(cache)?;
@@ -467,6 +511,7 @@ fn write_display_capture(dir: &Path, cache: &ffe_content::VerifiedCache) -> Resu
         "DISPLAY EVIDENCE: THE 320x200 FRAME IS UNCHANGED",
     );
     let logical = screen.logical_pixels().to_vec();
+    write_modern_3d_capture(dir, &mut screen, &state, scene.as_ref())?;
     let default = DisplaySettings::default();
     let mut target = Vec::new();
     for (name, width, height, settings) in [
@@ -627,7 +672,7 @@ fn run_intro(
             return Ok(IntroExit::Start(1));
         }
         screen.draw_intro(scene, tics, version)?;
-        presenter.present(window, screen.logical_pixels(), display)?;
+        presenter.present(window, screen.logical_pixels(), None, display)?;
         let real = last.elapsed().as_secs_f64().min(0.1);
         last = Instant::now();
         let inp = session.frame(window, real);
@@ -1676,7 +1721,7 @@ fn run() -> Result<(), String> {
                     write_shot(dir, &format!("start-{frames:04}.ppm"), &screen);
                 }
             }
-            presenter.present(&mut window, screen.logical_pixels(), &prefs.display)?;
+            presenter.present(&mut window, screen.logical_pixels(), None, &prefs.display)?;
             frames += 1;
             last = Instant::now();
             continue;
@@ -6878,6 +6923,10 @@ fn run() -> Result<(), String> {
                 screen.scroll_messages(older);
             }
         }
+        // Modern graphics draw the flight view's models on the GPU (`modern3d`) when it opened;
+        // otherwise the frame keeps them and the modern engine only upscales it.
+        let modern_3d =
+            prefs.display.graphics == ffe_rs::modern::Graphics::Modern && presenter.gpu_available();
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();
@@ -6925,12 +6974,14 @@ fn run() -> Result<(), String> {
                     inside.pitch = (to[1] / length).asin();
                 }
             }
+            screen.capture = modern_3d;
             screen.draw(&inside, views, scene.as_ref(), prefs.modern, &message);
         } else {
             screen.hyperspace = nav
                 .as_ref()
                 .and_then(|nav| nav.transit)
                 .map(|t| t.animation());
+            screen.capture = modern_3d;
             screen.draw(&state, views, scene.as_ref(), prefs.modern, &message);
         }
         if let Some(dir) = &options.capture {
@@ -7019,7 +7070,12 @@ fn run() -> Result<(), String> {
                 );
             }
         }
-        presenter.present(&mut window, screen.logical_pixels(), &prefs.display)?;
+        presenter.present(
+            &mut window,
+            screen.logical_pixels(),
+            screen.world(),
+            &prefs.display,
+        )?;
         frames += 1;
         let arrived = options.capture_planet.is_some()
             && nav.as_ref().is_some_and(|nav| nav.target.is_none());

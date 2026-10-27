@@ -1,0 +1,12 @@
+[package]
+name = "ffe-render"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The modern GPU renderer: draws a presentation-only scene description with wgpu, apart from the game"
+
+[dependencies]
+wgpu = "30"
+pollster = "1"
+bytemuck = { version = "1", features = ["derive"] }

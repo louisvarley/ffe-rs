@@ -57,17 +57,65 @@ their look. Tests: `modern::tests` (the Scale2x rules) and
 Classic unchanged and blocky, Modern smooth only on edges). The presentation evidence
 (`--capture-display DIR`) now writes `display-modern-4x.png` beside the Classic images.
 
-## What comes next (in the order `RENDERING_DESIGN.md` gives)
+## GPU 3-D view: the models at the window's resolution
 
-1. **Native-resolution 3D** (ENH-002), the step that adds real detail: the model executor already
-   produces the scene as shapes; for Modern, carry the vertices' view-space positions (not only the
-   original's integer screen points) and rasterise the 3D view at the window's resolution, then put the
-   original HUD over it. The executor's results stay the same; only a second, higher-precision
-   projection is added in the modern engine.
-2. **Smooth shading and anti-aliased edges** on that native-resolution path (ENH-003/005 in software,
-   or through wgpu once the backend is chosen).
-3. **HD images** (ENH-001) from an owner-upscaled pack, resolved by stable asset ID.
-4. A higher-quality starfield and glows (ENH-014/015) drawn from the same game data.
+Status (2026-10-27): **implemented for the flight view's models** (stations, ships, the lift, the
+beam, effects). `crates/ffe-render` (the GPU renderer, no game knowledge), `crates/ffe-rs/src/modern3d.rs`
+(the bridge), `Screen::draw_frame` and `model_viewer::Solid`. Deviation ENH-002/003/004/005.
+
+This is FFED3D's idea (hand the original's model programs to the GPU instead of the software
+rasteriser) done with the port's own executor and a modern API:
+
+```
+executor (unchanged) ──► Frame { shapes, solids }      solids: each face's view-space corners,
+                                │                       flat colour and texture (bitmap, slot
+                 Classic ◄──────┤                       colours, F1644/F1647 corner texels)
+   every shape drawn into       │ Modern + GPU
+   the 320x200 frame            ▼
+                 Screen::draw_frame: faces set aside as one batch per object; the other shapes
+                 (stars, planets, dots) drawn into the frame; shapes an object draws after its
+                 faces (lights, labels) drawn after the world phase, over the 3-D view
+                                │
+                 modern3d::World { batches, textures, snapshot of the frame after the world }
+                                ▼
+   ffe-render (wgpu: Vulkan / D3D12 / Metal), offscreen at the window's view size:
+     background  = the frame behind the models (Scale2x, then smooth filtering)
+     each batch  = its faces with 4x MSAA, a reversed-Z 32-bit depth buffer, perspective-correct
+                   textures (Scale2x-enlarged to 256, mipmapped, 8x anisotropic, masked texels
+                   discarded), the original's lit flat colours
+     then        = every pixel the game drew after the world phase (HUD, gunsight, scanner) on top
+```
+
+- **Same picture, finer.** The projection is the original's F1479 (`160 + 256x/z`, `79 - 256y/z`,
+  nothing nearer than 64), so every face lands where Classic puts it; the GPU clips at the near plane
+  itself, so faces passing the eye are cut cleanly instead of being dropped or span-clipped.
+- **Order.** Objects are drawn in the original's painter order, each over the last (their view-space
+  scales can differ). Within an object the depth buffer decides, and a later face at the same depth
+  wins by a tiny order bias, so decals painted on a hull stay visible.
+- **Separation.** The faces are copies taken while drawing. Classic never sets them aside, so its
+  frame is the original's; Modern without a GPU (no adapter) keeps the faces in the frame and only
+  upscales. The game state, the RNG and the clock are not reachable from `ffe-render` or `modern3d`.
+  Switching (Ctrl+G, Port Options) still takes effect on the next frame.
+- **Cost.** About 5 ms a frame at 1920x1440 on an RTX 3090 (`--capture-display` prints it), most of
+  it the synchronous read-back into the window buffer.
+- **Evidence.** `--capture-display DIR` writes `display-modern-3d.png` (the free-flight station at
+  1920x1440). Tests: `ffe-render`'s depth/clipping/batch-order/texture test, and
+  `modern3d::tests` (fans, texture coordinates, and the GPU picture landing where F1479 projects
+  with the HUD left on top). GPU tests skip themselves on a machine without an adapter.
+
+Not yet on the GPU (still the original's pixels behind the models): planets and their surfaces,
+the background nebula and stars, dots and particles, thruster glows and the hyperspace tunnel.
+Lines are one window pixel wide.
+
+## What comes next
+
+1. **Planets on the GPU** (their curved surfaces as tessellated meshes, as FFED3D does), so a ship
+   can pass in front of and behind a planet by depth, then atmosphere (ENH: enhanced-3).
+2. **Per-pixel lighting** from the faces' normals and the star direction instead of the original's
+   flat shade, and glows/stars as sprites (ENH-014/015), then modest bloom.
+3. **Presentation through a wgpu surface** instead of reading the picture back into the minifb buffer
+   (removes most of the frame cost and allows the window's full resolution for the HUD too).
+4. **HD images** (ENH-001) from an owner-upscaled pack, resolved by stable asset ID.
 
 Each one is another technique inside `modern`, selected with the same switch, and Classic stays
 exactly as it is.

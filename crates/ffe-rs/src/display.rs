@@ -28,6 +28,7 @@
 
 use crate::indexed::{LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::modern::{Graphics, ModernRenderer};
+use crate::modern3d::{Gpu3d, World};
 use minifb::{Scale, ScaleMode, Window, WindowOptions};
 
 /// The smallest window scale the Display Options page offers.
@@ -509,6 +510,8 @@ pub fn alt_held() -> bool {
 pub struct Presenter {
     buffer: Vec<u32>,
     modern: ModernRenderer,
+    /// The modern engine's GPU 3-D view (`modern3d`).
+    gpu: Gpu3d,
     size: (usize, usize),
     rect: Rect,
     valid: bool,
@@ -517,6 +520,17 @@ pub struct Presenter {
 impl Presenter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether Modern graphics can draw the 3-D view on the GPU (opening it on first use). The
+    /// game sets its model faces aside for the GPU only when this holds.
+    pub fn gpu_available(&mut self) -> bool {
+        self.gpu.available()
+    }
+
+    /// The GPU adapter's name, or why there is none.
+    pub fn gpu_description(&mut self) -> String {
+        self.gpu.describe()
     }
 
     /// Forget the cached buffer (after the window is reopened).
@@ -530,6 +544,7 @@ impl Presenter {
         &mut self,
         window: &mut Window,
         logical: &[u32],
+        world: Option<&World>,
         settings: &DisplaySettings,
     ) -> Result<(), String> {
         let size = window.get_size();
@@ -546,7 +561,13 @@ impl Presenter {
         }
         match settings.graphics {
             Graphics::Classic => blit(logical, &mut self.buffer, size.0, rect, settings.filter),
-            Graphics::Modern => self.modern.render(logical, &mut self.buffer, size.0, rect),
+            Graphics::Modern => {
+                self.modern.render(logical, &mut self.buffer, size.0, rect);
+                if let Some(world) = world {
+                    self.gpu
+                        .render(logical, world, &mut self.buffer, size.0, rect)?;
+                }
+            }
         }
         window
             .update_with_buffer(&self.buffer, size.0, size.1)
