@@ -5631,7 +5631,9 @@ fn run() -> Result<(), String> {
                 .filter(|b| matches!(b.kind, NavKind::Star | NavKind::Planet | NavKind::Moon))
                 .map(|b| {
                     let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
-                    let light = b.position.map(|v| -(v as f64) / length.sqrt().max(1.0));
+                    // The original's light vector points from the star toward
+                    // the observer (`scene_light`); the star is at the origin.
+                    let light = b.position.map(|v| (v as f64) / length.sqrt().max(1.0));
                     ffe_rs::screen::Disc {
                         centre: b.position.map(|v| v as f64 / unit),
                         // The approach draws the base sphere (inner); a settled

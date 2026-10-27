@@ -1323,7 +1323,20 @@ impl ModelViewer {
         // text instance colour (the GAME!TEK cyan) is only added to local faces;
         // registering it would put a dynamic cell in model 177's empty upper
         // palette, which the executed original does not have.
-        let (surfaces, skipped, haze) = self.collect_surfaces(&result, light);
+        // F1876/F1877 read the instance's `+0x134` light in view space (their
+        // eye direction is built from the view-space axes), not the object-
+        // space vector the normal test uses: with the object one the Hope
+        // pad's low sun read as below the horizon and the start was night.
+        let view_light = {
+            let length = light_view
+                .iter()
+                .map(|v| v * v)
+                .sum::<f64>()
+                .sqrt()
+                .max(1e-9);
+            light_view.map(|v| (v / length * 32_768.0) as i32)
+        };
+        let (surfaces, skipped, haze) = self.collect_surfaces(&result, view_light);
         frame.skipped += skipped;
         for batch in &surfaces {
             self.register_surface_colours(batch);
