@@ -955,6 +955,10 @@ fn run() -> Result<(), String> {
     let mut engines_page = false;
     // F2's sub-page: 0 is `F1120`'s ship/equipment page, 1 is F312's profile.
     let mut status_section = 0u8;
+    // F308's next page (`+0x4a39`): F285 reopens the screen on it.
+    let mut status_next = 0u8;
+    // F293 turns the status model only while the screen is up (DATA_009068/9).
+    let mut status_spin = 0.0f64;
     // The single route into the original's ten-entry log. Port-only notices
     // (`message` below) never enter it.
     let mut log_channel = Channel::default();
@@ -1783,9 +1787,10 @@ fn run() -> Result<(), String> {
         }
         // F2 is the original's status screen: F1120's ship diagram and equipment
         // page on the console. The key and its console button both toggle it.
-        // The original's page keys are F6 (ship systems) and F7 (this profile):
-        // `F292` maps action 0xf6 to page 0 and 0xf7 to page 1. They select the
-        // status page only while it is open.
+        // F2's status screen (module 0x0e): F285 opens it, F292 owns F1 and
+        // F6..F12 while it is up. `status_left` keeps the F1 that closes it
+        // from also cycling the view this frame.
+        let mut status_left = false;
         if active
             && state.mode == ffe_rs::flight::Mode::Flight
             && !pad_board
@@ -1793,15 +1798,22 @@ fn run() -> Result<(), String> {
             && model_viewer.is_none()
             && (pressed(Key::F2) || console_click == Some(Click::Screen(2)))
         {
+            // F285 opens the screen on F308's next page (`+0x4a39`, the
+            // equipment page in a new game); while it is up each press shows
+            // the next page that has something to show. F1 leaves it.
+            let sections = status_sections(&cache, &state, nav.as_ref());
             if status_page {
-                status_page = false;
-                status_section = 0;
-                message = "Flight console.".to_owned();
+                status_section = ffe_rs::screen::next_status_section(status_section, &sections);
             } else {
                 status_page = true;
-                status_section = 0;
-                message = "Status: ship systems (F2 returns, F7 commander profile).".to_owned();
+                status_section = if sections[usize::from(status_next)] {
+                    status_next
+                } else {
+                    0
+                };
             }
+            status_next = ffe_rs::screen::next_status_section(status_section, &sections);
+            message = ffe_rs::screen::STATUS_TITLES[usize::from(status_section)].to_owned();
             held_controls.disarm(&keys_down);
         }
         if active
@@ -1810,6 +1822,7 @@ fn run() -> Result<(), String> {
             && model_lab.is_none()
             && model_viewer.is_none()
             && console_click == Some(Click::Screen(5))
+            && !status_page
         {
             // F1056's action 0xf5 swaps F1117's normal page and F1120's engines-off page.
             engines_page = !engines_page;
@@ -1826,12 +1839,32 @@ fn run() -> Result<(), String> {
             && model_lab.is_none()
             && model_viewer.is_none()
         {
-            if pressed(Key::F7) {
-                status_section = 1;
-                message = "Status: commander profile (F6 ship systems).".to_owned();
-            } else if pressed(Key::F6) {
+            // F292: F6..F12 (and their console buttons) pick a page that has
+            // something to show; F1 (or the views button) leaves the screen.
+            let sections = status_sections(&cache, &state, nav.as_ref());
+            let keyed = [
+                (Key::F6, Click::Front),
+                (Key::F7, Click::Rear),
+                (Key::F8, Click::Turret),
+                (Key::F9, Click::External),
+                (Key::F10, Click::Missile),
+                (Key::F11, Click::Combat),
+                (Key::F12, Click::Capsule),
+            ]
+            .into_iter()
+            .position(|(key, click)| pressed(key) || console_click == Some(click));
+            if let Some(key) = keyed {
+                let section = ffe_rs::screen::STATUS_KEY_SECTIONS[key];
+                if sections[usize::from(section)] {
+                    status_section = section;
+                    status_next = ffe_rs::screen::next_status_section(section, &sections);
+                    message = ffe_rs::screen::STATUS_TITLES[usize::from(section)].to_owned();
+                }
+            } else if pressed(Key::F1) || console_click == Some(Click::CycleView) {
+                status_page = false;
                 status_section = 0;
-                message = "Status: ship systems (F7 commander profile).".to_owned();
+                status_left = true;
+                message = "Flight console.".to_owned();
             }
         }
         // Every console click beeps (F1056). A click whose screen is not ported
@@ -2196,13 +2229,13 @@ fn run() -> Result<(), String> {
                 // F1056's action 0xd0 under the autopilot lamp: F1018 while
                 // the autopilot flies (mode 2), else F1020.
                 let lamp_click = !engines_page
-                    && !(status_page && status_section == 0)
+                    && !status_page
                     && click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
                         == Some(ffe_rs::console::SystemsClick::Autopilot);
                 let autopilot_off_click = lamp_click && nav.target.is_some();
                 let autopilot_on_click = lamp_click && nav.target.is_none();
                 let jump_icon = !engines_page
-                    && !(status_page && status_section == 0)
+                    && !status_page
                     && click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
                         == Some(ffe_rs::console::SystemsClick::Hyperspace);
                 if pressed(Key::H) || jump_icon || console_click == Some(Click::Hyperspace) {
@@ -2824,7 +2857,7 @@ fn run() -> Result<(), String> {
                     // the ship diagram, and 0x75 (undercarriage) on either wing:
                     // F1005 installs those areas (`DATA_007259`) with F1117's normal
                     // page; F1120's equipment page (F5) swaps them for its own.
-                    let systems_click = if !engines_page && !(status_page && status_section == 0) {
+                    let systems_click = if !engines_page && !status_page {
                         click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
                     } else {
                         None
@@ -2989,8 +3022,10 @@ fn run() -> Result<(), String> {
                     // owns F12 as zoom-out while the map page is open.
                     let ctrl_down =
                         inp.is_key_down(Key::LeftCtrl) || inp.is_key_down(Key::RightCtrl);
-                    if (pressed(Key::F12) && !ctrl_down && !map_page_open)
-                        || (console_click == Some(Click::Capsule) && !map_page_open)
+                    let status_keys = status_page || status_left;
+                    if !status_keys
+                        && ((pressed(Key::F12) && !ctrl_down && !map_page_open)
+                            || (console_click == Some(Click::Capsule) && !map_page_open))
                     {
                         match death::escape_craft(&state.loadout) {
                             Some(craft) => {
@@ -3024,7 +3059,11 @@ fn run() -> Result<(), String> {
                         _ => None,
                     });
                     let turret = ViewMode::turret(gun_mounts, views.turret.pitch);
-                    let clicked = if map_page_open { None } else { clicked };
+                    let clicked = if map_page_open || status_keys {
+                        None
+                    } else {
+                        clicked
+                    };
                     // F1054's F10 (action 0xfb): the missile view needs the
                     // Missile Viewer (general bit 9) and a missile in flight
                     // (`player+0xef`); otherwise the key does nothing.
@@ -3032,17 +3071,10 @@ fn run() -> Result<(), String> {
                     let view_command = [Key::F1, Key::F6, Key::F7, Key::F8, Key::F9, Key::F10]
                         .into_iter()
                         .find(|key| pressed(*key))
-                        .and_then(|key| {
-                            let command = input::view_command(key)?;
-                            // F6/F7 are the status page's profile keys while it
-                            // is open; they must not also change the view.
-                            (!status_page
-                                || !matches!(
-                                    command,
-                                    input::ViewCommand::Front | input::ViewCommand::Rear
-                                ))
-                            .then_some(command)
-                        });
+                        // F1 and F6..F12 belong to the status screen while it
+                        // is up (F292).
+                        .filter(|_| !status_keys)
+                        .and_then(input::view_command);
                     let chosen = if let Some(command) = view_command {
                         match command {
                             input::ViewCommand::Cycle => {
@@ -3082,7 +3114,11 @@ fn run() -> Result<(), String> {
                     };
                     // F11 is the source combat-computer key. View 6 is not
                     // ported, so say so instead of leaving a silent dead key.
-                    if view_command.is_none() && clicked.is_none() && pressed(Key::F11) {
+                    if view_command.is_none()
+                        && clicked.is_none()
+                        && pressed(Key::F11)
+                        && !status_keys
+                    {
                         view_note =
                             Some("The combat computer needs equipment (not ported).".to_owned());
                     }
@@ -5098,16 +5134,34 @@ fn run() -> Result<(), String> {
             views.mode = ViewMode::Front;
             message = "Missile view ended.".to_owned();
         }
-        screen.equipment_status = (state.mode == ffe_rs::flight::Mode::Flight
-            && status_page
-            && status_section == 0)
-            .then(|| equipment_status(&cache, &state, nav.as_ref(), scene.as_ref(), session.total));
-        screen.profile =
-            if state.mode == ffe_rs::flight::Mode::Flight && status_page && status_section == 1 {
-                nav.as_ref().map(|nav| nav.profile(death::COMMANDER_NAME))
-            } else {
-                None
-            };
+        screen.select_cabin(
+            state.ship,
+            scene
+                .as_ref()
+                .and_then(|scene| scene.ship_stats(state.ship))
+                .map(|stats| stats.mass),
+        );
+        let status_shown = state.mode == ffe_rs::flight::Mode::Flight && status_page;
+        if status_shown {
+            status_spin += elapsed;
+        }
+        screen.status_backdrop = status_shown.then(|| ffe_rs::screen::StatusBackdrop {
+            hold: status_hold(&cache, &state, nav.as_ref()),
+            cargo_block: matches!(status_section, 0 | 3),
+            ship: state.ship,
+            tics: (session.total * 65_536.0) as u32,
+            spin: (status_spin * 65_536.0) as u32,
+            gear: state.gear,
+        });
+        screen.equipment_status = (status_shown && status_section == 0)
+            .then(|| equipment_status(&cache, &state, nav.as_ref(), scene.as_ref()));
+        screen.profile = if status_shown && status_section == 1 {
+            nav.as_ref().map(|nav| nav.profile(death::COMMANDER_NAME))
+        } else {
+            None
+        };
+        screen.cargo_inventory =
+            (status_shown && status_section == 3).then(|| cargo_inventory(&cache, &state));
         views.console = ConsoleState {
             acceleration,
             paused,
@@ -5117,7 +5171,13 @@ fn run() -> Result<(), String> {
                 .map(|model| model.set_speed_metres().round() as i32),
             labels,
             navigation: nav.as_ref().is_some_and(|nav| nav.view == NavView::Places),
-            status_page: (status_page && status_section == 0) || engines_page,
+            status_page: engines_page,
+            status: (state.mode == ffe_rs::flight::Mode::Flight && status_page).then(|| {
+                (
+                    status_section,
+                    status_sections(&cache, &state, nav.as_ref()),
+                )
+            }),
         };
         // Launching from the station puts the ship out from it in this system, on the
         // original flight model (which the navigation moves).
@@ -6893,7 +6953,6 @@ fn equipment_status(
     state: &Flight,
     nav: Option<&ffe_rs::navigation::Navigator>,
     scene: Option<&ModelViewer>,
-    seconds: f64,
 ) -> ffe_rs::screen::EquipmentStatus {
     use ffe_core::equipment::{equipment, Category};
     let name_of = |category: Category, code: u8| {
@@ -6969,10 +7028,57 @@ fn equipment_status(
         status,
         equipment,
         lasers,
-        ship: state.ship,
-        tics: (seconds * 65_536.0) as u32,
-        gear: state.gear,
     }
+}
+
+/// F310's cargo, cabins and cash (`DATA_008888..8892`).
+fn status_hold(
+    cache: &ffe_content::VerifiedCache,
+    state: &Flight,
+    nav: Option<&ffe_rs::navigation::Navigator>,
+) -> ffe_rs::station::Status {
+    let hold = nav.map(|nav| trade::hold_of(state, trade::capacity(nav, cache, state)));
+    ffe_rs::station::Status {
+        cargo_used: hold.as_ref().map_or(0, |hold| hold.used),
+        cargo_capacity: hold.as_ref().map_or(0, |hold| hold.capacity),
+        cash: i32::try_from(state.credits).unwrap_or(i32::MAX),
+        cabins_used: i32::from(state.loadout.occupied_cabins),
+        cabins_total: i32::from(state.loadout.cabin_capacity()),
+    }
+}
+
+/// F308/F292's page conditions: the equipment and profile pages always, the
+/// cargo page while anything is carried (F276 shows its button for
+/// `DATA_008891`, the tonnes used). The crew, passenger, contract and mining
+/// pages need state the port does not keep yet, so they never appear.
+fn status_sections(
+    cache: &ffe_content::VerifiedCache,
+    state: &Flight,
+    nav: Option<&ffe_rs::navigation::Navigator>,
+) -> [bool; 7] {
+    let cargo = status_hold(cache, state, nav).cargo_used > 0;
+    [true, true, false, cargo, false, false, false]
+}
+
+/// F294's list: each commodity in the hold (`DATA_008896` order) and its tonnes.
+fn cargo_inventory(cache: &ffe_content::VerifiedCache, state: &Flight) -> Vec<(String, u16)> {
+    let tables = cache
+        .asset("base:market/tables")
+        .and_then(|bytes| ffe_core::market::Tables::new(bytes).ok());
+    state
+        .hold
+        .iter()
+        .enumerate()
+        .filter(|(_, tonnes)| **tonnes != 0)
+        .map(|(index, tonnes)| {
+            let name = tables
+                .as_ref()
+                .and_then(|tables| tables.name(index))
+                .unwrap_or("?")
+                .to_owned();
+            (name, *tonnes)
+        })
+        .collect()
 }
 
 /// Where the pad world's planet and starport are now.

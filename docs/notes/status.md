@@ -126,10 +126,17 @@ witness/range test only.
 
 ## 4. Differences and owner decisions
 
-- **F2 page 0 text.** The port's F2 page 0 is the console equipment page
-  (`F1120`); the original also draws `DATA_005133`'s "SHIP EQUIPMENT STATUS"
-  block over the view. This slice adds the profile page; the page-0 text block
-  remains unmapped (the equipment icons are the current stand-in).
+- **F2 status screen.** F285/F286 are ported: F2 opens on F308's next page
+  and each further press shows the next page with something to show; F6..F12
+  (and the console's page buttons, records 3..0x0a) pick a page; F1 leaves.
+  Every page draws F956's cabin for the ship's mass class, F288's turning
+  ship (F284's view position, F293's angle rates) and, on the equipment and
+  cargo pages, F310's `0x9c3b` block at its absolute tab stops. Ported pages:
+  equipment (F283), profile (F312) and cargo inventory (F294). The crew,
+  passenger, contract and mining pages (F313, F295, F316, F317) need state
+  the port does not keep yet, so their buttons stay hidden as F276 hides
+  them for an empty list. F294's refuel and jettison buttons are drawn but
+  not yet live.
 - **Police spawns.** F238/F239's extra police objects still need F927's slot
   allocator and the F239 object template. The port provokes every existing
   police/military ship and sets `alert`; it does not spawn a new patrol. This is

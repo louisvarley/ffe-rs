@@ -236,6 +236,8 @@ pub const MAP_BUTTONS: [(i32, i32, &str); 2] = [(2, 62, "SYSTEMS"), (66, 150, "T
 const BACKGROUND_MODEL: u32 = 0x13b;
 /// The depth the background object is drawn at (F959's intro object depth).
 const BACKGROUND_DEPTH: f64 = 0x14820 as f64;
+/// F318's title colour (`DATA_008673`, the executed boot's index 34).
+const STATUS_TITLE: u8 = 34;
 
 /// F283's page: everything it prints, resolved by the game loop.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -249,15 +251,58 @@ pub struct EquipmentStatus {
     pub equipment: Vec<(String, bool)>,
     /// The gun mounts: mount name (`0x9870..`), laser(s), and the tab x.
     pub lasers: Vec<(String, String, usize)>,
+}
+
+/// F286's seven status pages in section order, as the port's console note
+/// names them (F318's titles are `0x9c04..0x9c0a`).
+pub const STATUS_TITLES: [&str; 7] = [
+    "Ship equipment status.",
+    "Commander profile.",
+    "Crew roster.",
+    "Cargo inventory.",
+    "Passenger and small items roster.",
+    "Outstanding contracts.",
+    "Mining equipment list.",
+];
+
+/// F292: the sections F6..F12 (actions 0xf6..0xfc) select.
+pub const STATUS_KEY_SECTIONS: [u8; 7] = [0, 1, 2, 4, 3, 5, 6];
+
+/// F309's `DATA_005126`: the console record lit for each section (F6's 9
+/// through F12's 3).
+pub const STATUS_BUTTONS: [usize; 7] = [9, 8, 7, 5, 6, 4, 3];
+
+/// F308: the page after `current` that has something to show, wrapping to
+/// the equipment page. The profile always follows the equipment page.
+pub fn next_status_section(current: u8, sections: &[bool; 7]) -> u8 {
+    (current.saturating_add(1)..7)
+        .find(|section| sections[usize::from(*section)])
+        .unwrap_or(0)
+}
+
+/// What every status page draws under its text: F956's cabin, F288's ship
+/// and, on the equipment and cargo pages, F310's cargo/cabins/cash block.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StatusBackdrop {
+    pub hold: Status,
+    pub cargo_block: bool,
     pub ship: u32,
+    /// The game clock (65536 a second) for the model's animation.
     pub tics: u32,
+    /// The time the status screen has been up (65536 a second): F293 turns
+    /// the model only while it is.
+    pub spin: u32,
     pub gear: u16,
 }
 
 pub struct Screen {
     pub pixels: Vec<u32>,
     frame: Vec<u32>,
-    cabin: Vec<u32>,
+    /// `CABIN0..5.BMP`, the backdrops of the station and status screens.
+    /// A missing one falls back to `CABIN0`.
+    cabins: Vec<Vec<u32>>,
+    /// F955's choice for the player's ship (`DATA_007224`).
+    cabin_index: usize,
     panel: IndexedImage,
     font: BitmapFont,
     palette: [u32; 128],
@@ -363,6 +408,10 @@ pub struct Screen {
     /// F312's F2 profile page, when it is open. The original draws it over the
     /// upper view; the console stays below.
     pub profile: Option<ffe_core::status::Profile>,
+    /// F294's page: each commodity carried and its tonnes.
+    pub cargo_inventory: Option<Vec<(String, u16)>>,
+    /// The cabin, model and cargo block under any status page.
+    pub status_backdrop: Option<StatusBackdrop>,
     /// F2's page 0, F283's ship equipment status (drawn over the view).
     pub equipment_status: Option<EquipmentStatus>,
     /// The game date and time header `F272` writes before the entries.
@@ -471,6 +520,13 @@ impl Screen {
             panel,
             palette_rgb6(asset("base:palette/low")?)?,
         )?;
+        for index in 1..6 {
+            let cabin = cache
+                .asset(&format!("base:cockpit/cabin{index}"))
+                .and_then(|png| decode_cabin(png).ok())
+                .unwrap_or_else(|| screen.cabins[0].clone());
+            screen.cabins.push(cabin);
+        }
         // F962's primary bitmap 0x42 and the raw credit/width assets (cache v27).
         screen.intro_bitmap = indexed_bitmap(cache, "base:bitmap/primary/066");
         screen.intro_text = IntroText::new(cache).ok();
@@ -725,6 +781,20 @@ impl Screen {
         (lx < LOGICAL_WIDTH as i32 && ly < LOGICAL_HEIGHT as i32).then_some((lx, ly))
     }
 
+    /// F955: the cabin backdrop for the player's ship, chosen by its hull
+    /// mass (`DATA_007222`'s bounds 32, 75, 300 and 1000 t); model `0x34`
+    /// always gets `CABIN5`.
+    pub fn select_cabin(&mut self, model: u32, mass: Option<u16>) {
+        const BOUNDS: [i32; 4] = [0x20, 0x4b, 0x12c, 0x3e8];
+        let index = if model == 0x34 {
+            5
+        } else {
+            let mass = i32::from(mass.unwrap_or(0) as i16);
+            BOUNDS.iter().take_while(|bound| mass >= **bound).count()
+        };
+        self.cabin_index = index.min(self.cabins.len() - 1);
+    }
+
     pub fn from_assets(
         cabin_png: &[u8],
         font: &[u8],
@@ -732,28 +802,7 @@ impl Screen {
         palette: [u32; 128],
     ) -> Result<Self, String> {
         let font = BitmapFont::new(font)?;
-        let mut decoder = png::Decoder::new(Cursor::new(cabin_png));
-        decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-        let mut reader = decoder.read_info().map_err(|e| format!("Cabin PNG: {e}"))?;
-        if reader.info().width != 320
-            || reader.info().height != 158
-            || reader.output_buffer_size() > 320 * 158 * 4
-        {
-            return Err("Expected a bounded 320x158 cabin PNG.".to_owned());
-        }
-        let mut output = vec![0; reader.output_buffer_size()];
-        let info = reader
-            .next_frame(&mut output)
-            .map_err(|e| format!("Cabin pixels: {e}"))?;
-        let channels = match info.color_type {
-            png::ColorType::Rgb => 3,
-            png::ColorType::Rgba => 4,
-            _ => return Err("Cabin PNG did not expand to RGB/RGBA.".to_owned()),
-        };
-        let cabin = output[..info.buffer_size()]
-            .chunks_exact(channels)
-            .map(|p| (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2]))
-            .collect();
+        let cabin = decode_cabin(cabin_png)?;
         let mut seed = 7u32;
         let mut number = || {
             seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -765,7 +814,8 @@ impl Screen {
         Ok(Self {
             pixels: vec![0; WIDTH * HEIGHT],
             frame: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
-            cabin,
+            cabins: vec![cabin],
+            cabin_index: 0,
             panel,
             font,
             palette,
@@ -812,6 +862,8 @@ impl Screen {
             messages: MessageLog::new(),
             messages_visible: true,
             profile: None,
+            cargo_inventory: None,
+            status_backdrop: None,
             equipment_status: None,
             clock: String::new(),
             console: Console::new(),
@@ -1439,25 +1491,24 @@ impl Screen {
     /// jurisdiction's record at (4, 75), and medals/permits at (4, 132). The
     /// positions and strings are from `DATA_005136`/`DATA_005189` and the
     /// executed original's frame `docs/evidence/status/original-profile.png`.
-    /// F283's ship equipment status page: F318's title (`0x9c04` and the
-    /// ship's name) at (30,5); F282's `0x9c12` block at (5,15) with the
-    /// `0xfd` tab stops at 68 and 130; the fitted general equipment in two
-    /// columns at x 5 and 96 from y 47 (9-pixel lines, colour 0x11, 0x10 when
-    /// damaged); the gun mounts from (5,125) in 10-pixel lines (`0x9c0c`,
-    /// `0x9c0d`'s turret pair); and F957's spinning ship model in the
-    /// viewport x 189..317, y 2..130.
-    fn draw_equipment_status(&mut self, page: &EquipmentStatus, scene: Option<&ModelViewer>) {
+    /// F283's ship equipment status page over F956's cabin backdrop, every
+    /// string with F1399's drop shadow: F318's title (`0x9c04` and the ship's
+    /// name) at (8,5) in `DATA_008673`'s green; F282's `0x9c12` block at (5,15)
+    /// in 10-pixel lines with the `0xfd` tab stops at 68 and 130; the fitted
+    /// general equipment in two columns at x 5 and 96 from y 47 (9-pixel lines,
+    /// colour 0x11, 0x10 when damaged); the gun mounts from (5,125) in 10-pixel
+    /// lines (`0x9c0c`, `0x9c0d`'s turret pair); F310's `0x9c3b` cargo, cabins
+    /// and cash at (190,138); and F288's spinning ship model in F957's viewport
+    /// x 189..317, y 2..130. The positions and colours are the executed
+    /// original's F2 frame.
+    fn draw_equipment_status(&mut self, page: &EquipmentStatus) {
         const TEXT: u8 = 0x0f;
-        self.frame[..320 * VIEW_HEIGHT].fill(0);
-        if let Some(scene) = scene {
-            self.draw_spinning_model(scene, page.ship, page.tics, page.gear);
-        }
-        self.text(30, 5, &page.title, TEXT);
+        self.shadow_text(8, 5, &page.title, STATUS_TITLE);
         for (row, line) in page.status.iter().enumerate() {
-            let y = 15 + row * 8;
+            let y = 15 + row as i32 * 10;
             for (column, part) in line.split('\t').enumerate() {
                 let x = [5, 68, 130][column.min(2)];
-                self.text(x, y, part, TEXT);
+                self.shadow_text(x, y, part, TEXT);
             }
         }
         let per_column = if page.equipment.len() > 16 {
@@ -1474,35 +1525,79 @@ impl Screen {
             if y + 8 > 125 {
                 continue;
             }
-            self.text(x, y, name, if *damaged { 0x10 } else { 0x11 });
+            self.shadow_text(x, y as i32, name, if *damaged { 0x10 } else { 0x11 });
         }
         for (row, (mount, laser, tab)) in page.lasers.iter().enumerate() {
-            let y = 125 + row * 10;
-            self.text(5, y, &format!("{mount}:"), TEXT);
-            self.text(*tab, y, laser, TEXT);
+            let y = 125 + row as i32 * 10;
+            self.shadow_text(5, y, &format!("{mount}:"), TEXT);
+            self.shadow_text(*tab as i32, y, laser, TEXT);
         }
     }
 
-    /// F957: a model turning in the status viewport (x 189..317, y 2..130),
-    /// lit from the default direction, at a depth that fits its radius.
-    fn draw_spinning_model(&mut self, scene: &ModelViewer, model: u32, tics: u32, gear: u16) {
-        let Some(radius) = scene.model_radius(model) else {
+    /// F956's cabin, F288's turning ship and F310's block for any status page.
+    fn draw_status_backdrop(&mut self, backdrop: &StatusBackdrop, scene: Option<&ModelViewer>) {
+        self.frame[..320 * VIEW_HEIGHT]
+            .copy_from_slice(&self.cabins[self.cabin_index][..320 * VIEW_HEIGHT]);
+        if let Some(scene) = scene {
+            self.draw_spinning_model(scene, backdrop);
+        }
+        if backdrop.cargo_block {
+            self.draw_status_hold(&backdrop.hold);
+        }
+    }
+
+    /// F294's cargo inventory: F318's `0x9c05` title at (30,5) with its
+    /// "Refuel" heading at (140,15) beside F1621's button (bitmap 0x31) at
+    /// (120,15), the two "Jettison" headings at (2,25) and (88,25), and each
+    /// commodity carried (`DATA_008896`, up to 24) with its jettison button:
+    /// twelve to a column at x 18 and 106 from y 35 in 10-pixel lines, the
+    /// tonnage at the `0x9c13`/`0x9c14` tab stops 74 and 162.
+    fn draw_cargo_inventory(&mut self, items: &[(String, u16)]) {
+        const TEXT: u8 = 0x0f;
+        self.shadow_text(30, 5, "CARGO INVENTORY", STATUS_TITLE);
+        self.shadow_text(140, 15, "Refuel", STATUS_TITLE);
+        self.shadow_text(2, 25, "Jettison", STATUS_TITLE);
+        self.shadow_text(88, 25, "Jettison", STATUS_TITLE);
+        if let Some(marker) = &self.marker {
+            marker.blit_colours(&mut self.frame, &self.palette, 120, 15);
+        }
+        for (index, (name, tonnes)) in items.iter().take(24).enumerate() {
+            let (x, tab) = if index < 12 { (18, 74) } else { (106, 162) };
+            let y = 35 + (index % 12) as i32 * 10;
+            if let Some(marker) = &self.marker {
+                marker.blit_colours(&mut self.frame, &self.palette, x - 12, y - 1);
+            }
+            self.shadow_text(x, y, name, TEXT);
+            let cursor = x as usize + self.font.width(name).unwrap_or(0);
+            self.shadow_text(cursor.max(tab) as i32, y, &format!("{tonnes}t"), TEXT);
+        }
+    }
+
+    /// F284 + F288 + F293: the player's ship turning in the status viewport.
+    /// The view position is from the statistics' `+0xc` word `w`:
+    /// `(w·90000 >> 8, w·11000 >> 8, w·1000)`; F293 turns F1675's two angles
+    /// by `DATA_009122 >> 3` and `>> 4` a frame (994 per 20 ms), so one full
+    /// turn of the first takes about 10.5 s.
+    fn draw_spinning_model(&mut self, scene: &ModelViewer, backdrop: &StatusBackdrop) {
+        let model = backdrop.ship;
+        let Some(stats) = scene.ship_stats(model) else {
             return;
         };
-        let z = 256.0 * f64::from(radius.max(1)) / 44.0;
-        let origin = [93.0 * z / 256.0, 13.0 * z / 256.0, z];
-        let angle = f64::from(tics) / 65_536.0 * std::f64::consts::TAU / 8.0;
-        let (sin, cos) = angle.sin_cos();
-        let rows = [[cos, 0.0, -sin], [0.0, 1.0, 0.0], [sin, 0.0, cos]];
-        let tilt = 0.35_f64;
-        let rows = rows.map(|row| {
-            [
-                row[0],
-                row[1] * tilt.cos() - row[2] * tilt.sin(),
-                row[1] * tilt.sin() + row[2] * tilt.cos(),
-            ]
+        let w = f64::from(stats.shield_strength);
+        let origin = [
+            (w * 90_000.0 / 256.0).floor(),
+            (w * 11_000.0 / 256.0).floor(),
+            w * 1000.0,
+        ];
+        // `spin` is 65536 per second; F293 adds 994·50/8 and 994·50/16 a second.
+        let seconds = f64::from(backdrop.spin) / 65_536.0;
+        let a = (seconds * 994.0 * 50.0 / 8.0) as i64 as i32;
+        let b = (seconds * 994.0 * 50.0 / 16.0) as i64 as i32;
+        let matrix = scene.matrix_yzt(a & 0xffff, b & 0xffff);
+        let rows = std::array::from_fn(|k| {
+            std::array::from_fn(|j| f64::from(matrix[3 * k + j]) / 2_147_483_648.0)
         });
-        let inputs = AnimationInputs::original(tics, gear, &scene.shades());
+        let inputs = AnimationInputs::original(backdrop.tics, backdrop.gear, &scene.shades());
         if let Ok(frame) =
             scene.render_scene_with(model, rows, origin, scene.light_direction(), &inputs)
         {
@@ -1512,51 +1607,27 @@ impl Screen {
 
     fn draw_profile(&mut self, profile: &ffe_core::status::Profile) {
         const TEXT: u8 = 0x0f;
-        self.text(
+        // F1399's 0xfd tab: the pen moves on to the stop, never back.
+        let tabbed = |screen: &mut Self, x: i32, y: i32, label: &str, tab: i32, value: &str| {
+            screen.shadow_text(x, y, label, TEXT);
+            let cursor = x + screen.font.width(label).unwrap_or(0) as i32;
+            screen.shadow_text(cursor.max(tab), y, value, TEXT);
+        };
+        self.shadow_text(
             30,
             5,
             &format!("PROFILE FOR COMMANDER {}", profile.commander),
-            TEXT,
+            STATUS_TITLE,
         );
-        self.text(2, 20, "MILITARY STANDING", TEXT);
-        self.text(114, 20, "LEGAL STATUS", TEXT);
-        self.text(
-            2,
-            30,
-            &format!("Federal Rank: {}", profile.federal_rank),
-            TEXT,
-        );
-        self.text(
-            114,
-            30,
-            &format!("Federal:  {}", profile.federal_status),
-            TEXT,
-        );
-        self.text(
-            2,
-            40,
-            &format!("Imperial Title: {}", profile.imperial_title),
-            TEXT,
-        );
-        self.text(
-            114,
-            40,
-            &format!("Imperial: {}", profile.imperial_status),
-            TEXT,
-        );
-        self.text(
-            2,
-            50,
-            &format!("Elite Rating: {}", profile.elite_rating),
-            TEXT,
-        );
-        self.text(
-            114,
-            50,
-            &format!("Interpol: {}", profile.interpol_status),
-            TEXT,
-        );
-        self.text(
+        self.shadow_text(2, 20, "MILITARY STANDING", TEXT);
+        self.shadow_text(114, 20, "LEGAL STATUS", TEXT);
+        tabbed(self, 2, 30, "Federal Rank: ", 52, profile.federal_rank);
+        tabbed(self, 114, 30, "Federal:", 150, profile.federal_status);
+        tabbed(self, 2, 40, "Imperial Title: ", 52, profile.imperial_title);
+        tabbed(self, 114, 40, "Imperial:", 150, profile.imperial_status);
+        tabbed(self, 2, 50, "Elite Rating:", 52, profile.elite_rating);
+        tabbed(self, 114, 50, "Interpol:", 150, profile.interpol_status);
+        self.shadow_text(
             2,
             65,
             &format!("{} CRIMINAL RECORD", profile.heading()),
@@ -1568,11 +1639,11 @@ impl Screen {
             } else {
                 (108, index - 5)
             };
-            self.text(x, 75 + row * 9, offence, TEXT);
+            self.shadow_text(x, 75 + row as i32 * 9, offence, TEXT);
         }
-        self.text(2, 123, "MEDALS AND PERMITS", TEXT);
+        self.shadow_text(2, 123, "MEDALS AND PERMITS", TEXT);
         for (index, medal) in profile.medals.iter().take(3).enumerate() {
-            self.text(4, 132 + index * 9, medal, TEXT);
+            self.shadow_text(4, 132 + index as i32 * 9, medal, TEXT);
         }
     }
 
@@ -1862,7 +1933,7 @@ impl Screen {
             return;
         }
         if state.mode == Mode::Docked {
-            self.frame[..320 * 158].copy_from_slice(&self.cabin);
+            self.frame[..320 * 158].copy_from_slice(&self.cabins[self.cabin_index]);
             if let Some(dock) = self.dock.take() {
                 self.draw_dock(&dock);
             } else if self.market.is_some() {
@@ -1873,7 +1944,7 @@ impl Screen {
             // 3-D view, while the console/scanner page and the message clock
             // above it stay live. The ship's mode is still `Flight`, so closing
             // the board with F1 (F1003) reveals the same landed view and model.
-            self.frame[..320 * 158].copy_from_slice(&self.cabin);
+            self.frame[..320 * 158].copy_from_slice(&self.cabins[self.cabin_index]);
             if let Some(dock) = self.dock.take() {
                 self.draw_dock(&dock);
             } else if self.market.is_some() {
@@ -2072,13 +2143,17 @@ impl Screen {
         // gone (they covered the shields/hull rows, the Autopilot and Set/Act
         // lines, and the lift's lower rows).
         if state.mode == Mode::Flight {
+            if let Some(backdrop) = self.status_backdrop.clone() {
+                self.draw_status_backdrop(&backdrop, scene);
+            }
             if let Some(page) = self.equipment_status.clone() {
-                self.draw_equipment_status(&page, scene);
+                self.draw_equipment_status(&page);
             }
             if let Some(profile) = self.profile.clone() {
-                // F312's profile page is drawn over the upper view; the console
-                // below it is untouched.
                 self.draw_profile(&profile);
+            }
+            if let Some(items) = self.cargo_inventory.clone() {
+                self.draw_cargo_inventory(&items);
             }
         }
         if state.mode == Mode::Docked {
@@ -2592,43 +2667,59 @@ impl Screen {
         if matches!(view.screen, StationScreen::Journal | StationScreen::Comms) {
             return;
         }
-        let money = format!("${}", crate::trade::credits(view.status.cash));
+        self.draw_cargo_status(&view.status);
+    }
+
+    /// F558's cargo/cabins/cash block (`0x98e8`) at the station's lower
+    /// left: blue labels (0x43), white values.
+    fn draw_cargo_status(&mut self, status: &Status) {
+        let money = format!("${}", crate::trade::credits(status.cash));
         let money_x = (station::STATUS_CASH_RIGHT as usize)
             .saturating_sub(self.font.width(&money).unwrap_or(0));
-        self.text(
-            station::STATUS_LABEL_X as usize,
+        let label = station::STATUS_LABEL_X as usize;
+        let value = station::STATUS_VALUE_X as usize;
+        let (row_1, row_2) = (
             station::STATUS_ROW_1 as usize,
-            "Cargo",
-            0x43,
+            station::STATUS_ROW_2 as usize,
         );
+        self.text(label, row_1, "Cargo", 0x43);
         self.text(
-            station::STATUS_VALUE_X as usize,
-            station::STATUS_ROW_1 as usize,
-            &format!(
-                "{} : {}",
-                view.status.cargo_used, view.status.cargo_capacity
-            ),
+            value,
+            row_1,
+            &format!("{} : {}", status.cargo_used, status.cargo_capacity),
             0x0f,
         );
+        self.text(station::STATUS_CASH_LABEL_X as usize, row_1, "Cash", 0x43);
+        self.text(label, row_2, "Cabins", 0x43);
         self.text(
-            station::STATUS_CASH_LABEL_X as usize,
-            station::STATUS_ROW_1 as usize,
-            "Cash",
-            0x43,
-        );
-        self.text(
-            station::STATUS_LABEL_X as usize,
-            station::STATUS_ROW_2 as usize,
-            "Cabins",
-            0x43,
-        );
-        self.text(
-            station::STATUS_VALUE_X as usize,
-            station::STATUS_ROW_2 as usize,
-            &format!("{} : {}", view.status.cabins_used, view.status.cabins_total),
+            value,
+            row_2,
+            &format!("{} : {}", status.cabins_used, status.cabins_total),
             0x0f,
         );
-        self.text(money_x, station::STATUS_ROW_2 as usize, &money, 0x0f);
+        self.text(money_x, row_2, &money, 0x0f);
+    }
+
+    /// F310's `0x9c3b` at (190,138), with F1399's drop shadow and its
+    /// absolute `0xfd` tab stops: the used tonnes/cabins at 234, the totals
+    /// at 252, "Cash" at 272 and the cash at 264, in 10-pixel lines.
+    fn draw_status_hold(&mut self, status: &Status) {
+        const LABEL: u8 = 0x43;
+        const VALUE: u8 = 0x0f;
+        let rows = [
+            ("Cargo Space", status.cargo_used, status.cargo_capacity, 138),
+            ("Cabins", status.cabins_used, status.cabins_total, 148),
+        ];
+        for (label, used, total, y) in rows {
+            self.shadow_text(190, y, label, LABEL);
+            let used = format!("{used} :");
+            self.shadow_text(234, y, &used, VALUE);
+            let cursor = 234 + self.font.width(&used).unwrap_or(0) as i32;
+            self.shadow_text(cursor.max(252), y, &total.to_string(), VALUE);
+        }
+        self.shadow_text(272, 138, "Cash", LABEL);
+        let money = format!("${}", crate::trade::credits(status.cash));
+        self.shadow_text(264, 148, &money, VALUE);
     }
 
     /// The station as the original model 74, executed by the verified port and
@@ -2888,7 +2979,8 @@ impl Screen {
     /// The galaxy map (F840, F828, F863): the cabin art behind the scene, the sector and fuel
     /// lines with a shadow at the lower left, and the date and the star's text in the console.
     fn draw_galaxy(&mut self, viewer: &ModelViewer, map: &MapScene) {
-        self.frame[..320 * VIEW_HEIGHT].copy_from_slice(&self.cabin[..320 * VIEW_HEIGHT]);
+        self.frame[..320 * VIEW_HEIGHT]
+            .copy_from_slice(&self.cabins[self.cabin_index][..320 * VIEW_HEIGHT]);
         self.draw_shapes(viewer, &map.shapes);
         let shadowed = |screen: &mut Self, x: usize, y: usize, text: &str| {
             screen.text(x + 1, y + 1, text, 0);
@@ -3197,4 +3289,30 @@ pub fn model_radius(scene: &ModelViewer, model: u32) -> Option<f64> {
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+}
+
+/// One `CABINn.BMP`, exported as a 320x158 PNG, as RGB pixels.
+fn decode_cabin(png: &[u8]) -> Result<Vec<u32>, String> {
+    let mut decoder = png::Decoder::new(Cursor::new(png));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().map_err(|e| format!("Cabin PNG: {e}"))?;
+    if reader.info().width != 320
+        || reader.info().height != 158
+        || reader.output_buffer_size() > 320 * 158 * 4
+    {
+        return Err("Expected a bounded 320x158 cabin PNG.".to_owned());
+    }
+    let mut output = vec![0; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut output)
+        .map_err(|e| format!("Cabin pixels: {e}"))?;
+    let channels = match info.color_type {
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        _ => return Err("Cabin PNG did not expand to RGB/RGBA.".to_owned()),
+    };
+    Ok(output[..info.buffer_size()]
+        .chunks_exact(channels)
+        .map(|p| (u32::from(p[0]) << 16) | (u32::from(p[1]) << 8) | u32::from(p[2]))
+        .collect())
 }

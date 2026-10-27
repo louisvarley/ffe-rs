@@ -146,6 +146,9 @@ pub struct ConsoleState {
     /// The `F2` status screen's engines-off/equipment page (`F1120`,
     /// `DATA_008871 & 8`).
     pub status_page: bool,
+    /// The F2 status screen (module 0x0e) while it is up: the page shown and
+    /// which of F286's seven pages have something to show.
+    pub status: Option<(u8, [bool; 7])>,
 }
 
 impl ConsoleState {
@@ -691,6 +694,29 @@ impl Console {
             self.apply_engines_off_page(systems);
         } else {
             self.apply_normal_page(systems);
+        }
+        if let Some((section, sections)) = console.status {
+            self.apply_status(section, &sections);
+        }
+    }
+
+    /// The F2 status screen's console. Leaving the flight module hides its
+    /// view row (0x10..0x19) as the executed original's F2 frame shows; F276
+    /// shows the page buttons (records 3..7 for pages that have something to
+    /// show, 8, 9 and 0x0a always), F309 lights the current page's record
+    /// (`DATA_005126`) and F285 lights F2's screen button (0x0d).
+    pub fn apply_status(&mut self, section: u8, sections: &[bool; 7]) {
+        for id in 0x10..=0x19 {
+            self.hide(id);
+        }
+        for (page, id) in crate::screen::STATUS_BUTTONS.into_iter().enumerate() {
+            self.show_if(id, page < 2 || sections[page]);
+        }
+        self.show(0x0a);
+        self.set_image(0x0e, 0);
+        self.set_image(0x0d, 1);
+        if let Some(id) = crate::screen::STATUS_BUTTONS.get(usize::from(section)) {
+            self.set_image(*id, 1);
         }
     }
 
