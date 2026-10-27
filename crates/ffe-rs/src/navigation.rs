@@ -459,6 +459,16 @@ pub fn bodies_since(
     let mut out: Vec<Body> = Vec::new();
     let mut offsets: Vec<[i64; 3]> = Vec::new();
     let count = generator.count as usize;
+    // The system list's parent words count its own objects, and the bodies
+    // skip the kind-0 ones (a binary's barycentre), so a parent is looked up
+    // through this map, up past any skipped object.
+    let mut body_of: Vec<Option<usize>> = vec![None; count];
+    let system_parent = |system: &[u8], index: usize| {
+        u16::from_le_bytes([
+            system[index * OBJECT_BYTES + 8],
+            system[index * OBJECT_BYTES + 9],
+        ]) as usize
+    };
     for index in 0..count {
         let at = index * OBJECT_BYTES;
         let kind_code = u16::from_le_bytes([system[at + 0xa], system[at + 0xb]]);
@@ -520,6 +530,17 @@ pub fn bodies_since(
             continue;
         }
         let class = list.byte(slot, 0x14c);
+        let mut ancestor = parent;
+        let parent_body = loop {
+            if ancestor == 0 || ancestor > count {
+                break None;
+            }
+            if let Some(body) = body_of[ancestor - 1] {
+                break Some(body);
+            }
+            ancestor = system_parent(&system, ancestor - 1);
+        };
+        body_of[index] = Some(out.len());
         out.push(Body {
             name: String::from_utf8_lossy(text).into_owned(),
             kind,
@@ -527,7 +548,7 @@ pub fn bodies_since(
             velocity: std::array::from_fn(|k| list.dword(slot, 0x8c + 4 * k) as i32),
             radius,
             inner_radius,
-            parent: parent.checked_sub(1),
+            parent: parent_body,
             model: list.dword(slot, 0x82),
             seed: list.dword(slot, 0xa0),
             mass: list.dword(slot, 0xa4),

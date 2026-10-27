@@ -478,10 +478,12 @@ fn beam_is_model_156_at_the_gun_only_where_it_is_in_front() {
     screen.beam = Some(beam);
     draw(&mut screen, &state, views, Some(&viewer));
     save(&screen, "combat-beam-front.ppm");
-    assert_eq!(
-        changed(&before, screen.logical_pixels(), 0, 320, 0, 158),
-        0,
-        "the front view invented a muzzle flash"
+    // The cone itself stays culled (above), but F1776 also reads F931's shot
+    // length (global 37) and draws the ray from the gun forward, which is in
+    // front of the eye.
+    assert!(
+        changed(&before, screen.logical_pixels(), 0, 320, 0, 158) > 0,
+        "the front view did not draw the ray"
     );
 
     // The external camera is 49 m behind the ship, so the gun is in front of it
@@ -511,7 +513,11 @@ fn beam_is_model_156_at_the_gun_only_where_it_is_in_front() {
         !rendered.shapes.is_empty(),
         "model 0x9c did not render in front of the external camera"
     );
-    assert_eq!(external, 1, "the external muzzle is one pixel");
+    // The cone is a pixel there; the ray (F931's length) adds a short line.
+    assert!(
+        (1..=32).contains(&external),
+        "the external muzzle and ray: {external} pixels"
+    );
 
     // Model 0x9c is the original's small muzzle cone: its record coordinates
     // divide by 2^17, so its 8,388,607 record units are 64 model units.
