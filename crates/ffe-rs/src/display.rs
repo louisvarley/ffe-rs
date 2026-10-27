@@ -390,7 +390,7 @@ fn blit(logical: &[u32], target: &mut [u32], width: usize, rect: Rect, filter: F
 }
 
 /// The two source indices and the 0..=65535 weight for one destination index.
-fn linear_row(index: usize, destination: usize, source: usize) -> (usize, usize, u32) {
+pub(crate) fn linear_row(index: usize, destination: usize, source: usize) -> (usize, usize, u32) {
     // u = (index + 0.5) * source / destination - 0.5, in 16.16 fixed point.
     let value = ((2 * index + 1) as i64 * source as i64 * 65536) / (2 * destination as i64) - 32768;
     let value = value.clamp(0, (source.saturating_sub(1) as i64) * 65536) as u64;
@@ -400,7 +400,7 @@ fn linear_row(index: usize, destination: usize, source: usize) -> (usize, usize,
 }
 
 /// Blend two packed colours by `weight` (0 = `a`, 65536 = `b`).
-fn mix(a: u32, b: u32, weight: u32) -> u32 {
+pub(crate) fn mix(a: u32, b: u32, weight: u32) -> u32 {
     let channel = |shift: u32| {
         let first = (a >> shift) & 0xff;
         let second = (b >> shift) & 0xff;
@@ -520,6 +520,11 @@ pub struct Presenter {
 impl Presenter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The modern engine, to give it replacement art.
+    pub fn modern_mut(&mut self) -> &mut ModernRenderer {
+        &mut self.modern
     }
 
     /// Whether Modern graphics can draw the 3-D view on the GPU (opening it on first use). The

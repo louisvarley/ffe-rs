@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 pub mod cache;
 pub mod census;
 pub mod external;
+pub mod images;
 pub mod reference;
 
 const MAX_EXECUTABLE_BYTES: u64 = 8 * 1024 * 1024;

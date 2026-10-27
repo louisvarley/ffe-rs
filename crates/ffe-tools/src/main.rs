@@ -10,6 +10,7 @@ ffe-tools: local First Encounters installation tools
 Usage:
   ffe-tools inspect-game [--game <directory>] [--json]
   ffe-tools export-external --game <directory> --out <new-directory> [--json]
+  ffe-tools export-images --game <directory> --out <new-directory> [--json]
   ffe-tools build-data --game <directory> --out <new-file> [--json]
   ffe-tools inspect-data --data <file> [--json]
   ffe-tools verify-reference --vectors <jsonl> --state <jsonl> [--json]
@@ -23,6 +24,10 @@ Inspection is read-only. Exit codes: 0 passed/help, 1 invalid installation,
 A recognized version is not proof of a working game converter.
 export-external converts only six cockpit BMPs and 23 PCM effects, with
 per-image UHD guidance and a contact sheet. It never overwrites an output.
+export-images exports every bitmap the game draws (cabins, 345 embedded
+sprites/textures, two raw texture blocks, the main font) as original-size PNGs
+with a manifest, UHD sizes.csv, excluded.json and a contact sheet, for local
+upscaling. It never overwrites an output and is not a graphics pack.
 build-data imports 345 bitmaps, two raw texture blocks, the fixed low palette, cabins and
 effects and main font into a deterministic partial cache. V3 adds two original
 station vertex programs; v4/v5 add root commands/normals and v6 the original sine table; v7 imports every model that decodes; v8 adds the texture descriptor table and the 12-bit fixed colour map (floppy 1.02).
@@ -38,6 +43,7 @@ through native import, decoding and execution, and what blocks the rest.
 enum Command {
     InspectGame,
     ExportExternal,
+    ExportImages,
     BuildData,
     InspectData,
     VerifyReference,
@@ -69,6 +75,8 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
         Command::InspectGame
     } else if command == "export-external" {
         Command::ExportExternal
+    } else if command == "export-images" {
+        Command::ExportImages
     } else if command == "build-data" {
         Command::BuildData
     } else if command == "inspect-data" {
@@ -80,13 +88,17 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
     } else {
         return Err("Unknown command. Use --help for usage.".to_owned());
     };
-    let exporting = matches!(command, Command::ExportExternal | Command::BuildData);
+    let exporting = matches!(
+        command,
+        Command::ExportExternal | Command::ExportImages | Command::BuildData
+    );
     while let Some(arg) = args.next() {
         if arg == "--game"
             && matches!(
                 command,
                 Command::InspectGame
                     | Command::ExportExternal
+                    | Command::ExportImages
                     | Command::BuildData
                     | Command::ModelCensus
             )
@@ -258,6 +270,37 @@ fn run() -> Result<u8, String> {
         } else {
             writeln!(output, "Verified content cache v{}: {}\nAssets: {}; source fingerprints: {}\nPartial content only; not a complete game cache. Runtime upper palette, full model-command execution/submodels, gameplay tables, other fonts, journal and CD media remain unresolved.",
                 manifest.format_version, manifest.source_profile, manifest.files.len(), manifest.source_files.len()).map_err(|error| error.to_string())?;
+        }
+        return Ok(0);
+    }
+    if options.command == Command::ExportImages {
+        let destination = options.output.as_deref().ok_or("missing --out")?;
+        let manifest = ffe_tools::images::export_images(&options.game, destination)?;
+        if options.json {
+            serde_json::to_writer_pretty(&mut output, &manifest)
+                .map_err(|error| error.to_string())?;
+            writeln!(output).map_err(|error| error.to_string())?;
+        } else {
+            let counts: Vec<_> = manifest
+                .counts
+                .iter()
+                .map(|(category, count)| format!("{count} {category}"))
+                .collect();
+            let review = manifest
+                .images
+                .iter()
+                .filter(|image| !image.review.is_empty())
+                .count();
+            writeln!(
+                output,
+                "Exported {} images to {}: {}.
+{review} carry review notes (run-time colours, unfilled slots, upper palette).
+Open index.html for previews and sizes.csv for UHD recommendations. No image resizing performed.",
+                manifest.images.len(),
+                destination.display(),
+                counts.join(", ")
+            )
+            .map_err(|error| error.to_string())?;
         }
         return Ok(0);
     }

@@ -518,7 +518,11 @@ fn write_modern_3d_capture(
     write_png(&dir.join("display-modern-3d.png"), &target, width, height)
 }
 
-fn write_display_capture(dir: &Path, cache: &ffe_content::VerifiedCache) -> Result<(), String> {
+fn write_display_capture(
+    dir: &Path,
+    root: &Path,
+    cache: &ffe_content::VerifiedCache,
+) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|error| format!("Cannot create {}: {error}", dir.display()))?;
     let mut screen = Screen::new(cache)?;
     let scene = ModelViewer::new(cache).ok();
@@ -589,6 +593,37 @@ fn write_display_capture(dir: &Path, cache: &ffe_content::VerifiedCache) -> Resu
         display::compose(&logical, &settings, width, height, &mut target);
         write_png(&dir.join(name), &target, width, height)?;
     }
+    // A docked frame through Modern with any replacement cabins in `img-export`.
+    let mut docked = Flight::free_flight();
+    docked.mode = ffe_rs::flight::Mode::Docked;
+    screen.draw(&docked, ViewState::default(), scene.as_ref(), true, "");
+    let mut modern = ffe_rs::modern::ModernRenderer::new();
+    for line in modern.load_cabins(
+        &root.join("img-export/images/cockpit"),
+        screen.cabin_pixels(),
+    ) {
+        eprintln!("{line}");
+    }
+    let (width, height) = (1920, 1080);
+    target.clear();
+    target.resize(width * height, 0);
+    let settings = DisplaySettings {
+        graphics: ffe_rs::modern::Graphics::Modern,
+        fit: ffe_rs::display::FitMode::FillWindow,
+        ..default
+    };
+    modern.render(
+        screen.logical_pixels(),
+        &mut target,
+        width,
+        settings.rect((width, height)),
+    );
+    write_png(
+        &dir.join("display-modern-docked-1080p.png"),
+        &target,
+        width,
+        height,
+    )?;
     // The port-only page itself, at 2x.
     let shown = Prefs {
         open: true,
@@ -912,7 +947,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     if let Some(dir) = &options.capture_display {
-        write_display_capture(dir, &cache)?;
+        write_display_capture(dir, &options.root, &cache)?;
         return Ok(());
     }
     if let Some(dir) = &options.capture_save {
@@ -965,6 +1000,13 @@ fn run() -> Result<(), String> {
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
     let mut presenter = Presenter::new();
+    // Modern graphics' replacement cabins: for now the owner's upscaled export.
+    for line in presenter.modern_mut().load_cabins(
+        &options.root.join("img-export/images/cockpit"),
+        screen.cabin_pixels(),
+    ) {
+        eprintln!("{line}");
+    }
     // `FFE_TRACE=1`: print the flight state ten times a second and every click's
     // logical point to stderr (for diagnosing a replayed recording).
     let trace_flight = std::env::var_os("FFE_TRACE").is_some();

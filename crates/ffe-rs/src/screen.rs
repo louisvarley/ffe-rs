@@ -1577,6 +1577,11 @@ impl Screen {
         &self.frame
     }
 
+    /// The six cabin backdrops (320x158 RGB each), in F955's order.
+    pub fn cabin_pixels(&self) -> &[Vec<u32>] {
+        &self.cabins
+    }
+
     /// The expanded fixed low palette, for tests that check a drawn colour.
     pub fn palette(&self) -> &[u32; 128] {
         &self.palette

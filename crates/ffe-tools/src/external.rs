@@ -235,7 +235,17 @@ pub fn export_external(root: &Path, output: &Path) -> Result<ExternalManifest, S
     json.push(b'\n');
     // The completion manifest is written last; an interrupted output is never a valid export.
     push_file(&mut files, "manifest.json".to_owned(), json);
-    fs::create_dir(&destination).map_err(|error| {
+    write_new_directory(&destination, files)?;
+    Ok(manifest)
+}
+
+/// Create `destination` and write every file with `create_new`, in order; the
+/// caller puts its completion manifest last.
+pub(crate) fn write_new_directory(
+    destination: &Path,
+    files: Vec<(String, Vec<u8>)>,
+) -> Result<(), String> {
+    fs::create_dir(destination).map_err(|error| {
         format!(
             "{}: cannot create new output: {error}",
             destination.display()
@@ -259,5 +269,5 @@ pub fn export_external(root: &Path, output: &Path) -> Result<ExternalManifest, S
             return Err(format!("{}: export is incomplete: {error}. No existing files were overwritten; choose a fresh output directory before retrying.", path.display()));
         }
     }
-    Ok(manifest)
+    Ok(())
 }

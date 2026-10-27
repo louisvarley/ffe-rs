@@ -25,6 +25,7 @@ legacy/ffed3d-master/
 /to-be-upscaled/
 /upscaled/
 /extracted/
+/img-export/
 /saves/
 *upscaled/working/
 *.ffe-cache
@@ -99,3 +100,6 @@ desktop.ini
 .env.*
 ffe-rs.toml.local
 *.log
+*.ffe-input
+*.ffe-input
+tools/redraw-swarmui.ps1

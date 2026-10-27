@@ -166,12 +166,61 @@ impl IndexedImage {
     }
 }
 
+/// Straight-alpha RGBA PNG, row-major, top to bottom.
+pub fn rgba_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    if width == 0 || height == 0 || rgba.len() as u64 != u64::from(width) * u64::from(height) * 4 {
+        return Err("invalid RGBA image dimensions".to_owned());
+    }
+    encode_png(width, height, png::ColorType::Rgba, rgba, None)
+}
+
+/// Indexed PNG with an optional `tRNS` alpha per palette entry.
+pub fn indexed_png(
+    width: u32,
+    height: u32,
+    indices: &[u8],
+    palette_rgb: &[u8],
+    alpha: Option<&[u8]>,
+) -> Result<Vec<u8>, String> {
+    let colours = palette_rgb.len() / 3;
+    if width == 0
+        || height == 0
+        || indices.len() as u64 != u64::from(width) * u64::from(height)
+        || colours == 0
+        || colours > 256
+        || palette_rgb.len() % 3 != 0
+        || indices.iter().any(|index| usize::from(*index) >= colours)
+        || alpha.is_some_and(|alpha| alpha.len() > colours)
+    {
+        return Err("invalid indexed image, palette or alpha".to_owned());
+    }
+    encode_png_alpha(
+        width,
+        height,
+        png::ColorType::Indexed,
+        indices,
+        Some(palette_rgb),
+        alpha,
+    )
+}
+
 fn encode_png(
     width: u32,
     height: u32,
     color: png::ColorType,
     pixels: &[u8],
     palette: Option<&[u8]>,
+) -> Result<Vec<u8>, String> {
+    encode_png_alpha(width, height, color, pixels, palette, None)
+}
+
+fn encode_png_alpha(
+    width: u32,
+    height: u32,
+    color: png::ColorType,
+    pixels: &[u8],
+    palette: Option<&[u8]>,
+    alpha: Option<&[u8]>,
 ) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     {
@@ -182,6 +231,9 @@ fn encode_png(
         encoder.set_filter(png::FilterType::NoFilter);
         if let Some(palette) = palette {
             encoder.set_palette(palette);
+        }
+        if let Some(alpha) = alpha {
+            encoder.set_trns(alpha);
         }
         let mut writer = encoder
             .write_header()

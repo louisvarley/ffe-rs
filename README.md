@@ -380,6 +380,40 @@ This is **not the complete upscale exporter**: embedded executable images,
 fonts, models, journal decoding, music and optional CD media are not converted.
 It does not produce `data.bin` or `upscaled.bin`.
 
+## Export every bitmap for upscaling
+
+```powershell
+cargo run --locked --release -p ffe-tools -- export-images --game .\game --out .\img-export
+```
+
+Writes all 354 bitmaps the game draws to the ignored `img-export/`, at original
+size: `images/<category>/` straight-alpha RGBA PNGs to upscale and
+`indexed/<category>/` the same pixels as indexed PNGs with the palette used.
+Categories: `cockpit` (6 cabins), `sprite` (218 screen bitmaps: newspaper
+mastheads, icons, buttons, planets, crosshairs, intro art), `texture` (125
+model-face textures, coloured with the first texture record's unshaded slot
+colours), `planet_texture` (land/sea), `texture_block` (the two raw 64x512
+blocks) and `font` (the main font as a glyph atlas, metrics in
+`images/font/main.json`). Index 0 of masked bitmaps is transparent; anchors are
+the original draw offsets.
+
+`sizes.csv` gives each image's recommended UHD size: 11x for screen art on the
+320x200 canvas, an **estimated** 8x for textures. `index.html` is the contact
+sheet (open it in a browser from the folder), `excluded.json` lists what is not
+a bitmap (models, vector text, procedural planets, lookup tables) and the CD
+stills/AVIs inside the disc image. Twenty images carry review notes in the
+manifest and CSV: run-time colours shown as grey ramps, texture slots the game
+never fills, alternative colourings of shared textures, and the font. It never
+overwrites an existing destination and is not a graphics pack.
+
+`tools/redraw-swarmui.ps1` redraws the export through a **local** SwarmUI
+server (img2img plus a refiner upscale), at each image's `sizes.csv` size, into
+`upscaled/images/<category>/` with the same filenames. Run `-ListModels` to see
+model names, try `-Filter 'cockpit/*' -Limit 2` first, and see the script's
+help (`Get-Help .\tools\redraw-swarmui.ps1 -Full`) for the options. It skips
+the font and raw texture blocks and only resizes images under 16 pixels. For
+Z-Image Turbo use `-Steps 8 -CfgScale 1`; leave `-ModelTiling` off with it.
+
 ## Build and verify the partial content cache
 
 ```powershell
@@ -807,7 +841,7 @@ crates/ffe-content/     partial base-cache reader/writer; replacement packs plan
 crates/ffe-convert/     verified partial import; full game conversion planned
 crates/ffe-render/      render description, software reference, wgpu Classic, features
 crates/ffe-platform/    window/input/audio/config
-crates/ffe-tools/       inspect-game/export-external/build-data/inspect-data/verify-reference
+crates/ffe-tools/       inspect-game/export-external/export-images/build-data/inspect-data/verify-reference
 crates/ffe-rs/          experimental playable binary; not the faithful engine yet
 tests/golden/           planned: hashes and numeric dumps only (not yet present)
 dashboard/              milestone burndown page (open index.html locally)

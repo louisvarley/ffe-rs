@@ -25,6 +25,34 @@ pub(crate) fn model_layout(profile: &str) -> Result<(u32, u32), String> {
     }
 }
 
+/// Bitmap tables and fixed low palette. RVAs, not offsets in the rebuilt JJFFE
+/// executable. These are verified against all 347 table records in each
+/// exact-hash original release.
+pub(crate) fn bitmap_layout(profile: &str) -> Result<BitmapLayout, String> {
+    match profile {
+        "ffe-floppy-1.02-en" => Ok(BitmapLayout {
+            primary_rva: 0x1b069c,
+            secondary_rva: 0x1b081c,
+            low_palette_rva: 0x101990,
+        }),
+        "ffe-cd-1.01-en" => Ok(BitmapLayout {
+            primary_rva: 0x1af640,
+            secondary_rva: 0x1af7c0,
+            low_palette_rva: 0x1009b0,
+        }),
+        _ => Err("no verified embedded bitmap layout for this source profile".to_owned()),
+    }
+}
+
+/// Main bitmap font RVA.
+pub(crate) fn font_layout(profile: &str) -> Result<u32, String> {
+    match profile {
+        "ffe-floppy-1.02-en" => Ok(0x1013b0),
+        "ffe-cd-1.01-en" => Ok(0x1003d0),
+        _ => Err("no verified font layout for this source profile".to_owned()),
+    }
+}
+
 /// Texture descriptor (`DATA_007811`) and 12-bit colour map (`DATA_007770`) RVAs
 /// (v8). Verified byte for byte against JJFFE 2.8a7 for floppy 1.02 only; the CD
 /// 1.01 executable was not available, so its cache omits both tables.
@@ -179,26 +207,8 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     let profile = inspection
         .source_profile
         .ok_or("inspection passed without a source profile")?;
-    // RVAs, not offsets in the rebuilt JJFFE executable. These are verified
-    // against all 347 table records in each exact-hash original release.
-    let layout = match profile.id {
-        "ffe-floppy-1.02-en" => BitmapLayout {
-            primary_rva: 0x1b069c,
-            secondary_rva: 0x1b081c,
-            low_palette_rva: 0x101990,
-        },
-        "ffe-cd-1.01-en" => BitmapLayout {
-            primary_rva: 0x1af640,
-            secondary_rva: 0x1af7c0,
-            low_palette_rva: 0x1009b0,
-        },
-        _ => return Err("no verified embedded bitmap layout for this source profile".to_owned()),
-    };
-    let font_rva = match profile.id {
-        "ffe-floppy-1.02-en" => 0x1013b0,
-        "ffe-cd-1.01-en" => 0x1003d0,
-        _ => return Err("no verified font layout for this source profile".to_owned()),
-    };
+    let layout = bitmap_layout(profile.id)?;
+    let font_rva = font_layout(profile.id)?;
     let (model_table_rva, sine_table_rva) = model_layout(profile.id)?;
     let mut assets = Vec::new();
     let mut models = 0;
