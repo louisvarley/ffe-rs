@@ -99,17 +99,17 @@ fn intro_flight_combat_hyperspace_and_dock_start_the_source_songs() {
     assert_eq!(game.current_song(), None, "F770 combat end");
     log.push(("combat end", None, "F770 stop"));
 
-    // F656 hyperspace exit.
+    // F1094 hyperspace exit: a random song.
     game.hyperspace_music();
-    assert_eq!(game.current_song(), Some(15), "F656 Blue Danube");
-    log.push(("hyperspace", Some(15), "F656 song 15"));
+    let jump = game.current_song().expect("F1094 random song");
+    assert!(jump < 16, "F1902(-2) uses the 0..=15 random pool");
+    log.push(("hyperspace", Some(jump), "F1094 random 0..=15"));
 
-    // F1048 stop, then F1094 random docking/launch music.
+    // F1048 stop, then F656's clearance music.
     game.stop_for_sequence();
-    game.sequence_end_music();
-    let dock = game.current_song().expect("F1094 random song");
-    assert!(dock < 16, "F1902(-2) uses the same 0..=15 random pool");
-    log.push(("docked", Some(dock), "F1094 random 0..=15"));
+    game.clearance_music();
+    assert_eq!(game.current_song(), Some(15), "F656 Blue Danube");
+    log.push(("clearance", Some(15), "F656 song 15"));
 
     // F770/F941: death stops the song and clears the scene state.
     game.player_death();
@@ -152,7 +152,7 @@ fn music_off_is_silent_and_music_volume_sets_the_midi_channel_level() {
     game.front_end_music();
     game.start_battle();
     game.hyperspace_music();
-    game.sequence_end_music();
+    game.clearance_music();
     assert_eq!(game.current_song(), None, "every scene start is gated");
     assert!(game.song_done());
 }
