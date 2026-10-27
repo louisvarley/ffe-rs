@@ -955,6 +955,8 @@ fn run() -> Result<(), String> {
     let mut last_prompt = String::new();
     // `player+0xc6` bit 1: F1008's micrometeorite warning has been given.
     let mut gear_warned = false;
+    // F1's view inside a station while docked (F1092's bay), not the board.
+    let mut station_eye = false;
     // The galaxy map while it is closed, with the system it was opened in.
     let mut parked_galaxy = None;
     let mut model_viewer: Option<ModelViewer> = None;
@@ -1847,6 +1849,20 @@ fn run() -> Result<(), String> {
         // board. It is drawn over the landed view, not as a docked state:
         // F1003's return (F1) only closes it, so the flight model, HUD and
         // console are never torn down.
+        // F1 (the eye) while docked in a station: F1092's view of the bay
+        // behind the cabin instead of the services board; F4 brings the
+        // board back.
+        if state.mode != ffe_rs::flight::Mode::Docked
+            || nav.as_ref().is_some_and(|nav| nav.sequence.is_some())
+        {
+            station_eye = false;
+        } else if active
+            && model_lab.is_none()
+            && model_viewer.is_none()
+            && (pressed(Key::F1) || console_click == Some(Click::CycleView))
+        {
+            station_eye = true;
+        }
         if active
             && !death_control
             && model_lab.is_none()
@@ -1879,6 +1895,7 @@ fn run() -> Result<(), String> {
                 }
                 ffe_rs::flight::Mode::Docked => {
                     // F343 re-displays the root from any station screen.
+                    station_eye = false;
                     dock.open(StationScreen::Services);
                     message = station::SERVICES_HINT.to_owned();
                 }
@@ -3120,6 +3137,7 @@ fn run() -> Result<(), String> {
                     held_controls.disarm(&keys_down);
                 }
                 if (state.mode == ffe_rs::flight::Mode::Docked || pad_board)
+                    && !station_eye
                     && model_lab.is_none()
                     && model_viewer.is_none()
                 {
@@ -5642,17 +5660,27 @@ fn run() -> Result<(), String> {
         // Draw the inside view until the launch completes (LaunchDone), not
         // only while the current lift stage has objects: F1088 keeps the ship in
         // the station while the outer door opens.
-        let launching_scene = nav
+        let launching_scene = (nav
             .as_ref()
             .is_some_and(|nav| nav.sequence.is_some_and(|s| s.launching))
+            || station_eye)
             && state.mode == ffe_rs::flight::Mode::Docked;
         screen.station_view = launching_scene;
-        if let Some((objects, launching)) = nav.as_ref().and_then(|nav| nav.lift_scene()) {
+        let docked_bay = station_eye
+            .then(|| ffe_core::lift::objects(ffe_core::traffic::state::DOCKED, 0))
+            .flatten()
+            .map(|objects| (objects, false));
+        if let Some((objects, launching)) =
+            nav.as_ref().and_then(|nav| nav.lift_scene()).or(docked_bay)
+        {
             views.mode = ViewMode::Front;
             let _ = launching;
-            let station = nav
-                .as_ref()
-                .and_then(|nav| nav.sequence.map(|s| s.station).map(|i| &nav.bodies[i]));
+            let station = nav.as_ref().and_then(|nav| {
+                nav.sequence
+                    .map(|s| s.station)
+                    .or(nav.docked)
+                    .map(|i| &nav.bodies[i])
+            });
             screen.lift = Some(ffe_rs::screen::LiftView {
                 objects,
                 seed: station.map_or(0, |body| body.seed),
