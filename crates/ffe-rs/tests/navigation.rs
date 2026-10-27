@@ -1433,8 +1433,12 @@ fn starport_autopilot_lands_on_the_pad() {
     model.teleport(approach);
     model.face(body.position);
     model.apply(&mut state);
+    // The ship starts at F741's approach point, not on the pad: free the new
+    // game's seat as F1031's clear would, or the landed ship cannot engage.
+    nav.starport(index).release(PLAYER);
+    nav.docked = None;
     nav.lock(index);
-    nav.engage_locked();
+    assert!(nav.engage_locked().is_some(), "the autopilot engages");
     let shots = std::env::var_os("FFE_SHOT_DIR");
     let viewer = shots
         .as_ref()
