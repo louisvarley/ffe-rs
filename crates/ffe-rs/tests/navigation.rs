@@ -1215,6 +1215,10 @@ fn autopilot_after_every_jump() {
             picks
         };
         for index in kinds {
+            // A station arrival starts F863's docking sequence, during which
+            // the autopilot cannot engage; each target starts in free flight.
+            nav.sequence = None;
+            nav.docked = None;
             nav.lock(index);
             nav.engage_locked();
             let target_name = nav.bodies[index].name.clone();
