@@ -232,6 +232,11 @@ pub struct SystemMissile {
 /// clicks them now (the original's navigation is the `n` console icon).
 pub const MAP_BUTTONS: [(i32, i32, &str); 2] = [(2, 62, "SYSTEMS"), (66, 150, "THIS SYSTEM")];
 
+/// F1775's background object: the nebula and star field (model 315).
+const BACKGROUND_MODEL: u32 = 0x13b;
+/// The depth the background object is drawn at (F959's intro object depth).
+const BACKGROUND_DEPTH: f64 = 0x14820 as f64;
+
 /// F283's page: everything it prints, resolved by the game loop.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EquipmentStatus {
@@ -1899,9 +1904,30 @@ impl Screen {
             }
             self.jitter.cursor = self.jitter.start;
             let world = self.lift.as_ref().is_none_or(|lift| lift.world);
+            // F1052 draws F1775's background only while the previous frame's
+            // background flag is clear: model 0x13b, the nebula and star field
+            // the intro also shows, turned with the world. The port draws it at
+            // the intro object's depth (F959's 0x14820), where the model's
+            // nebula band renders; F1775's own 0x200 is a cached position this
+            // renderer does not reproduce. The port's star points stay as well,
+            // because the model's star field child is sparse here.
+            if world && self.stars_visible && self.surface_sky.is_none() {
+                if let Some(scene) = scene {
+                    let rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+                        .map(|axis| camera.direction(axis));
+                    let inputs = AnimationInputs::original(0, 0, &scene.shades());
+                    if let Ok(frame) = scene.render_scene_with(
+                        BACKGROUND_MODEL,
+                        rows,
+                        [0.0, 0.0, BACKGROUND_DEPTH],
+                        scene.light_direction(),
+                        &inputs,
+                    ) {
+                        self.draw_shapes(scene, &frame.shapes);
+                    }
+                }
+            }
             for index in 0..self.stars.len() {
-                // F1052 draws F1775's stars only while the previous frame's
-                // background flag is clear.
                 if !world || !self.stars_visible || self.surface_sky.is_some() {
                     break;
                 }

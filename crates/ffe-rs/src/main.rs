@@ -955,6 +955,10 @@ fn run() -> Result<(), String> {
     let mut last_prompt = String::new();
     // `player+0xc6` bit 1: F1008's micrometeorite warning has been given.
     let mut gear_warned = false;
+    // The sine table F1675 builds the dust's orientation with.
+    let dust_sine = cache
+        .asset("base:math/sine")
+        .and_then(|bytes| ffe_core::model_math::SineTable::from_bytes(bytes).ok());
     // F1's view inside a station while docked (F1092's bay), not the board.
     let mut station_eye = false;
     // The galaxy map while it is closed, with the system it was opened in.
@@ -1434,7 +1438,7 @@ fn run() -> Result<(), String> {
             && (session.total * 2.0).floor() != ((session.total - elapsed) * 2.0).floor()
         {
             eprintln!(
-                "trace state t={:.1} mode={:?} dead={} hull={:?} docked={:?} landed={:?} sequence={} log={:?}",
+                "trace state t={:.1} mode={:?} dead={} hull={:?} docked={:?} landed={:?} sequence={} dust={} log={:?}",
                 session.total,
                 state.mode,
                 death_control,
@@ -1442,6 +1446,7 @@ fn run() -> Result<(), String> {
                 nav.as_ref().and_then(|nav| nav.docked).and_then(|i| nav.as_ref().map(|n| n.bodies[i].name.clone())),
                 nav.as_ref().and_then(|nav| nav.landed_state()),
                 nav.as_ref().is_some_and(|nav| nav.sequence.is_some()),
+                nav.as_ref().map_or(0, |nav| nav.dust.particles().len()),
                 message,
             );
         }
@@ -5602,6 +5607,25 @@ fn run() -> Result<(), String> {
                     axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
                     mass: 0,
                 }));
+                // F1035's space dust (model 0x6d): static objects the ship
+                // flies past, turned by F1675's YZT matrix.
+                if let Some(sine) = dust_sine.as_ref() {
+                    effects.extend(nav.dust.particles().iter().filter(|p| !p.hidden).map(
+                        |particle| {
+                            let rows = particle.orientation(sine);
+                            ffe_rs::screen::SystemEffect {
+                                model: particle.model,
+                                centre: particle.position.map(|v| v as f64 / unit),
+                                axes: std::array::from_fn(|r| {
+                                    std::array::from_fn(|c| {
+                                        f64::from(rows[3 * r + c]) / 2_147_483_648.0
+                                    })
+                                }),
+                                mass: 0,
+                            }
+                        },
+                    ));
+                }
                 effects
             }
             None => Vec::new(),
