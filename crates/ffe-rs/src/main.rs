@@ -4793,6 +4793,9 @@ fn run() -> Result<(), String> {
                     (value * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT
                         / ffe_rs::original_flight::MM_PER_SECOND) as i64
                 });
+                // The docking and launch stages run their own state handlers
+                // (F1028-F1030), not the flight frame that calls F1035.
+                let flight_frame = nav.sequence.is_none();
                 nav.tick_dust(
                     elapsed,
                     &ffe_core::dust::Spawn {
@@ -4800,7 +4803,7 @@ fn run() -> Result<(), String> {
                         velocity,
                         altitude: nav.altitude,
                         detail: prefs.others[0],
-                        flight_active: true,
+                        flight_active: flight_frame,
                         time_running: true,
                         speed: 0,
                     },

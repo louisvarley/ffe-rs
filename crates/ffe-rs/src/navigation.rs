@@ -4892,6 +4892,8 @@ impl Navigator {
     /// stays where the ship left it. Also picks the frame for the next refresh.
     pub fn follow(&mut self, ship: [i64; 3]) -> Option<[i64; 3]> {
         let drift = std::mem::take(&mut self.drift);
+        // The dust is in the player's frame as well (F1533's clone).
+        self.dust.shift(drift);
         self.frame = self.choose_frame(ship);
         (drift != [0; 3]).then(|| std::array::from_fn(|k| ship[k] + drift[k]))
     }

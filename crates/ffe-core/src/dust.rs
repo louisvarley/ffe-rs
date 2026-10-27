@@ -256,6 +256,17 @@ impl Field {
         &self.particles
     }
 
+    /// Move every particle with the frame the player is in: F1533 clones the
+    /// player's object, parent (`+0x56`) included, so the dust sits in the
+    /// player's frame and is carried with its body's motion like the ship.
+    pub fn shift(&mut self, delta: [i64; 3]) {
+        for particle in &mut self.particles {
+            for (axis, value) in particle.position.iter_mut().enumerate() {
+                *value = value.wrapping_add(delta[axis]);
+            }
+        }
+    }
+
     /// The stream state, for a deterministic capture or a test.
     pub fn random(&self) -> Random {
         self.rng
