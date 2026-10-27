@@ -613,10 +613,15 @@ fn pad_takeoff_hands_over_and_falls_back_under_gravity() {
         altitudes.last()
     );
     // 0x24 -> 0x26 at F1013's altitude test, then F603 pulls the ship back.
+    // Once it lands on the pad again F1031 starts F1013's climb over
+    // (`Retakeoff`, back to 0x24).
     assert_eq!(seen.first(), Some(&ffe_core::traffic::state::TAKEOFF));
-    assert_eq!(
-        nav.takeoff_state(),
-        Some(ffe_core::traffic::state::AFTER_TAKEOFF),
+    assert_eq!(seen.get(1), Some(&ffe_core::traffic::state::AFTER_TAKEOFF));
+    assert!(
+        matches!(
+            nav.takeoff_state(),
+            Some(ffe_core::traffic::state::AFTER_TAKEOFF | ffe_core::traffic::state::TAKEOFF)
+        ),
         "{seen:?}"
     );
     let peak = altitudes.iter().copied().max().unwrap_or(0);
