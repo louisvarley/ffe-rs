@@ -2178,7 +2178,7 @@ impl Screen {
     /// 320x158 upper view over the console. Background palette index 3 is the
     /// original's clear colour for (3,3,3) (`DATA_009222`), the icons are
     /// `0x2c`/`0x2d`, and every rectangle is `DATA_004903`..`DATA_004905`.
-    /// The `>` marks the port's keyboard selection (the original is mouse-only).
+    /// A bullet marks the port's keyboard selection (the original is mouse-only).
     pub fn draw_prefs(&mut self, prefs: &Prefs) {
         // The original only clears the upper view; the console below it stays
         // visible (`FUNC_000225` calls `FUNC_001618_ClearUpperBuf`).
@@ -2205,7 +2205,7 @@ impl Screen {
             self.shadow_text(text.x, text.y, text.text, text.colour);
         }
         if let Some(row) = rows.get(prefs.selected) {
-            self.shadow_text(row.x - 10, row.y, ">", 18);
+            self.prefs_bullet(row.x - 9, row.y + 2);
         }
         self.present();
     }
@@ -2235,6 +2235,17 @@ impl Screen {
     }
 
     /// FFE text with its one-pixel black drop shadow.
+    /// The keyboard selection's round 4x4 bullet with a drop shadow, its top
+    /// left at (x, y).
+    fn prefs_bullet(&mut self, x: i32, y: i32) {
+        for (dx, dy, colour) in [(1, 1, 0u8), (0, 0, 18)] {
+            let (x, y) = ((x + dx) as usize, (y + dy) as usize);
+            self.rect(x + 1, y, 2, 1, colour);
+            self.rect(x, y + 1, 4, 2, colour);
+            self.rect(x + 1, y + 3, 2, 1, colour);
+        }
+    }
+
     fn shadow_text(&mut self, x: i32, y: i32, message: &str, colour: u8) {
         if x < 0 || y < 0 {
             return;
