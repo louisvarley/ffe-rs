@@ -1036,6 +1036,30 @@ void TimerFrameUpdate(void)
         fflush(stdout);
         if (frames + 1 >= limit) exit(0);
     } else if (state_mode) {
+        {
+            /* The player object's first nine dwords (its rows), for F994's seat. */
+            unsigned long player_pointer = state_u32(0xc8);
+            if (player_pointer != 0) {
+                long *rows = (long *)player_pointer;
+                fprintf(stderr, "state-rows %lu: %ld %ld %ld %ld %ld %ld %ld %ld %ld\n", frames,
+                        rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], rows[6], rows[7], rows[8]);
+                if (frames == limit - 1) {
+                    unsigned char *list = ref_pl_object_list;
+                    unsigned i;
+                    for (i = 1; i <= 0x72; ++i) {
+                        unsigned char *o = list + i * 0x152 + 0x74;
+                        long *r = (long *)o;
+                        if (o[0x87] == 0) continue;
+                        fprintf(stderr, "obj-pos %u %lld %lld %lld\n", i, *(long long *)(o + 0x3e), *(long long *)(o + 0x46), *(long long *)(o + 0x4e));
+                        fprintf(stderr, "obj %u model %lu parent %u spin %d tilt %d a8 %lu ac %lu rows %ld %ld %ld %ld %ld %ld %ld %ld %ld\n",
+                                i, (unsigned long)(o[0x82] | o[0x83] << 8 | o[0x84] << 16 | o[0x85] << 24),
+                                (unsigned)o[0x56], (int)(signed char)o[0xc8], (int)*(short *)(o + 0xcc),
+                                *(unsigned long *)(o + 0xa8), *(unsigned long *)(o + 0xac),
+                                r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]);
+                    }
+                }
+            }
+        }
         printf("{\"frame\":%lu,\"clock_ms\":%lu,\"game_tics\":%lu,\"game_days\":%lu,\"rng_a\":%lu,\"rng_b\":%lu,\"player_state\":%u,\"player_index\":%lu,\"cash\":%lu,\"start_type\":%lu,\"time_accel\":%lu,\"system_counter\":%lu,\"accel_counter\":%lu,\"pixels_fnv1a64\":\"%016llx\",\"palette_fnv1a64\":\"%016llx\"}\n",
             frames, milliseconds, state_u32(0), state_u32(4), state_u32(0x24), state_u32(0x28),
             (unsigned)ref_state[0xe8], state_u32(0xc0), state_u32(0x114), state_u32(0xfa),

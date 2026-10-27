@@ -219,7 +219,12 @@ fn start_record_one_is_ross_154() {
     let radius = info.radii().1 as i32;
     let up = [body.rows[3], body.rows[4], body.rows[5]];
     assert_eq!(radius, 5_200);
-    assert_eq!(up, [-1_938_310_550, -909_597_149, 163_923_668]);
+    // The executed original's object 0x6e holds [-1938310550, -909597149,
+    // 163923668]: the starport's rows in Ross 154 A's rotating frame. That
+    // planet is half a turn round at the noon start (rows diag(-1, 1, -1)),
+    // and the port keeps the port's rows in the system frame (F1677), so x
+    // and z change sign.
+    assert_eq!(up, [1_938_310_531, -909_597_145, -163_923_668]);
     let expected = pads
         .seat(
             body.position,
@@ -238,16 +243,19 @@ fn start_record_one_is_ross_154() {
             state.seat[1] - body.position[1] - offset[1],
             state.seat[2] - body.position[2] - offset[2],
         ],
-        [-4_694, -2_203, 396],
-        "F1521's radius product, hand-checked"
+        // The original's (-4694, -2203, 396) in the planet's frame; the
+        // system-frame row gives the same product with x and z negated (F1521
+        // rounds the negated row one unit differently).
+        [4_693, -2_203, -397],
+        "F1521's radius product"
     );
-    // Hand-checked: model 0x55 uses DATA_006177; bay 1 is (-250, 0, 250); the
-    // station rows are (Q31, from F1674)
-    //   [-906354405, 1945245414, 76650739,
-    //    -1938310550, -909597149, 163923668,
-    //    180966058, 0, 2139827798],
-    // so F1669 gives (126, -227, 240) and the <<10 wraps to this offset.
-    assert_eq!(offset, [129_024, -232_448, 245_760]);
+    // F994's sentinel leaves bay 0, (250, 0, 250) on model 0x55. The executed
+    // original (`--state`) puts the player at (-91734, 229221, 263564) from
+    // object 0x6e in Ross 154 A's frame: less the radius product that is
+    // (-85, 226, 257) << 10, which the system-frame rows give as
+    // (83, 226, -259) << 10 (x and z negated, F1669 rounding the other rows).
+    assert_eq!(state.bay, 0);
+    assert_eq!(offset, [84_992, 231_424, -265_216]);
     eprintln!(
         "seat {:?} (bay {}, station at {:?}, offset {offset:?})",
         state.seat, state.bay, body.position
