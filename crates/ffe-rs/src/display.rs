@@ -27,6 +27,7 @@
 //! `docs/ARCHITECTURE.md` §2.2).
 
 use crate::indexed::{LOGICAL_HEIGHT, LOGICAL_WIDTH};
+use crate::modern::{Graphics, ModernRenderer};
 use minifb::{Scale, ScaleMode, Window, WindowOptions};
 
 /// The smallest window scale the Display Options page offers.
@@ -129,6 +130,8 @@ pub struct DisplaySettings {
     pub fit: FitMode,
     pub filter: Filter,
     pub aspect: PixelAspect,
+    /// Which engine shows the frame (`modern`); Classic by default.
+    pub graphics: Graphics,
 }
 
 impl Default for DisplaySettings {
@@ -140,6 +143,7 @@ impl Default for DisplaySettings {
             fit: FitMode::PixelPerfect,
             filter: Filter::Nearest,
             aspect: PixelAspect::Dos43,
+            graphics: Graphics::Classic,
         }
     }
 }
@@ -166,11 +170,12 @@ impl DisplaySettings {
     /// The persistable form (`saves/display.cfg`).
     pub fn to_config(self) -> String {
         format!(
-            "scale={}\nfit={}\nfilter={}\naspect={}\n",
+            "scale={}\nfit={}\nfilter={}\naspect={}\ngraphics={}\n",
             self.scale.clamp(MIN_SCALE, MAX_SCALE),
             self.fit.key(),
             self.filter.key(),
-            self.aspect.key()
+            self.aspect.key(),
+            self.graphics.key()
         )
     }
 
@@ -197,6 +202,7 @@ impl DisplaySettings {
                 "fit" => settings.fit = FitMode::from_key(value)?,
                 "filter" => settings.filter = Filter::from_key(value)?,
                 "aspect" => settings.aspect = PixelAspect::from_key(value)?,
+                "graphics" => settings.graphics = Graphics::from_key(value)?,
                 _ => {}
             }
         }
@@ -306,7 +312,41 @@ pub fn compose(
         return;
     }
     let rect = settings.rect((width, height));
-    blit(logical, target, width, rect, settings.filter);
+    match settings.graphics {
+        Graphics::Classic => blit(logical, target, width, rect, settings.filter),
+        Graphics::Modern => ModernRenderer::new().render(logical, target, width, rect),
+    }
+}
+
+/// Bilinear resampling of a `source_width` by `source_height` image into `rect` of `target` (a
+/// `width`-pixel-wide buffer): the modern engine's last step.
+pub fn resample_linear(
+    source: &[u32],
+    source_width: usize,
+    source_height: usize,
+    target: &mut [u32],
+    width: usize,
+    rect: Rect,
+) {
+    if rect.width == 0 || rect.height == 0 || width == 0 || source_width == 0 {
+        return;
+    }
+    let columns: Vec<(usize, usize, u32)> = (0..rect.width)
+        .map(|dx| linear_row(dx, rect.width, source_width))
+        .collect();
+    for dy in 0..rect.height {
+        let row = (rect.y + dy) * width + rect.x;
+        let Some(destination) = target.get_mut(row..row + rect.width) else {
+            continue;
+        };
+        let (y0, y1, fy) = linear_row(dy, rect.height, source_height);
+        let (upper, lower) = (&source[y0 * source_width..], &source[y1 * source_width..]);
+        for (pixel, (x0, x1, fx)) in destination.iter_mut().zip(&columns) {
+            let top = mix(upper[*x0], upper[*x1], *fx);
+            let bottom = mix(lower[*x0], lower[*x1], *fx);
+            *pixel = mix(top, bottom, fy);
+        }
+    }
 }
 
 /// Copy the logical frame into `rect` of `target`, sampling with `filter`.
@@ -468,6 +508,7 @@ pub fn alt_held() -> bool {
 #[derive(Default)]
 pub struct Presenter {
     buffer: Vec<u32>,
+    modern: ModernRenderer,
     size: (usize, usize),
     rect: Rect,
     valid: bool,
@@ -503,7 +544,10 @@ impl Presenter {
             self.rect = rect;
             self.valid = true;
         }
-        blit(logical, &mut self.buffer, size.0, rect, settings.filter);
+        match settings.graphics {
+            Graphics::Classic => blit(logical, &mut self.buffer, size.0, rect, settings.filter),
+            Graphics::Modern => self.modern.render(logical, &mut self.buffer, size.0, rect),
+        }
         window
             .update_with_buffer(&self.buffer, size.0, size.1)
             .map_err(|error| format!("Window update: {error}"))
@@ -513,6 +557,41 @@ impl Presenter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_engines_share_the_frame_and_only_modern_smooths_it() {
+        // A frame with a diagonal staircase: the two engines show the same logical pixels,
+        // the frame itself is never written, and a flat area stays the same colour.
+        let mut logical = vec![0x0c0c4cu32; LOGICAL_WIDTH * LOGICAL_HEIGHT];
+        for step in 0..100 {
+            for x in 0..=step {
+                logical[step * LOGICAL_WIDTH + x + 100] = 0xffffff;
+            }
+        }
+        let before = logical.clone();
+        let classic = DisplaySettings::default();
+        let modern = DisplaySettings {
+            graphics: Graphics::Modern,
+            ..classic
+        };
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        compose(&logical, &classic, 1280, 960, &mut a);
+        compose(&logical, &modern, 1280, 960, &mut b);
+        assert_eq!(logical, before);
+        assert_ne!(a, b);
+        // Far from the staircase the two agree exactly.
+        assert_eq!(a[900 * 1280 + 40], b[900 * 1280 + 40]);
+        // Classic is the original's blocky nearest scaling; Modern adds in-between shades on
+        // the edge only.
+        let shades = |image: &[u32]| {
+            let mut seen: Vec<u32> = image.to_vec();
+            seen.sort_unstable();
+            seen.dedup();
+            seen.len()
+        };
+        assert_eq!(shades(&a), 2);
+        assert!(shades(&b) > 2);
+    }
 
     #[test]
     fn the_defaults_are_the_ports_existing_1280x960_4_3_window() {
@@ -713,6 +792,7 @@ mod tests {
             fit: FitMode::FillWindow,
             filter: Filter::Linear,
             aspect: PixelAspect::Square,
+            graphics: crate::modern::Graphics::Modern,
         };
         assert_eq!(
             DisplaySettings::from_config(&settings.to_config()),

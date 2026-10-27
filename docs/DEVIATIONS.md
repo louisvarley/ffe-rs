@@ -129,6 +129,7 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 
 | ID | Feature | Status | Dependencies / notes |
 |---|---|---|---|
+| ENH-021 | Modern graphics engine switch (`modern::Graphics`): Classic / Modern on Port Options and Ctrl+G, persisted as `graphics=` | implemented | Presentation only: the engine reads the finished 320x200 frame and never touches game state; Classic is the default and unchanged. First technique: edge-directed 4x upscaling (Scale2x twice) and a smooth fit. See `docs/notes/modern-graphics.md`. |
 | ENH-001 | HD textures (`upscaled.bin`, per-asset fallback) | proposed | Classic ignores the pack. |
 | ENH-002 | Native-resolution rendering | proposed | — |
 | ENH-003 | Smooth texture filtering | proposed | native-res |

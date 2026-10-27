@@ -299,7 +299,7 @@ window.FFE_BURNDOWN = {
       tasks: [
         { id: "packs-1", title: "Upscale export and pack commands", status: "todo" },
         { id: "packs-2", title: "Pack registry, validation and fallback", status: "todo" },
-        { id: "packs-3", title: "Live Classic/Enhanced switching", status: "todo" },
+        { id: "packs-3", title: "Live Classic/Enhanced switching", status: "in-progress", version: "modern-1" },
         { id: "packs-4", title: "Pack changes never change gameplay traces", status: "todo" }
       ]
     },
@@ -308,6 +308,7 @@ window.FFE_BURNDOWN = {
       title: "Enhanced renderer (phase 7)",
       status: "planned",
       tasks: [
+        { id: "enhanced-0", title: "Separate modern engine, the Classic/Modern switch and a first technique (edge-directed upscaling)", status: "done", version: "modern-1" },
         { id: "enhanced-1", title: "Native resolution, filtering and MSAA", status: "todo" },
         { id: "enhanced-2", title: "Modest bloom", status: "todo" },
         { id: "enhanced-3", title: "Planet atmosphere and shadows", status: "todo" },
@@ -917,6 +918,11 @@ window.FFE_BURNDOWN = {
       remaining: 101,
       note: "Source-parity implementation: restored source 1 t delivered hold (PAR-19 done); remaining touched items stay in progress. Corrected surface-port rotating coordinates, F994 bay sentinel/F997 starting view, F1013 integration/order, fitted drive failures, signed selected-speed saves, new commander restart and destruction camera. F938/F929 pass 192 executed-source cases. Source atmosphere, effect evolution and full route/event replay remain open."
 
+    },
+    {
+      date: "2026-10-27",
+      remaining: 101,
+      note: "Modern graphics engine, first slice: a separate presentation module (ffe_rs::modern) that reads the finished 320x200 frame and never touches game state; Classic/Modern rows on Port Options and Ctrl+G switch it live, persisted as graphics= in config.cfg; first technique is edge-directed 4x upscaling (Scale2x twice) with a smooth fit. One item added and completed (enhanced-0); packs-3 in progress. Remaining count unchanged."
     }
   ]
 };

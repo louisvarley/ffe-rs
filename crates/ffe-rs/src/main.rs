@@ -472,6 +472,15 @@ fn write_display_capture(dir: &Path, cache: &ffe_content::VerifiedCache) -> Resu
     for (name, width, height, settings) in [
         ("display-default-4x.png", 1280, 960, default),
         (
+            "display-modern-4x.png",
+            1280,
+            960,
+            DisplaySettings {
+                graphics: ffe_rs::modern::Graphics::Modern,
+                ..default
+            },
+        ),
+        (
             "display-2x.png",
             640,
             480,
@@ -1443,6 +1452,13 @@ fn run() -> Result<(), String> {
             }
         }
         let pressed = |key| inp.is_key_pressed(key, KeyRepeat::No);
+        // Ctrl+G flips between the Classic and the Modern graphics engine at once. It is
+        // presentation only (`modern`): the game's frame, state and clock are untouched.
+        let graphics_chord = inp.is_key_down(Key::LeftCtrl) || inp.is_key_down(Key::RightCtrl);
+        if active && graphics_chord && pressed(Key::G) {
+            prefs.display.graphics = prefs.display.graphics.flipped();
+            message = format!("{} (Ctrl+G).", prefs.display.graphics.label());
+        }
         // F1104's death sequence: the external-view hold, then F917's spinning
         // tombstone. Flight controls and traffic stay held throughout; F1107's
         // timeout starts the screen. There are no game-over options here: the
@@ -2124,7 +2140,7 @@ fn run() -> Result<(), String> {
                 }
                 if [Key::F3, Key::G]
                     .into_iter()
-                    .any(|key| input::galaxy_map_key(key) && pressed(key))
+                    .any(|key| input::galaxy_map_key(key) && pressed(key) && !graphics_chord)
                     || console_click == Some(Click::Screen(3))
                 {
                     toggle(nav, NavView::Galaxy);

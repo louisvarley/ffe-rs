@@ -196,6 +196,7 @@ fn display_page_sets_the_port_only_presentation_options() {
             fit: FitMode::FillWindow,
             filter: Filter::Linear,
             aspect: PixelAspect::Square,
+            ..DisplaySettings::default()
         }
     );
     // Out-of-range scale rows do nothing.

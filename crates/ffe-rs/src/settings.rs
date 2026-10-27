@@ -454,6 +454,7 @@ mod tests {
             fit: FitMode::FillWindow,
             filter: Filter::Linear,
             aspect: PixelAspect::Square,
+            graphics: crate::modern::Graphics::Modern,
         };
         save_display(&path, settings).unwrap();
         assert_eq!(load_display(&path), Some(settings));

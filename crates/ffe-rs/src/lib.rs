@@ -22,6 +22,7 @@ pub mod messages;
 pub mod missile;
 pub mod model_lab;
 pub mod model_viewer;
+pub mod modern;
 pub mod navigation;
 pub mod original_flight;
 pub mod outfitting;
