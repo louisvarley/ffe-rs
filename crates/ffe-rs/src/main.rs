@@ -2146,6 +2146,14 @@ fn run() -> Result<(), String> {
                 // icon (record 0x45 at (17,174), whose DATA_007259 area is the
                 // same action) or the right-hand hot area 0x0f, with or without
                 // the map open.
+                // F1056's action 0xd0 under the autopilot lamp: F1018 while
+                // the autopilot flies (mode 2), else F1020.
+                let lamp_click = !engines_page
+                    && !(status_page && status_section == 0)
+                    && click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
+                        == Some(ffe_rs::console::SystemsClick::Autopilot);
+                let autopilot_off_click = lamp_click && nav.target.is_some();
+                let autopilot_on_click = lamp_click && nav.target.is_none();
                 let jump_icon = !engines_page
                     && !(status_page && status_section == 0)
                     && click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
@@ -2247,7 +2255,10 @@ fn run() -> Result<(), String> {
                         nav.view = NavView::Closed;
                     }
                 }
-                if pressed(Key::Backspace) || console_click == Some(Click::AutopilotOff) {
+                if pressed(Key::Backspace)
+                    || console_click == Some(Click::AutopilotOff)
+                    || autopilot_off_click
+                {
                     // F1018: leave the autopilot and drop the set speed to
                     // DATA_008866 (0), so the ship brakes instead of coasting on
                     // at the speed the autopilot had set. The source also leaves
@@ -2632,7 +2643,10 @@ fn run() -> Result<(), String> {
                             }
                         }
                     }
-                    if pressed(Key::K) || console_click == Some(Click::Autopilot) {
+                    if pressed(Key::K)
+                        || console_click == Some(Click::Autopilot)
+                        || autopilot_on_click
+                    {
                         if state.loadout.general & (1 << 21) == 0 {
                             message = "No autopilot fitted.".to_owned();
                         } else if nav.landed_view() || nav.sequence.is_some() {
@@ -6381,6 +6395,8 @@ fn run() -> Result<(), String> {
             // altitude at least 0xb71b00 (`+0xc6` bit 0x40) and F903's jump
             // possible (`+0xc7` bit 0).
             p268: u8::from(nav.as_ref().is_some_and(|nav| nav.destination.is_some())),
+            // `player+0xec`: a navigation target is locked (the 0x49 arrow).
+            ec: u8::from(nav.as_ref().is_some_and(|nav| nav.locked.is_some())),
             status: nav.as_ref().map_or(0, |nav| {
                 (if nav.altitude >= ffe_rs::navigation::HYPERSPACE_ALTITUDE {
                     0x40

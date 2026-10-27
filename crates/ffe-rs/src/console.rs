@@ -255,7 +255,7 @@ impl Click {
 /// The normal console's ship-diagram hot areas (`DATA_007259`, installed by F1005
 /// from F1117), in the table's order: the two engine nozzles are action 9 (the
 /// launch action: engines on), `(24,158)` action `0x74` (`t`, the target lamp,
-/// which `DATA_007684` also covers), `(24,166)` action `0xd0` (not routed), the
+/// which `DATA_007684` also covers), `(24,166)` action `0xd0` (the autopilot toggle), the
 /// jump icon (record 0x45 at (17,174)) action `0x68` (`h`), and the two wings
 /// action `0x75` (`u`, the undercarriage). As in `DATA_007684`, a click inside
 /// several takes the last. F1120's equipment page removes them and installs its
@@ -268,7 +268,7 @@ const SYSTEMS_AREAS: [(Area, Option<SystemsClick>); 7] = [
     (ENGINE_AREAS[0], Some(SystemsClick::EnginesOn)),
     (ENGINE_AREAS[1], Some(SystemsClick::EnginesOn)),
     ((24, 158, 41, 166), None),
-    ((24, 166, 41, 174), None),
+    ((24, 166, 41, 174), Some(SystemsClick::Autopilot)),
     (JUMP_AREA, Some(SystemsClick::Hyperspace)),
     (GEAR_AREAS[0], Some(SystemsClick::Undercarriage)),
     (GEAR_AREAS[1], Some(SystemsClick::Undercarriage)),
@@ -278,6 +278,9 @@ const SYSTEMS_AREAS: [(Area, Option<SystemsClick>); 7] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemsClick {
     EnginesOn,
+    /// Action `0xd0` under the autopilot lamp (0x49): F1018 when the
+    /// autopilot is flying, else F1020.
+    Autopilot,
     Hyperspace,
     Undercarriage,
 }
