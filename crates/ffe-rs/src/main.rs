@@ -3783,25 +3783,16 @@ fn run() -> Result<(), String> {
                             "Docking clearance cancelled.".to_owned()
                         }
                         Some(nav) => match nav.request_clearance(ship) {
+                            // The executable's traffic-control strings.
                             Some((index, Reply::Granted(bay))) => format!(
-                                "{}: {} clearance {} (bay {}). {}",
+                                "{}: Clearance {} Proceed to bay {}.",
                                 nav.bodies[index].name,
-                                if nav.bodies[index].kind == NavKind::Starport {
-                                    "landing"
-                                } else {
-                                    "docking"
-                                },
                                 if bay.fresh {
-                                    "granted"
+                                    "granted."
                                 } else {
-                                    "already granted"
+                                    "already granted."
                                 },
                                 bay.index + 1,
-                                if nav.bodies[index].kind == NavKind::Starport {
-                                    "Land on that pad."
-                                } else {
-                                    "Enter the slot on the docking face."
-                                }
                             ),
                             Some((index, other)) => {
                                 format!("{}: {}.", nav.bodies[index].name, refusal(other))
@@ -4260,7 +4251,7 @@ fn run() -> Result<(), String> {
                                 gear_warned = true;
                                 pending_log.add(
                                     Source::Ship,
-                                    "Undercarriage is lowered: it will be damaged by micrometeorites unless retracted.",
+                                    "Undercarriage down.   (It may be damaged by micrometeorites)",
                                 );
                             }
                         }
@@ -5002,6 +4993,10 @@ fn run() -> Result<(), String> {
             views.mode = ViewMode::Front;
             message = "Missile view ended.".to_owned();
         }
+        screen.equipment_status = (state.mode == ffe_rs::flight::Mode::Flight
+            && status_page
+            && status_section == 0)
+            .then(|| equipment_status(&cache, &state, nav.as_ref(), scene.as_ref(), session.total));
         screen.profile =
             if state.mode == ffe_rs::flight::Mode::Flight && status_page && status_section == 1 {
                 nav.as_ref().map(|nav| nav.profile(death::COMMANDER_NAME))
@@ -6720,6 +6715,94 @@ fn clock_runs(
     model_viewer: bool,
 ) -> bool {
     active && !paused && !prefs_open && !death && !model_lab && !model_viewer
+}
+
+/// F283's ship equipment status page for the player's ship.
+fn equipment_status(
+    cache: &ffe_content::VerifiedCache,
+    state: &Flight,
+    nav: Option<&ffe_rs::navigation::Navigator>,
+    scene: Option<&ModelViewer>,
+    seconds: f64,
+) -> ffe_rs::screen::EquipmentStatus {
+    use ffe_core::equipment::{equipment, Category};
+    let name_of = |category: Category, code: u8| {
+        equipment()
+            .iter()
+            .find(|item| item.category == category && item.code == code)
+            .map(|item| item.name.to_owned())
+    };
+    let ship = ffe_rs::ships::model_name(cache, state.ship).unwrap_or_default();
+    // 0x9c12: the drive and its ranges, the hull and the shield generators.
+    let drive = name_of(Category::Drive, state.loadout.drive).unwrap_or_else(|| "None".to_owned());
+    let (max, now) = nav.and_then(|nav| nav.drive_ranges()).unwrap_or((0, 0));
+    let ly = |value: i32| format!("{}.{:02}", value / 100, value % 100);
+    let hull = if state.hull[1] > 0 {
+        f64::from(state.hull[0]) * 100.0 / f64::from(state.hull[1])
+    } else {
+        100.0
+    };
+    let status = vec![
+        format!("Drive System:\t{drive} (max.{} ly)", ly(max)),
+        format!("Hull Condition:\t{hull:.1}%\t(current {} ly)", ly(now)),
+        format!(
+            "Shield Generators:\t{} unit(s)",
+            state.loadout.shield_generators
+        ),
+    ];
+    // DATA_005106 by the rotated general word: the record whose code is the
+    // bit index ^ 0x10 (F393's selector).
+    let equipment = (0u8..32)
+        .filter(|code| state.loadout.general & (1 << ((code ^ 0x10) & 0x1f)) != 0)
+        .filter_map(|code| name_of(Category::General, code))
+        .map(|name| (name, false))
+        .collect();
+    let mounts = scene
+        .and_then(|scene| scene.ship_stats(state.ship))
+        .map_or(1, |stats| stats.gun_mounts.max(0) as usize);
+    let laser = |code: u8| {
+        if code == 0 {
+            "Empty".to_owned()
+        } else {
+            name_of(Category::Laser, code).unwrap_or_else(|| "Empty".to_owned())
+        }
+    };
+    const MOUNTS: [&str; 5] = [
+        "Front Gun Mounting",
+        "Rear Gun Mounting",
+        "Top Turret Mounting",
+        "Bottom Turret Mounting",
+        "Turrets T-B",
+    ];
+    let lasers_fitted = state.combat.lasers;
+    let mut lasers = Vec::new();
+    let mut mount = 0;
+    while mount < mounts.min(4) {
+        if mounts == 4 && mount == 2 {
+            lasers.push((
+                MOUNTS[4].to_owned(),
+                format!("{} - {}", laser(lasers_fitted[2]), laser(lasers_fitted[3])),
+                0x1a * 2,
+            ));
+            mount += 2;
+        } else {
+            lasers.push((
+                MOUNTS[mount].to_owned(),
+                laser(lasers_fitted[mount]),
+                0x2d * 2,
+            ));
+            mount += 1;
+        }
+    }
+    ffe_rs::screen::EquipmentStatus {
+        title: format!("SHIP EQUIPMENT STATUS - {ship}"),
+        status,
+        equipment,
+        lasers,
+        ship: state.ship,
+        tics: (seconds * 65_536.0) as u32,
+        gear: state.gear,
+    }
 }
 
 /// Where the pad world's planet and starport are now.

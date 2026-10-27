@@ -1598,10 +1598,8 @@ pub enum RegionTouch {
 /// Why traffic control said no (the original's 0x98b7..0x98b9 messages).
 pub fn refusal(reply: Reply) -> &'static str {
     match reply {
-        Reply::Fined => "docking refused: outstanding fines",
-        Reply::Busy => "traffic control is busy with another ship",
-        Reply::Full => "all bays are full",
-        Reply::Granted(_) => "clearance granted",
+        Reply::Fined | Reply::Busy | Reply::Full => "CLEARANCE DENIED",
+        Reply::Granted(_) => "Clearance granted",
     }
 }
 
@@ -3160,9 +3158,8 @@ impl Navigator {
         // F1022 posts its message only while DATA_008873 is clear, then sets
         // it; the port keeps that per port until the next landing or launch.
         let warning = (self.warned_at != Some(index)).then(|| {
-            // Message 0x98be; the comms strings are not in the cache, so this
-            // is the port's wording.
-            format!("{name}: you have no clearance to land here.")
+            // Message 0x98be, the executable's string.
+            format!("{name}: You do not have clearance.")
         });
         if self.cleared(index) {
             let bay = self
@@ -4519,6 +4516,23 @@ impl Navigator {
             .map(|report| report.max_range)
     }
 
+    /// F283's F899 call: the drive's maximum range and the range on the fuel
+    /// carried, in hundredths of a light year.
+    pub fn drive_ranges(&self) -> Option<(i32, i32)> {
+        let drive = self.drive?;
+        let report = jump_plan(
+            &self.drives()?,
+            drive.mass,
+            drive.class,
+            1,
+            drive.fuel,
+            false,
+            true,
+        )
+        .ok()?;
+        Some((report.max_range, report.range_now.max(0)))
+    }
+
     /// The distance from the current system to system `index`, in the drive's units.
     pub fn range_to(&self, index: usize) -> Option<i32> {
         Some(star_distance(
@@ -5088,10 +5102,14 @@ impl Navigator {
             // A refusal does not silently disengage F742; F745 retries.
             let fine = self.fine_at(index);
             match self.starport(index).request_docking(PLAYER, true, fine) {
-                Reply::Granted(_) => {
+                Reply::Granted(bay) => {
                     self.final_leg = true;
                     self.clearance_granted = true;
-                    self.autopilot_notice(format!("{}: clearance granted.", body.name));
+                    self.autopilot_notice(format!(
+                        "{}: Clearance granted. Proceed to bay {}.",
+                        body.name,
+                        bay.index + 1
+                    ));
                     // The original's next accelerated AI tick runs F745/F746 at
                     // once; one accelerated frame of physics in between would
                     // drop the ship from the approach point onto the port.

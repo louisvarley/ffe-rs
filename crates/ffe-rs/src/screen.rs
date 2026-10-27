@@ -232,6 +232,23 @@ pub struct SystemMissile {
 /// clicks them now (the original's navigation is the `n` console icon).
 pub const MAP_BUTTONS: [(i32, i32, &str); 2] = [(2, 62, "SYSTEMS"), (66, 150, "THIS SYSTEM")];
 
+/// F283's page: everything it prints, resolved by the game loop.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EquipmentStatus {
+    /// `0x9c04`: "SHIP EQUIPMENT STATUS - " and the ship's name.
+    pub title: String,
+    /// `0x9c12`'s three lines, columns split at F1399's tab stops by '\t'.
+    pub status: Vec<String>,
+    /// The fitted general equipment's names (`DATA_005106`) and whether each
+    /// is damaged.
+    pub equipment: Vec<(String, bool)>,
+    /// The gun mounts: mount name (`0x9870..`), laser(s), and the tab x.
+    pub lasers: Vec<(String, String, usize)>,
+    pub ship: u32,
+    pub tics: u32,
+    pub gear: u16,
+}
+
 pub struct Screen {
     pub pixels: Vec<u32>,
     frame: Vec<u32>,
@@ -341,6 +358,8 @@ pub struct Screen {
     /// F312's F2 profile page, when it is open. The original draws it over the
     /// upper view; the console stays below.
     pub profile: Option<ffe_core::status::Profile>,
+    /// F2's page 0, F283's ship equipment status (drawn over the view).
+    pub equipment_status: Option<EquipmentStatus>,
     /// The game date and time header `F272` writes before the entries.
     pub clock: String,
     /// The console's mutable `DATA_005100` state, derived from the view and ship
@@ -788,6 +807,7 @@ impl Screen {
             messages: MessageLog::new(),
             messages_visible: true,
             profile: None,
+            equipment_status: None,
             clock: String::new(),
             console: Console::new(),
             gauges: [None, None, None],
@@ -1408,6 +1428,77 @@ impl Screen {
     /// jurisdiction's record at (4, 75), and medals/permits at (4, 132). The
     /// positions and strings are from `DATA_005136`/`DATA_005189` and the
     /// executed original's frame `docs/evidence/status/original-profile.png`.
+    /// F283's ship equipment status page: F318's title (`0x9c04` and the
+    /// ship's name) at (30,5); F282's `0x9c12` block at (5,15) with the
+    /// `0xfd` tab stops at 68 and 130; the fitted general equipment in two
+    /// columns at x 5 and 96 from y 47 (9-pixel lines, colour 0x11, 0x10 when
+    /// damaged); the gun mounts from (5,125) in 10-pixel lines (`0x9c0c`,
+    /// `0x9c0d`'s turret pair); and F957's spinning ship model in the
+    /// viewport x 189..317, y 2..130.
+    fn draw_equipment_status(&mut self, page: &EquipmentStatus, scene: Option<&ModelViewer>) {
+        const TEXT: u8 = 0x0f;
+        self.frame[..320 * VIEW_HEIGHT].fill(0);
+        if let Some(scene) = scene {
+            self.draw_spinning_model(scene, page.ship, page.tics, page.gear);
+        }
+        self.text(30, 5, &page.title, TEXT);
+        for (row, line) in page.status.iter().enumerate() {
+            let y = 15 + row * 8;
+            for (column, part) in line.split('\t').enumerate() {
+                let x = [5, 68, 130][column.min(2)];
+                self.text(x, y, part, TEXT);
+            }
+        }
+        let per_column = if page.equipment.len() > 16 {
+            page.equipment.len().div_ceil(2)
+        } else {
+            8
+        };
+        for (index, (name, damaged)) in page.equipment.iter().enumerate() {
+            let (x, y) = if index < per_column {
+                (5, 47 + index * 9)
+            } else {
+                (0x60, 47 + (index - per_column) * 9)
+            };
+            if y + 8 > 125 {
+                continue;
+            }
+            self.text(x, y, name, if *damaged { 0x10 } else { 0x11 });
+        }
+        for (row, (mount, laser, tab)) in page.lasers.iter().enumerate() {
+            let y = 125 + row * 10;
+            self.text(5, y, &format!("{mount}:"), TEXT);
+            self.text(*tab, y, laser, TEXT);
+        }
+    }
+
+    /// F957: a model turning in the status viewport (x 189..317, y 2..130),
+    /// lit from the default direction, at a depth that fits its radius.
+    fn draw_spinning_model(&mut self, scene: &ModelViewer, model: u32, tics: u32, gear: u16) {
+        let Some(radius) = scene.model_radius(model) else {
+            return;
+        };
+        let z = 256.0 * f64::from(radius.max(1)) / 44.0;
+        let origin = [93.0 * z / 256.0, 13.0 * z / 256.0, z];
+        let angle = f64::from(tics) / 65_536.0 * std::f64::consts::TAU / 8.0;
+        let (sin, cos) = angle.sin_cos();
+        let rows = [[cos, 0.0, -sin], [0.0, 1.0, 0.0], [sin, 0.0, cos]];
+        let tilt = 0.35_f64;
+        let rows = rows.map(|row| {
+            [
+                row[0],
+                row[1] * tilt.cos() - row[2] * tilt.sin(),
+                row[1] * tilt.sin() + row[2] * tilt.cos(),
+            ]
+        });
+        let inputs = AnimationInputs::original(tics, gear, &scene.shades());
+        if let Ok(frame) =
+            scene.render_scene_with(model, rows, origin, scene.light_direction(), &inputs)
+        {
+            self.draw_shapes(scene, &frame.shapes);
+        }
+    }
+
     fn draw_profile(&mut self, profile: &ffe_core::status::Profile) {
         const TEXT: u8 = 0x0f;
         self.text(
@@ -1941,6 +2032,9 @@ impl Screen {
         // gone (they covered the shields/hull rows, the Autopilot and Set/Act
         // lines, and the lift's lower rows).
         if state.mode == Mode::Flight {
+            if let Some(page) = self.equipment_status.clone() {
+                self.draw_equipment_status(&page, scene);
+            }
             if let Some(profile) = self.profile.clone() {
                 // F312's profile page is drawn over the upper view; the console
                 // below it is untouched.
