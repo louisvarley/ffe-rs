@@ -41,7 +41,17 @@ pub const PORT: usize = 5;
 pub const DISPLAY: usize = 6;
 /// Port addition: where the autopilot asks for docking clearance.
 pub const DOCKING: usize = 7;
-pub const PAGES: usize = 8;
+/// Port addition: how busy systems are, and whether police and pirates fly.
+pub const WORLD: usize = 8;
+pub const PAGES: usize = 9;
+
+/// The World Options page's space traffic levels. `Original` is F688's
+/// traffic alone; the others add the port's ambient ships ([`TRAFFIC_EXTRA`]).
+pub const TRAFFIC_LABELS: [&str; 4] = ["Original", "Off", "Medium", "Heavy"];
+/// Ambient ships added per system for each [`TRAFFIC_LABELS`] level.
+pub const TRAFFIC_EXTRA: [usize; 4] = [0, 0, 8, 16];
+/// The `Off` level: no traffic at all.
+pub const TRAFFIC_OFF: usize = 1;
 
 /// The station approach distances the Docking Options page offers, in km.
 /// F741's indoor-station offset is the z word 0xfa0 (4,096 m): index 0.
@@ -166,6 +176,9 @@ pub enum Action {
     /// Port-only docking approach choices (indices into the tables above).
     StationApproach(usize),
     StarportApproach(usize),
+    /// Port-only world choices: a [`TRAFFIC_LABELS`] index, and police/pirates.
+    Traffic(usize),
+    Hostiles(bool),
     /// Port-only display choices (window scale 1..=6).
     WindowScale(usize),
     DisplayFit(FitMode),
@@ -266,6 +279,10 @@ pub struct Prefs {
     pub station_approach: usize,
     /// Port addition: [`STARPORT_APPROACH_KM`] index for the starport approach.
     pub starport_approach: usize,
+    /// Port addition: [`TRAFFIC_LABELS`] index; 0 (Original) by default.
+    pub traffic: usize,
+    /// Port addition: police and pirates fly (the original's behaviour).
+    pub hostiles: bool,
     /// Port-only presentation choices; persisted in `saves/display.cfg`.
     pub display: DisplaySettings,
     /// Borderless full-screen. Session-only: a saved full-screen launch would
@@ -289,6 +306,8 @@ impl Default for Prefs {
             modern: false,
             station_approach: 0,
             starport_approach: 0,
+            traffic: 0,
+            hostiles: true,
             display: DisplaySettings::default(),
             fullscreen: false,
         }
@@ -564,6 +583,15 @@ impl Prefs {
                     true,
                     18,
                 ));
+                rows.push(row(
+                    32,
+                    124,
+                    "World Options",
+                    Action::Page(WORLD),
+                    Mark::Action,
+                    true,
+                    18,
+                ));
                 rows.push(main_menu(32, 136));
             }
             DOCKING => {
@@ -585,6 +613,40 @@ impl Prefs {
                         label,
                         Action::StarportApproach(index),
                         Mark::Radio(self.starport_approach == index),
+                        true,
+                        15,
+                    ));
+                }
+                rows.push(row(
+                    32,
+                    126,
+                    "Port Options",
+                    Action::Page(PORT),
+                    Mark::Action,
+                    true,
+                    18,
+                ));
+                rows.push(main_menu(32, 136));
+            }
+            WORLD => {
+                for (index, label) in TRAFFIC_LABELS.iter().enumerate() {
+                    rows.push(row(
+                        32,
+                        38 + 10 * index as i32,
+                        label,
+                        Action::Traffic(index),
+                        Mark::Radio(self.traffic == index),
+                        true,
+                        15,
+                    ));
+                }
+                for (index, label) in ["Enabled (original)", "Disabled"].into_iter().enumerate() {
+                    rows.push(row(
+                        176,
+                        38 + 10 * index as i32,
+                        label,
+                        Action::Hostiles(index == 0),
+                        Mark::Radio(self.hostiles == (index == 0)),
                         true,
                         15,
                     ));
@@ -828,6 +890,44 @@ impl Prefs {
                     colour: 18,
                 });
             }
+            WORLD => {
+                texts.push(Text {
+                    x: 32,
+                    y: 18,
+                    text: "World options:",
+                    colour: 18,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 28,
+                    text: "Space traffic:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 176,
+                    y: 28,
+                    text: "Police and pirates:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 86,
+                    text: "Medium and Heavy add ships that fly between",
+                    colour: 15,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 94,
+                    text: "the planets and ports. New systems only.",
+                    colour: 15,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 146,
+                    text: "Port additions, not in the original DOS release.",
+                    colour: 18,
+                });
+            }
             DOCKING => {
                 texts.push(Text {
                     x: 32,
@@ -955,6 +1055,14 @@ impl Prefs {
                 self.starport_approach = index;
                 Activate::None
             }
+            Action::Traffic(index) if index < TRAFFIC_LABELS.len() => {
+                self.traffic = index;
+                Activate::None
+            }
+            Action::Hostiles(on) => {
+                self.hostiles = on;
+                Activate::None
+            }
             Action::WindowScale(scale) if (MIN_SCALE..=MAX_SCALE).contains(&(scale as u32)) => {
                 self.display.scale = scale as u32;
                 Activate::None
@@ -988,6 +1096,7 @@ impl Prefs {
             | Action::Sound(_)
             | Action::StationApproach(_)
             | Action::StarportApproach(_)
+            | Action::Traffic(_)
             | Action::WindowScale(_)
             | Action::Ignored => Activate::None,
         }

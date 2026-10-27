@@ -1164,6 +1164,12 @@ pub struct Navigator {
     /// Port addition: the starport approach altitude in km, `None` for F741's
     /// 0x1770 word.
     pub starport_approach_km: Option<u32>,
+    /// Port addition (World Options): ambient traders added to each system's
+    /// F688 traffic, and whether police and pirates fly. `traffic_off` spawns
+    /// no traffic at all.
+    pub traffic_extra: usize,
+    pub traffic_off: bool,
+    pub hostiles: bool,
     autopilot_notice: Option<String>,
     /// The body the player has locked on (clicked in the view or cycled to): what the
     /// autopilot button flies to.
@@ -2045,6 +2051,9 @@ impl Navigator {
             target: None,
             station_approach_km: None,
             starport_approach_km: None,
+            traffic_extra: 0,
+            traffic_off: false,
+            hostiles: true,
             autopilot_notice: None,
             locked: None,
             destination: None,
@@ -2233,6 +2242,43 @@ impl Navigator {
         // but no capture guarantee and no pirate placed at the pad.
         nav.spawn_traffic(cache, seat, launch_axis);
         Ok(nav)
+    }
+
+    /// Port addition (World Options): set the traffic choices and, for a new
+    /// game, respawn the start system's F687/F686 traffic with them (the
+    /// navigator spawns it before the preferences are known). Original
+    /// choices change nothing.
+    pub fn apply_world_options(
+        &mut self,
+        cache: &VerifiedCache,
+        extra: usize,
+        off: bool,
+        hostiles: bool,
+    ) {
+        self.traffic_extra = extra;
+        self.traffic_off = off;
+        self.hostiles = hostiles;
+        let Some(seat) = self.new_game.as_ref().map(|state| state.seat) else {
+            return;
+        };
+        if extra == 0 && !off && hostiles {
+            return;
+        }
+        let held: Vec<(usize, u8)> = self
+            .ships
+            .iter()
+            .filter(|ship| ship.bay.is_some())
+            .filter_map(|ship| Some((ship.station?, npc::traffic_id(ship.id))))
+            .collect();
+        for (station, id) in held {
+            self.starport(station).release(id);
+        }
+        self.ships.clear();
+        self.spawned = None;
+        let forward = self
+            .docked
+            .map_or([0.0, 0.0, 1.0], |index| self.bodies[index].orientation[2]);
+        self.spawn_traffic(cache, seat, forward);
     }
 
     /// This navigator's serialisable state. The system is identified by its
@@ -3387,7 +3433,12 @@ impl Navigator {
         player: [i64; 3],
         forward: [f64; 3],
     ) -> bool {
-        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::default(), 0)
+        let options = npc::SpawnOptions {
+            extra_traders: self.traffic_extra,
+            hostiles: self.hostiles,
+            ..npc::SpawnOptions::default()
+        };
+        self.spawn_traffic_with(cache, player, forward, options, 0)
     }
 
     /// F690's Thargoid branch with an explicit `F35(0x16)` limit: the hook a
@@ -3425,7 +3476,9 @@ impl Navigator {
         };
         let code = self.entries[self.current].params.code;
         let details = tables.details(code);
-        let system = npc::System::new(details, thargoids);
+        let mut system = npc::System::new(details, thargoids);
+        // F686: the new game's own pass (the first spawn of a new game).
+        system.start = self.new_game.is_some() && self.spawned.is_none();
         let allegiance = details.allegiance >> 6;
         let anchors: Vec<Anchor> = self
             .bodies
@@ -3443,21 +3496,29 @@ impl Navigator {
         let mut rng = npc::Random::new(seed, clock[1] ^ 0x4567_89ab);
         let mut ships = npc::restore(&self.persisted, player, 0);
         self.persisted.clear();
+        if !options.hostiles {
+            ships.retain(|ship| !matches!(ship.role, npc::Role::Pirate | npc::Role::Police));
+        }
         let base = ships.len() as u32;
-        for mut ship in npc::spawn(
-            player,
-            forward,
-            &anchors,
-            &system,
-            allegiance,
-            &mut rng,
-            options,
-            |model| crate::ships::npc_spec(cache, model),
-        ) {
+        let spawned = if self.traffic_off {
+            Vec::new()
+        } else {
+            npc::spawn(
+                player,
+                forward,
+                &anchors,
+                &system,
+                allegiance,
+                &mut rng,
+                options,
+                |model| crate::ships::npc_spec(cache, model),
+            )
+        };
+        for mut ship in spawned {
             ship.id += base;
             ships.push(ship);
         }
-        ships.truncate(npc::MAX_SHIPS);
+        ships.truncate(npc::MAX_SHIPS + options.extra_traders);
         // The ships being replaced may still hold bays in a traffic record. The
         // original's F651/F927 release the slot with the object; the port must
         // do the same when a spawn (a jump, or a scripted respawn) replaces the
@@ -3621,6 +3682,9 @@ impl Navigator {
     ) -> Vec<ShipEvent> {
         self.player_at = player;
         let mut events = Vec::new();
+        // The port holds hostile fire and missiles while the player is docked,
+        // on a pad or landed (see F931 below).
+        let exposed = self.docked.is_none() && self.landed.is_none();
         self.tick_effects(seconds, tics);
         if self.ships.is_empty() {
             return events;
@@ -3673,7 +3737,7 @@ impl Navigator {
                 station.as_ref(),
                 &mut requests,
             );
-            if let Some(launch) = ship.take_launch() {
+            if let Some(launch) = ship.take_launch().filter(|_| exposed) {
                 events.push(ShipEvent::MissileLaunch {
                     owner: launch.owner,
                     name: ship.name.clone(),
@@ -3706,8 +3770,11 @@ impl Navigator {
                 }
             }
         }
-        // F931: every hostile ship with a laser fires at the player's box.
-        for ship in &mut self.ships {
+        // F931: every hostile ship with a laser fires at the player's box,
+        // unless the player is docked, on a pad or landed: with the system's
+        // pirates orbiting the player's own port, a new commander would
+        // otherwise be shot before take-off.
+        for ship in self.ships.iter_mut().filter(|_| exposed) {
             if let Some(shot) = ship.fire(tics, player, player_radius) {
                 events.push(ShipEvent::Hit {
                     ship: shot.ship,

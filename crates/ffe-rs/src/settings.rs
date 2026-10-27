@@ -45,6 +45,9 @@ pub struct Config {
     /// Port addition: the Docking Options page's indices.
     pub station_approach: usize,
     pub starport_approach: usize,
+    /// Port addition: the World Options page's choices.
+    pub traffic: usize,
+    pub hostiles: bool,
     pub remap: BTreeMap<String, String>,
 }
 
@@ -61,6 +64,8 @@ impl Default for Config {
             sound: prefs.sound,
             station_approach: prefs.station_approach,
             starport_approach: prefs.starport_approach,
+            traffic: prefs.traffic,
+            hostiles: prefs.hostiles,
             remap: BTreeMap::new(),
         }
     }
@@ -89,6 +94,8 @@ impl Config {
         }
         out.push_str(&format!("station_approach={}\n", self.station_approach));
         out.push_str(&format!("starport_approach={}\n", self.starport_approach));
+        out.push_str(&format!("traffic={}\n", self.traffic));
+        out.push_str(&format!("police_pirates={}\n", on_off(self.hostiles)));
         out.push_str(&self.display.to_config());
         for (action, key) in &self.remap {
             out.push_str(&format!("bind.{action}={key}\n"));
@@ -144,6 +151,14 @@ impl Config {
                     }
                     config.starport_approach = parsed;
                 }
+                "traffic" => {
+                    let parsed: usize = value.parse().ok()?;
+                    if parsed >= crate::prefs::TRAFFIC_LABELS.len() {
+                        return None;
+                    }
+                    config.traffic = parsed;
+                }
+                "police_pirates" => config.hostiles = parse_on_off(value)?,
                 "shape_detail" => {
                     let parsed: usize = value.parse().ok()?;
                     if parsed > 3 {
@@ -365,6 +380,21 @@ mod tests {
             0,
             "the original's offset"
         );
+    }
+
+    #[test]
+    fn world_options_default_to_the_original_and_round_trip() {
+        let config = Config::default();
+        assert_eq!((config.traffic, config.hostiles), (0, true));
+        let config = Config {
+            traffic: 3,
+            hostiles: false,
+            ..Config::default()
+        };
+        let text = config.to_config();
+        assert!(text.contains("traffic=3\npolice_pirates=off\n"));
+        assert_eq!(Config::from_config(&text), Some(config));
+        assert_eq!(Config::from_config("version=2\ntraffic=4\n"), None);
     }
 
     #[test]

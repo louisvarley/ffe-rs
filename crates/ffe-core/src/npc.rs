@@ -699,6 +699,9 @@ pub struct Anchor {
 pub const ANCHOR_ORBIT: f64 = 2.5e6;
 /// The base distance ahead of the player a pirate group appears at.
 pub const PIRATE_DISTANCE: f64 = 3.5e6;
+/// How far outside the anchor's orbit a system entry's pirate group spawns
+/// (25 km): beyond [`laser::RANGE`] of the port, near enough to come in.
+pub const PIRATE_LURK: f64 = 25.0e6;
 /// Ships farther than this from the player are despawned (F927 recycles slots).
 pub const DESPAWN_RANGE: f64 = 30.0e6;
 /// F1536's model-0x9d flash stays for this many seconds (the original clears the
@@ -1789,6 +1792,11 @@ impl NpcShip {
         match self.state {
             State::Dead => self.death <= 0.0,
             State::Escaped => true,
+            // A ship with business in the system stays wherever it is: a
+            // trader flying to, docked at or leaving a station, and a hostile
+            // hunting the player. The original keeps every object until F927
+            // needs its slot; the port only recycles idle ships far away.
+            _ if self.station.is_some() || (self.hostile && self.role.hostile()) => false,
             _ => distance_between(self.position, player) > DESPAWN_RANGE,
         }
     }
@@ -2500,11 +2508,19 @@ pub struct System {
     /// `F35(0x16)` (`ffe.asm:45858`): the exclusive limit of F688's Thargoid
     /// draw, not the number of ships.
     pub thargoids: usize,
+    /// F686's flag (`DATA_009046` bit 0): the new game's own F688 pass. It
+    /// drops the patrol roll's `* 4`, so a system with danger byte 1 starts
+    /// with no pirates (`RND(1)` is always 0).
+    pub start: bool,
 }
 
 impl System {
     pub const fn new(details: Details, thargoids: usize) -> Self {
-        Self { details, thargoids }
+        Self {
+            details,
+            thargoids,
+            start: false,
+        }
     }
 }
 
@@ -2564,12 +2580,20 @@ pub fn counts_with_places(system: &System, places: usize, rng: &mut Random) -> C
     } else {
         0
     };
+    // F688: `RND(+6 << 2)` patrol groups (F698), without the shift on F686's
+    // new-game pass.
+    let patrol_limit = if system.start {
+        details.bytes[1]
+    } else {
+        details.bytes[1] << 2
+    };
+    let pirates = rng.bounded(patrol_limit) as usize;
     Counts {
         traders,
         thargoids,
         bay_ships,
         aux_traders,
-        pirates: details.bytes[1] as usize,
+        pirates,
         police: (details.bytes[2] > 0) as usize,
     }
 }
@@ -2595,6 +2619,13 @@ pub struct SpawnOptions {
     /// fixtures turn them off so their frames keep the ships they were built
     /// against.
     pub station_traffic: bool,
+    /// Port addition (World Options' space traffic): ambient traders added to
+    /// F688's, each starting near one place and flying to another to dock.
+    /// They are allowed past [`MAX_SHIPS`].
+    pub extra_traders: usize,
+    /// Port addition (World Options): police and pirates fly. Off spawns
+    /// neither F698's pirate groups nor the system's police.
+    pub hostiles: bool,
 }
 
 impl Default for SpawnOptions {
@@ -2603,6 +2634,8 @@ impl Default for SpawnOptions {
             guarantee: false,
             near_player: false,
             station_traffic: true,
+            extra_traders: 0,
+            hostiles: true,
         }
     }
 }
@@ -2615,6 +2648,8 @@ impl SpawnOptions {
         guarantee: true,
         near_player: true,
         station_traffic: false,
+        extra_traders: 0,
+        hostiles: true,
     };
 }
 
@@ -2647,16 +2682,27 @@ pub fn spawn(
         0
     };
     let mut counts = counts_with_places(system, place_count, rng);
-    let anchor = anchors.first().copied().unwrap_or(Anchor {
-        position: player,
-        radius: 1_000_000,
-        station: None,
-    });
+    // The port's stand-in for F702's system-wide placement is an orbit of one
+    // place: the one nearest the player, so the system's traffic, police and
+    // pirates are where the player is rather than at the first port listed.
+    let anchor = anchors
+        .iter()
+        .copied()
+        .min_by(|a, b| {
+            distance_between(a.position, player).total_cmp(&distance_between(b.position, player))
+        })
+        .unwrap_or(Anchor {
+            position: player,
+            radius: 1_000_000,
+            station: None,
+        });
     if options.guarantee {
         // The capture/test guarantee: a fresh system has something to label and
         // shoot and the F953 damage path is reachable.
         counts.traders = counts.traders.clamp(1, 2);
-        counts.pirates = counts.pirates.clamp(1, 2);
+        // The capture keeps the record's patrol count, not F688's roll, so
+        // its pirate group is the same every run.
+        counts.pirates = (system.details.bytes[1] as usize).clamp(1, 2);
     } else {
         // F688 can roll zero of every kind. Keep only the port's per-kind caps.
         counts.traders = counts.traders.min(2);
@@ -2671,6 +2717,11 @@ pub fn spawn(
         counts.aux_traders = 0;
     }
     counts.police = counts.police.min(1);
+    if !options.hostiles {
+        counts.police = 0;
+        counts.pirates = 0;
+    }
+    let limit = MAX_SHIPS + options.extra_traders;
 
     let orbit = (anchor.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
     let mut ships: Vec<NpcShip> = Vec::new();
@@ -2681,7 +2732,7 @@ pub fn spawn(
                    anchor,
                    rng: &mut Random|
      -> Option<NpcShip> {
-        if next_id as usize >= MAX_SHIPS {
+        if next_id as usize >= limit {
             return None;
         }
         let mut model = model_for(role, allegiance, rng);
@@ -2737,6 +2788,44 @@ pub fn spawn(
             // an endless orbit.
             if let Some(station) = anchor.station {
                 ship.begin_transit(station, anchor.position);
+            }
+            ships.push(ship);
+        }
+    }
+    // The port's ambient traffic: traders between the system's places. Each
+    // starts on an orbit of one place and flies to a different one, so the
+    // F745/F746 docking cycle carries it on from port to port.
+    let all_places: Vec<Anchor> = anchors
+        .iter()
+        .copied()
+        .filter(|anchor| anchor.station.is_some())
+        .collect();
+    for i in 0..options.extra_traders {
+        let Some(from) = all_places
+            .get(rng.bounded(all_places.len().max(1) as u32) as usize)
+            .copied()
+        else {
+            break;
+        };
+        let to = if all_places.len() > 1 {
+            let mut pick = rng.bounded(all_places.len() as u32 - 1) as usize;
+            if all_places[pick].station == from.station {
+                pick = all_places.len() - 1;
+            }
+            all_places[pick]
+        } else {
+            from
+        };
+        let radius = (from.radius as f64 * 1.5).max(ANCHOR_ORBIT);
+        let angle = i as f64 * 2.4 + f64::from(rng.bounded(16_384)) / 16_384.0;
+        let position = [
+            from.position[0] + (angle.cos() * radius) as i64,
+            from.position[1] + (f64::from(rng.bounded(1_000_000)) * 0.4) as i64,
+            from.position[2] + (angle.sin() * radius) as i64,
+        ];
+        if let Some(mut ship) = add(Role::Trader, 1, position, from.position, rng) {
+            if let Some(station) = to.station {
+                ship.begin_transit(station, to.position);
             }
             ships.push(ship);
         }
@@ -2822,7 +2911,10 @@ pub fn spawn(
                     + (forward[2] * distance + right[2] * side * 0.8e6 - forward[2] * back) as i64,
             ]
         } else {
-            spread(rng, 3.6 + i as f64 * 2.1, orbit)
+            // The group lurks well outside the port's orbit, so a commander
+            // on the pad is not beside it (the executed original's start pad
+            // has no attacker); it comes for the player in flight.
+            spread(rng, 3.6 + i as f64 * 2.1, orbit + PIRATE_LURK)
         };
         let holder = if options.near_player {
             player
@@ -3266,11 +3358,27 @@ mod tests {
     }
 
     #[test]
+    fn f686s_new_game_pass_rolls_no_pirates_at_danger_one() {
+        let mut start = system(0);
+        start.start = true;
+        assert_eq!(start.details.bytes[1], 1);
+        for seed in 0..64 {
+            let c = counts(&start, &mut Random::new(seed, seed ^ 0x55));
+            assert_eq!(c.pirates, 0, "seed {seed}");
+        }
+        let entered = (0..64)
+            .map(|seed| counts(&system(0), &mut Random::new(seed, seed ^ 0x55)).pirates)
+            .max();
+        assert!(entered > Some(0), "a jump in can bring pirates");
+    }
+
+    #[test]
     fn f688_counts_come_from_the_system_record_and_are_capped() {
         let mut rng = Random::new(0x1234_5678, 0x4567_89ab);
         let c = counts(&system(0), &mut rng);
         assert!(c.traders <= 3);
-        assert!(c.pirates == 1);
+        // RND(+6 << 2): 0..3 groups for danger byte 1.
+        assert!(c.pirates < 4);
         assert_eq!(c.police, 1);
         assert_eq!(c.thargoids, 0);
         // F35(0x16) is an exclusive limit: F688 calls F922 on it exactly as it
@@ -3434,6 +3542,47 @@ mod tests {
     /// in `State::Docked`, each with a random place as `+0xfe` and no bay yet
     /// (F650 belongs to the traffic record). The port caps the branch at
     /// [`MAX_BAY_SHIPS`].
+    #[test]
+    fn world_options_add_traders_between_places_and_drop_hostiles() {
+        let anchors = [anchor(4), anchor(7)];
+        let run = |options: SpawnOptions| {
+            spawn(
+                [0, 0, 0],
+                [0.0, 0.0, 1.0],
+                &anchors,
+                &system(0),
+                0,
+                &mut Random::new(21, 22),
+                SpawnOptions {
+                    guarantee: true,
+                    ..options
+                },
+                spec,
+            )
+        };
+        let original = run(SpawnOptions::default());
+        assert!(original.iter().any(|ship| ship.role == Role::Pirate));
+        let heavy = run(SpawnOptions {
+            extra_traders: 16,
+            ..SpawnOptions::default()
+        });
+        let extra = heavy.len() - original.len();
+        assert_eq!(extra, 16, "{} vs {}", heavy.len(), original.len());
+        // Every ambient trader is bound for one of the places.
+        let bound = heavy
+            .iter()
+            .filter(|ship| ship.state == State::Transit && matches!(ship.station, Some(4 | 7)))
+            .count();
+        assert!(bound >= 16, "{bound}");
+        let calm = run(SpawnOptions {
+            hostiles: false,
+            ..SpawnOptions::default()
+        });
+        assert!(calm
+            .iter()
+            .all(|ship| !matches!(ship.role, Role::Pirate | Role::Police)));
+    }
+
     #[test]
     fn f691_spawns_docked_traders_from_the_place_table() {
         let places = 2;

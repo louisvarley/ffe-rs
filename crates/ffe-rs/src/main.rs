@@ -355,6 +355,8 @@ fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Co
         sound: prefs.sound,
         station_approach: prefs.station_approach,
         starport_approach: prefs.starport_approach,
+        traffic: prefs.traffic,
+        hostiles: prefs.hostiles,
         remap: previous.remap.clone(),
     }
 }
@@ -996,6 +998,8 @@ fn run() -> Result<(), String> {
     prefs.sound = config.sound;
     prefs.station_approach = config.station_approach;
     prefs.starport_approach = config.starport_approach;
+    prefs.traffic = config.traffic;
+    prefs.hostiles = config.hostiles;
     let mut stored_config = config;
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
@@ -1191,6 +1195,14 @@ fn run() -> Result<(), String> {
             }
         },
     );
+    if let Some(nav) = nav.as_mut() {
+        nav.apply_world_options(
+            &cache,
+            ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic],
+            prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF,
+            prefs.hostiles,
+        );
+    }
     if loaded.is_none() {
         if let Some(nav) = nav.as_ref().filter(|nav| nav.new_game.is_some()) {
             let (new_state, model) = OriginalFlight::new_commander(&cache, nav)?;
@@ -1423,6 +1435,14 @@ fn run() -> Result<(), String> {
                             Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type)?,
                             Boot::Sandbox => Navigator::new(&cache)?,
                         });
+                        if let Some(nav) = nav.as_mut() {
+                            nav.apply_world_options(
+                                &cache,
+                                ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic],
+                                prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF,
+                                prefs.hostiles,
+                            );
+                        }
                         let new_nav = nav.as_ref().ok_or("New-game navigation is unavailable.")?;
                         let (new_state, model) = OriginalFlight::new_commander(&cache, new_nav)?;
                         state = new_state;
@@ -1614,6 +1634,10 @@ fn run() -> Result<(), String> {
             model_viewer.is_some(),
         ) {
             if let Some(nav) = nav.as_mut() {
+                // World Options: read when the next system's traffic spawns.
+                nav.traffic_extra = ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic];
+                nav.traffic_off = prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF;
+                nav.hostiles = prefs.hostiles;
                 if nav.transit.is_some() {
                     // F908's mode 4: the clock runs at the hyperspace rate until
                     // the arrival time, which ends the transit (F1066/F1094).
@@ -1622,6 +1646,13 @@ fn run() -> Result<(), String> {
                     let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
                         / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
                     nav.advance(&cache, elapsed * factor);
+                    // F688: a system's traffic exists from the moment the
+                    // player is in it (the reference's new game already has
+                    // ships at the start pad). The jump arrival and station
+                    // launch also ask; `spawn_traffic` runs once per system.
+                    let at = ship_position(&original, &state);
+                    let forward = ship_axes(&state)[2];
+                    nav.spawn_traffic(&cache, at, forward);
                 }
             }
         }

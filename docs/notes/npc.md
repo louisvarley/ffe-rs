@@ -642,3 +642,56 @@ there), and launch straight into F733's countdown.
   deliberately passes `EXPLOSION_MASS` 0x4000 to draw the twelve. Keep that
   deviation or follow F942 literally (no fragments); the shapes also need
   F1560/F1613's fill before they are solid.
+
+## Traffic you can meet, and the World Options (2026-10-27)
+
+Three changes made the system's police, pirates and traders reachable:
+
+1. **Anchor.** `npc::spawn` placed F688's traffic on an orbit of the
+   system's *first* place, which in most systems is a port on another body,
+   millions of kilometres from the player. It now uses the place nearest the
+   player (the port's stand-in for F702's system-wide placement), so the
+   traffic is around the port the player is at or arrives near.
+2. **Despawn.** `NpcShip::finished` recycled every ship beyond
+   `DESPAWN_RANGE` (30 km) on the first tick, which removed nearly all of a
+   system's traffic at once. A ship with business is now kept wherever it
+   is: a trader bound for, docked at or leaving a station, and a hostile
+   hunting the player. Idle ships far away are still recycled, standing in
+   for F927's slot reuse.
+3. **Holding fire.** With pirates near the player's port, they fired at a
+   new commander still on the pad (77 hits a minute in the Gateway start).
+   `tick_ships` holds F931's fire and NPC missile launches while the player
+   is docked, on a pad or landed; they engage once the player is airborne.
+   This is a port decision, recorded as such.
+
+The new game's traffic is spawned by `Navigator::new_game` (F687/F686), and
+every system the player is in now has its traffic from the first frame (the
+main loop asks `spawn_traffic`, which runs once per system); before this a
+starport take-off never spawned any.
+
+**World Options** (Preferences → Port Options → World Options, saved as
+`traffic=` and `police_pirates=` in `config.cfg`):
+
+- *Space traffic*: **Original** (default) is F688's traffic alone. **Off**
+  spawns none. **Medium** and **Heavy** add 8 or 16 ambient traders
+  (`SpawnOptions::extra_traders`), each starting on an orbit of one place and
+  flying to a different one, where F745/F746's docking cycle takes over and
+  sends it on to the next. They may exceed `MAX_SHIPS`.
+- *Police and pirates*: **Enabled (original)** by default; **Disabled**
+  spawns neither F698's pirate groups nor the system's police, and drops
+  carried-over pirates/police at a jump.
+
+The choices apply to the next system entered (and to a new game's start
+system, which `apply_world_options` respawns once).
+
+**Safe start systems (F686/F688).** F688 rolls `RND(byte +6 << 2)` pirate
+patrols (F698: a lone pirate or a group). The new game's own pass comes
+through F686, which sets `DATA_009046` bit 0, and with that bit F688 drops the
+`<< 2`. Gateway and Ross 154 have `+6 = 1`, and `RND(1)` is always 0, so the
+original's starting system never has pirates. Entering a system later (F687
+clears the bit) rolls `RND(4)`: zero to three groups. The port used the byte
+as a fixed count, so a pirate group was always present; `counts_with_places`
+now rolls it, with `System::start` for the new game's pass. The scripted
+capture (`SpawnOptions::guarantee`) keeps the record's count so its frames
+stay the same. Pirate groups from a real entry spawn `PIRATE_LURK` (25 km)
+outside the anchor orbit.
