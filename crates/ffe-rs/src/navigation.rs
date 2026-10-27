@@ -1137,6 +1137,12 @@ pub struct Navigator {
     pub selected: usize,
     /// The body the autopilot is flying to.
     pub target: Option<usize>,
+    /// Port addition (Docking Options): the station approach distance in km,
+    /// `None` for F741's own 0xfa0 word.
+    pub station_approach_km: Option<u32>,
+    /// Port addition: the starport approach altitude in km, `None` for F741's
+    /// 0x1770 word.
+    pub starport_approach_km: Option<u32>,
     autopilot_notice: Option<String>,
     /// The body the player has locked on (clicked in the view or cycled to): what the
     /// autopilot button flies to.
@@ -2016,6 +2022,8 @@ impl Navigator {
             view: View::Closed,
             selected: 0,
             target: None,
+            station_approach_km: None,
+            starport_approach_km: None,
             autopilot_notice: None,
             locked: None,
             destination: None,
@@ -5051,17 +5059,30 @@ impl Navigator {
         } else if body.kind == Kind::Starport {
             // F741 stores signed offset words, then F593 shifts them by ten.
             // Use the Q31 row, rather than a re-normalised floating point axis.
-            std::array::from_fn(|k| {
-                body.position[k]
-                    + i64::from((ffe_core::model::multiply(body.rows[3 + k], 0x1770) as i16) as i32)
-                        * 1024
-            })
+            // The Docking Options altitude (a port addition) replaces 0x1770.
+            match self.starport_approach_km {
+                None => std::array::from_fn(|k| {
+                    body.position[k]
+                        + i64::from(
+                            (ffe_core::model::multiply(body.rows[3 + k], 0x1770) as i16) as i32,
+                        ) * 1024
+                }),
+                Some(km) => std::array::from_fn(|k| {
+                    body.position[k]
+                        + (f64::from(body.rows[3 + k]) / 2_147_483_648.0 * f64::from(km) * 1.0e6)
+                            as i64
+                }),
+            }
         } else if body.kind == Kind::Station {
-            // F741's indoor-station offset is the literal z word 0xfa0.
+            // F741's indoor-station offset is the literal z word 0xfa0; the
+            // Docking Options distance (a port addition) replaces it.
+            let offset = self
+                .station_approach_km
+                .map_or(0xfa0 * 1024, |km| i64::from(km) * 1_000_000);
             [
                 body.position[0],
                 body.position[1],
-                body.position[2] + 0xfa0 * 1024,
+                body.position[2] + offset,
             ]
         } else {
             body.position

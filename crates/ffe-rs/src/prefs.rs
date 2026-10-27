@@ -38,7 +38,18 @@ pub const OTHERS: usize = 3;
 pub const MAPS: usize = 4;
 pub const PORT: usize = 5;
 pub const DISPLAY: usize = 6;
-pub const PAGES: usize = 7;
+/// Port addition: where the autopilot asks for docking clearance.
+pub const DOCKING: usize = 7;
+pub const PAGES: usize = 8;
+
+/// The station approach distances the Docking Options page offers, in km.
+/// F741's indoor-station offset is the z word 0xfa0 (4,096 m): index 0.
+pub const STATION_APPROACH_KM: [u32; 4] = [4, 3, 2, 1];
+/// The starport approach altitudes the page offers, in km. Index 0 is F741's
+/// own `0x1770` word along the port's up row (about 6.1 km).
+pub const STARPORT_APPROACH_KM: [u32; 5] = [6, 4, 3, 2, 1];
+const STATION_APPROACH_LABELS: [&str; 4] = ["4 km (original)", "3 km", "2 km", "1 km"];
+const STARPORT_APPROACH_LABELS: [&str; 5] = ["6 km (original)", "4 km", "3 km", "2 km", "1 km"];
 
 /// The original's "Level of Shape Detail" values (`DATA_004964`).
 pub const SHAPE_DETAIL: [&str; 4] = ["Low", "Medium", "High", "Very High"];
@@ -149,6 +160,9 @@ pub enum Action {
     Map(usize),
     Sound(usize),
     Modern(bool),
+    /// Port-only docking approach choices (indices into the tables above).
+    StationApproach(usize),
+    StarportApproach(usize),
     /// Port-only display choices (window scale 1..=6).
     WindowScale(usize),
     DisplayFit(FitMode),
@@ -243,6 +257,12 @@ pub struct Prefs {
     pub maps: [bool; 5],
     pub sound: [bool; 10],
     pub modern: bool,
+    /// Port addition: [`STATION_APPROACH_KM`] index for the autopilot's
+    /// station approach (where clearance is asked, the music starts and the
+    /// time acceleration drops).
+    pub station_approach: usize,
+    /// Port addition: [`STARPORT_APPROACH_KM`] index for the starport approach.
+    pub starport_approach: usize,
     /// Port-only presentation choices; persisted in `saves/display.cfg`.
     pub display: DisplaySettings,
     /// Borderless full-screen. Session-only: a saved full-screen launch would
@@ -264,6 +284,8 @@ impl Default for Prefs {
             maps: [true; 5],
             sound: [true; 10],
             modern: false,
+            station_approach: 0,
+            starport_approach: 0,
             display: DisplaySettings::default(),
             fullscreen: false,
         }
@@ -514,6 +536,49 @@ impl Prefs {
                     true,
                     18,
                 ));
+                rows.push(row(
+                    32,
+                    114,
+                    "Docking Options",
+                    Action::Page(DOCKING),
+                    Mark::Action,
+                    true,
+                    18,
+                ));
+                rows.push(main_menu(32, 136));
+            }
+            DOCKING => {
+                for (index, label) in STATION_APPROACH_LABELS.iter().enumerate() {
+                    rows.push(row(
+                        32,
+                        38 + 10 * index as i32,
+                        label,
+                        Action::StationApproach(index),
+                        Mark::Radio(self.station_approach == index),
+                        true,
+                        15,
+                    ));
+                }
+                for (index, label) in STARPORT_APPROACH_LABELS.iter().enumerate() {
+                    rows.push(row(
+                        176,
+                        38 + 10 * index as i32,
+                        label,
+                        Action::StarportApproach(index),
+                        Mark::Radio(self.starport_approach == index),
+                        true,
+                        15,
+                    ));
+                }
+                rows.push(row(
+                    32,
+                    126,
+                    "Port Options",
+                    Action::Page(PORT),
+                    Mark::Action,
+                    true,
+                    18,
+                ));
                 rows.push(main_menu(32, 136));
             }
             DISPLAY => {
@@ -738,6 +803,44 @@ impl Prefs {
                     colour: 18,
                 });
             }
+            DOCKING => {
+                texts.push(Text {
+                    x: 32,
+                    y: 18,
+                    text: "Docking options:",
+                    colour: 18,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 28,
+                    text: "Station distance:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 176,
+                    y: 28,
+                    text: "Starport altitude:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 102,
+                    text: "Where the autopilot asks for clearance:",
+                    colour: 15,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 110,
+                    text: "music, time to 1x, then the approach.",
+                    colour: 15,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 146,
+                    text: "Port additions, not in the original DOS release.",
+                    colour: 18,
+                });
+            }
             DISPLAY => {
                 texts.push(Text {
                     x: 32,
@@ -815,6 +918,14 @@ impl Prefs {
                 self.modern = modern;
                 Activate::None
             }
+            Action::StationApproach(index) if index < STATION_APPROACH_KM.len() => {
+                self.station_approach = index;
+                Activate::None
+            }
+            Action::StarportApproach(index) if index < STARPORT_APPROACH_KM.len() => {
+                self.starport_approach = index;
+                Activate::None
+            }
             Action::WindowScale(scale) if (MIN_SCALE..=MAX_SCALE).contains(&(scale as u32)) => {
                 self.display.scale = scale as u32;
                 Activate::None
@@ -846,6 +957,8 @@ impl Prefs {
             | Action::Other(_)
             | Action::Map(_)
             | Action::Sound(_)
+            | Action::StationApproach(_)
+            | Action::StarportApproach(_)
             | Action::WindowScale(_)
             | Action::Ignored => Activate::None,
         }

@@ -42,6 +42,9 @@ pub struct Config {
     pub others: [bool; 10],
     pub maps: [bool; 5],
     pub sound: [bool; 10],
+    /// Port addition: the Docking Options page's indices.
+    pub station_approach: usize,
+    pub starport_approach: usize,
     pub remap: BTreeMap<String, String>,
 }
 
@@ -56,6 +59,8 @@ impl Default for Config {
             others: prefs.others,
             maps: prefs.maps,
             sound: prefs.sound,
+            station_approach: prefs.station_approach,
+            starport_approach: prefs.starport_approach,
             remap: BTreeMap::new(),
         }
     }
@@ -82,6 +87,8 @@ impl Config {
         for (index, value) in self.sound.iter().enumerate() {
             out.push_str(&format!("sound_{index}={}\n", on_off(*value)));
         }
+        out.push_str(&format!("station_approach={}\n", self.station_approach));
+        out.push_str(&format!("starport_approach={}\n", self.starport_approach));
         out.push_str(&self.display.to_config());
         for (action, key) in &self.remap {
             out.push_str(&format!("bind.{action}={key}\n"));
@@ -122,6 +129,20 @@ impl Config {
                         return None;
                     }
                     config.space_colour = parsed;
+                }
+                "station_approach" => {
+                    let parsed: usize = value.parse().ok()?;
+                    if parsed >= crate::prefs::STATION_APPROACH_KM.len() {
+                        return None;
+                    }
+                    config.station_approach = parsed;
+                }
+                "starport_approach" => {
+                    let parsed: usize = value.parse().ok()?;
+                    if parsed >= crate::prefs::STARPORT_APPROACH_KM.len() {
+                        return None;
+                    }
+                    config.starport_approach = parsed;
                 }
                 "shape_detail" => {
                     let parsed: usize = value.parse().ok()?;
@@ -323,6 +344,28 @@ fn save_text(path: &Path, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docking_options_round_trip_and_reject_bad_indices() {
+        let config = Config {
+            station_approach: 3,
+            starport_approach: 2,
+            ..Config::default()
+        };
+        let text = config.to_config();
+        assert!(text.contains("station_approach=3\nstarport_approach=2\n"));
+        assert_eq!(Config::from_config(&text), Some(config));
+        assert_eq!(
+            Config::from_config("version=2\nstation_approach=4\n"),
+            None,
+            "only four station distances"
+        );
+        assert_eq!(
+            Config::default().station_approach,
+            0,
+            "the original's offset"
+        );
+    }
 
     #[test]
     fn the_versioned_config_round_trips_every_page() {

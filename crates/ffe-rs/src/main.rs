@@ -353,6 +353,8 @@ fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Co
         others: prefs.others,
         maps: prefs.maps,
         sound: prefs.sound,
+        station_approach: prefs.station_approach,
+        starport_approach: prefs.starport_approach,
         remap: previous.remap.clone(),
     }
 }
@@ -882,6 +884,8 @@ fn run() -> Result<(), String> {
     prefs.others = config.others;
     prefs.maps = config.maps;
     prefs.sound = config.sound;
+    prefs.station_approach = config.station_approach;
+    prefs.starport_approach = config.starport_approach;
     let mut stored_config = config;
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
@@ -4111,6 +4115,12 @@ fn run() -> Result<(), String> {
                     if nav.target.is_some() && nav.autopilot_takeoff_handoff() {
                         model.end_pad_takeoff();
                     }
+                    // Port addition: the Docking Options approach distances
+                    // (index 0 keeps F741's own offset words).
+                    nav.station_approach_km = (prefs.station_approach > 0)
+                        .then(|| ffe_rs::prefs::STATION_APPROACH_KM[prefs.station_approach]);
+                    nav.starport_approach_km = (prefs.starport_approach > 0)
+                        .then(|| ffe_rs::prefs::STARPORT_APPROACH_KM[prefs.starport_approach]);
                     if let Some((guidance, _body)) = nav.source_command(&cache, model) {
                         model.apply_guidance(guidance);
                         keys = OriginalKeys::default();
