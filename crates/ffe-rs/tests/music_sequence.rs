@@ -135,8 +135,8 @@ fn music_off_is_silent_and_music_volume_sets_the_midi_channel_level() {
     game.front_end_music();
     assert_eq!(game.current_song(), Some(0));
     assert!(
-        midi.contains(&[0xb0, 7, 63]),
-        "50% of MIDI's 127 is CC7 = 63"
+        midi.contains(&[0xb0, 7, 50]),
+        "50% of General MIDI's reset level 100 is CC7 = 50"
     );
 
     game.set_settings(AudioSettings {

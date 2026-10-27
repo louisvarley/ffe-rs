@@ -131,6 +131,9 @@ pub struct TextEmission {
     /// The colour of the text's normal entry. F1747's F1692/F1693/F1691 chain
     /// adds it before the colour becomes the glyph instance colour.
     pub shade: [u8; 3],
+    /// The [`Primitive::Text`] place this text took in the depth order, when
+    /// the execution queues one.
+    pub queued: Option<usize>,
 }
 
 /// A child-model call operand event (F1749/F1750). The child's culling, frame and
@@ -311,6 +314,11 @@ pub enum Primitive {
     SystemLabel(SystemLabelEmission),
     Thruster(crate::model_thruster::Entry),
     Chain(ChainEmission),
+    /// F1747's glyph primitives join the depth list where the text command
+    /// runs: inside an active group they stay with its members. The number
+    /// names the text ([`TextEmission::queued`]); the caller draws its glyphs
+    /// here.
+    Text(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -970,6 +978,8 @@ struct Shared<'e> {
     children: Option<&'e ChildEnvironment<'e>>,
     arena: u32,
     depth: usize,
+    /// Texts queued so far across this execution and its children.
+    texts: usize,
 }
 
 fn execute_inner(
@@ -1018,6 +1028,7 @@ fn execute_inner(
         children,
         arena: children.map_or(0, |environment| environment.arena),
         depth: 0,
+        texts: 0,
     };
     let frame = Frame {
         bytes,
@@ -1599,20 +1610,31 @@ fn run(
                             format!("Text at {offset:#x} references an out-of-range normal.")
                         })?;
                     let culled = normal.culled;
+                    let mut queued = None;
                     if let (false, Some(live)) = (culled, vertices.as_deref_mut()) {
-                        live.resolve(
+                        let anchor = live.resolve(
                             text.vertex as i8,
                             working,
                             instance.position,
                             instance.generation,
                             false,
                         )?;
+                        if let Some(queue) = shared.order.as_mut() {
+                            let id = shared.texts;
+                            shared.texts += 1;
+                            queue.push(
+                                model_depth::key(anchor.view, instance.key_scale),
+                                Primitive::Text(id),
+                            )?;
+                            queued = Some(id);
+                        }
                     }
                     result.texts.push(TextEmission {
                         text: text.clone(),
                         culled,
                         context: working.clone(),
                         shade: normal.colour,
+                        queued,
                     });
                 }
                 Some(command.size as i32)

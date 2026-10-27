@@ -574,7 +574,7 @@ fn execution_emits_submodel_calls_with_original_extra_vertex_order() {
 }
 
 #[test]
-fn live_text_and_submodels_stay_out_of_render_order_and_errors_are_transactional() {
+fn live_text_takes_a_render_order_place_and_errors_are_transactional() {
     let stream = bytes(&[10, 0x0123, 0x5a02, 0x8104, 0x1234, 0x002e, 0x0001, 0]);
     let records: Vec<u8> = (0..4).flat_map(|_| [1, 0, 0, 0, 80, 0]).collect();
     let mut vertices = Vertices::new(&records, 8).unwrap();
@@ -595,7 +595,10 @@ fn live_text_and_submodels_stay_out_of_render_order_and_errors_are_transactional
     )
     .unwrap();
     assert_eq!((result.texts.len(), result.submodels.len()), (1, 1));
-    assert!(result.ordered.is_empty());
+    // F1747 queues the glyphs where the text command runs: the text holds that
+    // place (the caller draws its glyphs there); the submodel call does not.
+    assert_eq!(result.texts[0].queued, Some(0));
+    assert!(matches!(result.ordered.as_slice(), [Primitive::Text(0)]));
     assert_eq!(vertices.slots()[1].stamp, 2, "submodel vertex is projected");
 
     let before = context.clone();

@@ -1335,9 +1335,24 @@ impl ModelViewer {
         if let Some(word) = haze {
             self.haze_sky.set(Some(self.textures.rgb(word)));
         }
-        self.draw_primitives(&result, &mut frame)?;
-        for run in &text_runs {
-            self.draw_primitives(run, &mut frame)?;
+        // F1747's glyphs are drawn where their text took its place in the depth
+        // order (`Primitive::Text`); a text the order did not take is drawn last.
+        let mut glyph_runs: Vec<Option<Vec<Execution>>> = Vec::new();
+        let mut unplaced = Vec::new();
+        for (queued, run) in text_runs {
+            match queued {
+                Some(id) => {
+                    if glyph_runs.len() <= id {
+                        glyph_runs.resize_with(id + 1, || None);
+                    }
+                    glyph_runs[id].get_or_insert_with(Vec::new).push(run);
+                }
+                None => unplaced.push(run),
+            }
+        }
+        self.draw_primitives(&result, &mut frame, &glyph_runs)?;
+        for run in &unplaced {
+            self.draw_primitives(run, &mut frame, &[])?;
         }
         // F1840/F1841 queue their entries into the same F1778 list as the model's
         // faces; merge them by key so the planet is not painted over a nearer ship.
@@ -1855,7 +1870,7 @@ impl ModelViewer {
                         self.register_frame_colour(colour);
                     }
                 },
-                Primitive::Label(_) | Primitive::SystemLabel(_) => {}
+                Primitive::Label(_) | Primitive::SystemLabel(_) | Primitive::Text(_) => {}
             }
         }
     }
@@ -1865,7 +1880,12 @@ impl ModelViewer {
     }
 
     /// Turn one executed stream's render-ordered primitives into shapes.
-    fn draw_primitives(&self, result: &Execution, frame: &mut Frame) -> Result<(), String> {
+    fn draw_primitives(
+        &self,
+        result: &Execution,
+        frame: &mut Frame,
+        texts: &[Option<Vec<Execution>>],
+    ) -> Result<(), String> {
         let point =
             |p: [i16; 2]| (p != NEAR_SENTINEL).then_some((i32::from(p[0]), i32::from(p[1])));
         for (index, primitive) in result.ordered.iter().enumerate() {
@@ -2036,6 +2056,22 @@ impl ModelViewer {
                         push!(Shape::Curve(points, self.rgb(spline.colour)));
                     }
                 }
+                Primitive::Text(id) => {
+                    // The text's glyphs, in its place and under its key.
+                    for run in texts
+                        .get(*id)
+                        .and_then(Option::as_ref)
+                        .into_iter()
+                        .flatten()
+                    {
+                        let mut glyphs = Frame::default();
+                        self.draw_primitives(run, &mut glyphs, &[])?;
+                        frame.skipped += glyphs.skipped;
+                        for shape in glyphs.shapes {
+                            push!(shape);
+                        }
+                    }
+                }
                 Primitive::Chain(chain) => {
                     // F1814: one F1611 particle of the entry's size at each
                     // point F1766 projected (the 0x7f terminator never reaches
@@ -2127,7 +2163,7 @@ impl ModelViewer {
         runs: &[ChildRun],
         light_view: [f64; 3],
         frame: &mut Frame,
-        out: &mut Vec<Execution>,
+        out: &mut Vec<(Option<usize>, Execution)>,
     ) -> Result<(), String> {
         for run in runs {
             let (ChildOutcome::Executed(execution), Some(setup)) = (&run.outcome, &run.setup)
@@ -2170,7 +2206,7 @@ impl ModelViewer {
         instance: InstanceContext,
         light_view: [f64; 3],
         frame: &mut Frame,
-        out: &mut Vec<Execution>,
+        out: &mut Vec<(Option<usize>, Execution)>,
     ) -> Result<(), String> {
         for emission in &result.texts {
             if emission.culled {
@@ -2339,7 +2375,7 @@ impl ModelViewer {
                 .map_err(|error| {
                     format!("{error} (glyph {code:?} of text at {:#x})", text.offset)
                 })?;
-                out.push(execution);
+                out.push((emission.queued, execution));
                 let next =
                     glyph_vertices.resolve(anchor as i8, &glyph_context, pen, generation, false)?;
                 pen = next.view;

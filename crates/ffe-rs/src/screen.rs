@@ -1833,7 +1833,11 @@ impl Screen {
         if state.mode != Mode::Docked {
             self.draw_gauges();
         }
-        for (pixel, index) in self.frame.iter_mut().zip(self.indexed.iter()) {
+        // The lift stages leave the view as the last frame left it (below), so
+        // only the console rows come from the indexed layer then.
+        let lift_alone = self.lift.as_ref().is_some_and(|lift| !lift.world);
+        let first = if lift_alone { 320 * VIEW_HEIGHT } else { 0 };
+        for (pixel, index) in self.frame[first..].iter_mut().zip(&self.indexed[first..]) {
             *pixel = self.palette[usize::from(*index)];
         }
         // The original clears the upper view to the palette entry nearest its
@@ -1841,7 +1845,11 @@ impl Screen {
         // quantised colour (`prefs::space_colour_rgb`, `DATA_008815..817`) and
         // registers the same `(0,0,index)` request with the runtime palette, so
         // the models and FX around it are quantised against it.
-        if state.mode != Mode::Docked || self.pad_services {
+        // The lift stages' views (F1069-F1087) draw their objects straight
+        // through F1682 and never run F1052, so nothing clears the view: what
+        // the lift does not cover keeps the previous frame (the closed door
+        // shows through the interior's open end while the lift travels).
+        if (state.mode != Mode::Docked || self.pad_services) && !lift_alone {
             // F1052 clears with the background colour the previous frame's scene
             // left in `DATA_008814..8817`; a planet's haze overrides the space
             // colour until the eye is out of it again.
