@@ -160,6 +160,20 @@ pub struct LaserBeam {
     pub origin: [f64; 3],
     /// The axes the beam is drawn along (right, up, forward), flight space.
     pub axes: [[f64; 3]; 3],
+    /// The firing mount (index into the ship's four laser bytes).
+    pub mount: usize,
+    /// F931's `+0xe6`: the hit distance >> 7 in original position units, or
+    /// 0xffff for a miss. The beam model reads it as global 37.
+    pub length: u16,
+}
+
+/// F931's `+0xe6` for a miss.
+pub const MISS_LENGTH: u16 = 0xffff;
+
+/// F931's `+0xe6` for a hit `distance` (original position units) away:
+/// `DATA_008712 >> 7`, kept to the low word.
+pub fn hit_length(distance: f64) -> u16 {
+    ((distance.max(0.0) as i64) >> 7) as u16
 }
 
 /// The mount a view fires, F1040: the view itself for 0..3, the front mount in
@@ -237,6 +251,8 @@ pub fn beam(
     LaserBeam {
         origin: gun_origin(state, stats, view_mode, axes),
         axes,
+        mount: mount(view_mode).unwrap_or(0),
+        length: MISS_LENGTH,
     }
 }
 

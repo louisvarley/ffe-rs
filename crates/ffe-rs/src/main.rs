@@ -42,6 +42,9 @@ use minifb::{MouseButton, MouseMode};
 /// The window title, shared by every reopen.
 const WINDOW_TITLE: &str = "FFE-RS 0.9 - Depth-order helpers, experimental flight";
 
+/// How long a shot's beam stays drawn: one frame of the original at about 18
+/// frames a second.
+const BEAM_HOLD_SECONDS: f64 = 1.0 / 18.0;
 /// F1088's set speed for a ship leaving a station's slot (`player+0x1b8`).
 const STATION_LAUNCH_SET_SPEED: i32 = 0xb5d;
 /// What the open-air launch tells the player: F1013/F1031 need thrust to climb
@@ -955,6 +958,8 @@ fn run() -> Result<(), String> {
     let mut last_prompt = String::new();
     // `player+0xc6` bit 1: F1008's micrometeorite warning has been given.
     let mut gear_warned = false;
+    // How much longer the last shot's beam is drawn.
+    let mut beam_time = 0.0f64;
     // The sine table F1675 builds the dust's orientation with.
     let dust_sine = cache
         .asset("base:math/sine")
@@ -5277,7 +5282,28 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        screen.beam = None;
+        // F1536 draws a shot's beam (F1776) on the frame it fired. The port
+        // runs several frames to one of the original's, so the beam is held
+        // for one original frame's time (1/18 s) or it is never seen.
+        beam_time -= elapsed;
+        if beam_time <= 0.0 {
+            screen.beam = None;
+        } else if screen.beam.is_some() {
+            // A held beam stays on the gun while the ship moves.
+            let stats = scene
+                .as_ref()
+                .and_then(|scene| scene.ship_stats(state.ship));
+            let length = screen.beam.map_or(combat::MISS_LENGTH, |beam| beam.length);
+            screen.beam = Some(combat::LaserBeam {
+                length,
+                ..combat::beam(
+                    &state,
+                    stats.as_ref(),
+                    views.mode,
+                    [views.turret.yaw, views.turret.pitch],
+                )
+            });
+        }
         let can_fire = active
             && !paused
             && !pad_board
@@ -5316,7 +5342,7 @@ fn run() -> Result<(), String> {
                         let stats = scene
                             .as_ref()
                             .and_then(|scene| scene.ship_stats(state.ship));
-                        let beam = combat::beam(
+                        let mut beam = combat::beam(
                             &state,
                             stats.as_ref(),
                             views.mode,
@@ -5349,6 +5375,7 @@ fn run() -> Result<(), String> {
                                 targets
                             });
                         if let Some(hit) = laser::hit(origin, beam.axes[2], &targets) {
+                            beam.length = combat::hit_length(hit.distance);
                             if hit.index < body_count {
                                 if let Some(nav) = nav.as_ref() {
                                     if let Some(body) = nav.bodies.get(hit.index) {
@@ -5463,6 +5490,7 @@ fn run() -> Result<(), String> {
                             }
                         }
                         screen.beam = Some(beam);
+                        beam_time = BEAM_HOLD_SECONDS;
                     }
                     Err(laser::FireError::Overheated) => {
                         pending_log.add(Source::Combat, "Lasers overheated.");

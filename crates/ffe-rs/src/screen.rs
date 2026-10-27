@@ -856,7 +856,7 @@ impl Screen {
     }
 
     /// F1776's visible beam: model 0x9c (156) at the gun, oriented along the
-    /// mount's axes. It is drawn on the firing frame only.
+    /// mount's axes.
     fn draw_beam(
         &mut self,
         scene: &ModelViewer,
@@ -867,13 +867,19 @@ impl Screen {
         let scale = model_scale(scene).unwrap_or(DEFAULT_MODEL_SCALE);
         let rows = beam.axes.map(|axis| camera.direction(axis));
         // F1776 places the duplicate at the gun and hands it to F1680; the
-        // projection culls anything behind the near plane. The Eagle's gun
-        // (1300/8) sits behind the front eye (1500/8), so the original has no
-        // front-view muzzle: do not invent one by clamping z here.
+        // projection culls anything behind the near plane, so a gun behind
+        // the eye shows only the ray: do not invent a muzzle by clamping z.
         let origin = camera.point(beam.origin).map(|v| v * scale);
         let light = self.scene_light(scene, camera);
         let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
         inputs.jitter = self.jitter.cursor;
+        // F1776 stores the mount's laser type at `+0xa4` (global 4), which
+        // picks the flash and ray; F931 left the shot's length at `+0xe6`
+        // (global 37). The ray's far end is the gun plus 0x40 << 17 (the
+        // model's own scale, F931's 0x7fffff range) times length / 0x10000,
+        // so a hit's `distance >> 7` ends it on the target.
+        inputs.globals[4] = u16::from(self.lasers[beam.mount]);
+        inputs.globals[37] = beam.length;
         if let Ok(frame) =
             scene.render_scene_with(crate::combat::BEAM_MODEL, rows, origin, light, &inputs)
         {
