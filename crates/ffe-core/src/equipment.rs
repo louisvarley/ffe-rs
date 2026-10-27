@@ -120,6 +120,12 @@ pub const NAVAL_ECM_BIT: u32 = 1 << 23;
 /// tonne of hydrogen when this is fitted; F394 gates the Cargo Scoop
 /// Conversion on it.
 pub const FUEL_SCOOP_BIT: u32 = 1 << 20;
+/// `ship+0xc8` bit 29: the Cargo Scoop Conversion (record code `0x0d`). F714
+/// takes a canister its scoop touches.
+pub const CARGO_SCOOP_BIT: u32 = 1 << 29;
+/// `ship+0xc8` bit 10: the Tractor Beam Cargo Scoop (record code `0x1a`).
+/// F714 draws in a canister within 2^15 mm and 60° of the nose.
+pub const TRACTOR_BEAM_BIT: u32 = 1 << 10;
 /// `ship+0xc8` bit 1: the Auto Refueller (record code `0x11`). F929 burns a
 /// tonne of fuel for `0x2000_0000` energy when the pool empties.
 pub const AUTO_REFUELLER_BIT: u32 = 1 << 1;

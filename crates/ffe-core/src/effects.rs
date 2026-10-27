@@ -143,6 +143,79 @@ pub struct Effect {
     /// copies the source ship's (0 for the player in the executed death
     /// probe), F942 and F939 change it.
     pub shift: i8,
+    /// A canister's commodity (`+0x9e`): what F714 scoops into the hold.
+    pub cargo: Option<u16>,
+}
+
+/// F926's first pods (`0x8e0f + 0x7200`): commodity 15.
+pub const WRECK_CARGO: u16 = 0x0f;
+
+/// `DATA_007212`: the cargo of a destroyed ship's pods, by `F1530 & 0x1f`.
+pub const WRECK_CARGO_TABLE: [u8; 32] = [
+    0x00, 0x1e, 0x1e, 0x1e, 0x04, 0x05, 0x1e, 0x07, 0x08, 0x09, 0x0a, 0x04, 0x09, 0x1e, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x1e, 0x1d, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+];
+
+/// `DATA_005112`: what a jettisoned commodity becomes in its canister (F291).
+pub const JETTISON_CARGO: [u8; 33] = [
+    0x00, 0x01, 0x1e, 0x1e, 0x04, 0x05, 0x1e, 0x07, 0x08, 0x09, 0x0a, 0x04, 0x09, 0x1e, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+    0x20,
+];
+
+/// F714's Tractor Beam reach: `Vec64Truncate(.., 13)` below 2, under
+/// `2^15` mm on every axis.
+pub const TRACTOR_RANGE: i64 = 1 << 15;
+/// F714's Tractor Beam cone: the canister's direction against the ship's
+/// forward row at least `0x3fffffff` (cos 60°).
+pub const TRACTOR_COS: f64 = 0.5;
+
+/// What F714 needs of the player's ship to scoop a canister.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Scoop {
+    pub position: [i64; 3],
+    pub forward: [f64; 3],
+    /// The ship's collision radius (mm), for the contact route.
+    pub radius: f64,
+    /// General bit 10, the Tractor Beam Cargo Scoop.
+    pub tractor: bool,
+    /// General bit 29, the Cargo Scoop Conversion.
+    pub scoop: bool,
+}
+
+/// The canister model's collision radius (model 0x99, mm).
+pub const CANISTER_RADIUS: f64 = 1664.0;
+
+impl Effect {
+    /// F714: the player takes this canister. With the Tractor Beam it must be
+    /// within [`TRACTOR_RANGE`] and ahead within 60°; otherwise the ship's
+    /// scoop must touch it. The original's touch is the scoop region of the
+    /// ship's collision stream (F582's flag 0x10); the port's is the two
+    /// collision spheres meeting ahead of the ship, with the Cargo Scoop
+    /// Conversion fitted.
+    pub fn scooped_by(&self, ship: &Scoop) -> bool {
+        if self.cargo.is_none() || !self.alive {
+            return false;
+        }
+        let offset: [f64; 3] =
+            std::array::from_fn(|k| (self.position[k] - ship.position[k]) as f64);
+        if ship.tractor {
+            if offset.iter().any(|v| v.abs() >= TRACTOR_RANGE as f64) {
+                return false;
+            }
+            let length = offset.iter().map(|v| v * v).sum::<f64>().sqrt();
+            if length < 1.0 {
+                return true;
+            }
+            let cos = (0..3).map(|k| offset[k] * ship.forward[k]).sum::<f64>() / length;
+            return cos >= TRACTOR_COS;
+        }
+        // The scoop's region of the collision volume is at the nose: a
+        // canister behind the ship (a jettison leaves one there) is not in it.
+        let length = offset.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let ahead = (0..3).map(|k| offset[k] * ship.forward[k]).sum::<f64>() > 0.0;
+        ship.scoop && ahead && length <= ship.radius + CANISTER_RADIUS
+    }
 }
 
 /// What an update asks the caller for besides the object itself.
@@ -268,6 +341,7 @@ pub fn hit(
         think: 0,
         alive: true,
         shift: 0,
+        cargo: None,
     }
 }
 
@@ -289,6 +363,7 @@ pub fn missile_explosion(position: [i64; 3], axes: [[f64; 3]; 3], rng: &mut Rand
         think: 0,
         alive: true,
         shift: 0,
+        cargo: None,
     }
 }
 
@@ -316,11 +391,24 @@ pub fn explosion(
         think: 0,
         alive: true,
         shift: 0,
+        cargo: None,
     }];
     // F942: (F922(6) - 2) pods, then min(4, cargo >> 1) cargo pods.
+    // F942: F922(6) - 2 pods of commodity 15, then, when the ship has cargo
+    // space, F922(min(4, cargo >> 1)) - 1 pods of DATA_007212's cargo.
     let pods = (rng.bounded(6) as i32 - 2).max(0) as usize;
-    let cargo_pods = ((cargo >> 1) as usize).min(4);
-    for _ in 0..pods + cargo_pods {
+    let bound = u32::from((cargo >> 1).min(4));
+    let cargo_pods = if bound > 0 {
+        (rng.bounded(bound) as i32 - 1).max(0) as usize
+    } else {
+        0
+    };
+    for pod in 0..pods + cargo_pods {
+        let load = if pod < pods {
+            WRECK_CARGO
+        } else {
+            u16::from(WRECK_CARGO_TABLE[(rng.bounded(0x1_0000) & 0x1f) as usize])
+        };
         let (forward, up) = random_axes(axes[2], rng);
         // F926 adds DATA_008818 >> 22 per axis: 0..1023 original units.
         let drift = [
@@ -344,6 +432,7 @@ pub fn explosion(
             think: 0,
             alive: true,
             shift: 0,
+            cargo: Some(load),
         });
     }
     effects
@@ -357,6 +446,7 @@ pub fn canister(
     velocity: [f64; 3],
     axes: [[f64; 3]; 3],
     push: [f64; 3],
+    cargo: u16,
     rng: &mut Random,
 ) -> Effect {
     let (forward, up) = random_axes(axes[2], rng);
@@ -376,6 +466,7 @@ pub fn canister(
         think: 0,
         alive: true,
         shift: 0,
+        cargo: Some(cargo),
     }
 }
 
@@ -456,9 +547,10 @@ mod tests {
         assert_eq!(burst.model, EXPLOSION_MODEL);
         assert_eq!(burst.kind, Kind::Explosion);
         assert_eq!(burst.timer, EXPLOSION_TIMER);
-        // F922(6) - 2 pods plus min(4, 8 >> 1) cargo pods.
+        // F922(6) - 2 pods (0..3) plus F922(min(4, 8 >> 1)) - 1 cargo pods
+        // (0..2).
         let debris = effects.iter().filter(|e| e.kind == Kind::Debris).count();
-        assert!((4..=7).contains(&debris), "{debris}");
+        assert!(debris <= 5, "{debris}");
         // No cargo, and F922(6) can still give 0..3 pods.
         let mut rng = Random::new(3, 4);
         let light = explosion([0; 3], [0.0; 3], 0, axes(), &mut rng);
@@ -525,8 +617,12 @@ mod tests {
     #[test]
     fn f926_pods_spark_for_seven_think_ticks_then_drift() {
         let mut rng = Random::new(5, 6);
-        let mut pods = explosion([0; 3], [0.0; 3], 16, axes(), &mut rng);
-        let mut pod = pods.pop().unwrap();
+        let mut pod = loop {
+            let mut pods = explosion([0; 3], [0.0; 3], 16, axes(), &mut rng);
+            if pods.len() > 1 {
+                break pods.pop().unwrap();
+            }
+        };
         assert_eq!(pod.kind, Kind::Debris);
         let mut sparking = 0.0f64;
         while pod.tick(0.02, 994) == Update::Spark {
@@ -537,5 +633,53 @@ mod tests {
         assert!(pod.alive());
         assert!(!pod.out_of_range([0; 3]));
         assert!(pod.out_of_range([2 * DEBRIS_RANGE, 0, 0]));
+    }
+
+    #[test]
+    fn f714_scoops_with_the_tractor_or_the_scoop() {
+        let mut rng = Random::new(9, 10);
+        let pod = canister([0, 0, 10_000], [0.0; 3], axes(), [0.0; 3], 7, &mut rng);
+        let mut ship = Scoop {
+            position: [0; 3],
+            forward: [0.0, 0.0, 1.0],
+            radius: 10_000.0,
+            tractor: false,
+            scoop: false,
+        };
+        // No scoop fitted: nothing.
+        assert!(!pod.scooped_by(&ship));
+        // The Cargo Scoop takes a canister touching the nose.
+        ship.scoop = true;
+        assert!(pod.scooped_by(&ship));
+        // Not one behind the ship (a jettison leaves it there).
+        let behind = canister([0, 0, -10_000], [0.0; 3], axes(), [0.0; 3], 7, &mut rng);
+        assert!(!behind.scooped_by(&ship));
+        // The Tractor Beam reaches 2^15 mm within 60° of the nose.
+        ship.scoop = false;
+        ship.tractor = true;
+        let far = canister([0, 10_000, 30_000], [0.0; 3], axes(), [0.0; 3], 7, &mut rng);
+        assert!(far.scooped_by(&ship));
+        let wide = canister([30_000, 0, 10_000], [0.0; 3], axes(), [0.0; 3], 7, &mut rng);
+        assert!(!wide.scooped_by(&ship));
+        let out = canister([0, 0, 40_000], [0.0; 3], axes(), [0.0; 3], 7, &mut rng);
+        assert!(!out.scooped_by(&ship));
+        // An explosion's flash carries no cargo.
+        let burst = explosion([0, 0, 1000], [0.0; 3], 0, axes(), &mut rng).remove(0);
+        assert!(!burst.scooped_by(&ship));
+    }
+
+    #[test]
+    fn f926_pods_carry_alloys_then_the_wreck_table() {
+        let mut rng = Random::new(11, 12);
+        for _ in 0..50 {
+            let effects = explosion([0; 3], [0.0; 3], 16, axes(), &mut rng);
+            for pod in effects.iter().filter(|e| e.kind == Kind::Debris) {
+                let cargo = pod.cargo.expect("a pod carries cargo");
+                assert!(
+                    cargo == WRECK_CARGO || WRECK_CARGO_TABLE.contains(&(cargo as u8)),
+                    "{cargo}"
+                );
+            }
+        }
     }
 }

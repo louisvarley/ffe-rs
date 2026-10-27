@@ -156,12 +156,12 @@ fn hit_particle_explosion_and_frames() {
             .any(|effect| effect.kind == Kind::Explosion),
         "F942 spawned no explosion object"
     );
-    assert!(
-        nav.effects[before..]
-            .iter()
-            .any(|effect| effect.kind == Kind::Debris),
-        "F926 spawned no debris"
-    );
+    // F926's pod counts are random and can both be zero (F922(6) - 2 and
+    // F922(min(4, cargo >> 1)) - 1); any pod carries its cargo for F714.
+    assert!(nav.effects[before..]
+        .iter()
+        .filter(|effect| effect.kind == Kind::Debris)
+        .all(|effect| effect.cargo.is_some()));
     stage(&mut screen, &nav);
     screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "effects-kill.ppm");

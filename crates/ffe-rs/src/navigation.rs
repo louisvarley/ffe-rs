@@ -3556,6 +3556,25 @@ impl Navigator {
     /// window and F712's sparking pods each throw an F939 particle an update;
     /// F939 keeps the source's velocity only above the `0x9c40` speed, which
     /// the port takes as still, so the sparks stay where they were thrown.
+    /// F714 for every canister: the commodities `ship` scoops, at most
+    /// `space` of them (`+0x120` against `+0x118`); those canisters go.
+    pub fn scoop(&mut self, ship: &effects::Scoop, space: usize) -> Vec<u16> {
+        let mut taken = Vec::new();
+        for effect in &mut self.effects {
+            if taken.len() >= space {
+                break;
+            }
+            if effect.scooped_by(ship) {
+                if let Some(cargo) = effect.cargo {
+                    taken.push(cargo);
+                    effect.alive = false;
+                }
+            }
+        }
+        self.effects.retain(Effect::alive);
+        taken
+    }
+
     pub fn tick_effects(&mut self, seconds: f64, tics: u32) {
         let mut sparks = Vec::new();
         for (index, effect) in self.effects.iter_mut().enumerate() {

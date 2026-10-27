@@ -1918,7 +1918,7 @@ fn run() -> Result<(), String> {
                         pending_log
                             .add(Source::Trade, format!("Jettisoning {name} from cargo bay."));
                         if let Some(nav) = nav.as_mut() {
-                            jettison_canister(nav, &original, &state, scene.as_ref());
+                            jettison_canister(nav, &original, &state, scene.as_ref(), commodity);
                         }
                         sound.play(Cue::Launch);
                     }
@@ -4886,6 +4886,33 @@ fn run() -> Result<(), String> {
                         .map_or(10_000, i64::from)
                 };
                 let events = nav.tick_ships(elapsed * factor, tics, player, radius);
+                // F714: canisters the ship's scoop takes into the hold.
+                if nav.sequence.is_none() && nav.docked.is_none() && !nav.landed_view() {
+                    let hold = trade::hold_of(&state, trade::capacity(nav, &cache, &state));
+                    let space = (hold.capacity - hold.used).max(0) as usize;
+                    let scoop = ffe_core::effects::Scoop {
+                        position: player,
+                        forward: ffe_rs::camera::ship_axes(&state)[2],
+                        radius: radius as f64,
+                        tractor: state.loadout.general & ffe_core::equipment::TRACTOR_BEAM_BIT != 0,
+                        scoop: state.loadout.general & ffe_core::equipment::CARGO_SCOOP_BIT != 0,
+                    };
+                    for cargo in nav.scoop(&scoop, space) {
+                        let commodity = usize::from(cargo);
+                        if state.hold.len() < ffe_core::market::NAMES {
+                            state.hold.resize(ffe_core::market::NAMES, 0);
+                        }
+                        if let Some(tonnes) = state.hold.get_mut(commodity) {
+                            *tonnes = tonnes.saturating_add(1);
+                        }
+                        let name = cache
+                            .asset("base:market/tables")
+                            .and_then(|bytes| ffe_core::market::Tables::new(bytes).ok())
+                            .and_then(|tables| tables.name(commodity).map(str::to_owned))
+                            .unwrap_or_else(|| "cargo".to_owned());
+                        pending_log.add(Source::Trade, format!("Scooping {name} into Cargo Bay."));
+                    }
+                }
                 // F1035/F769: the space-dust spawn and lifecycle for this
                 // flight frame. `DATA_009018` is the first "Other Options" row
                 // ("Space dust, clouds etc"); `DATA_008867` is the altitude
@@ -7111,6 +7138,7 @@ fn jettison_canister(
     original: &Option<OriginalFlight>,
     state: &Flight,
     scene: Option<&ModelViewer>,
+    commodity: usize,
 ) {
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
     let axes = ffe_rs::camera::ship_axes(state);
@@ -7128,8 +7156,12 @@ fn jettison_canister(
         (forward[i] * f64::from(0x7fff_ffff_u32 >> 11) + jitter) / 4096.0 * unit_speed
     });
     let velocity = state.velocity.map(|v| v * unit);
+    // F291: the canister holds DATA_005112's form of the commodity.
+    let cargo = ffe_core::effects::JETTISON_CARGO
+        .get(commodity)
+        .map_or(commodity as u16, |code| u16::from(*code));
     nav.effects.push(ffe_core::effects::canister(
-        position, velocity, axes, push, &mut rng,
+        position, velocity, axes, push, cargo, &mut rng,
     ));
 }
 
