@@ -86,17 +86,7 @@ fn ships(screen: &mut Screen, nav: &Navigator) {
     screen.effects = nav
         .effects
         .iter()
-        .map(|effect| ffe_rs::screen::SystemEffect {
-            model: effect.model,
-            centre: effect.position.map(|v| v as f64 / unit),
-            axes: effect.axes(),
-            timer: effect.timer,
-            size: if effect.kind == ffe_core::effects::Kind::Explosion {
-                ffe_core::effects::EXPLOSION_SIZE
-            } else {
-                0
-            },
-        })
+        .map(|effect| ffe_rs::screen::SystemEffect::from_effect(None, effect, unit))
         .collect();
 }
 
@@ -423,7 +413,8 @@ fn system_traffic_draws_ships_names_hit_and_kill() {
     // F708/F709's timers; F927 recycles the slot on the same ticks. F926's
     // pods drift on until F767's range.
     screen.ships = Vec::new();
-    let seconds = ffe_core::effects::EXPLOSION_SECONDS + 3.0;
+    // F712 sparks a pod for seven day ticks; its last sparks live 2.6 s.
+    let seconds = 7.0 + 3.0;
     for _ in 0..(seconds / 0.02) as usize {
         nav.tick_ships(0.02, 994, from, 10_000);
     }

@@ -11,7 +11,7 @@ use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::gameover::{self, GameOver};
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::navigation::{Navigator, NEW_GAME_SHIP};
-use ffe_rs::screen::{Screen, SystemEffect};
+use ffe_rs::screen::Screen;
 
 fn cache() -> ffe_content::VerifiedCache {
     ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
@@ -91,17 +91,7 @@ fn stage_effects(screen: &mut Screen, nav: &Navigator) {
     screen.effects = nav
         .effects
         .iter()
-        .map(|effect| SystemEffect {
-            model: effect.model,
-            centre: effect.position.map(|v| v as f64 / unit),
-            axes: effect.axes(),
-            timer: effect.timer,
-            size: if effect.kind == effects::Kind::Explosion {
-                ffe_core::effects::EXPLOSION_SIZE
-            } else {
-                0
-            },
-        })
+        .map(|effect| ffe_rs::screen::SystemEffect::from_effect(None, effect, unit))
         .collect();
 }
 

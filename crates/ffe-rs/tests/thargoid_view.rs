@@ -69,17 +69,7 @@ fn ships(screen: &mut Screen, nav: &Navigator) {
     screen.effects = nav
         .effects
         .iter()
-        .map(|effect| ffe_rs::screen::SystemEffect {
-            model: effect.model,
-            centre: effect.position.map(|v| v as f64 / unit),
-            axes: effect.axes(),
-            timer: effect.timer,
-            size: if effect.kind == ffe_core::effects::Kind::Explosion {
-                ffe_core::effects::EXPLOSION_SIZE
-            } else {
-                0
-            },
-        })
+        .map(|effect| ffe_rs::screen::SystemEffect::from_effect(None, effect, unit))
         .collect();
 }
 

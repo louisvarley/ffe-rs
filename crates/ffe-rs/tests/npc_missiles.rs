@@ -103,6 +103,7 @@ fn draw(screen: &mut Screen, nav: &Navigator, state: &Flight, viewer: &ModelView
             axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
             timer: 0,
             size: 0,
+            scale: None,
         })
         .collect();
     screen.draw(state, ViewState::default(), Some(viewer), false, "");

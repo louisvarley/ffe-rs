@@ -326,6 +326,22 @@ pub fn player_explosion(
     ffe_core::effects::explosion(position, velocity, cargo, axes, &mut rng)
 }
 
+/// [`player_explosion`] for a ship of `mass` t (F942's distance word).
+pub fn player_explosion_of(
+    mass: u16,
+    position: [i64; 3],
+    velocity: [f64; 3],
+    cargo: u16,
+    axes: [[f64; 3]; 3],
+    clock: f64,
+) -> Vec<ffe_core::effects::Effect> {
+    let mut effects = player_explosion(position, velocity, cargo, axes, clock);
+    for effect in &mut effects {
+        effect.set_mass(mass);
+    }
+    effects
+}
+
 /// The no-craft branch's audible sequence: F942's `0x05` and `0x1f`, F1104's
 /// `0x1f` before F1098 (`81474`), the failed F1098, and F1104's second `0x1f`
 /// (`81517`). F770's song stop is

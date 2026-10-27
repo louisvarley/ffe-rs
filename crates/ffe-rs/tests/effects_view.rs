@@ -11,7 +11,7 @@ use ffe_rs::camera::ViewState;
 use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::model_viewer::{AnimationInputs, ModelViewer};
 use ffe_rs::navigation::{Navigator, NEW_GAME_SHIP};
-use ffe_rs::screen::{Screen, SystemEffect, SystemShip};
+use ffe_rs::screen::{Screen, SystemShip};
 
 fn cache() -> ffe_content::VerifiedCache {
     ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
@@ -69,17 +69,7 @@ fn stage(screen: &mut Screen, nav: &Navigator) {
     screen.effects = nav
         .effects
         .iter()
-        .map(|effect| SystemEffect {
-            model: effect.model,
-            centre: effect.position.map(|v| v as f64 / unit),
-            axes: effect.axes(),
-            timer: effect.timer,
-            size: if effect.kind == Kind::Explosion {
-                ffe_core::effects::EXPLOSION_SIZE
-            } else {
-                0
-            },
-        })
+        .map(|effect| ffe_rs::screen::SystemEffect::from_effect(None, effect, unit))
         .collect();
 }
 
@@ -183,7 +173,8 @@ fn hit_particle_explosion_and_frames() {
 
     // The effects live for their own lifetimes (debris the longest), then the
     // frame is clean again.
-    for _ in 0..((effects::EXPLOSION_SECONDS + 3.0) / 0.05) as usize {
+    // F712 sparks a pod for seven day ticks; its last sparks live 2.6 s.
+    for _ in 0..((7.0 + 3.0) / 0.05) as usize {
         nav.tick_ships(0.05, 2_485, from_mm, 10_000);
     }
     assert!(

@@ -219,6 +219,37 @@ pub struct SystemEffect {
     /// Object global word 1 (`+0x9e`): F942's `0xffff` on the explosion,
     /// model 155's fragment size (`global1 >> 7`); 0 otherwise.
     pub size: u16,
+    /// The effect model's scale shifted by its distance word, or `None` to
+    /// draw at the model's own scale.
+    pub scale: Option<u32>,
+}
+
+impl SystemEffect {
+    /// One of the navigator's effects as the renderer draws it. `unit` is the
+    /// original units per flight unit. The effect's distance word shifts its
+    /// model's own scale (F939's sparks draw at +2 or -1).
+    pub fn from_effect(
+        scene: Option<&ModelViewer>,
+        effect: &ffe_core::effects::Effect,
+        unit: f64,
+    ) -> Self {
+        let scale = scene
+            .filter(|_| effect.shift != 0)
+            .and_then(|scene| scene.find(effect.model))
+            .map(|model| (model.scale as i32 + i32::from(effect.shift)).max(0) as u32);
+        Self {
+            model: effect.model,
+            centre: effect.position.map(|v| v as f64 / unit),
+            axes: effect.axes(),
+            timer: effect.timer,
+            size: if effect.kind == ffe_core::effects::Kind::Explosion {
+                ffe_core::effects::EXPLOSION_SIZE
+            } else {
+                0
+            },
+            scale,
+        }
+    }
 }
 
 /// A missile object (F941, models 4..13) drawn through the same object renderer
@@ -2917,7 +2948,14 @@ impl Screen {
                 inputs.globals[1] = effect.size;
             }
             inputs.jitter = self.jitter.cursor;
-            if let Ok(frame) = scene.render_scene_with(effect.model, rows, origin, light, &inputs) {
+            if let Ok(frame) = scene.render_scene_with_scale(
+                effect.model,
+                effect.scale,
+                rows,
+                origin,
+                light,
+                &inputs,
+            ) {
                 if !frame.shapes.is_empty() {
                     self.jitter.cursor = frame.jitter;
                     self.draw_shapes(scene, &frame.shapes);

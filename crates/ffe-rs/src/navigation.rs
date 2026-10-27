@@ -3537,25 +3537,23 @@ impl Navigator {
     /// the port takes as still, so the sparks stay where they were thrown.
     pub fn tick_effects(&mut self, seconds: f64, tics: u32) {
         let mut sparks = Vec::new();
-        for effect in &mut self.effects {
+        for (index, effect) in self.effects.iter_mut().enumerate() {
             if effect.tick(seconds, tics) == effects::Update::Spark {
-                sparks.push((effect.position, effect.axes()));
+                sparks.push(index);
             }
-        }
-        let player = self.player_at;
-        self.effects
-            .retain(|effect| effect.alive() && !effect.out_of_range(player));
-        if sparks.is_empty() {
-            return;
         }
         let seed = (self.clock * 1000.0) as u32
             ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9)
             ^ 0x2000_0000;
         let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
-        for (position, axes) in sparks {
-            self.effects
-                .push(effects::hit(position, [0.0; 3], axes, 0.0, &mut rng));
-        }
+        let sparks: Vec<Effect> = sparks
+            .into_iter()
+            .map(|index| self.effects[index].spark(&mut rng))
+            .collect();
+        let player = self.player_at;
+        self.effects
+            .retain(|effect| effect.alive() && !effect.out_of_range(player));
+        self.effects.extend(sparks);
     }
 
     /// One flight frame of F1035's spawn and F769's lifetime. `elapsed` is the
@@ -4278,6 +4276,7 @@ impl Navigator {
         let axes = ship.axes();
         let velocity = ship.velocity;
         let cargo = ship.cargo;
+        let mass = ship.damage.mass;
         let speed = velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
         let attack = self.player_attack(id, damage)?;
         let seed = (self.clock * 1000.0) as u32
@@ -4293,9 +4292,11 @@ impl Navigator {
             &mut rng,
         ));
         if attack.damage == ffe_core::laser::Damage::Destroyed {
-            self.effects.extend(effects::explosion(
-                position, velocity, cargo, axes, &mut rng,
-            ));
+            let mut burst = effects::explosion(position, velocity, cargo, axes, &mut rng);
+            for effect in &mut burst {
+                effect.set_mass(mass);
+            }
+            self.effects.extend(burst);
         }
         Some(attack)
     }

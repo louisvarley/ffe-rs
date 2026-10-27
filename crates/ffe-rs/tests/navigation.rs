@@ -2423,8 +2423,9 @@ fn the_map_destination_survives_the_map_and_jumps() {
         up: [0.0, 1.0, 0.0],
         timer: 0xffff,
         countdown: 0,
-        think: 0.0,
+        think: 0,
         alive: true,
+        shift: 0,
     });
     let before = nav.clock;
     let jumped = nav.hyperspace_to_destination(&cache).unwrap();

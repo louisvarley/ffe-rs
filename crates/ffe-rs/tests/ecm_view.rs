@@ -12,7 +12,7 @@ use ffe_rs::flight::{Flight, Mode};
 use ffe_rs::missile::{EcmLoss, MissileField};
 use ffe_rs::model_viewer::ModelViewer;
 use ffe_rs::navigation::{Navigator, NEW_GAME_SHIP};
-use ffe_rs::screen::{Screen, SystemEffect, SystemMissile, SystemShip};
+use ffe_rs::screen::{Screen, SystemMissile, SystemShip};
 use ffe_rs::targeter;
 
 fn cache() -> ffe_content::VerifiedCache {
@@ -102,19 +102,7 @@ fn draw(
     screen.effects = nav
         .effects
         .iter()
-        .map(|effect| SystemEffect {
-            model: effect.model,
-            centre: effect.position.map(|v| v as f64 / unit),
-            axes: effect.axes(),
-            // Model 155's fragment branches read object global word 4,
-            // F708's countdown.
-            timer: effect.timer,
-            size: if effect.kind == ffe_core::effects::Kind::Explosion {
-                ffe_core::effects::EXPLOSION_SIZE
-            } else {
-                0
-            },
-        })
+        .map(|effect| ffe_rs::screen::SystemEffect::from_effect(None, effect, unit))
         .collect();
     screen.lasers = state.combat.lasers;
     screen.draw(state, views, Some(viewer), true, "");

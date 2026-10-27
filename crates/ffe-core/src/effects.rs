@@ -88,8 +88,9 @@ pub const SPARK_WINDOW: std::ops::Range<u16> = 0xbc00..0xc800;
 /// F926's `+0x14e`: the event-6 ticks a pod sparks for (it changes state once
 /// the count goes below zero).
 pub const DEBRIS_SPARK_TICKS: i8 = 6;
-/// The event-6 interval the port runs F768 at (the missile guidance cadence).
-pub const THINK_SECONDS: f64 = 0.4;
+/// F152's whole-day tick, which drives event 6 (F706 → F768): every `0xc22e`
+/// game tics, one second at 1x.
+pub const THINK_TICS: u32 = 0xc22e;
 /// F767's removal distance: distance class `0xd`, `2^(13 + 13)` mm.
 pub const DEBRIS_RANGE: i64 = 1 << 26;
 /// Seconds an explosion lives at 1x: F708's `0xffff` at `tics >> 2`.
@@ -135,9 +136,13 @@ pub struct Effect {
     pub timer: u16,
     /// F926's `+0x14e`: a pod's remaining event-6 spark ticks.
     pub countdown: i8,
-    /// Seconds towards the next event-6 tick.
-    pub think: f64,
+    /// Game tics towards the next event-6 tick.
+    pub think: u32,
     pub alive: bool,
+    /// The distance word `+0x7e`, a shift on the model's own scale: F1533
+    /// copies the source ship's (0 for the player in the executed death
+    /// probe), F942 and F939 change it.
+    pub shift: i8,
 }
 
 /// What an update asks the caller for besides the object itself.
@@ -192,9 +197,9 @@ impl Effect {
                 Update::Nothing
             }
             Kind::Debris => {
-                self.think += seconds;
-                while self.think >= THINK_SECONDS && self.countdown >= 0 {
-                    self.think -= THINK_SECONDS;
+                self.think = self.think.saturating_add(tics);
+                while self.think >= THINK_TICS && self.countdown >= 0 {
+                    self.think -= THINK_TICS;
                     self.countdown -= 1;
                 }
                 if self.countdown >= 0 {
@@ -204,6 +209,24 @@ impl Effect {
                 }
             }
         }
+    }
+
+    /// F942's distance word for the explosion of a ship of `mass` t: the
+    /// ship's less one, given back for 10 t or more (the executed probe's
+    /// 28 t Saker leaves 0). F942's own formula for 400 t or more is not
+    /// modelled; those keep the ship's word.
+    pub fn set_mass(&mut self, mass: u16) {
+        if self.kind == Kind::Explosion && mass < 10 {
+            self.shift = -1;
+        }
+    }
+
+    /// The F939 spark this object throws: F708 passes flag 2 (distance word
+    /// `+2`, four times the size), F712 flag 4 (`-1`).
+    pub fn spark(&self, rng: &mut Random) -> Effect {
+        let mut spark = hit(self.position, [0.0; 3], self.axes(), 0.0, rng);
+        spark.shift = self.shift + if self.kind == Kind::Debris { -1 } else { 2 };
+        spark
     }
 
     /// F767: a drifting pod goes once it is `DEBRIS_RANGE` from `player`.
@@ -242,8 +265,9 @@ pub fn hit(
         up,
         timer,
         countdown: 0,
-        think: 0.0,
+        think: 0,
         alive: true,
+        shift: 0,
     }
 }
 
@@ -262,8 +286,9 @@ pub fn missile_explosion(position: [i64; 3], axes: [[f64; 3]; 3], rng: &mut Rand
         up,
         timer: EXPLOSION_TIMER,
         countdown: 0,
-        think: 0.0,
+        think: 0,
         alive: true,
+        shift: 0,
     }
 }
 
@@ -288,8 +313,9 @@ pub fn explosion(
         up,
         timer: EXPLOSION_TIMER,
         countdown: 0,
-        think: 0.0,
+        think: 0,
         alive: true,
+        shift: 0,
     }];
     // F942: (F922(6) - 2) pods, then min(4, cargo >> 1) cargo pods.
     let pods = (rng.bounded(6) as i32 - 2).max(0) as usize;
@@ -315,8 +341,9 @@ pub fn explosion(
             up,
             timer: 0,
             countdown: DEBRIS_SPARK_TICKS,
-            think: 0.0,
+            think: 0,
             alive: true,
+            shift: 0,
         });
     }
     effects
@@ -471,11 +498,12 @@ mod tests {
         let mut pods = explosion([0; 3], [0.0; 3], 16, axes(), &mut rng);
         let mut pod = pods.pop().unwrap();
         assert_eq!(pod.kind, Kind::Debris);
-        let mut sparking = 0.0;
+        let mut sparking = 0.0f64;
         while pod.tick(0.02, 994) == Update::Spark {
             sparking += 0.02;
         }
-        assert!((sparking - 7.0 * THINK_SECONDS).abs() < 0.05, "{sparking}");
+        // Seven day ticks of 0xc22e tics at 994 a 20 ms update: 7.0 s.
+        assert!((sparking - 7.0).abs() < 0.05, "{sparking}");
         assert!(pod.alive());
         assert!(!pod.out_of_range([0; 3]));
         assert!(pod.out_of_range([2 * DEBRIS_RANGE, 0, 0]));

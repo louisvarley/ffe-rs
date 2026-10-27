@@ -5764,16 +5764,8 @@ fn run() -> Result<(), String> {
                 let mut effects: Vec<ffe_rs::screen::SystemEffect> = nav
                     .effects
                     .iter()
-                    .map(|effect| ffe_rs::screen::SystemEffect {
-                        model: effect.model,
-                        centre: effect.position.map(|v| v as f64 / unit),
-                        axes: effect.axes(),
-                        timer: effect.timer,
-                        size: if effect.kind == ffe_core::effects::Kind::Explosion {
-                            ffe_core::effects::EXPLOSION_SIZE
-                        } else {
-                            0
-                        },
+                    .map(|effect| {
+                        ffe_rs::screen::SystemEffect::from_effect(scene.as_ref(), effect, unit)
                     })
                     .collect();
                 // F1054's chaff object (model 0xa4) is an ordinary object in
@@ -5784,6 +5776,7 @@ fn run() -> Result<(), String> {
                     axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
                     timer: 0,
                     size: 0,
+                    scale: None,
                 }));
                 // F1035's space dust (model 0x6d): static objects the ship
                 // flies past, turned by F1675's YZT matrix.
@@ -5801,6 +5794,7 @@ fn run() -> Result<(), String> {
                                 }),
                                 timer: 0,
                                 size: 0,
+                                scale: None,
                             }
                         },
                     ));
@@ -6541,6 +6535,17 @@ fn run() -> Result<(), String> {
         if stats.is_some() {
             state.ensure_damage(hull_full);
         }
+        // Developer capture: `FFE_DEV_DESTROY_AT=<seconds>` ends the hull at that
+        // session time, as the reference's death probe does with F953.
+        if options.dev
+            && state.death.is_none()
+            && std::env::var("FFE_DEV_DESTROY_AT")
+                .ok()
+                .and_then(|value| value.parse::<f64>().ok())
+                .is_some_and(|at| session.total >= at)
+        {
+            state.hull[0] = 0;
+        }
         // A save or damage path that left the hull at zero without running F953's
         // lethal branch still enters F1104 once.
         if state.destroyed() && state.death.is_none() {
@@ -7146,7 +7151,8 @@ fn playership_destroyed(
     let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
     let cargo = stats.map_or(0, |stats| stats.cargo.max(0) as u16);
     let explosion_index = nav.effects.len();
-    nav.effects.extend(death::player_explosion(
+    nav.effects.extend(death::player_explosion_of(
+        stats.map_or(0, |stats| stats.mass),
         position,
         velocity,
         cargo,

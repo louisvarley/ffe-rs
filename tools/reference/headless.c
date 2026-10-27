@@ -839,6 +839,31 @@ void TimerFrameUpdate(void)
             ref_damage(object, 0x7fffffffL, 0);
         }
         if (death_triggered) {
+            /* The explosion and F1104's external view after the hit. */
+            unsigned long since = frames - death_trigger_at;
+            if (since == 1 || since == 3 || since == 10 || since == 25 || since == 50 ||
+                since == 75 || since == 100 || since == 150 || since == 200 || since == 260) {
+                char name[64];
+                snprintf(name, sizeof name, "death-hit-%03lu.ppm", since);
+                write_ppm(name);
+                {
+                    unsigned char *list = ref_pl_object_list;
+                    unsigned i;
+                    fprintf(stderr, "death-objects %lu:", since);
+                    for (i = 1; i <= 0x72; ++i) {
+                        unsigned char *o = list + i * 0x152 + 0x74;
+                        unsigned long model;
+                        if (o[0x87] == 0) continue;
+                        model = o[0x82] | o[0x83] << 8 | o[0x84] << 16 | o[0x85] << 24;
+                        if (model < 0x99 || model > 0x9e) continue;
+                        fprintf(stderr, " [%u m%lu d%ld ai%u t%u g1 %u]", i, model,
+                                (long)(o[0x7e] | o[0x7f] << 8 | o[0x80] << 16 | o[0x81] << 24),
+                                (unsigned)o[0xff], (unsigned)(o[0xa4] | o[0xa5] << 8),
+                                (unsigned)(o[0x9e] | o[0x9f] << 8));
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
             printf("{\"frame\":%lu,\"tics\":%lu,\"mode\":%u,\"timeout\":%lu,\"player\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n",
                    frames, state_u32(0), ref_pl_mode, *(unsigned long *)&ref_state[0x106], player,
                    (unsigned long long)fingerprint(pixels, sizeof(pixels)));
