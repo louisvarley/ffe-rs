@@ -1915,6 +1915,10 @@ fn autopilot_docks_at_stations_from_every_bearing() {
             ] {
                 let start: [i64; 3] =
                     std::array::from_fn(|k| centre[k] + (dir[k] * 40.0e6).round() as i64);
+                // The previous bearing's docking sequence would keep the
+                // autopilot from engaging: each run starts in free flight.
+                nav.sequence = None;
+                nav.docked = None;
                 nav.lock(index);
                 nav.engage_locked();
                 let mut flight = OriginalFlight::from_flight(
