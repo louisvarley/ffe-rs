@@ -172,6 +172,19 @@ pub enum DeathPhase {
     GameOver,
 }
 
+/// F1107, the death hold's frame handler, turns the external camera's yaw
+/// (`DATA_008893`, `DATA_008804 + 0x128`) by the frame's `tics >> 2`: one
+/// orbit of the explosion in 0x40000 tics (5.27 s), measured as 260 per
+/// 1043-tic frame in the reference. F1107 then retries with +0x2000, +0x6000
+/// and +0x1000 while F1054 reports the view blocked; the port has no such test.
+pub fn orbit_yaw(yaw: u16, seconds: f64) -> u16 {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return yaw;
+    }
+    let tics = (seconds * crate::original_flight::TICS_PER_SECOND) as u32;
+    yaw.wrapping_add((tics >> 2) as u16)
+}
+
 /// F1104's external distance word (F1105 selects the player's explosion).
 pub const DEATH_CAMERA_DISTANCE: i32 = 0xf900_0000u32 as i32;
 
@@ -389,6 +402,15 @@ pub fn escaped_message(killer: &str, craft: EscapeCraft) -> String {
 mod tests {
     use super::*;
     use ffe_core::equipment::Loadout;
+
+    #[test]
+    fn f1107_turns_the_camera_by_a_quarter_of_the_frame_tics() {
+        // The reference's 1043-tic frames turn the yaw by 260.
+        let frame = 1043.0 / crate::original_flight::TICS_PER_SECOND;
+        assert_eq!(orbit_yaw(0, frame), 260);
+        assert_eq!(orbit_yaw(0xffff, frame), 259);
+        assert_eq!(orbit_yaw(5, 0.0), 5);
+    }
 
     #[test]
     fn escape_craft_reads_the_source_bits_in_f1098s_order() {

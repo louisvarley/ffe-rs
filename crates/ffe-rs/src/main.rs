@@ -1448,6 +1448,9 @@ fn run() -> Result<(), String> {
         // timeout starts the screen. There are no game-over options here: the
         // tombstone ends by returning to the front end (the intro's choices).
         if let Some(value) = state.death.as_mut() {
+            if value.phase == death::DeathPhase::Exploding {
+                views.external.yaw = death::orbit_yaw(views.external.yaw, elapsed);
+            }
             value.tick(elapsed);
         }
         let death_control = state.death.is_some();
