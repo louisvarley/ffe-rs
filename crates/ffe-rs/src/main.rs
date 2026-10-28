@@ -5118,6 +5118,7 @@ fn run() -> Result<(), String> {
                         .map_or(10_000, i64::from)
                 };
                 let events = nav.tick_ships(elapsed * factor, tics, player, radius);
+                nav.tick_life(&cache, elapsed * factor);
                 // F714: canisters the ship's scoop takes into the hold.
                 if nav.sequence.is_none() && nav.docked.is_none() && !nav.landed_view() {
                     let hold = trade::hold_of(&state, trade::capacity(nav, &cache, &state));

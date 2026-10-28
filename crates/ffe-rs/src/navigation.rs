@@ -1173,6 +1173,8 @@ pub struct Navigator {
     pub pirates: bool,
     /// World Options' Advanced traffic ([`npc::Life`]).
     pub advanced_traffic: bool,
+    /// Game seconds to Advanced traffic's next hyperspace arrival or departure.
+    life_clock: f64,
     autopilot_notice: Option<String>,
     /// The body the player has locked on (clicked in the view or cycled to): what the
     /// autopilot button flies to.
@@ -2059,6 +2061,7 @@ impl Navigator {
             police: true,
             pirates: true,
             advanced_traffic: false,
+            life_clock: npc::LIFE_SECONDS,
             autopilot_notice: None,
             locked: None,
             destination: None,
@@ -2558,6 +2561,88 @@ impl Navigator {
     /// variance sign and legality; 37 bytes.
     pub fn stock_flags(&self, cache: &VerifiedCache) -> Result<[u8; 37], String> {
         Ok(self.conditions(cache)?.2)
+    }
+
+    /// Port addition (Advanced traffic): now and then a trader drops out of
+    /// hyperspace (with F1094's exit cloud) beyond the place nearest the
+    /// player and flies in to dock, or an idle trader jumps out (the
+    /// `Escaped` departure cloud). Busier systems do this more often.
+    pub fn tick_life(&mut self, cache: &VerifiedCache, seconds: f64) {
+        if !self.advanced_traffic
+            || self.traffic_off
+            || self.transit.is_some()
+            || self.spawned != Some(self.current)
+        {
+            return;
+        }
+        self.life_clock -= seconds;
+        if self.life_clock > 0.0 {
+            return;
+        }
+        let life = self.life(cache);
+        let clock = clock_words(self.clock);
+        let mut rng = npc::Random::new(
+            clock[0] ^ 0x1f3d_5b79 ^ self.ships.len() as u32,
+            clock[1].rotate_left(7) ^ 0x2a4c_6e80,
+        );
+        self.life_clock = life.interval(f64::from(rng.bounded(1000)) / 1000.0);
+        let player = self.player_at;
+        let options = npc::SpawnOptions {
+            extra_traders: self.traffic_extra,
+            advanced: Some(life),
+            ..npc::SpawnOptions::default()
+        };
+        let alive = self.ships.iter().filter(|ship| ship.alive()).count();
+        if rng.bounded(2) == 0 && alive < options.cap() {
+            // An arrival at the place nearest the player.
+            let Some((index, place)) = self
+                .bodies
+                .iter()
+                .enumerate()
+                .filter(|(_, body)| body.kind.is_place())
+                .min_by(|a, b| {
+                    distance(player, a.1.position).total_cmp(&distance(player, b.1.position))
+                })
+                .map(|(index, body)| (index, body.position))
+            else {
+                return;
+            };
+            let radius = self.bodies[index].radius as f64 + npc::ARRIVAL_DISTANCE;
+            let angle = f64::from(rng.bounded(65_536)) / 65_536.0 * std::f64::consts::TAU;
+            let lift = (f64::from(rng.bounded(65_536)) / 65_536.0 - 0.5) * 0.6;
+            let position = [
+                place[0] + (angle.cos() * radius) as i64,
+                place[1] + (lift * radius) as i64,
+                place[2] + (angle.sin() * radius) as i64,
+            ];
+            let Some(tables) = cache
+                .asset("base:world/system-tables")
+                .and_then(|blob| Tables::new(blob).ok())
+            else {
+                return;
+            };
+            let allegiance = tables
+                .details(self.entries[self.current].params.code)
+                .allegiance
+                >> 6;
+            let model = npc::model_for(npc::Role::Trader, allegiance, &mut rng);
+            let Some(spec) = crate::ships::npc_spec(cache, model) else {
+                return;
+            };
+            let id = self.ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
+            let ship = npc::hyperspace_arrival(&spec, id, position, place, index, &mut rng);
+            self.effects.push(effects::exit_cloud(position, 4 * 49_710));
+            self.ships.push(ship);
+        } else if let Some(ship) = self.ships.iter_mut().find(|ship| {
+            // A departure: an idle trader or shuttle out of the player's way.
+            matches!(ship.role, npc::Role::Trader)
+                && !ship.hostile
+                && ship.state == npc::State::Hold
+                && ship.station.is_none()
+                && distance(player, ship.position) > 5.0e6
+        }) {
+            ship.state = npc::State::Escaped;
+        }
     }
 
     /// Advanced traffic's view of this system: F870's population and danger.

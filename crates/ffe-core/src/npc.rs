@@ -2684,6 +2684,42 @@ impl Life {
     }
 }
 
+/// Port addition (Advanced traffic): game seconds between hyperspace
+/// arrivals or departures in an empty system; each population step takes
+/// [`LIFE_STEP_SECONDS`] off.
+pub const LIFE_SECONDS: f64 = 90.0;
+pub const LIFE_STEP_SECONDS: f64 = 6.0;
+/// How far off the place's surface a hyperspace arrival appears.
+pub const ARRIVAL_DISTANCE: f64 = 25.0e6;
+
+impl Life {
+    /// The wait before the next arrival or departure, with up to half again
+    /// at random (`roll` in 0..1).
+    pub fn interval(self, roll: f64) -> f64 {
+        let base = (LIFE_SECONDS - LIFE_STEP_SECONDS * f64::from(self.population)).max(20.0);
+        base * (1.0 + 0.5 * roll.clamp(0.0, 1.0))
+    }
+}
+
+/// Port addition (Advanced traffic): a trader out of hyperspace, `id` its
+/// stable id, flying to `station` (a place at `anchor`) for a bay.
+pub fn hyperspace_arrival(
+    spec: &Spec,
+    id: u32,
+    position: [i64; 3],
+    anchor: [i64; 3],
+    station: usize,
+    rng: &mut Random,
+) -> NpcShip {
+    let mut spec = spec.clone();
+    spec.name = format!("{} {}", spec.name, id + 1);
+    let mut ship = NpcShip::new(&spec, Role::Trader, position, anchor, rng);
+    ship.id = id;
+    ship.forward = normalise(sub(anchor, position));
+    ship.begin_transit(station, anchor);
+    ship
+}
+
 /// Port addition: the most ships one convoy (a bulk carrier and its escorts)
 /// adds.
 pub const MAX_CONVOY_SHIPS: usize = 3;
