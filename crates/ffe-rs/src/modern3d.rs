@@ -24,6 +24,8 @@ use crate::modern::scale2x;
 
 /// The flight view's rows; the console starts below them.
 pub const VIEW_ROWS: usize = 158;
+/// How strongly the brightest parts (the star, lights, sunlit white) glow: modest.
+const BLOOM: f32 = 0.6;
 /// How much the frame behind the models is enlarged before the GPU filters it.
 const BACKGROUND_SCALE: usize = 2;
 /// The nearest view depth the original projects (F1479 rejects `z < 64`).
@@ -338,6 +340,7 @@ pub fn scene(
         },
         batches,
         textures,
+        bloom: BLOOM,
     }
 }
 
@@ -447,8 +450,11 @@ mod tests {
         // 4x the logical frame: the square spans columns 538..742 and rows 214..418.
         assert_eq!(at(560, 240), 0xffffff);
         assert_eq!(at(720, 400), 0xffffff);
-        assert_eq!(at(520, 240), 0x000010);
-        assert_eq!(at(760, 300), 0x000010);
+        // Beyond the white square's bloom (about 30 pixels), the sky as it was.
+        assert_eq!(at(490, 240), 0x000010);
+        assert_eq!(at(790, 300), 0x000010);
+        // Just outside the square its glow lightens the sky.
+        assert!(at(545 - 12, 300) & 0xff > 0x10);
         // The HUD pixel and the rows below the view are left as they were.
         assert_eq!(at(642, 318), 0x123456);
         assert_eq!(at(640, 700), 0x123456);

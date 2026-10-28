@@ -310,7 +310,7 @@ window.FFE_BURNDOWN = {
       tasks: [
         { id: "enhanced-0", title: "Separate modern engine, the Classic/Modern switch and a first technique (edge-directed upscaling)", status: "done", version: "modern-1" },
         { id: "enhanced-1", title: "Native resolution, filtering and MSAA", status: "in-progress", version: "modern-2" },
-        { id: "enhanced-2", title: "Modest bloom", status: "todo" },
+        { id: "enhanced-2", title: "Modest bloom", status: "done", version: "modern-4" },
         { id: "enhanced-3", title: "Planet atmosphere and shadows", status: "in-progress", version: "modern-3" },
         { id: "enhanced-4", title: "HDR output and temporal AA (deferred)", status: "todo" },
         { id: "enhanced-5", title: "Frame and VRAM budgets measured", status: "todo" }
@@ -943,6 +943,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 101,
       note: "Modern graphics: model lights as soft GPU sprites (halo and core, depth-tested), background stars as GPU points, the nebula model on the GPU, and anti-aliased wide lines; lines and F1546 curves now carry view-space points from the executor. enhanced-1 stays in progress. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: modest bloom (bright parts blurred at half size and added back) and a halo sprite for a star in view. enhanced-2 done."
     }
   ]
 };

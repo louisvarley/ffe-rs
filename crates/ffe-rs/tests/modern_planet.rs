@@ -181,3 +181,70 @@ fn the_planet_is_drawn_on_the_gpu_from_orbit_to_the_ground() {
         );
     }
 }
+
+/// A star in view glows in Modern graphics: a halo sprite in its colour goes to the GPU before
+/// the star, and the GPU picture is brighter round the star than the sky it was drawn over.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
+fn a_star_glows_on_the_gpu() {
+    let mut gpu = Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    state.position = [0.0; 3];
+    // A star 5 original pixels in radius straight ahead.
+    screen.discs = vec![Disc {
+        centre: [0.0, 0.0, 1000.0],
+        radius: 20.0,
+        light: [0.0, 0.0, 1.0],
+        colours: (15, 15),
+        star: true,
+        model: None,
+        orientation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    }];
+    screen.capture = true;
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+    let world = screen.world().cloned().expect("the flight view's world");
+    let halo = world
+        .batches
+        .iter()
+        .flatten()
+        .find_map(|solid| solid.sprite.as_ref()?.halo);
+    assert!(halo.is_some_and(|(size, _)| size >= 16), "a halo sprite");
+    let (width, height) = (1280usize, 800usize);
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let mut target = vec![0u32; width * height];
+    gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)
+        .unwrap();
+    // Twelve original pixels right of the star's centre (160, 79): sky in the frame, glow on
+    // the GPU.
+    let sum = |p: u32| (p >> 16 & 0xff) + (p >> 8 & 0xff) + (p & 0xff);
+    let sky = world.snapshot[79 * 320 + 172];
+    let shown = target[(79 * 4 + 2) * width + 172 * 4 + 2];
+    eprintln!("sky {sky:06x}, glow {shown:06x}");
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        write_png(
+            &std::path::Path::new(&dir).join("modern-star.png"),
+            &target,
+            width,
+            height,
+        );
+    }
+    assert!(sum(shown) > sum(sky) + 30, "the star glows");
+}

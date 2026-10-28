@@ -1397,6 +1397,25 @@ impl Screen {
             .collect();
         order.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (z, disc) in order {
+            // For the modern engine, a star's glow: a halo eight times its radius in its colour,
+            // drawn before the star itself, so the star's disc lies over the halo's centre.
+            if self.capture && disc.star && z > 0.0 {
+                let ahead = camera.point(disc.centre);
+                let length = ahead.iter().map(|c| c * c).sum::<f64>().sqrt().max(1.0);
+                let across = (disc.radius * 256.0 / ahead[2] * 8.0).clamp(16.0, 640.0) as i32;
+                let colour = self.palette[usize::from(disc.colours.0)];
+                let rgb = [(colour >> 16) as u8, (colour >> 8) as u8, colour as u8];
+                self.batches.push(vec![Solid {
+                    views: vec![ahead.map(|c| (c / length * 1.0e6) as i32)],
+                    rgb,
+                    texture: None,
+                    path: false,
+                    sprite: Some(crate::model_viewer::Sprite {
+                        size: 0,
+                        halo: Some((across, rgb)),
+                    }),
+                }]);
+            }
             // The real surface when the model fits the view space at this range.
             if let (Some((model, seed)), Some(viewer)) = (disc.model, viewer) {
                 // The planet's radius in the model's units is its surface axes' length;

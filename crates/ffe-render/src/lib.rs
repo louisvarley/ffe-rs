@@ -154,6 +154,8 @@ pub struct Scene {
     pub background: Option<Image>,
     pub projection: Projection,
     pub batches: Vec<Batch>,
+    /// How strongly bright parts glow (0 none): they are blurred at half size and added back.
+    pub bloom: f32,
     pub textures: Vec<Texture>,
 }
 
@@ -183,6 +185,77 @@ const LAYERS: usize = 4095;
 /// BGRA, so a texel's bytes are the little-endian `0xAARRGGBB` word callers use.
 const COLOUR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+/// The bloom's passes: bright parts at half size, a separable blur, and the sum.
+const POST: &str = r#"
+struct Post { params: vec4<f32>, texel: vec4<f32> };
+@group(0) @binding(0) var source: texture_2d<f32>;
+@group(0) @binding(1) var extra: texture_2d<f32>;
+@group(0) @binding(2) var filtered: sampler;
+@group(0) @binding(3) var<uniform> post: Post;
+
+struct FullOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_full(@builtin(vertex_index) index: u32) -> FullOut {
+    let x = f32((index << 1u) & 2u);
+    let y = f32(index & 2u);
+    var out: FullOut;
+    out.position = vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+    out.uv = vec2<f32>(x, y);
+    return out;
+}
+
+// The parts brighter than the threshold (params.z), fading in over the last stretch, from four
+// samples of the full picture round each half-size texel.
+@fragment
+fn fs_bright(i: FullOut) -> @location(0) vec4<f32> {
+    let t = post.texel.xy * 0.5;
+    var sum = vec3<f32>(0.0);
+    for (var k = 0; k < 4; k = k + 1) {
+        let offset = vec2<f32>(f32(k & 1) - 0.5, f32(k >> 1u) - 0.5) * t * 2.0;
+        let c = textureSample(source, filtered, i.uv + offset).rgb;
+        let peak = max(c.r, max(c.g, c.b));
+        sum = sum + c * smoothstep(post.params.z, 1.0, peak);
+    }
+    return vec4<f32>(sum * 0.25, 1.0);
+}
+
+// Nine taps of a Gaussian along params.xy (in source texels).
+@fragment
+fn fs_blur(i: FullOut) -> @location(0) vec4<f32> {
+    var weights = array<f32, 5>(0.2270270, 0.1945946, 0.1216216, 0.0540540, 0.0162162);
+    let step = post.params.xy * post.texel.xy;
+    var sum = textureSample(source, filtered, i.uv).rgb * weights[0];
+    for (var k = 1; k < 5; k = k + 1) {
+        let offset = step * f32(k);
+        sum = sum + textureSample(source, filtered, i.uv + offset).rgb * weights[k];
+        sum = sum + textureSample(source, filtered, i.uv - offset).rgb * weights[k];
+    }
+    return vec4<f32>(sum, 1.0);
+}
+
+// The picture plus the blurred glow times params.w.
+@fragment
+fn fs_combine(i: FullOut) -> @location(0) vec4<f32> {
+    let base = textureSample(source, filtered, i.uv).rgb;
+    let glow = textureSample(extra, filtered, i.uv).rgb;
+    return vec4<f32>(min(base + glow * post.params.w, vec3<f32>(1.0)), 1.0);
+}
+"#;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct PostUniforms {
+    params: [f32; 4],
+    texel: [f32; 4],
+}
+
+/// The brightness (largest channel) above which a pixel starts to glow.
+const BLOOM_THRESHOLD: f32 = 0.8;
 
 const SHADER: &str = r#"
 struct Uniforms { scale: vec4<f32>, viewport: vec4<f32> };
@@ -318,7 +391,8 @@ fn vs_sprite(
         vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
     );
     let corner = corners[index];
-    let extent = max(size, halo_size) * 0.5 + 1.5;
+    // Wide enough for the halo's tail to fade out (it is 1/2000 at 1.8 halo radii).
+    let extent = max(size * 0.5, halo_size * 0.9) + 1.5;
     var clip = vec4<f32>(p.x * u.scale.x, p.y * u.scale.y, u.scale.z * 1.02, p.z);
     clip.x = clip.x + corner.x * extent * 2.0 / u.viewport.x * clip.w;
     clip.y = clip.y + corner.y * extent * 2.0 / u.viewport.y * clip.w;
@@ -463,6 +537,9 @@ struct Targets {
     height: u32,
     colour: wgpu::Texture,
     resolved: wgpu::Texture,
+    /// The bloom's two half-size buffers and the picture with the glow added.
+    glow: [wgpu::Texture; 2],
+    bloomed: wgpu::Texture,
     depth: wgpu::Texture,
     readback: wgpu::Buffer,
     padded_row: u32,
@@ -480,6 +557,10 @@ pub struct Renderer {
     shells: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     face_sampler: wgpu::Sampler,
+    post_layout: wgpu::BindGroupLayout,
+    bright: wgpu::RenderPipeline,
+    blur: wgpu::RenderPipeline,
+    combine: wgpu::RenderPipeline,
     /// The GPU array the scenes' textures are kept in between frames.
     face_textures: Option<FaceTextures>,
     targets: Option<Targets>,
@@ -753,7 +834,85 @@ impl Renderer {
             anisotropy_clamp: 8,
             ..Default::default()
         });
+        let post_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ffe-render bloom"),
+            source: wgpu::ShaderSource::Wgsl(POST.into()),
+        });
+        let picture = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let post_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bloom bindings"),
+            entries: &[
+                picture(0),
+                picture(1),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let post_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bloom layout"),
+            bind_group_layouts: &[Some(&post_layout)],
+            ..Default::default()
+        });
+        let post_pipeline = |entry: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&post_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &post_module,
+                    entry_point: Some("vs_full"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &post_module,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: COLOUR_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let (bright, blur, combine) = (
+            post_pipeline("fs_bright"),
+            post_pipeline("fs_blur"),
+            post_pipeline("fs_combine"),
+        );
         Ok(Self {
+            post_layout,
+            bright,
+            blur,
+            combine,
             device,
             queue,
             layout,
@@ -805,8 +964,33 @@ impl Renderer {
                 resolved: texture(
                     1,
                     COLOUR_FORMAT,
-                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
                     "resolved",
+                ),
+                glow: ["glow a", "glow b"].map(|label| {
+                    self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some(label),
+                        size: wgpu::Extent3d {
+                            width: width.div_ceil(2),
+                            height: height.div_ceil(2),
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: COLOUR_FORMAT,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    })
+                }),
+                bloomed: texture(
+                    1,
+                    COLOUR_FORMAT,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    "bloomed",
                 ),
                 depth: texture(
                     SAMPLES,
@@ -1051,9 +1235,15 @@ impl Renderer {
                 pass.draw(0..3, atmospheres.clone());
             }
         }
+        let shown = if scene.bloom > 0.0 {
+            self.bloom(&mut encoder, targets, scene.bloom);
+            &targets.bloomed
+        } else {
+            &targets.resolved
+        };
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &targets.resolved,
+                texture: shown,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -1105,8 +1295,115 @@ impl Renderer {
 }
 
 impl Renderer {
-    /// Put the scene's textures in a GPU array with their mip levels, unless they are the
-    /// previous scene's.
+    /// The bloom: the resolved picture's bright parts at half size, blurred twice (the second
+    /// time twice as wide), then added to it in `bloomed`.
+    fn bloom(&self, encoder: &mut wgpu::CommandEncoder, targets: &Targets, strength: f32) {
+        let device = &self.device;
+        let view = |texture: &wgpu::Texture| texture.create_view(&Default::default());
+        let (resolved, bloomed) = (view(&targets.resolved), view(&targets.bloomed));
+        let glow = [view(&targets.glow[0]), view(&targets.glow[1])];
+        let full = [
+            1.0 / targets.width as f32,
+            1.0 / targets.height as f32,
+            0.0,
+            0.0,
+        ];
+        let half = [
+            1.0 / targets.width.div_ceil(2) as f32,
+            1.0 / targets.height.div_ceil(2) as f32,
+            0.0,
+            0.0,
+        ];
+        let pass = |encoder: &mut wgpu::CommandEncoder,
+                    pipeline: &wgpu::RenderPipeline,
+                    target: &wgpu::TextureView,
+                    source: &wgpu::TextureView,
+                    extra: &wgpu::TextureView,
+                    uniforms: PostUniforms| {
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("bloom uniforms"),
+                contents: bytemuck::bytes_of(&uniforms),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let bindings = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bloom bindings"),
+                layout: &self.post_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(source),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(extra),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: buffer.as_entire_binding(),
+                    },
+                ],
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("bloom"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bindings, &[]);
+            pass.draw(0..3, 0..1);
+        };
+        let uniforms = |params: [f32; 4], texel: [f32; 4]| PostUniforms { params, texel };
+        pass(
+            encoder,
+            &self.bright,
+            &glow[0],
+            &resolved,
+            &resolved,
+            uniforms([0.0, 0.0, BLOOM_THRESHOLD, 0.0], full),
+        );
+        for spread in [1.0, 2.0] {
+            pass(
+                encoder,
+                &self.blur,
+                &glow[1],
+                &glow[0],
+                &glow[0],
+                uniforms([spread, 0.0, 0.0, 0.0], half),
+            );
+            pass(
+                encoder,
+                &self.blur,
+                &glow[0],
+                &glow[1],
+                &glow[1],
+                uniforms([0.0, spread, 0.0, 0.0], half),
+            );
+        }
+        pass(
+            encoder,
+            &self.combine,
+            &bloomed,
+            &resolved,
+            &glow[0],
+            uniforms([0.0, 0.0, 0.0, strength], full),
+        );
+    }
+
     /// Put the scene's textures in the GPU array, uploading (with mip levels) only those not
     /// already there; returns each one's layer. Layers are reused least recently used first.
     fn upload_textures(&mut self, textures: &[Texture]) -> Vec<u32> {
@@ -1329,6 +1626,7 @@ mod tests {
                 sprites: vec![],
             }],
             textures: vec![],
+            bloom: 0.0,
         };
         let pixels = renderer.render(&scene).unwrap();
         assert_eq!(pixels.len(), 64 * 48);
@@ -1410,6 +1708,7 @@ mod tests {
                 ..Batch::default()
             }],
             textures: vec![],
+            bloom: 0.0,
             ..textured
         };
         let pixels = renderer.render(&hazy).unwrap();
@@ -1454,6 +1753,39 @@ mod tests {
         let line = renderer.render(&ruled).unwrap();
         assert_eq!(line[24 * 64 + 4], 0xff00ff, "on the line");
         assert_eq!(line[20 * 64 + 4], 0x203040, "four pixels off it");
+        // Bloom: a white face glows onto the dark round it only when bloom is on.
+        let bright = Scene {
+            background: None,
+            batches: vec![Batch {
+                triangles: vec![Triangle {
+                    positions: [
+                        [-10.0, -10.0, 100.0],
+                        [10.0, -10.0, 100.0],
+                        [0.0, 10.0, 100.0],
+                    ],
+                    colours: [[1.0; 4]; 3],
+                    texture: None,
+                }],
+                ..Batch::default()
+            }],
+            ..ruled
+        };
+        let plain = renderer.render(&bright).unwrap();
+        let glowing = renderer
+            .render(&Scene {
+                bloom: 1.0,
+                ..bright
+            })
+            .unwrap();
+        // Six pixels above the centre, past the small triangle's apex (2.4 pixels up).
+        let near = 18 * 64 + 32;
+        assert_eq!(plain[near], 0, "no glow without bloom");
+        assert!(glowing[near] & 0xff > 0, "glow round a bright face");
+        assert_eq!(
+            glowing[24 * 64 + 32],
+            0xffffff,
+            "the face itself stays white"
+        );
         // The far light lands 5/20 of the half-width (8 pixels) right of centre, inside the face.
         assert_eq!(
             pixels[24 * 64 + 40],

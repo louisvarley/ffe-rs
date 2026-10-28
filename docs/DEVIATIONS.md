@@ -139,7 +139,7 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 | ENH-007 | Sharp scalable HUD/text | proposed | native-res; must match Classic metrics when off |
 | ENH-008 | HDR + tone mapping | proposed | native-res |
 | ENH-009 | HDR display output | proposed | HDR + capable surface/OS |
-| ENH-010 | Bloom/lens effects | proposed | HDR |
+| ENH-010 | Bloom/lens effects | modest bloom and star glow implemented (Modern with a GPU) | The GPU picture's brightest parts (largest channel over 0.8) are blurred at half size and added back at 0.6; a star in view gets a halo sprite eight times its radius in its colour, drawn before the star. No HDR yet. See `docs/notes/modern-graphics.md`. |
 | ENH-011 | Shadows (incl. ship self-shadowing) | proposed | native-res |
 | ENH-012 | Ambient occlusion | proposed | native-res |
 | ENH-013 | Atmospheric scattering + clouds | atmosphere implemented (no clouds) | Modern graphics with a GPU: each planet with an F1877 haze record gets a shell from the surface to the ring's radius (`radius * (1 + word8 / 32768)`), traced per pixel in the record's haze colour and lit by the star, in place of the ring's dithered quads (which are set aside in Modern only). See `docs/notes/modern-graphics.md`. |

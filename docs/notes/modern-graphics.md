@@ -171,6 +171,18 @@ Status (2026-10-28): **implemented**.
   pixel wide (`ffe-render`'s wide lines, cut at the near plane), and a curve is F1546's cubic
   through its four points, stepped in view space (33 points) instead of on the screen.
 
+### Bloom and the star's glow
+
+Status (2026-10-28): **implemented** (ENH-010, modest; enhanced-2).
+
+- After the scene resolves, `ffe-render` takes the parts whose largest channel is over 0.8 (fading
+  in over the last stretch) at half size, blurs them with a nine-tap Gaussian twice (the second
+  pass twice as wide) and adds them back at 0.6 (`Scene::bloom`). Ordinary hulls and terrain are
+  left alone; the star, lights and sunlit white glow softly.
+- A star in view gets a halo sprite eight times its radius across (at least 16 original pixels) in
+  its colour, drawn before the star, so the star's disc or model lies over the halo's centre
+  (`tests/modern_planet.rs`, `a_star_glows_on_the_gpu`).
+
 Not yet on the GPU (still the original's pixels behind the models): particles (F1814 chains),
 thruster glows, the hyperspace tunnel, and the HUD and its gunsight.
 
