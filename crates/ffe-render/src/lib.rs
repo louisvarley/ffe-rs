@@ -66,6 +66,19 @@ pub struct Triangle {
 pub struct Line {
     pub positions: [[f32; 3]; 2],
     pub colour: [f32; 4],
+    /// Its width in pixels (anti-aliased; at least one).
+    pub width: f32,
+}
+
+/// A line as the GPU reads it: both ends, the colour, the width and the place in its batch.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct WideLine {
+    a: [f32; 3],
+    width: f32,
+    b: [f32; 3],
+    layer: f32,
+    colour: [f32; 4],
 }
 
 /// One object's geometry, depth-tested within itself. Batches are drawn in order, each over the
@@ -78,6 +91,29 @@ pub struct Batch {
     pub lines: Vec<Line>,
     /// Atmospheres drawn over the batch's faces (a planet's).
     pub atmospheres: Vec<Atmosphere>,
+    /// Lights and stars: round glows facing the eye, hidden by the batch's nearer faces.
+    pub sprites: Vec<Sprite>,
+}
+
+/// A point of light at `position` (view space): a soft round core `size` pixels across in
+/// `colour`, and optionally a fainter halo `halo_size` pixels across round it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Sprite {
+    pub position: [f32; 3],
+    pub size: f32,
+    pub colour: [f32; 3],
+    pub halo_size: f32,
+    pub halo: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SpriteVertex {
+    position: [f32; 3],
+    size: f32,
+    colour: [f32; 3],
+    halo_size: f32,
+    halo: [f32; 3],
 }
 
 /// A planet's atmosphere: a shell from the surface to `outer` round `centre` (view space),
@@ -137,6 +173,8 @@ struct Vertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Uniforms {
     scale: [f32; 4],
+    /// The picture's width and height in pixels.
+    viewport: [f32; 4],
 }
 
 const SAMPLES: u32 = 4;
@@ -147,7 +185,7 @@ const COLOUR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 const SHADER: &str = r#"
-struct Uniforms { scale: vec4<f32> };
+struct Uniforms { scale: vec4<f32>, viewport: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
 struct Out {
@@ -191,6 +229,124 @@ fn fs_scene(i: Out) -> @location(0) vec4<f32> {
         discard;
     }
     return vec4<f32>(texel.rgb, 1.0);
+}
+
+struct WideOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) across: f32,
+    @location(1) @interpolate(flat) half: f32,
+    @location(2) @interpolate(flat) colour: vec4<f32>,
+};
+
+// A line as a quad: both ends projected, then moved apart across the line by half its width
+// (plus a pixel for the anti-aliased edge) in pixels. The ends must be in front of the eye.
+@vertex
+fn vs_wide(
+    @builtin(vertex_index) index: u32,
+    @location(0) a: vec3<f32>,
+    @location(1) width: f32,
+    @location(2) b: vec3<f32>,
+    @location(3) layer: f32,
+    @location(4) colour: vec4<f32>,
+) -> WideOut {
+    let z = u.scale.z * (1.0 + layer * 4.8e-7);
+    let ca = vec4<f32>(a.x * u.scale.x, a.y * u.scale.y, z, a.z);
+    let cb = vec4<f32>(b.x * u.scale.x, b.y * u.scale.y, z, b.z);
+    let half_view = u.viewport.xy * 0.5;
+    let sa = ca.xy / ca.w * half_view;
+    let sb = cb.xy / cb.w * half_view;
+    var along = sb - sa;
+    if (dot(along, along) < 1.0e-6) {
+        along = vec2<f32>(1.0, 0.0);
+    }
+    along = normalize(along);
+    let half = max(width, 1.0) * 0.5;
+    let reach = half + 1.0;
+    let normal = vec2<f32>(-along.y, along.x) * reach;
+    var ends = array<u32, 6>(0u, 1u, 1u, 0u, 1u, 0u);
+    var sides = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
+    let side = sides[index];
+    var clip = ca;
+    var past = -along;
+    if (ends[index] == 1u) {
+        clip = cb;
+        past = along;
+    }
+    // Half a pixel past each end, so the joins of a curve's steps close.
+    let offset = normal * side + past * 0.5;
+    clip.x = clip.x + offset.x / half_view.x * clip.w;
+    clip.y = clip.y + offset.y / half_view.y * clip.w;
+    var out: WideOut;
+    out.position = clip;
+    out.across = side * reach;
+    out.half = half;
+    out.colour = colour;
+    return out;
+}
+
+@fragment
+fn fs_wide(i: WideOut) -> @location(0) vec4<f32> {
+    let coverage = clamp(i.half + 0.5 - abs(i.across), 0.0, 1.0);
+    if (coverage <= 0.0) {
+        discard;
+    }
+    return vec4<f32>(i.colour.rgb, i.colour.a * coverage);
+}
+
+struct SpriteOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) offset: vec2<f32>,
+    @location(1) @interpolate(flat) size: f32,
+    @location(2) @interpolate(flat) colour: vec3<f32>,
+    @location(3) @interpolate(flat) halo_size: f32,
+    @location(4) @interpolate(flat) halo: vec3<f32>,
+};
+
+// A quad round the projected point, `offset` in pixels from its centre. Pulled 2% nearer, so
+// a light on a hull is not hidden by the face it sits on.
+@vertex
+fn vs_sprite(
+    @builtin(vertex_index) index: u32,
+    @location(0) p: vec3<f32>,
+    @location(1) size: f32,
+    @location(2) colour: vec3<f32>,
+    @location(3) halo_size: f32,
+    @location(4) halo: vec3<f32>,
+) -> SpriteOut {
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
+    );
+    let corner = corners[index];
+    let extent = max(size, halo_size) * 0.5 + 1.5;
+    var clip = vec4<f32>(p.x * u.scale.x, p.y * u.scale.y, u.scale.z * 1.02, p.z);
+    clip.x = clip.x + corner.x * extent * 2.0 / u.viewport.x * clip.w;
+    clip.y = clip.y + corner.y * extent * 2.0 / u.viewport.y * clip.w;
+    var out: SpriteOut;
+    out.position = clip;
+    out.offset = corner * extent;
+    out.size = size;
+    out.colour = colour;
+    out.halo_size = halo_size;
+    out.halo = halo;
+    return out;
+}
+
+@fragment
+fn fs_sprite(i: SpriteOut) -> @location(0) vec4<f32> {
+    let r = length(i.offset);
+    let core = 1.0 - smoothstep(i.size * 0.5 - 0.7, i.size * 0.5 + 0.7, r);
+    var glow = 0.0;
+    if (i.halo_size > 0.0) {
+        let q = r / (i.halo_size * 0.5);
+        glow = exp(-2.5 * q * q);
+    }
+    let alpha = max(core, glow * 0.85);
+    if (alpha < 0.004) {
+        discard;
+    }
+    let colour = mix(i.halo, i.colour, core / max(alpha, 0.0001));
+    return vec4<f32>(colour, alpha);
 }
 
 struct ShellOut {
@@ -320,6 +476,7 @@ pub struct Renderer {
     triangles: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     background: wgpu::RenderPipeline,
+    sprites: wgpu::RenderPipeline,
     shells: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     face_sampler: wgpu::Sampler,
@@ -461,7 +618,39 @@ impl Renderer {
             })
         };
         let triangles = scene_pipeline(wgpu::PrimitiveTopology::TriangleList, "triangles");
-        let lines = scene_pipeline(wgpu::PrimitiveTopology::LineList, "lines");
+        let wide_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<WideLine>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x3,
+                1 => Float32,
+                2 => Float32x3,
+                3 => Float32,
+                4 => Float32x4
+            ],
+        };
+        let lines = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lines"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_wide"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wide_layout)],
+            },
+            primitive: Default::default(),
+            // Tested against the batch's faces; lines do not hide each other.
+            depth_stencil: Some(depth(false, wgpu::CompareFunction::GreaterEqual)),
+            multisample,
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_wide"),
+                compilation_options: Default::default(),
+                targets: &target,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let background = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("background"),
             layout: Some(&pipeline_layout),
@@ -494,6 +683,39 @@ impl Renderer {
                 4 => Float32x3
             ],
         };
+        let sprite_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SpriteVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x3,
+                1 => Float32,
+                2 => Float32x3,
+                3 => Float32,
+                4 => Float32x3
+            ],
+        };
+        let sprites = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sprites"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_sprite"),
+                compilation_options: Default::default(),
+                buffers: &[Some(sprite_layout)],
+            },
+            primitive: Default::default(),
+            // Tested against the batch's faces, without hiding each other.
+            depth_stencil: Some(depth(false, wgpu::CompareFunction::GreaterEqual)),
+            multisample,
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_sprite"),
+                compilation_options: Default::default(),
+                targets: &target,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let shells = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("atmospheres"),
             layout: Some(&pipeline_layout),
@@ -538,6 +760,7 @@ impl Renderer {
             triangles,
             lines,
             background,
+            sprites,
             shells,
             sampler,
             face_sampler,
@@ -618,6 +841,7 @@ impl Renderer {
                 scene.projection.near,
                 0.0,
             ],
+            viewport: [width as f32, height as f32, 0.0, 0.0],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("uniforms"),
@@ -679,7 +903,10 @@ impl Renderer {
         // Every batch's triangles, then its lines, in one buffer.
         let mut vertices: Vec<Vertex> = Vec::new();
         let mut ranges = Vec::with_capacity(scene.batches.len());
+        let mut wide: Vec<WideLine> = Vec::new();
         let mut shells: Vec<Shell> = Vec::new();
+        let mut sprites: Vec<SpriteVertex> = Vec::new();
+        let mut sprite_ranges = Vec::with_capacity(scene.batches.len());
         let mut shell_ranges = Vec::with_capacity(scene.batches.len());
         for batch in &scene.batches {
             let first = vertices.len() as u32;
@@ -701,20 +928,45 @@ impl Renderer {
             }
             let middle = vertices.len() as u32;
             let layer = batch.triangles.len().min(LAYERS) as f32;
-            for l in &batch.lines {
-                vertices.extend((0..2).map(|k| Vertex {
-                    position: l.positions[k],
-                    colour: l.colour,
+            let first_wide = wide.len() as u32;
+            wide.extend(batch.lines.iter().filter_map(|l| {
+                let [a, b] = clip_line(l.positions, scene.projection.near)?;
+                Some(WideLine {
+                    a,
+                    width: l.width,
+                    b,
                     layer,
-                    uv: [0.0; 2],
-                    texture: -1.0,
-                }));
-            }
-            ranges.push((first..middle, middle..vertices.len() as u32));
+                    colour: l.colour,
+                })
+            }));
+            ranges.push((first..middle, first_wide..wide.len() as u32));
+            let first_sprite = sprites.len() as u32;
+            sprites.extend(batch.sprites.iter().map(|sprite| SpriteVertex {
+                position: sprite.position,
+                size: sprite.size,
+                colour: sprite.colour,
+                halo_size: sprite.halo_size,
+                halo: sprite.halo,
+            }));
+            sprite_ranges.push(first_sprite..sprites.len() as u32);
             let first_shell = shells.len() as u32;
             shells.extend(batch.atmospheres.iter().filter_map(shell));
             shell_ranges.push(first_shell..shells.len() as u32);
         }
+        let wide_buffer = (!wide.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("lines"),
+                contents: bytemuck::cast_slice(&wide),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
+        let sprite_buffer = (!sprites.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("sprites"),
+                contents: bytemuck::cast_slice(&sprites),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
         let shell_buffer = (!shells.is_empty()).then(|| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("atmospheres"),
@@ -776,16 +1028,21 @@ impl Renderer {
                 continue;
             }
             let (triangles, lines) = &ranges[pass_index - 1];
-            if let Some(buffer) = &vertex_buffer {
+            if let (Some(buffer), false) = (&vertex_buffer, triangles.is_empty()) {
                 pass.set_vertex_buffer(0, buffer.slice(..));
-                if !triangles.is_empty() {
-                    pass.set_pipeline(&self.triangles);
-                    pass.draw(triangles.clone(), 0..1);
-                }
-                if !lines.is_empty() {
-                    pass.set_pipeline(&self.lines);
-                    pass.draw(lines.clone(), 0..1);
-                }
+                pass.set_pipeline(&self.triangles);
+                pass.draw(triangles.clone(), 0..1);
+            }
+            if let (Some(buffer), false) = (&wide_buffer, lines.is_empty()) {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.set_pipeline(&self.lines);
+                pass.draw(0..6, lines.clone());
+            }
+            let lights = &sprite_ranges[pass_index - 1];
+            if let (Some(buffer), false) = (&sprite_buffer, lights.is_empty()) {
+                pass.set_pipeline(&self.sprites);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..6, lights.clone());
             }
             let atmospheres = &shell_ranges[pass_index - 1];
             if let (Some(buffer), false) = (&shell_buffer, atmospheres.is_empty()) {
@@ -907,6 +1164,20 @@ impl Renderer {
             out.push(layer as u32);
         }
         out
+    }
+}
+
+/// A line cut to the part at least `near` ahead of the eye, or `None` when none of it is.
+fn clip_line([a, b]: [[f32; 3]; 2], near: f32) -> Option<[[f32; 3]; 2]> {
+    match (a[2] >= near, b[2] >= near) {
+        (true, true) => Some([a, b]),
+        (false, false) => None,
+        (front, _) => {
+            let (inside, outside) = if front { (a, b) } else { (b, a) };
+            let t = (inside[2] - near) / (inside[2] - outside[2]);
+            let cut: [f32; 3] = std::array::from_fn(|k| inside[k] + (outside[k] - inside[k]) * t);
+            Some(if front { [a, cut] } else { [cut, b] })
+        }
     }
 }
 
@@ -1055,6 +1326,7 @@ mod tests {
                 ],
                 lines: vec![],
                 atmospheres: vec![],
+                sprites: vec![],
             }],
             textures: vec![],
         };
@@ -1068,6 +1340,7 @@ mod tests {
                 triangles: vec![triangle(-5.0, [1.0, 1.0, 1.0, 1.0])],
                 lines: vec![],
                 atmospheres: vec![],
+                sprites: vec![],
             }],
             ..scene.clone()
         };
@@ -1081,6 +1354,7 @@ mod tests {
                     triangles: vec![triangle(5.0, [1.0, 0.0, 0.0, 1.0])],
                     lines: vec![],
                     atmospheres: vec![],
+                    sprites: vec![],
                 },
                 Batch {
                     triangles: vec![
@@ -1089,6 +1363,7 @@ mod tests {
                     ],
                     lines: vec![],
                     atmospheres: vec![],
+                    sprites: vec![],
                 },
             ],
             ..scene
@@ -1107,6 +1382,7 @@ mod tests {
                 triangles: vec![face],
                 lines: vec![],
                 atmospheres: vec![],
+                sprites: vec![],
             }],
             textures: vec![Texture {
                 id: 0,
@@ -1144,6 +1420,45 @@ mod tests {
             pixels[2 * 64 + 2],
             0x203040,
             "clear sky far from the planet"
+        );
+        // Two lights: one in front of a face shows, one behind it is hidden by it.
+        let light = |position: [f32; 3]| Sprite {
+            position,
+            size: 6.0,
+            colour: [1.0, 1.0, 0.0],
+            halo_size: 0.0,
+            halo: [0.0; 3],
+        };
+        let lit = Scene {
+            batches: vec![Batch {
+                triangles: vec![triangle(10.0, [0.0, 0.0, 1.0, 1.0])],
+                sprites: vec![light([0.0, 0.0, 5.0]), light([5.0, 0.0, 20.0])],
+                ..Batch::default()
+            }],
+            ..hazy
+        };
+        let pixels = renderer.render(&lit.clone()).unwrap();
+        assert_eq!(pixels[24 * 64 + 32], 0xffff00, "the near light");
+        // A five-pixel line across the picture, one end behind the eye (cut at the near plane).
+        let ruled = Scene {
+            batches: vec![Batch {
+                lines: vec![Line {
+                    positions: [[-10.0, 0.0, 10.0], [30.0, 0.0, -10.0]],
+                    colour: [1.0, 0.0, 1.0, 1.0],
+                    width: 5.0,
+                }],
+                ..Batch::default()
+            }],
+            ..lit.clone()
+        };
+        let line = renderer.render(&ruled).unwrap();
+        assert_eq!(line[24 * 64 + 4], 0xff00ff, "on the line");
+        assert_eq!(line[20 * 64 + 4], 0x203040, "four pixels off it");
+        // The far light lands 5/20 of the half-width (8 pixels) right of centre, inside the face.
+        assert_eq!(
+            pixels[24 * 64 + 40],
+            0x0000ff,
+            "the far light is behind the face"
         );
     }
 }

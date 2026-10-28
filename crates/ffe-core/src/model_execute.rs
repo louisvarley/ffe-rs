@@ -119,6 +119,9 @@ pub struct LineEmission {
     /// vertex is resolved on a copy of the cache, so the original's cache state
     /// is unchanged.
     pub screen: Option<[[i16; 2]; 2]>,
+    /// Not the original's: both ends in view space when they resolved, for a renderer that
+    /// draws the line itself (the port's modern engine).
+    pub views: Option<[[i32; 3]; 2]>,
 }
 
 /// A text operand event (F1747). `culled` is the original normal-flag skip; the
@@ -208,6 +211,8 @@ pub struct SplineEmission {
     pub spline: Spline,
     pub key: Option<u32>,
     pub points: Option<[[i16; 2]; 4]>,
+    /// Not the original's: the four points in view space, in the same order, when queued.
+    pub views: Option<[[i32; 3]; 4]>,
     /// F1692/F1693/F1691 colour; zero when culled (not computed).
     pub colour: [u8; 3],
 }
@@ -752,6 +757,7 @@ fn emit_line(
         vertices: ends,
         context: working.clone(),
         screen: None,
+        views: None,
     };
     result.lines.push(emission.clone());
     if let (Some(queue), Some(live)) = (shared.order.as_mut(), vertices) {
@@ -779,6 +785,7 @@ fn emit_line(
         // view (F1705) and stored with x - 1 when positive, or
         // nothing when F1704 rejects the line.
         let mut emission = emission;
+        emission.views = other.as_ref().map(|other| [vertex.view, other.view]);
         emission.screen = other
             .and_then(|other| crate::model_thruster::line(&vertex, &other).ok())
             .flatten()
@@ -1316,6 +1323,7 @@ fn run(
                         spline: spline.clone(),
                         key: None,
                         points: None,
+                        views: None,
                         colour: [0; 3],
                     };
                     if !normal.culled {
@@ -1340,6 +1348,7 @@ fn run(
                             let key = model_depth::key(b4.view, instance.key_scale);
                             emission.key = Some(key);
                             emission.points = Some([b4.screen, b2.screen, b5.screen, b3.screen]);
+                            emission.views = Some([b4.view, b2.view, b5.view, b3.view]);
                             if let Some(queue) = shared.order.as_mut() {
                                 queue.push(key, Primitive::Spline(emission.clone()))?;
                                 shared.queue.push(QueueEvent::Spline(key));

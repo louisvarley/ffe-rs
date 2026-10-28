@@ -187,6 +187,29 @@ impl Gpu3d {
     }
 }
 
+/// A point of light for the GPU: the original's dot sizes (particle diameters) in this view's
+/// pixels, a one-pixel dot (and a star) a little over half an original pixel across, so it stays
+/// a point at any resolution.
+fn light(
+    sprite: &crate::model_viewer::Sprite,
+    position: [f32; 3],
+    colour: [f32; 3],
+    pixel: f32,
+) -> ffe_render::Sprite {
+    let across = |size: i32| (size.max(0) as f32).max(0.6) * pixel;
+    let (halo_size, halo) = match sprite.halo {
+        Some((size, rgb)) => (across(size), rgb.map(|c| f32::from(c) / 255.0)),
+        None => (0.0, [0.0; 3]),
+    };
+    ffe_render::Sprite {
+        position,
+        size: across(sprite.size).max(1.2),
+        colour,
+        halo_size,
+        halo,
+    }
+}
+
 /// A planet's atmosphere for the GPU: the shell between the surface and F1877's ring radius,
 /// in the haze colour, lit from the star (against the light vector).
 fn atmosphere(shell: &Shell) -> ffe_render::Atmosphere {
@@ -220,6 +243,8 @@ pub fn scene(
     );
     upscaled.truncate(LOGICAL_WIDTH * BACKGROUND_SCALE * VIEW_ROWS * BACKGROUND_SCALE);
     let colour = |[r, g, b]: [u8; 3]| [r, g, b].map(|c| f32::from(c) / 255.0);
+    // One of the original's pixels in this view's pixels.
+    let pixel = width as f32 / LOGICAL_WIDTH as f32;
     let textures: Vec<ffe_render::Texture> = world
         .textures
         .iter()
@@ -263,24 +288,35 @@ pub fn scene(
                 let [r, g, b] = colour(solid.rgb);
                 let rgba = [r, g, b, 1.0];
                 let point = |v: [i32; 3]| v.map(|c| c as f32);
-                match &solid.views[..] {
-                    [a, b] => batch.lines.push(ffe_render::Line {
-                        positions: [point(*a), point(*b)],
-                        colour: rgba,
-                    }),
-                    [first, rest @ ..] => {
-                        let texture = texture_of(solid);
-                        for (k, pair) in rest.windows(2).enumerate() {
-                            batch.triangles.push(ffe_render::Triangle {
-                                positions: [point(*first), point(pair[0]), point(pair[1])],
-                                colours: [rgba; 3],
-                                texture: texture
-                                    .as_ref()
-                                    .map(|(index, uv)| (*index, [uv[0], uv[k + 1], uv[k + 2]])),
-                            });
-                        }
+                if let (Some(sprite), [at]) = (&solid.sprite, &solid.views[..]) {
+                    batch
+                        .sprites
+                        .push(light(sprite, point(*at), [r, g, b], pixel));
+                    continue;
+                }
+                // Lines and curves about one of the original's pixels wide.
+                if solid.path || solid.views.len() == 2 {
+                    for pair in solid.views.windows(2) {
+                        batch.lines.push(ffe_render::Line {
+                            positions: [point(pair[0]), point(pair[1])],
+                            colour: rgba,
+                            width: pixel,
+                        });
                     }
-                    [] => {}
+                    continue;
+                }
+                // A face: a fan from its first corner.
+                if let [first, rest @ ..] = &solid.views[..] {
+                    let texture = texture_of(solid);
+                    for (k, pair) in rest.windows(2).enumerate() {
+                        batch.triangles.push(ffe_render::Triangle {
+                            positions: [point(*first), point(pair[0]), point(pair[1])],
+                            colours: [rgba; 3],
+                            texture: texture
+                                .as_ref()
+                                .map(|(index, uv)| (*index, [uv[0], uv[k + 1], uv[k + 2]])),
+                        });
+                    }
                 }
             }
             batch
@@ -316,6 +352,8 @@ mod tests {
                 Solid {
                     views: vec![[0, 0, 100], [10, 0, 100], [10, 10, 100], [0, 10, 100]],
                     rgb: [255, 0, 0],
+                    sprite: None,
+                    path: false,
                     texture: Some(crate::model_viewer::SolidTexture {
                         bitmap: 7,
                         slots: vec![[1, 2, 3]],
@@ -328,6 +366,8 @@ mod tests {
                     views: vec![[0, 0, 100], [5, 5, 100]],
                     rgb: [0, 255, 0],
                     texture: None,
+                    sprite: None,
+                    path: false,
                 },
             ]],
             textures: vec![WorldTexture {
@@ -383,6 +423,8 @@ mod tests {
                 ],
                 rgb: [255, 255, 255],
                 texture: None,
+                sprite: None,
+                path: false,
             }]],
             textures: vec![],
             atmospheres: vec![],

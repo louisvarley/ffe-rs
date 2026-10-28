@@ -2366,19 +2366,42 @@ impl Screen {
                         scene.light_direction(),
                         &inputs,
                     ) {
-                        self.draw_shapes(scene, &frame.shapes);
+                        self.draw_frame(scene, &frame);
                     }
                 }
             }
+            // With `capture` the stars go to the modern engine as lights at their directions,
+            // in a batch of their own before everything else.
+            let mut stars = Vec::new();
             for index in 0..self.stars.len() {
                 if !world || !self.stars_visible || self.surface_sky.is_some() {
                     break;
+                }
+                if self.capture {
+                    let [x, y, z] = camera.direction(self.stars[index]);
+                    if z > 0.0 {
+                        let colour = self.palette[12];
+                        stars.push(Solid {
+                            views: vec![[x, y, z].map(|c| (c * 1.0e6) as i32)],
+                            rgb: [(colour >> 16) as u8, (colour >> 8) as u8, colour as u8],
+                            texture: None,
+                            path: false,
+                            sprite: Some(crate::model_viewer::Sprite {
+                                size: 0,
+                                halo: None,
+                            }),
+                        });
+                    }
+                    continue;
                 }
                 if let Some((x, y)) = camera.project(self.stars[index], false) {
                     if y < 158 {
                         self.pixel(x, y, 12);
                     }
                 }
+            }
+            if !stars.is_empty() {
+                self.batches.push(stars);
             }
             if world {
                 // F1052 sets `DATA_008814` to 0 before F1536 draws the objects;

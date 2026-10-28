@@ -143,8 +143,8 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 | ENH-011 | Shadows (incl. ship self-shadowing) | proposed | native-res |
 | ENH-012 | Ambient occlusion | proposed | native-res |
 | ENH-013 | Atmospheric scattering + clouds | atmosphere implemented (no clouds) | Modern graphics with a GPU: each planet with an F1877 haze record gets a shell from the surface to the ring's radius (`radius * (1 + word8 / 32768)`), traced per pixel in the record's haze colour and lit by the star, in place of the ring's dithered quads (which are set aside in Modern only). See `docs/notes/modern-graphics.md`. |
-| ENH-014 | Higher-quality starfield/nebulae | proposed | native-res; no gameplay RNG |
-| ENH-015 | Engine glows/particles | proposed | native-res; spawn timing from core |
+| ENH-014 | Higher-quality starfield/nebulae | implemented (Modern with a GPU) | The background stars are drawn by the GPU as round points at their directions, and the nebula model (0x13b) as GPU geometry; same stars, same model, no gameplay RNG. See `docs/notes/modern-graphics.md`. |
+| ENH-015 | Engine glows/particles | lights implemented; thruster glows proposed | The models' dots (F1699 to F1801: lights with a halo and a core) are drawn as soft round GPU sprites at their view positions, hidden by nearer faces of their object; spawn timing and sizes stay the core's. |
 | ENH-016 | Material maps | proposed | native-res, smooth filtering, HD/map pack |
 | ENH-017 | Widescreen/ultrawide **presentation** (letterbox/pillarbox, HUD anchoring, no frustum change) | proposed | Does not reveal more of the scene. |
 | ENH-018 | Frame interpolation | proposed | Continuous transforms only; no event interpolation. |

@@ -938,6 +938,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 101,
       note: "Modern graphics: a per-pixel GPU atmosphere shell from F1877's record (radius * (1 + word8/32768), the haze material, lit by the star) replaces the dithered ring in Modern only; strongest at the limb, thin over the ground, seamless at the terrain's outline. enhanced-3 in progress (shadows and clouds remain). Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 101,
+      note: "Modern graphics: model lights as soft GPU sprites (halo and core, depth-tested), background stars as GPU points, the nebula model on the GPU, and anti-aliased wide lines; lines and F1546 curves now carry view-space points from the executor. enhanced-1 stays in progress. Remaining count unchanged."
     }
   ]
 };

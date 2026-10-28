@@ -153,8 +153,26 @@ after the planet's batch (`ffe-render`'s `fs_shell`):
 `tests/modern_planet.rs` now also checks the atmosphere reaches the GPU at every altitude and that
 the GPU picture covers every pixel of the original's planet and ring.
 
-Not yet on the GPU (still the original's pixels behind the models): the background nebula and stars,
-dots and particles, thruster glows and the hyperspace tunnel. Lines are one window pixel wide.
+### Lights, stars, lines and curves
+
+Status (2026-10-28): **implemented**.
+
+- **Lights.** A model's dot (F1699 to F1801: one particle, or a halo and a core) becomes one GPU
+  sprite at its view position (`model_viewer::Sprite`, the core's and halo's F1611 sizes and colours):
+  a soft round core with a fainter halo, the original's sizes in the window's pixels, pulled 2 %
+  nearer so a light on a hull shows, and hidden by the nearer faces of its own object. A lit point
+  (drawn as one pixel by the original) is a small sprite too.
+- **Stars and the nebula.** The background stars go to the GPU as points at their directions (a
+  batch of their own, before everything), so they stay points at any resolution instead of enlarged
+  pixels; the nebula model (0x13b) is drawn as GPU geometry like any other model.
+- **Lines and curves.** The executor now also keeps a line's two ends and a curve's four points in
+  view space beside the screen points it queues (`LineEmission::views`, `SplineEmission::views`;
+  the original's results are unchanged). Lines are drawn as anti-aliased quads about one original
+  pixel wide (`ffe-render`'s wide lines, cut at the near plane), and a curve is F1546's cubic
+  through its four points, stepped in view space (33 points) instead of on the screen.
+
+Not yet on the GPU (still the original's pixels behind the models): particles (F1814 chains),
+thruster glows, the hyperspace tunnel, and the HUD and its gunsight.
 
 ## What comes next
 

@@ -84,6 +84,19 @@ pub struct Solid {
     pub rgb: [u8; 3],
     /// The original's texture for a textured face (F1643's path), else `None`.
     pub texture: Option<SolidTexture>,
+    /// For a point of light (one view): its sizes, drawn as a round glow, else `None`.
+    pub sprite: Option<Sprite>,
+    /// The views are an open line through the points (a line or a curve), not a face.
+    pub path: bool,
+}
+
+/// A point of light (a dot, F1699 to F1801): the core's size in the original's pixels (F1611's
+/// particle diameter, 0 for one pixel) in [`Solid::rgb`], and the halo's size and colour when
+/// it has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sprite {
+    pub size: i32,
+    pub halo: Option<(i32, [u8; 3])>,
 }
 
 /// A planet's atmosphere as F1877 has it (view space, the planet's own units): the centre,
@@ -239,6 +252,24 @@ fn ramp_word(w: &[u32], at: usize, band: u32, first: usize) -> u16 {
     let word = w[at + 2 + first + step / 2];
     let value = if step % 2 == 0 { word } else { word >> 16 };
     (value & 0xfff) as u16
+}
+
+/// F1546's cubic curve through four points (entry order: the ends first and last) in view
+/// space, as 33 points for the modern engine: the same curve F1549's forward differences step
+/// along on the screen, but drawn finer and in perspective.
+fn bezier(points: [[i32; 3]; 4]) -> Vec<[i32; 3]> {
+    let [a, b, c, d] = points.map(|p| p.map(f64::from));
+    (0..=32)
+        .map(|step| {
+            let t = f64::from(step) / 32.0;
+            let u = 1.0 - t;
+            let weights = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+            std::array::from_fn(|k| {
+                (weights[0] * a[k] + weights[1] * b[k] + weights[2] * c[k] + weights[3] * d[k])
+                    .round() as i32
+            })
+        })
+        .collect()
 }
 
 /// Every curved surface in this execution and its executed children, in the
@@ -1809,6 +1840,8 @@ impl ModelViewer {
                     views: Vec::new(),
                     rgb: [0; 3],
                     texture: None,
+                    path: false,
+                    sprite: None,
                 })
             };
             for &(key, at) in &batch.order {
@@ -1904,6 +1937,8 @@ impl ModelViewer {
                                 .copied()
                                 .unwrap_or_default(),
                             texture: Some(self.solid_texture(textured, uv)?),
+                            path: false,
+                            sprite: None,
                         })
                     });
                     shapes.push((texture.key, shape, solid));
@@ -1949,6 +1984,8 @@ impl ModelViewer {
                             views: views.clone(),
                             rgb,
                             texture: None,
+                            path: false,
+                            sprite: None,
                         });
                         shapes.push((key, Shape::Fill(points, rgb), solid));
                     }
@@ -2135,6 +2172,8 @@ impl ModelViewer {
                         views: emission.views.clone(),
                         rgb,
                         texture: None,
+                        path: false,
+                        sprite: None,
                     });
                     let behind = emission.screen.contains(&NEAR_SENTINEL);
                     let on_view = !behind
@@ -2218,7 +2257,14 @@ impl ModelViewer {
                     // F1803: F1704's clipped, stored end points, drawn by F1616.
                     if let Some([a, b]) = line.screen {
                         let point = |[x, y]: [i16; 2]| (i32::from(x), i32::from(y));
-                        push!(Shape::Line(point(a), point(b), rgb));
+                        let solid = line.views.map(|views| Solid {
+                            views: views.to_vec(),
+                            rgb,
+                            texture: None,
+                            path: true,
+                            sprite: None,
+                        });
+                        push!(Shape::Line(point(a), point(b), rgb), solid);
                     }
                 }
                 Primitive::Point(emitted) => {
@@ -2260,19 +2306,57 @@ impl ModelViewer {
                                     core,
                                 } => vec![(halo_size, halo), (core_size, core)],
                             };
+                            // For the modern engine, the dot as one light at its view
+                            // position; its other particle is set aside with it.
+                            let (core, halo) = match dot.shape {
+                                DotShape::One { size, colour } => ((size, colour), None),
+                                DotShape::Two {
+                                    halo_size,
+                                    halo,
+                                    core_size,
+                                    core,
+                                } => ((core_size, core), Some((halo_size, self.rgb(halo)))),
+                            };
+                            let mut light = emitted.view.map(|view| Solid {
+                                views: vec![view],
+                                rgb: self.rgb(core.1),
+                                texture: None,
+                                path: false,
+                                sprite: Some(Sprite { size: core.0, halo }),
+                            });
                             for (size, colour) in particles {
                                 let spans = ffe_core::model_dot::particle_clipped(x, y, size)
                                     .into_iter()
                                     .map(|s| [s.x, s.y, s.width])
                                     .collect();
-                                push!(Shape::Spans(spans, self.rgb(colour)));
+                                let solid = match light.take() {
+                                    Some(light) => Some(light),
+                                    None => emitted.view.map(|_| Solid {
+                                        views: Vec::new(),
+                                        rgb: [0; 3],
+                                        texture: None,
+                                        path: false,
+                                        sprite: None,
+                                    }),
+                                };
+                                push!(Shape::Spans(spans, self.rgb(colour)), solid);
                             }
                         }
                         // Off the view or too near: nothing.
                         Some(None) => {}
                         None => {
                             if let Some(p) = emitted.screen.and_then(point) {
-                                push!(Shape::Point(p, rgb));
+                                let light = emitted.view.map(|view| Solid {
+                                    views: vec![view],
+                                    rgb,
+                                    texture: None,
+                                    path: false,
+                                    sprite: Some(Sprite {
+                                        size: 0,
+                                        halo: None,
+                                    }),
+                                });
+                                push!(Shape::Point(p, rgb), light);
                             }
                         }
                     }
@@ -2280,7 +2364,15 @@ impl ModelViewer {
                 Primitive::Spline(spline) => {
                     // F1811: the entry's four points, drawn by F1546.
                     if let Some(points) = spline.points {
-                        push!(Shape::Curve(points, self.rgb(spline.colour)));
+                        let rgb = self.rgb(spline.colour);
+                        let solid = spline.views.map(|views| Solid {
+                            views: bezier(views),
+                            rgb,
+                            texture: None,
+                            path: true,
+                            sprite: None,
+                        });
+                        push!(Shape::Curve(points, rgb), solid);
                     }
                 }
                 Primitive::Text(id) => {
