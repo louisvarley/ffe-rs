@@ -140,7 +140,7 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 | ENH-008 | HDR + tone mapping | proposed | native-res |
 | ENH-009 | HDR display output | proposed | HDR + capable surface/OS |
 | ENH-010 | Bloom/lens effects | modest bloom and star glow implemented (Modern with a GPU) | The GPU picture's brightest parts (largest channel over 0.8) are blurred at half size and added back at 0.6; a star in view gets a halo sprite eight times its radius in its colour, drawn before the star. No HDR yet. See `docs/notes/modern-graphics.md`. |
-| ENH-011 | Shadows (incl. ship self-shadowing) | proposed | native-res |
+| ENH-011 | Shadows (incl. ship self-shadowing) | planet eclipses implemented (Modern with a GPU); self-shadowing proposed | An object (station, ship) with a body between it and the star keeps only the share of the star's disc it still sees (umbra, penumbra, annular), down to 30 % of its light in full shadow. The original shadows nothing. See `docs/notes/modern-graphics.md`. |
 | ENH-012 | Ambient occlusion | proposed | native-res |
 | ENH-013 | Atmospheric scattering + clouds | atmosphere implemented (no clouds) | Modern graphics with a GPU: each planet with an F1877 haze record gets a shell from the surface to the ring's radius (`radius * (1 + word8 / 32768)`), traced per pixel in the record's haze colour and lit by the star, in place of the ring's dithered quads (which are set aside in Modern only). See `docs/notes/modern-graphics.md`. |
 | ENH-014 | Higher-quality starfield/nebulae | implemented (Modern with a GPU) | The background stars are drawn by the GPU as round points at their directions, and the nebula model (0x13b) as GPU geometry; same stars, same model, no gameplay RNG. See `docs/notes/modern-graphics.md`. |

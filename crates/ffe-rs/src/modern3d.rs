@@ -32,6 +32,9 @@ pub const TERRAIN_DETAIL: i32 = 1;
 /// Faces whose normals are closer than this (the cosine of 50 degrees) are shaded smoothly
 /// across their shared corners; sharper edges stay sharp.
 const SMOOTH_EDGE: f32 = 0.643;
+/// The light an object keeps in a planet's full shadow (from the planet's day side and the sky),
+/// as a share of its sunlit colour.
+const SHADOW_AMBIENT: f32 = 0.3;
 /// How strongly the brightest parts (the star, lights, sunlit white) glow: modest.
 const BLOOM: f32 = 0.6;
 /// How much the frame behind the models is enlarged before the GPU filters it.
@@ -48,6 +51,9 @@ pub struct World {
     pub atmospheres: Vec<(usize, Shell)>,
     /// The light each batch was drawn in (view space, the way the light travels), by batch.
     pub lights: Vec<(usize, [i32; 3])>,
+    /// How much of the star an object still sees past the planets (0..1), by batch, for the
+    /// objects in a planet's shadow.
+    pub eclipses: Vec<(usize, f32)>,
     /// The textured faces' bitmaps (their original indices), each once.
     pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
@@ -243,6 +249,51 @@ fn normal(views: &[[i32; 3]]) -> Option<[f32; 3]> {
     Some(n)
 }
 
+/// How much of the star a point sees past the bodies (0 none, 1 all). Everything is in one space
+/// (camera space, flight units): the point, each body's centre and radius, and the star's. A body
+/// between the point and the star covers the star's disc by how far their apparent discs overlap:
+/// fully in the umbra, partly in the penumbra (in a straight line across it), and at most its own
+/// share of the star's area when it looks smaller than the star.
+pub fn sunlight(place: [f64; 3], bodies: &[([f64; 3], f64)], star: ([f64; 3], f64)) -> f32 {
+    let toward = |at: [f64; 3]| -> ([f64; 3], f64) {
+        let v = [at[0] - place[0], at[1] - place[1], at[2] - place[2]];
+        let length = v.iter().map(|c| c * c).sum::<f64>().sqrt();
+        (v, length)
+    };
+    let (to_star, star_distance) = toward(star.0);
+    if star_distance <= star.1 {
+        return 1.0;
+    }
+    let star_angle = (star.1 / star_distance).asin();
+    let mut seen = 1.0f64;
+    for &(centre, radius) in bodies {
+        let (to_body, body_distance) = toward(centre);
+        // Inside the body (landed, or the eye under the ground), or past the star: no shadow.
+        if body_distance <= radius || body_distance >= star_distance {
+            continue;
+        }
+        let body_angle = (radius / body_distance).asin();
+        let cosine = (to_star
+            .iter()
+            .zip(&to_body)
+            .map(|(a, b)| a * b)
+            .sum::<f64>()
+            / (star_distance * body_distance))
+            .clamp(-1.0, 1.0);
+        let apart = cosine.acos();
+        let full = (body_angle / star_angle).powi(2).min(1.0);
+        let covered = if apart >= body_angle + star_angle {
+            0.0
+        } else if apart <= (body_angle - star_angle).abs() {
+            full
+        } else {
+            full * (body_angle + star_angle - apart) / (2.0 * body_angle.min(star_angle))
+        };
+        seen *= 1.0 - covered.clamp(0.0, 1.0);
+    }
+    seen as f32
+}
+
 /// The luminance of a colour (Rec. 601 weights), 0..255.
 fn luma([r, g, b]: [u8; 3]) -> f32 {
     0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)
@@ -421,9 +472,17 @@ pub fn scene(
                 ..ffe_render::Batch::default()
             };
             let shading = smooth(solids);
+            // An object in a planet's shadow keeps only part of its light.
+            let shadow = world
+                .eclipses
+                .iter()
+                .find(|(over, _)| *over == index)
+                .map_or(1.0, |(_, seen)| {
+                    SHADOW_AMBIENT + (1.0 - SHADOW_AMBIENT) * seen
+                });
             for (solid, shade) in solids.iter().zip(&shading) {
                 let [r, g, b] = colour(solid.rgb);
-                let rgba = [r, g, b, 1.0];
+                let rgba = [r * shadow, g * shadow, b * shadow, 1.0];
                 let point = |v: [i32; 3]| v.map(|c| c as f32);
                 if let (Some(sprite), [at]) = (&solid.sprite, &solid.views[..]) {
                     batch
@@ -446,7 +505,11 @@ pub fn scene(
                 // (or, for a texture, its brightness) takes the corner's factor.
                 if let [first, rest @ ..] = &solid.views[..] {
                     let texture = texture_of(solid);
-                    let base = if texture.is_some() { [1.0; 4] } else { rgba };
+                    let base = if texture.is_some() {
+                        [shadow, shadow, shadow, 1.0]
+                    } else {
+                        rgba
+                    };
                     let corner = |k: usize| match shade {
                         Some(factors) => {
                             let f = factors[k];
@@ -498,6 +561,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_planet_between_an_object_and_the_star_eclipses_it() {
+        // The star 1000 away along +x, radius 10 (an angle of 0.01); a planet of radius 1 at 10
+        // along +x (an angle of 0.1): far bigger than the star, so a full shadow behind it.
+        let star = ([1000.0, 0.0, 0.0], 10.0);
+        let planet = [([10.0, 0.0, 0.0], 1.0)];
+        assert_eq!(sunlight([0.0; 3], &planet, star), 0.0);
+        // Well off to the side: full sun.
+        assert_eq!(sunlight([0.0, 5.0, 0.0], &planet, star), 1.0);
+        // On the star's side of the planet: full sun.
+        assert_eq!(sunlight([20.0, 0.0, 0.0], &planet, star), 1.0);
+        // At the shadow's edge (the planet's limb against the star's centre): about half.
+        let edge = sunlight([0.0, 1.005, 0.0], &planet, star);
+        assert!(edge > 0.2 && edge < 0.8, "penumbra {edge}");
+        // A small moon in front of the star covers only its share of the disc.
+        let moon = [([500.0, 0.0, 0.0], 1.0)];
+        let annular = sunlight([0.0; 3], &moon, star);
+        assert!((annular - 0.96).abs() < 0.01, "annular {annular}");
+    }
+
+    #[test]
     fn faces_become_fans_and_two_point_faces_lines() {
         let world = World {
             batches: vec![vec![
@@ -531,6 +614,7 @@ mod tests {
             }],
             atmospheres: vec![],
             lights: vec![],
+            eclipses: vec![],
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
         let scene = scene(&world, 640, 316, &mut MapCache::default());
@@ -584,6 +668,7 @@ mod tests {
             bitmaps: vec![],
             atmospheres: vec![],
             lights: vec![],
+            eclipses: vec![],
             snapshot: snapshot.clone(),
         };
         // The HUD drew one pixel at the square's centre after the world phase.

@@ -241,6 +241,20 @@ Status (2026-10-28): **implemented**.
   their edges. Each viewer frame also now carries the light it was drawn in (`Frame::light`), passed
   to the modern engine per object (`World::lights`) for the lighting effects to come.
 
+### Eclipses
+
+Status (2026-10-28): **implemented** (ENH-011 for planets' shadows; the original shadows nothing).
+
+Each viewer frame now records where the model's origin was drawn (`Frame::origin`), so the screen
+knows each object's place in camera space (the origin over the objects' common scale,
+`model_scale`) beside the bodies' centres and radii (`Screen::casters`, from the discs). For each
+object (not the bodies themselves), `modern3d::sunlight` works out how much of the star's disc it
+still sees past the bodies: none in the umbra, a straight-line share across the penumbra, and at most
+the body's share of the star's area when the body looks smaller than the star (an annular eclipse).
+The object's colours then keep `0.3 + 0.7 * seen` of their light. A station on a planet's night side
+goes dark as it turns into the shadow (`tests/modern_planet.rs`,
+`a_station_in_a_planets_shadow_is_eclipsed`).
+
 Not yet on the GPU (still the original's pixels behind the models): particle chains (F1814: debris
 and exhaust specks), and the HUD and its gunsight.
 

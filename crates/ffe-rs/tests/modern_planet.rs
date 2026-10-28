@@ -405,3 +405,45 @@ fn engine_glows_are_drawn_on_the_gpu() {
     }
     assert!(glows > 0, "an engine glow from some side");
 }
+
+/// The free-flight station with a planet between it and the star: its batch is eclipsed, and
+/// with the planet moved aside it is not.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn a_station_in_a_planets_shadow_is_eclipsed() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let state = Flight::free_flight();
+    let disc = |centre: [f64; 3], radius: f64, star: bool| Disc {
+        centre,
+        radius,
+        light: [-1.0, 0.0, 0.0],
+        colours: (12, 4),
+        star,
+        model: None,
+        orientation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    };
+    let mut darkest = |planet_y: f64| {
+        // The star far along +x; the planet on the way to it, or 10 radii off the line.
+        screen.discs = vec![
+            disc([1.0e9, 0.0, 0.0], 1.0e6, true),
+            disc([1.0e5, planet_y, 0.0], 1.0e4, false),
+        ];
+        screen.capture = true;
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+        let world = screen.world().cloned().expect("the flight view's world");
+        world
+            .eclipses
+            .iter()
+            .map(|(_, seen)| *seen)
+            .fold(1.0f32, f32::min)
+    };
+    let shadowed = darkest(0.0);
+    let sunlit = darkest(1.0e5);
+    eprintln!("in the shadow {shadowed}, beside it {sunlit}");
+    assert!(shadowed < 0.1, "the station is eclipsed");
+    assert_eq!(sunlit, 1.0, "out of the shadow it is not");
+}

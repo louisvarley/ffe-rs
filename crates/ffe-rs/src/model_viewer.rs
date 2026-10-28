@@ -138,6 +138,8 @@ pub struct Frame {
     /// The light the frame was drawn in: a view-space vector the way the light travels, 32768
     /// long (F1876's `+0x134`), for the modern engine's smooth shading.
     pub light: Option<[i32; 3]>,
+    /// Where the model's origin was drawn, in view space (the modern engine's eclipses).
+    pub origin: Option<[i32; 3]>,
     /// The F1777 depth key of each shape, aligned with [`Self::shapes`], in the
     /// original's far-to-near order. Curved-surface entries (F1840/F1841) are
     /// merged into this order, so a ship draws over a planet it is in front of.
@@ -1515,6 +1517,7 @@ impl ModelViewer {
             light_view.map(|v| (v / length * 32_768.0) as i32)
         };
         frame.light = Some(view_light);
+        frame.origin = Some(position);
         let (surfaces, skipped, haze) = self.collect_surfaces(&result, view_light);
         frame.skipped += skipped;
         for batch in &surfaces {

@@ -963,6 +963,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: planet surfaces one detail level finer in the GPU view (presentation only), and smooth shading that evens out the original's flat lighting steps at shared corners of like faces. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: planets eclipse stations and ships (umbra, penumbra, annular) in the GPU view. enhanced-3 still in progress (self-shadowing and clouds remain). Remaining count unchanged."
     }
   ]
 };

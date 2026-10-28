@@ -448,6 +448,15 @@ pub struct Screen {
     atmospheres: Vec<(usize, crate::model_viewer::Shell)>,
     /// The light each object's batch was drawn in, by batch.
     lights: Vec<(usize, [i32; 3])>,
+    /// How much of the star each object's batch sees past the planets (1 all), by batch.
+    eclipses: Vec<(usize, f32)>,
+    /// The system's bodies this frame for the eclipses: camera-space centre and radius in
+    /// flight units, and whether it is the star.
+    casters: Vec<([f64; 3], f64, bool)>,
+    /// The objects' view units per flight unit (`model_scale`), this frame.
+    object_scale: f64,
+    /// Drawing the bodies themselves (they cast the eclipses, and are not shaded by them).
+    in_discs: bool,
     /// Their textures' bitmaps so far this frame, each once.
     bitmaps: Vec<crate::modern3d::WorldBitmap>,
     /// The bitmaps read so far, so they are not read again every frame.
@@ -987,6 +996,10 @@ impl Screen {
             batches: Vec::new(),
             atmospheres: Vec::new(),
             lights: Vec::new(),
+            eclipses: Vec::new(),
+            casters: Vec::new(),
+            object_scale: 1.0,
+            in_discs: false,
             bitmaps: Vec::new(),
             bitmap_memory: Vec::new(),
             deferred: Vec::new(),
@@ -2233,6 +2246,7 @@ impl Screen {
         self.batches.clear();
         self.atmospheres.clear();
         self.lights.clear();
+        self.eclipses.clear();
         self.bitmaps.clear();
         self.deferred.clear();
         self.world = None;
@@ -2371,6 +2385,7 @@ impl Screen {
                     batches: std::mem::take(&mut self.batches),
                     atmospheres: std::mem::take(&mut self.atmospheres),
                     lights: std::mem::take(&mut self.lights),
+                    eclipses: std::mem::take(&mut self.eclipses),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2380,6 +2395,13 @@ impl Screen {
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
             let camera = Camera::new(state, &views, stats.as_ref(), scale);
+            // For the modern engine's eclipses: the bodies where the camera sees them.
+            self.object_scale = scale;
+            self.casters = self
+                .discs
+                .iter()
+                .map(|disc| (camera.point(disc.centre), disc.radius, disc.star))
+                .collect();
             // A new flight step continues the stream where the last frame left it;
             // redrawing the same step replays it.
             if self.jitter.tick != Some(state.ticks) {
@@ -2450,7 +2472,9 @@ impl Screen {
                 if let Some(scene) = scene {
                     scene.clear_haze_sky();
                 }
+                self.in_discs = true;
                 self.draw_discs(&camera, scene);
+                self.in_discs = false;
                 self.surface_sky = scene.and_then(|scene| scene.haze_sky()).map(|colour| {
                     u32::from(colour[0]) << 16 | u32::from(colour[1]) << 8 | u32::from(colour[2])
                 });
@@ -2545,6 +2569,7 @@ impl Screen {
                     batches: std::mem::take(&mut self.batches),
                     atmospheres: std::mem::take(&mut self.atmospheres),
                     lights: std::mem::take(&mut self.lights),
+                    eclipses: std::mem::take(&mut self.eclipses),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2918,6 +2943,24 @@ impl Screen {
             self.atmospheres
                 .extend(frame.atmospheres.iter().map(|shell| (index, shell.clone())));
             self.lights.extend(frame.light.map(|light| (index, light)));
+            // An object (not a body) in a body's shadow: how much of the star it still sees.
+            if let (false, Some(origin), Some(star)) = (
+                self.in_discs,
+                frame.origin,
+                self.casters.iter().find(|caster| caster.2),
+            ) {
+                let place = origin.map(|v| f64::from(v) / self.object_scale);
+                let bodies: Vec<([f64; 3], f64)> = self
+                    .casters
+                    .iter()
+                    .filter(|caster| !caster.2)
+                    .map(|caster| (caster.0, caster.1))
+                    .collect();
+                let seen = crate::modern3d::sunlight(place, &bodies, (star.0, star.1));
+                if seen < 1.0 {
+                    self.eclipses.push((index, seen));
+                }
+            }
         }
     }
 
