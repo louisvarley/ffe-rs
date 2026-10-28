@@ -703,3 +703,35 @@ now rolls it, with `System::start` for the new game's pass. The scripted
 capture (`SpawnOptions::guarantee`) keeps the record's count so its frames
 stay the same. Pirate groups from a real entry spawn `PIRATE_LURK` (25 km)
 outside the anchor orbit.
+
+## Port addition: Advanced traffic
+
+World Options → **Advanced traffic** (`advanced_traffic=` in `config.cfg`, off
+by default). It reads F870's population (0..9) and danger (0..7) for the
+system (`npc::Life`) and adds:
+
+1. **Approach lanes:** traders queued 6-20 km off the place nearest the
+   player, each flying in to ask for a bay (2 + population/3).
+2. **Convoy:** a Lynx/LRC carrier flying from the nearest place to another,
+   with two military escorts in its frame. Escorts that are not hostile keep
+   formation instead of turning toward the player.
+3. **Hyperspace arrivals and departures:** every 90 s of game time, less 6 s
+   per population step (at least 20 s), plus up to half again at random,
+   either a trader arrives 25 km beyond the nearest place (exit cloud) and
+   flies in, or an idle trader away from the player jumps out (departure
+   cloud) (`Navigator::tick_life`).
+5. **Ships fight each other:** a pirate more than 15 km from the player takes
+   the nearest trader within 20 km; the trader runs and jumps out when the
+   pirate is within 6 km; idle police take a pirate that is attacking
+   someone; escorts join their leader's fight; a pirate drops its prey when
+   the player is within 8 km. These hits use F953 and the hit/explosion
+   effects but never the player's legal record, rating or bounty
+   (`Navigator::pick_fights`, `npc_hit`).
+7. **Busy surface ports:** the three starports nearest the player get
+   traders on their pads (2 + population/4) that take off after 2-4 minutes,
+   and one trader landing from 15 km up.
+9. **Rich systems are busier:** the trader roll is kept between
+   population/3 and 2 + population/2.
+10. **Law by danger:** police patrols 4/3/2/1/0 for danger 0-1/2-3/4-5/6/7
+    (replacing the `+7` byte test), and pirate groups capped at
+    `ceil(danger/2)`.

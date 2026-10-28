@@ -2710,7 +2710,35 @@ impl Life {
 
     /// Ships Advanced traffic may add beyond [`MAX_SHIPS`].
     pub fn extra(self) -> usize {
-        self.lane_traders() + MAX_CONVOY_SHIPS
+        self.lane_traders() + MAX_CONVOY_SHIPS + self.trader_cap()
+    }
+
+    /// Busier rich systems: F688's trader roll is kept between a third of the
+    /// population and two plus half of it (the original cap is two).
+    pub fn trader_floor(self) -> usize {
+        (self.population / 3) as usize
+    }
+
+    pub fn trader_cap(self) -> usize {
+        2 + (self.population / 2) as usize
+    }
+
+    /// Police patrols by danger: four in the safest systems, none in the
+    /// most dangerous ([`MAX_POLICE_PATROLS`] without Advanced traffic).
+    pub fn police_patrols(self) -> usize {
+        match self.danger {
+            0..=1 => 4,
+            2..=3 => 3,
+            4..=5 => 2,
+            6 => 1,
+            _ => 0,
+        }
+    }
+
+    /// Pirate groups by danger: none in the safest systems, up to four in
+    /// the most dangerous (the original cap is two).
+    pub fn pirate_cap(self) -> usize {
+        self.danger.div_ceil(2) as usize
     }
 }
 
@@ -2866,6 +2894,7 @@ pub fn spawn(
             radius: 1_000_000,
             station: None,
         });
+    let rolled = counts;
     if options.guarantee {
         // The capture/test guarantee: a fresh system has something to label and
         // shoot and the F953 damage path is reachable.
@@ -2877,6 +2906,19 @@ pub fn spawn(
         // F688 can roll zero of every kind. Keep only the port's per-kind caps.
         counts.traders = counts.traders.min(2);
         counts.pirates = counts.pirates.min(2);
+    }
+    // Port addition (Advanced traffic): the system's population and danger
+    // set the trader and pirate caps, and police come by danger rather than
+    // the record's +7 byte.
+    if let Some(life) = options.advanced {
+        counts.traders = rolled
+            .traders
+            .max(life.trader_floor())
+            .min(life.trader_cap());
+        if !options.guarantee {
+            counts.pirates = rolled.pirates.min(life.pirate_cap());
+        }
+        counts.police = (life.police_patrols() > 0) as usize;
     }
     counts.thargoids = counts.thargoids.min(MAX_SHIPS);
     counts.bay_ships = counts.bay_ships.min(MAX_BAY_SHIPS);
@@ -3181,7 +3223,12 @@ pub fn spawn(
         let others = places
             .iter()
             .filter(|place| place.position != anchor.position)
-            .take(MAX_POLICE_PATROLS - counts.police);
+            .take(
+                options
+                    .advanced
+                    .map_or(MAX_POLICE_PATROLS, Life::police_patrols)
+                    .saturating_sub(counts.police),
+            );
         for (index, place) in others.enumerate() {
             let radius = (place.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
             let position = offset(place.position, 2.6 + index as f64 * 1.7, radius);
