@@ -64,6 +64,9 @@ pub struct Triangle {
     pub positions: [[f32; 3]; 3],
     pub colours: [[f32; 4]; 3],
     pub texture: Option<FaceTexture>,
+    /// Burning: animated fire over the face instead of its texture, in the corners' colours,
+    /// with `fire` coordinates (0..1 across the burning shape) at the corners.
+    pub fire: Option<[[f32; 2]; 3]>,
 }
 
 /// Which of the scene's [`Scene::maps`] a triangle shows, in which of its
@@ -110,6 +113,35 @@ pub struct Batch {
     pub atmospheres: Vec<Atmosphere>,
     /// Lights and stars: round glows facing the eye, hidden by the batch's nearer faces.
     pub sprites: Vec<Sprite>,
+    /// Flames: engine plumes and fireballs, animated, adding their light.
+    pub flames: Vec<Flame>,
+}
+
+/// A flame from `a` to `b` (view space), `width` across at `a` and `end` across at `b` (view
+/// units), hottest at `a` in `core` and cooling to `edge`, flickering with time; with `a` and
+/// `b` the same, a round fireball `width` across. `seed` keeps neighbouring flames apart.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Flame {
+    pub a: [f32; 3],
+    pub b: [f32; 3],
+    pub width: f32,
+    pub end: f32,
+    pub core: [f32; 3],
+    pub edge: [f32; 3],
+    pub seed: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct FlameVertex {
+    a: [f32; 3],
+    width: f32,
+    b: [f32; 3],
+    end: f32,
+    core: [f32; 3],
+    seed: f32,
+    edge: [f32; 3],
+    pad: f32,
 }
 
 /// A point of light at `position` (view space): a soft round core `size` pixels across in
@@ -174,6 +206,8 @@ pub struct Scene {
     pub batches: Vec<Batch>,
     /// How strongly bright parts glow (0 none): they are blurred at half size and added back.
     pub bloom: f32,
+    /// Seconds of presentation time, for animated fire (any running clock; not game time).
+    pub time: f32,
     /// How many times the picture's size the 3-D view is drawn at before it is filtered down
     /// (1 to 2; on top of the 4x multisampling). Sizes given in pixels are the picture's.
     pub supersample: f32,
@@ -306,6 +340,42 @@ struct Out {
     @location(3) @interpolate(flat) palette: u32,
 };
 
+// Value noise and three octaves of it, for fire.
+fn hash2(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+fn noise2(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let w = f * f * (3.0 - 2.0 * f);
+    let a = hash2(i);
+    let b = hash2(i + vec2<f32>(1.0, 0.0));
+    let c = hash2(i + vec2<f32>(0.0, 1.0));
+    let d = hash2(i + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, w.x), mix(c, d, w.x), w.y);
+}
+fn turbulence(p: vec2<f32>) -> f32 {
+    return noise2(p) * 0.55 + noise2(p * 2.1 + vec2<f32>(3.1, 1.7)) * 0.3
+        + noise2(p * 4.3 + vec2<f32>(7.9, 4.2)) * 0.15;
+}
+// Heat (0..1) to fire colour: dark red, orange, yellow, white, brighter than white at the top.
+fn fire_colour(heat: f32) -> vec3<f32> {
+    let red = vec3<f32>(0.6, 0.05, 0.0);
+    let orange = vec3<f32>(1.0, 0.45, 0.05);
+    let yellow = vec3<f32>(1.0, 0.85, 0.3);
+    let white = vec3<f32>(1.6, 1.5, 1.2);
+    if (heat < 0.4) {
+        return mix(red * 0.3, red, heat / 0.4);
+    }
+    if (heat < 0.65) {
+        return mix(red, orange, (heat - 0.4) / 0.25);
+    }
+    if (heat < 0.85) {
+        return mix(orange, yellow, (heat - 0.65) / 0.2);
+    }
+    return mix(yellow, white, (heat - 0.85) / 0.15) * 1.6;
+}
+
 @group(0) @binding(3) var face_maps: texture_2d_array<f32>;
 @group(0) @binding(4) var<storage, read> palettes: array<vec4<f32>>;
 
@@ -358,6 +428,20 @@ fn fs_scene(i: Out) -> @location(0) vec4<f32> {
     // The mip level from the texture's footprint (worked out before any branch).
     let footprint = i.uv * vec2<f32>(textureDimensions(face_maps, 0));
     let spread = max(length(dpdx(footprint)), length(dpdy(footprint)));
+    // Fire (texture -2): turbulence rising through the shape, hottest at its middle, ragged at
+    // its edges, tinted a little by the face's own colour.
+    if (i.texture == -2) {
+        let t = u.viewport.z;
+        let rise = i.uv * 5.0 + vec2<f32>(0.0, t * 1.6);
+        let swirl = turbulence(rise + vec2<f32>(turbulence(rise * 0.7 - t * 0.4) * 2.0, 0.0));
+        let middle = 1.0 - clamp(length(i.uv - vec2<f32>(0.5)) * 1.7, 0.0, 1.0);
+        let heat = clamp(middle * 1.15 + (swirl - 0.5) * 0.9, 0.0, 1.0);
+        if (heat < 0.06) {
+            discard;
+        }
+        let tint = i.colour.rgb / max(max(i.colour.r, max(i.colour.g, i.colour.b)), 0.001);
+        return vec4<f32>(fire_colour(heat) * mix(vec3<f32>(1.0), tint, 0.25), 1.0);
+    }
     if (i.texture < 0) {
         return i.colour;
     }
@@ -435,6 +519,104 @@ fn fs_wide(i: WideOut) -> @location(0) vec4<f32> {
         discard;
     }
     return vec4<f32>(i.colour.rgb, i.colour.a * coverage);
+}
+
+struct FlameOut {
+    @builtin(position) position: vec4<f32>,
+    // Along the flame (0 at `a`, 1 at `b`) and across it (-1..1 of its radius there), and its
+    // length and radius at `a` in pixels.
+    @location(0) along: f32,
+    @location(1) across: f32,
+    @location(2) @interpolate(flat) shape: vec2<f32>,
+    @location(3) @interpolate(flat) core: vec3<f32>,
+    @location(4) @interpolate(flat) edge: vec3<f32>,
+    @location(5) @interpolate(flat) seed: f32,
+    @location(6) @interpolate(flat) taper: f32,
+};
+
+// A quad round the flame on the screen: from half a radius behind `a` to `b`, as wide as its
+// widest end. A round fireball when the ends meet.
+@vertex
+fn vs_flame(
+    @builtin(vertex_index) index: u32,
+    @location(0) a: vec3<f32>,
+    @location(1) width: f32,
+    @location(2) b: vec3<f32>,
+    @location(3) end: f32,
+    @location(4) core: vec3<f32>,
+    @location(5) seed: f32,
+    @location(6) edge: vec3<f32>,
+) -> FlameOut {
+    let half_view = u.viewport.xy * 0.5;
+    let ca = vec4<f32>(a.x * u.scale.x, a.y * u.scale.y, u.scale.z * 1.02, a.z);
+    let cb = vec4<f32>(b.x * u.scale.x, b.y * u.scale.y, u.scale.z * 1.02, b.z);
+    let sa = ca.xy / ca.w * half_view;
+    let sb = cb.xy / cb.w * half_view;
+    // Radii in pixels: half the width over the depth, through the projection.
+    let ra = max(width * 0.5 * u.scale.x / ca.w * half_view.x, 1.0);
+    let rb = max(end * 0.5 * u.scale.x / cb.w * half_view.x, 0.5);
+    var along = sb - sa;
+    let length_px = length(along);
+    if (length_px < 1.0e-3) {
+        along = vec2<f32>(1.0, 0.0);
+    } else {
+        along = along / length_px;
+    }
+    let across = vec2<f32>(-along.y, along.x);
+    let reach = max(ra, rb) * 1.3 + 1.0;
+    var ends = array<f32, 6>(0.0, 1.0, 1.0, 0.0, 1.0, 0.0);
+    var sides = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
+    let t = ends[index];
+    let side = sides[index];
+    // Stretch the quad half a radius past each end, so the rounded ends fit.
+    let start = sa - along * ra;
+    let finish = sb + along * rb;
+    let point = mix(start, finish, t) + across * side * reach;
+    let w = mix(ca.w, cb.w, t);
+    var out: FlameOut;
+    // Pulled 2% nearer, like the glows, so a plume at its nozzle is not hidden by the hull.
+    out.position = vec4<f32>(point / half_view * w, u.scale.z * 1.02, w);
+    out.along = mix(-ra, length_px + rb, t) / max(length_px, 1.0);
+    out.across = side * reach;
+    out.shape = vec2<f32>(length_px, ra);
+    out.core = core;
+    out.edge = edge;
+    out.seed = seed;
+    out.taper = rb / ra;
+    return out;
+}
+
+@fragment
+fn fs_flame(i: FlameOut) -> @location(0) vec4<f32> {
+    let t = u.viewport.z;
+    let length_px = i.shape.x;
+    let ra = i.shape.y;
+    var heat: f32;
+    if (length_px < 1.0) {
+        // A fireball: round, boiling (`along` is in pixels when the ends meet).
+        let offset = vec2<f32>(i.along, i.across);
+        let r = length(offset) / ra;
+        let angle = atan2(offset.y, offset.x);
+        let boil = turbulence(vec2<f32>(r * 3.0 - t * 2.0, i.seed * 7.0 + angle * 2.0));
+        heat = pow(clamp(1.0 - r + (boil - 0.5) * 0.5, 0.0, 1.0), 1.5);
+    } else {
+        // A plume: narrowing from the nozzle, flickering along its length.
+        let along = clamp(i.along, -0.5, 1.2);
+        let radius = ra * mix(1.0, i.taper, clamp(along, 0.0, 1.0));
+        let r = abs(i.across) / max(radius, 0.5);
+        let flicker = turbulence(vec2<f32>(along * 6.0 - t * 14.0, i.seed * 13.0 + i.across / ra));
+        // Bright for most of its length, fading over the last part, flickering.
+        let fade = 1.0 - smoothstep(0.6, 1.1 + (flicker - 0.5) * 0.3, along);
+        let nozzle = smoothstep(-0.5, 0.0, along);
+        heat = clamp((1.0 - r * r) * fade * nozzle * (0.85 + flicker * 0.3), 0.0, 1.0);
+    }
+    if (heat <= 0.01) {
+        discard;
+    }
+    // Only the hottest part runs past white (and blooms); the rest is the plume's own colours.
+    let colour = mix(i.edge, i.core, smoothstep(0.5, 1.0, heat)) * (0.35 + heat * 0.9);
+    // The glow thins out steeply towards its edges, so neighbouring plumes stay apart.
+    return vec4<f32>(colour, pow(heat, 1.5));
 }
 
 struct SpriteOut {
@@ -627,6 +809,7 @@ pub struct Renderer {
     lines: wgpu::RenderPipeline,
     background: wgpu::RenderPipeline,
     sprites: wgpu::RenderPipeline,
+    flames: wgpu::RenderPipeline,
     shells: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
 
@@ -888,6 +1071,40 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let flame_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<FlameVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x3,
+                1 => Float32,
+                2 => Float32x3,
+                3 => Float32,
+                4 => Float32x3,
+                5 => Float32,
+                6 => Float32x3
+            ],
+        };
+        let flames = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("flames"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_flame"),
+                compilation_options: Default::default(),
+                buffers: &[Some(flame_layout)],
+            },
+            primitive: Default::default(),
+            depth_stencil: Some(depth(false, wgpu::CompareFunction::GreaterEqual)),
+            multisample,
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_flame"),
+                compilation_options: Default::default(),
+                targets: &additive,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let shells = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("atmospheres"),
             layout: Some(&pipeline_layout),
@@ -1001,6 +1218,7 @@ impl Renderer {
             lines,
             background,
             sprites,
+            flames,
             shells,
             sampler,
             face_maps: None,
@@ -1118,7 +1336,7 @@ impl Renderer {
                 scene.projection.near,
                 0.0,
             ],
-            viewport: [inner.0 as f32, inner.1 as f32, 0.0, 0.0],
+            viewport: [inner.0 as f32, inner.1 as f32, scene.time % 1000.0, 0.0],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("uniforms"),
@@ -1194,23 +1412,28 @@ impl Renderer {
         let mut shells: Vec<Shell> = Vec::new();
         let mut sprites: Vec<SpriteVertex> = Vec::new();
         let mut sprite_ranges = Vec::with_capacity(scene.batches.len());
+        let mut flames: Vec<FlameVertex> = Vec::new();
+        let mut flame_ranges = Vec::with_capacity(scene.batches.len());
         let mut shell_ranges = Vec::with_capacity(scene.batches.len());
         for batch in &scene.batches {
             let first = vertices.len() as u32;
             for (index, t) in batch.triangles.iter().enumerate() {
                 let layer = index.min(LAYERS) as f32;
-                let (texture, palette, uvs) = match t.texture {
-                    Some(face)
-                        if (face.map as usize) < layers.len()
-                            && (face.palette as usize) < scene.palettes.len() =>
-                    {
-                        (
-                            layers[face.map as usize] as f32,
-                            (face.palette as usize * PALETTE_SIZE) as f32,
-                            face.uvs,
-                        )
-                    }
-                    _ => (-1.0, 0.0, [[0.0; 2]; 3]),
+                let (texture, palette, uvs) = match (t.fire, t.texture) {
+                    (Some(fire), _) => (-2.0, 0.0, fire),
+                    (None, texture) => match texture {
+                        Some(face)
+                            if (face.map as usize) < layers.len()
+                                && (face.palette as usize) < scene.palettes.len() =>
+                        {
+                            (
+                                layers[face.map as usize] as f32,
+                                (face.palette as usize * PALETTE_SIZE) as f32,
+                                face.uvs,
+                            )
+                        }
+                        _ => (-1.0, 0.0, [[0.0; 2]; 3]),
+                    },
                 };
                 vertices.extend((0..3).map(|k| Vertex {
                     position: t.positions[k],
@@ -1244,6 +1467,21 @@ impl Renderer {
                 halo: sprite.halo,
             }));
             sprite_ranges.push(first_sprite..sprites.len() as u32);
+            let first_flame = flames.len() as u32;
+            flames.extend(batch.flames.iter().filter_map(|flame| {
+                let near = scene.projection.near;
+                (flame.a[2] >= near && flame.b[2] >= near).then_some(FlameVertex {
+                    a: flame.a,
+                    width: flame.width,
+                    b: flame.b,
+                    end: flame.end,
+                    core: flame.core,
+                    seed: flame.seed,
+                    edge: flame.edge,
+                    pad: 0.0,
+                })
+            }));
+            flame_ranges.push(first_flame..flames.len() as u32);
             let first_shell = shells.len() as u32;
             shells.extend(batch.atmospheres.iter().filter_map(shell));
             shell_ranges.push(first_shell..shells.len() as u32);
@@ -1259,6 +1497,13 @@ impl Renderer {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("sprites"),
                 contents: bytemuck::cast_slice(&sprites),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
+        let flame_buffer = (!flames.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("flames"),
+                contents: bytemuck::cast_slice(&flames),
                 usage: wgpu::BufferUsages::VERTEX,
             })
         });
@@ -1338,6 +1583,12 @@ impl Renderer {
                 pass.set_pipeline(&self.sprites);
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..6, lights.clone());
+            }
+            let burning = &flame_ranges[pass_index - 1];
+            if let (Some(buffer), false) = (&flame_buffer, burning.is_empty()) {
+                pass.set_pipeline(&self.flames);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..6, burning.clone());
             }
             let atmospheres = &shell_ranges[pass_index - 1];
             if let (Some(buffer), false) = (&shell_buffer, atmospheres.is_empty()) {
@@ -1707,6 +1958,7 @@ mod tests {
             positions: [[-z, -z, z], [z, -z, z], [0.0, z, z]],
             colours: [colour; 3],
             texture: None,
+            fire: None,
         }
     }
 
@@ -1739,10 +1991,12 @@ mod tests {
                 lines: vec![],
                 atmospheres: vec![],
                 sprites: vec![],
+                flames: vec![],
             }],
             maps: vec![],
             palettes: vec![],
             bloom: 0.0,
+            time: 0.0,
             supersample: 1.0,
         };
         let pixels = renderer.render(&scene).unwrap();
@@ -1756,6 +2010,7 @@ mod tests {
                 lines: vec![],
                 atmospheres: vec![],
                 sprites: vec![],
+                flames: vec![],
             }],
             ..scene.clone()
         };
@@ -1770,6 +2025,7 @@ mod tests {
                     lines: vec![],
                     atmospheres: vec![],
                     sprites: vec![],
+                    flames: vec![],
                 },
                 Batch {
                     triangles: vec![
@@ -1779,6 +2035,7 @@ mod tests {
                     lines: vec![],
                     atmospheres: vec![],
                     sprites: vec![],
+                    flames: vec![],
                 },
             ],
             ..scene
@@ -1846,6 +2103,7 @@ mod tests {
             maps: vec![],
             palettes: vec![],
             bloom: 0.0,
+            time: 0.0,
             supersample: 1.0,
             ..textured
         };
@@ -1892,6 +2150,39 @@ mod tests {
         let line = renderer.render(&ruled).unwrap();
         assert_eq!(line[24 * 64 + 4], 0xff00ff, "on the line");
         assert_eq!(line[20 * 64 + 4], 0x203040, "four pixels off it");
+        // A flame along the view's middle row adds warm light there (white-hot at the nozzle)
+        // and none far above it; a burning face is fire-coloured where it is hottest.
+        let burning = Scene {
+            batches: vec![Batch {
+                flames: vec![Flame {
+                    a: [-5.0, 0.0, 20.0],
+                    b: [5.0, 0.0, 20.0],
+                    width: 3.0,
+                    end: 1.0,
+                    core: [1.0, 0.9, 0.6],
+                    edge: [1.0, 0.3, 0.0],
+                    seed: 0.0,
+                }],
+                ..Batch::default()
+            }],
+            ..ruled.clone()
+        };
+        let flame = renderer.render(&burning).unwrap();
+        let warm = |p: u32| p != 0x203040 && (p >> 16 & 0xff) >= (p & 0xff);
+        assert!(warm(flame[24 * 64 + 26]), "the plume near its nozzle");
+        assert_eq!(flame[4 * 64 + 26], 0x203040, "nothing far above it");
+        let mut face = triangle(5.0, [1.0, 0.5, 0.0, 1.0]);
+        face.fire = Some([[0.0, 1.0], [1.0, 1.0], [0.5, 0.0]]);
+        let fire = renderer
+            .render(&Scene {
+                batches: vec![Batch {
+                    triangles: vec![face],
+                    ..Batch::default()
+                }],
+                ..ruled.clone()
+            })
+            .unwrap();
+        assert!(warm(fire[30 * 64 + 32]), "a burning face");
         // Bloom: a white face glows onto the dark round it only when bloom is on.
         let bright = Scene {
             background: None,
@@ -1904,6 +2195,7 @@ mod tests {
                     ],
                     colours: [[1.0; 4]; 3],
                     texture: None,
+                    fire: None,
                 }],
                 ..Batch::default()
             }],

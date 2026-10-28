@@ -324,8 +324,8 @@ fn the_hyperspace_tunnel_is_drawn_on_the_gpu() {
 }
 
 /// The player's ship from outside with its main engine at full thrust, from four sides: the
-/// engine glows (F1805's textured quads over bitmaps 0x123 and 0x65) go to the GPU as textured
-/// faces, hidden by the hull where it is nearer.
+/// engine glows (F1805's quads over bitmaps 0x123 and 0x65) go to the GPU as flames, hidden by
+/// the hull where it is nearer.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
 fn engine_glows_are_drawn_on_the_gpu() {
@@ -366,14 +366,10 @@ fn engine_glows_are_drawn_on_the_gpu() {
             .batches
             .iter()
             .flatten()
-            .filter(|solid| {
-                solid
-                    .texture
-                    .as_ref()
-                    .is_some_and(|t| matches!(t.bitmap & 0xfff, 0x123 | 0x65))
-            })
+            .filter(|solid| solid.flame.is_some())
             .count();
         eprintln!("yaw {yaw:#x}: {here} glow faces");
+
         glows += here;
         let mut target = vec![0u32; width * height];
         ffe_rs::modern::ModernRenderer::new().render(

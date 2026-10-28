@@ -170,6 +170,10 @@ pub struct PolygonEmission {
     pub colour: [u8; 3],
     /// The normal's colour F1693 adds (zero when culled).
     pub shade: [u8; 3],
+    /// Not the original's: the view positions of the vertices the outline's segments resolved,
+    /// in the order they were resolved, for a renderer that draws the polygon itself (the
+    /// port's modern engine finds the polygon's plane from them).
+    pub views: Vec<[i32; 3]>,
 }
 
 /// A sound request (opcode 15, F1759): sample `code >> 5 & 15` at volume
@@ -1214,6 +1218,7 @@ fn run(
                         outline: Outline::default(),
                         colour: [0; 3],
                         shade: [0; 3],
+                        views: Vec::new(),
                     };
                     if !normal.culled {
                         let lighting = match (polygon.normal, result.normal_zero_colour) {
@@ -1238,22 +1243,28 @@ fn run(
                             scale: instance.operand_scale,
                             normal_records: live.normal_records(),
                         };
+                        let mut views = vec![vertex.view];
                         emission.outline = model_polygon::run(
                             &polygon.segments,
                             &polygon.segment_bytes,
                             polygon.flag,
                             &inputs,
                             &mut |index| {
-                                live.resolve(
+                                let resolved = live.resolve(
                                     index as i8,
                                     working,
                                     instance.position,
                                     instance.generation,
                                     true,
-                                )
+                                );
+                                if let Ok(point) = &resolved {
+                                    views.push(point.view);
+                                }
+                                resolved
                             },
                         )
                         .map_err(|error| format!("{error} (polygon at {offset:#x})"))?;
+                        emission.views = views;
                     }
                     let key = emission.key;
                     result.polygons.push(emission.clone());

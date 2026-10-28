@@ -295,8 +295,30 @@ Status (2026-10-28): **implemented**.
   (F1326's nibbles), so there is no finer colour to recover. The smooth shading and the HDR bloom are
   what smooth the gradients.
 
-Not yet on the GPU (still the original's pixels behind the models): complex polygons (opcode 5, such
-as the fireball's body; they are queued as screen-space outlines), and the HUD and its gunsight.
+### Fire, engine flames and complex polygons
+
+Status (2026-10-28): **implemented**.
+
+- **Complex polygons** (opcode 5, F1721) are queued as screen-space outlines (edges and cubic
+  curves). The executor now also keeps the view positions of the vertices their segments resolve
+  (`PolygonEmission::views`, not the original's); the viewer finds the polygon's plane from them and
+  lifts each outline point back along its view ray onto it (curves stepped 16 times), and the GPU
+  fills each loop by ear clipping on that plane, so concave shapes fill correctly and edges stay
+  smooth at any resolution (`model_viewer::outline_views`, `modern3d::fill_outline`).
+- **Fire.** An explosion's batch is marked as burning (`World::burning`). Its coloured faces and
+  complex polygons are drawn with an animated fire material: three octaves of value noise rising
+  through the shape, hottest at its middle, through dark red, orange, yellow and white (brighter than
+  white at the top, so the bloom spreads it), with ragged edges where it cools to nothing, tinted a
+  little by the face's own colour.
+- **Engine flames.** An engine glow (F1805: the core quad, bitmap 0x123, round at the nozzle; the
+  shaft, 0x65, from the nozzle A to B) becomes an animated GPU flame (`ffe_render::Flame`): sized
+  from the original quad's width at the nozzle (its bright body narrower than the quad, which
+  included a dark soft edge), tapering along the plume, flickering, white-hot only at its core and
+  otherwise in the glow's own colours (its brightest and dimmest lit slots), adding its light.
+- The fire and the flames flicker by a presentation clock (`Scene::time`, the time since the GPU view
+  first drew), never game time.
+
+Not yet on the GPU (still the original's pixels behind the models): the HUD and its gunsight.
 
 ## What comes next
 

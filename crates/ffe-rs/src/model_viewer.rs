@@ -88,6 +88,20 @@ pub struct Solid {
     pub sprite: Option<Sprite>,
     /// The views are an open line through the points (a line or a curve), not a face.
     pub path: bool,
+    /// A complex polygon's outline (opcode 5): the views are its loops one after another, these
+    /// their lengths, filled as polygons (not as fans).
+    pub outline: Option<Vec<usize>>,
+    /// An engine plume: the views are its two ends (A at the nozzle, B), drawn as a flame.
+    pub flame: Option<Plume>,
+}
+
+/// An engine plume as the modern engine draws it: its width at the nozzle and at its end (view
+/// units) and its hot and cool colours (the glow's own slots).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plume {
+    pub widths: [i32; 2],
+    pub core: [u8; 3],
+    pub edge: [u8; 3],
 }
 
 /// A point of light (a dot, F1699 to F1801): the core's size in the original's pixels (F1611's
@@ -259,10 +273,107 @@ fn ramp_word(w: &[u32], at: usize, band: u32, first: usize) -> u16 {
     (value & 0xfff) as u16
 }
 
-/// A thruster glow's screen corners back in view space: each at the depth of its place between
-/// the plume's two ends (A and B, view space) along the line between them on the screen, through
-/// F1479's projection run backwards.
-fn lift(points: &[[i16; 2]], [a, b]: [[i32; 3]; 2]) -> Vec<[i32; 3]> {
+/// A complex polygon's outline (screen entries) lifted onto its plane in view space: the plane
+/// through the vertices the outline resolved (`views`), each screen point taken back along its
+/// view ray to it (F1479 run backwards), curves stepped 16 times. The loops one after another and
+/// their lengths; `None` when the plane is edge-on or behind the eye, or there is no outline.
+fn outline_views(
+    entries: &[ffe_core::model_polygon::Entry],
+    views: &[[i32; 3]],
+) -> Option<(Vec<[i32; 3]>, Vec<usize>)> {
+    use ffe_core::model_polygon::Entry;
+    let points: Vec<[f64; 3]> = views.iter().map(|v| v.map(f64::from)).collect();
+    let first = *points.first()?;
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let size = |a: [f64; 3]| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    // The plane's normal from the widest triangle of the resolved points.
+    let mut normal = [0.0; 3];
+    for (i, b) in points.iter().enumerate().skip(1) {
+        for c in &points[i + 1..] {
+            let n = cross(sub(*b, first), sub(*c, first));
+            if size(n) > size(normal) {
+                normal = n;
+            }
+        }
+    }
+    if size(normal) <= 0.0 {
+        return None;
+    }
+    let reach = normal[0] * first[0] + normal[1] * first[1] + normal[2] * first[2];
+    let lift = |[x, y]: [f64; 2]| -> Option<[i32; 3]> {
+        let ray = [(x - 160.0) / 256.0, (79.0 - y) / 256.0, 1.0];
+        let facing = normal[0] * ray[0] + normal[1] * ray[1] + normal[2] * ray[2];
+        let t = reach / facing;
+        (facing.abs() > 1.0e-9 && t > 0.0 && t.is_finite())
+            .then(|| ray.map(|c| (c * t).round() as i32))
+    };
+    let at = |p: [i16; 2]| [f64::from(p[0]), f64::from(p[1])];
+    let mut loops: Vec<Vec<[f64; 2]>> = Vec::new();
+    let start = |loops: &mut Vec<Vec<[f64; 2]>>, p: [f64; 2]| {
+        if loops.last().and_then(|l| l.last()) != Some(&p) {
+            loops.push(vec![p]);
+        }
+    };
+    for entry in entries {
+        match entry {
+            Entry::Edge([a, b]) => {
+                start(&mut loops, at(*a));
+                loops.last_mut()?.push(at(*b));
+            }
+            Entry::To(b) => loops.last_mut()?.push(at(*b)),
+            Entry::Curve([a, b, c, d]) => {
+                start(&mut loops, at(*a));
+                let [a, b, c, d] = [*a, *b, *c, *d].map(at);
+                for step in 1..=16 {
+                    let t = f64::from(step) / 16.0;
+                    let u = 1.0 - t;
+                    let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+                    let point = std::array::from_fn(|k| {
+                        w[0] * a[k] + w[1] * b[k] + w[2] * c[k] + w[3] * d[k]
+                    });
+                    loops.last_mut()?.push(point);
+                }
+            }
+        }
+    }
+    let mut views = Vec::new();
+    let mut lengths = Vec::new();
+    for mut ring in loops {
+        ring.dedup();
+        if ring.len() > 1 && ring.first() == ring.last() {
+            ring.pop();
+        }
+        if ring.len() < 3 {
+            continue;
+        }
+        for point in &ring {
+            views.push(lift(*point)?);
+        }
+        lengths.push(ring.len());
+    }
+    (!lengths.is_empty()).then_some((views, lengths))
+}
+
+/// An engine plume for the modern engine from a thruster glow: the original's quad corners on the
+/// screen give its width at the nozzle (A); the shaft (bitmap 0x65) runs from A to B and narrows to
+/// a third, the core (0x123) is round at A. Its hot colour is the glow's brightest slot and its
+/// cool one the dimmest lit slot.
+fn plume(
+    points: &[[i16; 2]],
+    [a, b]: [[i32; 3]; 2],
+    bitmap: u32,
+    slots: &[[u8; 3]],
+) -> Option<(Vec<[i32; 3]>, Plume)> {
+    if a[2] <= 0 || points.len() < 3 {
+        return None;
+    }
     let screen = |v: [i32; 3]| {
         let z = f64::from(v[2].max(1));
         [
@@ -272,24 +383,37 @@ fn lift(points: &[[i16; 2]], [a, b]: [[i32; 3]; 2]) -> Vec<[i32; 3]> {
     };
     let (sa, sb) = (screen(a), screen(b));
     let along = [sb[0] - sa[0], sb[1] - sa[1]];
-    let length = along[0] * along[0] + along[1] * along[1];
-    points
+    let length = (along[0] * along[0] + along[1] * along[1]).sqrt();
+    // The quad's half width across the plume (or its half size, for the round core).
+    let half = points
         .iter()
         .map(|p| {
-            let [x, y] = p.map(f64::from);
-            let t = if length > 0.0 {
-                (((x - sa[0]) * along[0] + (y - sa[1]) * along[1]) / length).clamp(0.0, 1.0)
+            let (x, y) = (f64::from(p[0]) - sa[0], f64::from(p[1]) - sa[1]);
+            if length > 0.5 {
+                (x * along[1] - y * along[0]).abs() / length
             } else {
-                0.0
-            };
-            let z = f64::from(a[2]) + (f64::from(b[2]) - f64::from(a[2])) * t;
-            [
-                ((x - 160.0) * z / 256.0) as i32,
-                ((79.0 - y) * z / 256.0) as i32,
-                z as i32,
-            ]
+                (x * x + y * y).sqrt()
+            }
         })
-        .collect()
+        .fold(0.0, f64::max);
+    let width = (2.0 * half * f64::from(a[2]) / 256.0).max(1.0) as i32;
+    let lit: Vec<[u8; 3]> = slots
+        .iter()
+        .skip(1)
+        .copied()
+        .filter(|c| *c != [0; 3])
+        .collect();
+    let bright = |c: &[u8; 3]| u32::from(c[0]) + u32::from(c[1]) + u32::from(c[2]);
+    let core = *lit.iter().max_by_key(|c| bright(c))?;
+    let edge = *lit.iter().min_by_key(|c| bright(c))?;
+    let round = bitmap & 0xfff == 0x123;
+    let ends = if round { vec![a, a] } else { vec![a, b] };
+    let widths = if round {
+        [width, width]
+    } else {
+        [width, (width / 3).max(1)]
+    };
+    Some((ends, Plume { widths, core, edge }))
 }
 
 /// F1546's cubic curve through four points (entry order: the ends first and last) in view
@@ -1869,6 +1993,8 @@ impl ModelViewer {
                     rgb: [0; 3],
                     texture: None,
                     path: false,
+                    outline: None,
+                    flame: None,
                     sprite: None,
                 })
             };
@@ -1966,6 +2092,8 @@ impl ModelViewer {
                                 .unwrap_or_default(),
                             texture: Some(self.solid_texture(textured, uv)?),
                             path: false,
+                            outline: None,
+                            flame: None,
                             sprite: None,
                         })
                     });
@@ -2013,6 +2141,8 @@ impl ModelViewer {
                             rgb,
                             texture: None,
                             path: false,
+                            outline: None,
+                            flame: None,
                             sprite: None,
                         });
                         shapes.push((key, Shape::Fill(points, rgb), solid));
@@ -2201,6 +2331,8 @@ impl ModelViewer {
                         rgb,
                         texture: None,
                         path: false,
+                        outline: None,
+                        flame: None,
                         sprite: None,
                     });
                     let behind = emission.screen.contains(&NEAR_SENTINEL);
@@ -2290,6 +2422,8 @@ impl ModelViewer {
                             rgb,
                             texture: None,
                             path: true,
+                            outline: None,
+                            flame: None,
                             sprite: None,
                         });
                         push!(Shape::Line(point(a), point(b), rgb), solid);
@@ -2350,6 +2484,8 @@ impl ModelViewer {
                                 rgb: self.rgb(core.1),
                                 texture: None,
                                 path: false,
+                                outline: None,
+                                flame: None,
                                 sprite: Some(Sprite { size: core.0, halo }),
                             });
                             for (size, colour) in particles {
@@ -2364,6 +2500,8 @@ impl ModelViewer {
                                         rgb: [0; 3],
                                         texture: None,
                                         path: false,
+                                        outline: None,
+                                        flame: None,
                                         sprite: None,
                                     }),
                                 };
@@ -2379,6 +2517,8 @@ impl ModelViewer {
                                     rgb,
                                     texture: None,
                                     path: false,
+                                    outline: None,
+                                    flame: None,
                                     sprite: Some(Sprite {
                                         size: 0,
                                         halo: None,
@@ -2398,6 +2538,8 @@ impl ModelViewer {
                             rgb,
                             texture: None,
                             path: true,
+                            outline: None,
+                            flame: None,
                             sprite: None,
                         });
                         push!(Shape::Curve(points, rgb), solid);
@@ -2437,6 +2579,8 @@ impl ModelViewer {
                             rgb: colour,
                             texture: None,
                             path: false,
+                            outline: None,
+                            flame: None,
                             sprite: Some(Sprite {
                                 size: chain.size,
                                 halo: None,
@@ -2451,8 +2595,20 @@ impl ModelViewer {
                     // outline has no entries.
                     let edges = ffe_core::model_polygon::edges(&polygon.outline.entries)?;
                     if !edges.is_empty() {
-                        let colour = self.polygon_colour(polygon);
-                        push!(Shape::Polygon(edges, self.rgb(colour)));
+                        let rgb = self.rgb(self.polygon_colour(polygon));
+                        // For the modern engine, the outline lifted onto the polygon's plane.
+                        let solid = outline_views(&polygon.outline.entries, &polygon.views).map(
+                            |(views, loops)| Solid {
+                                views,
+                                rgb,
+                                texture: None,
+                                path: false,
+                                outline: Some(loops),
+                                flame: None,
+                                sprite: None,
+                            },
+                        );
+                        push!(Shape::Polygon(edges, rgb), solid);
                     }
                 }
                 Primitive::Thruster(entry) => match &entry.shape {
@@ -2475,15 +2631,20 @@ impl ModelViewer {
                             bitmap: *texture,
                             slots,
                         };
-                        // For the modern engine, the quad lifted back into view space at the
-                        // plume's depth there, and textured like the original's.
-                        let solid = self.solid_texture(&glow, None).map(|texture| Solid {
-                            views: lift(points, entry.views),
-                            rgb: glow.slots.get(1).copied().unwrap_or_default(),
-                            texture: Some(texture),
-                            path: false,
-                            sprite: None,
-                        });
+                        // For the modern engine, a flame: from the nozzle (A) along the plume
+                        // for the shaft (0x65), or round the nozzle for the core (0x123), as
+                        // wide as the original's quad there, in the glow's own colours.
+                        let solid = plume(points, entry.views, *texture, &glow.slots).map(
+                            |(views, plume)| Solid {
+                                views,
+                                rgb: plume.core,
+                                texture: None,
+                                path: false,
+                                outline: None,
+                                flame: Some(plume),
+                                sprite: None,
+                            },
+                        );
                         push!(Shape::Glow(glow), solid);
                     }
                     // F1803: the stored end points (x - 1 when positive) in the F1691
@@ -2500,6 +2661,8 @@ impl ModelViewer {
                             rgb,
                             texture: None,
                             path: true,
+                            outline: None,
+                            flame: None,
                             sprite: None,
                         };
                         push!(Shape::Line(a, b, rgb), Some(solid));

@@ -463,6 +463,10 @@ pub struct Screen {
     emissive: bool,
     /// The batches that give off light, this frame.
     glowing: Vec<usize>,
+    /// The next object drawn is on fire (an explosion).
+    on_fire: bool,
+    /// The batches on fire, this frame.
+    burning: Vec<usize>,
     /// Their textures' bitmaps so far this frame, each once.
     bitmaps: Vec<crate::modern3d::WorldBitmap>,
     /// The bitmaps read so far, so they are not read again every frame.
@@ -1009,6 +1013,8 @@ impl Screen {
             star: None,
             emissive: false,
             glowing: Vec::new(),
+            on_fire: false,
+            burning: Vec::new(),
             bitmaps: Vec::new(),
             bitmap_memory: Vec::new(),
             deferred: Vec::new(),
@@ -1438,6 +1444,8 @@ impl Screen {
                     rgb,
                     texture: None,
                     path: false,
+                    outline: None,
+                    flame: None,
                     sprite: Some(crate::model_viewer::Sprite {
                         size: 0,
                         halo: Some((across, rgb)),
@@ -2274,6 +2282,7 @@ impl Screen {
         self.eclipses.clear();
         self.star = None;
         self.glowing.clear();
+        self.burning.clear();
         self.bitmaps.clear();
         self.deferred.clear();
         self.world = None;
@@ -2415,6 +2424,7 @@ impl Screen {
                     eclipses: std::mem::take(&mut self.eclipses),
                     star: self.star.take(),
                     glowing: std::mem::take(&mut self.glowing),
+                    burning: std::mem::take(&mut self.burning),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2478,6 +2488,8 @@ impl Screen {
                             rgb: [(colour >> 16) as u8, (colour >> 8) as u8, colour as u8],
                             texture: None,
                             path: false,
+                            outline: None,
+                            flame: None,
                             sprite: Some(crate::model_viewer::Sprite {
                                 size: 0,
                                 halo: None,
@@ -2601,6 +2613,7 @@ impl Screen {
                     eclipses: std::mem::take(&mut self.eclipses),
                     star: self.star.take(),
                     glowing: std::mem::take(&mut self.glowing),
+                    burning: std::mem::take(&mut self.burning),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2976,6 +2989,9 @@ impl Screen {
             self.lights.extend(frame.light.map(|light| (index, light)));
             if std::mem::take(&mut self.emissive) {
                 self.glowing.push(index);
+            }
+            if std::mem::take(&mut self.on_fire) {
+                self.burning.push(index);
             }
             // An object (not a body) in a body's shadow: how much of the star it still sees.
             if let (false, Some(origin), Some(star)) = (
@@ -3525,8 +3541,11 @@ impl Screen {
                         effect.model,
                         ffe_core::effects::EXPLOSION_MODEL | ffe_core::effects::HIT_MODEL
                     );
+                    // And an explosion burns.
+                    self.on_fire = effect.model == ffe_core::effects::EXPLOSION_MODEL;
                     self.draw_frame(scene, &frame);
                     self.emissive = false;
+                    self.on_fire = false;
                 }
             }
         }

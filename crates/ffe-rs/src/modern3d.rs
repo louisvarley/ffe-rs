@@ -64,6 +64,8 @@ pub struct World {
     pub star: Option<Star>,
     /// The batches that give off light (beams, explosions, a hit's sparks).
     pub glowing: Vec<usize>,
+    /// The batches on fire (explosions): their coloured faces burn.
+    pub burning: Vec<usize>,
     /// The textured faces' bitmaps (their original indices), each once.
     pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
@@ -86,6 +88,8 @@ pub struct Star {
 pub struct Gpu3d {
     renderer: Option<Result<ffe_render::Renderer, String>>,
     maps: MapCache,
+    /// When the GPU view first drew, the clock its fire flickers by (presentation only).
+    started: Option<std::time::Instant>,
     /// Each view row's and column's logical pixel, for the current view size.
     rows: Vec<usize>,
     columns: Vec<usize>,
@@ -181,7 +185,12 @@ impl Gpu3d {
         if view_height == 0 {
             return Ok(());
         }
-        let scene = scene(world, view_width, view_height, &mut self.maps);
+        let time = self
+            .started
+            .get_or_insert_with(std::time::Instant::now)
+            .elapsed()
+            .as_secs_f32();
+        let scene = scene(world, view_width, view_height, &mut self.maps, time);
         let Ok(renderer) = self.renderer() else {
             return Ok(());
         };
@@ -378,6 +387,132 @@ fn flare(
     batch
 }
 
+/// How saturated a colour is (0 grey, 1 pure).
+fn saturation([r, g, b]: [f32; 3]) -> f32 {
+    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
+    if high > 0.0 {
+        (high - low) / high
+    } else {
+        0.0
+    }
+}
+
+/// A triangle of a filled outline: its corners in view space and their places across the outline.
+type OutlineTriangle = ([[i32; 3]; 3], [[f32; 2]; 3]);
+
+/// A complex polygon's loops (view space, one after another with `loops` their lengths) as
+/// triangles on the polygon's plane, ear-clipped so concave shapes fill correctly (a loop that
+/// crosses itself falls back to a fan), each corner with its place across the whole outline
+/// (0..1 both ways, for fire).
+fn fill_outline(views: &[[i32; 3]], loops: &[usize]) -> Vec<OutlineTriangle> {
+    let points: Vec<[f64; 3]> = views.iter().map(|v| v.map(f64::from)).collect();
+    let Some(&first) = points.first() else {
+        return Vec::new();
+    };
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    // The plane's axes: its normal from the widest corner, and two directions in it.
+    let mut normal = [0.0; 3];
+    for window in points.windows(2) {
+        let n = cross(sub(window[0], first), sub(window[1], first));
+        if dot(n, n) > dot(normal, normal) {
+            normal = n;
+        }
+    }
+    let length = dot(normal, normal).sqrt();
+    if length <= 0.0 {
+        return Vec::new();
+    }
+    let normal = normal.map(|c| c / length);
+    let helper = if normal[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let across = cross(normal, helper);
+    let across_length = dot(across, across).sqrt();
+    let across = across.map(|c| c / across_length);
+    let up = cross(normal, across);
+    let flat: Vec<[f64; 2]> = points
+        .iter()
+        .map(|p| [dot(sub(*p, first), across), dot(sub(*p, first), up)])
+        .collect();
+    let (mut low, mut high) = ([f64::MAX; 2], [f64::MIN; 2]);
+    for p in &flat {
+        for k in 0..2 {
+            low[k] = low[k].min(p[k]);
+            high[k] = high[k].max(p[k]);
+        }
+    }
+    let place = |p: [f64; 2]| {
+        std::array::from_fn(|k| ((p[k] - low[k]) / (high[k] - low[k]).max(1.0e-9)) as f32)
+    };
+    let mut out = Vec::new();
+    let mut start = 0;
+    for &count in loops {
+        let ring: Vec<usize> = (start..start + count).filter(|&i| i < flat.len()).collect();
+        start += count;
+        for [a, b, c] in ear_clip(&ring.iter().map(|&i| flat[i]).collect::<Vec<_>>()) {
+            let corners = [ring[a], ring[b], ring[c]];
+            out.push((corners.map(|i| views[i]), corners.map(|i| place(flat[i]))));
+        }
+    }
+    out
+}
+
+/// Ear clipping of a simple polygon (2-D points in order): triangles as index triples. A polygon
+/// it cannot clip (crossing itself) is finished as a fan.
+fn ear_clip(points: &[[f64; 2]]) -> Vec<[usize; 3]> {
+    let n = points.len();
+    if n < 3 {
+        return Vec::new();
+    }
+    let area: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (points[i], points[(i + 1) % n]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    let turn = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+    };
+    let inside = |p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        let (x, y, z) = (turn(a, b, p), turn(b, c, p), turn(c, a, p));
+        (x >= 0.0 && y >= 0.0 && z >= 0.0) || (x <= 0.0 && y <= 0.0 && z <= 0.0)
+    };
+    let mut ring: Vec<usize> = (0..n).collect();
+    let mut out = Vec::with_capacity(n - 2);
+    while ring.len() > 3 {
+        let m = ring.len();
+        let ear = (0..m).find(|&i| {
+            let (a, b, c) = (ring[(i + m - 1) % m], ring[i], ring[(i + 1) % m]);
+            let bend = turn(points[a], points[b], points[c]);
+            // Convex the same way as the whole polygon, and no other corner inside.
+            bend * area > 0.0
+                && ring
+                    .iter()
+                    .filter(|&&k| k != a && k != b && k != c)
+                    .all(|&k| !inside(points[k], points[a], points[b], points[c]))
+        });
+        let Some(i) = ear else {
+            break;
+        };
+        out.push([ring[(i + m - 1) % m], ring[i], ring[(i + 1) % m]]);
+        ring.remove(i);
+    }
+    for k in 1..ring.len().saturating_sub(1) {
+        out.push([ring[0], ring[k], ring[k + 1]]);
+    }
+    out
+}
+
 /// The luminance of a colour (Rec. 601 weights), 0..255.
 fn luma([r, g, b]: [u8; 3]) -> f32 {
     0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)
@@ -391,7 +526,11 @@ fn luma([r, g, b]: [u8; 3]) -> f32 {
 /// stripe on a hull) keeps its own colour.
 fn smooth(solids: &[Solid]) -> Vec<Option<Vec<f32>>> {
     let face = |solid: &Solid| {
-        (solid.sprite.is_none() && !solid.path && solid.views.len() >= 3)
+        (solid.sprite.is_none()
+            && !solid.path
+            && solid.outline.is_none()
+            && solid.flame.is_none()
+            && solid.views.len() >= 3)
             .then(|| normal(&solid.views))
             .flatten()
     };
@@ -484,6 +623,7 @@ pub fn scene(
     width: usize,
     height: usize,
     cache: &mut MapCache,
+    time: f32,
 ) -> ffe_render::Scene {
     // The frame behind the models: Scale2x once, then the GPU's smooth filtering.
     let mut upscaled = scale2x(
@@ -566,15 +706,14 @@ pub fn scene(
                 });
             // An object that gives off light is lit by itself, not the star.
             let glowing = world.glowing.contains(&index);
+            let burning = world.burning.contains(&index);
             for (solid, shade) in solids.iter().zip(&shading) {
                 let [r, g, b] = colour(solid.rgb);
                 // In an object that gives off light, its coloured parts (fire, a beam) glow by
                 // how saturated they are; grey debris stays as it is. It is lit by itself, so a
                 // planet's shadow does not darken it.
                 let glow = if glowing {
-                    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
-                    let saturation = if high > 0.0 { (high - low) / high } else { 0.0 };
-                    1.0 + (EMISSIVE - 1.0) * saturation
+                    1.0 + (EMISSIVE - 1.0) * saturation([r, g, b])
                 } else {
                     1.0
                 };
@@ -588,6 +727,38 @@ pub fn scene(
                         [r * glow, g * glow, b * glow],
                         pixel,
                     ));
+                    continue;
+                }
+                // An engine plume: a flame from the nozzle.
+                if let (Some(plume), [a, b]) = (&solid.flame, &solid.views[..]) {
+                    let seed = (a[0] ^ a[1] ^ a[2]) as f32 * 0.001 % 97.0;
+                    let warm = |c: [u8; 3], k: f32| c.map(|v| f32::from(v) / 255.0 * k);
+                    // The original's quads include their dark soft edges: the flame's bright body
+                    // is narrower (the round glow at the nozzle more so).
+                    let round = a == b;
+                    let width = plume.widths[0] as f32 * if round { 0.5 } else { 0.65 };
+                    batch.flames.push(ffe_render::Flame {
+                        a: point(*a),
+                        b: point(*b),
+                        width,
+                        end: if round { width } else { plume.widths[1] as f32 },
+                        core: warm(plume.core, 1.1),
+                        edge: warm(plume.edge, 0.9),
+                        seed,
+                    });
+                    continue;
+                }
+                // A complex polygon: each loop filled on its plane; burning, it is fire.
+                if let Some(loops) = &solid.outline {
+                    let fire = burning && saturation([r, g, b]) > 0.4;
+                    for (corners, uvs) in fill_outline(&solid.views, loops) {
+                        batch.triangles.push(ffe_render::Triangle {
+                            positions: corners.map(point),
+                            colours: [rgba; 3],
+                            texture: None,
+                            fire: fire.then_some(uvs),
+                        });
+                    }
                     continue;
                 }
                 // Lines and curves about one of the original's pixels wide.
@@ -605,6 +776,12 @@ pub fn scene(
                 // (or, for a texture, its brightness) takes the corner's factor.
                 if let [first, rest @ ..] = &solid.views[..] {
                     let texture = texture_of(solid);
+                    // A burning object's coloured faces burn.
+                    let fire = (burning && saturation([r, g, b]) > 0.4).then_some([
+                        [0.0, 1.0],
+                        [1.0, 1.0],
+                        [0.5, 0.0],
+                    ]);
                     let base = if texture.is_some() {
                         [shadow, shadow, shadow, 1.0]
                     } else {
@@ -628,6 +805,7 @@ pub fn scene(
                                     uvs: [uv[0], uv[k + 1], uv[k + 2]],
                                 }
                             }),
+                            fire,
                         });
                     }
                 }
@@ -657,6 +835,7 @@ pub fn scene(
         maps,
         palettes,
         bloom: BLOOM,
+        time,
         supersample: SUPERSAMPLE,
     }
 }
@@ -686,12 +865,37 @@ mod tests {
     }
 
     #[test]
+    fn ear_clipping_fills_a_concave_outline() {
+        // An L: six corners, four triangles, none outside it.
+        let l = [
+            [0.0, 0.0],
+            [2.0, 0.0],
+            [2.0, 1.0],
+            [1.0, 1.0],
+            [1.0, 2.0],
+            [0.0, 2.0],
+        ];
+        let triangles = ear_clip(&l);
+        assert_eq!(triangles.len(), 4);
+        let area: f64 = triangles
+            .iter()
+            .map(|[a, b, c]| {
+                let (a, b, c) = (l[*a], l[*b], l[*c]);
+                ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs() / 2.0
+            })
+            .sum();
+        assert!((area - 3.0).abs() < 1.0e-9, "the L's area is 3, got {area}");
+    }
+
+    #[test]
     fn faces_become_fans_and_two_point_faces_lines() {
         let world = World {
             batches: vec![vec![
                 Solid {
                     views: vec![[0, 0, 100], [10, 0, 100], [10, 10, 100], [0, 10, 100]],
                     rgb: [255, 0, 0],
+                    outline: None,
+                    flame: None,
                     sprite: None,
                     path: false,
                     texture: Some(crate::model_viewer::SolidTexture {
@@ -706,6 +910,8 @@ mod tests {
                     views: vec![[0, 0, 100], [5, 5, 100]],
                     rgb: [0, 255, 0],
                     texture: None,
+                    outline: None,
+                    flame: None,
                     sprite: None,
                     path: false,
                 },
@@ -722,9 +928,10 @@ mod tests {
             eclipses: vec![],
             star: None,
             glowing: vec![],
+            burning: vec![],
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
-        let scene = scene(&world, 640, 316, &mut MapCache::default());
+        let scene = scene(&world, 640, 316, &mut MapCache::default(), 0.0);
         assert_eq!(scene.batches.len(), 1);
         assert_eq!(scene.batches[0].triangles.len(), 2);
         assert_eq!(scene.batches[0].lines.len(), 1);
@@ -769,6 +976,8 @@ mod tests {
                 ],
                 rgb: [255, 255, 255],
                 texture: None,
+                outline: None,
+                flame: None,
                 sprite: None,
                 path: false,
             }]],
@@ -778,6 +987,7 @@ mod tests {
             eclipses: vec![],
             star: None,
             glowing: vec![],
+            burning: vec![],
             snapshot: snapshot.clone(),
         };
         // The HUD drew one pixel at the square's centre after the world phase.
