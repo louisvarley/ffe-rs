@@ -569,6 +569,38 @@ fn a_stars_glow_takes_the_stars_own_colour() {
             "{}'s glow is not green: {glow:?}",
             star.name
         );
+        // The same colour from any side, off-centre, and too far away for the model to be
+        // drawn (from 200 radii the flat stand-in disc is drawn instead), lit as the game
+        // lights a star (no light vector: the star is at the light's origin).
+        let mut seen = Screen::new(&cache).unwrap();
+        seen.discs = screen.discs.clone();
+        seen.capture = true;
+        for distance in [3.0, 200.0, 5000.0] {
+            for k in 0..8 {
+                let a = f64::from(k) * std::f64::consts::TAU / 8.0;
+                let yaw = a + 0.15;
+                let mut view = state.clone();
+                view.axes = Some([
+                    [yaw.cos(), 0.0, yaw.sin()],
+                    [0.0, 1.0, 0.0],
+                    [-yaw.sin(), 0.0, yaw.cos()],
+                ]);
+                view.position = [
+                    centre[0] + a.sin() * distance * radius,
+                    centre[1],
+                    centre[2] - a.cos() * distance * radius,
+                ];
+                seen.discs[0].light = [0.0; 3];
+                seen.draw(&view, ViewState::default(), Some(&viewer), false, "");
+                let rgb = seen.world().and_then(|w| w.star.as_ref()).map(|s| s.rgb);
+                assert_eq!(
+                    rgb,
+                    Some(glow),
+                    "{} from {distance} radii at {k}/8 of a turn",
+                    star.name
+                );
+            }
+        }
         if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
             let (width, height) = (1280usize, 800usize);
             let rect = Rect {

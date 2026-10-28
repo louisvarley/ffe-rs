@@ -998,6 +998,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: a star's glow, glare and flare take the star's own colour from its drawn model (Gateway orange, Sol yellow) instead of the stand-in disc's green. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: a star's glow colour is worked out once per star from a fixed close render, so a far star (beyond the range its model is drawn) no longer glows green. Remaining count unchanged."
     }
   ]
 };

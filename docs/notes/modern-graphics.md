@@ -181,11 +181,14 @@ Status (2026-10-28): **implemented** (ENH-010, modest; enhanced-2).
   left alone; the star, lights and sunlit white glow softly.
 - A star in view gets a halo sprite eight times its radius across (at least 16 original pixels) in
   its colour, drawn before the star, so the star's disc or model lies over the halo's centre
-  (`tests/modern_planet.rs`, `a_star_glows_on_the_gpu`). The colour is the star's own, taken from
-  its drawn model (`Screen::tint_star`): its most saturated colour (an orange or red star's rim), or
-  for a white star its brightest; the disc colour the port gives every star (palette 17, green) is
-  only the flat stand-in's. Gateway's star (the new game's, Hope's sun) glows orange and Sol
-  yellow (`a_stars_glow_takes_the_stars_own_colour`). The glare and lens flare use it too.
+  (`tests/modern_planet.rs`, `a_star_glows_on_the_gpu`). The colour is the star's own, taken once per
+  star (model and seed) from its model drawn head-on four radii away (`Screen::star_colour`): its
+  most saturated colour (an orange or red star's rim), or for a white star its brightest, never a
+  green-led one; warm white if the model draws nothing. So it is the same from any side and at any
+  range, including beyond about 200 radii, where the model is not drawn and only the flat stand-in
+  disc is (palette 17, green; the first version took its colour there, so a far star glowed green).
+  Gateway's star (the new game's, Hope's sun) glows orange and Sol yellow, from eight sides at 3, 200
+  and 5000 radii (`a_stars_glow_takes_the_stars_own_colour`). The glare and lens flare use it too.
 
 ### The hyperspace tunnel and engine glows
 
