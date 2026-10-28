@@ -2623,9 +2623,10 @@ pub struct SpawnOptions {
     /// F688's, each starting near one place and flying to another to dock.
     /// They are allowed past [`MAX_SHIPS`].
     pub extra_traders: usize,
-    /// Port addition (World Options): police and pirates fly. Off spawns
-    /// neither F698's pirate groups nor the system's police.
-    pub hostiles: bool,
+    /// Port addition (World Options): the system's police fly.
+    pub police: bool,
+    /// Port addition (World Options): pirates fly, alone or in F698's groups.
+    pub pirates: bool,
 }
 
 impl Default for SpawnOptions {
@@ -2635,7 +2636,8 @@ impl Default for SpawnOptions {
             near_player: false,
             station_traffic: true,
             extra_traders: 0,
-            hostiles: true,
+            police: true,
+            pirates: true,
         }
     }
 }
@@ -2649,7 +2651,8 @@ impl SpawnOptions {
         near_player: true,
         station_traffic: false,
         extra_traders: 0,
-        hostiles: true,
+        police: true,
+        pirates: true,
     };
 }
 
@@ -2717,8 +2720,10 @@ pub fn spawn(
         counts.aux_traders = 0;
     }
     counts.police = counts.police.min(1);
-    if !options.hostiles {
+    if !options.police {
         counts.police = 0;
+    }
+    if !options.pirates {
         counts.pirates = 0;
     }
     let limit = MAX_SHIPS + options.extra_traders;
@@ -3575,12 +3580,24 @@ mod tests {
             .count();
         assert!(bound >= 16, "{bound}");
         let calm = run(SpawnOptions {
-            hostiles: false,
+            police: false,
+            pirates: false,
             ..SpawnOptions::default()
         });
         assert!(calm
             .iter()
             .all(|ship| !matches!(ship.role, Role::Pirate | Role::Police)));
+        let unpoliced = run(SpawnOptions {
+            police: false,
+            ..SpawnOptions::default()
+        });
+        assert!(unpoliced.iter().all(|ship| ship.role != Role::Police));
+        assert!(unpoliced.iter().any(|ship| ship.role == Role::Pirate));
+        let no_pirates = run(SpawnOptions {
+            pirates: false,
+            ..SpawnOptions::default()
+        });
+        assert!(no_pirates.iter().all(|ship| ship.role != Role::Pirate));
     }
 
     #[test]

@@ -178,7 +178,8 @@ pub enum Action {
     StarportApproach(usize),
     /// Port-only world choices: a [`TRAFFIC_LABELS`] index, and police/pirates.
     Traffic(usize),
-    Hostiles(bool),
+    Police(bool),
+    Pirates(bool),
     /// Port addition: the Improved combat aids on (`true`) or Classic.
     Combat(bool),
     /// Port-only display choices (window scale 1..=6).
@@ -283,8 +284,10 @@ pub struct Prefs {
     pub starport_approach: usize,
     /// Port addition: [`TRAFFIC_LABELS`] index; 0 (Original) by default.
     pub traffic: usize,
-    /// Port addition: police and pirates fly (the original's behaviour).
-    pub hostiles: bool,
+    /// Port addition: police fly (the original's behaviour).
+    pub police: bool,
+    /// Port addition: pirates fly (the original's behaviour).
+    pub pirates: bool,
     /// Port addition: the Improved combat aids ([`crate::enhanced_combat`]);
     /// `false` (Classic, the original's HUD) by default.
     pub combat_improved: bool,
@@ -312,7 +315,8 @@ impl Default for Prefs {
             station_approach: 0,
             starport_approach: 0,
             traffic: 0,
-            hostiles: true,
+            police: true,
+            pirates: true,
             combat_improved: false,
             display: DisplaySettings::default(),
             fullscreen: false,
@@ -651,16 +655,25 @@ impl Prefs {
                         176,
                         38 + 10 * index as i32,
                         label,
-                        Action::Hostiles(index == 0),
-                        Mark::Radio(self.hostiles == (index == 0)),
+                        Action::Police(index == 0),
+                        Mark::Radio(self.police == (index == 0)),
+                        true,
+                        15,
+                    ));
+                    rows.push(row(
+                        176,
+                        72 + 10 * index as i32,
+                        label,
+                        Action::Pirates(index == 0),
+                        Mark::Radio(self.pirates == (index == 0)),
                         true,
                         15,
                     ));
                 }
                 for (index, label) in ["Classic (original)", "Improved"].into_iter().enumerate() {
                     rows.push(row(
-                        176,
-                        72 + 10 * index as i32,
+                        32,
+                        92 + 10 * index as i32,
                         label,
                         Action::Combat(index == 1),
                         Mark::Radio(self.combat_improved == (index == 1)),
@@ -923,31 +936,25 @@ impl Prefs {
                 texts.push(Text {
                     x: 176,
                     y: 28,
-                    text: "Police and pirates:",
+                    text: "Police:",
                     colour: 16,
                 });
                 texts.push(Text {
                     x: 176,
                     y: 62,
+                    text: "Pirates:",
+                    colour: 16,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 82,
                     text: "Combat:",
                     colour: 16,
                 });
                 texts.push(Text {
                     x: 32,
-                    y: 96,
-                    text: "Medium and Heavy add ships that fly between",
-                    colour: 15,
-                });
-                texts.push(Text {
-                    x: 32,
-                    y: 104,
-                    text: "the planets and ports. New systems only.",
-                    colour: 15,
-                });
-                texts.push(Text {
-                    x: 32,
                     y: 114,
-                    text: "Improved: target brackets and contacts list.",
+                    text: "Traffic, police and pirates: from the next system.",
                     colour: 15,
                 });
                 texts.push(Text {
@@ -1088,8 +1095,12 @@ impl Prefs {
                 self.traffic = index;
                 Activate::None
             }
-            Action::Hostiles(on) => {
-                self.hostiles = on;
+            Action::Police(on) => {
+                self.police = on;
+                Activate::None
+            }
+            Action::Pirates(on) => {
+                self.pirates = on;
                 Activate::None
             }
             Action::Combat(improved) => {

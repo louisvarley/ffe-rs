@@ -47,7 +47,8 @@ pub struct Config {
     pub starport_approach: usize,
     /// Port addition: the World Options page's choices.
     pub traffic: usize,
-    pub hostiles: bool,
+    pub police: bool,
+    pub pirates: bool,
     pub combat_improved: bool,
     pub remap: BTreeMap<String, String>,
 }
@@ -66,7 +67,8 @@ impl Default for Config {
             station_approach: prefs.station_approach,
             starport_approach: prefs.starport_approach,
             traffic: prefs.traffic,
-            hostiles: prefs.hostiles,
+            police: prefs.police,
+            pirates: prefs.pirates,
             combat_improved: prefs.combat_improved,
             remap: BTreeMap::new(),
         }
@@ -97,7 +99,8 @@ impl Config {
         out.push_str(&format!("station_approach={}\n", self.station_approach));
         out.push_str(&format!("starport_approach={}\n", self.starport_approach));
         out.push_str(&format!("traffic={}\n", self.traffic));
-        out.push_str(&format!("police_pirates={}\n", on_off(self.hostiles)));
+        out.push_str(&format!("police={}\n", on_off(self.police)));
+        out.push_str(&format!("pirates={}\n", on_off(self.pirates)));
         out.push_str(&format!(
             "combat={}\n",
             if self.combat_improved {
@@ -168,7 +171,14 @@ impl Config {
                     }
                     config.traffic = parsed;
                 }
-                "police_pirates" => config.hostiles = parse_on_off(value)?,
+                "police" => config.police = parse_on_off(value)?,
+                "pirates" => config.pirates = parse_on_off(value)?,
+                // The earlier single choice sets both.
+                "police_pirates" => {
+                    let on = parse_on_off(value)?;
+                    config.police = on;
+                    config.pirates = on;
+                }
                 "combat" => {
                     config.combat_improved = match value {
                         "classic" => false,
@@ -403,20 +413,28 @@ mod tests {
     fn world_options_default_to_the_original_and_round_trip() {
         let config = Config::default();
         assert_eq!(
-            (config.traffic, config.hostiles, config.combat_improved),
-            (0, true, false)
+            (
+                config.traffic,
+                config.police,
+                config.pirates,
+                config.combat_improved
+            ),
+            (0, true, true, false)
         );
         let config = Config {
             traffic: 3,
-            hostiles: false,
+            police: false,
             combat_improved: true,
             ..Config::default()
         };
         let text = config.to_config();
-        assert!(text.contains("traffic=3\npolice_pirates=off\ncombat=improved\n"));
+        assert!(text.contains("traffic=3\npolice=off\npirates=on\ncombat=improved\n"));
         assert_eq!(Config::from_config(&text), Some(config));
         assert_eq!(Config::from_config("version=2\ntraffic=4\n"), None);
         assert_eq!(Config::from_config("version=2\ncombat=arcade\n"), None);
+        // The earlier single police-and-pirates choice sets both.
+        let old = Config::from_config("version=2\npolice_pirates=off\n").unwrap();
+        assert_eq!((old.police, old.pirates), (false, false));
     }
 
     #[test]

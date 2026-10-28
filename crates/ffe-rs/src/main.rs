@@ -375,7 +375,8 @@ fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Co
         station_approach: prefs.station_approach,
         starport_approach: prefs.starport_approach,
         traffic: prefs.traffic,
-        hostiles: prefs.hostiles,
+        police: prefs.police,
+        pirates: prefs.pirates,
         combat_improved: prefs.combat_improved,
         remap: previous.remap.clone(),
     }
@@ -1020,7 +1021,8 @@ fn run() -> Result<(), String> {
     prefs.station_approach = config.station_approach;
     prefs.starport_approach = config.starport_approach;
     prefs.traffic = config.traffic;
-    prefs.hostiles = config.hostiles;
+    prefs.police = config.police;
+    prefs.pirates = config.pirates;
     prefs.combat_improved = config.combat_improved;
     let mut stored_config = config;
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
@@ -1222,7 +1224,8 @@ fn run() -> Result<(), String> {
             &cache,
             ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic],
             prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF,
-            prefs.hostiles,
+            prefs.police,
+            prefs.pirates,
         );
     }
     if loaded.is_none() {
@@ -1462,7 +1465,8 @@ fn run() -> Result<(), String> {
                                 &cache,
                                 ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic],
                                 prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF,
-                                prefs.hostiles,
+                                prefs.police,
+                                prefs.pirates,
                             );
                         }
                         let new_nav = nav.as_ref().ok_or("New-game navigation is unavailable.")?;
@@ -1659,7 +1663,8 @@ fn run() -> Result<(), String> {
                 // World Options: read when the next system's traffic spawns.
                 nav.traffic_extra = ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic];
                 nav.traffic_off = prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF;
-                nav.hostiles = prefs.hostiles;
+                nav.police = prefs.police;
+                nav.pirates = prefs.pirates;
                 if nav.transit.is_some() {
                     // F908's mode 4: the clock runs at the hyperspace rate until
                     // the arrival time, which ends the transit (F1066/F1094).

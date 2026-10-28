@@ -1169,7 +1169,8 @@ pub struct Navigator {
     /// no traffic at all.
     pub traffic_extra: usize,
     pub traffic_off: bool,
-    pub hostiles: bool,
+    pub police: bool,
+    pub pirates: bool,
     autopilot_notice: Option<String>,
     /// The body the player has locked on (clicked in the view or cycled to): what the
     /// autopilot button flies to.
@@ -2053,7 +2054,8 @@ impl Navigator {
             starport_approach_km: None,
             traffic_extra: 0,
             traffic_off: false,
-            hostiles: true,
+            police: true,
+            pirates: true,
             autopilot_notice: None,
             locked: None,
             destination: None,
@@ -2253,15 +2255,17 @@ impl Navigator {
         cache: &VerifiedCache,
         extra: usize,
         off: bool,
-        hostiles: bool,
+        police: bool,
+        pirates: bool,
     ) {
         self.traffic_extra = extra;
         self.traffic_off = off;
-        self.hostiles = hostiles;
+        self.police = police;
+        self.pirates = pirates;
         let Some(seat) = self.new_game.as_ref().map(|state| state.seat) else {
             return;
         };
-        if extra == 0 && !off && hostiles {
+        if extra == 0 && !off && police && pirates {
             return;
         }
         let held: Vec<(usize, u8)> = self
@@ -3435,7 +3439,8 @@ impl Navigator {
     ) -> bool {
         let options = npc::SpawnOptions {
             extra_traders: self.traffic_extra,
-            hostiles: self.hostiles,
+            police: self.police,
+            pirates: self.pirates,
             ..npc::SpawnOptions::default()
         };
         self.spawn_traffic_with(cache, player, forward, options, 0)
@@ -3496,9 +3501,11 @@ impl Navigator {
         let mut rng = npc::Random::new(seed, clock[1] ^ 0x4567_89ab);
         let mut ships = npc::restore(&self.persisted, player, 0);
         self.persisted.clear();
-        if !options.hostiles {
-            ships.retain(|ship| !matches!(ship.role, npc::Role::Pirate | npc::Role::Police));
-        }
+        ships.retain(|ship| match ship.role {
+            npc::Role::Police => options.police,
+            npc::Role::Pirate => options.pirates,
+            _ => true,
+        });
         let base = ships.len() as u32;
         let spawned = if self.traffic_off {
             Vec::new()
