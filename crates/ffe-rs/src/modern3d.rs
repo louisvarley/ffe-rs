@@ -54,10 +54,22 @@ pub struct World {
     /// How much of the star an object still sees past the planets (0..1), by batch, for the
     /// objects in a planet's shadow.
     pub eclipses: Vec<(usize, f32)>,
+    /// The star, when it is ahead, for its hot core, glare and lens flare.
+    pub star: Option<Star>,
     /// The textured faces' bitmaps (their original indices), each once.
     pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
     pub snapshot: Vec<u32>,
+}
+
+/// The system's star as the eye sees it: its view-space direction, its radius in the original's
+/// pixels, its colour, and how much of its disc the eye sees past the bodies (0..1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Star {
+    pub direction: [f32; 3],
+    pub radius: f32,
+    pub rgb: [u8; 3],
+    pub seen: f32,
 }
 
 /// The GPU, opened on first use. A machine without one keeps the classic picture: the game only
@@ -294,6 +306,70 @@ pub fn sunlight(place: [f64; 3], bodies: &[([f64; 3], f64)], star: ([f64; 3], f6
     seen as f32
 }
 
+/// The star's light seen through a lens, drawn over everything as a last batch of glows: a core
+/// four times brighter than white (which the bloom spreads and the last pass turns white), a wide
+/// faint glare, and four ghosts on the line from the star through the middle of the view, all
+/// dimmed by how much of the star a planet hides. Nothing when it is hidden or far off the view.
+fn flare(
+    star: &Star,
+    width: usize,
+    pixel: f32,
+    projection: &ffe_render::Projection,
+) -> ffe_render::Batch {
+    let mut batch = ffe_render::Batch::default();
+    let [x, y, z] = star.direction;
+    let seen = star.seen.clamp(0.0, 1.0);
+    if z <= 0.0 || seen < 0.02 {
+        return batch;
+    }
+    let screen = [x / z * projection.x_scale, y / z * projection.y_scale];
+    if screen[0].abs() > 1.6 || screen[1].abs() > 1.6 {
+        return batch;
+    }
+    let tint = star.rgb.map(|c| f32::from(c) / 255.0);
+    let at = |s: [f32; 2]| {
+        [
+            s[0] / projection.x_scale * 1.0e6,
+            s[1] / projection.y_scale * 1.0e6,
+            1.0e6,
+        ]
+    };
+    let disc = (star.radius * 2.0 * pixel).max(3.0);
+    let glow = |position, size: f32, colour: [f32; 3], halo: f32, halo_colour: [f32; 3]| {
+        ffe_render::Sprite {
+            position,
+            size,
+            colour: colour.map(|c| c * seen),
+            halo_size: halo,
+            halo: halo_colour.map(|c| c * seen),
+        }
+    };
+    let wide = width as f32;
+    batch.sprites.push(glow(
+        at(screen),
+        disc * 1.1,
+        tint.map(|c| 2.0 + 2.0 * c),
+        wide * 0.5,
+        tint.map(|c| c * 0.18),
+    ));
+    let ghosts = [
+        (0.4, 0.05, [1.0, 0.6, 0.3]),
+        (-0.3, 0.09, [0.3, 0.8, 0.7]),
+        (-0.7, 0.04, [0.7, 0.4, 1.0]),
+        (-1.1, 0.16, [0.5, 0.6, 1.0]),
+    ];
+    for (t, size, colour) in ghosts {
+        batch.sprites.push(glow(
+            at([screen[0] * t, screen[1] * t]),
+            0.0,
+            [0.0; 3],
+            wide * size,
+            colour.map(|c| c * 0.12),
+        ));
+    }
+    batch
+}
+
 /// The luminance of a colour (Rec. 601 weights), 0..255.
 fn luma([r, g, b]: [u8; 3]) -> f32 {
     0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)
@@ -457,7 +533,7 @@ pub fn scene(
             .collect();
         (uv.len() == solid.views.len()).then_some((map as u32, palette, uv))
     };
-    let batches = world
+    let mut batches: Vec<ffe_render::Batch> = world
         .batches
         .iter()
         .enumerate()
@@ -535,6 +611,14 @@ pub fn scene(
             batch
         })
         .collect();
+    let projection = ffe_render::Projection {
+        x_scale: 256.0 / 160.0,
+        y_scale: 256.0 / 79.0,
+        near: NEAR,
+    };
+    if let Some(star) = &world.star {
+        batches.push(flare(star, width, pixel, &projection));
+    }
     ffe_render::Scene {
         width: width as u32,
         height: height as u32,
@@ -544,11 +628,7 @@ pub fn scene(
             pixels: upscaled,
         }),
         // F1479: x lands at 160 + 256x/z of 320 columns, y at 79 - 256y/z of 158 rows.
-        projection: ffe_render::Projection {
-            x_scale: 256.0 / 160.0,
-            y_scale: 256.0 / 79.0,
-            near: NEAR,
-        },
+        projection,
         batches,
         maps,
         palettes,
@@ -615,6 +695,7 @@ mod tests {
             atmospheres: vec![],
             lights: vec![],
             eclipses: vec![],
+            star: None,
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
         let scene = scene(&world, 640, 316, &mut MapCache::default());
@@ -669,6 +750,7 @@ mod tests {
             atmospheres: vec![],
             lights: vec![],
             eclipses: vec![],
+            star: None,
             snapshot: snapshot.clone(),
         };
         // The HUD drew one pixel at the square's centre after the world phase.

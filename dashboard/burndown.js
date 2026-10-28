@@ -968,6 +968,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: planets eclipse stations and ships (umbra, penumbra, annular) in the GPU view. enhanced-3 still in progress (self-shadowing and clouds remain). Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: the GPU view in floating point (original colours exact, highlights brighter than white run to white), additive glows, and the star's white-hot core, glare and lens flare, dimmed when a planet covers it. enhanced-4 (HDR output) stays todo: this is HDR rendering, not HDR display. Remaining count unchanged."
     }
   ]
 };

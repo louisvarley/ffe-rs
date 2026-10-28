@@ -457,6 +457,8 @@ pub struct Screen {
     object_scale: f64,
     /// Drawing the bodies themselves (they cast the eclipses, and are not shaded by them).
     in_discs: bool,
+    /// The star in view this frame, for the modern engine's glare and flare.
+    star: Option<crate::modern3d::Star>,
     /// Their textures' bitmaps so far this frame, each once.
     bitmaps: Vec<crate::modern3d::WorldBitmap>,
     /// The bitmaps read so far, so they are not read again every frame.
@@ -1000,6 +1002,7 @@ impl Screen {
             casters: Vec::new(),
             object_scale: 1.0,
             in_discs: false,
+            star: None,
             bitmaps: Vec::new(),
             bitmap_memory: Vec::new(),
             deferred: Vec::new(),
@@ -1431,6 +1434,19 @@ impl Screen {
                         halo: Some((across, rgb)),
                     }),
                 }]);
+                // How much of it the eye sees past the bodies, for the glare and the flare.
+                let bodies: Vec<([f64; 3], f64)> = self
+                    .casters
+                    .iter()
+                    .filter(|caster| !caster.2)
+                    .map(|caster| (caster.0, caster.1))
+                    .collect();
+                self.star = Some(crate::modern3d::Star {
+                    direction: ahead.map(|c| (c / length) as f32),
+                    radius: (disc.radius * 256.0 / ahead[2]) as f32,
+                    rgb,
+                    seen: crate::modern3d::sunlight([0.0; 3], &bodies, (ahead, disc.radius)),
+                });
             }
             // The real surface when the model fits the view space at this range.
             if let (Some((model, seed)), Some(viewer)) = (disc.model, viewer) {
@@ -2247,6 +2263,7 @@ impl Screen {
         self.atmospheres.clear();
         self.lights.clear();
         self.eclipses.clear();
+        self.star = None;
         self.bitmaps.clear();
         self.deferred.clear();
         self.world = None;
@@ -2386,6 +2403,7 @@ impl Screen {
                     atmospheres: std::mem::take(&mut self.atmospheres),
                     lights: std::mem::take(&mut self.lights),
                     eclipses: std::mem::take(&mut self.eclipses),
+                    star: self.star.take(),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2570,6 +2588,7 @@ impl Screen {
                     atmospheres: std::mem::take(&mut self.atmospheres),
                     lights: std::mem::take(&mut self.lights),
                     eclipses: std::mem::take(&mut self.eclipses),
+                    star: self.star.take(),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });

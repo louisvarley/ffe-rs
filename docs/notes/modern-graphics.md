@@ -255,6 +255,21 @@ The object's colours then keep `0.3 + 0.7 * seen` of their light. A station on a
 goes dark as it turns into the shadow (`tests/modern_planet.rs`,
 `a_station_in_a_planets_shadow_is_eclipsed`).
 
+### Brighter than white: HDR, glare and lens flare
+
+Status (2026-10-28): **implemented**.
+
+- The 3-D view and the bloom's buffers are now 16-bit floating point, so a light can be brighter than
+  white. The last pass adds the bloom and brings the picture back to the screen's range: a colour up
+  to white is shown exactly as it is (the original's colours do not change), and a colour brighter
+  than white runs towards white by how far over it is, so a star's core is white whatever its tint.
+- Glows (lights, stars, the star's halo) now add their light to what lies behind them.
+- The star in view (`modern3d::Star`: its direction, apparent radius and colour, and how much of it
+  the eye sees past the bodies, `sunlight` from the eye) gets, over everything, a core four times
+  brighter than white (the bloom spreads it), a wide faint glare and four lens-flare ghosts on the
+  line from the star through the middle of the view, all dimmed as a planet covers it and gone when
+  it is hidden.
+
 Not yet on the GPU (still the original's pixels behind the models): particle chains (F1814: debris
 and exhaust specks), and the HUD and its gunsight.
 

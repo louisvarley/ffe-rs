@@ -113,7 +113,8 @@ pub struct Batch {
 }
 
 /// A point of light at `position` (view space): a soft round core `size` pixels across in
-/// `colour`, and optionally a fainter halo `halo_size` pixels across round it.
+/// `colour`, and optionally a fainter halo `halo_size` pixels across round it. Its light is added
+/// to what lies behind it, and may be brighter than white (1).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Sprite {
     pub position: [f32; 3],
@@ -204,6 +205,9 @@ const SAMPLES: u32 = 4;
 const LAYERS: usize = 4095;
 /// BGRA, so a texel's bytes are the little-endian `0xAARRGGBB` word callers use.
 const COLOUR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+/// The 3-D view and the bloom are drawn in floating point, so the star and lights can be
+/// brighter than white; the last pass brings them back to [`COLOUR_FORMAT`].
+const SCENE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// The bloom's passes: bright parts at half size, a separable blur, and the sum.
@@ -258,12 +262,16 @@ fn fs_blur(i: FullOut) -> @location(0) vec4<f32> {
     return vec4<f32>(sum, 1.0);
 }
 
-// The picture plus the blurred glow times params.w.
+// The picture plus the blurred glow times params.w, brought back to the screen's range: colours
+// up to white stay exactly as they are, and a colour brighter than white runs towards white by
+// how far over it is (a star's hot core is white whatever its tint).
 @fragment
 fn fs_combine(i: FullOut) -> @location(0) vec4<f32> {
     let base = textureSample(source, filtered, i.uv).rgb;
     let glow = textureSample(extra, filtered, i.uv).rgb;
-    return vec4<f32>(min(base + glow * post.params.w, vec3<f32>(1.0)), 1.0);
+    let c = base + glow * post.params.w;
+    let over = max(max(c.r, max(c.g, c.b)) - 1.0, 0.0);
+    return vec4<f32>(min(c + vec3<f32>(over * 0.6), vec3<f32>(1.0)), 1.0);
 }
 "#;
 
@@ -724,7 +732,7 @@ impl Renderer {
             ..Default::default()
         };
         let target = [Some(wgpu::ColorTargetState {
-            format: COLOUR_FORMAT,
+            format: SCENE_FORMAT,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             write_mask: wgpu::ColorWrites::ALL,
         })];
@@ -834,6 +842,19 @@ impl Renderer {
                 4 => Float32x3
             ],
         };
+        // Glows add their light to what lies behind them.
+        let additive = [Some(wgpu::ColorTargetState {
+            format: SCENE_FORMAT,
+            blend: Some(wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::SrcAlpha,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent::OVER,
+            }),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
         let sprites = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("sprites"),
             layout: Some(&pipeline_layout),
@@ -851,7 +872,7 @@ impl Renderer {
                 module: &module,
                 entry_point: Some("fs_sprite"),
                 compilation_options: Default::default(),
-                targets: &target,
+                targets: &additive,
             }),
             multiview_mask: None,
             cache: None,
@@ -925,7 +946,7 @@ impl Renderer {
             bind_group_layouts: &[Some(&post_layout)],
             ..Default::default()
         });
-        let post_pipeline = |entry: &str| {
+        let post_pipeline = |entry: &str, format: wgpu::TextureFormat| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(entry),
                 layout: Some(&post_pipeline_layout),
@@ -943,7 +964,7 @@ impl Renderer {
                     entry_point: Some(entry),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: COLOUR_FORMAT,
+                        format,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -953,9 +974,9 @@ impl Renderer {
             })
         };
         let (bright, blur, combine) = (
-            post_pipeline("fs_bright"),
-            post_pipeline("fs_blur"),
-            post_pipeline("fs_combine"),
+            post_pipeline("fs_bright", SCENE_FORMAT),
+            post_pipeline("fs_blur", SCENE_FORMAT),
+            post_pipeline("fs_combine", COLOUR_FORMAT),
         );
         Ok(Self {
             post_layout,
@@ -1005,13 +1026,13 @@ impl Renderer {
                 height,
                 colour: texture(
                     SAMPLES,
-                    COLOUR_FORMAT,
+                    SCENE_FORMAT,
                     wgpu::TextureUsages::RENDER_ATTACHMENT,
                     "colour",
                 ),
                 resolved: texture(
                     1,
-                    COLOUR_FORMAT,
+                    SCENE_FORMAT,
                     wgpu::TextureUsages::RENDER_ATTACHMENT
                         | wgpu::TextureUsages::COPY_SRC
                         | wgpu::TextureUsages::TEXTURE_BINDING,
@@ -1028,7 +1049,7 @@ impl Renderer {
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
-                        format: COLOUR_FORMAT,
+                        format: SCENE_FORMAT,
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                             | wgpu::TextureUsages::TEXTURE_BINDING,
                         view_formats: &[],
@@ -1301,12 +1322,8 @@ impl Renderer {
                 pass.draw(0..3, atmospheres.clone());
             }
         }
-        let shown = if scene.bloom > 0.0 {
-            self.bloom(&mut encoder, targets, scene.bloom);
-            &targets.bloomed
-        } else {
-            &targets.resolved
-        };
+        self.bloom(&mut encoder, targets, scene.bloom.max(0.0));
+        let shown = &targets.bloomed;
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: shown,
@@ -1361,8 +1378,9 @@ impl Renderer {
 }
 
 impl Renderer {
-    /// The bloom: the resolved picture's bright parts at half size, blurred twice (the second
-    /// time twice as wide), then added to it in `bloomed`.
+    /// The bloom and the last pass: the resolved picture's bright parts at half size, blurred
+    /// twice (the second time twice as wide), then added to it and brought back to the screen's
+    /// range in `bloomed`.
     fn bloom(&self, encoder: &mut wgpu::CommandEncoder, targets: &Targets, strength: f32) {
         let device = &self.device;
         let view = |texture: &wgpu::Texture| texture.create_view(&Default::default());
@@ -1434,31 +1452,34 @@ impl Renderer {
             pass.draw(0..3, 0..1);
         };
         let uniforms = |params: [f32; 4], texel: [f32; 4]| PostUniforms { params, texel };
-        pass(
-            encoder,
-            &self.bright,
-            &glow[0],
-            &resolved,
-            &resolved,
-            uniforms([0.0, 0.0, BLOOM_THRESHOLD, 0.0], full),
-        );
-        for spread in [1.0, 2.0] {
+        // Without bloom only the last pass runs (the glow is multiplied by nothing).
+        if strength > 0.0 {
             pass(
                 encoder,
-                &self.blur,
-                &glow[1],
+                &self.bright,
                 &glow[0],
-                &glow[0],
-                uniforms([spread, 0.0, 0.0, 0.0], half),
+                &resolved,
+                &resolved,
+                uniforms([0.0, 0.0, BLOOM_THRESHOLD, 0.0], full),
             );
-            pass(
-                encoder,
-                &self.blur,
-                &glow[0],
-                &glow[1],
-                &glow[1],
-                uniforms([0.0, spread, 0.0, 0.0], half),
-            );
+            for spread in [1.0, 2.0] {
+                pass(
+                    encoder,
+                    &self.blur,
+                    &glow[1],
+                    &glow[0],
+                    &glow[0],
+                    uniforms([spread, 0.0, 0.0, 0.0], half),
+                );
+                pass(
+                    encoder,
+                    &self.blur,
+                    &glow[0],
+                    &glow[1],
+                    &glow[1],
+                    uniforms([0.0, spread, 0.0, 0.0], half),
+                );
+            }
         }
         pass(
             encoder,
@@ -1804,7 +1825,8 @@ mod tests {
             ..hazy
         };
         let pixels = renderer.render(&lit.clone()).unwrap();
-        assert_eq!(pixels[24 * 64 + 32], 0xffff00, "the near light");
+        // Yellow light added to the blue face behind it.
+        assert_eq!(pixels[24 * 64 + 32], 0xffffff, "the near light");
         // A five-pixel line across the picture, one end behind the eye (cut at the near plane).
         let ruled = Scene {
             batches: vec![Batch {
