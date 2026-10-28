@@ -318,6 +318,33 @@ Status (2026-10-28): **implemented**.
 - The fire and the flames flicker by a presentation clock (`Scene::time`, the time since the GPU view
   first drew), never game time.
 
+### A generated sky
+
+Status (2026-10-28): **implemented** (ENH-014).
+
+In open space the GPU generates the sky behind everything (`ffe-render`'s `fs_sky`), for each
+pixel's direction turned into flight space by the camera (`modern3d::SkyView`: each flight axis in
+view space, set by the screen each frame):
+
+- **The galaxy's band**: a narrow strip along flight space's `y = 0` plane, where the original's
+  nebula model (0x13b, drawn unturned in flight space) lies, wavering a little, in a wider faint glow,
+  with dark dust lanes along it.
+- **Nebulae**: five octaves of three-dimensional value noise, thickest in the band, in blues,
+  purples and pinks.
+- **Stars**: three layers (many faint, fewer middling, a few bright that bloom), denser in the band,
+  each a sharp point about a pixel across at any resolution and its own colour from blue-white to
+  orange. One star at most per cell, kept clear of the cell's edges, so a pixel looks at one cell a
+  layer.
+- The base is the player's space colour (the Graphic Detail page). The hash is an integer one (PCG)
+  of the lattice point, so the noise stays exact far from the origin. One fixed seed for the whole
+  galaxy: the same sky every time, never the game's random numbers.
+- The frame behind the models is drawn over it with its space colour made transparent, so anything
+  the original draws in the sky (a distant planet's disc, dots) stays. The original's star points and
+  nebula model are left out in Modern. "Background stars" off leaves the generated stars out too, and
+  inside a planet's haze (where the original fills the sky with the haze colour and shows no stars)
+  there is no generated sky.
+- Cost: about 0.6 ms a frame at 1920x1440 on the RTX 3090.
+
 Not yet on the GPU (still the original's pixels behind the models): the HUD and its gunsight.
 
 ## What comes next

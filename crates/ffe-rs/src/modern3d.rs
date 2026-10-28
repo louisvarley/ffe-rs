@@ -66,11 +66,27 @@ pub struct World {
     pub glowing: Vec<usize>,
     /// The batches on fire (explosions): their coloured faces burn.
     pub burning: Vec<usize>,
+    /// The generated sky, in flight (open space; not inside a planet's haze).
+    pub sky: Option<SkyView>,
     /// The textured faces' bitmaps (their original indices), each once.
     pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
     pub snapshot: Vec<u32>,
 }
+
+/// The generated sky for one frame: each flight-space axis in view space (how the camera is
+/// turned), the space colour the original fills the sky with (shown through the frame, and the
+/// generated sky's base), and whether the stars are on (the "Background stars" option).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkyView {
+    pub rows: [[f32; 3]; 3],
+    pub key: u32,
+    pub stars: bool,
+}
+
+/// The sky's seed: one sky for the whole galaxy, the same every time (not the game's random
+/// numbers).
+const SKY_SEED: f32 = 17.0;
 
 /// The system's star as the eye sees it: its view-space direction, its radius in the original's
 /// pixels, its colour, and how much of its disc the eye sees past the bodies (0..1).
@@ -836,6 +852,12 @@ pub fn scene(
         palettes,
         bloom: BLOOM,
         time,
+        sky: world.sky.as_ref().map(|sky| ffe_render::Sky {
+            rows: sky.rows,
+            key: sky.key,
+            stars: sky.stars,
+            seed: SKY_SEED,
+        }),
         supersample: SUPERSAMPLE,
     }
 }
@@ -929,6 +951,7 @@ mod tests {
             star: None,
             glowing: vec![],
             burning: vec![],
+            sky: None,
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
         let scene = scene(&world, 640, 316, &mut MapCache::default(), 0.0);
@@ -988,6 +1011,7 @@ mod tests {
             star: None,
             glowing: vec![],
             burning: vec![],
+            sky: None,
             snapshot: snapshot.clone(),
         };
         // The HUD drew one pixel at the square's centre after the world phase.

@@ -988,6 +988,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: explosions burn with an animated fire material, engine glows are animated flames, and complex polygons (opcode 5) are filled on the GPU on their plane (ear clipping). Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: a generated sky (Milky Way band along the original nebula's plane, nebulae, dust lanes, three star layers) replaces the original star points and nebula model in open space. Remaining count unchanged."
     }
   ]
 };

@@ -46,6 +46,9 @@ fn the_planet_is_drawn_on_the_gpu_from_orbit_to_the_ground() {
     let earth = list.iter().find(|b| b.name == "Earth").unwrap();
     let radius = earth.radius as f64 / UNIT;
     let centre = earth.position.map(|v| v as f64 / UNIT);
+    // Without the background stars and nebula, which Modern generates instead of drawing, so
+    // the frames differ only by the planet.
+    screen.stars_visible = false;
     for (k, pitch) in [
         (3.0, 0.0),
         (1.5, -0.84),

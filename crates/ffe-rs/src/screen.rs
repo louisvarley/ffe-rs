@@ -467,6 +467,8 @@ pub struct Screen {
     on_fire: bool,
     /// The batches on fire, this frame.
     burning: Vec<usize>,
+    /// The generated sky for the modern engine, this frame.
+    sky_view: Option<crate::modern3d::SkyView>,
     /// Their textures' bitmaps so far this frame, each once.
     bitmaps: Vec<crate::modern3d::WorldBitmap>,
     /// The bitmaps read so far, so they are not read again every frame.
@@ -1015,6 +1017,7 @@ impl Screen {
             glowing: Vec::new(),
             on_fire: false,
             burning: Vec::new(),
+            sky_view: None,
             bitmaps: Vec::new(),
             bitmap_memory: Vec::new(),
             deferred: Vec::new(),
@@ -2283,6 +2286,7 @@ impl Screen {
         self.star = None;
         self.glowing.clear();
         self.burning.clear();
+        self.sky_view = None;
         self.bitmaps.clear();
         self.deferred.clear();
         self.world = None;
@@ -2425,6 +2429,7 @@ impl Screen {
                     star: self.star.take(),
                     glowing: std::mem::take(&mut self.glowing),
                     burning: std::mem::take(&mut self.burning),
+                    sky: self.sky_view.take(),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2434,6 +2439,22 @@ impl Screen {
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
             let camera = Camera::new(state, &views, stats.as_ref(), scale);
+            // For the modern engine's generated sky: how the camera is turned in flight space
+            // (each flight axis in view space) and the space colour it shows through. Not inside
+            // a planet's haze, where the original's sky is the haze colour and has no stars.
+            let open = self.lift.as_ref().is_none_or(|lift| lift.world);
+            if self.capture && open && self.surface_sky.is_none() {
+                let axis = |k: usize| {
+                    let mut unit = [0.0; 3];
+                    unit[k] = 1.0;
+                    camera.direction(unit).map(|c| c as f32)
+                };
+                self.sky_view = Some(crate::modern3d::SkyView {
+                    rows: [axis(0), axis(1), axis(2)],
+                    key: self.sky,
+                    stars: self.stars_visible,
+                });
+            }
             // For the modern engine's eclipses: the bodies where the camera sees them.
             self.object_scale = scale;
             self.casters = self
@@ -2456,7 +2477,8 @@ impl Screen {
             // nebula band renders; F1775's own 0x200 is a cached position this
             // renderer does not reproduce. The port's star points stay as well,
             // because the model's star field child is sparse here.
-            if world && self.stars_visible && self.surface_sky.is_none() {
+            if world && self.stars_visible && self.surface_sky.is_none() && self.sky_view.is_none()
+            {
                 if let Some(scene) = scene {
                     let rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
                         .map(|axis| camera.direction(axis));
@@ -2504,7 +2526,8 @@ impl Screen {
                     }
                 }
             }
-            if !stars.is_empty() {
+            // The generated sky has its own stars.
+            if !stars.is_empty() && self.sky_view.is_none() {
                 self.batches.push(stars);
             }
             if world {
@@ -2614,6 +2637,7 @@ impl Screen {
                     star: self.star.take(),
                     glowing: std::mem::take(&mut self.glowing),
                     burning: std::mem::take(&mut self.burning),
+                    sky: self.sky_view.take(),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });

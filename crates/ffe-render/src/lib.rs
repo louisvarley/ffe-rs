@@ -194,6 +194,19 @@ struct Shell {
     pad: f32,
 }
 
+/// A generated sky: a galaxy's band with nebulae and dust lanes, and stars, worked out for each
+/// pixel's direction. `rows` turn view space into the sky's space (row `k` is the sky's axis `k`
+/// in view space), whose plane `y = 0` is the galaxy's. `key` is the background image's sky
+/// colour (`0x00RRGGBB`), let through as transparent and used as the sky's own dark base. The same
+/// `seed` gives the same sky.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sky {
+    pub rows: [[f32; 3]; 3],
+    pub key: u32,
+    pub stars: bool,
+    pub seed: f32,
+}
+
 /// What to draw.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
@@ -208,6 +221,9 @@ pub struct Scene {
     pub bloom: f32,
     /// Seconds of presentation time, for animated fire (any running clock; not game time).
     pub time: f32,
+    /// A generated sky behind everything; the background image then lets it through wherever
+    /// it shows the sky's key colour.
+    pub sky: Option<Sky>,
     /// How many times the picture's size the 3-D view is drawn at before it is filtered down
     /// (1 to 2; on top of the 4x multisampling). Sizes given in pixels are the picture's.
     pub supersample: f32,
@@ -235,6 +251,10 @@ struct Uniforms {
     scale: [f32; 4],
     /// The picture's width and height in pixels.
     viewport: [f32; 4],
+    /// The sky's three rows, then its base colour (rgb) and stars on (w).
+    sky: [[f32; 4]; 4],
+    /// The sky's seed (x).
+    sky_seed: [f32; 4],
 }
 
 const SAMPLES: u32 = 4;
@@ -329,7 +349,15 @@ struct PostUniforms {
 const BLOOM_THRESHOLD: f32 = 0.8;
 
 const SHADER: &str = r#"
-struct Uniforms { scale: vec4<f32>, viewport: vec4<f32> };
+struct Uniforms {
+    scale: vec4<f32>,
+    viewport: vec4<f32>,
+    sky_x: vec4<f32>,
+    sky_y: vec4<f32>,
+    sky_z: vec4<f32>,
+    sky_base: vec4<f32>,
+    sky_seed: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
 struct Out {
@@ -783,6 +811,120 @@ fn vs_back(@builtin(vertex_index) index: u32) -> BackOut {
 fn fs_back(i: BackOut) -> @location(0) vec4<f32> {
     return textureSample(back_texture, back_sampler, i.uv);
 }
+
+// Three-dimensional value noise and a few octaves of it, for the sky. The hash is an integer
+// one (PCG) of the lattice point, which stays exact at any distance from the origin.
+fn pcg(x: u32) -> u32 {
+    let v = x * 747796405u + 2891336453u;
+    let w = ((v >> ((v >> 28u) + 4u)) ^ v) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+fn hash_cell(p: vec3<f32>, salt: u32) -> f32 {
+    let i = vec3<i32>(floor(p));
+    let h = pcg(bitcast<u32>(i.x) ^ pcg(bitcast<u32>(i.y) ^ pcg(bitcast<u32>(i.z) ^ salt)));
+    return f32(h) / 4294967295.0;
+}
+fn hash3(p: vec3<f32>) -> f32 {
+    return hash_cell(p, 0u);
+}
+fn hash33(p: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(hash_cell(p, 1u), hash_cell(p, 2u), hash_cell(p, 3u));
+}
+fn noise3(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let w = f * f * (3.0 - 2.0 * f);
+    let a = mix(hash3(i), hash3(i + vec3<f32>(1.0, 0.0, 0.0)), w.x);
+    let b = mix(hash3(i + vec3<f32>(0.0, 1.0, 0.0)), hash3(i + vec3<f32>(1.0, 1.0, 0.0)), w.x);
+    let c = mix(hash3(i + vec3<f32>(0.0, 0.0, 1.0)), hash3(i + vec3<f32>(1.0, 0.0, 1.0)), w.x);
+    let d = mix(hash3(i + vec3<f32>(0.0, 1.0, 1.0)), hash3(i + vec3<f32>(1.0, 1.0, 1.0)), w.x);
+    return mix(mix(a, b, w.y), mix(c, d, w.y), w.z);
+}
+fn clouds(p: vec3<f32>) -> f32 {
+    var sum = 0.0;
+    var scale = 1.0;
+    var weight = 0.5;
+    for (var k = 0; k < 5; k = k + 1) {
+        sum = sum + noise3(p * scale) * weight;
+        scale = scale * 2.07;
+        weight = weight * 0.5;
+    }
+    return sum / 0.97;
+}
+
+// One layer of stars: one possible star in each cell of a grid of `cells` across, present by
+// `chance`, kept away from the cell's edges so only its own cell need be looked at; a sharp
+// point about `size` pixels across (`pixel`: one pixel in cell units), its colour from blue-white
+// to orange.
+fn star_layer(d: vec3<f32>, cells: f32, chance: f32, size: f32, pixel: f32, seed: f32) -> vec3<f32> {
+    let p = d * cells;
+    let cell = floor(p);
+    let h = hash33(cell + vec3<f32>(seed * 101.0));
+    if (h.x > chance) {
+        return vec3<f32>(0.0);
+    }
+    let centre = cell + vec3<f32>(0.5) + (hash33(cell + vec3<f32>(seed * 101.0 + 7.0)) - vec3<f32>(0.5)) * 0.6;
+    let along = p - centre;
+    // Off the sphere's surface does not count: only the part across the view direction.
+    let across = along - d * dot(along, d);
+    let r = length(across) / max(pixel * size, 1.0e-6);
+    let light = exp(-r * r * 2.0) * (0.35 + 0.65 * h.y * h.y);
+    let temperature = h.z;
+    var colour = vec3<f32>(1.0, 0.95, 0.9);
+    if (temperature < 0.2) {
+        colour = vec3<f32>(0.65, 0.75, 1.0);
+    } else if (temperature < 0.45) {
+        colour = vec3<f32>(0.85, 0.9, 1.0);
+    } else if (temperature > 0.9) {
+        colour = vec3<f32>(1.0, 0.65, 0.4);
+    } else if (temperature > 0.75) {
+        colour = vec3<f32>(1.0, 0.85, 0.6);
+    }
+    return colour * light;
+}
+
+// The sky in a direction (unit, the sky's space: y = 0 is the galaxy's plane).
+fn sky_colour(d: vec3<f32>, pixel: f32) -> vec3<f32> {
+    let seed = u.sky_seed.x;
+    let base = u.sky_base.rgb;
+    // The galaxy's band: a narrow strip along its plane (as the original's nebula band), wavering
+    // a little, in a wider faint glow.
+    let waver = (noise3(d * 3.0 + vec3<f32>(seed)) - 0.5) * 0.06;
+    let latitude = d.y + waver;
+    let band = exp(-latitude * latitude * 500.0);
+    let glow = exp(-latitude * latitude * 60.0);
+    // Nebulae: clouds thickest in the band, in blues, purples and pinks, with dark dust lanes
+    // along the plane.
+    let cloud = clouds(d * 9.0 + vec3<f32>(seed * 1.3));
+    let tint = clouds(d * 3.0 + vec3<f32>(seed * 2.1, 3.0, 9.0));
+    let gas = smoothstep(0.4, 0.85, cloud) * (0.08 + 0.92 * glow);
+    let blue = vec3<f32>(0.18, 0.28, 0.75);
+    let purple = vec3<f32>(0.45, 0.2, 0.7);
+    let pink = vec3<f32>(0.85, 0.35, 0.6);
+    var nebula = mix(blue, purple, smoothstep(0.35, 0.6, tint));
+    nebula = mix(nebula, pink, smoothstep(0.6, 0.8, tint));
+    let dust = smoothstep(0.45, 0.7, clouds(d * 30.0 + vec3<f32>(seed * 0.7, 1.0, 2.0))) * band;
+    let milky = vec3<f32>(0.9, 0.85, 0.75) * band * (0.4 + cloud) * 0.35;
+    var colour = base + (nebula * gas * 0.55 + milky) * (1.0 - dust * 0.75);
+    if (u.sky_base.w > 0.5) {
+        // Stars: many faint, fewer middling, a few bright (which bloom), denser in the band.
+        let crowd = 0.25 + band * 0.75;
+        colour = colour + star_layer(d, 380.0, 0.32 * crowd, 1.1, pixel * 380.0, seed) * 0.55;
+        colour = colour + star_layer(d, 140.0, 0.22 * crowd + 0.04, 1.3, pixel * 140.0, seed + 31.0) * 0.9;
+        colour = colour + star_layer(d, 45.0, 0.12, 1.7, pixel * 45.0, seed + 77.0) * 2.2;
+    }
+    return colour;
+}
+
+@fragment
+fn fs_sky(i: BackOut) -> @location(0) vec4<f32> {
+    let ndc = vec2<f32>(i.uv.x * 2.0 - 1.0, 1.0 - i.uv.y * 2.0);
+    let view = normalize(vec3<f32>(ndc.x / u.scale.x, ndc.y / u.scale.y, 1.0));
+    let d = normalize(vec3<f32>(dot(u.sky_x.xyz, view), dot(u.sky_y.xyz, view), dot(u.sky_z.xyz, view)));
+    // One pixel's angle, for the stars' sharp points.
+    let pixel = 2.0 / (u.scale.x * u.viewport.x);
+    return vec4<f32>(sky_colour(d, pixel), 1.0);
+}
 "#;
 
 struct Targets {
@@ -808,6 +950,7 @@ pub struct Renderer {
     triangles: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     background: wgpu::RenderPipeline,
+    sky: wgpu::RenderPipeline,
     sprites: wgpu::RenderPipeline,
     flames: wgpu::RenderPipeline,
     shells: wgpu::RenderPipeline,
@@ -1008,6 +1151,27 @@ impl Renderer {
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_back"),
+                compilation_options: Default::default(),
+                targets: &target,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("sky"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_back"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: Some(depth(false, wgpu::CompareFunction::Always)),
+            multisample,
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_sky"),
                 compilation_options: Default::default(),
                 targets: &target,
             }),
@@ -1217,6 +1381,7 @@ impl Renderer {
             triangles,
             lines,
             background,
+            sky,
             sprites,
             flames,
             shells,
@@ -1337,6 +1502,25 @@ impl Renderer {
                 0.0,
             ],
             viewport: [inner.0 as f32, inner.1 as f32, scene.time % 1000.0, 0.0],
+            sky: match &scene.sky {
+                Some(sky) => {
+                    let row = |k: usize| [sky.rows[k][0], sky.rows[k][1], sky.rows[k][2], 0.0];
+                    let base = [
+                        (sky.key >> 16) & 0xff,
+                        (sky.key >> 8) & 0xff,
+                        sky.key & 0xff,
+                    ]
+                    .map(|c| c as f32 / 255.0);
+                    [
+                        row(0),
+                        row(1),
+                        row(2),
+                        [base[0], base[1], base[2], f32::from(u8::from(sky.stars))],
+                    ]
+                }
+                None => [[0.0; 4]; 4],
+            },
+            sky_seed: [scene.sky.map_or(0.0, |sky| sky.seed), 0.0, 0.0, 0.0],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("uniforms"),
@@ -1366,7 +1550,7 @@ impl Renderer {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &rgba(&back.pixels),
+            &rgba(&back.pixels, scene.sky.map(|sky| sky.key & 0xff_ffff)),
         );
         let back_view = back_texture.create_view(&Default::default());
         // The palettes one after another (one transparent palette when there are none).
@@ -1563,6 +1747,11 @@ impl Renderer {
             });
             pass.set_bind_group(0, &bind_group, &[]);
             if pass_index == 0 {
+                // The generated sky first, then the background over it (its sky colour clear).
+                if scene.sky.is_some() {
+                    pass.set_pipeline(&self.sky);
+                    pass.draw(0..3, 0..1);
+                }
                 pass.set_pipeline(&self.background);
                 pass.draw(0..3, 0..1);
                 continue;
@@ -1942,10 +2131,15 @@ fn shell(atmosphere: &Atmosphere) -> Option<Shell> {
     })
 }
 
-fn rgba(pixels: &[u32]) -> Vec<u8> {
+/// An image as BGRA bytes, opaque, except the `key` colour, which is transparent.
+fn rgba(pixels: &[u32], key: Option<u32>) -> Vec<u8> {
     pixels
         .iter()
-        .flat_map(|p| (p | 0xff00_0000).to_le_bytes())
+        .flat_map(|p| {
+            let rgb = p & 0xff_ffff;
+            let alpha = if Some(rgb) == key { 0 } else { 0xff00_0000 };
+            (rgb | alpha).to_le_bytes()
+        })
         .collect()
 }
 
@@ -1997,6 +2191,7 @@ mod tests {
             palettes: vec![],
             bloom: 0.0,
             time: 0.0,
+            sky: None,
             supersample: 1.0,
         };
         let pixels = renderer.render(&scene).unwrap();
@@ -2104,6 +2299,7 @@ mod tests {
             palettes: vec![],
             bloom: 0.0,
             time: 0.0,
+            sky: None,
             supersample: 1.0,
             ..textured
         };
@@ -2183,6 +2379,21 @@ mod tests {
             })
             .unwrap();
         assert!(warm(fire[30 * 64 + 32]), "a burning face");
+        // A generated sky shows through the background's sky colour: nebulae and stars change
+        // much of it, and none of it without the sky.
+        let starry = Scene {
+            batches: vec![],
+            sky: Some(Sky {
+                rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                key: 0x203040,
+                stars: true,
+                seed: 1.0,
+            }),
+            ..ruled.clone()
+        };
+        let sky = renderer.render(&starry).unwrap();
+        let changed = sky.iter().filter(|p| **p != 0x203040).count();
+        assert!(changed > 64 * 48 / 10, "the sky shows ({changed} pixels)");
         // Bloom: a white face glows onto the dark round it only when bloom is on.
         let bright = Scene {
             background: None,
