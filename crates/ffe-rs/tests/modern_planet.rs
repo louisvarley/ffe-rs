@@ -511,3 +511,87 @@ fn an_explosion_glows_on_the_gpu() {
         );
     }
 }
+
+/// The stars of Gateway (the new game's system, Hope's star) and Sol: the glow and glare take
+/// the star's own colour from its drawn model, not the flat stand-in disc's green.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
+fn a_stars_glow_takes_the_stars_own_colour() {
+    use ffe_rs::navigation::{Kind, Navigator};
+    let mut gpu = Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let gateway = Navigator::new_game(&cache, 0).unwrap().bodies;
+    let entries = galaxy(&cache).unwrap();
+    let sol = entries.iter().find(|e| e.name == "Sol").unwrap();
+    let sol = bodies(&cache, sol, [0x1000, 0]).unwrap();
+    let stars: Vec<_> = gateway
+        .iter()
+        .chain(sol.iter())
+        .filter(|b| b.kind == Kind::Star)
+        .cloned()
+        .collect();
+    assert!(!stars.is_empty());
+    for (n, star) in stars.iter().enumerate() {
+        let radius = star.radius as f64 / UNIT;
+        let centre = star.position.map(|v| v as f64 / UNIT);
+        let mut state = Flight {
+            mode: Mode::Flight,
+            ..Flight::default()
+        };
+        state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        state.position = [centre[0], centre[1], centre[2] - 20.0 * radius];
+        state.system_flight = true;
+        screen.discs = vec![Disc {
+            centre,
+            radius,
+            light: [0.0, 0.0, 1.0],
+            colours: (17, 17),
+            star: true,
+            model: Some((star.model, star.seed)),
+            orientation: star.orientation,
+        }];
+        screen.capture = true;
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+        let world = screen.world().cloned().expect("the flight view's world");
+        let glow = world.star.as_ref().expect("the star in view").rgb;
+        eprintln!("{} (model {:#x}): glow {glow:?}", star.name, star.model);
+        let [r, g, b] = glow.map(u32::from);
+        assert!(
+            g <= r.max(b) + 16,
+            "{}'s glow is not green: {glow:?}",
+            star.name
+        );
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let (width, height) = (1280usize, 800usize);
+            let rect = Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            };
+            let mut target = vec![0u32; width * height];
+            ffe_rs::modern::ModernRenderer::new().render(
+                screen.logical_pixels(),
+                &mut target,
+                width,
+                rect,
+            );
+            gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)
+                .unwrap();
+            write_png(
+                &std::path::Path::new(&dir).join(format!("modern-star-{n}.png")),
+                &target,
+                width,
+                height,
+            );
+        }
+    }
+}

@@ -459,6 +459,8 @@ pub struct Screen {
     in_discs: bool,
     /// The star in view this frame, for the modern engine's glare and flare.
     star: Option<crate::modern3d::Star>,
+    /// The batch of the star's glow, coloured once the star's model is drawn.
+    star_glow: Option<usize>,
     /// The next object drawn gives off light (a beam, an explosion, a hit's sparks).
     emissive: bool,
     /// The batches that give off light, this frame.
@@ -1013,6 +1015,7 @@ impl Screen {
             object_scale: 1.0,
             in_discs: false,
             star: None,
+            star_glow: None,
             emissive: false,
             glowing: Vec::new(),
             on_fire: false,
@@ -1442,6 +1445,9 @@ impl Screen {
                 let across = (disc.radius * 256.0 / ahead[2] * 8.0).clamp(16.0, 640.0) as i32;
                 let colour = self.palette[usize::from(disc.colours.0)];
                 let rgb = [(colour >> 16) as u8, (colour >> 8) as u8, colour as u8];
+                // The disc's colour is only the flat stand-in's; once the star's model is drawn,
+                // its own colours replace it (`tint_star`).
+                self.star_glow = Some(self.batches.len());
                 self.batches.push(vec![Solid {
                     views: vec![ahead.map(|c| (c / length * 1.0e6) as i32)],
                     rgb,
@@ -1503,6 +1509,9 @@ impl Screen {
                             .orientation
                             .map(|axis| camera.direction(axis).map(|v| v * shrunk));
                         if let Ok(frame) = viewer.render_scene(model, rows, position, light) {
+                            if disc.star {
+                                self.tint_star(&frame);
+                            }
                             self.draw_frame(viewer, &frame);
                             continue;
                         }
@@ -2284,6 +2293,7 @@ impl Screen {
         self.lights.clear();
         self.eclipses.clear();
         self.star = None;
+        self.star_glow = None;
         self.glowing.clear();
         self.burning.clear();
         self.sky_view = None;
@@ -2950,6 +2960,55 @@ impl Screen {
         }
         self.text(10, 146, status, 15);
         self.present();
+    }
+
+    /// The star's glow and glare take the star's own colour from its drawn model: its most
+    /// saturated colour (an orange or red star's rim), or for a white star its brightest.
+    fn tint_star(&mut self, frame: &Frame) {
+        let Some(at) = self.star_glow.take() else {
+            return;
+        };
+        let mut colours: Vec<[u8; 3]> = frame.solids.iter().flatten().map(|s| s.rgb).collect();
+        for shape in &frame.shapes {
+            match shape {
+                Shape::Fill(_, rgb)
+                | Shape::Flat(_, rgb)
+                | Shape::Polygon(_, rgb)
+                | Shape::Spans(_, rgb)
+                | Shape::Point(_, rgb) => colours.push(*rgb),
+                Shape::Gouraud(_, corners) => colours.extend(corners.iter().copied()),
+                _ => {}
+            }
+        }
+        let value = |c: &[u8; 3]| c.iter().map(|v| f32::from(*v)).fold(0.0, f32::max);
+        let saturation = |c: &[u8; 3]| {
+            let high = value(c);
+            let low = c.iter().map(|v| f32::from(*v)).fold(255.0, f32::min);
+            if high > 0.0 {
+                (high - low) / high
+            } else {
+                0.0
+            }
+        };
+        let vivid = colours
+            .iter()
+            .filter(|c| saturation(c) > 0.25 && value(c) > 64.0)
+            .max_by(|a, b| (saturation(a) * value(a)).total_cmp(&(saturation(b) * value(b))));
+        let Some(rgb) =
+            vivid.or_else(|| colours.iter().max_by(|a, b| value(a).total_cmp(&value(b))))
+        else {
+            return;
+        };
+        let rgb = *rgb;
+        if let Some(glow) = self.batches.get_mut(at).and_then(|batch| batch.first_mut()) {
+            glow.rgb = rgb;
+            if let Some(sprite) = &mut glow.sprite {
+                sprite.halo = sprite.halo.map(|(size, _)| (size, rgb));
+            }
+        }
+        if let Some(star) = &mut self.star {
+            star.rgb = rgb;
+        }
     }
 
     /// The last flight view's set-aside faces, for the modern engine; `None` unless

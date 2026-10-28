@@ -993,6 +993,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: a generated sky (Milky Way band along the original nebula's plane, nebulae, dust lanes, three star layers) replaces the original star points and nebula model in open space. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: a star's glow, glare and flare take the star's own colour from its drawn model (Gateway orange, Sol yellow) instead of the stand-in disc's green. Remaining count unchanged."
     }
   ]
 };
