@@ -1171,6 +1171,8 @@ pub struct Navigator {
     pub traffic_off: bool,
     pub police: bool,
     pub pirates: bool,
+    /// World Options' Advanced traffic ([`npc::Life`]).
+    pub advanced_traffic: bool,
     autopilot_notice: Option<String>,
     /// The body the player has locked on (clicked in the view or cycled to): what the
     /// autopilot button flies to.
@@ -2056,6 +2058,7 @@ impl Navigator {
             traffic_off: false,
             police: true,
             pirates: true,
+            advanced_traffic: false,
             autopilot_notice: None,
             locked: None,
             destination: None,
@@ -2257,15 +2260,17 @@ impl Navigator {
         off: bool,
         police: bool,
         pirates: bool,
+        advanced: bool,
     ) {
         self.traffic_extra = extra;
         self.traffic_off = off;
         self.police = police;
         self.pirates = pirates;
+        self.advanced_traffic = advanced;
         let Some(seat) = self.new_game.as_ref().map(|state| state.seat) else {
             return;
         };
-        if extra == 0 && !off && police && pirates {
+        if extra == 0 && !off && police && pirates && !advanced {
             return;
         }
         let held: Vec<(usize, u8)> = self
@@ -2553,6 +2558,16 @@ impl Navigator {
     /// variance sign and legality; 37 bytes.
     pub fn stock_flags(&self, cache: &VerifiedCache) -> Result<[u8; 37], String> {
         Ok(self.conditions(cache)?.2)
+    }
+
+    /// Advanced traffic's view of this system: F870's population and danger.
+    fn life(&self, cache: &VerifiedCache) -> npc::Life {
+        self.conditions(cache)
+            .map(|(population, danger, _)| npc::Life {
+                population: population.clamp(0, 9) as u32,
+                danger: danger.clamp(0, 7) as u32,
+            })
+            .unwrap_or_default()
     }
 
     /// What this system's stock string, population and danger say (F870).
@@ -3441,6 +3456,7 @@ impl Navigator {
             extra_traders: self.traffic_extra,
             police: self.police,
             pirates: self.pirates,
+            advanced: self.advanced_traffic.then(|| self.life(cache)),
             ..npc::SpawnOptions::default()
         };
         self.spawn_traffic_with(cache, player, forward, options, 0)
@@ -3525,7 +3541,7 @@ impl Navigator {
             ship.id += base;
             ships.push(ship);
         }
-        ships.truncate(npc::MAX_SHIPS + options.extra_traders);
+        ships.truncate(options.cap());
         // The ships being replaced may still hold bays in a traffic record. The
         // original's F651/F927 release the slot with the object; the port must
         // do the same when a spawn (a jump, or a scripted respawn) replaces the

@@ -2658,6 +2658,47 @@ pub struct SpawnOptions {
     pub police: bool,
     /// Port addition (World Options): pirates fly, alone or in F698's groups.
     pub pirates: bool,
+    /// Port addition (World Options' Advanced traffic): approach lanes,
+    /// convoys, hyperspace arrivals and the rest of [`Life`].
+    pub advanced: Option<Life>,
+}
+
+/// Port addition: the system's character for Advanced traffic, from F870's
+/// population (0..9) and danger (0..7) bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Life {
+    pub population: u32,
+    pub danger: u32,
+}
+
+impl Life {
+    /// Traders already queued on the approach to the nearest place: two, and
+    /// one more for every three population steps.
+    pub fn lane_traders(self) -> usize {
+        2 + (self.population / 3) as usize
+    }
+
+    /// Ships Advanced traffic may add beyond [`MAX_SHIPS`].
+    pub fn extra(self) -> usize {
+        self.lane_traders() + MAX_CONVOY_SHIPS
+    }
+}
+
+/// Port addition: the most ships one convoy (a bulk carrier and its escorts)
+/// adds.
+pub const MAX_CONVOY_SHIPS: usize = 3;
+/// Port addition: the approach lane's queue, from this far out from the
+/// place's surface...
+pub const LANE_NEAR: f64 = 6.0e6;
+/// ...to this far.
+pub const LANE_FAR: f64 = 20.0e6;
+
+impl SpawnOptions {
+    /// The most ships a spawn keeps: [`MAX_SHIPS`], the World Options'
+    /// extra traders and Advanced traffic, and the police patrols.
+    pub fn cap(&self) -> usize {
+        MAX_SHIPS + self.extra_traders + self.advanced.map_or(0, Life::extra) + MAX_POLICE_PATROLS
+    }
 }
 
 impl Default for SpawnOptions {
@@ -2669,6 +2710,7 @@ impl Default for SpawnOptions {
             extra_traders: 0,
             police: true,
             pirates: true,
+            advanced: None,
         }
     }
 }
@@ -2684,6 +2726,7 @@ impl SpawnOptions {
         extra_traders: 0,
         police: true,
         pirates: true,
+        advanced: None,
     };
 }
 
@@ -2757,7 +2800,7 @@ pub fn spawn(
     if !options.pirates {
         counts.pirates = 0;
     }
-    let limit = MAX_SHIPS + options.extra_traders;
+    let limit = MAX_SHIPS + options.extra_traders + options.advanced.map_or(0, Life::extra);
 
     let orbit = (anchor.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
     let mut ships: Vec<NpcShip> = Vec::new();
@@ -2865,6 +2908,26 @@ pub fn spawn(
                 ship.begin_transit(station, to.position);
             }
             ships.push(ship);
+        }
+    }
+    // Port addition (Advanced traffic): traders already queued on the
+    // approach to the nearest place, spread from LANE_NEAR to LANE_FAR off
+    // its surface, each flying in to ask for a bay.
+    if let (Some(life), Some(station)) = (options.advanced, anchor.station) {
+        let count = life.lane_traders();
+        for i in 0..count {
+            let along = LANE_NEAR + (LANE_FAR - LANE_NEAR) * (i as f64 + 0.5) / count as f64;
+            let radius = anchor.radius as f64 + along;
+            let angle = 0.9 + i as f64 * 0.35 + f64::from(rng.bounded(16_384)) / 16_384.0 * 0.2;
+            let position = [
+                anchor.position[0] + (angle.cos() * radius) as i64,
+                anchor.position[1] + (f64::from(rng.bounded(1_000_000)) * 1.5) as i64,
+                anchor.position[2] + (angle.sin() * radius) as i64,
+            ];
+            if let Some(mut ship) = add(Role::Trader, 1, position, anchor.position, rng) {
+                ship.begin_transit(station, anchor.position);
+                ships.push(ship);
+            }
         }
     }
     // F690: F689's setup with type 0x11 (DATA_006197's models). The source uses

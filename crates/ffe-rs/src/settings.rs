@@ -49,6 +49,7 @@ pub struct Config {
     pub traffic: usize,
     pub police: bool,
     pub pirates: bool,
+    pub advanced_traffic: bool,
     pub combat_improved: bool,
     pub remap: BTreeMap<String, String>,
 }
@@ -69,6 +70,7 @@ impl Default for Config {
             traffic: prefs.traffic,
             police: prefs.police,
             pirates: prefs.pirates,
+            advanced_traffic: prefs.advanced_traffic,
             combat_improved: prefs.combat_improved,
             remap: BTreeMap::new(),
         }
@@ -101,6 +103,10 @@ impl Config {
         out.push_str(&format!("traffic={}\n", self.traffic));
         out.push_str(&format!("police={}\n", on_off(self.police)));
         out.push_str(&format!("pirates={}\n", on_off(self.pirates)));
+        out.push_str(&format!(
+            "advanced_traffic={}\n",
+            on_off(self.advanced_traffic)
+        ));
         out.push_str(&format!(
             "combat={}\n",
             if self.combat_improved {
@@ -173,6 +179,7 @@ impl Config {
                 }
                 "police" => config.police = parse_on_off(value)?,
                 "pirates" => config.pirates = parse_on_off(value)?,
+                "advanced_traffic" => config.advanced_traffic = parse_on_off(value)?,
                 // The earlier single choice sets both.
                 "police_pirates" => {
                     let on = parse_on_off(value)?;
@@ -428,7 +435,9 @@ mod tests {
             ..Config::default()
         };
         let text = config.to_config();
-        assert!(text.contains("traffic=3\npolice=off\npirates=on\ncombat=improved\n"));
+        assert!(text.contains(
+            "traffic=3\npolice=off\npirates=on\nadvanced_traffic=off\ncombat=improved\n"
+        ));
         assert_eq!(Config::from_config(&text), Some(config));
         assert_eq!(Config::from_config("version=2\ntraffic=4\n"), None);
         assert_eq!(Config::from_config("version=2\ncombat=arcade\n"), None);

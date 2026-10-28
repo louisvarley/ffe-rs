@@ -180,6 +180,8 @@ pub enum Action {
     Traffic(usize),
     Police(bool),
     Pirates(bool),
+    /// Port addition: World Options' Advanced traffic on or off.
+    AdvancedTraffic(bool),
     /// Port addition: the Improved combat aids on (`true`) or Classic.
     Combat(bool),
     /// Port-only display choices (window scale 1..=6).
@@ -288,6 +290,10 @@ pub struct Prefs {
     pub police: bool,
     /// Port addition: pirates fly (the original's behaviour).
     pub pirates: bool,
+    /// Port addition: Advanced traffic ([`ffe_core::npc::Life`]): approach
+    /// lanes, convoys, hyperspace arrivals, NPC fights and busier rich
+    /// systems. Off (the original) by default.
+    pub advanced_traffic: bool,
     /// Port addition: the Improved combat aids ([`crate::enhanced_combat`]);
     /// `false` (Classic, the original's HUD) by default.
     pub combat_improved: bool,
@@ -317,6 +323,7 @@ impl Default for Prefs {
             traffic: 0,
             police: true,
             pirates: true,
+            advanced_traffic: false,
             combat_improved: false,
             display: DisplaySettings::default(),
             fullscreen: false,
@@ -670,6 +677,17 @@ impl Prefs {
                         15,
                     ));
                 }
+                for (index, label) in ["Off (original)", "On"].into_iter().enumerate() {
+                    rows.push(row(
+                        176,
+                        106 + 10 * index as i32,
+                        label,
+                        Action::AdvancedTraffic(index == 1),
+                        Mark::Radio(self.advanced_traffic == (index == 1)),
+                        true,
+                        15,
+                    ));
+                }
                 for (index, label) in ["Classic (original)", "Improved"].into_iter().enumerate() {
                     rows.push(row(
                         32,
@@ -952,10 +970,10 @@ impl Prefs {
                     colour: 16,
                 });
                 texts.push(Text {
-                    x: 32,
-                    y: 114,
-                    text: "Traffic, police and pirates: from the next system.",
-                    colour: 15,
+                    x: 176,
+                    y: 96,
+                    text: "Advanced traffic:",
+                    colour: 16,
                 });
                 texts.push(Text {
                     x: 32,
@@ -1101,6 +1119,10 @@ impl Prefs {
             }
             Action::Pirates(on) => {
                 self.pirates = on;
+                Activate::None
+            }
+            Action::AdvancedTraffic(on) => {
+                self.advanced_traffic = on;
                 Activate::None
             }
             Action::Combat(improved) => {

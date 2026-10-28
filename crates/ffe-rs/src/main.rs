@@ -377,6 +377,7 @@ fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Co
         traffic: prefs.traffic,
         police: prefs.police,
         pirates: prefs.pirates,
+        advanced_traffic: prefs.advanced_traffic,
         combat_improved: prefs.combat_improved,
         remap: previous.remap.clone(),
     }
@@ -1023,6 +1024,7 @@ fn run() -> Result<(), String> {
     prefs.traffic = config.traffic;
     prefs.police = config.police;
     prefs.pirates = config.pirates;
+    prefs.advanced_traffic = config.advanced_traffic;
     prefs.combat_improved = config.combat_improved;
     let mut stored_config = config;
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
@@ -1226,6 +1228,7 @@ fn run() -> Result<(), String> {
             prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF,
             prefs.police,
             prefs.pirates,
+            prefs.advanced_traffic,
         );
     }
     if loaded.is_none() {
@@ -1467,6 +1470,7 @@ fn run() -> Result<(), String> {
                                 prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF,
                                 prefs.police,
                                 prefs.pirates,
+                                prefs.advanced_traffic,
                             );
                         }
                         let new_nav = nav.as_ref().ok_or("New-game navigation is unavailable.")?;
@@ -1665,6 +1669,7 @@ fn run() -> Result<(), String> {
                 nav.traffic_off = prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF;
                 nav.police = prefs.police;
                 nav.pirates = prefs.pirates;
+                nav.advanced_traffic = prefs.advanced_traffic;
                 if nav.transit.is_some() {
                     // F908's mode 4: the clock runs at the hyperspace rate until
                     // the arrival time, which ends the transit (F1066/F1094).
