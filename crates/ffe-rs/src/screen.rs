@@ -496,6 +496,9 @@ pub struct Screen {
     /// frame's scene. The original clears the next upper view to it and leaves
     /// the stars out while it is set; `None` uses [`Screen::sky`].
     surface_sky: Option<u32>,
+    /// The glyphs drawn since the presenter last took them, for the modern
+    /// engine's replacement font ([`crate::modern::TextLayer`]).
+    text_layer: crate::modern::TextLayer,
     /// The original's "Background stars" option; off leaves the sky empty.
     pub stars_visible: bool,
     /// The original's "Lock external view to ship" option (camera offset axis).
@@ -1079,6 +1082,7 @@ impl Screen {
             sky: prefs::space_colour_rgb(4),
             surface_detail: 1,
             surface_sky: None,
+            text_layer: Default::default(),
             stars_visible: true,
             lock_external: true,
             capture: false,
@@ -1865,13 +1869,34 @@ impl Screen {
                 break;
             }
             if let Some(glyph) = self.font.glyph(code) {
+                let value = self.palette[usize::from(colour)];
+                if self.text_layer.glyphs.len() >= crate::modern::TextLayer::LIMIT {
+                    self.text_layer = Default::default();
+                }
+                let first = self.text_layer.pixels.len();
                 for (col, row) in glyph.pixels() {
                     let px = cursor + col as i32;
                     let py = y + row as i32;
                     if (0..320).contains(&px) && (top..bottom).contains(&py) && py < 200 {
-                        self.frame[py as usize * 320 + px as usize] =
-                            self.palette[usize::from(colour)];
+                        let at = py as usize * 320 + px as usize;
+                        self.text_layer
+                            .pixels
+                            .push((at as u32, self.frame[at], value));
+                        self.frame[at] = value;
                     }
+                }
+                let last = self.text_layer.pixels.len();
+                if last > first {
+                    self.text_layer.glyphs.push(crate::modern::TextGlyph {
+                        code,
+                        x: cursor,
+                        y,
+                        advance: glyph.advance as u8,
+                        colour: value,
+                        top,
+                        bottom: bottom.min(200),
+                        pixels: first..last,
+                    });
                 }
                 cursor += glyph.advance as i32;
             }
@@ -1892,6 +1917,19 @@ impl Screen {
 
     pub fn logical_pixels(&self) -> &[u32] {
         &self.frame
+    }
+
+    /// The glyphs drawn since the last call, for the modern engine's replacement font.
+    pub fn take_text(&mut self) -> crate::modern::TextLayer {
+        std::mem::take(&mut self.text_layer)
+    }
+
+    /// The main font's advances by code from 32, for fitting a real font to it.
+    pub fn font_advances(&self) -> Vec<u8> {
+        (32..=u8::MAX)
+            .map_while(|code| self.font.advance(code))
+            .map(|advance| advance as u8)
+            .collect()
     }
 
     /// The six cabin backdrops (320x158 RGB each), in F955's order.

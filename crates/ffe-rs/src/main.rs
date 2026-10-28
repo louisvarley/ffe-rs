@@ -617,9 +617,10 @@ fn write_display_capture(
         display::compose(&logical, &settings, width, height, &mut target);
         write_png(&dir.join(name), &target, width, height)?;
     }
-    // A docked frame through Modern with any replacement cabins in `img-export`.
+    // A docked frame through Modern with any replacement cabins and font in `img-export`.
     let mut docked = Flight::free_flight();
     docked.mode = ffe_rs::flight::Mode::Docked;
+    screen.take_text();
     screen.draw(&docked, ViewState::default(), scene.as_ref(), true, "");
     let mut modern = ffe_rs::modern::ModernRenderer::new();
     for line in modern.load_cabins(
@@ -628,6 +629,14 @@ fn write_display_capture(
     ) {
         eprintln!("{line}");
     }
+    if let Some(line) = modern.load_font(&root.join("img-export/images/font/main.png")) {
+        eprintln!("{line}");
+    }
+    eprintln!(
+        "{}",
+        modern.load_true_font(&root.join("img-export"), &screen.font_advances())
+    );
+    modern.set_text(screen.take_text());
     let (width, height) = (1920, 1080);
     target.clear();
     target.resize(width * height, 0);
@@ -636,12 +645,9 @@ fn write_display_capture(
         fit: ffe_rs::display::FitMode::FillWindow,
         ..default
     };
-    modern.render(
-        screen.logical_pixels(),
-        &mut target,
-        width,
-        settings.rect((width, height)),
-    );
+    let rect = settings.rect((width, height));
+    modern.render(screen.logical_pixels(), &mut target, width, rect);
+    modern.finish(&mut target, width, rect);
     write_png(
         &dir.join("display-modern-docked-1080p.png"),
         &target,
@@ -654,7 +660,20 @@ fn write_display_capture(
         page: ffe_rs::prefs::DISPLAY,
         ..Default::default()
     };
+    screen.take_text();
     screen.draw_prefs(&shown);
+    // The same page through Modern, with the replacement font when there is one.
+    modern.set_text(screen.take_text());
+    target.clear();
+    target.resize(width * height, 0);
+    modern.render(screen.logical_pixels(), &mut target, width, rect);
+    modern.finish(&mut target, width, rect);
+    write_png(
+        &dir.join("display-modern-options-1080p.png"),
+        &target,
+        width,
+        height,
+    )?;
     display::compose(
         screen.logical_pixels(),
         &DisplaySettings {
@@ -752,6 +771,7 @@ fn run_intro(
             return Ok(IntroExit::Start(1));
         }
         screen.draw_intro(scene, tics, version)?;
+        presenter.modern_mut().set_text(screen.take_text());
         presenter.present(window, screen.logical_pixels(), None, display)?;
         let real = last.elapsed().as_secs_f64().min(0.1);
         last = Instant::now();
@@ -1033,13 +1053,27 @@ fn run() -> Result<(), String> {
     // The GPU view's upscaled model and planet textures: the owner's export, read again as the
     // files change.
     presenter.set_art_dir(options.root.join("img-export"));
-    // Modern graphics' replacement cabins: for now the owner's upscaled export.
+    // Modern graphics' replacement cabins and font: for now the owner's upscaled export,
+    // and a real font for the text.
     for line in presenter.modern_mut().load_cabins(
         &options.root.join("img-export/images/cockpit"),
         screen.cabin_pixels(),
     ) {
         eprintln!("{line}");
     }
+    if let Some(line) = presenter
+        .modern_mut()
+        .load_font(&options.root.join("img-export/images/font/main.png"))
+    {
+        eprintln!("{line}");
+    }
+    let advances = screen.font_advances();
+    eprintln!(
+        "{}",
+        presenter
+            .modern_mut()
+            .load_true_font(&options.root.join("img-export"), &advances)
+    );
     // `FFE_TRACE=1`: print the flight state ten times a second and every click's
     // logical point to stderr (for diagnosing a replayed recording).
     let trace_flight = std::env::var_os("FFE_TRACE").is_some();
@@ -1859,6 +1893,7 @@ fn run() -> Result<(), String> {
                     write_shot(dir, &format!("start-{frames:04}.ppm"), &screen);
                 }
             }
+            presenter.modern_mut().set_text(screen.take_text());
             presenter.present(&mut window, screen.logical_pixels(), None, &prefs.display)?;
             frames += 1;
             last = Instant::now();
@@ -7309,6 +7344,7 @@ fn run() -> Result<(), String> {
                 );
             }
         }
+        presenter.modern_mut().set_text(screen.take_text());
         presenter.present(
             &mut window,
             screen.logical_pixels(),

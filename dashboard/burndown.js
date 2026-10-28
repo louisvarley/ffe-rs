@@ -1013,6 +1013,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Space dust follows the time acceleration's shift (DATA_009123) as the original does, so it shows at 1000x; Modern draws warp-like speed dust streaks instead of the original's clouds. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: text in the main font is drawn with a real font (Bahnschrift, or the owner's own) at full resolution, in the original's layout. Remaining count unchanged."
     }
   ]
 };

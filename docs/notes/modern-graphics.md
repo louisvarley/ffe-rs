@@ -382,6 +382,31 @@ drawn by `draw_hud` over the composed picture):
   view through wherever the frame still shows that value, then draws the lines over it. Without a GPU
   the enlarged original stays (`tests/modern_planet.rs`, `the_gunsight_is_drawn_crisp`).
 
+### A real font
+
+Status (2026-10-28): **implemented** (ENH-007, the main font).
+
+Text in the game's main font is drawn with a real TrueType or OpenType font at the window's
+resolution (`modern::TrueFont`, rasterised by `fontdue`), in place of the enlarged 8x9 pixel
+glyphs. The screen records each glyph it draws (code, pen, advance, colour, clip rows and the
+pixels it wrote; `modern::TextLayer`, `Screen::take_text`); the presenter takes the glyphs the
+frame still shows back out before upscaling (and before the GPU pass), then draws each in the
+real font after.
+
+- **Which font:** the first `.ttf`/`.otf` in `img-export/fonts` (sorted by name), else Windows'
+  Bahnschrift, else Segoe UI (`modern::font_candidates`; nothing is bundled). Without one, the
+  owner's upscaled atlas (`img-export/images/font/main.png`) is used; without that, the original.
+- **Same layout as the original:** each glyph stands on the original's baseline (row 7 of the
+  glyph), with capitals 6.5 rows tall (the original's are 7; a little shorter keeps descenders
+  and accents clear of the next line), condensed by one factor for the whole font so its letters
+  and digits take the original's advances on average, and centred in its own advance, clipped to
+  the rows the original clipped it to. Lines, menus and columns stay where they were.
+- **Characters** (`modern::character`): ASCII, with the font's European letters in their slots
+  (ö ñ è ü ß ° ä ç é ù î â ô ê û à ò ¿ © and a second A..F). h⁻¹ and s⁻¹ (codes 123/124, km/h and
+  m/s) are the letter and a small raised "-1". The four arrows and the box (125..129) stay the
+  original's glyphs.
+- The game's drop shadows (each string drawn twice) come through as a real shadow.
+
 Not yet on the GPU (still the original's pixels behind the models): the rest of the HUD.
 
 ## What comes next

@@ -315,7 +315,11 @@ pub fn compose(
     let rect = settings.rect((width, height));
     match settings.graphics {
         Graphics::Classic => blit(logical, target, width, rect, settings.filter),
-        Graphics::Modern => ModernRenderer::new().render(logical, target, width, rect),
+        Graphics::Modern => {
+            let mut modern = ModernRenderer::new();
+            modern.render(logical, target, width, rect);
+            modern.finish(target, width, rect);
+        }
     }
 }
 
@@ -580,9 +584,11 @@ impl Presenter {
             Graphics::Modern => {
                 self.modern.render(logical, &mut self.buffer, size.0, rect);
                 if let Some(world) = world {
+                    let frame = self.modern.frame(logical);
                     self.gpu
-                        .render(logical, world, &mut self.buffer, size.0, rect)?;
+                        .render(frame, world, &mut self.buffer, size.0, rect)?;
                 }
+                self.modern.finish(&mut self.buffer, size.0, rect);
             }
         }
         window
