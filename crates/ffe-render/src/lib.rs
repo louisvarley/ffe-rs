@@ -76,6 +76,36 @@ pub struct Line {
 pub struct Batch {
     pub triangles: Vec<Triangle>,
     pub lines: Vec<Line>,
+    /// Atmospheres drawn over the batch's faces (a planet's).
+    pub atmospheres: Vec<Atmosphere>,
+}
+
+/// A planet's atmosphere: a shell from the surface to `outer` round `centre` (view space),
+/// traced per pixel. Its haze is thicker the longer and lower a view ray runs through it, and
+/// lit by the star on the side facing it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Atmosphere {
+    pub centre: [f32; 3],
+    pub radius: f32,
+    pub outer: f32,
+    /// The haze colour (0..1).
+    pub colour: [f32; 3],
+    /// The unit direction towards the star, in view space.
+    pub sun: [f32; 3],
+    /// How dense the haze is (1 the usual).
+    pub density: f32,
+}
+
+/// [`Atmosphere`] as the GPU reads it: everything in units of the outer radius.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct Shell {
+    centre: [f32; 3],
+    radius: f32,
+    colour: [f32; 3],
+    density: f32,
+    sun: [f32; 3],
+    pad: f32,
 }
 
 /// What to draw.
@@ -163,6 +193,90 @@ fn fs_scene(i: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(texel.rgb, 1.0);
 }
 
+struct ShellOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) ndc: vec2<f32>,
+    @location(1) @interpolate(flat) centre: vec3<f32>,
+    @location(2) @interpolate(flat) radius: f32,
+    @location(3) @interpolate(flat) colour: vec3<f32>,
+    @location(4) @interpolate(flat) density: f32,
+    @location(5) @interpolate(flat) sun: vec3<f32>,
+};
+
+@vertex
+fn vs_shell(
+    @builtin(vertex_index) index: u32,
+    @location(0) centre: vec3<f32>,
+    @location(1) radius: f32,
+    @location(2) colour: vec3<f32>,
+    @location(3) density: f32,
+    @location(4) sun: vec3<f32>,
+) -> ShellOut {
+    let x = f32((index << 1u) & 2u) * 2.0 - 1.0;
+    let y = 1.0 - f32(index & 2u) * 2.0;
+    var out: ShellOut;
+    out.position = vec4<f32>(x, y, 0.0, 1.0);
+    out.ndc = vec2<f32>(x, y);
+    out.centre = centre;
+    out.radius = radius;
+    out.colour = colour;
+    out.density = density;
+    out.sun = sun;
+    return out;
+}
+
+// The view ray through the pixel meets the shell (radius 1) and maybe the planet (`radius`).
+// The cross product gives the ray's closest approach without the cancellation of the usual
+// quadratic, which matters when the planet is far away.
+@fragment
+fn fs_shell(i: ShellOut) -> @location(0) vec4<f32> {
+    let d = normalize(vec3<f32>(i.ndc.x / u.scale.x, i.ndc.y / u.scale.y, 1.0));
+    let c = i.centre;
+    let along = dot(c, d);
+    let side = cross(c, d);
+    let low2 = dot(side, side);
+    if (low2 >= 1.0) {
+        discard;
+    }
+    let half = sqrt(1.0 - low2);
+    let far = along + half;
+    if (far <= 0.0) {
+        discard;
+    }
+    let near = max(along - half, 0.0);
+    var end = far;
+    let r2 = i.radius * i.radius;
+    var ground = false;
+    if (low2 < r2) {
+        let hit = along - sqrt(r2 - low2);
+        if (hit > 0.0) {
+            end = min(end, hit);
+            ground = true;
+        }
+    }
+    // Near the limb a ray that meets the ground blends towards one that misses it, so the
+    // terrain's own outline (which is not quite this sphere) shows no seam.
+    let edge = select(0.0, smoothstep(i.radius * 0.94, i.radius, sqrt(low2)), ground);
+    let path = mix(max(end - near, 0.0), max(far - near, 0.0), edge);
+    // The longest path that misses the planet: a ray grazing the surface.
+    let longest = 2.0 * sqrt(max(1.0 - r2, 1.0e-6));
+    // 0 at the shell's edge, 1 at the surface: the haze is densest low down.
+    let depth = clamp((1.0 - sqrt(low2)) / max(1.0 - i.radius, 1.0e-4), 0.0, 1.0);
+    var thickness = path / longest * (0.35 + 0.65 * depth);
+    // The original already mixes the haze into the ground's colours by distance (F1840), so
+    // over the surface the shell only deepens it towards the limb.
+    thickness = mix(thickness, thickness * thickness * 1.5, select(0.0, 1.0 - edge, ground));
+    let alpha = 1.0 - exp(-4.0 * i.density * thickness);
+    // The original's ring is the haze colour all the way round, with the star's light added on
+    // the side facing it (F1879); here the light brightens the haze where the ray runs through
+    // it, with a little forward glow round the star.
+    let middle = normalize(d * (0.5 * (near + end)) - c);
+    let lit = clamp(dot(middle, i.sun) * 1.4 + 0.3, 0.0, 1.0);
+    let glow = pow(max(dot(d, i.sun), 0.0), 16.0) * 0.5;
+    let colour = i.colour * (0.7 + 0.5 * lit) + vec3<f32>(glow);
+    return vec4<f32>(min(colour, vec3<f32>(1.0)), alpha);
+}
+
 struct BackOut {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -206,6 +320,7 @@ pub struct Renderer {
     triangles: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     background: wgpu::RenderPipeline,
+    shells: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     face_sampler: wgpu::Sampler,
     /// The GPU array the scenes' textures are kept in between frames.
@@ -242,7 +357,7 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -368,6 +483,38 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let shell_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Shell>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x3,
+                1 => Float32,
+                2 => Float32x3,
+                3 => Float32,
+                4 => Float32x3
+            ],
+        };
+        let shells = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("atmospheres"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_shell"),
+                compilation_options: Default::default(),
+                buffers: &[Some(shell_layout)],
+            },
+            primitive: Default::default(),
+            depth_stencil: Some(depth(false, wgpu::CompareFunction::Always)),
+            multisample,
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_shell"),
+                compilation_options: Default::default(),
+                targets: &target,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("background sampler"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -391,6 +538,7 @@ impl Renderer {
             triangles,
             lines,
             background,
+            shells,
             sampler,
             face_sampler,
             face_textures: None,
@@ -531,6 +679,8 @@ impl Renderer {
         // Every batch's triangles, then its lines, in one buffer.
         let mut vertices: Vec<Vertex> = Vec::new();
         let mut ranges = Vec::with_capacity(scene.batches.len());
+        let mut shells: Vec<Shell> = Vec::new();
+        let mut shell_ranges = Vec::with_capacity(scene.batches.len());
         for batch in &scene.batches {
             let first = vertices.len() as u32;
             for (index, t) in batch.triangles.iter().enumerate() {
@@ -561,7 +711,17 @@ impl Renderer {
                 }));
             }
             ranges.push((first..middle, middle..vertices.len() as u32));
+            let first_shell = shells.len() as u32;
+            shells.extend(batch.atmospheres.iter().filter_map(shell));
+            shell_ranges.push(first_shell..shells.len() as u32);
         }
+        let shell_buffer = (!shells.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("atmospheres"),
+                contents: bytemuck::cast_slice(&shells),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
         let vertex_buffer = (!vertices.is_empty()).then(|| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("vertices"),
@@ -615,18 +775,23 @@ impl Renderer {
                 pass.draw(0..3, 0..1);
                 continue;
             }
-            let (Some(buffer), (triangles, lines)) = (&vertex_buffer, &ranges[pass_index - 1])
-            else {
-                continue;
-            };
-            pass.set_vertex_buffer(0, buffer.slice(..));
-            if !triangles.is_empty() {
-                pass.set_pipeline(&self.triangles);
-                pass.draw(triangles.clone(), 0..1);
+            let (triangles, lines) = &ranges[pass_index - 1];
+            if let Some(buffer) = &vertex_buffer {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                if !triangles.is_empty() {
+                    pass.set_pipeline(&self.triangles);
+                    pass.draw(triangles.clone(), 0..1);
+                }
+                if !lines.is_empty() {
+                    pass.set_pipeline(&self.lines);
+                    pass.draw(lines.clone(), 0..1);
+                }
             }
-            if !lines.is_empty() {
-                pass.set_pipeline(&self.lines);
-                pass.draw(lines.clone(), 0..1);
+            let atmospheres = &shell_ranges[pass_index - 1];
+            if let (Some(buffer), false) = (&shell_buffer, atmospheres.is_empty()) {
+                pass.set_pipeline(&self.shells);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..3, atmospheres.clone());
             }
         }
         encoder.copy_texture_to_buffer(
@@ -743,6 +908,19 @@ impl Renderer {
         }
         out
     }
+}
+
+/// An atmosphere in units of its outer radius, or `None` when it has no thickness.
+fn shell(atmosphere: &Atmosphere) -> Option<Shell> {
+    let outer = atmosphere.outer;
+    (outer > atmosphere.radius && atmosphere.radius > 0.0 && outer.is_finite()).then(|| Shell {
+        centre: atmosphere.centre.map(|c| c / outer),
+        radius: atmosphere.radius / outer,
+        colour: atmosphere.colour,
+        density: atmosphere.density,
+        sun: atmosphere.sun,
+        pad: 0.0,
+    })
 }
 
 /// The face textures' GPU array and which texture each layer holds: `(id, frame last used)`.
@@ -876,6 +1054,7 @@ mod tests {
                     triangle(20.0, [0.0, 1.0, 0.0, 1.0]),
                 ],
                 lines: vec![],
+                atmospheres: vec![],
             }],
             textures: vec![],
         };
@@ -888,6 +1067,7 @@ mod tests {
             batches: vec![Batch {
                 triangles: vec![triangle(-5.0, [1.0, 1.0, 1.0, 1.0])],
                 lines: vec![],
+                atmospheres: vec![],
             }],
             ..scene.clone()
         };
@@ -900,6 +1080,7 @@ mod tests {
                 Batch {
                     triangles: vec![triangle(5.0, [1.0, 0.0, 0.0, 1.0])],
                     lines: vec![],
+                    atmospheres: vec![],
                 },
                 Batch {
                     triangles: vec![
@@ -907,6 +1088,7 @@ mod tests {
                         triangle(50.0, [0.0, 0.0, 1.0, 1.0]),
                     ],
                     lines: vec![],
+                    atmospheres: vec![],
                 },
             ],
             ..scene
@@ -924,6 +1106,7 @@ mod tests {
             batches: vec![Batch {
                 triangles: vec![face],
                 lines: vec![],
+                atmospheres: vec![],
             }],
             textures: vec![Texture {
                 id: 0,
@@ -936,5 +1119,31 @@ mod tests {
         let pixels = renderer.render(&textured).unwrap();
         assert_eq!(pixels[30 * 64 + 26], 0xff0000);
         assert_eq!(pixels[30 * 64 + 38], 0x203040);
+        // An atmosphere round a planet straight ahead, lit from behind the eye: the haze shows
+        // just outside the planet's edge, not far away from it.
+        let hazy = Scene {
+            batches: vec![Batch {
+                atmospheres: vec![Atmosphere {
+                    centre: [0.0, 0.0, 100.0],
+                    radius: 20.0,
+                    outer: 26.0,
+                    colour: [0.4, 0.6, 1.0],
+                    sun: [0.0, 0.0, -1.0],
+                    density: 1.0,
+                }],
+                ..Batch::default()
+            }],
+            textures: vec![],
+            ..textured
+        };
+        let pixels = renderer.render(&hazy).unwrap();
+        let blue = |p: u32| p & 0xff;
+        // The planet's edge is at 20/100 of the half-width (6.4 pixels from the centre).
+        assert!(blue(pixels[24 * 64 + 32 + 7]) > 0x60, "haze at the limb");
+        assert_eq!(
+            pixels[2 * 64 + 2],
+            0x203040,
+            "clear sky far from the planet"
+        );
     }
 }

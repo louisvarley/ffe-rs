@@ -127,8 +127,8 @@ fn the_planet_is_drawn_on_the_gpu_from_orbit_to_the_ground() {
             first.as_secs_f64() * 1000.0,
             start.elapsed().as_secs_f64() * 1000.0
         );
-        // Where the classic frame shows ground, so does the GPU picture (not the background
-        // the faces were taken out of), allowing for the edges.
+        // Where the classic frame shows the planet or its atmosphere ring, so does the GPU
+        // picture (not the background they were taken out of), allowing for the edges.
         let background = screen.world().unwrap().snapshot.clone();
         let (mut ground, mut covered) = (0, 0);
         for y in 2..156 {
@@ -147,14 +147,14 @@ fn the_planet_is_drawn_on_the_gpu_from_orbit_to_the_ground() {
         }
         eprintln!("k {k}: GPU covers {covered} of {ground} classic ground pixels");
         // At one radius the eye is under the ground and the original draws only the
-        // atmosphere ring (and a few points over it): nothing to set aside then.
+        // atmosphere ring: no surface to set aside then, only the atmosphere.
         assert!(
-            ground < 100 || faces > 50,
+            k <= 1.0 || faces > 50,
             "the surface reaches the GPU at {k} radii"
         );
         assert!(
-            covered * 100 >= ground * 97,
-            "the GPU surface covers the classic one at {k} radii ({covered} of {ground})"
+            !world.atmospheres.is_empty(),
+            "Earth's atmosphere reaches the GPU at {k} radii"
         );
         if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
             let dir = std::path::Path::new(&dir);
@@ -175,5 +175,9 @@ fn the_planet_is_drawn_on_the_gpu_from_orbit_to_the_ground() {
                 height,
             );
         }
+        assert!(
+            covered * 100 >= ground * 97,
+            "the GPU surface covers the classic one at {k} radii ({covered} of {ground})"
+        );
     }
 }

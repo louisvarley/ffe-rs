@@ -444,6 +444,8 @@ pub struct Screen {
     pub capture: bool,
     /// The faces set aside so far this frame, one batch per object.
     batches: Vec<Vec<Solid>>,
+    /// The planets' atmospheres so far this frame, by the batch they go over.
+    atmospheres: Vec<(usize, crate::model_viewer::Shell)>,
     /// Their textures so far this frame, each (bitmap, slot colours) once.
     textures: Vec<crate::modern3d::WorldTexture>,
     /// The textures of recent frames, so a planet's hundred are not rebuilt every frame.
@@ -981,6 +983,7 @@ impl Screen {
             lock_external: true,
             capture: false,
             batches: Vec::new(),
+            atmospheres: Vec::new(),
             textures: Vec::new(),
             texture_memory: Vec::new(),
             deferred: Vec::new(),
@@ -2206,6 +2209,7 @@ impl Screen {
         let mut views = views;
         views.lock_external = self.lock_external;
         self.batches.clear();
+        self.atmospheres.clear();
         self.textures.clear();
         self.deferred.clear();
         self.world = None;
@@ -2475,6 +2479,7 @@ impl Screen {
             if self.capture {
                 self.world = Some(crate::modern3d::World {
                     batches: std::mem::take(&mut self.batches),
+                    atmospheres: std::mem::take(&mut self.atmospheres),
                     textures: std::mem::take(&mut self.textures),
                     snapshot: self.frame.clone(),
                 });
@@ -2849,8 +2854,11 @@ impl Screen {
                 None => self.draw_shapes(viewer, std::slice::from_ref(shape)),
             }
         }
-        if !batch.is_empty() {
+        if !batch.is_empty() || !frame.atmospheres.is_empty() {
+            let index = self.batches.len();
             self.batches.push(batch);
+            self.atmospheres
+                .extend(frame.atmospheres.iter().map(|shell| (index, shell.clone())));
         }
     }
 

@@ -19,7 +19,7 @@
 
 use crate::display::Rect;
 use crate::indexed::{LOGICAL_HEIGHT, LOGICAL_WIDTH};
-use crate::model_viewer::Solid;
+use crate::model_viewer::{Shell, Solid};
 use crate::modern::scale2x;
 
 /// The flight view's rows; the console starts below them.
@@ -34,6 +34,8 @@ const NEAR: f32 = 64.0;
 pub struct World {
     /// The drawn objects' faces, one batch per object in the order the original paints them.
     pub batches: Vec<Vec<Solid>>,
+    /// The planets' atmospheres, each with the batch (its planet) it is drawn over.
+    pub atmospheres: Vec<(usize, Shell)>,
     /// The textured faces' bitmaps in their slot colours, each once.
     pub textures: Vec<WorldTexture>,
     /// The logical frame as the world phase left it (without the set-aside faces).
@@ -185,6 +187,21 @@ impl Gpu3d {
     }
 }
 
+/// A planet's atmosphere for the GPU: the shell between the surface and F1877's ring radius,
+/// in the haze colour, lit from the star (against the light vector).
+fn atmosphere(shell: &Shell) -> ffe_render::Atmosphere {
+    let light = shell.light.map(|c| c as f32);
+    let length = light.iter().map(|c| c * c).sum::<f32>().sqrt().max(1.0);
+    ffe_render::Atmosphere {
+        centre: shell.centre.map(|c| c as f32),
+        radius: shell.radius as f32,
+        outer: shell.outer as f32,
+        colour: shell.rgb.map(|c| f32::from(c) / 255.0),
+        sun: light.map(|c| -c / length),
+        density: 1.0,
+    }
+}
+
 /// The GPU scene for a `width` by `height` view: the edge-upscaled frame behind, then the
 /// batches in order. Textures are enlarged to 256 texels with the same edge-directed Scale2x
 /// as the frame (no new colours, no blur), and the GPU maps them with perspective correction,
@@ -231,8 +248,17 @@ pub fn scene(
     let batches = world
         .batches
         .iter()
-        .map(|solids| {
-            let mut batch = ffe_render::Batch::default();
+        .enumerate()
+        .map(|(index, solids)| {
+            let mut batch = ffe_render::Batch {
+                atmospheres: world
+                    .atmospheres
+                    .iter()
+                    .filter(|(over, _)| *over == index)
+                    .map(|(_, shell)| atmosphere(shell))
+                    .collect(),
+                ..ffe_render::Batch::default()
+            };
             for solid in solids {
                 let [r, g, b] = colour(solid.rgb);
                 let rgba = [r, g, b, 1.0];
@@ -311,6 +337,7 @@ mod tests {
                 height: 64,
                 pixels: vec![0xff010203; 64 * 64].into(),
             }],
+            atmospheres: vec![],
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
         let scene = scene(&world, 640, 316, &mut TextureCache::default());
@@ -358,6 +385,7 @@ mod tests {
                 texture: None,
             }]],
             textures: vec![],
+            atmospheres: vec![],
             snapshot: snapshot.clone(),
         };
         // The HUD drew one pixel at the square's centre after the world phase.

@@ -129,14 +129,36 @@ depth on the GPU, at the window's resolution, with the same textures as the orig
   `FFE_SHOT_DIR` writes `classic-k*.png`/`modern-k*.png`. `FFE_CAPTURE_MODERN=1` with
   `--capture-planet` also saves `planet-XXXX-modern.png` beside each shot.
 
-Not yet on the GPU (still the original's pixels behind the models): the atmosphere ring, the
-background nebula and stars, dots and particles, thruster glows and the hyperspace tunnel. Lines are
-one window pixel wide.
+### Atmosphere
+
+Status (2026-10-28): **implemented** (ENH-013, without clouds).
+
+F1877 draws a planet's air as a ring of 32 dithered quads from 7/8 of the radius out to
+`radius * (1 + word8 / 32768)` (the record's word `+8`), coloured from the record's material to the
+sky colour and lit by the star (F1879). In Modern graphics that ring is set aside (its shapes carry
+an empty `Solid`) and the GPU draws the same air as a shell (`model_viewer::Shell`: centre, surface
+radius, the ring's radius, the material through the palette and the light vector), traced per pixel
+after the planet's batch (`ffe-render`'s `fs_shell`):
+
+- each pixel's view ray is met with the shell and the planet's sphere (the closest approach comes
+  from a cross product, not the quadratic, so a planet far away keeps its precision);
+- the haze is thicker the longer and lower the ray runs through the shell, so it is strongest at the
+  limb and thin over the ground, where the original's emitter already mixes the haze into the terrain's
+  colours by distance (F1840); near the limb a ground ray blends into a grazing one, so the terrain's
+  own outline shows no seam;
+- like the original's ring, the haze is its colour all the way round and brighter on the side facing
+  the star, with a little forward glow round the star; from inside the shell the sky takes the haze
+  colour towards the horizon, as the original colours the sky in daylight.
+
+`tests/modern_planet.rs` now also checks the atmosphere reaches the GPU at every altitude and that
+the GPU picture covers every pixel of the original's planet and ring.
+
+Not yet on the GPU (still the original's pixels behind the models): the background nebula and stars,
+dots and particles, thruster glows and the hyperspace tunnel. Lines are one window pixel wide.
 
 ## What comes next
 
-1. **A smooth GPU atmosphere** in place of the dithered ring (FFED3D's `DrawAtmosphere` spheres;
-   enhanced-3), from F1877's own haze colour and strength.
+1. Clouds and shadows on the planet (the rest of enhanced-3).
 2. **Per-pixel lighting** from the faces' normals and the star direction instead of the original's
    flat shade, and glows/stars as sprites (ENH-014/015), then modest bloom.
 3. **Presentation through a wgpu surface** instead of reading the picture back into the minifb buffer

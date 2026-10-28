@@ -311,7 +311,7 @@ window.FFE_BURNDOWN = {
         { id: "enhanced-0", title: "Separate modern engine, the Classic/Modern switch and a first technique (edge-directed upscaling)", status: "done", version: "modern-1" },
         { id: "enhanced-1", title: "Native resolution, filtering and MSAA", status: "in-progress", version: "modern-2" },
         { id: "enhanced-2", title: "Modest bloom", status: "todo" },
-        { id: "enhanced-3", title: "Planet atmosphere and shadows", status: "todo" },
+        { id: "enhanced-3", title: "Planet atmosphere and shadows", status: "in-progress", version: "modern-3" },
         { id: "enhanced-4", title: "HDR output and temporal AA (deferred)", status: "todo" },
         { id: "enhanced-5", title: "Frame and VRAM budgets measured", status: "todo" }
       ]
@@ -933,6 +933,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-27",
       remaining: 101,
       note: "Modern graphics: planet surfaces on the GPU. The terrain emitter records each queued entry's view-space corners beside the unchanged queue; the surface is one depth-tested, textured batch from orbit to the ground (covers 99.9% of the original's planet pixels). Textures persist between frames (256-layer GPU array). Atmosphere ring, stars and dots still classic; enhanced-1 stays in progress. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 101,
+      note: "Modern graphics: a per-pixel GPU atmosphere shell from F1877's record (radius * (1 + word8/32768), the haze material, lit by the star) replaces the dithered ring in Modern only; strongest at the limb, thin over the ground, seamless at the terrain's outline. enhanced-3 in progress (shadows and clouds remain). Remaining count unchanged."
     }
   ]
 };

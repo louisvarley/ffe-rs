@@ -86,6 +86,19 @@ pub struct Solid {
     pub texture: Option<SolidTexture>,
 }
 
+/// A planet's atmosphere as F1877 has it (view space, the planet's own units): the centre,
+/// the surface radius, the ring's outer radius (`radius * (1 + word8 / 32768)`), the haze
+/// colour (the record's material through the palette) and the light vector (pointing the way
+/// the light travels, as F1878 reads it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shell {
+    pub centre: [i32; 3],
+    pub radius: i64,
+    pub outer: i64,
+    pub rgb: [u8; 3],
+    pub light: [i32; 3],
+}
+
 /// A textured face's bitmap, its slot colours (as [`Textured`]) and each corner's texel
 /// coordinates in the bitmap (F1644/F1647's corner table, or the entry's own for the planet
 /// surface's F1806/F1808), in the face's vertex order.
@@ -106,6 +119,9 @@ pub struct Frame {
     /// For each shape that is a model face, its [`Solid`] (aligned with
     /// [`Self::shapes`]; may be shorter, the rest are `None`).
     pub solids: Vec<Option<Solid>>,
+    /// The planets' atmospheres, for the modern engine, which draws them in place of the
+    /// ring F1877 queues (those shapes carry an empty [`Solid`], so they are set aside).
+    pub atmospheres: Vec<Shell>,
     /// The F1777 depth key of each shape, aligned with [`Self::shapes`], in the
     /// original's far-to-near order. Curved-surface entries (F1840/F1841) are
     /// merged into this order, so a ship draws over a planet it is in front of.
@@ -197,6 +213,8 @@ pub const SURFACE_QUEUE_WORDS: usize = 0x2_0000;
 /// A generated surface queue held between registration and drawing: the words
 /// F1876/F1840 queued and their far-to-near order.
 struct SurfaceBatch {
+    /// The planet's atmosphere, when its record has one.
+    shell: Option<Shell>,
     words: Vec<u32>,
     order: Vec<(u32, usize)>,
     /// Each entry's corners in view space (by the position of its words), for the
@@ -1476,6 +1494,9 @@ impl ModelViewer {
         // faces; merge them by key so the planet is not painted over a nearer ship.
         let surface_shapes = self.surface_shapes(&surfaces);
         Self::merge_surface_shapes(&mut frame, surface_shapes);
+        frame
+            .atmospheres
+            .extend(surfaces.iter().filter_map(|batch| batch.shell.clone()));
         Ok(frame)
     }
 
@@ -1683,7 +1704,18 @@ impl ModelViewer {
             }
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+            let shell = (record.strength != 0 && outcome.is_ok()).then(|| {
+                let radius = self.surface_extent.get();
+                Shell {
+                    centre: origin,
+                    radius: radius as i64,
+                    outer: (radius * (1.0 + f64::from(surface.parameters[1]) / 32768.0)) as i64,
+                    rgb: self.rgb(material),
+                    light,
+                }
+            });
             batches.push(SurfaceBatch {
+                shell,
                 views: queue.views.take().unwrap_or_default().into_iter().collect(),
                 words: queue.words,
                 order,
@@ -1771,6 +1803,14 @@ impl ModelViewer {
         let mut shapes = Vec::new();
         for batch in batches {
             let w = &batch.words;
+            // With an atmosphere the modern engine draws, the ring's shapes are set aside.
+            let ring = || {
+                batch.shell.as_ref().map(|_| Solid {
+                    views: Vec::new(),
+                    rgb: [0; 3],
+                    texture: None,
+                })
+            };
             for &(key, at) in &batch.order {
                 let handler = w[at + 2];
                 if handler == GROUP_OPEN {
@@ -1794,7 +1834,7 @@ impl ModelViewer {
                                 if let Some(texture) =
                                     self.terrain_texture(w, pos - 2, key, 4, false)
                                 {
-                                    shapes.push((key, self.texture_shape(&texture), None));
+                                    shapes.push((key, self.texture_shape(&texture), ring()));
                                     pos += 13;
                                     continue;
                                 }
@@ -1809,7 +1849,7 @@ impl ModelViewer {
                                         vec![points[0], points[1], points[2]],
                                         vec![colours[0], colours[1], colours[2]],
                                     ),
-                                    None,
+                                    ring(),
                                 ));
                                 shapes.push((
                                     key,
@@ -1817,13 +1857,13 @@ impl ModelViewer {
                                         vec![points[0], points[2], points[3]],
                                         vec![colours[0], colours[2], colours[3]],
                                     ),
-                                    None,
+                                    ring(),
                                 ));
                                 pos += 13;
                             }
                             10 => {
                                 let points = vec![point(1), point(2), point(3), point(4)];
-                                shapes.push((key, Shape::Fill(points, colour(w[pos + 5])), None));
+                                shapes.push((key, Shape::Fill(points, colour(w[pos + 5])), ring()));
                                 pos += 6;
                             }
                             _ => break,

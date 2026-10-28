@@ -131,7 +131,7 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 |---|---|---|---|
 | ENH-021 | Modern graphics engine switch (`modern::Graphics`): Classic / Modern on Port Options and Ctrl+G, persisted as `graphics=` | implemented | Presentation only: the engine reads the finished 320x200 frame and never touches game state; Classic is the default and unchanged. First technique: edge-directed 4x upscaling (Scale2x twice) and a smooth fit. See `docs/notes/modern-graphics.md`. |
 | ENH-001 | HD textures (`upscaled.bin`, per-asset fallback) | proposed | Classic ignores the pack. |
-| ENH-002 | Native-resolution rendering | implemented for the flight view's models | Modern graphics with a GPU: the executor's faces and the planet surfaces' triangles (recorded in view space beside F1840's queue, which is unchanged) are drawn by `ffe-render` (wgpu) at the window's view size with the original's projection, over the original's frame, under its HUD. The atmosphere ring, stars and dots stay the original's pixels for now. See `docs/notes/modern-graphics.md`. |
+| ENH-002 | Native-resolution rendering | implemented for the flight view's models | Modern graphics with a GPU: the executor's faces and the planet surfaces' triangles (recorded in view space beside F1840's queue, which is unchanged) are drawn by `ffe-render` (wgpu) at the window's view size with the original's projection, over the original's frame, under its HUD. Stars and dots stay the original's pixels for now. See `docs/notes/modern-graphics.md`. |
 | ENH-003 | Smooth texture filtering | implemented for model textures | Perspective-correct, mipmapped; textures enlarged with Scale2x first. |
 | ENH-004 | Anisotropic filtering | implemented for model textures (8x) | smooth-filtering |
 | ENH-005 | MSAA | implemented (4x) for the GPU 3-D view | native-res |
@@ -142,7 +142,7 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 | ENH-010 | Bloom/lens effects | proposed | HDR |
 | ENH-011 | Shadows (incl. ship self-shadowing) | proposed | native-res |
 | ENH-012 | Ambient occlusion | proposed | native-res |
-| ENH-013 | Atmospheric scattering + clouds | proposed | native-res, HDR |
+| ENH-013 | Atmospheric scattering + clouds | atmosphere implemented (no clouds) | Modern graphics with a GPU: each planet with an F1877 haze record gets a shell from the surface to the ring's radius (`radius * (1 + word8 / 32768)`), traced per pixel in the record's haze colour and lit by the star, in place of the ring's dithered quads (which are set aside in Modern only). See `docs/notes/modern-graphics.md`. |
 | ENH-014 | Higher-quality starfield/nebulae | proposed | native-res; no gameplay RNG |
 | ENH-015 | Engine glows/particles | proposed | native-res; spawn timing from core |
 | ENH-016 | Material maps | proposed | native-res, smooth filtering, HD/map pack |
