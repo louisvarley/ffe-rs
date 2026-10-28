@@ -10,16 +10,20 @@
 //!   makes) and amber when it is within laser range but off the sight;
 //! - an arrow on the edge of the view pointing the way to turn when the
 //!   locked ship is off the view or behind;
-//! - a contacts list down the right of the view, hostiles first, each with a
-//!   marker box that locks the ship when clicked (as clicking the ship does).
+//! - a contacts list down the right of the view, hostiles first, each name
+//!   and range in red, right-aligned against a marker box that locks the ship when clicked (as clicking the ship does).
 //!
 //! The lasers are hitscan (F931 tests the ray when the trigger is pressed and
 //! nothing travels), so there is no lead to show: a ship under the sight is a
 //! ship that is hit. The on-target bracket is that test.
 
-/// The contacts list's column: the right column of the navigation computer's
-/// places list (x 230), below F1099's target hull/shields text (y 1..31).
-pub const CONTACT_X: i32 = 230;
+/// The contacts list's marker boxes, on the view's right edge below F1099's
+/// target hull/shields text (y 1..31). Each row's name and range are
+/// right-aligned against the box, ending at [`CONTACT_TEXT_RIGHT`].
+pub const CONTACT_X: i32 = 308;
+pub const CONTACT_TEXT_RIGHT: i32 = 304;
+/// The left edge of a row's click area (the longest names reach about here).
+pub const CONTACT_LEFT: i32 = 200;
 pub const CONTACT_TOP: i32 = 36;
 /// Row pitch: the name and, a text line below it, the range.
 pub const CONTACT_STEP: i32 = 20;
@@ -73,11 +77,12 @@ pub fn contact_cell(index: usize) -> Option<(i32, i32)> {
 }
 
 /// The row whose marker or text is under (x, y): the box and the two text
-/// lines to the view's right edge.
+/// lines to its left.
 pub fn contact_row(x: i32, y: i32) -> Option<usize> {
     (0..CONTACT_ROWS).find(|index| {
-        contact_cell(*index)
-            .is_some_and(|(cx, cy)| (cx..320).contains(&x) && (cy..cy + 18).contains(&y))
+        contact_cell(*index).is_some_and(|(cx, cy)| {
+            (CONTACT_LEFT..=cx + 10).contains(&x) && (cy..cy + 18).contains(&y)
+        })
     })
 }
 
@@ -218,14 +223,14 @@ mod tests {
     }
 
     #[test]
-    fn contact_rows_sit_in_the_right_column_below_the_target_readout() {
-        assert_eq!(contact_cell(0), Some((230, 36)));
-        assert_eq!(contact_cell(5), Some((230, 136)));
+    fn contact_rows_sit_on_the_right_edge_below_the_target_readout() {
+        assert_eq!(contact_cell(0), Some((308, 36)));
+        assert_eq!(contact_cell(5), Some((308, 136)));
         assert_eq!(contact_cell(6), None);
-        assert_eq!(contact_row(232, 38), Some(0));
-        assert_eq!(contact_row(300, 60), Some(1));
-        assert_eq!(contact_row(229, 38), None);
-        assert_eq!(contact_row(232, 30), None);
+        assert_eq!(contact_row(312, 38), Some(0));
+        assert_eq!(contact_row(250, 60), Some(1));
+        assert_eq!(contact_row(199, 38), None);
+        assert_eq!(contact_row(312, 30), None);
         // The last row's two lines end above the view's foot.
         assert!(contact_cell(CONTACT_ROWS - 1).unwrap().1 + 18 <= 158);
     }

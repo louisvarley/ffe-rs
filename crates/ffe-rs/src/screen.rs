@@ -1360,15 +1360,28 @@ impl Screen {
                 self.line((x + 9, y + 9), (x, y + 9), colour);
                 self.line((x, y + 9), (x, y), colour);
             }
-            let name: String = contact.name.to_ascii_uppercase().chars().take(12).collect();
-            let text = if contact.locked {
-                aids::ON_TARGET_COLOUR
-            } else {
-                aids::PLAIN_COLOUR
-            };
-            self.text((x + 13) as usize, y as usize, &name, text);
-            self.text((x + 13) as usize, (y + 9) as usize, &contact.range, colour);
+            // The name (with its id) and the range, right-aligned against
+            // the box, in the combat target's red.
+            let name = contact.name.to_ascii_uppercase();
+            for (line, text) in [(0, name.as_str()), (9, contact.range.as_str())] {
+                let left = (aids::CONTACT_TEXT_RIGHT - self.text_width(text)).max(0);
+                self.text(
+                    left as usize,
+                    (y + line) as usize,
+                    text,
+                    aids::HOSTILE_COLOUR,
+                );
+            }
         }
+    }
+
+    /// The pixel width F1587 would advance over `message`.
+    fn text_width(&self, message: &str) -> i32 {
+        message
+            .bytes()
+            .filter_map(|code| self.font.glyph(code))
+            .map(|glyph| glyph.advance as i32)
+            .sum()
     }
 
     /// Planets and moons as shaded discs, the farthest first (a stand-in for the

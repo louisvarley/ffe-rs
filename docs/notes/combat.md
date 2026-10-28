@@ -865,10 +865,11 @@ Classic leaves the original HUD exactly as it was.
 - **Off-view arrow.** When the locked ship is off the view or behind, a filled
   arrow on the view's edge points the way to turn: the direction of the ship's
   offset in the camera frame. A ship dead astern points down.
-- **Contacts list.** Down the right of the view (x 230, from y 36, 20-pixel rows,
+- **Contacts list.** Down the right of the view (from y 36, 20-pixel rows,
   six rows, below F1099's hull/shields text), the visible ships are listed with
-  hostiles first, then the nearest. Each row has a marker box (filled for the
-  locked ship, red for hostiles, green otherwise), the name and the range. A
+  hostiles first, then the nearest. Each row has the name with its id and the
+  range in red, right-aligned against a marker box on the right edge (x 308;
+  filled for the locked ship, red for hostiles, green otherwise). A
   click on a row locks that ship as a click on the ship does (the combat target
   and the missile target). The list is hidden while the navigation computer's
   places list is open.
