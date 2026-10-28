@@ -73,11 +73,20 @@ F1035 is called once per flight frame from the flight module's frame handler
 8. **F1517** (`ffe.asm:90632`) scales the inherited `+0x8c` velocity by
    `DATA_009123 + 7` into a 64-bit vector and **Vec64Add** (`ffe.asm:100373`)
    adds it to `+0x3e`: the particle appears ahead of the player along its own
-   velocity. `DATA_009123` is zero in normal flight; F908 sets `0x12` together
-   with `DATA_007706 = 0xf880000` for the hyperspace exit effect (the port's
-   instant jump does not run that effect, so `Spawn::speed` is 0).
+   velocity. `DATA_009123` is the time acceleration's shift: F208 sets
+   `DATA_009013` to 0, 3, 7, 10 or 12 for 1x..10000x (`ffe.asm:17137-17184`)
+   and F207 copies it across with `DATA_007706`, so the dust is led the same
+   real time ahead (about 1.3 s) at any acceleration
+   (`dust::ACCELERATION_SHIFT`, passed by the flight frame as `Spawn::speed`).
+   F208's hyperspace branch sets `0x12` with `DATA_009012 = 0xf880000`; the
+   port's instant jump does not run it. The first slice read `DATA_009123` as
+   always 0 in flight, so under acceleration the dust was led only a 1x
+   distance and kept 1x-sized clouds, and almost every cloud was culled as too
+   far away: none showed at 1000x.
 9. The distance word `+0x7e` is
-   `(F1530() & 3) + DATA_008865 + DATA_009123 - 7`. `DATA_008865` has **no
+   `(F1530() & 3) + DATA_008865 + DATA_009123 - 7`: under acceleration each
+   cloud is `2^shift` times larger (at 1000x, 0.5..4 km becomes 0.5..4,000 km).
+   `DATA_008865` has **no
    writer** in JJFFE 2.8a7 (it follows the mouse accumulators
    `DATA_008863/864`), so it is 0; the port keeps that as `DISTANCE_BIAS`.
 
@@ -203,4 +212,35 @@ at its own scale (opcode-24 F1766 chains behind three opcode-12 branches), so
 a cloud is 0.5..4 km across. The first wiring passed no scale, which drew
 every cloud 16..128 times too large: the camera sat inside it and almost no
 dot reached the screen. `effects_view::dust_is_drawn_ahead_at_speed` checks
-the dots are drawn at 5 km/s.
+the dots are drawn at 5 km/s, and `dust_keeps_up_under_time_acceleration` that
+at 1000x they are drawn and spread across the view (before the shift was
+passed, none were). At 1x and high speed the clouds gather round the middle of
+the view: each starts on the line of flight about 1.3 s ahead, as in the source.
+
+## The modern engine's speed dust (2026-10-28)
+
+With the modern engine (a GPU) the original's clouds, which all start on the
+line of flight and spread out from one point, are replaced by speed dust drawn
+by the GPU (`Screen::speed_dust`, `modern3d::dust`). Presentation only: its own
+SplitMix64 hash of the place, never the game's random numbers, and nothing
+about the dust reaches the simulation. Classic keeps the original's clouds.
+
+- Motes are fixed in the ship's own frame all round it (the travel is the
+  ship's velocity times real time times the acceleration; paused, nothing
+  moves), at most one in each place of a grid, 80% of places filled, up to
+  five spacings each way.
+- Six layers, each eight times as far apart as the last (97 m to about
+  3,200 km). A layer shows at the speeds where it streams past well (fading in
+  from half a spacing a second, full from 4 to 32, gone by 256), so the layers
+  hand over smoothly from a few hundred m/s to 10000x time, and motes fade out
+  towards the edge of their layer.
+- Each mote is a streak from where it is to where it was four frames' travel
+  ago (at most three spacings): at speed the streaks rush out from the way the
+  ship is going, like a starship's warp. Blue-white, brightest at the mote and
+  fading along the trail, wider the nearer it is; past the top of a layer's
+  band the head runs over white and blooms.
+- The "Space dust, clouds etc" option turns it off; there is none inside a
+  planet's haze. `tests/modern_planet.rs`,
+  `speed_dust_streams_out_from_the_way_ahead`, checks the streaks point back to
+  the way ahead at 300 m/s, 5 km/s and 5 km/s at 1000x, and that paused motes
+  are points.

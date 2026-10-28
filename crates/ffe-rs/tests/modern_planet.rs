@@ -699,3 +699,89 @@ fn the_gunsight_is_drawn_crisp() {
         );
     }
 }
+
+/// The modern engine's speed dust: motes all round the ship, each a streak pointing back towards
+/// the way the ship is going (so they rush outward from it), none while paused.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
+fn speed_dust_streams_out_from_the_way_ahead() {
+    let mut gpu = Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    // Flight units a second (9.7 m each): 300 m/s, 5 km/s, and 5 km/s at 1000x.
+    for (n, (speed, acceleration)) in [(31.0, 0usize), (515.0, 0), (515.0, 3)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut screen = Screen::new(&cache).unwrap();
+        screen.capture = true;
+        let state = Flight {
+            mode: Mode::Flight,
+            velocity: [0.0, 0.0, speed],
+            axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+            system_flight: true,
+            ..Flight::default()
+        };
+        let mut views = ViewState::default();
+        views.console.acceleration = acceleration;
+        for _ in 0..3 {
+            screen.dust_step = Some(1.0 / 60.0);
+            screen.draw(&state, views, Some(&viewer), false, "");
+        }
+        let world = screen.world().cloned().expect("the flight view's world");
+        let ahead: Vec<_> = world
+            .dust
+            .iter()
+            .filter(|s| s.head[2] > 0.0 && s.tail[2] > 0.0)
+            .collect();
+        eprintln!("{} streaks, {} ahead", world.dust.len(), ahead.len());
+        assert!(ahead.len() > 50, "dust all round at speed {speed}");
+        // Projected, each tail is nearer the middle of the view than its head.
+        let off = |p: [f32; 3]| (p[0] / p[2]).hypot(p[1] / p[2]);
+        let outward = ahead
+            .iter()
+            .filter(|s| off(s.tail) <= off(s.head) + 1.0e-4)
+            .count();
+        assert_eq!(
+            outward,
+            ahead.len(),
+            "every streak points back to the way ahead"
+        );
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let (width, height) = (1280usize, 960usize);
+            let rect = Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            };
+            let mut target = vec![0u32; width * height];
+            ffe_rs::modern::ModernRenderer::new().render(
+                screen.logical_pixels(),
+                &mut target,
+                width,
+                rect,
+            );
+            gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)
+                .unwrap();
+            write_png(
+                &std::path::Path::new(&dir).join(format!("modern-dust-{n}.png")),
+                &target,
+                width,
+                height,
+            );
+        }
+        // Paused, nothing moves: the motes are points.
+        views.console.paused = true;
+        screen.dust_step = Some(1.0 / 60.0);
+        screen.draw(&state, views, Some(&viewer), false, "");
+        let world = screen.world().cloned().unwrap();
+        assert!(world.dust.iter().all(|s| s.head == s.tail));
+    }
+}

@@ -1008,6 +1008,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: the gunsight, velocity marker and targetting marks are drawn as crisp lines; explosion fire is round fireballs and streaks with body instead of filled polygons and dithered textures. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Space dust follows the time acceleration's shift (DATA_009123) as the original does, so it shows at 1000x; Modern draws warp-like speed dust streaks instead of the original's clouds. Remaining count unchanged."
     }
   ]
 };

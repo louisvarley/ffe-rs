@@ -74,11 +74,50 @@ pub struct World {
     pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
     pub snapshot: Vec<u32>,
+    /// The speed dust's streaks, drawn over the world.
+    pub dust: Vec<DustStreak>,
     /// HUD shapes drawn crisp over the 3-D view in place of their original pixels.
     pub hud: Vec<HudShape>,
     /// For each logical pixel, the value a crisp HUD shape put there (empty: none): while the
     /// frame still shows it, the 3-D view shows through instead.
     pub crisp: Vec<Option<u32>>,
+}
+
+/// One mote of speed dust: from where it is (`head`) to where it was (`tail`), in view space at
+/// its own scale, how strongly it shows (`alpha`, above 1 when it streams past fast enough to
+/// glow) and how near it is (`near`, 1 at the ship, 0 at the edge of its layer).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DustStreak {
+    pub head: [f32; 3],
+    pub tail: [f32; 3],
+    pub alpha: f32,
+    pub near: f32,
+}
+
+/// The speed dust over the world: each streak a fine line, wider the nearer it is, blue-white and
+/// brightest at the mote, fading to nothing along its trail (four steps). Over white at the mote,
+/// a fast streak blooms.
+fn dust(streaks: &[DustStreak], pixel: f32) -> ffe_render::Batch {
+    const STEPS: usize = 4;
+    let mut batch = ffe_render::Batch::default();
+    for streak in streaks {
+        let at = |t: f32| -> [f32; 3] {
+            std::array::from_fn(|k| streak.head[k] + (streak.tail[k] - streak.head[k]) * t)
+        };
+        let width = pixel * (0.35 + 0.65 * streak.near);
+        let bright = streak.alpha.max(0.0);
+        for step in 0..STEPS {
+            let (from, to) = (step as f32 / STEPS as f32, (step + 1) as f32 / STEPS as f32);
+            let fade = 1.0 - from;
+            let light = (bright * fade).min(1.6);
+            batch.lines.push(ffe_render::Line {
+                positions: [at(from), at(to)],
+                colour: [0.82 * light, 0.88 * light, light, (bright * fade).min(1.0)],
+                width,
+            });
+        }
+    }
+    batch
 }
 
 /// A HUD shape the modern engine draws as anti-aliased strokes at the output's resolution in place
@@ -1132,6 +1171,9 @@ pub fn scene(
         y_scale: 256.0 / 79.0,
         near: NEAR,
     };
+    if !world.dust.is_empty() {
+        batches.push(dust(&world.dust, pixel));
+    }
     if let Some(star) = &world.star {
         batches.push(flare(star, width, pixel, &projection));
     }
@@ -1251,6 +1293,7 @@ mod tests {
             burning: vec![],
             sky: None,
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
+            dust: Vec::new(),
             hud: Vec::new(),
             crisp: Vec::new(),
         };
@@ -1313,6 +1356,7 @@ mod tests {
             burning: vec![],
             sky: None,
             snapshot: snapshot.clone(),
+            dust: Vec::new(),
             hud: Vec::new(),
             crisp: Vec::new(),
         };

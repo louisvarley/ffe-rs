@@ -358,6 +358,81 @@ fn dust_is_drawn_ahead_at_speed() {
     assert!(dots > 50, "only {dots} dust pixels");
 }
 
+/// Under time acceleration `DATA_009123` is the step's shift: the dust is led the same real
+/// time ahead and its clouds grow with it, so at 1000x it is still drawn, spread across the
+/// view. With the shift left at 0 (the port's old input) every cloud was culled as too far.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn dust_keeps_up_under_time_acceleration() {
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let sine = ffe_core::model_math::SineTable::from_bytes(cache.asset("base:math/sine").unwrap())
+        .unwrap();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let speed_mm = 5_000_000.0;
+    let velocity = (speed_mm / ffe_rs::original_flight::MM_PER_SECOND) as i64;
+    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    let mut position = [7.0e15f64, 3.0e15, 1.0e15];
+    for _ in 0..100 {
+        // 1000x: the ship goes a thousand times as far each 20 ms frame.
+        position[2] += speed_mm * 1000.0 * 0.02;
+        let mut spawn =
+            ffe_core::dust::Spawn::deep_space(position.map(|v| v as i64), [0, 0, velocity], true);
+        spawn.speed = ffe_core::dust::ACCELERATION_SHIFT[3];
+        nav.tick_dust(0.02, &spawn);
+    }
+    let state = Flight {
+        mode: Mode::Flight,
+        position: position.map(|v| v / unit),
+        system_flight: true,
+        ship: NEW_GAME_SHIP,
+        axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        ..Flight::default()
+    };
+    let views = ViewState::default();
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.draw(&state, views, Some(&viewer), true, "");
+    let empty = screen.logical_pixels().to_vec();
+    screen.effects = nav
+        .dust
+        .particles()
+        .iter()
+        .map(|particle| {
+            let rows = particle.orientation(&sine);
+            ffe_rs::screen::SystemEffect {
+                model: particle.model,
+                centre: particle.position.map(|v| v as f64 / unit),
+                axes: std::array::from_fn(|r| {
+                    std::array::from_fn(|c| f64::from(rows[3 * r + c]) / 2_147_483_648.0)
+                }),
+                timer: 0,
+                size: 0,
+                scale: viewer
+                    .find(particle.model)
+                    .map(|model| (model.scale as i32 + particle.distance_bias).max(0) as u32),
+            }
+        })
+        .collect();
+    screen.draw(&state, views, Some(&viewer), true, "");
+    let columns: Vec<usize> = empty
+        .iter()
+        .zip(screen.logical_pixels())
+        .enumerate()
+        .take(320 * 158)
+        .filter(|(_, (a, b))| a != b)
+        .map(|(i, _)| i % 320)
+        .collect();
+    let (left, right) = (
+        columns.iter().min().copied().unwrap_or(0),
+        columns.iter().max().copied().unwrap_or(0),
+    );
+    assert!(columns.len() > 10, "only {} dust pixels", columns.len());
+    assert!(
+        right - left > 100,
+        "dust spread over columns {left}..{right}"
+    );
+}
+
 /// F738's departure cloud and F1094's exit cloud: model 0x9a at distance word
 /// +8, global word 1 the size ramp. Both draw ahead of the camera, and a cloud
 /// expires once its game time is spent (F763/F764).

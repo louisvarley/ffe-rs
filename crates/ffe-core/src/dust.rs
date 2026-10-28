@@ -78,6 +78,10 @@ pub const DISTANCE_BASE: i32 = 0xd;
 pub const DISTANCE_JITTER: u32 = 0x3;
 /// F1517's base shift (`DATA_009123 + 7`).
 pub const LEAD_SHIFT: u32 = 7;
+/// `DATA_009123` at each time acceleration step (1x .. 10000x): F208's
+/// `DATA_009013` (`ffe.asm:17137-17184`), which F207 copies across when the
+/// step takes effect. The 1x play value and F220's stopped time are 0.
+pub const ACCELERATION_SHIFT: [u32; 5] = [0, 3, 7, 10, 12];
 /// `DATA_008865`: no routine in JJFFE 2.8a7 writes it (it follows the mouse
 /// accumulators at `DATA_008863/864`), so it is zero.
 pub const DISTANCE_BIAS: i32 = 0;
@@ -125,9 +129,10 @@ pub struct Spawn {
     pub detail: bool,
     pub flight_active: bool,
     pub time_running: bool,
-    /// `DATA_009123`, zero in normal flight; F908 sets `0x12` for the
-    /// hyperspace exit effect, which shifts the spawn offset farther and
-    /// raises the distance bias.
+    /// `DATA_009123`: the time acceleration's shift ([`ACCELERATION_SHIFT`]),
+    /// or `0x12` for the hyperspace exit effect. It shifts the spawn offset
+    /// farther (the same real time ahead at any acceleration) and raises the
+    /// distance bias, which makes each cloud that many powers of two larger.
     pub speed: u32,
 }
 
@@ -513,6 +518,29 @@ mod tests {
         assert_eq!(field.particles()[0].age, 0);
         assert_eq!(field.tick(0.5, player), 0);
         assert_eq!(field.particles()[0].age, 0x100);
+    }
+
+    /// Under time acceleration `DATA_009123` is the step's shift: F1517 leads by
+    /// `velocity << (7 + shift)` (the same real time ahead) and `+0x7e` rises by
+    /// the shift, so each cloud is that many powers of two larger.
+    #[test]
+    fn time_acceleration_leads_farther_and_grows_the_cloud() {
+        assert_eq!(ACCELERATION_SHIFT, [0, 3, 7, 10, 12]);
+        let mut normal = spawn();
+        normal.velocity = [500, -250, 125];
+        let mut fast = normal;
+        fast.speed = ACCELERATION_SHIFT[1];
+        let (one, ten) = (with_one(11, &normal), with_one(11, &fast));
+        let (one, ten) = (one.particles()[0], ten.particles()[0]);
+        assert_eq!(
+            ten.position,
+            [
+                fast.position[0] + 500 * 1024,
+                fast.position[1] - 250 * 1024,
+                fast.position[2] + 125 * 1024
+            ]
+        );
+        assert_eq!(ten.distance_bias, one.distance_bias + 3);
     }
 
     #[test]

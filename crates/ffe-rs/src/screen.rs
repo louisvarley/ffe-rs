@@ -41,6 +41,29 @@ pub struct Disc {
     pub orientation: [[f64; 3]; 3],
 }
 
+/// The speed dust's closest spacing: ten flight units (97 m).
+const DUST_CELL: f64 = 10.0;
+/// How many times farther apart each layer of speed dust is than the one before.
+const DUST_SPREAD: f64 = 8.0;
+/// The layers of speed dust: spacings of 97 m to about 3,200 km.
+const DUST_LAYERS: usize = 6;
+/// How many spacings the speed dust reaches each way from the ship.
+const DUST_REACH: u32 = 5;
+/// The share of the speed dust's places that hold a mote.
+const DUST_CHANCE: f64 = 0.8;
+
+/// A place of the speed dust, hashed (SplitMix64): the same place always holds the same mote.
+fn dust_hash(at: [i64; 3], layer: usize) -> u64 {
+    let mut z = (at[0] as u64)
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add((at[1] as u64).wrapping_mul(0xc2b2_ae3d_27d4_eb4f))
+        .wrapping_add((at[2] as u64).wrapping_mul(0x1656_67b1_9e37_79f9))
+        .wrapping_add(layer as u64);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
 /// A star's glow when its colour is not known.
 const STAR_WHITE: [u8; 3] = [255, 244, 228];
 
@@ -502,6 +525,17 @@ pub struct Screen {
     /// from a fixed close render of its model (`star_colour`), so it is the same from any angle
     /// or distance, and when the model is too far away to be drawn.
     star_colours: std::collections::HashMap<(u32, u32), [u8; 3]>,
+    /// The Others page's "Space dust, clouds etc": with the modern engine, the speed dust
+    /// ([`Self::speed_dust`]) in place of the original's dust clouds.
+    pub dust_visible: bool,
+    /// For tests: the real seconds the next frame's speed dust takes instead of the clock's.
+    pub dust_step: Option<f64>,
+    /// How far the ship has gone in its own frame, for the speed dust (flight units), and when
+    /// the dust was last drawn.
+    dust_travel: [f64; 3],
+    dust_clock: Option<std::time::Instant>,
+    /// The speed dust this frame.
+    dust: Vec<crate::modern3d::DustStreak>,
     /// The next object drawn gives off light (a beam, an explosion, a hit's sparks).
     emissive: bool,
     /// The batches that give off light, this frame.
@@ -1057,6 +1091,11 @@ impl Screen {
             in_discs: false,
             star: None,
             star_colours: std::collections::HashMap::new(),
+            dust_visible: true,
+            dust_step: None,
+            dust_travel: [0.0; 3],
+            dust_clock: None,
+            dust: Vec::new(),
             emissive: false,
             glowing: Vec::new(),
             on_fire: false,
@@ -2381,6 +2420,7 @@ impl Screen {
         self.lights.clear();
         self.eclipses.clear();
         self.star = None;
+        self.dust.clear();
         self.glowing.clear();
         self.burning.clear();
         self.sky_view = None;
@@ -2529,6 +2569,7 @@ impl Screen {
                     sky: self.sky_view.take(),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
+                    dust: std::mem::take(&mut self.dust),
                     hud: Vec::new(),
                     crisp: Vec::new(),
                 });
@@ -2548,6 +2589,9 @@ impl Screen {
                     unit[k] = 1.0;
                     camera.direction(unit).map(|c| c as f32)
                 };
+                if self.dust_visible && state.mode == Mode::Flight {
+                    self.speed_dust(state, &views, &camera);
+                }
                 self.sky_view = Some(crate::modern3d::SkyView {
                     rows: [axis(0), axis(1), axis(2)],
                     key: self.sky,
@@ -2739,6 +2783,7 @@ impl Screen {
                     sky: self.sky_view.take(),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
+                    dust: std::mem::take(&mut self.dust),
                     hud: Vec::new(),
                     crisp: Vec::new(),
                 });
@@ -3051,6 +3096,93 @@ impl Screen {
         }
         self.text(10, 146, status, 15);
         self.present();
+    }
+
+    /// The modern engine's speed dust (presentation only: its own hash, never the game's random
+    /// numbers). Motes are fixed in the ship's own frame all round it, in [`DUST_LAYERS`] layers
+    /// each [`DUST_SPREAD`] times as far apart as the last; a layer shows at the speeds where it
+    /// streams past well (some 4 to 32 spacings a second), fading in and out so the layers hand
+    /// over smoothly from a few hundred m/s to 10000x time. Each mote is a streak from where it is
+    /// to where it was four frames' travel ago (at most three spacings), so at speed the motes
+    /// stretch into lines rushing out from the way the ship is going. Paused, nothing moves.
+    fn speed_dust(&mut self, state: &Flight, views: &ViewState, camera: &Camera) {
+        let now = std::time::Instant::now();
+        let clock = self
+            .dust_clock
+            .map_or(0.0, |then| now.duration_since(then).as_secs_f64());
+        let real = self.dust_step.take().unwrap_or(clock).clamp(0.0, 0.1);
+        self.dust_clock = Some(now);
+        let console = views.console;
+        let rate = if console.paused {
+            0.0
+        } else {
+            let table = crate::console::TIME_ACCELERATION;
+            f64::from(table[console.acceleration.min(4)]) / f64::from(table[0])
+        };
+        let moved = state.velocity.map(|v| v * real * rate);
+        for (travel, step) in self.dust_travel.iter_mut().zip(moved) {
+            *travel += step;
+        }
+        let length = |v: [f64; 3]| v.iter().map(|c| c * c).sum::<f64>().sqrt();
+        let speed = length(state.velocity) * rate;
+        let step = length(moved);
+        let smooth = |low: f64, high: f64, x: f64| {
+            let t = ((x - low) / (high - low)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        for layer in 0..DUST_LAYERS {
+            let cell = DUST_CELL * DUST_SPREAD.powi(layer as i32);
+            let pace = (speed / cell).max(1.0e-9).log2();
+            let weight = smooth(-1.0, 2.0, pace) * (1.0 - smooth(5.0, 8.0, pace));
+            if weight <= 0.0 {
+                continue;
+            }
+            let reach = f64::from(DUST_REACH) * cell;
+            // Each streak is drawn at its own scale (a projection does not change with one).
+            let scale = 1.0e5 / cell;
+            let trail = if step > 0.0 {
+                (4.0 * step).min(3.0 * cell) / step
+            } else {
+                0.0
+            };
+            let base = self.dust_travel.map(|c| (c / cell).floor() as i64);
+            let span = -i64::from(DUST_REACH)..=i64::from(DUST_REACH);
+            for dz in span.clone() {
+                for dy in span.clone() {
+                    for dx in span.clone() {
+                        let at = [base[0] + dx, base[1] + dy, base[2] + dz];
+                        let hash = dust_hash(at, layer);
+                        if (hash >> 56) as f64 >= DUST_CHANCE * 256.0 {
+                            continue;
+                        }
+                        let part = |shift: u32| ((hash >> shift) & 0xffff) as f64 / 65_536.0;
+                        let offset: [f64; 3] = std::array::from_fn(|k| {
+                            (at[k] as f64 + part(16 * k as u32)) * cell - self.dust_travel[k]
+                        });
+                        let away = length(offset) / reach;
+                        // Streaming past fast (the top of the layer's band), a mote glows.
+                        let glow = 1.0 + 0.5 * smooth(3.0, 6.0, pace);
+                        let alpha =
+                            weight * glow * (1.0 - smooth(0.6, 1.0, away)) * (0.5 + 0.5 * part(48));
+                        if alpha <= 0.01 {
+                            continue;
+                        }
+                        let head = camera.direction(offset);
+                        let tail =
+                            camera.direction(std::array::from_fn(|k| offset[k] + moved[k] * trail));
+                        if head[2] <= 0.0 && tail[2] <= 0.0 {
+                            continue;
+                        }
+                        self.dust.push(crate::modern3d::DustStreak {
+                            head: head.map(|c| (c * scale) as f32),
+                            tail: tail.map(|c| (c * scale) as f32),
+                            alpha: alpha as f32,
+                            near: (1.0 - away).clamp(0.0, 1.0) as f32,
+                        });
+                    }
+                }
+            }
+        }
     }
 
     /// A star's colour, from its model drawn head-on close by in a fixed light, once per star
@@ -3678,6 +3810,11 @@ impl Screen {
         });
         let light = self.scene_light(scene, camera);
         for effect in order {
+            // The modern engine draws its own speed dust instead of the original's clouds,
+            // which all start on the line of flight and spread from one point.
+            if self.capture && effect.model == ffe_core::dust::MODEL {
+                continue;
+            }
             let origin = camera.point(effect.centre).map(|v| v * scale);
             if origin.iter().any(|value| value.abs() > STATION_DRAW_RANGE) {
                 continue;

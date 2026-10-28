@@ -5152,10 +5152,11 @@ fn run() -> Result<(), String> {
                 // F1035/F769: the space-dust spawn and lifecycle for this
                 // flight frame. `DATA_009018` is the first "Other Options" row
                 // ("Space dust, clouds etc"); `DATA_008867` is the altitude
-                // F1033 measured above; `DATA_009123` is zero in normal flight
-                // (F908's `0x12` belongs to the hyperspace exit effect, which
-                // the port does not run). The dust's own stream is seeded from
-                // the system code (EXP-020).
+                // F1033 measured above; `DATA_009123` is the time acceleration's
+                // shift (F207 copies F208's `DATA_009013`: 0, 3, 7, 10, 12), which
+                // keeps the dust about 1.3 real seconds ahead and makes its clouds
+                // that much larger. The dust's own stream is seeded from the
+                // system code (EXP-020).
                 let velocity = state.velocity.map(|value| {
                     (value * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT
                         / ffe_rs::original_flight::MM_PER_SECOND) as i64
@@ -5172,7 +5173,7 @@ fn run() -> Result<(), String> {
                         detail: prefs.others[0],
                         flight_active: flight_frame,
                         time_running: true,
-                        speed: 0,
+                        speed: ffe_core::dust::ACCELERATION_SHIFT[acceleration.min(4)],
                     },
                 );
                 let mass = scene
@@ -6740,6 +6741,7 @@ fn run() -> Result<(), String> {
         // option (the original's DATA_008815..817 / DATA_009019).
         screen.sky = prefs::space_colour_rgb(prefs.space_colour);
         screen.stars_visible = prefs.others[1];
+        screen.dust_visible = prefs.others[0];
         screen.lock_external = prefs.others[2];
         // The Graphic Detail page's "Level of Shape Detail" row is stored one
         // less than the original's `DATA_008812` (High, the default, is 1);
