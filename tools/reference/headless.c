@@ -2013,6 +2013,21 @@ static int child_model_vector(int index, long depth)
     instance[0x14c/4]=(unsigned long)globals;
     instance[0x150/4]=model[1];
     memcpy((char *)instance+0x134,light,12);
+    /* Optional object words and the F1685 direction (+0x38), so a slot can be
+       run as a seeded body (a gas giant's rings read global 2). */
+    if(getenv("FFE_CHILD_GLOBAL2")) *(unsigned short *)((char *)globals+0xa0)=(unsigned short)strtoul(getenv("FFE_CHILD_GLOBAL2"),0,0);
+    if(getenv("FFE_CHILD_GLOBAL3")) *(unsigned short *)((char *)globals+0xa2)=(unsigned short)strtoul(getenv("FFE_CHILD_GLOBAL3"),0,0);
+    if(getenv("FFE_CHILD_MATRIX")) {
+        long m[9];
+        sscanf(getenv("FFE_CHILD_MATRIX"),"%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld",&m[0],&m[1],&m[2],&m[3],&m[4],&m[5],&m[6],&m[7],&m[8]);
+        memcpy((char *)instance+0x14,m,36);
+        memcpy((char *)instance+0x9c,m,36);
+    }
+    if(getenv("FFE_CHILD_DIRECTION")) {
+        long d[3]={0,0,0};
+        sscanf(getenv("FFE_CHILD_DIRECTION"),"%ld,%ld,%ld",&d[0],&d[1],&d[2]);
+        memcpy((char *)instance+0x38,d,12);
+    }
     /* DATA_008831 shades: a test pattern, copied to +0x84 as F1683 would. */
     for(i=0;i<24;++i) ref_shades[i]=(unsigned char)(i*29+3);
     memcpy((char *)instance+0x84,ref_shades,24);

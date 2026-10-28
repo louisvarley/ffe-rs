@@ -1530,11 +1530,28 @@ fn run(
                             ))
                         }
                     };
-                    // F1771: rotate by (a, b) / sqrt(a^2 + b^2); a zero length is skipped.
-                    if a.wrapping_mul(a).wrapping_add(b.wrapping_mul(b)) != 0 {
-                        return Err(format!(
-                            "Direction alignment at {offset:#x} needs the original square-root table."
-                        ));
+                    // F1771: F1467's root of the 32-bit `a*a + b*b`; a zero root
+                    // leaves the basis. Each component over the root through F1523
+                    // (its magnitude, sign restored) is F1744's cosine and sine.
+                    let root = crate::model_math::table_root(
+                        a.wrapping_mul(a).wrapping_add(b.wrapping_mul(b)) as u32,
+                    );
+                    if root != 0 {
+                        let ratio = |value: i32| {
+                            let magnitude =
+                                crate::model_math::fraction(value.unsigned_abs(), root) as i32;
+                            if value < 0 {
+                                magnitude.wrapping_neg()
+                            } else {
+                                magnitude
+                            }
+                        };
+                        crate::model_math::rotate_by(
+                            &mut working.basis,
+                            (code >> 5 & 3) as u8,
+                            ratio(a),
+                            ratio(b),
+                        )?;
                     }
                 }
                 Some(command.size as i32)

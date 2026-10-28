@@ -1078,16 +1078,36 @@ fn beams_chains_and_direction_alignment() {
     )
     .unwrap();
     assert_eq!(context.basis, ffe_core::model::IDENTITY);
-    // A non-zero pair needs the original square-root table; axis 3 is undefined.
+    // F1771: mode 0 takes (d[1], d[2]) = (3, 4); F1467's root of 25 is 5, so
+    // F1744 turns rows 1 and 2 by cos 3/5, sin 4/5 (F1523 Q31 fractions).
     let mut aimed = VertexContext {
         direction: [0, 3, 4],
         ..Default::default()
     };
-    let before = aimed.clone();
-    for code in [0x0019, 0x0079] {
-        assert!(execute(&bytes(&[code, 0]), 8, &mut aimed, &visibility(), None, 8).is_err());
-        assert_eq!(aimed, before);
-    }
+    execute(&bytes(&[0x0019, 0]), 8, &mut aimed, &visibility(), None, 8).unwrap();
+    let (cos, sin) = ((3i64 << 31) / 5, (4i64 << 31) / 5);
+    let row = |v: i64| (i64::from(i32::MAX) * v >> 31) as i32;
+    assert_eq!(aimed.basis[0], i32::MAX);
+    assert_eq!(aimed.basis[4], row(cos));
+    assert_eq!(aimed.basis[5], row(sin));
+    assert_eq!(aimed.basis[7], row(-sin));
+    assert_eq!(aimed.basis[8], row(cos));
+    // Axis 3 is undefined.
+    let mut undefined = VertexContext {
+        direction: [0, 3, 4],
+        ..Default::default()
+    };
+    let before = undefined.clone();
+    assert!(execute(
+        &bytes(&[0x0079, 0]),
+        8,
+        &mut undefined,
+        &visibility(),
+        None,
+        8
+    )
+    .is_err());
+    assert_eq!(undefined, before);
 }
 
 #[test]

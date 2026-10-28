@@ -392,6 +392,27 @@ fn executed_reference_child_models() {
         for (k, chunk) in shade_bytes.chunks_exact(4).enumerate() {
             context.locals[12 + k] = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
+        // The harness's optional object words and F1685 direction (+0x38).
+        let word = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .map(|v| u16::from_str_radix(v.trim_start_matches("0x"), 16).unwrap())
+        };
+        if let Some(value) = word("FFE_CHILD_GLOBAL2") {
+            context.globals[2] = value;
+        }
+        if let Some(value) = word("FFE_CHILD_GLOBAL3") {
+            context.globals[3] = value;
+        }
+        if let Ok(value) = std::env::var("FFE_CHILD_MATRIX") {
+            let parts: Vec<i32> = value.split(',').map(|v| v.parse().unwrap()).collect();
+            context.matrix = std::array::from_fn(|i| parts[i]);
+            context.basis = context.matrix;
+        }
+        if let Ok(value) = std::env::var("FFE_CHILD_DIRECTION") {
+            let parts: Vec<i32> = value.split(',').map(|v| v.parse().unwrap()).collect();
+            context.direction = [parts[0], parts[1], parts[2]];
+        }
         let instance = InstanceContext {
             position: [0, 0, depth],
             generation: 2,

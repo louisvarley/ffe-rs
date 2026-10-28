@@ -1328,6 +1328,9 @@ impl ModelViewer {
             scale: model.scale,
             globals: inputs.globals,
             locals: inputs.locals,
+            // F1685: +0x38 is the light (+0x134) turned into the object frame,
+            // which opcode 25 (F1771) aligns the basis with (a planet's rings).
+            direction: light,
             ..Default::default()
         };
         if let Some(thrust) = self.thrust {
@@ -2639,6 +2642,11 @@ impl ViewerModel {
     /// The model's command stream.
     pub fn commands(&self) -> &[u8] {
         &self.commands
+    }
+
+    /// The model's vertex records (six bytes each).
+    pub fn vertex_records(&self) -> &[u8] {
+        &self.vertices
     }
 
     pub fn radius(&self) -> Option<f64> {

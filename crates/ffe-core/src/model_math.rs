@@ -159,22 +159,9 @@ impl SineTable {
 
     /// F1744 with original sine/cosine inputs, not F1743's instance operand decoding.
     pub fn rotate(&self, matrix: &mut [i32; 9], axis: u8, angle: i32) -> Result<(), String> {
-        let (a, b) = match axis {
-            0 => (3, 6),
-            1 => (6, 0),
-            2 => (0, 3),
-            _ => return Err("Model rotation axis must be 0, 1 or 2.".to_owned()),
-        };
         let cosine = self.sin32(angle.wrapping_add(0x4000));
         let sine = self.sin32(angle);
-        for component in 0..3 {
-            let av = matrix[a + component];
-            let bv = matrix[b + component];
-            matrix[a + component] = multiply(av, cosine).wrapping_add(multiply(bv, sine));
-            matrix[b + component] =
-                multiply(av.wrapping_neg(), sine).wrapping_add(multiply(bv, cosine));
-        }
-        Ok(())
+        rotate_by(matrix, axis, cosine, sine)
     }
 
     /// F1741: the 0x8000 local-basis rotation (F1742/F1743), or the 0x0000/0x4000
@@ -209,6 +196,26 @@ impl SineTable {
         let angle = angle_operand(operand, context);
         self.rotate(&mut context.basis, axis, angle)
     }
+}
+
+/// F1744: turn two basis rows by a Q31 cosine and sine. Axis 0 turns rows 1
+/// and 2, axis 1 rows 2 and 0, axis 2 rows 0 and 1 (`+0xa8/+0xb4`,
+/// `+0xb4/+0x9c`, `+0x9c/+0xa8`).
+pub fn rotate_by(matrix: &mut [i32; 9], axis: u8, cosine: i32, sine: i32) -> Result<(), String> {
+    let (a, b) = match axis {
+        0 => (3, 6),
+        1 => (6, 0),
+        2 => (0, 3),
+        _ => return Err("Model rotation axis must be 0, 1 or 2.".to_owned()),
+    };
+    for component in 0..3 {
+        let av = matrix[a + component];
+        let bv = matrix[b + component];
+        matrix[a + component] = multiply(av, cosine).wrapping_add(multiply(bv, sine));
+        matrix[b + component] =
+            multiply(av.wrapping_neg(), sine).wrapping_add(multiply(bv, cosine));
+    }
+    Ok(())
 }
 
 /// F1739 as opcode 28's base forms call it (F1741 passes `code << 1`).
