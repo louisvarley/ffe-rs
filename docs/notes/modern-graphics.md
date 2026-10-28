@@ -270,8 +270,20 @@ Status (2026-10-28): **implemented**.
   line from the star through the middle of the view, all dimmed as a planet covers it and gone when
   it is hidden.
 
-Not yet on the GPU (still the original's pixels behind the models): particle chains (F1814: debris
-and exhaust specks), and the HUD and its gunsight.
+### Glowing beams, explosions and particles
+
+Status (2026-10-28): **implemented**.
+
+- F1814's particle chains (debris, exhaust and fire specks) keep each point's view position beside
+  its screen point (`ChainEmission::views`, not the original's) and are drawn as GPU glows of the
+  original's particle size.
+- A laser beam, an explosion (model 0x9b) and a hit's sparks (0x9e) are marked as giving off light
+  (`World::glowing`): each of their colours is drawn up to 2.2 times brighter by how saturated it is,
+  so fire and beams run past white and the bloom spreads them while grey debris stays as it is, and
+  a planet's shadow does not darken them (`an_explosion_glows_on_the_gpu`).
+
+Not yet on the GPU (still the original's pixels behind the models): complex polygons (opcode 5, such
+as the fireball's body; they are queued as screen-space outlines), and the HUD and its gunsight.
 
 ## What comes next
 

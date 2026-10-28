@@ -104,6 +104,9 @@ pub struct ChainEmission {
     pub size: i32,
     /// Screen points in F1766's pair order (high byte then low byte).
     pub points: Vec<[i16; 2]>,
+    /// Not the original's: each point in view space, aligned with [`Self::points`], for a
+    /// renderer that draws the particles itself (the port's modern engine).
+    pub views: Vec<[i32; 3]>,
 }
 
 /// A line operand event. This is the original handler's decoded input, not a
@@ -1457,6 +1460,7 @@ fn run(
                         context: working.clone(),
                         size: 0,
                         points: Vec::new(),
+                        views: Vec::new(),
                     };
                     if let Some(live) = vertices.as_deref_mut() {
                         // F1474 then the instance-scale adjustment: a negative
@@ -1503,6 +1507,7 @@ fn run(
                                     let y = i32::from(point.screen[1]) - 1;
                                     if (x as u16) < 0x140 && (y as u16) < 0x9e {
                                         emission.points.push([x as i16, y as i16]);
+                                        emission.views.push(point.view);
                                     }
                                 }
                             }

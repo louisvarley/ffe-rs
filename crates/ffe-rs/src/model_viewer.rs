@@ -2426,12 +2426,23 @@ impl ModelViewer {
                     // `points`).
                     let rgb = resolve_colour(chain.chain.material, chain.context.colour, [0; 3]);
                     let colour = self.rgb(rgb);
-                    for [x, y] in &chain.points {
+                    for (k, [x, y]) in chain.points.iter().enumerate() {
                         let spans = particle_clipped(*x, *y, chain.size)
                             .into_iter()
                             .map(|s| [s.x, s.y, s.width])
                             .collect();
-                        push!(Shape::Spans(spans, colour));
+                        // For the modern engine, the particle as a light at its view position.
+                        let light = chain.views.get(k).map(|view| Solid {
+                            views: vec![*view],
+                            rgb: colour,
+                            texture: None,
+                            path: false,
+                            sprite: Some(Sprite {
+                                size: chain.size,
+                                halo: None,
+                            }),
+                        });
+                        push!(Shape::Spans(spans, colour), light);
                     }
                 }
                 Primitive::Polygon(polygon) => {

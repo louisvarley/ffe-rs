@@ -32,6 +32,9 @@ pub const TERRAIN_DETAIL: i32 = 1;
 /// Faces whose normals are closer than this (the cosine of 50 degrees) are shaded smoothly
 /// across their shared corners; sharper edges stay sharp.
 const SMOOTH_EDGE: f32 = 0.643;
+/// How much brighter than its colour the fully saturated parts of an object that gives off light
+/// are drawn (fire, a beam), so that they run past white and the bloom spreads them.
+const EMISSIVE: f32 = 2.2;
 /// The light an object keeps in a planet's full shadow (from the planet's day side and the sky),
 /// as a share of its sunlit colour.
 const SHADOW_AMBIENT: f32 = 0.3;
@@ -56,6 +59,8 @@ pub struct World {
     pub eclipses: Vec<(usize, f32)>,
     /// The star, when it is ahead, for its hot core, glare and lens flare.
     pub star: Option<Star>,
+    /// The batches that give off light (beams, explosions, a hit's sparks).
+    pub glowing: Vec<usize>,
     /// The textured faces' bitmaps (their original indices), each once.
     pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
@@ -556,14 +561,30 @@ pub fn scene(
                 .map_or(1.0, |(_, seen)| {
                     SHADOW_AMBIENT + (1.0 - SHADOW_AMBIENT) * seen
                 });
+            // An object that gives off light is lit by itself, not the star.
+            let glowing = world.glowing.contains(&index);
             for (solid, shade) in solids.iter().zip(&shading) {
                 let [r, g, b] = colour(solid.rgb);
+                // In an object that gives off light, its coloured parts (fire, a beam) glow by
+                // how saturated they are; grey debris stays as it is. It is lit by itself, so a
+                // planet's shadow does not darken it.
+                let glow = if glowing {
+                    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
+                    let saturation = if high > 0.0 { (high - low) / high } else { 0.0 };
+                    1.0 + (EMISSIVE - 1.0) * saturation
+                } else {
+                    1.0
+                };
+                let shadow = if glowing { glow } else { shadow };
                 let rgba = [r * shadow, g * shadow, b * shadow, 1.0];
                 let point = |v: [i32; 3]| v.map(|c| c as f32);
                 if let (Some(sprite), [at]) = (&solid.sprite, &solid.views[..]) {
-                    batch
-                        .sprites
-                        .push(light(sprite, point(*at), [r, g, b], pixel));
+                    batch.sprites.push(light(
+                        sprite,
+                        point(*at),
+                        [r * glow, g * glow, b * glow],
+                        pixel,
+                    ));
                     continue;
                 }
                 // Lines and curves about one of the original's pixels wide.
@@ -696,6 +717,7 @@ mod tests {
             lights: vec![],
             eclipses: vec![],
             star: None,
+            glowing: vec![],
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
         let scene = scene(&world, 640, 316, &mut MapCache::default());
@@ -751,6 +773,7 @@ mod tests {
             lights: vec![],
             eclipses: vec![],
             star: None,
+            glowing: vec![],
             snapshot: snapshot.clone(),
         };
         // The HUD drew one pixel at the square's centre after the world phase.

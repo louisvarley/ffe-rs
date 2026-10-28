@@ -973,6 +973,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: the GPU view in floating point (original colours exact, highlights brighter than white run to white), additive glows, and the star's white-hot core, glare and lens flare, dimmed when a planet covers it. enhanced-4 (HDR output) stays todo: this is HDR rendering, not HDR display. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: particle chains as GPU glows, and beams, explosions and hit sparks give off light (saturated colours past white, bloomed). Remaining count unchanged."
     }
   ]
 };

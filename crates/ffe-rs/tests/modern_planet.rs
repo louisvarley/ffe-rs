@@ -447,3 +447,68 @@ fn a_station_in_a_planets_shadow_is_eclipsed() {
     assert!(shadowed < 0.1, "the station is eclipsed");
     assert_eq!(sunlit, 1.0, "out of the shadow it is not");
 }
+
+/// An explosion ahead (F942's model 155 at full size) gives off light on the GPU: its batch is
+/// marked, and the GPU picture is brighter there than the original's colours alone.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
+fn an_explosion_glows_on_the_gpu() {
+    use ffe_rs::screen::SystemEffect;
+    let mut gpu = Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    state.position = [0.0, 0.0, -3000.0];
+    screen.effects = vec![SystemEffect {
+        model: ffe_core::effects::EXPLOSION_MODEL,
+        centre: [0.0, 0.0, -2800.0],
+        axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        timer: 0xc000,
+        size: 0xffff,
+        scale: None,
+    }];
+    state.system_flight = true;
+    screen.capture = true;
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+    let world = screen.world().cloned().expect("the flight view's world");
+    eprintln!(
+        "{} batches ({:?} solids), glowing {:?}",
+        world.batches.len(),
+        world.batches.iter().map(Vec::len).collect::<Vec<_>>(),
+        world.glowing
+    );
+    assert!(
+        !world.glowing.is_empty(),
+        "the explosion's batch gives off light"
+    );
+    let (width, height) = (1280usize, 800usize);
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let mut target = vec![0u32; width * height];
+    ffe_rs::modern::ModernRenderer::new().render(screen.logical_pixels(), &mut target, width, rect);
+    gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)
+        .unwrap();
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        write_png(
+            &std::path::Path::new(&dir).join("modern-explosion.png"),
+            &target,
+            width,
+            height,
+        );
+    }
+}

@@ -459,6 +459,10 @@ pub struct Screen {
     in_discs: bool,
     /// The star in view this frame, for the modern engine's glare and flare.
     star: Option<crate::modern3d::Star>,
+    /// The next object drawn gives off light (a beam, an explosion, a hit's sparks).
+    emissive: bool,
+    /// The batches that give off light, this frame.
+    glowing: Vec<usize>,
     /// Their textures' bitmaps so far this frame, each once.
     bitmaps: Vec<crate::modern3d::WorldBitmap>,
     /// The bitmaps read so far, so they are not read again every frame.
@@ -1003,6 +1007,8 @@ impl Screen {
             object_scale: 1.0,
             in_discs: false,
             star: None,
+            emissive: false,
+            glowing: Vec::new(),
             bitmaps: Vec::new(),
             bitmap_memory: Vec::new(),
             deferred: Vec::new(),
@@ -1118,7 +1124,10 @@ impl Screen {
             scene.render_scene_with(crate::combat::BEAM_MODEL, rows, origin, light, &inputs)
         {
             self.jitter.cursor = frame.jitter;
+            // The beam gives off light in the modern engine.
+            self.emissive = true;
             self.draw_frame(scene, &frame);
+            self.emissive = false;
         }
     }
 
@@ -2264,6 +2273,7 @@ impl Screen {
         self.lights.clear();
         self.eclipses.clear();
         self.star = None;
+        self.glowing.clear();
         self.bitmaps.clear();
         self.deferred.clear();
         self.world = None;
@@ -2404,6 +2414,7 @@ impl Screen {
                     lights: std::mem::take(&mut self.lights),
                     eclipses: std::mem::take(&mut self.eclipses),
                     star: self.star.take(),
+                    glowing: std::mem::take(&mut self.glowing),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2589,6 +2600,7 @@ impl Screen {
                     lights: std::mem::take(&mut self.lights),
                     eclipses: std::mem::take(&mut self.eclipses),
                     star: self.star.take(),
+                    glowing: std::mem::take(&mut self.glowing),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2962,6 +2974,9 @@ impl Screen {
             self.atmospheres
                 .extend(frame.atmospheres.iter().map(|shell| (index, shell.clone())));
             self.lights.extend(frame.light.map(|light| (index, light)));
+            if std::mem::take(&mut self.emissive) {
+                self.glowing.push(index);
+            }
             // An object (not a body) in a body's shadow: how much of the star it still sees.
             if let (false, Some(origin), Some(star)) = (
                 self.in_discs,
@@ -3505,7 +3520,13 @@ impl Screen {
             ) {
                 if !frame.shapes.is_empty() {
                     self.jitter.cursor = frame.jitter;
+                    // Explosions and a hit's sparks give off light in the modern engine.
+                    self.emissive = matches!(
+                        effect.model,
+                        ffe_core::effects::EXPLOSION_MODEL | ffe_core::effects::HIT_MODEL
+                    );
                     self.draw_frame(scene, &frame);
+                    self.emissive = false;
                 }
             }
         }
