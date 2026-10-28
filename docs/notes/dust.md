@@ -229,11 +229,15 @@ about the dust reaches the simulation. Classic keeps the original's clouds.
   ship's velocity times real time times the acceleration; paused, nothing
   moves), at most one in each place of a grid, 80% of places filled, up to
   five spacings each way.
-- Six layers, each eight times as far apart as the last (97 m to about
-  3,200 km). A layer shows at the speeds where it streams past well (fading in
-  from half a spacing a second, full from 4 to 32, gone by 256), so the layers
-  hand over smoothly from a few hundred m/s to 10000x time, and motes fade out
-  towards the edge of their layer.
+- Layers each eight times as far apart as the last (from 97 m), as many as
+  the speed needs. A layer shows while it streams past fast: fading in from 3
+  spacings a second, full from 11 to 90, gone by 360 (the closest layer also
+  from half a spacing a second, about 50 m/s), so every speed, up to the top
+  speed at 10000x, has the same rushing look and the layers hand over
+  smoothly; motes fade out towards the edge of their layer. (The first version
+  had six fixed layers, the largest 3,200 km apart, so above about 2.7 times
+  light speed the dust vanished; and each layer faded in while still slow, so
+  higher speeds looked slower.)
 - Each mote is a streak from where it is to where it was four frames' travel
   ago (at most three spacings): at speed the streaks rush out from the way the
   ship is going, like a starship's warp. Blue-white, brightest at the mote and
@@ -242,5 +246,5 @@ about the dust reaches the simulation. Classic keeps the original's clouds.
 - The "Space dust, clouds etc" option turns it off; there is none inside a
   planet's haze. `tests/modern_planet.rs`,
   `speed_dust_streams_out_from_the_way_ahead`, checks the streaks point back to
-  the way ahead at 300 m/s, 5 km/s and 5 km/s at 1000x, and that paused motes
-  are points.
+  the way ahead at 300 m/s, 5 km/s, 5 km/s at 1000x and 50,000 km/s at 10000x,
+  and that paused motes are points.

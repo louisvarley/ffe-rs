@@ -714,8 +714,9 @@ fn speed_dust_streams_out_from_the_way_ahead() {
         ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
             .unwrap();
     let viewer = ModelViewer::new(&cache).unwrap();
-    // Flight units a second (9.7 m each): 300 m/s, 5 km/s, and 5 km/s at 1000x.
-    for (n, (speed, acceleration)) in [(31.0, 0usize), (515.0, 0), (515.0, 3)]
+    // Flight units a second (9.7 m each): 300 m/s, 5 km/s, 5 km/s at 1000x and 50,000 km/s at
+    // 10000x (past the light speed where the first version's layers ran out).
+    for (n, (speed, acceleration)) in [(31.0, 0usize), (515.0, 0), (515.0, 3), (5.15e6, 4)]
         .into_iter()
         .enumerate()
     {

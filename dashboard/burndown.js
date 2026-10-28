@@ -1018,6 +1018,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: text in the main font is drawn with a real font (Bahnschrift, or the owner's own) at full resolution, in the original's layout. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: speed dust keeps its fast streaking look at every speed, including top speed at 10000x (layers no longer run out). Remaining count unchanged."
     }
   ]
 };
