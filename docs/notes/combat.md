@@ -849,3 +849,31 @@ effects are framed by `effects_view`.
   quantisation is close enough. The `--missile-probe` reference run calibrates
   the 0.4 s guidance interval, the 24 s (60-update) lifetime and the per-thrust
   acceleration.
+
+## Port addition: Improved combat aids
+
+The World Options page has a Combat choice, Classic (the original, and the
+default) or Improved, stored as `combat=classic|improved` in `config.cfg`.
+Improved draws three aids over the flight view (`crates/ffe-rs/src/enhanced_combat.rs`);
+Classic leaves the original HUD exactly as it was.
+
+- **Target brackets.** Corner brackets round the locked ship with its name above
+  them. They are red when out of laser range, amber within F931's range
+  (`laser::RANGE`, 0x7fffff) and yellow with "ON TARGET" below when the firing
+  mount's ray hits the ship's box now. The test is the same `laser::hit` a shot makes. F1100's
+  own range text is unchanged.
+- **Off-view arrow.** When the locked ship is off the view or behind, a filled
+  arrow on the view's edge points the way to turn: the direction of the ship's
+  offset in the camera frame. A ship dead astern points down.
+- **Contacts list.** Down the right of the view (x 230, from y 36, 20-pixel rows,
+  six rows, below F1099's hull/shields text), the visible ships are listed with
+  hostiles first, then the nearest. Each row has a marker box (filled for the
+  locked ship, red for hostiles, green otherwise), the name and the range. A
+  click on a row locks that ship as a click on the ship does (the combat target
+  and the missile target). The list is hidden while the navigation computer's
+  places list is open.
+
+There is no lead (deflection) indicator. The player's lasers are hitscan: F931
+tests the ray against the targets in the frame the trigger is pressed and
+nothing travels, so a ship under the sight is hit. The on-target bracket is that
+test. Missiles home on their own.

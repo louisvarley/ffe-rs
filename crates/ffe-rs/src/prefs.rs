@@ -179,6 +179,8 @@ pub enum Action {
     /// Port-only world choices: a [`TRAFFIC_LABELS`] index, and police/pirates.
     Traffic(usize),
     Hostiles(bool),
+    /// Port addition: the Improved combat aids on (`true`) or Classic.
+    Combat(bool),
     /// Port-only display choices (window scale 1..=6).
     WindowScale(usize),
     DisplayFit(FitMode),
@@ -283,6 +285,9 @@ pub struct Prefs {
     pub traffic: usize,
     /// Port addition: police and pirates fly (the original's behaviour).
     pub hostiles: bool,
+    /// Port addition: the Improved combat aids ([`crate::enhanced_combat`]);
+    /// `false` (Classic, the original's HUD) by default.
+    pub combat_improved: bool,
     /// Port-only presentation choices; persisted in `saves/display.cfg`.
     pub display: DisplaySettings,
     /// Borderless full-screen. Session-only: a saved full-screen launch would
@@ -308,6 +313,7 @@ impl Default for Prefs {
             starport_approach: 0,
             traffic: 0,
             hostiles: true,
+            combat_improved: false,
             display: DisplaySettings::default(),
             fullscreen: false,
         }
@@ -651,6 +657,17 @@ impl Prefs {
                         15,
                     ));
                 }
+                for (index, label) in ["Classic (original)", "Improved"].into_iter().enumerate() {
+                    rows.push(row(
+                        176,
+                        72 + 10 * index as i32,
+                        label,
+                        Action::Combat(index == 1),
+                        Mark::Radio(self.combat_improved == (index == 1)),
+                        true,
+                        15,
+                    ));
+                }
                 rows.push(row(
                     32,
                     126,
@@ -910,15 +927,27 @@ impl Prefs {
                     colour: 16,
                 });
                 texts.push(Text {
+                    x: 176,
+                    y: 62,
+                    text: "Combat:",
+                    colour: 16,
+                });
+                texts.push(Text {
                     x: 32,
-                    y: 86,
+                    y: 96,
                     text: "Medium and Heavy add ships that fly between",
                     colour: 15,
                 });
                 texts.push(Text {
                     x: 32,
-                    y: 94,
+                    y: 104,
                     text: "the planets and ports. New systems only.",
+                    colour: 15,
+                });
+                texts.push(Text {
+                    x: 32,
+                    y: 114,
+                    text: "Improved: target brackets and contacts list.",
                     colour: 15,
                 });
                 texts.push(Text {
@@ -1061,6 +1090,10 @@ impl Prefs {
             }
             Action::Hostiles(on) => {
                 self.hostiles = on;
+                Activate::None
+            }
+            Action::Combat(improved) => {
+                self.combat_improved = improved;
                 Activate::None
             }
             Action::WindowScale(scale) if (MIN_SCALE..=MAX_SCALE).contains(&(scale as u32)) => {

@@ -344,6 +344,25 @@ fn build_save(
 
 /// The persisted view of the live preference pages. The remap table is not
 /// edited by this build, so it is carried through unchanged.
+/// The Improved combat aids' contacts list ([`ffe_rs::enhanced_combat`]):
+/// the visible ships, hostiles first, then the nearest.
+fn combat_contacts(nav: &Navigator, player_at: [i64; 3]) -> Vec<ffe_rs::enhanced_combat::Contact> {
+    ffe_rs::enhanced_combat::order(
+        nav.ships
+            .iter()
+            .filter(|ship| ship.visible())
+            .map(|ship| ffe_rs::enhanced_combat::Contact {
+                id: ship.id,
+                name: ship.name.clone(),
+                range: range_label(player_at, ship.position),
+                hostile: ship.is_hostile(),
+                locked: nav.ship_lock == Some(ship.id),
+                distance: distance(player_at, ship.position),
+            })
+            .collect(),
+    )
+}
+
 fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Config {
     settings::Config {
         modern: prefs.modern,
@@ -357,6 +376,7 @@ fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Co
         starport_approach: prefs.starport_approach,
         traffic: prefs.traffic,
         hostiles: prefs.hostiles,
+        combat_improved: prefs.combat_improved,
         remap: previous.remap.clone(),
     }
 }
@@ -921,6 +941,7 @@ fn run() -> Result<(), String> {
             (MAPS, "prefs-maps.ppm"),
             (PORT, "prefs-port.ppm"),
             (ffe_rs::prefs::DISPLAY, "prefs-display.ppm"),
+            (ffe_rs::prefs::WORLD, "prefs-world.ppm"),
         ] {
             shown.page = page;
             shown.selected = 0;
@@ -1000,6 +1021,7 @@ fn run() -> Result<(), String> {
     prefs.starport_approach = config.starport_approach;
     prefs.traffic = config.traffic;
     prefs.hostiles = config.hostiles;
+    prefs.combat_improved = config.combat_improved;
     let mut stored_config = config;
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
@@ -2731,9 +2753,42 @@ fn run() -> Result<(), String> {
                             };
                         }
                     }
-                    if let Some(point) = click_point
-                        .filter(|(_, y)| console_click.is_none() && (12..118).contains(y))
-                    {
+                    // The Improved combat aids' contacts list: a click on a
+                    // row locks that ship, as a click on the ship does.
+                    let contact_click = click_point
+                        .filter(|_| {
+                            prefs.combat_improved
+                                && console_click.is_none()
+                                && nav.view == NavView::Closed
+                                && views.mode != ViewMode::Missile
+                        })
+                        .and_then(|(x, y)| ffe_rs::enhanced_combat::contact_row(x, y))
+                        .and_then(|row| {
+                            combat_contacts(nav, ship_position(&original, &state))
+                                .get(row)
+                                .map(|contact| contact.id)
+                        });
+                    if let Some(id) = contact_click {
+                        nav.locked = None;
+                        let locked = nav
+                            .lock_ship(id)
+                            .map(|ship| (ship.name.clone(), ship.position));
+                        if let Some((name, at)) = locked {
+                            nav.missile_lock = Some(id);
+                            sound.play(Cue::UiBeep2);
+                            pending_log.replace(
+                                Source::Target,
+                                format!(
+                                    "Locked on {} {}. Space fires.",
+                                    name,
+                                    range_label(ship_position(&original, &state), at)
+                                ),
+                            );
+                        }
+                    }
+                    if let Some(point) = click_point.filter(|(_, y)| {
+                        contact_click.is_none() && console_click.is_none() && (12..118).contains(y)
+                    }) {
                         let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
                         let body_count = nav.bodies.len();
                         let mut candidates: Vec<(usize, [f64; 3], f64)> = nav
@@ -6793,6 +6848,65 @@ fn run() -> Result<(), String> {
                 }
             }
         }
+        // Port addition: the World Options page's Improved combat aids.
+        screen.combat_overlay = nav
+            .as_ref()
+            .filter(|nav| {
+                prefs.combat_improved
+                    && state.mode == ffe_rs::flight::Mode::Flight
+                    && nav.view == NavView::Closed
+                    && views.mode != ViewMode::Missile
+            })
+            .map(|nav| {
+                use ffe_rs::enhanced_combat as aids;
+                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                let contacts = combat_contacts(nav, player_at);
+                let (bracket, arrow) = match locked_ship {
+                    Some(ship) => {
+                        let centre = ship.position.map(|v| v as f64 / unit);
+                        let bracket = Screen::body_screen(
+                            &state,
+                            &views,
+                            scene.as_ref(),
+                            centre,
+                            ship.radius as f64 / unit,
+                        )
+                        .map(|(x, y, radius)| {
+                            // F931's own test: the firing mount's ray against
+                            // the ship's box, as a shot would make it now.
+                            let on_target = ffe_rs::combat::mount(views.mode).is_some_and(|_| {
+                                let stats = scene
+                                    .as_ref()
+                                    .and_then(|scene| scene.ship_stats(state.ship));
+                                let beam = ffe_rs::combat::beam(
+                                    &state,
+                                    stats.as_ref(),
+                                    views.mode,
+                                    [views.turret.yaw, views.turret.pitch],
+                                );
+                                let origin = beam.origin.map(|v| (v * unit).round() as i64);
+                                laser::hit(origin, beam.axes[2], &[ship.target(0)]).is_some()
+                            });
+                            aids::Bracket {
+                                x,
+                                y,
+                                half: aids::bracket_half(radius),
+                                name: ship.name.clone(),
+                                on_target,
+                                in_range: distance(player_at, ship.position) <= laser::RANGE,
+                            }
+                        });
+                        let point = Screen::camera_point(&state, &views, scene.as_ref(), centre);
+                        (bracket, aids::edge_arrow(point))
+                    }
+                    None => (None, None),
+                };
+                aids::Overlay {
+                    bracket,
+                    arrow,
+                    contacts,
+                }
+            });
         // DATA_007252: F1023 takes `DATA_008799 / 0xc22e` (accelerated game
         // tics / tics per second) and keeps its low bit, so the targetter cursor
         // blinks once per game second.

@@ -48,6 +48,7 @@ pub struct Config {
     /// Port addition: the World Options page's choices.
     pub traffic: usize,
     pub hostiles: bool,
+    pub combat_improved: bool,
     pub remap: BTreeMap<String, String>,
 }
 
@@ -66,6 +67,7 @@ impl Default for Config {
             starport_approach: prefs.starport_approach,
             traffic: prefs.traffic,
             hostiles: prefs.hostiles,
+            combat_improved: prefs.combat_improved,
             remap: BTreeMap::new(),
         }
     }
@@ -96,6 +98,14 @@ impl Config {
         out.push_str(&format!("starport_approach={}\n", self.starport_approach));
         out.push_str(&format!("traffic={}\n", self.traffic));
         out.push_str(&format!("police_pirates={}\n", on_off(self.hostiles)));
+        out.push_str(&format!(
+            "combat={}\n",
+            if self.combat_improved {
+                "improved"
+            } else {
+                "classic"
+            }
+        ));
         out.push_str(&self.display.to_config());
         for (action, key) in &self.remap {
             out.push_str(&format!("bind.{action}={key}\n"));
@@ -159,6 +169,13 @@ impl Config {
                     config.traffic = parsed;
                 }
                 "police_pirates" => config.hostiles = parse_on_off(value)?,
+                "combat" => {
+                    config.combat_improved = match value {
+                        "classic" => false,
+                        "improved" => true,
+                        _ => return None,
+                    }
+                }
                 "shape_detail" => {
                     let parsed: usize = value.parse().ok()?;
                     if parsed > 3 {
@@ -385,16 +402,21 @@ mod tests {
     #[test]
     fn world_options_default_to_the_original_and_round_trip() {
         let config = Config::default();
-        assert_eq!((config.traffic, config.hostiles), (0, true));
+        assert_eq!(
+            (config.traffic, config.hostiles, config.combat_improved),
+            (0, true, false)
+        );
         let config = Config {
             traffic: 3,
             hostiles: false,
+            combat_improved: true,
             ..Config::default()
         };
         let text = config.to_config();
-        assert!(text.contains("traffic=3\npolice_pirates=off\n"));
+        assert!(text.contains("traffic=3\npolice_pirates=off\ncombat=improved\n"));
         assert_eq!(Config::from_config(&text), Some(config));
         assert_eq!(Config::from_config("version=2\ntraffic=4\n"), None);
+        assert_eq!(Config::from_config("version=2\ncombat=arcade\n"), None);
     }
 
     #[test]

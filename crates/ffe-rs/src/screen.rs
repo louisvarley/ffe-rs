@@ -525,6 +525,9 @@ pub struct Screen {
     pub target_hud: Option<TargetHud>,
     /// F1099's target shields/hull text, when the target is a ship with that state.
     pub target_damage: Option<TargetDamage>,
+    /// Port addition: the World Options page's Improved combat aids
+    /// ([`crate::enhanced_combat`]); `None` in Classic.
+    pub combat_overlay: Option<crate::enhanced_combat::Overlay>,
     /// F1099's player text: shields, hull, Autopilot, Set/Act/Alt and the turret
     /// angles. The caller sets it each frame.
     pub hud: PlayerHud,
@@ -867,6 +870,19 @@ impl Screen {
         Some((sx as i32, sy as i32))
     }
 
+    /// `centre` (flight units) in the view camera's frame: x right, y up,
+    /// z forward, whether or not it is in front.
+    pub fn camera_point(
+        state: &Flight,
+        views: &ViewState,
+        scene: Option<&ModelViewer>,
+        centre: [f64; 3],
+    ) -> [f64; 3] {
+        let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
+        let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
+        Camera::new(state, views, stats.as_ref(), scale).point(centre)
+    }
+
     fn body_projection_pixels(
         state: &Flight,
         views: &ViewState,
@@ -998,6 +1014,7 @@ impl Screen {
             drive: 0,
             target_hud: None,
             target_damage: None,
+            combat_overlay: None,
             hud: PlayerHud::default(),
             systems: ShipSystems::default(),
             messages: MessageLog::new(),
@@ -1274,6 +1291,83 @@ impl Screen {
             for (index, line) in lines.iter().enumerate() {
                 self.text(235, 1 + index * 10, line, 15);
             }
+        }
+    }
+
+    /// The Improved combat aids ([`crate::enhanced_combat`]): the locked ship's
+    /// brackets, name and range, the off-view arrow, and the contacts list.
+    fn draw_combat_overlay(&mut self) {
+        use crate::enhanced_combat as aids;
+        let Some(overlay) = self.combat_overlay.clone() else {
+            return;
+        };
+        if let Some(bracket) = &overlay.bracket {
+            let colour = bracket.colour();
+            let (x, y, h) = (bracket.x, bracket.y, bracket.half);
+            let arm = (h / 2).max(3);
+            for (cx, cy, sx, sy) in [
+                (x - h, y - h, 1, 1),
+                (x + h, y - h, -1, 1),
+                (x - h, y + h, 1, -1),
+                (x + h, y + h, -1, -1),
+            ] {
+                self.line((cx, cy), (cx + sx * arm, cy), colour);
+                self.line((cx, cy), (cx, cy + sy * arm), colour);
+            }
+            // F1100 already writes the range beside the target; the bracket
+            // adds the name above and the on-target cue below.
+            let name: String = bracket.name.to_ascii_uppercase().chars().take(24).collect();
+            let top = y - h - 9;
+            if top >= 0 {
+                self.text((x - h).max(0) as usize, top as usize, &name, colour);
+            }
+            let below = y + h + 3;
+            if bracket.on_target && below + 7 < 158 {
+                self.text((x - h).max(0) as usize, below as usize, "ON TARGET", colour);
+            }
+        }
+        if let Some(arrow) = overlay.arrow {
+            let [tip, a, b] = aids::arrow_points(arrow);
+            let colour = aids::HOSTILE_COLOUR;
+            self.line(tip, a, colour);
+            self.line(tip, b, colour);
+            self.line(a, b, colour);
+            // Fill: lines from the tip to the base.
+            for step in 0..=8 {
+                let t = f64::from(step) / 8.0;
+                let point = (
+                    (f64::from(a.0) + f64::from(b.0 - a.0) * t).round() as i32,
+                    (f64::from(a.1) + f64::from(b.1 - a.1) * t).round() as i32,
+                );
+                self.line(tip, point, colour);
+            }
+        }
+        for (index, contact) in overlay.contacts.iter().enumerate() {
+            let Some((x, y)) = aids::contact_cell(index) else {
+                break;
+            };
+            let colour = if contact.hostile {
+                aids::HOSTILE_COLOUR
+            } else {
+                aids::FRIENDLY_COLOUR
+            };
+            // A filled box for the locked ship, an outline for the rest.
+            if contact.locked {
+                self.rect(x as usize, y as usize, 10, 10, colour);
+            } else {
+                self.line((x, y), (x + 9, y), colour);
+                self.line((x + 9, y), (x + 9, y + 9), colour);
+                self.line((x + 9, y + 9), (x, y + 9), colour);
+                self.line((x, y + 9), (x, y), colour);
+            }
+            let name: String = contact.name.to_ascii_uppercase().chars().take(12).collect();
+            let text = if contact.locked {
+                aids::ON_TARGET_COLOUR
+            } else {
+                aids::PLAIN_COLOUR
+            };
+            self.text((x + 13) as usize, y as usize, &name, text);
+            self.text((x + 13) as usize, (y + 9) as usize, &contact.range, colour);
         }
     }
 
@@ -2388,6 +2482,7 @@ impl Screen {
                 // F1100's range and F1099's target shields/hull, then the
                 // player's own shields, hull, Autopilot and Set/Act/Alt.
                 self.draw_target_hud();
+                self.draw_combat_overlay();
                 self.draw_player_hud(view);
                 // F1100's targeting tunnels (F1113/F1114), then F1111's fixed
                 // gunsight (bitmap 97) and its blinking targetter cursor, then
