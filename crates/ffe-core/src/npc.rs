@@ -759,7 +759,7 @@ const ARRIVE: f64 = 0.35e6;
 /// How long a F597 overshoot pass runs before the ship turns back in.
 const PASS_SECONDS: f64 = 1.4;
 /// How long a ship runs for before F787/F738's jump-out.
-const FLEE_SECONDS: f64 = 3.0;
+pub const FLEE_SECONDS: f64 = 3.0;
 /// A hull at or below this fraction runs (the port's trigger; see the module
 /// docs: the original has the jump-out states but no low-hull trigger).
 const FLEE_HULL: f64 = 0.25;
@@ -1089,6 +1089,9 @@ pub struct NpcShip {
     /// Port addition: a police or military ship called in on a wanted
     /// player, flying in at [`RESPONSE_SPEED`] from wherever it patrolled.
     pub responding: bool,
+    /// Port addition (Advanced traffic): another ship this one is fighting
+    /// or running from, flown at in place of the player.
+    pub npc_target: Option<u32>,
     /// Seconds of a [`State::Flee`] left before the jump.
     pub flee: f64,
     /// Seconds of the F1536 shield-hit flash left.
@@ -1184,6 +1187,7 @@ impl NpcShip {
             pass: 0.0,
             flee: 0.0,
             responding: false,
+            npc_target: None,
             flash: 0.0,
             death: 0.0,
             station: None,
@@ -1814,6 +1818,31 @@ impl NpcShip {
         })
     }
 
+    /// Port addition (Advanced traffic): F931's shot at another ship, with
+    /// no hostility gate (the caller decides who fights whom).
+    pub fn fire_at(&mut self, tics: u32, centre: [i64; 3], radius: i64) -> Option<Shot> {
+        if !self.alive() || self.state == State::Evade {
+            return None;
+        }
+        let code = self.laser?;
+        let spec = laser::fire(code, &mut self.guns, tics).ok()?;
+        let targets = [laser::Target {
+            index: 0,
+            centre,
+            radius,
+        }];
+        let hit = laser::hit(self.position, self.forward, &targets)?;
+        Some(Shot {
+            ship: self.id,
+            name: self.name.clone(),
+            code,
+            damage: spec.damage,
+            beam: spec.beam,
+            point: hit.point,
+            distance: hit.distance,
+        })
+    }
+
     /// F927's slot recycle / the original ship vanishing: beyond
     /// [`DESPAWN_RANGE`] of the player, killed, or jumped out.
     pub fn finished(&self, player: [i64; 3]) -> bool {
@@ -2366,6 +2395,7 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             pass: 0.0,
             flee: 0.0,
             responding: false,
+            npc_target: None,
             flash: 0.0,
             death: 0.0,
             station: None,

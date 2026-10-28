@@ -324,6 +324,7 @@ mod tests {
             pass: 0.0,
             flee: 0.0,
             responding: false,
+            npc_target: None,
             flash: 0.0,
             death: 0.0,
             station: None,

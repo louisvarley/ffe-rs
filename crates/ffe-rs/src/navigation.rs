@@ -3798,6 +3798,9 @@ impl Navigator {
         if self.ships.is_empty() {
             return events;
         }
+        if self.advanced_traffic {
+            self.pick_fights(player);
+        }
         // F695's escorts hold a station in their leader's frame: right*+0x102 +
         // up*+0x104 + forward*+0x106 (F743's F610 target). F751 then hands the
         // escort to the attack when the leader is in state 1/2 (the port's
@@ -3809,12 +3812,21 @@ impl Navigator {
             .filter(|ship| ship.alive())
             .map(|ship| (ship.id, ship.position, ship.axes(), ship.state))
             .collect();
+        let fights: Vec<(u32, Option<u32>)> = self
+            .ships
+            .iter()
+            .map(|ship| (ship.id, ship.npc_target))
+            .collect();
         for ship in &mut self.ships {
             if let Some(leader) = ship.leader {
                 if leaders.iter().any(|(id, _, _, state)| {
                     *id == leader && matches!(state, npc::State::Attack | npc::State::Pass)
                 }) {
                     ship.join_attack();
+                    // An escort joins its leader's fight with another ship.
+                    if let Some((_, target)) = fights.iter().find(|(id, _)| *id == leader) {
+                        ship.npc_target = *target;
+                    }
                 }
             }
         }
@@ -3838,14 +3850,12 @@ impl Navigator {
                             + axes[2][axis] * forward as f64) as i64
                 }))
             });
-            ship.tick_with_station(
-                seconds,
-                tics,
-                player,
-                escort,
-                station.as_ref(),
-                &mut requests,
-            );
+            // A ship in a fight with another flies at (or away from) it.
+            let aim = ship
+                .npc_target
+                .and_then(|id| leaders.iter().find(|(leader, _, _, _)| *leader == id))
+                .map_or(player, |(_, position, _, _)| *position);
+            ship.tick_with_station(seconds, tics, aim, escort, station.as_ref(), &mut requests);
             if let Some(launch) = ship.take_launch().filter(|_| exposed) {
                 events.push(ShipEvent::MissileLaunch {
                     owner: launch.owner,
@@ -3883,7 +3893,34 @@ impl Navigator {
         // unless the player is docked, on a pad or landed: with the system's
         // pirates orbiting the player's own port, a new commander would
         // otherwise be shot before take-off.
-        for ship in self.ships.iter_mut().filter(|_| exposed) {
+        let mut npc_hits: Vec<(u32, u32, [i64; 3])> = Vec::new();
+        let targets: Vec<(u32, [i64; 3], i64)> = self
+            .ships
+            .iter()
+            .filter(|ship| ship.visible())
+            .map(|ship| (ship.id, ship.position, ship.radius))
+            .collect();
+        for ship in &mut self.ships {
+            let Some(target) = ship.npc_target else {
+                continue;
+            };
+            if ship.state == npc::State::Flee {
+                continue;
+            }
+            if let Some((_, centre, radius)) = targets.iter().find(|(id, _, _)| *id == target) {
+                if let Some(shot) = ship.fire_at(tics, *centre, *radius) {
+                    npc_hits.push((target, shot.damage, shot.point));
+                }
+            }
+        }
+        for (target, damage, point) in npc_hits {
+            self.npc_hit(target, damage, point);
+        }
+        for ship in self
+            .ships
+            .iter_mut()
+            .filter(|ship| exposed && ship.npc_target.is_none())
+        {
             if let Some(shot) = ship.fire(tics, player, player_radius) {
                 events.push(ShipEvent::Hit {
                     ship: shot.ship,
@@ -4522,6 +4559,141 @@ impl Navigator {
             self.effects.extend(burst);
         }
         Some(attack)
+    }
+
+    /// Port addition (Advanced traffic): who fights whom. A pirate well away
+    /// from the player goes for the nearest trader; a trader under attack runs
+    /// and jumps out; police not chasing the player go for a pirate that is
+    /// attacking someone. A pirate drops its prey when the player comes close.
+    fn pick_fights(&mut self, player: [i64; 3]) {
+        const PREY_RANGE: f64 = 20.0e6;
+        const PLAYER_NEAR: f64 = 8.0e6;
+        const PLAYER_FAR: f64 = 15.0e6;
+        const RUN_RANGE: f64 = 6.0e6;
+        let snapshot: Vec<(u32, [i64; 3], npc::Role, bool, Option<u32>)> = self
+            .ships
+            .iter()
+            .filter(|ship| ship.visible())
+            .map(|ship| {
+                (
+                    ship.id,
+                    ship.position,
+                    ship.role,
+                    ship.hostile,
+                    ship.npc_target,
+                )
+            })
+            .collect();
+        let find = |id: u32| snapshot.iter().find(|entry| entry.0 == id);
+        let nearest =
+            |from: [i64; 3],
+             keep: &dyn Fn(&(u32, [i64; 3], npc::Role, bool, Option<u32>)) -> bool| {
+                snapshot
+                    .iter()
+                    .filter(|entry| keep(entry))
+                    .map(|entry| (entry.0, distance(from, entry.1)))
+                    .filter(|(_, range)| *range <= PREY_RANGE)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(id, _)| id)
+            };
+        let mut runners: Vec<(u32, u32)> = Vec::new();
+        for ship in &mut self.ships {
+            if !ship.visible() {
+                continue;
+            }
+            // Drop a fight whose other ship has gone.
+            if ship.npc_target.is_some_and(|id| find(id).is_none()) {
+                ship.npc_target = None;
+                if ship.hostile && ship.state == npc::State::Hold {
+                    ship.state = npc::State::Attack;
+                }
+            }
+            let to_player = distance(player, ship.position);
+            match ship.role {
+                npc::Role::Pirate if ship.hostile && ship.leader.is_none() => {
+                    if to_player < PLAYER_NEAR {
+                        ship.npc_target = None;
+                    } else if ship.npc_target.is_none() && to_player > PLAYER_FAR {
+                        ship.npc_target = nearest(ship.position, &|entry| {
+                            matches!(entry.2, npc::Role::Trader | npc::Role::Shuttle)
+                        });
+                        if ship.npc_target.is_some() {
+                            ship.state = npc::State::Attack;
+                        }
+                    }
+                    if let Some(prey) = ship.npc_target {
+                        if find(prey)
+                            .is_some_and(|entry| distance(entry.1, ship.position) < RUN_RANGE)
+                        {
+                            runners.push((prey, ship.id));
+                        }
+                    }
+                }
+                npc::Role::Police if !ship.hostile && ship.npc_target.is_none() => {
+                    ship.npc_target = nearest(ship.position, &|entry| {
+                        entry.2 == npc::Role::Pirate && entry.4.is_some()
+                    });
+                    if ship.npc_target.is_some() {
+                        ship.state = npc::State::Attack;
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (prey, attacker) in runners {
+            if let Some(ship) = self.ships.iter_mut().find(|ship| ship.id == prey) {
+                if ship.npc_target.is_none()
+                    && !matches!(
+                        ship.state,
+                        npc::State::Docked | npc::State::Launch | npc::State::Flee
+                    )
+                {
+                    ship.npc_target = Some(attacker);
+                    ship.station = None;
+                    ship.state = npc::State::Flee;
+                    ship.flee = npc::FLEE_SECONDS * 4.0;
+                }
+            }
+        }
+    }
+
+    /// Port addition (Advanced traffic): one ship's shot hits another. F953's
+    /// damage and F939/F942's effects as a player hit makes them, without the
+    /// player's legal record, rating or bounty.
+    fn npc_hit(&mut self, id: u32, damage: u32, at: [i64; 3]) {
+        let Some(ship) = self.ships.iter_mut().find(|ship| ship.id == id) else {
+            return;
+        };
+        if !ship.alive() {
+            return;
+        }
+        let station = ship.station;
+        let held_bay = ship.bay.is_some();
+        let result = ship.hit(damage);
+        let (position, velocity, axes, cargo, mass) = (
+            ship.position,
+            ship.velocity,
+            ship.axes(),
+            ship.cargo,
+            ship.damage.mass,
+        );
+        let speed = velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let seed = (self.clock * 1000.0) as u32
+            ^ id.rotate_left(9)
+            ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9);
+        let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x1357_9bdf);
+        self.effects
+            .push(effects::hit(at, velocity, axes, speed, &mut rng));
+        if result == ffe_core::laser::Damage::Destroyed {
+            if let (Some(station), true) = (station, held_bay) {
+                self.starport(station).release(npc::traffic_id(id));
+            }
+            let mut burst = effects::explosion(position, velocity, cargo, axes, &mut rng);
+            for effect in &mut burst {
+                effect.set_mass(mass);
+            }
+            self.effects.extend(burst);
+        }
     }
 
     /// One frame of traffic: every station's door and clearance countdown, and the
