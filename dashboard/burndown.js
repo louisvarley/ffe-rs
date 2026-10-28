@@ -953,6 +953,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: the hyperspace tunnel and engine glows on the GPU (glow quads lifted to the plume's depth from the thruster's view positions, textured like the original's). Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: textures as index maps coloured per face on the GPU (as the original colours them), and the owner's upscaled model/planet textures read from img-export (turned back into indices with a brightness detail), reloaded within a second when a file changes. No packed upscaled.bin yet, so packs-2 stays todo. Remaining count unchanged."
     }
   ]
 };

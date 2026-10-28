@@ -198,6 +198,31 @@ Status (2026-10-28): **implemented**.
   hidden by the hull where it is nearer. A thin plume (an F1803 line) is a GPU line from A to B
   (`engine_glows_are_drawn_on_the_gpu`).
 
+### Textures as the original colours them, and the owner's upscaled art
+
+Status (2026-10-28): **implemented** (ENH-001 for model and planet textures).
+
+The original colours a texture per face: its bitmap holds colour indices and each face looks them
+up in its own slot colours (lighting, haze, material). The GPU now does the same: each bitmap is one
+index map on the GPU (`ffe_render::IndexMap`, a 512-texel layer of an `Rg8` array: the index and a
+brightness detail) and each textured face carries a palette (its slots; slot 0 a hole for a masked
+bitmap, indices past the slots black, as the original's lookup gives them). The fragment shader looks
+up the four nearest texels in the palette and blends them, and blends two mip levels (the mips keep
+the index most of each four share). A planet needs three maps on the GPU instead of about a hundred
+coloured textures, and new colours cost nothing to upload.
+
+The maps come from the owner's image export when it has a bigger picture than the original
+(`modern_art`): `img-export/images/<category>/primary-NNN.png` or `secondary-NNN.png` (texture,
+planet_texture, sprite or texture_block) with its `indexed/` twin. The upscaled picture has only one
+texture record's colours, so each of its pixels takes the index of the `indexed/` key whose palette
+colour is nearest, among the indices the original has round the same texel (two slots that share a
+colour in that record stay apart, and the upscaler cannot bring in an index the bitmap never had
+there; a tie keeps the texel's own index), and keeps how much brighter or darker than that colour it
+was (0.5 to 2) as the detail. Every face then colours the enlarged map with its own slots. The files'
+times are checked once a second, so an edited or newly upscaled picture shows within a second, in
+the running game. A picture still at the export's size, or a missing file, leaves the original bitmap
+(enlarged with Scale2x). Problems reading a file go to the log once per change.
+
 Not yet on the GPU (still the original's pixels behind the models): particle chains (F1814: debris
 and exhaust specks), and the HUD and its gunsight.
 

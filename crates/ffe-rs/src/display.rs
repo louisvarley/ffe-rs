@@ -527,6 +527,17 @@ impl Presenter {
         &mut self.modern
     }
 
+    /// Read the GPU view's upscaled textures from the owner's image export (`img-export`),
+    /// again whenever a file there changes.
+    pub fn set_art_dir(&mut self, dir: std::path::PathBuf) {
+        self.gpu.set_art_dir(dir);
+    }
+
+    /// What went wrong reading upscaled textures since the last call.
+    pub fn take_art_problems(&mut self) -> Vec<String> {
+        self.gpu.take_art_problems()
+    }
+
     /// Whether Modern graphics can draw the 3-D view on the GPU (opening it on first use). The
     /// game sets its model faces aside for the GPU only when this holds.
     pub fn gpu_available(&mut self) -> bool {

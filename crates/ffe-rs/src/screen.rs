@@ -446,10 +446,10 @@ pub struct Screen {
     batches: Vec<Vec<Solid>>,
     /// The planets' atmospheres so far this frame, by the batch they go over.
     atmospheres: Vec<(usize, crate::model_viewer::Shell)>,
-    /// Their textures so far this frame, each (bitmap, slot colours) once.
-    textures: Vec<crate::modern3d::WorldTexture>,
-    /// The textures of recent frames, so a planet's hundred are not rebuilt every frame.
-    texture_memory: Vec<crate::modern3d::WorldTexture>,
+    /// Their textures' bitmaps so far this frame, each once.
+    bitmaps: Vec<crate::modern3d::WorldBitmap>,
+    /// The bitmaps read so far, so they are not read again every frame.
+    bitmap_memory: Vec<crate::modern3d::WorldBitmap>,
     /// Shapes an object draws after its first set-aside face (lights, glows, labels): in the
     /// original's painter order they lie over its faces, so they are drawn after the world
     /// phase, over the 3-D view.
@@ -984,8 +984,8 @@ impl Screen {
             capture: false,
             batches: Vec::new(),
             atmospheres: Vec::new(),
-            textures: Vec::new(),
-            texture_memory: Vec::new(),
+            bitmaps: Vec::new(),
+            bitmap_memory: Vec::new(),
             deferred: Vec::new(),
             world: None,
             discs: Vec::new(),
@@ -2229,7 +2229,7 @@ impl Screen {
         views.lock_external = self.lock_external;
         self.batches.clear();
         self.atmospheres.clear();
-        self.textures.clear();
+        self.bitmaps.clear();
         self.deferred.clear();
         self.world = None;
         let view = views.mode;
@@ -2360,7 +2360,7 @@ impl Screen {
                 self.world = Some(crate::modern3d::World {
                     batches: std::mem::take(&mut self.batches),
                     atmospheres: std::mem::take(&mut self.atmospheres),
-                    textures: std::mem::take(&mut self.textures),
+                    bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
                 let deferred = std::mem::take(&mut self.deferred);
@@ -2533,7 +2533,7 @@ impl Screen {
                 self.world = Some(crate::modern3d::World {
                     batches: std::mem::take(&mut self.batches),
                     atmospheres: std::mem::take(&mut self.atmospheres),
-                    textures: std::mem::take(&mut self.textures),
+                    bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
                 if let Some(scene) = scene {
@@ -2865,31 +2865,24 @@ impl Screen {
             match frame.solids.get(index).and_then(Option::as_ref) {
                 Some(solid) => {
                     if let Some(texture) = &solid.texture {
-                        let known = self.textures.iter().any(|known| {
-                            known.bitmap == texture.bitmap && known.slots == texture.slots
-                        });
-                        if !known {
-                            let remembered = self.texture_memory.iter().position(|known| {
-                                known.bitmap == texture.bitmap && known.slots == texture.slots
-                            });
+                        let id = texture.bitmap & 0xfff;
+                        if !self.bitmaps.iter().any(|known| known.bitmap == id) {
+                            let remembered = self.bitmap_memory.iter().find(|b| b.bitmap == id);
                             let made = match remembered {
-                                Some(at) => Some(self.texture_memory[at].clone()),
-                                None => viewer.texture_argb(texture).map(|pixels| {
-                                    let made = crate::modern3d::WorldTexture {
-                                        bitmap: texture.bitmap,
-                                        slots: texture.slots.clone(),
+                                Some(known) => Some(known.clone()),
+                                None => viewer.bitmap_indices(texture).map(|(indices, masked)| {
+                                    let made = crate::modern3d::WorldBitmap {
+                                        bitmap: id,
                                         width: texture.width,
                                         height: texture.height,
-                                        pixels: pixels.into(),
+                                        indices: indices.into(),
+                                        masked,
                                     };
-                                    if self.texture_memory.len() >= 256 {
-                                        self.texture_memory.remove(0);
-                                    }
-                                    self.texture_memory.push(made.clone());
+                                    self.bitmap_memory.push(made.clone());
                                     made
                                 }),
                             };
-                            self.textures.extend(made);
+                            self.bitmaps.extend(made);
                         }
                     }
                     batch.push(solid.clone());

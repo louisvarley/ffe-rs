@@ -21,6 +21,7 @@ use crate::display::Rect;
 use crate::indexed::{LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::model_viewer::{Shell, Solid};
 use crate::modern::scale2x;
+pub use crate::modern_art::WorldBitmap;
 
 /// The flight view's rows; the console starts below them.
 pub const VIEW_ROWS: usize = 158;
@@ -38,22 +39,10 @@ pub struct World {
     pub batches: Vec<Vec<Solid>>,
     /// The planets' atmospheres, each with the batch (its planet) it is drawn over.
     pub atmospheres: Vec<(usize, Shell)>,
-    /// The textured faces' bitmaps in their slot colours, each once.
-    pub textures: Vec<WorldTexture>,
+    /// The textured faces' bitmaps (their original indices), each once.
+    pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
     pub snapshot: Vec<u32>,
-}
-
-/// A textured face's bitmap in its slot colours (`ModelViewer::texture_argb`): `size` by `size`
-/// `0xAARRGGBB` words, transparent where the original skips the texel.
-#[derive(Clone, Debug, PartialEq)]
-pub struct WorldTexture {
-    pub bitmap: u32,
-    pub slots: Vec<[u8; 3]>,
-    pub width: u32,
-    pub height: u32,
-    /// Shared: the screen keeps recent textures between frames.
-    pub pixels: std::sync::Arc<[u32]>,
 }
 
 /// The GPU, opened on first use. A machine without one keeps the classic picture: the game only
@@ -61,51 +50,48 @@ pub struct WorldTexture {
 #[derive(Default)]
 pub struct Gpu3d {
     renderer: Option<Result<ffe_render::Renderer, String>>,
-    textures: TextureCache,
+    maps: MapCache,
     /// Each view row's and column's logical pixel, for the current view size.
     rows: Vec<usize>,
     columns: Vec<usize>,
 }
 
-/// Enlarged textures by (bitmap, slot colours), kept between frames: a station's few textures
-/// are enlarged once, and an unchanged set is not uploaded again.
+/// The bitmaps' maps for the GPU, by bitmap id: the owner's upscaled art where the export has it
+/// (read again when it changes), else the original indices enlarged with Scale2x.
 #[derive(Default)]
-pub struct TextureCache {
-    known: Vec<(u32, Vec<[u8; 3]>, ffe_render::Texture)>,
-    next: u64,
+pub struct MapCache {
+    original: Vec<(u32, ffe_render::IndexMap)>,
+    pub art: crate::modern_art::Art,
 }
 
-impl TextureCache {
-    /// The enlarged texture (Scale2x up to the GPU's layer size) for one of the world's.
-    fn get(&mut self, texture: &WorldTexture) -> ffe_render::Texture {
-        if let Some((_, _, done)) = self
-            .known
-            .iter()
-            .find(|(bitmap, slots, _)| *bitmap == texture.bitmap && *slots == texture.slots)
-        {
-            return done.clone();
+impl MapCache {
+    fn map(&mut self, bitmap: &WorldBitmap) -> ffe_render::IndexMap {
+        if let Some(map) = self.art.map(bitmap) {
+            return map;
         }
-        let (mut width, mut height) = (texture.width as usize, texture.height as usize);
-        let mut pixels = texture.pixels.to_vec();
-        let layer = ffe_render::TEXTURE_SIZE as usize;
-        while width < layer && height < layer && pixels.len() == width * height {
-            pixels = scale2x(&pixels, width, height);
+        if let Some((_, map)) = self.original.iter().find(|(id, _)| *id == bitmap.bitmap) {
+            return map.clone();
+        }
+        // Scale2x works on the indices as on colours: it only copies neighbours.
+        let (mut width, mut height) = (bitmap.width as usize, bitmap.height as usize);
+        let mut texels: Vec<u32> = bitmap
+            .indices
+            .iter()
+            .map(|i| u32::from(*i) | 128 << 8)
+            .collect();
+        texels.resize(width * height, 128 << 8);
+        while width < 256 && height < 1024 {
+            texels = scale2x(&texels, width, height);
             (width, height) = (width * 2, height * 2);
         }
-        self.next += 1;
-        let done = ffe_render::Texture {
-            id: self.next,
+        let map = ffe_render::IndexMap {
+            id: 1 << 40 | u64::from(bitmap.bitmap),
             width: width as u32,
             height: height as u32,
-            pixels: pixels.into(),
+            texels: texels.iter().map(|t| *t as u16).collect(),
         };
-        // The original's palette changes slot colours over time; keep the recent ones.
-        if self.known.len() >= 256 {
-            self.known.remove(0);
-        }
-        self.known
-            .push((texture.bitmap, texture.slots.clone(), done.clone()));
-        done
+        self.original.push((bitmap.bitmap, map.clone()));
+        map
     }
 }
 
@@ -125,6 +111,16 @@ impl Gpu3d {
             Ok(renderer) => renderer.adapter.clone(),
             Err(error) => error.clone(),
         }
+    }
+
+    /// Read upscaled textures from the owner's image export at `dir` (`img-export`).
+    pub fn set_art_dir(&mut self, dir: std::path::PathBuf) {
+        self.maps.art.set_dir(dir);
+    }
+
+    /// What went wrong reading upscaled textures since the last call.
+    pub fn take_art_problems(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.maps.art.problems)
     }
 
     fn renderer(&mut self) -> &mut Result<ffe_render::Renderer, String> {
@@ -150,7 +146,7 @@ impl Gpu3d {
         if view_height == 0 {
             return Ok(());
         }
-        let scene = scene(world, view_width, view_height, &mut self.textures);
+        let scene = scene(world, view_width, view_height, &mut self.maps);
         let Ok(renderer) = self.renderer() else {
             return Ok(());
         };
@@ -228,14 +224,14 @@ fn atmosphere(shell: &Shell) -> ffe_render::Atmosphere {
 }
 
 /// The GPU scene for a `width` by `height` view: the edge-upscaled frame behind, then the
-/// batches in order. Textures are enlarged to 256 texels with the same edge-directed Scale2x
-/// as the frame (no new colours, no blur), and the GPU maps them with perspective correction,
-/// where the original maps them linearly across the screen.
+/// batches in order. A texture is its bitmap's index map (upscaled art, or the original enlarged
+/// with Scale2x) coloured per face from the face's slots, as the original colours it; the GPU
+/// maps it with perspective correction, where the original maps it linearly across the screen.
 pub fn scene(
     world: &World,
     width: usize,
     height: usize,
-    cache: &mut TextureCache,
+    cache: &mut MapCache,
 ) -> ffe_render::Scene {
     // The frame behind the models: Scale2x once, then the GPU's smooth filtering.
     let mut upscaled = scale2x(
@@ -247,17 +243,38 @@ pub fn scene(
     let colour = |[r, g, b]: [u8; 3]| [r, g, b].map(|c| f32::from(c) / 255.0);
     // One of the original's pixels in this view's pixels.
     let pixel = width as f32 / LOGICAL_WIDTH as f32;
-    let textures: Vec<ffe_render::Texture> = world
-        .textures
-        .iter()
-        .map(|texture| cache.get(texture))
-        .collect();
-    let texture_of = |solid: &Solid| {
+    let maps: Vec<ffe_render::IndexMap> = world.bitmaps.iter().map(|b| cache.map(b)).collect();
+    // One palette per distinct set of slot colours: masked bitmaps make slot 0 a hole, and
+    // indices past the slots are black, as the original's lookup gives them.
+    let mut palettes: Vec<ffe_render::Palette> = Vec::new();
+    let mut palette_of: Vec<(Vec<[u8; 3]>, bool, u32)> = Vec::new();
+    let mut texture_of = |solid: &Solid| {
         let texture = solid.texture.as_ref()?;
-        let index = world
-            .textures
+        let map = world
+            .bitmaps
             .iter()
-            .position(|known| known.bitmap == texture.bitmap && known.slots == texture.slots)?;
+            .position(|known| known.bitmap == texture.bitmap & 0xfff)?;
+        let masked = world.bitmaps[map].masked;
+        let palette = match palette_of
+            .iter()
+            .find(|(slots, hole, _)| *hole == masked && *slots == texture.slots)
+        {
+            Some((_, _, index)) => *index,
+            None => {
+                let mut palette = [[0.0, 0.0, 0.0, 1.0]; ffe_render::PALETTE_SIZE];
+                for (entry, [r, g, b]) in palette.iter_mut().zip(&texture.slots) {
+                    let [r, g, b] = [r, g, b].map(|c| f32::from(*c) / 255.0);
+                    *entry = [r, g, b, 1.0];
+                }
+                if masked {
+                    palette[0] = [0.0; 4];
+                }
+                palettes.push(palette);
+                let index = palettes.len() as u32 - 1;
+                palette_of.push((texture.slots.clone(), masked, index));
+                index
+            }
+        };
         // Texel centres: the original's corner 0 and corner 63 (or 127) are whole texels.
         let (width, height) = (texture.width as f32, texture.height as f32);
         let uv: Vec<[f32; 2]> = texture
@@ -270,7 +287,7 @@ pub fn scene(
                 ]
             })
             .collect();
-        (uv.len() == solid.views.len()).then_some((index as u32, uv))
+        (uv.len() == solid.views.len()).then_some((map as u32, palette, uv))
     };
     let batches = world
         .batches
@@ -314,9 +331,13 @@ pub fn scene(
                         batch.triangles.push(ffe_render::Triangle {
                             positions: [point(*first), point(pair[0]), point(pair[1])],
                             colours: [rgba; 3],
-                            texture: texture
-                                .as_ref()
-                                .map(|(index, uv)| (*index, [uv[0], uv[k + 1], uv[k + 2]])),
+                            texture: texture.as_ref().map(|(map, palette, uv)| {
+                                ffe_render::FaceTexture {
+                                    map: *map,
+                                    palette: *palette,
+                                    uvs: [uv[0], uv[k + 1], uv[k + 2]],
+                                }
+                            }),
                         });
                     }
                 }
@@ -339,7 +360,8 @@ pub fn scene(
             near: NEAR,
         },
         batches,
-        textures,
+        maps,
+        palettes,
         bloom: BLOOM,
     }
 }
@@ -373,35 +395,37 @@ mod tests {
                     path: false,
                 },
             ]],
-            textures: vec![WorldTexture {
+            bitmaps: vec![WorldBitmap {
                 bitmap: 7,
-                slots: vec![[1, 2, 3]],
                 width: 64,
                 height: 64,
-                pixels: vec![0xff010203; 64 * 64].into(),
+                indices: vec![0; 64 * 64].into(),
+                masked: true,
             }],
             atmospheres: vec![],
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
-        let scene = scene(&world, 640, 316, &mut TextureCache::default());
+        let scene = scene(&world, 640, 316, &mut MapCache::default());
         assert_eq!(scene.batches.len(), 1);
         assert_eq!(scene.batches[0].triangles.len(), 2);
         assert_eq!(scene.batches[0].lines.len(), 1);
         let background = scene.background.unwrap();
         assert_eq!((background.width, background.height), (640, 316));
         assert_eq!(background.pixels.len(), 640 * 316);
-        // The quad's texture is enlarged to 256 and its fan keeps the corners' coordinates.
-        assert_eq!(
-            (scene.textures[0].width, scene.textures[0].height),
-            (256, 256)
-        );
+        // The quad's map is the bitmap's indices enlarged to 256, coloured from its own
+        // palette (slot 0 a hole, as the bitmap is masked), and its fan keeps the corners'
+        // coordinates.
+        assert_eq!((scene.maps[0].width, scene.maps[0].height), (256, 256));
+        assert_eq!(scene.palettes.len(), 1);
+        assert_eq!(scene.palettes[0][0][3], 0.0);
         let half = 0.5 / 64.0;
         assert_eq!(
             scene.batches[0].triangles[1].texture,
-            Some((
-                0,
-                [[half, half], [1.0 - half, 1.0 - half], [half, 1.0 - half]]
-            ))
+            Some(ffe_render::FaceTexture {
+                map: 0,
+                palette: 0,
+                uvs: [[half, half], [1.0 - half, 1.0 - half], [half, 1.0 - half]],
+            })
         );
     }
 
@@ -429,7 +453,7 @@ mod tests {
                 sprite: None,
                 path: false,
             }]],
-            textures: vec![],
+            bitmaps: vec![],
             atmospheres: vec![],
             snapshot: snapshot.clone(),
         };

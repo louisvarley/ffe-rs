@@ -32,34 +32,51 @@ pub struct Projection {
     pub near: f32,
 }
 
-/// A texture, `0xAARRGGBB` words row after row; texels with alpha below a half are holes. Every
-/// texture of a scene is resampled to a [`TEXTURE_SIZE`] square layer if it is not one already
-/// (coordinates are 0..1 either way).
+/// A texture as the original keeps it: a map of colour indices (row after row), coloured per
+/// face from a palette, so one map serves every face that uses it in any colours. Each texel is
+/// `index | detail << 8`: the palette index, and a brightness detail (128 is 1, 255 nearly 2) an
+/// enlarged map can carry from finer art. Every map is resampled to a [`MAP_SIZE`] square layer
+/// if it is not one already (coordinates are 0..1 either way).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Texture {
-    /// Equal non-zero ids promise equal pixels, so a texture already on the GPU is not
-    /// uploaded again; 0 uploads it every time.
+pub struct IndexMap {
+    /// Equal non-zero ids promise equal texels, so a map already on the GPU is not uploaded
+    /// again; 0 uploads it every time.
     pub id: u64,
     pub width: u32,
     pub height: u32,
-    /// Shared, so a caller's cached texture is handed over without a copy.
-    pub pixels: std::sync::Arc<[u32]>,
+    /// Shared, so a caller's map is handed over without a copy.
+    pub texels: std::sync::Arc<[u16]>,
 }
 
-/// The side of the GPU's texture layers.
-pub const TEXTURE_SIZE: u32 = 256;
-/// The textures kept on the GPU at once (about 90 MB with their mip levels).
-pub const TEXTURE_LAYERS: u32 = 256;
+/// The side of the GPU's map layers.
+pub const MAP_SIZE: u32 = 512;
+/// The maps kept on the GPU at once (about 45 MB with their mip levels).
+pub const MAP_LAYERS: u32 = 64;
+/// The colours of one palette (a face's slots); an index past them reads the last.
+pub const PALETTE_SIZE: usize = 64;
 
-/// A triangle in view space, its corners' colours (RGBA, 0..1), and optionally a texture of the
-/// scene's [`Scene::textures`] with the corners' coordinates in it (0..1), which replaces the
-/// colours. Textures are mapped with perspective correction and smooth filtering.
+/// A triangle in view space, its corners' colours (RGBA, 0..1), and optionally a texture which
+/// replaces the colours. Textures are mapped with perspective correction, filtered smoothly in
+/// colour (each of the four nearest texels looked up in the palette, then blended) and blended
+/// between mip levels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Triangle {
     pub positions: [[f32; 3]; 3],
     pub colours: [[f32; 4]; 3],
-    pub texture: Option<(u32, [[f32; 2]; 3])>,
+    pub texture: Option<FaceTexture>,
 }
+
+/// Which of the scene's [`Scene::maps`] a triangle shows, in which of its
+/// [`Scene::palettes`], and the corners' coordinates in the map (0..1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceTexture {
+    pub map: u32,
+    pub palette: u32,
+    pub uvs: [[f32; 2]; 3],
+}
+
+/// A palette: [`PALETTE_SIZE`] colours (RGBA, 0..1; an alpha below a half is a hole).
+pub type Palette = [[f32; 4]; PALETTE_SIZE];
 
 /// A line in view space.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -156,7 +173,8 @@ pub struct Scene {
     pub batches: Vec<Batch>,
     /// How strongly bright parts glow (0 none): they are blurred at half size and added back.
     pub bloom: f32,
-    pub textures: Vec<Texture>,
+    pub maps: Vec<IndexMap>,
+    pub palettes: Vec<Palette>,
 }
 
 #[repr(C)]
@@ -167,8 +185,10 @@ struct Vertex {
     /// The primitive's place in its batch, which pulls it very slightly nearer.
     layer: f32,
     uv: [f32; 2],
-    /// The texture layer, or -1 for the colour.
+    /// The map's layer, or -1 for the colour.
     texture: f32,
+    /// The palette's first colour in the palette buffer.
+    palette: f32,
 }
 
 #[repr(C)]
@@ -266,10 +286,33 @@ struct Out {
     @location(0) colour: vec4<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) @interpolate(flat) texture: i32,
+    @location(3) @interpolate(flat) palette: u32,
 };
 
-@group(0) @binding(3) var face_textures: texture_2d_array<f32>;
-@group(0) @binding(4) var face_sampler: sampler;
+@group(0) @binding(3) var face_maps: texture_2d_array<f32>;
+@group(0) @binding(4) var<storage, read> palettes: array<vec4<f32>>;
+
+// One texel of a map at a mip level, through the face's palette, its brightness detail applied,
+// premultiplied by its alpha (so holes blend away cleanly).
+fn texel(layer: i32, level: i32, at: vec2<i32>, size: vec2<i32>, palette: u32) -> vec4<f32> {
+    let t = textureLoad(face_maps, clamp(at, vec2<i32>(0), size - vec2<i32>(1)), layer, level);
+    let index = min(u32(t.r * 255.0 + 0.5), 63u);
+    let colour = palettes[palette + index];
+    return vec4<f32>(colour.rgb * (t.g * 2.0) * colour.a, colour.a);
+}
+
+// The four nearest texels at a level, blended.
+fn bilinear(uv: vec2<f32>, layer: i32, level: i32, palette: u32) -> vec4<f32> {
+    let size = vec2<i32>(textureDimensions(face_maps, level));
+    let p = uv * vec2<f32>(size) - 0.5;
+    let base = vec2<i32>(floor(p));
+    let f = fract(p);
+    let a = texel(layer, level, base, size, palette);
+    let b = texel(layer, level, base + vec2<i32>(1, 0), size, palette);
+    let c = texel(layer, level, base + vec2<i32>(0, 1), size, palette);
+    let d = texel(layer, level, base + vec2<i32>(1, 1), size, palette);
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
 
 // Reversed-Z: the clip z is the near distance and w the view depth, so the stored depth is
 // near / z: 1 at the near plane, falling towards 0 far away.
@@ -282,26 +325,36 @@ fn vs_scene(
     @location(2) layer: f32,
     @location(3) uv: vec2<f32>,
     @location(4) texture: f32,
+    @location(5) palette: f32,
 ) -> Out {
     var out: Out;
     out.position = vec4<f32>(p.x * u.scale.x, p.y * u.scale.y, u.scale.z * (1.0 + layer * 4.8e-7), p.z);
     out.colour = c;
     out.uv = uv;
     out.texture = i32(texture);
+    out.palette = u32(palette);
     return out;
 }
 
 @fragment
 fn fs_scene(i: Out) -> @location(0) vec4<f32> {
+    // The mip level from the texture's footprint (worked out before any branch).
+    let footprint = i.uv * vec2<f32>(textureDimensions(face_maps, 0));
+    let spread = max(length(dpdx(footprint)), length(dpdy(footprint)));
     if (i.texture < 0) {
         return i.colour;
     }
-    let texel = textureSample(face_textures, face_sampler, i.uv, i.texture);
+    let top = f32(textureNumLevels(face_maps) - 1u);
+    let lod = clamp(log2(max(spread, 1.0e-6)), 0.0, top);
+    let level = i32(floor(lod));
+    let near = bilinear(i.uv, i.texture, level, i.palette);
+    let far = bilinear(i.uv, i.texture, min(level + 1, i32(top)), i.palette);
+    let texel = mix(near, far, fract(lod));
     // A hole in a masked texture shows what lies behind.
     if (texel.a < 0.5) {
         discard;
     }
-    return vec4<f32>(texel.rgb, 1.0);
+    return vec4<f32>(texel.rgb / texel.a, 1.0);
 }
 
 struct WideOut {
@@ -556,13 +609,13 @@ pub struct Renderer {
     sprites: wgpu::RenderPipeline,
     shells: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
-    face_sampler: wgpu::Sampler,
+
     post_layout: wgpu::BindGroupLayout,
     bright: wgpu::RenderPipeline,
     blur: wgpu::RenderPipeline,
     combine: wgpu::RenderPipeline,
-    /// The GPU array the scenes' textures are kept in between frames.
-    face_textures: Option<FaceTextures>,
+    /// The GPU array the scenes' maps are kept in between frames.
+    face_maps: Option<FaceMaps>,
     targets: Option<Targets>,
     /// The adapter's name, for the options page and the logs.
     pub adapter: String,
@@ -632,7 +685,11 @@ impl Renderer {
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],
@@ -650,7 +707,8 @@ impl Renderer {
                 1 => Float32x4,
                 2 => Float32,
                 3 => Float32x2,
-                4 => Float32
+                4 => Float32,
+                5 => Float32
             ],
         };
         let depth = |write: bool, compare: wgpu::CompareFunction| wgpu::DepthStencilState {
@@ -824,16 +882,6 @@ impl Renderer {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        // Textures repeat inside a face's own layer only and are smoothed between mip levels;
-        // anisotropic filtering keeps faces seen edge-on sharp.
-        let face_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("face sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            anisotropy_clamp: 8,
-            ..Default::default()
-        });
         let post_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ffe-render bloom"),
             source: wgpu::ShaderSource::Wgsl(POST.into()),
@@ -922,8 +970,7 @@ impl Renderer {
             sprites,
             shells,
             sampler,
-            face_sampler,
-            face_textures: None,
+            face_maps: None,
             targets: None,
             adapter: name,
         })
@@ -1014,8 +1061,8 @@ impl Renderer {
     pub fn render(&mut self, scene: &Scene) -> Result<Vec<u32>, String> {
         let (width, height) = (scene.width.max(1), scene.height.max(1));
         self.targets(width, height);
-        let layers = self.upload_textures(&scene.textures);
-        let face_view = &self.face_textures.as_ref().unwrap().view;
+        let layers = self.upload_maps(&scene.maps);
+        let face_view = &self.face_maps.as_ref().unwrap().view;
         let device = &self.device;
         let targets = self.targets.as_ref().unwrap();
         let uniforms = Uniforms {
@@ -1058,6 +1105,16 @@ impl Renderer {
             &rgba(&back.pixels),
         );
         let back_view = back_texture.create_view(&Default::default());
+        // The palettes one after another (one transparent palette when there are none).
+        let mut colours: Vec<[f32; 4]> = scene.palettes.iter().flatten().copied().collect();
+        if colours.is_empty() {
+            colours.resize(PALETTE_SIZE, [0.0; 4]);
+        }
+        let palette_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("palettes"),
+            contents: bytemuck::cast_slice(&colours),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bindings"),
             layout: &self.layout,
@@ -1080,7 +1137,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&self.face_sampler),
+                    resource: palette_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -1096,11 +1153,18 @@ impl Renderer {
             let first = vertices.len() as u32;
             for (index, t) in batch.triangles.iter().enumerate() {
                 let layer = index.min(LAYERS) as f32;
-                let (texture, uvs) = match t.texture {
-                    Some((texture, uvs)) if (texture as usize) < layers.len() => {
-                        (layers[texture as usize] as f32, uvs)
+                let (texture, palette, uvs) = match t.texture {
+                    Some(face)
+                        if (face.map as usize) < layers.len()
+                            && (face.palette as usize) < scene.palettes.len() =>
+                    {
+                        (
+                            layers[face.map as usize] as f32,
+                            (face.palette as usize * PALETTE_SIZE) as f32,
+                            face.uvs,
+                        )
                     }
-                    _ => (-1.0, [[0.0; 2]; 3]),
+                    _ => (-1.0, 0.0, [[0.0; 2]; 3]),
                 };
                 vertices.extend((0..3).map(|k| Vertex {
                     position: t.positions[k],
@@ -1108,6 +1172,7 @@ impl Renderer {
                     layer,
                     uv: uvs[k],
                     texture,
+                    palette,
                 }));
             }
             let middle = vertices.len() as u32;
@@ -1404,22 +1469,22 @@ impl Renderer {
         );
     }
 
-    /// Put the scene's textures in the GPU array, uploading (with mip levels) only those not
+    /// Put the scene's maps in the GPU array, uploading (with mip levels) only those not
     /// already there; returns each one's layer. Layers are reused least recently used first.
-    fn upload_textures(&mut self, textures: &[Texture]) -> Vec<u32> {
+    fn upload_maps(&mut self, maps: &[IndexMap]) -> Vec<u32> {
         let device = &self.device;
-        let faces = self.face_textures.get_or_insert_with(|| {
+        let faces = self.face_maps.get_or_insert_with(|| {
             let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("face textures"),
+                label: Some("face maps"),
                 size: wgpu::Extent3d {
-                    width: TEXTURE_SIZE,
-                    height: TEXTURE_SIZE,
-                    depth_or_array_layers: TEXTURE_LAYERS,
+                    width: MAP_SIZE,
+                    height: MAP_SIZE,
+                    depth_or_array_layers: MAP_LAYERS,
                 },
-                mip_level_count: TEXTURE_SIZE.ilog2() + 1,
+                mip_level_count: MAP_SIZE.ilog2() + 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: COLOUR_FORMAT,
+                format: wgpu::TextureFormat::Rg8Unorm,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
@@ -1427,17 +1492,17 @@ impl Renderer {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
             });
-            FaceTextures {
+            FaceMaps {
                 texture,
                 view,
-                layers: vec![None; TEXTURE_LAYERS as usize],
+                layers: vec![None; MAP_LAYERS as usize],
                 frame: 0,
             }
         });
         faces.frame += 1;
         let frame = faces.frame;
-        let mut out = Vec::with_capacity(textures.len());
-        for source in textures {
+        let mut out = Vec::with_capacity(maps.len());
+        for source in maps {
             let known = (source.id != 0)
                 .then(|| {
                     faces
@@ -1462,6 +1527,81 @@ impl Renderer {
         }
         out
     }
+}
+
+/// The face maps' GPU array and which map each layer holds: `(id, frame last used)`.
+struct FaceMaps {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    layers: Vec<Option<(u64, u64)>>,
+    frame: u64,
+}
+
+/// Upload one map into `layer` of the array, with its mip levels.
+fn upload(queue: &wgpu::Queue, texture: &wgpu::Texture, layer: u32, source: &IndexMap) {
+    let levels = MAP_SIZE.ilog2() + 1;
+    let mut level = resample(source, MAP_SIZE);
+    for mip in 0..levels {
+        let size = MAP_SIZE >> mip;
+        let bytes: Vec<u8> = level.iter().flat_map(|t| t.to_le_bytes()).collect();
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: mip,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: layer,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size * 2),
+                rows_per_image: Some(size),
+            },
+            wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+        );
+        level = halve(&level, size);
+    }
+}
+
+/// A map at `size` by `size`, each texel the nearest of the source (indices cannot be blended).
+fn resample(map: &IndexMap, size: u32) -> Vec<u16> {
+    let (width, height) = (map.width.max(1), map.height.max(1));
+    (0..size * size)
+        .map(|at| {
+            let (x, y) = (at % size, at / size);
+            let from = (y * height / size) * width + x * width / size;
+            map.texels.get(from as usize).copied().unwrap_or(0)
+        })
+        .collect()
+}
+
+/// The next mip level: each texel the index most of its four share (the first of them when they
+/// all differ) with their mean detail.
+fn halve(level: &[u16], size: u32) -> Vec<u16> {
+    let half = (size / 2).max(1) as usize;
+    let size = size as usize;
+    let mut out = Vec::with_capacity(half * half);
+    for y in 0..half {
+        for x in 0..half {
+            let at = |dx: usize, dy: usize| {
+                level[(2 * y + dy).min(size - 1) * size + (2 * x + dx).min(size - 1)]
+            };
+            let four = [at(0, 0), at(1, 0), at(0, 1), at(1, 1)];
+            let count = |t: u16| four.iter().filter(|o| *o & 0xff == t & 0xff).count();
+            let index = four.iter().copied().max_by_key(|t| count(*t)).unwrap_or(0) & 0xff;
+            let detail = four.iter().map(|t| u32::from(t >> 8)).sum::<u32>() / 4;
+            out.push(index | (detail as u16) << 8);
+        }
+    }
+    out
 }
 
 /// A line cut to the part at least `near` ahead of the eye, or `None` when none of it is.
@@ -1489,91 +1629,6 @@ fn shell(atmosphere: &Atmosphere) -> Option<Shell> {
         sun: atmosphere.sun,
         pad: 0.0,
     })
-}
-
-/// The face textures' GPU array and which texture each layer holds: `(id, frame last used)`.
-struct FaceTextures {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    layers: Vec<Option<(u64, u64)>>,
-    frame: u64,
-}
-
-/// Upload one texture into `layer` of the array, with its mip levels.
-fn upload(queue: &wgpu::Queue, texture: &wgpu::Texture, layer: u32, source: &Texture) {
-    let levels = TEXTURE_SIZE.ilog2() + 1;
-    let mut level = resample(source, TEXTURE_SIZE);
-    for mip in 0..levels {
-        let size = TEXTURE_SIZE >> mip;
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: mip,
-                origin: wgpu::Origin3d {
-                    x: 0,
-                    y: 0,
-                    z: layer,
-                },
-                aspect: wgpu::TextureAspect::All,
-            },
-            &level,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(size * 4),
-                rows_per_image: Some(size),
-            },
-            wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-        );
-        level = halve(&level, size);
-    }
-}
-
-/// A texture as BGRA bytes at `size` by `size` (nearest texel when it is another size).
-fn resample(texture: &Texture, size: u32) -> Vec<u8> {
-    let (width, height) = (texture.width.max(1), texture.height.max(1));
-    let mut out = Vec::with_capacity((size * size * 4) as usize);
-    for y in 0..size {
-        for x in 0..size {
-            let at = (y * height / size) * width + x * width / size;
-            let p = texture.pixels.get(at as usize).copied().unwrap_or(0);
-            out.extend_from_slice(&p.to_le_bytes());
-        }
-    }
-    out
-}
-
-/// The next mip level: each texel the mean of four. Colour is averaged over the opaque texels
-/// only, so a masked texture's holes do not darken its edges.
-fn halve(level: &[u8], size: u32) -> Vec<u8> {
-    let half = (size / 2).max(1);
-    let size = size as usize;
-    let mut out = Vec::with_capacity((half * half * 4) as usize);
-    for y in 0..half as usize {
-        for x in 0..half as usize {
-            let mut sum = [0u32; 4];
-            let mut opaque = 0;
-            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                let at = (((2 * y + dy).min(size - 1)) * size + (2 * x + dx).min(size - 1)) * 4;
-                let texel = &level[at..at + 4];
-                sum[3] += u32::from(texel[3]);
-                if texel[3] >= 128 {
-                    opaque += 1;
-                    for c in 0..3 {
-                        sum[c] += u32::from(texel[c]);
-                    }
-                }
-            }
-            for total in &sum[..3] {
-                out.push(total.checked_div(opaque).unwrap_or(0) as u8);
-            }
-            out.push((sum[3] / 4) as u8);
-        }
-    }
-    out
 }
 
 fn rgba(pixels: &[u32]) -> Vec<u8> {
@@ -1625,7 +1680,8 @@ mod tests {
                 atmospheres: vec![],
                 sprites: vec![],
             }],
-            textures: vec![],
+            maps: vec![],
+            palettes: vec![],
             bloom: 0.0,
         };
         let pixels = renderer.render(&scene).unwrap();
@@ -1668,26 +1724,34 @@ mod tests {
         };
         let pixels = renderer.render(&layered.clone()).unwrap();
         assert_eq!(pixels[24 * 64 + 32], 0x0000ff);
-        // A textured face: the left half of its texture is red and the right a hole.
-        let mut texture = vec![0x00000000u32; 4 * 4];
-        for row in texture.chunks_mut(4) {
-            row[..2].fill(0xffff0000);
+        // A textured face: the left half of its map is index 1 (red in its palette) and the
+        // right index 0 (a hole); the detail doubles the right-hand red column's brightness...
+        // which red cannot exceed, so it stays red.
+        let mut texels = vec![128u16 << 8; 4 * 4];
+        for row in texels.chunks_mut(4) {
+            row[0] = 1 | 128 << 8;
+            row[1] = 1 | 255 << 8;
         }
+        let mut palette: Palette = [[0.0; 4]; PALETTE_SIZE];
+        palette[1] = [1.0, 0.0, 0.0, 1.0];
         let mut face = triangle(5.0, [0.0, 1.0, 0.0, 1.0]);
-        face.texture = Some((0, [[0.0, 1.0], [1.0, 1.0], [0.5, 0.0]]));
+        face.texture = Some(FaceTexture {
+            map: 0,
+            palette: 0,
+            uvs: [[0.0, 1.0], [1.0, 1.0], [0.5, 0.0]],
+        });
         let textured = Scene {
             batches: vec![Batch {
                 triangles: vec![face],
-                lines: vec![],
-                atmospheres: vec![],
-                sprites: vec![],
+                ..Batch::default()
             }],
-            textures: vec![Texture {
+            maps: vec![IndexMap {
                 id: 0,
                 width: 4,
                 height: 4,
-                pixels: texture.into(),
+                texels: texels.into(),
             }],
+            palettes: vec![palette],
             ..layered
         };
         let pixels = renderer.render(&textured).unwrap();
@@ -1707,7 +1771,8 @@ mod tests {
                 }],
                 ..Batch::default()
             }],
-            textures: vec![],
+            maps: vec![],
+            palettes: vec![],
             bloom: 0.0,
             ..textured
         };

@@ -1030,6 +1030,9 @@ fn run() -> Result<(), String> {
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
     let mut presenter = Presenter::new();
+    // The GPU view's upscaled model and planet textures: the owner's export, read again as the
+    // files change.
+    presenter.set_art_dir(options.root.join("img-export"));
     // Modern graphics' replacement cabins: for now the owner's upscaled export.
     for line in presenter.modern_mut().load_cabins(
         &options.root.join("img-export/images/cockpit"),
@@ -7310,6 +7313,9 @@ fn run() -> Result<(), String> {
             screen.world(),
             &prefs.display,
         )?;
+        for line in presenter.take_art_problems() {
+            eprintln!("{line}");
+        }
         frames += 1;
         let arrived = options.capture_planet.is_some()
             && nav.as_ref().is_some_and(|nav| nav.target.is_none());

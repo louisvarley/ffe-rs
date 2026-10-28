@@ -96,9 +96,9 @@ fn the_planet_is_drawn_on_the_gpu_from_orbit_to_the_ground() {
             .filter(|solid| solid.texture.is_some())
             .count();
         eprintln!(
-            "k {k}: {} batches, {faces} faces ({textured} textured), {} textures",
+            "k {k}: {} batches, {faces} faces ({textured} textured), {} bitmaps",
             world.batches.len(),
-            world.textures.len()
+            world.bitmaps.len()
         );
         // Every corner the GPU gets projects where the original put a point of the surface.
         let (width, height) = (1280usize, 800usize);

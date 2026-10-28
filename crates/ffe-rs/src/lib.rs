@@ -25,6 +25,7 @@ pub mod model_lab;
 pub mod model_viewer;
 pub mod modern;
 pub mod modern3d;
+pub mod modern_art;
 pub mod navigation;
 pub mod original_flight;
 pub mod outfitting;

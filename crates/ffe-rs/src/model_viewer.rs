@@ -693,26 +693,14 @@ impl ModelViewer {
         })
     }
 
-    /// A textured face's bitmap as a `width` by `height` `0xAARRGGBB` image in the slot
-    /// colours, for the modern engine. Masked texel 0 is transparent; rows the bitmap does
-    /// not have are transparent too.
-    pub fn texture_argb(&self, texture: &SolidTexture) -> Option<Vec<u32>> {
+    /// A textured face's bitmap for the modern engine: its colour indices over its whole
+    /// stride and rows (index 0 where the bitmap has no texel), and whether it skips index 0.
+    pub fn bitmap_indices(&self, texture: &SolidTexture) -> Option<(Vec<u8>, bool)> {
         let map = self.textures.map(texture.bitmap & 0xfff)?;
-        Some(
-            (0..(texture.width * texture.height) as usize)
-                .map(|at| match map.texels.get(at) {
-                    Some(&texel) if !(map.masked_zero && texel == 0) => {
-                        let [r, g, b] = texture
-                            .slots
-                            .get(usize::from(texel))
-                            .copied()
-                            .unwrap_or([0; 3]);
-                        0xff00_0000 | u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
-                    }
-                    _ => 0,
-                })
-                .collect(),
-        )
+        let indices = (0..(texture.width * texture.height) as usize)
+            .map(|at| map.texels.get(at).copied().unwrap_or(0))
+            .collect();
+        Some((indices, map.masked_zero))
     }
 
     pub fn rasterise(&self, shape: &Textured, plot: impl FnMut(i32, i32, [u8; 3])) -> bool {
