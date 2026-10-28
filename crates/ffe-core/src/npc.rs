@@ -704,6 +704,17 @@ pub const PIRATE_DISTANCE: f64 = 3.5e6;
 pub const PIRATE_LURK: f64 = 25.0e6;
 /// Ships farther than this from the player are despawned (F927 recycles slots).
 pub const DESPAWN_RANGE: f64 = 30.0e6;
+/// Port addition: police patrols per system, one at the place nearest the
+/// player and one at each other place up to this count. The original's F238
+/// sends police after a wanted player; the port keeps a fixed patrol force and
+/// calls it in (see [`NpcShip::provoke`]) instead of spawning more.
+pub const MAX_POLICE_PATROLS: usize = 4;
+/// Port addition: a called-in police or military ship's cruise speed toward
+/// the player (2 km/s), its acceleration, and the range it slows to its own
+/// combat speed at.
+pub const RESPONSE_SPEED: f64 = 2.0e6;
+pub const RESPONSE_ACCEL: f64 = 2.0e5;
+pub const RESPONSE_ARRIVE: f64 = 5.0e6;
 /// F1536's model-0x9d flash stays for this many seconds (the original clears the
 /// flag on the next frame; a short visible flash replaces it in the port).
 pub const FLASH_SECONDS: f64 = 0.25;
@@ -1075,6 +1086,9 @@ pub struct NpcShip {
     pub formation: [i64; 3],
     /// Seconds of a [`State::Pass`] left.
     pub pass: f64,
+    /// Port addition: a police or military ship called in on a wanted
+    /// player, flying in at [`RESPONSE_SPEED`] from wherever it patrolled.
+    pub responding: bool,
     /// Seconds of a [`State::Flee`] left before the jump.
     pub flee: f64,
     /// Seconds of the F1536 shield-hit flash left.
@@ -1169,6 +1183,7 @@ impl NpcShip {
             formation: [0; 3],
             pass: 0.0,
             flee: 0.0,
+            responding: false,
             flash: 0.0,
             death: 0.0,
             station: None,
@@ -1372,6 +1387,7 @@ impl NpcShip {
         self.state = State::Attack;
         self.pass = 0.0;
         self.flee = 0.0;
+        self.responding = true;
         true
     }
 
@@ -1695,7 +1711,14 @@ impl NpcShip {
                 .min(0.7 * (2.0 * self.accel * distance).sqrt()),
             State::Attack => {
                 let room = (distance - STANDOFF).max(0.0);
-                self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt())
+                let combat = self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt());
+                if self.responding {
+                    // Called in: cruise to the player and brake into range.
+                    let run = (distance - RESPONSE_ARRIVE).max(0.0);
+                    combat.max(RESPONSE_SPEED.min(0.7 * (2.0 * RESPONSE_ACCEL * run).sqrt()))
+                } else {
+                    combat
+                }
             }
             State::Escort => {
                 let room = (distance - STANDOFF).max(0.0);
@@ -1714,7 +1737,12 @@ impl NpcShip {
             self.state = State::Pass;
             self.pass = PASS_SECONDS;
         }
-        let change = (wanted - self.speed).clamp(-self.accel * dt, self.accel * dt);
+        let accel = if self.responding {
+            self.accel.max(RESPONSE_ACCEL)
+        } else {
+            self.accel
+        };
+        let change = (wanted - self.speed).clamp(-accel * dt, accel * dt);
         self.speed = (self.speed + change).max(0.0);
         self.velocity = scale(self.forward, self.speed);
         for axis in 0..3 {
@@ -1796,7 +1824,9 @@ impl NpcShip {
             // trader flying to, docked at or leaving a station, and a hostile
             // hunting the player. The original keeps every object until F927
             // needs its slot; the port only recycles idle ships far away.
-            _ if self.station.is_some() || (self.hostile && self.role.hostile()) => false,
+            // Police patrols stay too: they are the force a wanted player
+            // calls in.
+            _ if self.station.is_some() || self.hostile || self.role == Role::Police => false,
             _ => distance_between(self.position, player) > DESPAWN_RANGE,
         }
     }
@@ -2335,6 +2365,7 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             formation: [0; 3],
             pass: 0.0,
             flee: 0.0,
+            responding: false,
             flash: 0.0,
             death: 0.0,
             station: None,
@@ -2737,7 +2768,8 @@ pub fn spawn(
                    anchor,
                    rng: &mut Random|
      -> Option<NpcShip> {
-        if next_id as usize >= limit {
+        // Police patrols are outside the cap ([`MAX_POLICE_PATROLS`]).
+        if next_id as usize >= limit && role != Role::Police {
             return None;
         }
         let mut model = model_for(role, allegiance, rng);
@@ -2953,6 +2985,21 @@ pub fn spawn(
             };
         }
         ships.push(ship);
+    }
+    // Port addition: a police patrol at each other place, after the source's
+    // draws so the rest of the traffic is as F688 rolled it.
+    if counts.police > 0 {
+        let others = places
+            .iter()
+            .filter(|place| place.position != anchor.position)
+            .take(MAX_POLICE_PATROLS - counts.police);
+        for (index, place) in others.enumerate() {
+            let radius = (place.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
+            let position = offset(place.position, 2.6 + index as f64 * 1.7, radius);
+            if let Some(ship) = add(Role::Police, 0xe, position, place.position, rng) {
+                ships.push(ship);
+            }
+        }
     }
     ships
 }

@@ -323,6 +323,7 @@ mod tests {
             formation: [0; 3],
             pass: 0.0,
             flee: 0.0,
+            responding: false,
             flash: 0.0,
             death: 0.0,
             station: None,

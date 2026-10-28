@@ -397,8 +397,15 @@ there), and launch straight into F733's countdown.
 - `F783` clears `wanted`/`alert` when a police object (`+0x118 == 0xe`) is
   removed; `tick_ships` emits `ShipEvent::AlertCleared`. It does not clear the
   illegal-fire flag.
-- The port does **not** spawn extra police; F688's police count is the only
-  source. Fines are wired into F655's docking refusal (`>= 0x2710`), but the
+- The port does **not** spawn extra police. A system with police (record
+  byte `+7` non-zero) gets a fixed patrol force: one ship at the place
+  nearest the player and one at each other place, up to `MAX_POLICE_PATROLS`
+  (4), outside the `MAX_SHIPS` cap and never recycled for range. When the
+  player becomes wanted, `provoke` calls in every police and military ship in
+  the system: each turns hostile with `responding` set and flies in at
+  `RESPONSE_SPEED` (2 km/s, `RESPONSE_ACCEL`), braking to its own combat
+  speed at `RESPONSE_ARRIVE` (5 km). Nothing launches from a station or a
+  planet, so the response is the patrols the system already has. Fines are wired into F655's docking refusal (`>= 0x2710`), but the
   fines office (`F366`) and the F2 legal-status screen are not ported. There is
   no flight HUD badge in the source.
 
@@ -670,16 +677,17 @@ main loop asks `spawn_traffic`, which runs once per system); before this a
 starport take-off never spawned any.
 
 **World Options** (Preferences → Port Options → World Options, saved as
-`traffic=` and `police_pirates=` in `config.cfg`):
+`traffic=`, `police=` and `pirates=` in `config.cfg`; an older
+`police_pirates=` line sets both):
 
 - *Space traffic*: **Original** (default) is F688's traffic alone. **Off**
   spawns none. **Medium** and **Heavy** add 8 or 16 ambient traders
   (`SpawnOptions::extra_traders`), each starting on an orbit of one place and
   flying to a different one, where F745/F746's docking cycle takes over and
   sends it on to the next. They may exceed `MAX_SHIPS`.
-- *Police and pirates*: **Enabled (original)** by default; **Disabled**
-  spawns neither F698's pirate groups nor the system's police, and drops
-  carried-over pirates/police at a jump.
+- *Police* and *Pirates*, each **Enabled (original)** by default.
+  **Disabled** police spawns no patrols; **Disabled** pirates spawns none of
+  F698's pirate groups. Either drops carried-over ships of that kind at a jump.
 
 The choices apply to the next system entered (and to a new game's start
 system, which `apply_world_options` respawns once).
