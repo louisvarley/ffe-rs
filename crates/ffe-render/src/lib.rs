@@ -174,6 +174,9 @@ pub struct Scene {
     pub batches: Vec<Batch>,
     /// How strongly bright parts glow (0 none): they are blurred at half size and added back.
     pub bloom: f32,
+    /// How many times the picture's size the 3-D view is drawn at before it is filtered down
+    /// (1 to 2; on top of the 4x multisampling). Sizes given in pixels are the picture's.
+    pub supersample: f32,
     pub maps: Vec<IndexMap>,
     pub palettes: Vec<Palette>,
 }
@@ -267,7 +270,13 @@ fn fs_blur(i: FullOut) -> @location(0) vec4<f32> {
 // how far over it is (a star's hot core is white whatever its tint).
 @fragment
 fn fs_combine(i: FullOut) -> @location(0) vec4<f32> {
-    let base = textureSample(source, filtered, i.uv).rgb;
+    // Four points of the output pixel (texel.zw) in the supersampled picture: a box filter.
+    let quarter = post.texel.zw * 0.25;
+    var base = vec3<f32>(0.0);
+    for (var k = 0; k < 4; k = k + 1) {
+        let offset = vec2<f32>(f32(k & 1) * 2.0 - 1.0, f32(k >> 1u) * 2.0 - 1.0) * quarter;
+        base = base + textureSample(source, filtered, i.uv + offset).rgb * 0.25;
+    }
     let glow = textureSample(extra, filtered, i.uv).rgb;
     let c = base + glow * post.params.w;
     let over = max(max(c.r, max(c.g, c.b)) - 1.0, 0.0);
@@ -597,6 +606,8 @@ fn fs_back(i: BackOut) -> @location(0) vec4<f32> {
 struct Targets {
     width: u32,
     height: u32,
+    /// The size the 3-D view is drawn at (the picture's, supersampled).
+    inner: (u32, u32),
     colour: wgpu::Texture,
     resolved: wgpu::Texture,
     /// The bloom's two half-size buffers and the picture with the glow added.
@@ -998,18 +1009,18 @@ impl Renderer {
         })
     }
 
-    fn targets(&mut self, width: u32, height: u32) -> &Targets {
+    fn targets(&mut self, width: u32, height: u32, inner: (u32, u32)) -> &Targets {
         if self
             .targets
             .as_ref()
-            .is_none_or(|t| t.width != width || t.height != height)
+            .is_none_or(|t| t.width != width || t.height != height || t.inner != inner)
         {
-            let texture = |samples: u32, format, usage, label| {
+            let sized = |size: (u32, u32), samples: u32, format, usage, label| {
                 self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some(label),
                     size: wgpu::Extent3d {
-                        width,
-                        height,
+                        width: size.0,
+                        height: size.1,
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
@@ -1020,10 +1031,13 @@ impl Renderer {
                     view_formats: &[],
                 })
             };
+            let texture =
+                |samples: u32, format, usage, label| sized(inner, samples, format, usage, label);
             let padded_row = (width * 4).div_ceil(256) * 256;
             self.targets = Some(Targets {
                 width,
                 height,
+                inner,
                 colour: texture(
                     SAMPLES,
                     SCENE_FORMAT,
@@ -1042,8 +1056,8 @@ impl Renderer {
                     self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some(label),
                         size: wgpu::Extent3d {
-                            width: width.div_ceil(2),
-                            height: height.div_ceil(2),
+                            width: inner.0.div_ceil(2),
+                            height: inner.1.div_ceil(2),
                             depth_or_array_layers: 1,
                         },
                         mip_level_count: 1,
@@ -1055,7 +1069,8 @@ impl Renderer {
                         view_formats: &[],
                     })
                 }),
-                bloomed: texture(
+                bloomed: sized(
+                    (width, height),
                     1,
                     COLOUR_FORMAT,
                     wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
@@ -1082,7 +1097,16 @@ impl Renderer {
     /// Draw the scene and return its picture (`0x00RRGGBB` words, `width * height`).
     pub fn render(&mut self, scene: &Scene) -> Result<Vec<u32>, String> {
         let (width, height) = (scene.width.max(1), scene.height.max(1));
-        self.targets(width, height);
+        let supersample = if scene.supersample.is_finite() {
+            scene.supersample.clamp(1.0, 2.0)
+        } else {
+            1.0
+        };
+        let inner = (
+            (width as f32 * supersample).ceil() as u32,
+            (height as f32 * supersample).ceil() as u32,
+        );
+        self.targets(width, height, inner);
         let layers = self.upload_maps(&scene.maps);
         let face_view = &self.face_maps.as_ref().unwrap().view;
         let device = &self.device;
@@ -1094,7 +1118,7 @@ impl Renderer {
                 scene.projection.near,
                 0.0,
             ],
-            viewport: [width as f32, height as f32, 0.0, 0.0],
+            viewport: [inner.0 as f32, inner.1 as f32, 0.0, 0.0],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("uniforms"),
@@ -1204,7 +1228,7 @@ impl Renderer {
                 let [a, b] = clip_line(l.positions, scene.projection.near)?;
                 Some(WideLine {
                     a,
-                    width: l.width,
+                    width: l.width * supersample,
                     b,
                     layer,
                     colour: l.colour,
@@ -1214,9 +1238,9 @@ impl Renderer {
             let first_sprite = sprites.len() as u32;
             sprites.extend(batch.sprites.iter().map(|sprite| SpriteVertex {
                 position: sprite.position,
-                size: sprite.size,
+                size: sprite.size * supersample,
                 colour: sprite.colour,
-                halo_size: sprite.halo_size,
+                halo_size: sprite.halo_size * supersample,
                 halo: sprite.halo,
             }));
             sprite_ranges.push(first_sprite..sprites.len() as u32);
@@ -1386,17 +1410,31 @@ impl Renderer {
         let view = |texture: &wgpu::Texture| texture.create_view(&Default::default());
         let (resolved, bloomed) = (view(&targets.resolved), view(&targets.bloomed));
         let glow = [view(&targets.glow[0]), view(&targets.glow[1])];
+        let (inner_width, inner_height) = targets.inner;
         let full = [
-            1.0 / targets.width as f32,
-            1.0 / targets.height as f32,
+            1.0 / inner_width as f32,
+            1.0 / inner_height as f32,
             0.0,
             0.0,
         ];
         let half = [
-            1.0 / targets.width.div_ceil(2) as f32,
-            1.0 / targets.height.div_ceil(2) as f32,
+            1.0 / inner_width.div_ceil(2) as f32,
+            1.0 / inner_height.div_ceil(2) as f32,
             0.0,
             0.0,
+        ];
+        // The last pass reads the supersampled picture at four points of each output pixel
+        // (all at its centre without supersampling, which leaves the picture exact).
+        let spread = if targets.inner == (targets.width, targets.height) {
+            0.0
+        } else {
+            1.0
+        };
+        let output = [
+            full[0],
+            full[1],
+            spread / targets.width as f32,
+            spread / targets.height as f32,
         ];
         let pass = |encoder: &mut wgpu::CommandEncoder,
                     pipeline: &wgpu::RenderPipeline,
@@ -1487,7 +1525,7 @@ impl Renderer {
             &bloomed,
             &resolved,
             &glow[0],
-            uniforms([0.0, 0.0, 0.0, strength], full),
+            uniforms([0.0, 0.0, 0.0, strength], output),
         );
     }
 
@@ -1705,6 +1743,7 @@ mod tests {
             maps: vec![],
             palettes: vec![],
             bloom: 0.0,
+            supersample: 1.0,
         };
         let pixels = renderer.render(&scene).unwrap();
         assert_eq!(pixels.len(), 64 * 48);
@@ -1746,6 +1785,16 @@ mod tests {
         };
         let pixels = renderer.render(&layered.clone()).unwrap();
         assert_eq!(pixels[24 * 64 + 32], 0x0000ff);
+        // Drawn twice the size and filtered down: the same picture size and colours.
+        let finer = renderer
+            .render(&Scene {
+                supersample: 2.0,
+                ..layered.clone()
+            })
+            .unwrap();
+        assert_eq!(finer.len(), 64 * 48);
+        assert_eq!(finer[24 * 64 + 32], 0x0000ff);
+        assert_eq!(finer[0], 0x203040);
         // A textured face: the left half of its map is index 1 (red in its palette) and the
         // right index 0 (a hole); the detail doubles the right-hand red column's brightness...
         // which red cannot exceed, so it stays red.
@@ -1797,6 +1846,7 @@ mod tests {
             maps: vec![],
             palettes: vec![],
             bloom: 0.0,
+            supersample: 1.0,
             ..textured
         };
         let pixels = renderer.render(&hazy).unwrap();

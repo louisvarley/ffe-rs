@@ -282,6 +282,19 @@ Status (2026-10-28): **implemented**.
   so fire and beams run past white and the bloom spreads them while grey debris stays as it is, and
   a planet's shadow does not darken them (`an_explosion_glows_on_the_gpu`).
 
+### Supersampling, and why colour stays as it is
+
+Status (2026-10-28): **implemented**.
+
+- The GPU draws the 3-D view (and its bloom) at 1.5 times the view's size, with its 4x multisampling
+  on top, and the last pass filters it down with four taps an output pixel (`Scene::supersample`,
+  `modern3d::SUPERSAMPLE`; line widths and glow sizes stay in the view's pixels). Finer edges and
+  texture detail cost little: 5.3 ms a frame at 1920x1440 against 5.1 before on the RTX 3090.
+  Without supersampling the last pass reads each pixel once, so the picture is exact.
+- Full-precision colour was looked at and left: the original works out every colour in 4-bit steps
+  (F1326's nibbles), so there is no finer colour to recover. The smooth shading and the HDR bloom are
+  what smooth the gradients.
+
 Not yet on the GPU (still the original's pixels behind the models): complex polygons (opcode 5, such
 as the fireball's body; they are queued as screen-space outlines), and the HUD and its gunsight.
 

@@ -134,7 +134,7 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 | ENH-002 | Native-resolution rendering | implemented for the flight view's models | Modern graphics with a GPU: the executor's faces and the planet surfaces' triangles (recorded in view space beside F1840's queue, which is unchanged) are drawn by `ffe-render` (wgpu) at the window's view size with the original's projection, over the original's frame, under its HUD. Stars and dots stay the original's pixels for now. In Modern the planets' surfaces are subdivided one level finer than the "Level of Shape Detail" setting (presentation only), and faces are shaded smoothly across shared corners where the original's flat lighting steps (same texture or hue, similar normals). See `docs/notes/modern-graphics.md`. |
 | ENH-003 | Smooth texture filtering | implemented for model textures | Perspective-correct, mipmapped; textures enlarged with Scale2x first. |
 | ENH-004 | Anisotropic filtering | implemented for model textures (8x) | smooth-filtering |
-| ENH-005 | MSAA | implemented (4x) for the GPU 3-D view | native-res |
+| ENH-005 | MSAA | implemented (4x) for the GPU 3-D view, with 1.5x supersampling on top | native-res |
 | ENH-006 | TAA | proposed | native-res |
 | ENH-007 | Sharp scalable HUD/text | proposed | native-res; must match Classic metrics when off |
 | ENH-008 | HDR + tone mapping | proposed | native-res |

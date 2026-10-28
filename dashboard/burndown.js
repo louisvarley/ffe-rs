@@ -978,6 +978,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: particle chains as GPU glows, and beams, explosions and hit sparks give off light (saturated colours past white, bloomed). Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: the GPU view supersampled 1.5x on top of 4x MSAA (5.3 ms a frame at 1920x1440). Full-precision colour left: the original's colours are 4-bit by design. Remaining count unchanged."
     }
   ]
 };

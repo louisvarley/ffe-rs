@@ -38,6 +38,9 @@ const EMISSIVE: f32 = 2.2;
 /// The light an object keeps in a planet's full shadow (from the planet's day side and the sky),
 /// as a share of its sunlit colour.
 const SHADOW_AMBIENT: f32 = 0.3;
+/// How many times the view's size the GPU draws the 3-D view at before filtering it down (on top
+/// of its 4x multisampling): finer edges and texture detail for about twice the GPU work.
+const SUPERSAMPLE: f32 = 1.5;
 /// How strongly the brightest parts (the star, lights, sunlit white) glow: modest.
 const BLOOM: f32 = 0.6;
 /// How much the frame behind the models is enlarged before the GPU filters it.
@@ -654,6 +657,7 @@ pub fn scene(
         maps,
         palettes,
         bloom: BLOOM,
+        supersample: SUPERSAMPLE,
     }
 }
 
