@@ -135,6 +135,9 @@ pub struct Frame {
     /// The planets' atmospheres, for the modern engine, which draws them in place of the
     /// ring F1877 queues (those shapes carry an empty [`Solid`], so they are set aside).
     pub atmospheres: Vec<Shell>,
+    /// The light the frame was drawn in: a view-space vector the way the light travels, 32768
+    /// long (F1876's `+0x134`), for the modern engine's smooth shading.
+    pub light: Option<[i32; 3]>,
     /// The F1777 depth key of each shape, aligned with [`Self::shapes`], in the
     /// original's far-to-near order. Curved-surface entries (F1840/F1841) are
     /// merged into this order, so a ship draws over a planet it is in front of.
@@ -1511,6 +1514,7 @@ impl ModelViewer {
                 .max(1e-9);
             light_view.map(|v| (v / length * 32_768.0) as i32)
         };
+        frame.light = Some(view_light);
         let (surfaces, skipped, haze) = self.collect_surfaces(&result, view_light);
         frame.skipped += skipped;
         for batch in &surfaces {

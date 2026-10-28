@@ -223,6 +223,24 @@ times are checked once a second, so an edited or newly upscaled picture shows wi
 the running game. A picture still at the export's size, or a missing file, leaves the original bitmap
 (enlarged with Scale2x). Problems reading a file go to the log once per change.
 
+### Finer planets and smooth shading
+
+Status (2026-10-28): **implemented**.
+
+- **Finer planets.** With the GPU view on, the flight view asks F1876 for planet surfaces one
+  level finer than the "Level of Shape Detail" setting (`modern3d::TERRAIN_DETAIL`): about twice the
+  triangles, finer coastlines and outlines, about 1.5 ms more a frame for a whole planet. Landing and
+  collision use the separate distance query and do not change. Two levels are finer still but cost
+  about 10 ms a frame; three overflow the original's node arena on a whole planet and leave holes.
+- **Smooth shading.** The original lights each face flat, in coarse steps. For each face the GPU
+  view now gives each corner a brightness factor that brings it to the mean of the faces meeting
+  there that are the same surface lit differently: normals within 50 degrees, the same texture bitmap
+  (or both untextured), the same hue, and a brightness step no bigger than lighting makes (within about
+  30 %). The face keeps its own colour (or texture) and only its brightness varies across it, so
+  big facets of sea or hull shade into each other while sea against land, or a stripe on a hull, keep
+  their edges. Each viewer frame also now carries the light it was drawn in (`Frame::light`), passed
+  to the modern engine per object (`World::lights`) for the lighting effects to come.
+
 Not yet on the GPU (still the original's pixels behind the models): particle chains (F1814: debris
 and exhaust specks), and the HUD and its gunsight.
 

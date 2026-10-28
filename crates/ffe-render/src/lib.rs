@@ -55,8 +55,8 @@ pub const MAP_LAYERS: u32 = 64;
 /// The colours of one palette (a face's slots); an index past them reads the last.
 pub const PALETTE_SIZE: usize = 64;
 
-/// A triangle in view space, its corners' colours (RGBA, 0..1), and optionally a texture which
-/// replaces the colours. Textures are mapped with perspective correction, filtered smoothly in
+/// A triangle in view space, its corners' colours (RGBA, 0..1), and optionally a texture, which
+/// the corners' colours then shade (white shows it as it is). Textures are mapped with perspective correction, filtered smoothly in
 /// colour (each of the four nearest texels looked up in the palette, then blended) and blended
 /// between mip levels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -350,11 +350,12 @@ fn fs_scene(i: Out) -> @location(0) vec4<f32> {
     let near = bilinear(i.uv, i.texture, level, i.palette);
     let far = bilinear(i.uv, i.texture, min(level + 1, i32(top)), i.palette);
     let texel = mix(near, far, fract(lod));
-    // A hole in a masked texture shows what lies behind.
+    // A hole in a masked texture shows what lies behind. The corners' colours shade the
+    // texture (white leaves it as it is).
     if (texel.a < 0.5) {
         discard;
     }
-    return vec4<f32>(texel.rgb / texel.a, 1.0);
+    return vec4<f32>(min(texel.rgb / texel.a * i.colour.rgb, vec3<f32>(1.0)), 1.0);
 }
 
 struct WideOut {
@@ -1734,7 +1735,8 @@ mod tests {
         }
         let mut palette: Palette = [[0.0; 4]; PALETTE_SIZE];
         palette[1] = [1.0, 0.0, 0.0, 1.0];
-        let mut face = triangle(5.0, [0.0, 1.0, 0.0, 1.0]);
+        // White corners show the texture as it is.
+        let mut face = triangle(5.0, [1.0, 1.0, 1.0, 1.0]);
         face.texture = Some(FaceTexture {
             map: 0,
             palette: 0,

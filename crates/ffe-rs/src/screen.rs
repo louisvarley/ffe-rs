@@ -446,6 +446,8 @@ pub struct Screen {
     batches: Vec<Vec<Solid>>,
     /// The planets' atmospheres so far this frame, by the batch they go over.
     atmospheres: Vec<(usize, crate::model_viewer::Shell)>,
+    /// The light each object's batch was drawn in, by batch.
+    lights: Vec<(usize, [i32; 3])>,
     /// Their textures' bitmaps so far this frame, each once.
     bitmaps: Vec<crate::modern3d::WorldBitmap>,
     /// The bitmaps read so far, so they are not read again every frame.
@@ -984,6 +986,7 @@ impl Screen {
             capture: false,
             batches: Vec::new(),
             atmospheres: Vec::new(),
+            lights: Vec::new(),
             bitmaps: Vec::new(),
             bitmap_memory: Vec::new(),
             deferred: Vec::new(),
@@ -2229,6 +2232,7 @@ impl Screen {
         views.lock_external = self.lock_external;
         self.batches.clear();
         self.atmospheres.clear();
+        self.lights.clear();
         self.bitmaps.clear();
         self.deferred.clear();
         self.world = None;
@@ -2244,7 +2248,13 @@ impl Screen {
                     ((background & 0xff) as u8) >> 4,
                 ]) & 0xfff,
             );
-            scene.set_surface_detail(self.surface_detail);
+            // The modern engine draws the planets' surfaces finer than the setting asks.
+            let finer = if self.capture {
+                crate::modern3d::TERRAIN_DETAIL
+            } else {
+                0
+            };
+            scene.set_surface_detail(self.surface_detail + finer);
         }
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
@@ -2360,6 +2370,7 @@ impl Screen {
                 self.world = Some(crate::modern3d::World {
                     batches: std::mem::take(&mut self.batches),
                     atmospheres: std::mem::take(&mut self.atmospheres),
+                    lights: std::mem::take(&mut self.lights),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2533,6 +2544,7 @@ impl Screen {
                 self.world = Some(crate::modern3d::World {
                     batches: std::mem::take(&mut self.batches),
                     atmospheres: std::mem::take(&mut self.atmospheres),
+                    lights: std::mem::take(&mut self.lights),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
                 });
@@ -2905,6 +2917,7 @@ impl Screen {
             self.batches.push(batch);
             self.atmospheres
                 .extend(frame.atmospheres.iter().map(|shell| (index, shell.clone())));
+            self.lights.extend(frame.light.map(|light| (index, light)));
         }
     }
 

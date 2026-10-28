@@ -25,6 +25,13 @@ pub use crate::modern_art::WorldBitmap;
 
 /// The flight view's rows; the console starts below them.
 pub const VIEW_ROWS: usize = 158;
+/// How many levels finer than the "Level of Shape Detail" setting the GPU view has the planets'
+/// surfaces subdivided (presentation only: landing and collision use their own query). Each level
+/// about doubles the triangles; three overflow the original's node arena on a whole planet.
+pub const TERRAIN_DETAIL: i32 = 1;
+/// Faces whose normals are closer than this (the cosine of 50 degrees) are shaded smoothly
+/// across their shared corners; sharper edges stay sharp.
+const SMOOTH_EDGE: f32 = 0.643;
 /// How strongly the brightest parts (the star, lights, sunlit white) glow: modest.
 const BLOOM: f32 = 0.6;
 /// How much the frame behind the models is enlarged before the GPU filters it.
@@ -39,6 +46,8 @@ pub struct World {
     pub batches: Vec<Vec<Solid>>,
     /// The planets' atmospheres, each with the batch (its planet) it is drawn over.
     pub atmospheres: Vec<(usize, Shell)>,
+    /// The light each batch was drawn in (view space, the way the light travels), by batch.
+    pub lights: Vec<(usize, [i32; 3])>,
     /// The textured faces' bitmaps (their original indices), each once.
     pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
@@ -208,6 +217,114 @@ fn light(
     }
 }
 
+/// The outward unit normal of a face (towards the eye, since the original only draws faces
+/// that face it) from its first three corners.
+fn normal(views: &[[i32; 3]]) -> Option<[f32; 3]> {
+    let [a, b, c] = [views.first()?, views.get(1)?, views.get(2)?].map(|v| v.map(|c| c as f32));
+    let (u, v) = (
+        [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+        [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+    );
+    let mut n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let length = n.iter().map(|c| c * c).sum::<f32>().sqrt();
+    // Also catches a degenerate face's NaN.
+    if length.is_nan() || length <= 0.0 {
+        return None;
+    }
+    n = n.map(|c| c / length);
+    // Facing the eye at the origin: against the direction to the face.
+    if n[0] * a[0] + n[1] * a[1] + n[2] * a[2] > 0.0 {
+        n = n.map(|c| -c);
+    }
+    Some(n)
+}
+
+/// The luminance of a colour (Rec. 601 weights), 0..255.
+fn luma([r, g, b]: [u8; 3]) -> f32 {
+    0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)
+}
+
+/// Smooth shading for one batch: for each face, a brightness factor at each corner that brings
+/// it to the mean brightness of the faces meeting there that belong with it (normals within
+/// [`SMOOTH_EDGE`], and the same texture bitmap, or for untextured faces the same hue). The
+/// original lights each face flat, in coarse steps; evening the steps out at the corners turns a
+/// faceted sphere or hull round, while a different material next door (sea against land, a
+/// stripe on a hull) keeps its own colour.
+fn smooth(solids: &[Solid]) -> Vec<Option<Vec<f32>>> {
+    let face = |solid: &Solid| {
+        (solid.sprite.is_none() && !solid.path && solid.views.len() >= 3)
+            .then(|| normal(&solid.views))
+            .flatten()
+    };
+    let normals: Vec<Option<[f32; 3]>> = solids.iter().map(face).collect();
+    let bright: Vec<f32> = solids
+        .iter()
+        .map(|solid| luma(solid.rgb).max(1.0))
+        .collect();
+    let hue = |solid: &Solid| {
+        let sum = solid
+            .rgb
+            .iter()
+            .map(|c| f32::from(*c))
+            .sum::<f32>()
+            .max(1.0);
+        solid.rgb.map(|c| f32::from(c) / sum)
+    };
+    // The same surface lit differently: the same bitmap (or both untextured), the same hue, and
+    // a brightness step no bigger than the original's lighting makes.
+    let alike = |a: usize, b: usize| {
+        let (x, y) = (&solids[a], &solids[b]);
+        let same = match (&x.texture, &y.texture) {
+            (Some(p), Some(q)) => p.bitmap & 0xfff == q.bitmap & 0xfff,
+            (None, None) => true,
+            _ => false,
+        };
+        let (p, q) = (hue(x), hue(y));
+        let ratio = bright[b] / bright[a];
+        same && (0..3).map(|k| (p[k] - q[k]).abs()).sum::<f32>() < 0.08
+            && (0.7..1.43).contains(&ratio)
+    };
+    let mut corners: std::collections::HashMap<[i32; 3], Vec<usize>> = Default::default();
+    for (index, (solid, n)) in solids.iter().zip(&normals).enumerate() {
+        if n.is_some() {
+            for corner in &solid.views {
+                corners.entry(*corner).or_default().push(index);
+            }
+        }
+    }
+    solids
+        .iter()
+        .zip(&normals)
+        .enumerate()
+        .map(|(index, (solid, n))| {
+            let n = (*n)?;
+            Some(
+                solid
+                    .views
+                    .iter()
+                    .map(|corner| {
+                        let (mut sum, mut count) = (0.0f32, 0.0f32);
+                        for &other in &corners[corner] {
+                            let m = normals[other].unwrap_or(n);
+                            if m[0] * n[0] + m[1] * n[1] + m[2] * n[2] >= SMOOTH_EDGE
+                                && alike(index, other)
+                            {
+                                sum += bright[other];
+                                count += 1.0;
+                            }
+                        }
+                        (sum / count.max(1.0) / bright[index]).clamp(0.6, 1.6)
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 /// A planet's atmosphere for the GPU: the shell between the surface and F1877's ring radius,
 /// in the haze colour, lit from the star (against the light vector).
 fn atmosphere(shell: &Shell) -> ffe_render::Atmosphere {
@@ -303,7 +420,8 @@ pub fn scene(
                     .collect(),
                 ..ffe_render::Batch::default()
             };
-            for solid in solids {
+            let shading = smooth(solids);
+            for (solid, shade) in solids.iter().zip(&shading) {
                 let [r, g, b] = colour(solid.rgb);
                 let rgba = [r, g, b, 1.0];
                 let point = |v: [i32; 3]| v.map(|c| c as f32);
@@ -324,13 +442,22 @@ pub fn scene(
                     }
                     continue;
                 }
-                // A face: a fan from its first corner.
+                // A face: a fan from its first corner. With smooth shading each corner's colour
+                // (or, for a texture, its brightness) takes the corner's factor.
                 if let [first, rest @ ..] = &solid.views[..] {
                     let texture = texture_of(solid);
+                    let base = if texture.is_some() { [1.0; 4] } else { rgba };
+                    let corner = |k: usize| match shade {
+                        Some(factors) => {
+                            let f = factors[k];
+                            [base[0] * f, base[1] * f, base[2] * f, 1.0]
+                        }
+                        None => base,
+                    };
                     for (k, pair) in rest.windows(2).enumerate() {
                         batch.triangles.push(ffe_render::Triangle {
                             positions: [point(*first), point(pair[0]), point(pair[1])],
-                            colours: [rgba; 3],
+                            colours: [corner(0), corner(k + 1), corner(k + 2)],
                             texture: texture.as_ref().map(|(map, palette, uv)| {
                                 ffe_render::FaceTexture {
                                     map: *map,
@@ -403,6 +530,7 @@ mod tests {
                 masked: true,
             }],
             atmospheres: vec![],
+            lights: vec![],
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
         };
         let scene = scene(&world, 640, 316, &mut MapCache::default());
@@ -455,6 +583,7 @@ mod tests {
             }]],
             bitmaps: vec![],
             atmospheres: vec![],
+            lights: vec![],
             snapshot: snapshot.clone(),
         };
         // The HUD drew one pixel at the square's centre after the world phase.
