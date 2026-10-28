@@ -3641,6 +3641,9 @@ impl Navigator {
         for (station, id) in held {
             self.starport(station).release(id);
         }
+        if let Some(life) = options.advanced.filter(|_| !self.traffic_off) {
+            self.busy_surface_ports(cache, player, allegiance, life, &mut ships, &mut rng);
+        }
         self.occupy_station_bays(&mut ships);
         self.ships = ships;
         self.player_at = player;
@@ -4559,6 +4562,77 @@ impl Navigator {
             self.effects.extend(burst);
         }
         Some(attack)
+    }
+
+    /// Port addition (Advanced traffic): the surface starports nearest the
+    /// player get traders waiting on their pads (they take off when their
+    /// wait is over) and one coming down to land, more in populous systems.
+    fn busy_surface_ports(
+        &self,
+        cache: &VerifiedCache,
+        player: [i64; 3],
+        allegiance: u32,
+        life: npc::Life,
+        ships: &mut Vec<NpcShip>,
+        rng: &mut npc::Random,
+    ) {
+        let mut ports: Vec<(usize, &Body)> = self
+            .bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, body)| body.kind == Kind::Starport)
+            .collect();
+        ports.sort_by(|a, b| {
+            distance(player, a.1.position).total_cmp(&distance(player, b.1.position))
+        });
+        let mut next = ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
+        let waiting = npc::PAD_TRADERS + (life.population / 4) as usize;
+        for (index, port) in ports.into_iter().take(npc::BUSY_PORTS) {
+            let spec = |rng: &mut npc::Random| {
+                let model = npc::model_for(npc::Role::Trader, allegiance, rng);
+                crate::ships::npc_spec(cache, model)
+            };
+            for _ in 0..waiting {
+                let Some(found) = spec(rng) else { continue };
+                let wait = npc::PAD_SECONDS * (1.0 + f64::from(rng.bounded(1000)) / 1000.0);
+                ships.push(npc::pad_trader(
+                    &found,
+                    next,
+                    port.position,
+                    index,
+                    wait,
+                    rng,
+                ));
+                next += 1;
+            }
+            // The landing trader comes down along the port's local up.
+            let up = port
+                .parent
+                .and_then(|parent| self.bodies.get(parent))
+                .map(|planet| {
+                    let to = [
+                        (port.position[0] - planet.position[0]) as f64,
+                        (port.position[1] - planet.position[1]) as f64,
+                        (port.position[2] - planet.position[2]) as f64,
+                    ];
+                    let length = to.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0);
+                    to.map(|v| v / length)
+                })
+                .unwrap_or([0.0, 1.0, 0.0]);
+            let Some(found) = spec(rng) else { continue };
+            let above = std::array::from_fn(|axis| {
+                port.position[axis] + (up[axis] * npc::LANDING_HEIGHT) as i64
+            });
+            ships.push(npc::hyperspace_arrival(
+                &found,
+                next,
+                above,
+                port.position,
+                index,
+                rng,
+            ));
+            next += 1;
+        }
     }
 
     /// Port addition (Advanced traffic): who fights whom. A pirate well away

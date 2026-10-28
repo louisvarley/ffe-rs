@@ -2750,6 +2750,33 @@ pub fn hyperspace_arrival(
     ship
 }
 
+/// Port addition (Advanced traffic): a trader waiting on a surface port's
+/// pad (its bay is the caller's to grant), launching after `seconds`.
+pub fn pad_trader(
+    spec: &Spec,
+    id: u32,
+    anchor: [i64; 3],
+    station: usize,
+    seconds: f64,
+    rng: &mut Random,
+) -> NpcShip {
+    let mut ship = hyperspace_arrival(spec, id, anchor, anchor, station, rng);
+    ship.state = State::Docked;
+    ship.dock_span = seconds;
+    ship.dock_timer = seconds;
+    ship
+}
+
+/// Port addition (Advanced traffic): surface ports kept busy, the nearest
+/// this many to the player...
+pub const BUSY_PORTS: usize = 3;
+/// ...each with this many traders on its pads...
+pub const PAD_TRADERS: usize = 2;
+/// ...one coming in to land from this high...
+pub const LANDING_HEIGHT: f64 = 15.0e6;
+/// ...and pad waits of this many game seconds, plus up to as many again.
+pub const PAD_SECONDS: f64 = 120.0;
+
 /// Port addition: the most ships one convoy (a bulk carrier and its escorts)
 /// adds.
 pub const MAX_CONVOY_SHIPS: usize = 3;
