@@ -119,7 +119,10 @@ pub struct Batch {
 
 /// A flame from `a` to `b` (view space), `width` across at `a` and `end` across at `b` (view
 /// units), hottest at `a` in `core` and cooling to `edge`, flickering with time; with `a` and
-/// `b` the same, a round fireball `width` across. `seed` keeps neighbouring flames apart.
+/// `b` the same, a round fireball `width` across. `seed` keeps neighbouring flames apart. A glow
+/// (an engine's) adds its light to what lies behind it; a flame with `body` (an explosion's fire)
+/// is drawn over it by how thick it is, so lit debris and overlapping fireballs stay fire-coloured
+/// instead of adding up past white.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Flame {
     pub a: [f32; 3],
@@ -129,6 +132,7 @@ pub struct Flame {
     pub core: [f32; 3],
     pub edge: [f32; 3],
     pub seed: f32,
+    pub body: bool,
 }
 
 #[repr(C)]
@@ -596,15 +600,18 @@ fn vs_flame(
     var sides = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
     let t = ends[index];
     let side = sides[index];
-    // Stretch the quad half a radius past each end, so the rounded ends fit.
-    let start = sa - along * ra;
-    let finish = sb + along * rb;
+    // Stretch the quad past each end as far as it reaches across, so the rounded ends and a
+    // fireball's boiling edge fit inside it (a radius alone cut a fireball's sides off straight).
+    let behind = ra * 1.3 + 1.0;
+    let beyond = rb * 1.3 + 1.0;
+    let start = sa - along * behind;
+    let finish = sb + along * beyond;
     let point = mix(start, finish, t) + across * side * reach;
     let w = mix(ca.w, cb.w, t);
     var out: FlameOut;
     // Pulled 2% nearer, like the glows, so a plume at its nozzle is not hidden by the hull.
     out.position = vec4<f32>(point / half_view * w, u.scale.z * 1.02, w);
-    out.along = mix(-ra, length_px + rb, t) / max(length_px, 1.0);
+    out.along = mix(-behind, length_px + beyond, t) / max(length_px, 1.0);
     out.across = side * reach;
     out.shape = vec2<f32>(length_px, ra);
     out.core = core;
@@ -953,6 +960,8 @@ pub struct Renderer {
     sky: wgpu::RenderPipeline,
     sprites: wgpu::RenderPipeline,
     flames: wgpu::RenderPipeline,
+    /// Flames with body: the flames' shaders, blended over what lies behind.
+    bodies: wgpu::RenderPipeline,
     shells: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
 
@@ -1248,27 +1257,31 @@ impl Renderer {
                 6 => Float32x3
             ],
         };
-        let flames = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("flames"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_flame"),
-                compilation_options: Default::default(),
-                buffers: &[Some(flame_layout)],
-            },
-            primitive: Default::default(),
-            depth_stencil: Some(depth(false, wgpu::CompareFunction::GreaterEqual)),
-            multisample,
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_flame"),
-                compilation_options: Default::default(),
-                targets: &additive,
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let flame_pipeline = |label: &str, targets: &[Option<wgpu::ColorTargetState>]| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_flame"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(flame_layout.clone())],
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(depth(false, wgpu::CompareFunction::GreaterEqual)),
+                multisample,
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_flame"),
+                    compilation_options: Default::default(),
+                    targets,
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let flames = flame_pipeline("flames", &additive);
+        let bodies = flame_pipeline("flames with body", &target);
         let shells = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("atmospheres"),
             layout: Some(&pipeline_layout),
@@ -1384,6 +1397,7 @@ impl Renderer {
             sky,
             sprites,
             flames,
+            bodies,
             shells,
             sampler,
             face_maps: None,
@@ -1598,6 +1612,7 @@ impl Renderer {
         let mut sprite_ranges = Vec::with_capacity(scene.batches.len());
         let mut flames: Vec<FlameVertex> = Vec::new();
         let mut flame_ranges = Vec::with_capacity(scene.batches.len());
+        let mut body_ranges = Vec::with_capacity(scene.batches.len());
         let mut shell_ranges = Vec::with_capacity(scene.batches.len());
         for batch in &scene.batches {
             let first = vertices.len() as u32;
@@ -1651,21 +1666,26 @@ impl Renderer {
                 halo: sprite.halo,
             }));
             sprite_ranges.push(first_sprite..sprites.len() as u32);
-            let first_flame = flames.len() as u32;
-            flames.extend(batch.flames.iter().filter_map(|flame| {
-                let near = scene.projection.near;
-                (flame.a[2] >= near && flame.b[2] >= near).then_some(FlameVertex {
-                    a: flame.a,
-                    width: flame.width,
-                    b: flame.b,
-                    end: flame.end,
-                    core: flame.core,
-                    seed: flame.seed,
-                    edge: flame.edge,
-                    pad: 0.0,
-                })
-            }));
-            flame_ranges.push(first_flame..flames.len() as u32);
+            // The glows, then the flames with body.
+            for (body, ranges) in [(false, &mut flame_ranges), (true, &mut body_ranges)] {
+                let first_flame = flames.len() as u32;
+                flames.extend(batch.flames.iter().filter_map(|flame| {
+                    let near = scene.projection.near;
+                    (flame.body == body && flame.a[2] >= near && flame.b[2] >= near).then_some(
+                        FlameVertex {
+                            a: flame.a,
+                            width: flame.width,
+                            b: flame.b,
+                            end: flame.end,
+                            core: flame.core,
+                            seed: flame.seed,
+                            edge: flame.edge,
+                            pad: 0.0,
+                        },
+                    )
+                }));
+                ranges.push(first_flame..flames.len() as u32);
+            }
             let first_shell = shells.len() as u32;
             shells.extend(batch.atmospheres.iter().filter_map(shell));
             shell_ranges.push(first_shell..shells.len() as u32);
@@ -1773,11 +1793,14 @@ impl Renderer {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..6, lights.clone());
             }
-            let burning = &flame_ranges[pass_index - 1];
-            if let (Some(buffer), false) = (&flame_buffer, burning.is_empty()) {
-                pass.set_pipeline(&self.flames);
-                pass.set_vertex_buffer(0, buffer.slice(..));
-                pass.draw(0..6, burning.clone());
+            for (pipeline, ranges) in [(&self.flames, &flame_ranges), (&self.bodies, &body_ranges)]
+            {
+                let burning = &ranges[pass_index - 1];
+                if let (Some(buffer), false) = (&flame_buffer, burning.is_empty()) {
+                    pass.set_pipeline(pipeline);
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    pass.draw(0..6, burning.clone());
+                }
             }
             let atmospheres = &shell_ranges[pass_index - 1];
             if let (Some(buffer), false) = (&shell_buffer, atmospheres.is_empty()) {
@@ -2358,6 +2381,7 @@ mod tests {
                     core: [1.0, 0.9, 0.6],
                     edge: [1.0, 0.3, 0.0],
                     seed: 0.0,
+                    body: false,
                 }],
                 ..Batch::default()
             }],
@@ -2379,6 +2403,38 @@ mod tests {
             })
             .unwrap();
         assert!(warm(fire[30 * 64 + 32]), "a burning face");
+        // A fireball with body over a light grey face is drawn over it, not added to it: at its
+        // middle it is its own orange, where added light would have run to white.
+        let mut grey = triangle(20.0, [0.7, 0.7, 0.7, 1.0]);
+        grey.positions = [[-40.0, -40.0, 20.0], [40.0, -40.0, 20.0], [0.0, 40.0, 20.0]];
+        let fireball = |body: bool| Scene {
+            batches: vec![Batch {
+                triangles: vec![grey],
+                flames: vec![Flame {
+                    a: [0.0, 0.0, 10.0],
+                    b: [0.0, 0.0, 10.0],
+                    width: 8.0,
+                    end: 8.0,
+                    core: [0.6, 0.3, 0.06],
+                    edge: [0.36, 0.08, 0.01],
+                    seed: 0.0,
+                    body,
+                }],
+                ..Batch::default()
+            }],
+            ..ruled.clone()
+        };
+        let rgb = |p: u32| [p >> 16 & 0xff, p >> 8 & 0xff, p & 0xff];
+        let added = rgb(renderer.render(&fireball(false)).unwrap()[24 * 64 + 32]);
+        let over = rgb(renderer.render(&fireball(true)).unwrap()[24 * 64 + 32]);
+        assert!(
+            over[0] > over[1] && over[1] > over[2],
+            "fire-coloured: {over:?}"
+        );
+        assert!(
+            added[2] > over[2] + 80,
+            "added light runs towards white: {added:?}"
+        );
         // A generated sky shows through the background's sky colour: nebulae and stars change
         // much of it, and none of it without the sky.
         let starry = Scene {

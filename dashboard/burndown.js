@@ -1003,6 +1003,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: a star's glow colour is worked out once per star from a fixed close render, so a far star (beyond the range its model is drawn) no longer glows green. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: the gunsight, velocity marker and targetting marks are drawn as crisp lines; explosion fire is round fireballs and streaks with body instead of filled polygons and dithered textures. Remaining count unchanged."
     }
   ]
 };

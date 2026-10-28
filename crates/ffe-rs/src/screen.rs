@@ -10,6 +10,7 @@ use crate::intro_text::IntroText;
 use crate::messages::MessageLog;
 use crate::model_lab::{LabView, ModelLab};
 use crate::model_viewer::{AnimationInputs, Frame, ModelViewer, Shape, Solid, THRUST_GLOBAL};
+use crate::modern3d::HudShape;
 use crate::prefs::{self, Mark, Prefs};
 use crate::scanner;
 use crate::station::{self, DockRow, DockView, Screen as StationScreen, Status};
@@ -1204,15 +1205,51 @@ impl Screen {
             return;
         }
         if let Some(Some(icon)) = self.icons.get(crate::combat::GUNSIGHT_BITMAP as usize) {
+            let before = self.crisp_start();
             icon.blit_colours(&mut self.frame, &self.palette, 129, 48);
+            // The bitmap's colour 15 is its line; 9 and 12 only soften its edges.
+            let rgb = self.rgb(15);
+            self.crisp_end(before, || vec![HudShape::gunsight([129.0, 48.0], rgb)]);
         }
         self.draw_targeter_cursor(view);
         // F1111: the combat target (`DATA_007247`) draws F1114's circle at
         // (0x9f,0x4f) with F1612's radius word 0xc (halved to 6) in colour
         // 0x10, while F1113's blink is on (`ffe.asm:81967-81991`).
         if self.missile_lock && self.missile_blink {
+            let before = self.crisp_start();
             self.circle(0x9f, 0x4f, 0x0c, targeter::COMBAT_COLOUR);
+            let rgb = self.rgb(targeter::COMBAT_COLOUR);
+            self.crisp_end(before, || vec![HudShape::circle((0x9f, 0x4f), 6.0, rgb)]);
         }
+    }
+
+    /// A palette colour as red, green and blue.
+    fn rgb(&self, index: u8) -> [u8; 3] {
+        let value = self.palette[usize::from(index)];
+        [(value >> 16) as u8, (value >> 8) as u8, value as u8]
+    }
+
+    /// With the modern engine, the frame before a HUD shape that [`Self::crisp_end`] draws crisp.
+    fn crisp_start(&self) -> Option<Vec<u32>> {
+        (self.capture && self.world.is_some()).then(|| self.frame.clone())
+    }
+
+    /// With the modern engine, the HUD shape just drawn is drawn crisp over the 3-D view instead:
+    /// the pixels it put down let the 3-D view through (the world's `crisp`), and the
+    /// modern engine draws `shapes` over them at the output's resolution.
+    fn crisp_end(&mut self, before: Option<Vec<u32>>, shapes: impl FnOnce() -> Vec<HudShape>) {
+        let (Some(before), Some(world)) = (before, self.world.as_mut()) else {
+            return;
+        };
+        if world.crisp.is_empty() {
+            world.crisp = vec![None; self.frame.len()];
+        }
+        for ((now, was), crisp) in self.frame.iter().zip(&before).zip(&mut world.crisp) {
+            if now != was {
+                *crisp = Some(*now);
+            }
+        }
+        world.hud.extend(shapes());
     }
 
     /// F1111's auto-targetter cursor, drawn after the gunsight: `DATA_007246`'s
@@ -1225,6 +1262,7 @@ impl Screen {
         let Some(cursor) = self.targeter else {
             return;
         };
+        let before = self.crisp_start();
         match cursor {
             targeter::Cursor::Navigation => {
                 let value = self.palette[usize::from(targeter::NAVIGATION_COLOUR)];
@@ -1232,6 +1270,8 @@ impl Screen {
                 for (from, to) in targeter::box_edges(x, y, half) {
                     self.line_value(from, to, value);
                 }
+                let rgb = self.rgb(targeter::NAVIGATION_COLOUR);
+                self.crisp_end(before, || vec![HudShape::square((x, y), half, rgb)]);
             }
             targeter::Cursor::Combat => {
                 let value = self.palette[usize::from(targeter::COMBAT_COLOUR)];
@@ -1241,6 +1281,10 @@ impl Screen {
                         self.frame[py as usize * 320 + px as usize] = value;
                     }
                 }
+                let rgb = self.rgb(targeter::COMBAT_COLOUR);
+                self.crisp_end(before, || {
+                    vec![HudShape::circle((x, y), radius as f32, rgb)]
+                });
             }
         }
     }
@@ -1332,7 +1376,14 @@ impl Screen {
             .icons
             .get(crate::combat::VELOCITY_MARKER_BITMAP as usize)
         {
+            let before = self.crisp_start();
             icon.blit_colours(&mut self.frame, &self.palette, x - 19, y - 18);
+            // The bitmap's arcs are colour 15 and its spokes about 8; the rest soften edges.
+            let (ring, spoke) = (self.rgb(15), self.rgb(8));
+            let at = [(x - 19) as f32, (y - 18) as f32];
+            self.crisp_end(before, || {
+                HudShape::velocity_marker(at, ring, spoke).to_vec()
+            });
         }
     }
 
@@ -2478,6 +2529,8 @@ impl Screen {
                     sky: self.sky_view.take(),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
+                    hud: Vec::new(),
+                    crisp: Vec::new(),
                 });
                 let deferred = std::mem::take(&mut self.deferred);
                 self.draw_shapes(viewer, &deferred);
@@ -2686,6 +2739,8 @@ impl Screen {
                     sky: self.sky_view.take(),
                     bitmaps: std::mem::take(&mut self.bitmaps),
                     snapshot: self.frame.clone(),
+                    hud: Vec::new(),
+                    crisp: Vec::new(),
                 });
                 if let Some(scene) = scene {
                     let deferred = std::mem::take(&mut self.deferred);

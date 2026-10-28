@@ -312,11 +312,20 @@ Status (2026-10-28): **implemented**.
   lifts each outline point back along its view ray onto it (curves stepped 16 times), and the GPU
   fills each loop by ear clipping on that plane, so concave shapes fill correctly and edges stay
   smooth at any resolution (`model_viewer::outline_views`, `modern3d::fill_outline`).
-- **Fire.** An explosion's batch is marked as burning (`World::burning`). Its coloured faces and
-  complex polygons are drawn with an animated fire material: three octaves of value noise rising
-  through the shape, hottest at its middle, through dark red, orange, yellow and white (brighter than
-  white at the top, so the bloom spreads it), with ragged edges where it cools to nothing, tinted a
-  little by the face's own colour.
+- **Fire.** An explosion's batch is marked as burning (`World::burning`). Its coloured faces,
+  complex polygons and textured faces (the original's dithered fire-cloud bitmaps 117, 119, 126 and
+  219, whose see-through holes showed as square speckles when enlarged) become GPU flames
+  (`modern3d::fire_flame`): a round boiling fireball over the face's middle when it is about as long
+  as it is wide, else a streak with rounded ends along its longest stretch, the ends kept inside the
+  face. So no straight edge or texel of the original's shapes shows. Fire's own colours, from a
+  deep red-orange edge to a yellow-white core that just blooms, take a quarter of the face's hue (a
+  textured face's: the mean of its bitmap's warm slots).
+- **Fire has body** (`Flame::body`): it is drawn over what lies behind it by how thick it is, not
+  added to it like an engine's glow. Added, a fireball over light grey debris ran past white and
+  showed as a white shape with the debris face's straight edges; overlapping fireballs did the same
+  (`ffe-render`'s flame test checks both blends over a grey face).
+- A flame's screen quad now reaches past each end as far as it reaches across (it used to stop one
+  radius past the end, cutting a big fireball's boiling sides off straight).
 - **Engine flames.** An engine glow (F1805: the core quad, bitmap 0x123, round at the nozzle; the
   shaft, 0x65, from the nozzle A to B) becomes an animated GPU flame (`ffe_render::Flame`): sized
   from the original quad's width at the nozzle (its bright body narrower than the quad, which
@@ -352,7 +361,28 @@ view space, set by the screen each frame):
   there is no generated sky.
 - Cost: about 0.6 ms a frame at 1920x1440 on the RTX 3090.
 
-Not yet on the GPU (still the original's pixels behind the models): the HUD and its gunsight.
+### Crisp sights
+
+Status (2026-10-28): **implemented** (ENH-007, sights only).
+
+The two cross hairs and the targetting marks are drawn as fine anti-aliased lines at the window's
+resolution instead of the enlarged bitmaps, in the same design and colours (`modern3d::HudShape`,
+drawn by `draw_hud` over the composed picture):
+
+- **The fixed gunsight** (F1111, bitmap 97 at (129,48), where the lasers fire): a ring of radius
+  28.8 about the bitmap's centre pixel in four 34-degree arcs on the cross hairs and four 6-degree
+  ones between them, the cross hairs from 10 to 30 pixels out with three-pixel ticks 13, 18 and 23
+  out, in colour 15 (the bitmap's 9 and 12 only soften its edges).
+- **The velocity marker** (F1112, bitmap 98, where the ship is going): four 56-degree corner arcs of
+  radius 16.8 in colour 15, and on each diagonal a dimmer spoke (colour 8) from 7 to 18.4 out.
+- **The targetter's cursor** (the navigation box or combat circle) and the **missile-lock circle**.
+- Lines are 0.9 of an original pixel wide, in the frame's 4:3 shape (so the ring stays the oval the
+  original shows). The screen still draws the original's pixels in the same places and by the same
+  rules; with the modern engine it notes each one (`World::crisp`) and the presenter lets the 3-D
+  view through wherever the frame still shows that value, then draws the lines over it. Without a GPU
+  the enlarged original stays (`tests/modern_planet.rs`, `the_gunsight_is_drawn_crisp`).
+
+Not yet on the GPU (still the original's pixels behind the models): the rest of the HUD.
 
 ## What comes next
 

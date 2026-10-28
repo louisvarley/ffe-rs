@@ -47,6 +47,8 @@ const BLOOM: f32 = 0.6;
 const BACKGROUND_SCALE: usize = 2;
 /// The nearest view depth the original projects (F1479 rejects `z < 64`).
 const NEAR: f32 = 64.0;
+/// A crisp HUD stroke's width, in original pixels: a little under one, so it reads as a fine line.
+const HUD_LINE: f32 = 0.9;
 
 /// What the flight view set aside for the modern engine this frame.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -72,6 +74,202 @@ pub struct World {
     pub bitmaps: Vec<WorldBitmap>,
     /// The logical frame as the world phase left it (without the set-aside faces).
     pub snapshot: Vec<u32>,
+    /// HUD shapes drawn crisp over the 3-D view in place of their original pixels.
+    pub hud: Vec<HudShape>,
+    /// For each logical pixel, the value a crisp HUD shape put there (empty: none): while the
+    /// frame still shows it, the 3-D view shows through instead.
+    pub crisp: Vec<Option<u32>>,
+}
+
+/// A HUD shape the modern engine draws as anti-aliased strokes at the output's resolution in place
+/// of the original's pixels (the gunsight and the targetter's cursor): polylines in the logical
+/// frame's coordinates (a pixel's centre at .5), in the frame's 4:3 shape.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HudShape {
+    pub rgb: [u8; 3],
+    pub strokes: Vec<Vec<[f32; 2]>>,
+}
+
+impl HudShape {
+    /// F1111's fixed gunsight, secondary bitmap 97 (61x61) with its top left at `at`: a ring of
+    /// radius 28.8 about the bitmap's centre pixel, in four arcs 34 degrees long on the cross
+    /// hairs and four 6-degree ones between them, and the cross hairs from 10 to 30 pixels out
+    /// with three-pixel ticks 13, 18 and 23 out.
+    pub fn gunsight(at: [f32; 2], rgb: [u8; 3]) -> Self {
+        let centre = [at[0] + 30.5, at[1] + 30.5];
+        let line = |a: [f32; 2], b: [f32; 2]| {
+            vec![
+                [centre[0] + a[0], centre[1] + a[1]],
+                [centre[0] + b[0], centre[1] + b[1]],
+            ]
+        };
+        let mut strokes = Vec::new();
+        for sign in [-1.0f32, 1.0] {
+            strokes.push(line([0.0, sign * 10.0], [0.0, sign * 30.0]));
+            strokes.push(line([sign * 10.0, 0.0], [sign * 30.0, 0.0]));
+            for out in [13.0, 18.0, 23.0] {
+                strokes.push(line([-1.0, sign * out], [1.0, sign * out]));
+                strokes.push(line([sign * out, -1.0], [sign * out, 1.0]));
+            }
+        }
+        for k in 0..8 {
+            let middle = k as f32 * 45.0;
+            let half = if k % 2 == 0 { 17.0 } else { 3.0 };
+            strokes.push(arc(centre, 28.8, middle - half, middle + half));
+        }
+        Self { rgb, strokes }
+    }
+
+    /// F1112's velocity marker, secondary bitmap 98 (35x35) with its top left at `at`: four corner
+    /// arcs of radius 16.8 about the bitmap's centre pixel, each 56 degrees long on a diagonal, in
+    /// `ring`, and on each diagonal a spoke from 7 to 18.4 pixels out in `spoke`.
+    pub fn velocity_marker(at: [f32; 2], ring: [u8; 3], spoke: [u8; 3]) -> [Self; 2] {
+        let centre = [at[0] + 17.5, at[1] + 17.5];
+        let diagonals = [45.0f32, 135.0, 225.0, 315.0];
+        let arcs = diagonals
+            .iter()
+            .map(|middle| arc(centre, 16.8, middle - 28.0, middle + 28.0))
+            .collect();
+        let spokes = diagonals
+            .iter()
+            .map(|angle| {
+                let (sin, cos) = angle.to_radians().sin_cos();
+                [7.0, 18.4]
+                    .map(|out| [centre[0] + cos * out, centre[1] + sin * out])
+                    .to_vec()
+            })
+            .collect();
+        [
+            Self {
+                rgb: ring,
+                strokes: arcs,
+            },
+            Self {
+                rgb: spoke,
+                strokes: spokes,
+            },
+        ]
+    }
+
+    /// A circle about a pixel's centre.
+    pub fn circle(centre: (i32, i32), radius: f32, rgb: [u8; 3]) -> Self {
+        let centre = [centre.0 as f32 + 0.5, centre.1 as f32 + 0.5];
+        Self {
+            rgb,
+            strokes: vec![arc(centre, radius, 0.0, 360.0)],
+        }
+    }
+
+    /// A square `half` pixels each way from a pixel's centre.
+    pub fn square(centre: (i32, i32), half: i32, rgb: [u8; 3]) -> Self {
+        let (x, y) = (centre.0 as f32 + 0.5, centre.1 as f32 + 0.5);
+        let h = half as f32;
+        Self {
+            rgb,
+            strokes: vec![vec![
+                [x - h, y - h],
+                [x + h, y - h],
+                [x + h, y + h],
+                [x - h, y + h],
+                [x - h, y - h],
+            ]],
+        }
+    }
+}
+
+/// An arc from `from` to `to` degrees (clockwise on the screen from the right), in two-degree steps.
+fn arc(centre: [f32; 2], radius: f32, from: f32, to: f32) -> Vec<[f32; 2]> {
+    let steps = ((to - from) / 2.0).ceil().max(1.0) as usize;
+    (0..=steps)
+        .map(|k| {
+            let angle = (from + (to - from) * k as f32 / steps as f32).to_radians();
+            [
+                centre[0] + radius * angle.cos(),
+                centre[1] + radius * angle.sin(),
+            ]
+        })
+        .collect()
+}
+
+/// Draw the HUD's crisp shapes into `rect` of `target` (`width` pixels a row), above the console:
+/// each stroke a round-ended line [`HUD_LINE`] original pixels wide, its edges anti-aliased. A
+/// shape's strokes are covered together, so where they cross the colour is laid down once.
+fn draw_hud(shapes: &[HudShape], target: &mut [u32], width: usize, rect: Rect) {
+    let (sx, sy) = (
+        rect.width as f32 / LOGICAL_WIDTH as f32,
+        rect.height as f32 / LOGICAL_HEIGHT as f32,
+    );
+    let half = (sx * HUD_LINE).max(1.0) * 0.5;
+    let bottom = rect.y + rect.height * VIEW_ROWS / LOGICAL_HEIGHT;
+    for shape in shapes {
+        let strokes: Vec<Vec<[f32; 2]>> = shape
+            .strokes
+            .iter()
+            .map(|stroke| {
+                stroke
+                    .iter()
+                    .map(|p| [rect.x as f32 + p[0] * sx, rect.y as f32 + p[1] * sy])
+                    .collect()
+            })
+            .collect();
+        let mut low = [f32::MAX; 2];
+        let mut high = [f32::MIN; 2];
+        for p in strokes.iter().flatten() {
+            for k in 0..2 {
+                low[k] = low[k].min(p[k]);
+                high[k] = high[k].max(p[k]);
+            }
+        }
+        let reach = half + 1.0;
+        let left = ((low[0] - reach).floor().max(rect.x as f32)) as usize;
+        let top = ((low[1] - reach).floor().max(rect.y as f32)) as usize;
+        let right = ((high[0] + reach).ceil().max(0.0) as usize).min(rect.x + rect.width);
+        let lower = ((high[1] + reach).ceil().max(0.0) as usize).min(bottom);
+        if left >= right || top >= lower {
+            continue;
+        }
+        let across = right - left;
+        let mut cover = vec![0.0f32; across * (lower - top)];
+        for pair in strokes.iter().flat_map(|stroke| stroke.windows(2)) {
+            let (a, b) = (pair[0], pair[1]);
+            let x0 = ((a[0].min(b[0]) - reach).floor().max(left as f32)) as usize;
+            let x1 = ((a[0].max(b[0]) + reach).ceil().max(0.0) as usize).min(right);
+            let y0 = ((a[1].min(b[1]) - reach).floor().max(top as f32)) as usize;
+            let y1 = ((a[1].max(b[1]) + reach).ceil().max(0.0) as usize).min(lower);
+            let d = [b[0] - a[0], b[1] - a[1]];
+            let length = d[0] * d[0] + d[1] * d[1];
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let p = [x as f32 + 0.5 - a[0], y as f32 + 0.5 - a[1]];
+                    let t = if length > 0.0 {
+                        ((p[0] * d[0] + p[1] * d[1]) / length).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let (ex, ey) = (p[0] - d[0] * t, p[1] - d[1] * t);
+                    let coverage = (half + 0.5 - (ex * ex + ey * ey).sqrt()).clamp(0.0, 1.0);
+                    let cell = &mut cover[(y - top) * across + x - left];
+                    *cell = cell.max(coverage);
+                }
+            }
+        }
+        let rgb = shape.rgb.map(f32::from);
+        for (row, line) in cover.chunks(across).enumerate() {
+            let start = (top + row) * width + left;
+            let Some(pixels) = target.get_mut(start..start + across) else {
+                continue;
+            };
+            for (pixel, &c) in pixels.iter_mut().zip(line) {
+                if c <= 0.0 {
+                    continue;
+                }
+                let old = [(*pixel >> 16) & 0xff, (*pixel >> 8) & 0xff, *pixel & 0xff];
+                let mixed: [u32; 3] =
+                    std::array::from_fn(|k| (old[k] as f32 + (rgb[k] - old[k] as f32) * c) as u32);
+                *pixel = (mixed[0] << 16) | (mixed[1] << 8) | mixed[2];
+            }
+        }
+    }
 }
 
 /// The generated sky for one frame: each flight-space axis in view space (how the camera is
@@ -230,17 +428,19 @@ impl Gpu3d {
                 &logical[line..line + LOGICAL_WIDTH],
                 &world.snapshot[line..line + LOGICAL_WIDTH],
             );
+            let crisp = world.crisp.get(line..line + LOGICAL_WIDTH);
             // Unchanged since the world phase: the 3-D view shows here.
-            if drawn == before {
+            if drawn == before && crisp.is_none() {
                 destination.copy_from_slice(source);
                 continue;
             }
             for ((pixel, &x), &shown) in destination.iter_mut().zip(&self.columns).zip(source) {
-                if drawn[x] == before[x] {
+                if drawn[x] == before[x] || crisp.is_some_and(|crisp| crisp[x] == Some(drawn[x])) {
                     *pixel = shown;
                 }
             }
         }
+        draw_hud(&world.hud, target, width, rect);
         Ok(())
     }
 }
@@ -410,6 +610,96 @@ fn saturation([r, g, b]: [f32; 3]) -> f32 {
         (high - low) / high
     } else {
         0.0
+    }
+}
+
+/// The mean of a bitmap's warm colours (its fire), if it has any.
+fn warm(slots: &[[u8; 3]]) -> Option<[f32; 3]> {
+    let warm: Vec<[f32; 3]> = slots
+        .iter()
+        .map(|slot| slot.map(|c| f32::from(c) / 255.0))
+        .filter(|rgb| saturation(*rgb) > 0.3 && rgb[0] >= rgb[2])
+        .collect();
+    (!warm.is_empty()).then(|| {
+        std::array::from_fn(|k| warm.iter().map(|rgb| rgb[k]).sum::<f32>() / warm.len() as f32)
+    })
+}
+
+/// A burning face (view space) as a flame: a round fireball over its middle when it is about as
+/// long as it is wide, else a streak with rounded ends along its longest stretch, the ends kept
+/// inside the face.
+fn fire_flame(views: &[[i32; 3]], rgb: [f32; 3]) -> ffe_render::Flame {
+    let points: Vec<[f32; 3]> = views.iter().map(|v| v.map(|c| c as f32)).collect();
+    let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let length = |v: [f32; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    let count = points.len().max(1) as f32;
+    let middle: [f32; 3] =
+        std::array::from_fn(|k| points.iter().map(|p| p[k]).sum::<f32>() / count);
+    // The longest stretch: the corners farthest apart.
+    let (mut a, mut b, mut long) = (middle, middle, 0.0f32);
+    for (i, p) in points.iter().enumerate() {
+        for q in &points[i + 1..] {
+            let apart = length(sub(*q, *p));
+            if apart > long {
+                (a, b, long) = (*p, *q, apart);
+            }
+        }
+    }
+    // The width across it: the corners' spread off that line.
+    let axis = if long > 0.0 {
+        sub(b, a).map(|c| c / long)
+    } else {
+        [0.0; 3]
+    };
+    let off: Vec<[f32; 3]> = points
+        .iter()
+        .map(|p| {
+            let v = sub(*p, a);
+            let along = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
+            sub(v, axis.map(|c| c * along))
+        })
+        .collect();
+    let mut wide = 0.0f32;
+    for (i, p) in off.iter().enumerate() {
+        for q in &off[i + 1..] {
+            wide = wide.max(length(sub(*q, *p)));
+        }
+    }
+    // Fire's own colours, from a deep red-orange edge to a yellow-white core that just blooms,
+    // a quarter the face's hue. It has body: drawn over the debris and the other fireballs
+    // behind it rather than added to them, so they never run together to white.
+    let top = rgb.iter().copied().fold(1.0e-3, f32::max);
+    let hue = rgb.map(|c| c / top);
+    let tint = |fire: [f32; 3], k: f32| -> [f32; 3] {
+        std::array::from_fn(|i| fire[i] * 0.75 + hue[i] * k * 0.25)
+    };
+    let edge = tint([0.55, 0.14, 0.02], 0.5);
+    let core = tint([1.0, 0.68, 0.25], 1.0);
+    let seed = (views[0][0] ^ views[0][1] ^ views[0][2]) as f32 * 0.001 % 97.0;
+    if long < wide * 1.6 {
+        let width = long.max(wide) * 0.9;
+        ffe_render::Flame {
+            a: middle,
+            b: middle,
+            width,
+            end: width,
+            core,
+            edge,
+            seed,
+            body: true,
+        }
+    } else {
+        let inset = axis.map(|c| c * wide * 0.5);
+        ffe_render::Flame {
+            a: [a[0] + inset[0], a[1] + inset[1], a[2] + inset[2]],
+            b: sub(b, inset),
+            width: wide,
+            end: wide * 0.7,
+            core,
+            edge,
+            seed,
+            body: true,
+        }
     }
 }
 
@@ -761,18 +1051,32 @@ pub fn scene(
                         core: warm(plume.core, 1.1),
                         edge: warm(plume.edge, 0.9),
                         seed,
+                        body: false,
                     });
                     continue;
                 }
-                // A complex polygon: each loop filled on its plane; burning, it is fire.
+                // A burning object's coloured faces and polygons are flames, and so are its
+                // textured faces (the original's dithered fire-cloud bitmaps, whose holes would
+                // show as square speckles), in their bitmap's warm colours: no straight edge or
+                // texel of the original's shapes shows.
+                if burning && solid.views.len() >= 3 {
+                    let fire = match &solid.texture {
+                        Some(texture) => warm(&texture.slots),
+                        None => (saturation([r, g, b]) > 0.4).then_some([r, g, b]),
+                    };
+                    if let Some(fire) = fire {
+                        batch.flames.push(fire_flame(&solid.views, fire));
+                        continue;
+                    }
+                }
+                // A complex polygon: each loop filled on its plane.
                 if let Some(loops) = &solid.outline {
-                    let fire = burning && saturation([r, g, b]) > 0.4;
-                    for (corners, uvs) in fill_outline(&solid.views, loops) {
+                    for (corners, _) in fill_outline(&solid.views, loops) {
                         batch.triangles.push(ffe_render::Triangle {
                             positions: corners.map(point),
                             colours: [rgba; 3],
                             texture: None,
-                            fire: fire.then_some(uvs),
+                            fire: None,
                         });
                     }
                     continue;
@@ -792,12 +1096,6 @@ pub fn scene(
                 // (or, for a texture, its brightness) takes the corner's factor.
                 if let [first, rest @ ..] = &solid.views[..] {
                     let texture = texture_of(solid);
-                    // A burning object's coloured faces burn.
-                    let fire = (burning && saturation([r, g, b]) > 0.4).then_some([
-                        [0.0, 1.0],
-                        [1.0, 1.0],
-                        [0.5, 0.0],
-                    ]);
                     let base = if texture.is_some() {
                         [shadow, shadow, shadow, 1.0]
                     } else {
@@ -821,7 +1119,7 @@ pub fn scene(
                                     uvs: [uv[0], uv[k + 1], uv[k + 2]],
                                 }
                             }),
-                            fire,
+                            fire: None,
                         });
                     }
                 }
@@ -953,6 +1251,8 @@ mod tests {
             burning: vec![],
             sky: None,
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
+            hud: Vec::new(),
+            crisp: Vec::new(),
         };
         let scene = scene(&world, 640, 316, &mut MapCache::default(), 0.0);
         assert_eq!(scene.batches.len(), 1);
@@ -1013,6 +1313,8 @@ mod tests {
             burning: vec![],
             sky: None,
             snapshot: snapshot.clone(),
+            hud: Vec::new(),
+            crisp: Vec::new(),
         };
         // The HUD drew one pixel at the square's centre after the world phase.
         let mut logical = snapshot;

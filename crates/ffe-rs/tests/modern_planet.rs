@@ -627,3 +627,75 @@ fn a_stars_glow_takes_the_stars_own_colour() {
         }
     }
 }
+
+/// The gunsight and the targetter's cursor are drawn crisp over the 3-D view: the original's
+/// pixels give way to the 3-D view, and the same design is drawn as fine lines at the output's
+/// resolution.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
+fn the_gunsight_is_drawn_crisp() {
+    let mut gpu = Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    screen.lasers = [1, 0, 0, 0];
+    screen.targeter = Some(ffe_rs::targeter::Cursor::Combat);
+    screen.blink = true;
+    screen.capture = true;
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+    let world = screen.world().cloned().expect("the flight view's world");
+    // The fixed sight and the cursor's circle (and the velocity marker, when it is ahead).
+    assert!(world.hud.len() >= 2, "{}", world.hud.len());
+    // Their original pixels are let through to the 3-D view: the top of the sight's
+    // vertical line (bitmap 97's column 30, rows 0..20, at (129,48)).
+    let logical = screen.logical_pixels();
+    for y in 48..68 {
+        let at = y * 320 + 159;
+        assert_eq!(world.crisp[at], Some(logical[at]), "row {y}");
+    }
+    let (width, height) = (1280usize, 960usize);
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let mut target = vec![0u32; width * height];
+    ffe_rs::modern::ModernRenderer::new().render(logical, &mut target, width, rect);
+    gpu.render(logical, &world, &mut target, width, rect)
+        .unwrap();
+    // The line's centre is the sight's colour; a pixel and a half to the side is the sky.
+    let sight = world.hud[0].rgb.map(u32::from);
+    let at = |x: f32, y: f32| target[(y * 4.8) as usize * width + (x * 4.0) as usize];
+    let rgb = |p: u32| [(p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff];
+    let centre = rgb(at(159.5, 55.5));
+    for k in 0..3 {
+        assert!(
+            centre[k].abs_diff(sight[k]) <= 8,
+            "{centre:?} against {sight:?}"
+        );
+    }
+    let beside = rgb(at(161.5, 55.5));
+    assert!(
+        beside.iter().zip(&sight).any(|(a, b)| a.abs_diff(*b) > 40),
+        "{beside:?}"
+    );
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        write_png(
+            &std::path::Path::new(&dir).join("modern-gunsight.png"),
+            &target,
+            width,
+            height,
+        );
+    }
+}
