@@ -1667,7 +1667,7 @@ impl NpcShip {
             }),
             State::Depart => station.map_or(self.anchor, Station::launch_point),
             State::Escort => escort.map_or(player, |point| {
-                if distance_between(player, self.position) > 4.0 * STANDOFF {
+                if !self.hostile || distance_between(player, self.position) > 4.0 * STANDOFF {
                     point
                 } else {
                     player
@@ -2927,6 +2927,39 @@ pub fn spawn(
             if let Some(mut ship) = add(Role::Trader, 1, position, anchor.position, rng) {
                 ship.begin_transit(station, anchor.position);
                 ships.push(ship);
+            }
+        }
+    }
+    // Port addition (Advanced traffic): a convoy. A bulk carrier (F699's
+    // Lynx/LRC list) flies from the nearest place to another and holds
+    // there; two military escorts keep station in its frame.
+    if let Some(destination) = options
+        .advanced
+        .and_then(|_| {
+            all_places
+                .iter()
+                .find(|place| place.position != anchor.position)
+        })
+        .copied()
+    {
+        let toward = normalise(sub(destination.position, anchor.position));
+        let start = (anchor.radius as f64 + LANE_FAR).max(ANCHOR_ORBIT * 4.0);
+        let position = self::add(anchor.position, toward.map(|value| (value * start) as i64));
+        if let Some(mut carrier) = add(Role::Shuttle, 0xf, position, destination.position, rng) {
+            carrier.state = State::Transit;
+            carrier.forward = toward;
+            carrier.orbit_radius = (destination.radius as f64 * 1.2).max(ANCHOR_ORBIT);
+            let leader = carrier.id;
+            ships.push(carrier);
+            for formation in [[600_000, 0, -500_000], [-600_000, 0, -500_000]] {
+                let at = self::add(position, formation);
+                if let Some(mut escort) = add(Role::Military, 0x0, at, destination.position, rng) {
+                    escort.state = State::Escort;
+                    escort.leader = Some(leader);
+                    escort.formation = formation;
+                    escort.forward = toward;
+                    ships.push(escort);
+                }
             }
         }
     }

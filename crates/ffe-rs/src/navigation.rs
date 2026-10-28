@@ -3539,6 +3539,7 @@ impl Navigator {
         };
         for mut ship in spawned {
             ship.id += base;
+            ship.leader = ship.leader.map(|leader| leader + base);
             ships.push(ship);
         }
         ships.truncate(options.cap());
