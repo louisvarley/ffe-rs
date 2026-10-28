@@ -183,8 +183,23 @@ Status (2026-10-28): **implemented** (ENH-010, modest; enhanced-2).
   its colour, drawn before the star, so the star's disc or model lies over the halo's centre
   (`tests/modern_planet.rs`, `a_star_glows_on_the_gpu`).
 
-Not yet on the GPU (still the original's pixels behind the models): particles (F1814 chains),
-thruster glows, the hyperspace tunnel, and the HUD and its gunsight.
+### The hyperspace tunnel and engine glows
+
+Status (2026-10-28): **implemented**.
+
+- The hyperspace tunnel (model 0xa5) goes through the same path as the flight view's models, and its
+  frame is the world phase of its own (`tests/modern_planet.rs`,
+  `the_hyperspace_tunnel_is_drawn_on_the_gpu`: the tunnel fills as much of the view on the GPU as in
+  the original, 15,692 against 15,715 pixels in the test frame).
+- An engine glow (F1805's textured quad over bitmap 0x123, the core, or 0x65, the shaft) is queued
+  with screen corners only; the thruster's queue entry now also keeps A's and B's view positions
+  (`model_thruster::Entry::views`, not the original's), so each corner is lifted back into view
+  space at the plume's depth at that point (`model_viewer::lift`) and drawn as a textured GPU face,
+  hidden by the hull where it is nearer. A thin plume (an F1803 line) is a GPU line from A to B
+  (`engine_glows_are_drawn_on_the_gpu`).
+
+Not yet on the GPU (still the original's pixels behind the models): particle chains (F1814: debris
+and exhaust specks), and the HUD and its gunsight.
 
 ## What comes next
 

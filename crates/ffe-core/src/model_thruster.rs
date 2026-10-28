@@ -59,6 +59,9 @@ pub struct Entry {
     pub material: u16,
     pub key: u32,
     pub shape: Shape,
+    /// Not the original's: A's and B's view positions, for a renderer that draws the entry
+    /// itself (the port's modern engine).
+    pub views: [[i32; 3]; 2],
 }
 
 /// F1666 (`SpecialDiv`): `(value << 8) / divisor`, with both halved (arithmetic)
@@ -316,6 +319,7 @@ pub fn entries(
         material: thruster.material,
         key,
         shape,
+        views: [a.view, b.view],
     };
     if width <= 4 {
         return Ok(queued(

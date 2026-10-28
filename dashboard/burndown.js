@@ -948,6 +948,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: modest bloom (bright parts blurred at half size and added back) and a halo sprite for a star in view. enhanced-2 done."
+    },
+    {
+      date: "2026-10-28",
+      remaining: 100,
+      note: "Modern graphics: the hyperspace tunnel and engine glows on the GPU (glow quads lifted to the plume's depth from the thruster's view positions, textured like the original's). Remaining count unchanged."
     }
   ]
 };

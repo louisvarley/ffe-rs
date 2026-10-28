@@ -254,6 +254,39 @@ fn ramp_word(w: &[u32], at: usize, band: u32, first: usize) -> u16 {
     (value & 0xfff) as u16
 }
 
+/// A thruster glow's screen corners back in view space: each at the depth of its place between
+/// the plume's two ends (A and B, view space) along the line between them on the screen, through
+/// F1479's projection run backwards.
+fn lift(points: &[[i16; 2]], [a, b]: [[i32; 3]; 2]) -> Vec<[i32; 3]> {
+    let screen = |v: [i32; 3]| {
+        let z = f64::from(v[2].max(1));
+        [
+            160.0 + 256.0 * f64::from(v[0]) / z,
+            79.0 - 256.0 * f64::from(v[1]) / z,
+        ]
+    };
+    let (sa, sb) = (screen(a), screen(b));
+    let along = [sb[0] - sa[0], sb[1] - sa[1]];
+    let length = along[0] * along[0] + along[1] * along[1];
+    points
+        .iter()
+        .map(|p| {
+            let [x, y] = p.map(f64::from);
+            let t = if length > 0.0 {
+                (((x - sa[0]) * along[0] + (y - sa[1]) * along[1]) / length).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let z = f64::from(a[2]) + (f64::from(b[2]) - f64::from(a[2])) * t;
+            [
+                ((x - 160.0) * z / 256.0) as i32,
+                ((79.0 - y) * z / 256.0) as i32,
+                z as i32,
+            ]
+        })
+        .collect()
+}
+
 /// F1546's cubic curve through four points (entry order: the ends first and last) in view
 /// space, as 33 points for the modern engine: the same curve F1549's forward differences step
 /// along on the screen, but drawn finer and in perspective.
@@ -2428,14 +2461,24 @@ impl ModelViewer {
                     } => {
                         let mut slots = vec![[0; 3]];
                         slots.extend(colours.iter().map(|c| self.rgb(*c)));
-                        push!(Shape::Glow(Textured {
+                        let glow = Textured {
                             points: points
                                 .iter()
                                 .map(|[x, y]| (i32::from(*x), i32::from(*y)))
                                 .collect(),
                             bitmap: *texture,
                             slots,
-                        }));
+                        };
+                        // For the modern engine, the quad lifted back into view space at the
+                        // plume's depth there, and textured like the original's.
+                        let solid = self.solid_texture(&glow, None).map(|texture| Solid {
+                            views: lift(points, entry.views),
+                            rgb: glow.slots.get(1).copied().unwrap_or_default(),
+                            texture: Some(texture),
+                            path: false,
+                            sprite: None,
+                        });
+                        push!(Shape::Glow(glow), solid);
                     }
                     // F1803: the stored end points (x - 1 when positive) in the F1691
                     // colour; the line rasteriser (F1616) is the viewer's own.
@@ -2445,7 +2488,15 @@ impl ModelViewer {
                             None => *colour,
                         };
                         let [a, b] = points.map(|[x, y]| (x, y));
-                        push!(Shape::Line(a, b, self.rgb(colour)));
+                        let rgb = self.rgb(colour);
+                        let solid = Solid {
+                            views: entry.views.to_vec(),
+                            rgb,
+                            texture: None,
+                            path: true,
+                            sprite: None,
+                        };
+                        push!(Shape::Line(a, b, rgb), Some(solid));
                     }
                 },
                 // A star's system name (F1812 with the 0x84xx string), in the bitmap font.

@@ -2353,7 +2353,18 @@ impl Screen {
                 viewer.light_direction(),
                 &inputs,
             ) {
-                self.draw_shapes(viewer, &frame.shapes);
+                self.draw_frame(viewer, &frame);
+            }
+            // The tunnel is the whole world phase: what follows lies over it.
+            if self.capture {
+                self.world = Some(crate::modern3d::World {
+                    batches: std::mem::take(&mut self.batches),
+                    atmospheres: std::mem::take(&mut self.atmospheres),
+                    textures: std::mem::take(&mut self.textures),
+                    snapshot: self.frame.clone(),
+                });
+                let deferred = std::mem::take(&mut self.deferred);
+                self.draw_shapes(viewer, &deferred);
             }
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);

@@ -248,3 +248,160 @@ fn a_star_glows_on_the_gpu() {
     }
     assert!(sum(shown) > sum(sky) + 30, "the star glows");
 }
+
+/// The hyperspace tunnel (model 0xa5) goes to the GPU like the flight view's models, and fills
+/// as much of the view there as in the original.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
+fn the_hyperspace_tunnel_is_drawn_on_the_gpu() {
+    let mut gpu = Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let state = Flight {
+        mode: Mode::Flight,
+        ..Flight::default()
+    };
+    // The runtime palette is built from the previous frame's colours: one frame first.
+    for _ in 0..2 {
+        screen.hyperspace = Some(72 << 8);
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+    }
+    let classic = screen.logical_pixels().to_vec();
+    screen.hyperspace = Some(72 << 8);
+    screen.capture = true;
+    screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+    let world = screen.world().cloned().expect("the tunnel's world");
+    let faces: usize = world.batches.iter().map(Vec::len).sum();
+    assert!(faces > 10, "the tunnel's faces reach the GPU ({faces})");
+    let (width, height) = (1280usize, 800usize);
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let mut target = vec![0u32; width * height];
+    ffe_rs::modern::ModernRenderer::new().render(screen.logical_pixels(), &mut target, width, rect);
+    gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)
+        .unwrap();
+    // The streaks move every frame (the tunnel's own animation), so the two frames are
+    // compared by how much of the view the tunnel fills, not pixel by pixel.
+    let (mut drawn, mut covered) = (0, 0);
+    for y in 0..158 {
+        for x in 0..320 {
+            let at = y * 320 + x;
+            drawn += usize::from(classic[at] != classic[0]);
+            covered += usize::from(target[(y * 4 + 2) * width + x * 4 + 2] != world.snapshot[0]);
+        }
+    }
+    eprintln!("the tunnel fills {covered} view pixels on the GPU, {drawn} in the original");
+    if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+        write_png(
+            &std::path::Path::new(&dir).join("modern-tunnel.png"),
+            &target,
+            width,
+            height,
+        );
+        let mut upscaled = vec![0u32; width * height];
+        for (at, p) in upscaled.iter_mut().enumerate() {
+            *p = classic[(at / width) / 4 * 320 + (at % width) / 4];
+        }
+        write_png(
+            &std::path::Path::new(&dir).join("classic-tunnel.png"),
+            &upscaled,
+            width,
+            height,
+        );
+    }
+    assert!(drawn > 1000 && covered * 10 >= drawn * 7 && covered * 10 <= drawn * 14);
+}
+
+/// The player's ship from outside with its main engine at full thrust, from four sides: the
+/// engine glows (F1805's textured quads over bitmaps 0x123 and 0x65) go to the GPU as textured
+/// faces, hidden by the hull where it is nearer.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
+fn engine_glows_are_drawn_on_the_gpu() {
+    use ffe_rs::camera::ViewMode;
+    let mut gpu = Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let mut state = Flight::free_flight();
+    state.thrust = 1.0;
+    let mut views = ViewState {
+        mode: ViewMode::External,
+        ..ViewState::default()
+    };
+    let (width, height) = (1280usize, 800usize);
+    let rect = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let mut glows = 0;
+    for yaw in [0u16, 0x4000, 0x8000, 0xc000] {
+        views.external.yaw = yaw;
+        screen.capture = false;
+        screen.draw(&state, views, Some(&viewer), false, "");
+        let classic = screen.logical_pixels().to_vec();
+        screen.capture = true;
+        screen.draw(&state, views, Some(&viewer), false, "");
+        let world = screen.world().cloned().expect("the flight view's world");
+        let here = world
+            .batches
+            .iter()
+            .flatten()
+            .filter(|solid| {
+                solid
+                    .texture
+                    .as_ref()
+                    .is_some_and(|t| matches!(t.bitmap & 0xfff, 0x123 | 0x65))
+            })
+            .count();
+        eprintln!("yaw {yaw:#x}: {here} glow faces");
+        glows += here;
+        let mut target = vec![0u32; width * height];
+        ffe_rs::modern::ModernRenderer::new().render(
+            screen.logical_pixels(),
+            &mut target,
+            width,
+            rect,
+        );
+        gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)
+            .unwrap();
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let dir = std::path::Path::new(&dir);
+            write_png(
+                &dir.join(format!("modern-engine-{yaw:04x}.png")),
+                &target,
+                width,
+                height,
+            );
+            let upscaled: Vec<u32> = (0..width * height)
+                .map(|at| classic[(at / width) / 4 * 320 + (at % width) / 4])
+                .collect();
+            write_png(
+                &dir.join(format!("classic-engine-{yaw:04x}.png")),
+                &upscaled,
+                width,
+                height,
+            );
+        }
+    }
+    assert!(glows > 0, "an engine glow from some side");
+}
