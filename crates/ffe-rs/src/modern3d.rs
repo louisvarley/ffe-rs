@@ -62,6 +62,9 @@ pub struct World {
     /// How much of the star an object still sees past the planets (0..1), by batch, for the
     /// objects in a planet's shadow.
     pub eclipses: Vec<(usize, f32)>,
+    /// The bodies' batches (star, planets, moons): [`Star::seen`] already counts how much of the
+    /// star they hide.
+    pub bodies: Vec<usize>,
     /// The star, when it is ahead, for its hot core, glare and lens flare.
     pub star: Option<Star>,
     /// The batches that give off light (beams, explosions, a hit's sparks).
@@ -578,35 +581,151 @@ pub fn sunlight(place: [f64; 3], bodies: &[([f64; 3], f64)], star: ([f64; 3], f6
     seen as f32
 }
 
-/// The star's light seen through a lens, drawn over everything as a last batch of glows: a core
-/// four times brighter than white (which the bloom spreads and the last pass turns white), a wide
-/// faint glare, and four ghosts on the line from the star through the middle of the view, all
-/// dimmed by how much of the star a planet hides. Nothing when it is hidden or far off the view.
-fn flare(
-    star: &Star,
-    width: usize,
-    pixel: f32,
-    projection: &ffe_render::Projection,
-) -> ffe_render::Batch {
-    let mut batch = ffe_render::Batch::default();
+/// The star's place on the screen (the projection's units, -1..1 across the view), and the view
+/// space point a million units along its direction, when it is ahead and not far off the view.
+fn star_screen(star: &Star, projection: &ffe_render::Projection) -> Option<[f32; 2]> {
     let [x, y, z] = star.direction;
-    let seen = star.seen.clamp(0.0, 1.0);
-    if z <= 0.0 || seen < 0.02 {
-        return batch;
-    }
     let screen = [x / z * projection.x_scale, y / z * projection.y_scale];
-    if screen[0].abs() > 1.6 || screen[1].abs() > 1.6 {
+    (z > 0.0 && screen[0].abs() <= 1.6 && screen[1].abs() <= 1.6).then_some(screen)
+}
+
+/// A point a million view units out at screen position `s`.
+fn screen_point(s: [f32; 2], projection: &ffe_render::Projection) -> [f32; 3] {
+    [
+        s[0] / projection.x_scale * 1.0e6,
+        s[1] / projection.y_scale * 1.0e6,
+        1.0e6,
+    ]
+}
+
+/// The star's hot core: a glow over its disc four times brighter than white (which the bloom
+/// spreads and the last pass turns white), dimmed by how much of it the planets hide. Drawn first,
+/// so whatever stands in front of the star hides it.
+fn core(star: &Star, pixel: f32, projection: &ffe_render::Projection) -> ffe_render::Batch {
+    let mut batch = ffe_render::Batch::default();
+    let seen = star.seen.clamp(0.0, 1.0);
+    let Some(screen) = star_screen(star, projection).filter(|_| seen >= 0.02) else {
         return batch;
-    }
+    };
     let tint = star.rgb.map(|c| f32::from(c) / 255.0);
-    let at = |s: [f32; 2]| {
+    batch.sprites.push(ffe_render::Sprite {
+        position: screen_point(screen, projection),
+        size: (star.radius * 2.0 * pixel).max(3.0) * 1.1,
+        colour: tint.map(|c| (2.0 + 2.0 * c) * seen),
+        halo_size: 0.0,
+        halo: [0.0; 3],
+    });
+    batch
+}
+
+/// How much of the star's disc the objects in front of it leave uncovered (0..1): rays to 13
+/// points across its disc (its middle and two rings of six), each tested against the faces of
+/// every batch but the bodies' (whose share [`Star::seen`] already counts). A batch whose
+/// bounding sphere no ray passes near is skipped.
+fn unblocked(world: &World, star: &Star) -> f32 {
+    let length = |v: [f32; 3]| v.iter().map(|c| c * c).sum::<f32>().sqrt();
+    let cross = |a: [f32; 3], b: [f32; 3]| {
         [
-            s[0] / projection.x_scale * 1.0e6,
-            s[1] / projection.y_scale * 1.0e6,
-            1.0e6,
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
         ]
     };
-    let disc = (star.radius * 2.0 * pixel).max(3.0);
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let unit = |v: [f32; 3]| {
+        let l = length(v).max(1.0e-12);
+        v.map(|c| c / l)
+    };
+    let ahead = unit(star.direction);
+    if ahead[2] <= 0.0 {
+        return 1.0;
+    }
+    // The star's angular radius: its radius in the original's pixels over the 256-pixel focal
+    // length.
+    let angle = (star.radius / 256.0).max(0.001);
+    let side = unit(cross(ahead, [0.0, 1.0, 0.0]));
+    let up = cross(side, ahead);
+    let mut rays = vec![ahead];
+    for (ring, count) in [(0.5f32, 6), (0.9, 6)] {
+        for k in 0..count {
+            let turn = (k as f32 + ring) * std::f32::consts::TAU / count as f32;
+            let (sin, cos) = turn.sin_cos();
+            rays.push(unit(std::array::from_fn(|i| {
+                ahead[i] + (side[i] * cos + up[i] * sin) * angle * ring
+            })));
+        }
+    }
+    let mut blocked = vec![false; rays.len()];
+    for (index, solids) in world.batches.iter().enumerate() {
+        if world.bodies.contains(&index) {
+            continue;
+        }
+        let faces: Vec<Vec<[f32; 3]>> = solids
+            .iter()
+            .filter(|s| s.sprite.is_none() && s.flame.is_none() && !s.path && s.views.len() >= 3)
+            .map(|s| s.views.iter().map(|v| v.map(|c| c as f32)).collect())
+            .collect();
+        let points = faces.iter().flatten();
+        let count = faces.iter().map(Vec::len).sum::<usize>().max(1) as f32;
+        let centre: [f32; 3] =
+            std::array::from_fn(|i| points.clone().map(|p| p[i]).sum::<f32>() / count);
+        let radius = points
+            .map(|p| length(std::array::from_fn(|i| p[i] - centre[i])))
+            .fold(0.0, f32::max);
+        // The nearest any ray passes to the centre, against the radius and the rays' spread.
+        let along = dot(centre, ahead);
+        if along + radius <= 0.0 {
+            continue;
+        }
+        let miss = length(std::array::from_fn(|i| centre[i] - ahead[i] * along));
+        if miss > radius + along.abs() * angle * 1.5 {
+            continue;
+        }
+        for (ray, hit) in rays.iter().zip(blocked.iter_mut()) {
+            if *hit {
+                continue;
+            }
+            *hit = faces.iter().any(|face| {
+                face[1..].windows(2).any(|pair| {
+                    // Moller-Trumbore from the eye along the ray.
+                    let (a, b, c) = (face[0], pair[0], pair[1]);
+                    let e1 = std::array::from_fn(|i| b[i] - a[i]);
+                    let e2 = std::array::from_fn(|i| c[i] - a[i]);
+                    let p = cross(*ray, e2);
+                    let det = dot(e1, p);
+                    if det.abs() < 1.0e-9 {
+                        return false;
+                    }
+                    let inverse = 1.0 / det;
+                    let s = a.map(|v| -v);
+                    let u = dot(s, p) * inverse;
+                    if !(0.0..=1.0).contains(&u) {
+                        return false;
+                    }
+                    let q = cross(s, e1);
+                    let v = dot(*ray, q) * inverse;
+                    v >= 0.0 && u + v <= 1.0 && dot(e2, q) * inverse > 0.0
+                })
+            });
+        }
+        if blocked.iter().all(|&hit| hit) {
+            return 0.0;
+        }
+    }
+    blocked.iter().filter(|&&hit| !hit).count() as f32 / rays.len() as f32
+}
+
+/// The star's light seen through a lens, drawn over everything as a last batch of glows: a wide
+/// faint glare and four ghosts on the line from the star through the middle of the view, dimmed
+/// by how much of the star is seen. Nothing when it is hidden or far off the view.
+fn flare(star: &Star, width: usize, projection: &ffe_render::Projection) -> ffe_render::Batch {
+    let mut batch = ffe_render::Batch::default();
+    let seen = star.seen.clamp(0.0, 1.0);
+    let Some(screen) = star_screen(star, projection).filter(|_| seen >= 0.02) else {
+        return batch;
+    };
+    let tint = star.rgb.map(|c| f32::from(c) / 255.0);
+    let at = |s: [f32; 2]| screen_point(s, projection);
     let glow = |position, size: f32, colour: [f32; 3], halo: f32, halo_colour: [f32; 3]| {
         ffe_render::Sprite {
             position,
@@ -619,8 +738,8 @@ fn flare(
     let wide = width as f32;
     batch.sprites.push(glow(
         at(screen),
-        disc * 1.1,
-        tint.map(|c| 2.0 + 2.0 * c),
+        0.0,
+        [0.0; 3],
         wide * 0.5,
         tint.map(|c| c * 0.18),
     ));
@@ -1175,7 +1294,15 @@ pub fn scene(
         batches.push(dust(&world.dust, pixel));
     }
     if let Some(star) = &world.star {
-        batches.push(flare(star, width, pixel, &projection));
+        // The star's hot core first, behind everything, so the ships and stations in front of
+        // it hide it and the bloom spreads what is left round their edges; its glare and ghosts
+        // last, over everything, as much as the objects in front leave of the star.
+        batches.insert(0, core(star, pixel, &projection));
+        let open = Star {
+            seen: star.seen * unblocked(world, star),
+            ..*star
+        };
+        batches.push(flare(&open, width, &projection));
     }
     ffe_render::Scene {
         width: width as u32,
@@ -1224,6 +1351,63 @@ mod tests {
         let moon = [([500.0, 0.0, 0.0], 1.0)];
         let annular = sunlight([0.0; 3], &moon, star);
         assert!((annular - 0.96).abs() < 0.01, "annular {annular}");
+    }
+
+    /// The faces in front of the star hide it, ray by ray across its disc; a body's batch does
+    /// not count (its share is [`Star::seen`]).
+    #[test]
+    fn objects_in_front_of_the_star_hide_it() {
+        let face = |views: Vec<[i32; 3]>| Solid {
+            views,
+            rgb: [128; 3],
+            texture: None,
+            path: false,
+            outline: None,
+            flame: None,
+            sprite: None,
+        };
+        // A star straight ahead, 20 of the original's pixels in radius (about 4.5 degrees).
+        let star = Star {
+            direction: [0.0, 0.0, 1.0],
+            radius: 20.0,
+            rgb: [255, 200, 120],
+            seen: 1.0,
+        };
+        let square = |left: i32| {
+            vec![
+                face(vec![
+                    [left, -500, 1000],
+                    [500, -500, 1000],
+                    [500, 500, 1000],
+                ]),
+                face(vec![
+                    [left, -500, 1000],
+                    [500, 500, 1000],
+                    [left, 500, 1000],
+                ]),
+            ]
+        };
+        let mut world = World::default();
+        assert_eq!(unblocked(&world, &star), 1.0, "nothing in front");
+        world.batches = vec![square(-500)];
+        assert_eq!(unblocked(&world, &star), 0.0, "a ship over the whole disc");
+        // Covering only the right half of the disc (x from 0): the middle ray and the right-hand
+        // ones are blocked.
+        world.batches = vec![square(0)];
+        let half = unblocked(&world, &star);
+        assert!(half > 0.3 && half < 0.7, "half covered: {half}");
+        // The same face as a body's batch: left to `seen`.
+        world.batches = vec![square(-500)];
+        world.bodies = vec![0];
+        assert_eq!(unblocked(&world, &star), 1.0);
+        // Behind the eye, nothing is hidden.
+        world.bodies.clear();
+        world.batches = vec![vec![face(vec![
+            [-500, -500, -1000],
+            [500, -500, -1000],
+            [0, 500, -1000],
+        ])]];
+        assert_eq!(unblocked(&world, &star), 1.0);
     }
 
     #[test]
@@ -1294,6 +1478,7 @@ mod tests {
             sky: None,
             snapshot: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
             dust: Vec::new(),
+            bodies: Vec::new(),
             hud: Vec::new(),
             crisp: Vec::new(),
         };
@@ -1357,6 +1542,7 @@ mod tests {
             sky: None,
             snapshot: snapshot.clone(),
             dust: Vec::new(),
+            bodies: Vec::new(),
             hud: Vec::new(),
             crisp: Vec::new(),
         };

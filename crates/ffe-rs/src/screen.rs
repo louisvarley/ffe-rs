@@ -513,6 +513,8 @@ pub struct Screen {
     lights: Vec<(usize, [i32; 3])>,
     /// How much of the star each object's batch sees past the planets (1 all), by batch.
     eclipses: Vec<(usize, f32)>,
+    /// The batches of the bodies (star, planets, moons) this frame.
+    body_batches: Vec<usize>,
     /// The system's bodies this frame for the eclipses: camera-space centre and radius in
     /// flight units, and whether it is the star.
     casters: Vec<([f64; 3], f64, bool)>,
@@ -1088,6 +1090,7 @@ impl Screen {
             atmospheres: Vec::new(),
             lights: Vec::new(),
             eclipses: Vec::new(),
+            body_batches: Vec::new(),
             casters: Vec::new(),
             object_scale: 1.0,
             in_discs: false,
@@ -2455,6 +2458,7 @@ impl Screen {
         self.atmospheres.clear();
         self.lights.clear();
         self.eclipses.clear();
+        self.body_batches.clear();
         self.star = None;
         self.dust.clear();
         self.glowing.clear();
@@ -2599,6 +2603,7 @@ impl Screen {
                     atmospheres: std::mem::take(&mut self.atmospheres),
                     lights: std::mem::take(&mut self.lights),
                     eclipses: std::mem::take(&mut self.eclipses),
+                    bodies: std::mem::take(&mut self.body_batches),
                     star: self.star.take(),
                     glowing: std::mem::take(&mut self.glowing),
                     burning: std::mem::take(&mut self.burning),
@@ -2813,6 +2818,7 @@ impl Screen {
                     atmospheres: std::mem::take(&mut self.atmospheres),
                     lights: std::mem::take(&mut self.lights),
                     eclipses: std::mem::take(&mut self.eclipses),
+                    bodies: std::mem::take(&mut self.body_batches),
                     star: self.star.take(),
                     glowing: std::mem::take(&mut self.glowing),
                     burning: std::mem::take(&mut self.burning),
@@ -3348,6 +3354,9 @@ impl Screen {
             }
             if std::mem::take(&mut self.on_fire) {
                 self.burning.push(index);
+            }
+            if self.in_discs {
+                self.body_batches.push(index);
             }
             // An object (not a body) in a body's shadow: how much of the star it still sees.
             if let (false, Some(origin), Some(star)) = (

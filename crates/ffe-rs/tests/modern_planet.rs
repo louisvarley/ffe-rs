@@ -841,3 +841,111 @@ fn speed_dust_looks_faster_at_each_time_step() {
         previous = mean;
     }
 }
+
+/// A station in front of Hope's sun hides it: fully in front, the glare and lens flare go, and
+/// half in front they dim; the sun's hot core is drawn behind the station, so what is left of it
+/// blooms round the station's edge.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE) and a GPU"]
+fn a_station_in_front_of_the_star_hides_it() {
+    use ffe_rs::navigation::{Kind, Navigator};
+    use ffe_rs::screen::SystemStation;
+    let mut gpu = Gpu3d::new();
+    if !gpu.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let bodies = Navigator::new_game(&cache, 0).unwrap().bodies;
+    let star = bodies.iter().find(|b| b.kind == Kind::Star).unwrap();
+    let radius = star.radius as f64 / UNIT;
+    let centre = star.position.map(|v| v as f64 / UNIT);
+    let eye = [centre[0], centre[1], centre[2] - 20.0 * radius];
+    let state = Flight {
+        mode: Mode::Flight,
+        axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        position: eye,
+        system_flight: true,
+        ..Flight::default()
+    };
+    // The flare's glare (the last batch's first glow) for the station `offset` flight units to
+    // the side of the line to the sun, or none.
+    let mut glare = |offset: Option<f64>, name: &str| {
+        let mut screen = Screen::new(&cache).unwrap();
+        screen.capture = true;
+        screen.discs = vec![Disc {
+            centre,
+            radius,
+            light: [0.0; 3],
+            colours: (17, 17),
+            star: true,
+            model: Some((star.model, star.seed)),
+            orientation: star.orientation,
+        }];
+        screen.stations = offset
+            .map(|x| SystemStation {
+                model: 74,
+                centre: [eye[0] + x, eye[1], eye[2] + 300.0],
+                orientation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                speed: 0,
+                door: 0xffff,
+                tics: ffe_core::model_animation::START_TICS,
+                seed: 0,
+            })
+            .into_iter()
+            .collect();
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+        let world = screen.world().cloned().expect("the flight view's world");
+        let scene = ffe_rs::modern3d::scene(
+            &world,
+            1280,
+            632,
+            &mut ffe_rs::modern3d::MapCache::default(),
+            0.0,
+        );
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let (width, height) = (1280usize, 800usize);
+            let rect = Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            };
+            let mut target = vec![0u32; width * height];
+            ffe_rs::modern::ModernRenderer::new().render(
+                screen.logical_pixels(),
+                &mut target,
+                width,
+                rect,
+            );
+            gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)
+                .unwrap();
+            write_png(
+                &std::path::Path::new(&dir).join(format!("modern-sun-{name}.png")),
+                &target,
+                width,
+                height,
+            );
+        }
+        scene
+            .batches
+            .last()
+            .and_then(|batch| batch.sprites.first())
+            .map_or(0.0, |sprite| {
+                sprite.halo.iter().copied().fold(0.0, f32::max)
+            })
+    };
+    let open = glare(None, "open");
+    let behind = glare(Some(0.0), "behind");
+    let edge = glare(Some(75.0), "edge");
+    eprintln!("glare: open {open}, behind the station {behind}, at its edge {edge}");
+    assert!(open > 0.0, "the sun glares in the open");
+    assert_eq!(behind, 0.0, "no glare with the station over the whole sun");
+    assert!(
+        edge > 0.0 && edge < open,
+        "dimmer with the station over part of it"
+    );
+}

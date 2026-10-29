@@ -1028,6 +1028,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-29",
       remaining: 100,
       note: "Modern graphics: speed dust looks faster at each higher time acceleration step (1x to 10000x), not slower. Remaining count unchanged."
+    },
+    {
+      date: "2026-10-29",
+      remaining: 100,
+      note: "Modern graphics: the star no longer shines through ships and stations: its core lies behind them and blooms round their edges, and its glare and lens flare dim as they cover it. Remaining count unchanged."
     }
   ]
 };

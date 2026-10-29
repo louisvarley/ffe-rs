@@ -272,10 +272,18 @@ Status (2026-10-28): **implemented**.
   than white runs towards white by how far over it is, so a star's core is white whatever its tint.
 - Glows (lights, stars, the star's halo) now add their light to what lies behind them.
 - The star in view (`modern3d::Star`: its direction, apparent radius and colour, and how much of it
-  the eye sees past the bodies, `sunlight` from the eye) gets, over everything, a core four times
-  brighter than white (the bloom spreads it), a wide faint glare and four lens-flare ghosts on the
-  line from the star through the middle of the view, all dimmed as a planet covers it and gone when
-  it is hidden.
+  the eye sees past the bodies, `sunlight` from the eye) gets a core four times brighter than white,
+  a wide faint glare and four lens-flare ghosts on the line from the star through the middle of the
+  view, all dimmed as a planet covers it and gone when it is hidden.
+- **Hidden by what stands in front of it** (2026-10-29). The core is drawn first, behind every
+  object (`modern3d::core`), so a ship or station in front of the star hides it and the bloom
+  spreads what is left round the object's edge. The glare and ghosts are drawn last, over
+  everything, dimmed also by how much of the star's disc the objects leave uncovered
+  (`modern3d::unblocked`: rays from the eye to 13 points of the disc, its middle and two rings of
+  six, tested against the faces of every batch but the bodies', which `seen` already counts; a
+  batch whose bounding sphere no ray passes near is skipped). Before, they were all drawn over
+  everything, so the star shone through ships and stations
+  (`a_station_in_front_of_the_star_hides_it`, `objects_in_front_of_the_star_hide_it`).
 
 ### Glowing beams, explosions and particles
 
