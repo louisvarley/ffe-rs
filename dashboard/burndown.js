@@ -1023,6 +1023,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-28",
       remaining: 100,
       note: "Modern graphics: speed dust keeps its fast streaking look at every speed, including top speed at 10000x (layers no longer run out). Remaining count unchanged."
+    },
+    {
+      date: "2026-10-29",
+      remaining: 100,
+      note: "Modern graphics: speed dust looks faster at each higher time acceleration step (1x to 10000x), not slower. Remaining count unchanged."
     }
   ]
 };

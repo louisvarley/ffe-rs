@@ -230,14 +230,20 @@ about the dust reaches the simulation. Classic keeps the original's clouds.
   moves), at most one in each place of a grid, 80% of places filled, up to
   five spacings each way.
 - Layers each eight times as far apart as the last (from 97 m), as many as
-  the speed needs. A layer shows while it streams past fast: fading in from 3
-  spacings a second, full from 11 to 90, gone by 360 (the closest layer also
-  from half a spacing a second, about 50 m/s), so every speed, up to the top
-  speed at 10000x, has the same rushing look and the layers hand over
-  smoothly; motes fade out towards the edge of their layer. (The first version
-  had six fixed layers, the largest 3,200 km apart, so above about 2.7 times
-  light speed the dust vanished; and each layer faded in while still slow, so
-  higher speeds looked slower.)
+  the speed needs. The speed sets a visual pace (log2 of spacings streaming past
+  a second): the true pace up to 16 spacings a second, then rising at 0.28 of
+  the true one up to 256 (beyond which a frame would skip most of the field).
+  So every higher speed or time step looks faster than the one below: at
+  5 km/s the shown pace is about 22, 41, 79, 150 and 256 spacings a second at
+  1x to 10000x. The layers nearest that pace are blended with Gaussian weights
+  summing to one, so the field keeps its density as they hand over; the
+  closest layer fades in from about 50 m/s; motes fade out towards the edge of
+  their layer. Faster, streaks run 2 to 3 frames' travel (at most eight
+  spacings) and glow up to 1.6x. `speed_dust_looks_faster_at_each_time_step`
+  checks the streaks sweep a wider angle at each step from 1x to 10000x. (The first versions picked layers only by how
+  fast they streamed past, so each time step handed over to a sparser layer
+  that looked slower, and six fixed layers ran out above about 2.7 times light
+  speed.)
 - Each mote is a streak from where it is to where it was four frames' travel
   ago (at most three spacings): at speed the streaks rush out from the way the
   ship is going, like a starship's warp. Blue-white, brightest at the mote and

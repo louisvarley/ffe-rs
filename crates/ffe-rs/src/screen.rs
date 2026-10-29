@@ -3136,11 +3136,14 @@ impl Screen {
 
     /// The modern engine's speed dust (presentation only: its own hash, never the game's random
     /// numbers). Motes are fixed in the ship's own frame all round it, in layers each
-    /// [`DUST_SPREAD`] times as far apart as the last, as many as any speed needs; a layer shows
-    /// while it streams past fast (full from 11 to 90 spacings a second), so every speed has the
-    /// same rushing look and the layers hand over smoothly; the closest layer also shows at low
-    /// speeds, from about 50 m/s. Each mote is a streak from where it is
-    /// to where it was four frames' travel ago (at most three spacings), so at speed the motes
+    /// [`DUST_SPREAD`] times as far apart as the last, as many as any speed needs. The speed
+    /// sets a visual pace (log2 of spacings streaming past a second): the true pace up to 16
+    /// spacings a second, then rising more slowly to 256 (beyond which a frame would skip most
+    /// of the field), so each higher speed and time step looks faster than the last. The layers
+    /// nearest that pace are blended, their weights summing to one, so the field keeps its
+    /// density as they hand over; the closest layer fades in from about 50 m/s. Faster, the
+    /// streaks also grow longer and brighter. Each mote is a streak from where it is
+    /// to where it was two to three frames' travel ago (at most eight spacings), so at speed the motes
     /// stretch into lines rushing out from the way the ship is going. Paused, nothing moves.
     fn speed_dust(&mut self, state: &Flight, views: &ViewState, camera: &Camera) {
         let now = std::time::Instant::now();
@@ -3167,28 +3170,38 @@ impl Screen {
             let t = ((x - low) / (high - low)).clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
         };
-        // The layers whose pace (log2 of spacings a second) is in the band, three octaves apart.
+        // The closest layer's pace (log2 of spacings a second), and the pace the dust shows.
         let octaves = DUST_SPREAD.log2();
         let pace0 = (speed / DUST_CELL).max(1.0e-9).log2();
-        let first = ((pace0 - 8.5) / octaves).ceil().max(0.0) as usize;
-        let last = ((pace0 - 1.5) / octaves).floor().max(0.0) as usize;
-        for layer in first..=last {
-            let cell = DUST_CELL * DUST_SPREAD.powi(layer as i32);
-            let pace = pace0 - octaves * layer as f64;
-            let fade_in = if layer == 0 {
-                smooth(-1.0, 1.0, pace)
-            } else {
-                smooth(1.5, 3.5, pace)
-            };
-            let weight = fade_in * (1.0 - smooth(6.5, 8.5, pace));
-            if weight <= 0.0 {
+        let shown = if pace0 <= 4.0 {
+            pace0
+        } else {
+            (4.0 + (pace0 - 4.0) * 0.28).min(8.0)
+        };
+        // The layers nearest that pace, weighted by how near (summing to one).
+        let nearest = ((pace0 - shown) / octaves).round().max(0.0) as usize;
+        let layers: Vec<(usize, f64)> = (nearest.saturating_sub(1)..=nearest + 1)
+            .map(|layer| {
+                let off = (pace0 - octaves * layer as f64 - shown) / 1.4;
+                (layer, (-off * off).exp())
+            })
+            .collect();
+        let total: f64 = layers.iter().map(|(_, w)| w).sum();
+        let arrive = smooth(-1.0, 1.0, pace0);
+        // Faster dust glows more and trails farther.
+        let glow = 1.0 + 0.6 * smooth(5.0, 8.0, shown);
+        let frames = 2.0 + smooth(5.0, 8.0, shown);
+        for (layer, share) in layers {
+            let weight = arrive * share / total.max(1.0e-9);
+            if weight <= 0.02 {
                 continue;
             }
+            let cell = DUST_CELL * DUST_SPREAD.powi(layer as i32);
             let reach = f64::from(DUST_REACH) * cell;
             // Each streak is drawn at its own scale (a projection does not change with one).
             let scale = 1.0e5 / cell;
             let trail = if step > 0.0 {
-                (4.0 * step).min(3.0 * cell) / step
+                (frames * step).min(8.0 * cell) / step
             } else {
                 0.0
             };
@@ -3207,8 +3220,6 @@ impl Screen {
                             (at[k] as f64 + part(16 * k as u32)) * cell - self.dust_travel[k]
                         });
                         let away = length(offset) / reach;
-                        // Streaming past fast (the top of the layer's band), a mote glows.
-                        let glow = 1.0 + 0.5 * smooth(4.0, 7.0, pace);
                         let alpha =
                             weight * glow * (1.0 - smooth(0.6, 1.0, away)) * (0.5 + 0.5 * part(48));
                         if alpha <= 0.01 {

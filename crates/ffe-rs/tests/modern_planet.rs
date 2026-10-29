@@ -786,3 +786,58 @@ fn speed_dust_streams_out_from_the_way_ahead() {
         assert!(world.dust.iter().all(|s| s.head == s.tail));
     }
 }
+
+/// Each higher time step makes the speed dust look faster: at 5 km/s, the streaks are longer on
+/// the screen at 10x than at 1x, at 100x than at 10x, and so on up to 10000x.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn speed_dust_looks_faster_at_each_time_step() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let state = Flight {
+        mode: Mode::Flight,
+        velocity: [0.0, 0.0, 515.0],
+        axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        system_flight: true,
+        ..Flight::default()
+    };
+    let mut previous = 0.0f32;
+    for acceleration in 0..5 {
+        let mut screen = Screen::new(&cache).unwrap();
+        screen.capture = true;
+        let mut views = ViewState::default();
+        views.console.acceleration = acceleration;
+        for _ in 0..3 {
+            screen.dust_step = Some(1.0 / 60.0);
+            screen.draw(&state, views, Some(&viewer), false, "");
+        }
+        let world = screen.world().cloned().unwrap();
+        // The median angle a streak sweeps across the view (a few motes beside the ship sweep
+        // far more, whatever the speed).
+        let mut angles: Vec<f32> = world
+            .dust
+            .iter()
+            .filter(|s| s.head[2] > 0.0 && s.tail[2] > 0.0)
+            .map(|s| {
+                let dot: f32 = (0..3).map(|k| s.head[k] * s.tail[k]).sum();
+                let size = |p: [f32; 3]| p.iter().map(|c| c * c).sum::<f32>().sqrt();
+                (dot / (size(s.head) * size(s.tail)))
+                    .clamp(-1.0, 1.0)
+                    .acos()
+            })
+            .collect();
+        angles.sort_by(f32::total_cmp);
+        let mean = angles.get(angles.len() / 2).copied().unwrap_or(0.0);
+        eprintln!(
+            "step {acceleration}: median streak {mean:.5} rad of {}",
+            angles.len()
+        );
+        assert!(
+            mean > previous,
+            "step {acceleration} looks no faster than the one below"
+        );
+        previous = mean;
+    }
+}
