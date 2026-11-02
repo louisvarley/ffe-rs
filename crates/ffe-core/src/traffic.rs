@@ -14,7 +14,7 @@ use crate::model_animation::door_step;
 /// `+0xce` the highest bay, `+0xd0..` one byte a bay, `+0xd8` the timeout and
 /// `+0x9e` the door word (0 is open: the door animation counts down to it when
 /// the mode is negative).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Starport {
     pub mode: u8,
     pub current: u8,

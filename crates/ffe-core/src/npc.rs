@@ -549,7 +549,7 @@ impl Random {
 }
 
 /// Which of the original's traffic roles a ship has.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Role {
     Trader,
     /// F699's auxiliary bulk carrier (`F772(0xf)`: Lynx Bulk Carrier/LRC). It
@@ -916,7 +916,7 @@ pub const ENERGY_BOMB_BIT: u32 = 1 << 26;
 
 /// F941's launch request for an NPC. The core has no cache, so `ffe-rs` turns
 /// the code into a missile [`crate::missile::Spec`] and calls F941's launch.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MissileLaunch {
     /// The launcher's [`NpcShip::id`] (`+0x100`).
     pub owner: u32,
@@ -954,7 +954,7 @@ pub struct MissileLaunch {
 /// - `Flee` = 0x1d (F761 hides the ship as F738's hyperspace cloud).
 /// - `Dead` = 0x1c (F708/F942's explosion object).
 /// - `Escaped`: the cloud is gone and F927 frees the slot; no live row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum State {
     /// Fly to the station or waypoint, then hold.
     Transit,
@@ -1014,7 +1014,7 @@ impl State {
 }
 
 /// One NPC ship in the system flight frame.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NpcShip {
     /// A stable id for the target lock (the slot index is not stable when a
     /// ship is destroyed and the list is compacted).

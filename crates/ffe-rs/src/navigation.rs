@@ -1922,9 +1922,17 @@ pub struct NavigatorSave {
     pub final_leg: bool,
     #[serde(default)]
     pub spawned: Option<usize>,
+    /// The system's live NPC ships (PAR-18). Older saves have none and get a
+    /// fresh F688 spawn instead.
+    #[serde(default)]
+    pub ships: Vec<npc::NpcShip>,
+    /// The stations' traffic records (bays, door, clearance), sorted by body.
+    #[serde(default)]
+    pub traffic: Vec<(usize, Starport)>,
 }
 
 /// A mid-docking or mid-launch stage (F1067-F1088).
+pub const MAX_SAVED_SHIPS: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SequenceSave {
@@ -1956,6 +1964,19 @@ impl NavigatorSave {
         }
         if !self.clock.is_finite() || !self.start_clock.is_finite() {
             return Err("Save has a non-finite navigation clock.".to_owned());
+        }
+        if self.ships.len() > MAX_SAVED_SHIPS {
+            return Err("Save has too many ships.".to_owned());
+        }
+        if self.ships.iter().any(|ship| {
+            ship.velocity
+                .iter()
+                .chain(&ship.forward)
+                .chain(&ship.up)
+                .any(|v| !v.is_finite())
+                || !ship.speed.is_finite()
+        }) {
+            return Err("Save has a ship with a non-finite motion.".to_owned());
         }
         if !(0.0..=1.0e12).contains(&self.clock) || !(0.0..=1.0e12).contains(&self.start_clock) {
             return Err("Save has an out-of-range navigation clock.".to_owned());
@@ -2340,9 +2361,19 @@ impl Navigator {
                 index: landed.index,
             }),
             final_leg: self.final_leg,
-            // Ephemeral: the traffic is regenerated on load, so the save does
-            // not claim the system already has its ships.
-            spawned: None,
+            // The traffic is saved with the system (PAR-18): the restored
+            // list is this system's spawn.
+            spawned: (!self.ships.is_empty()).then_some(self.current),
+            ships: self.ships.clone(),
+            traffic: {
+                let mut records: Vec<(usize, Starport)> = self
+                    .traffic
+                    .iter()
+                    .map(|(index, port)| (*index, *port))
+                    .collect();
+                records.sort_by_key(|(index, _)| *index);
+                records
+            },
         }
     }
 
@@ -2408,12 +2439,31 @@ impl Navigator {
             },
             index: landed.index,
         });
-        // Traffic, missiles and effects are regenerated rather than restored.
-        nav.ships.clear();
+        // The saved traffic is restored (PAR-18); a save without it gets a
+        // fresh spawn. Missiles and effects are short-lived and regenerated.
         nav.persisted.clear();
         nav.missiles = crate::missile::MissileField::default();
         nav.effects.clear();
-        nav.spawned = None;
+        nav.ships = save.ships.clone();
+        nav.spawned = (!nav.ships.is_empty()).then_some(nav.current);
+        // The stations' records come back with the ships that hold their
+        // bays. A save without them (older files) has ships ask again.
+        for (index, port) in &save.traffic {
+            if *index >= nav.bodies.len() || !nav.bodies[*index].kind.is_place() {
+                return Err(format!("Save's traffic record {index} is not a station."));
+            }
+            nav.traffic.insert(*index, *port);
+        }
+        if save.traffic.is_empty() {
+            for ship in &mut nav.ships {
+                if ship.bay.take().is_some() {
+                    ship.pad = None;
+                    if ship.state == npc::State::Approach {
+                        ship.state = npc::State::Transit;
+                    }
+                }
+            }
+        }
         // The bodies above were already placed at `save.clock`, so the next
         // orbital refresh must not run until the clock has actually moved on
         // from it; otherwise the first frame after a load advances the body
@@ -2457,6 +2507,10 @@ impl Navigator {
         if nav.page >= nav.pages() || nav.selected >= nav.listed().len() {
             return Err("Save's navigation selection is out of range.".to_owned());
         }
+        // Ships restored in a bay take one from the rebuilt traffic records.
+        let mut ships = std::mem::take(&mut nav.ships);
+        nav.occupy_station_bays(&mut ships);
+        nav.ships = ships;
         Ok(nav)
     }
 

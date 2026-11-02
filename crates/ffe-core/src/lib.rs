@@ -60,7 +60,7 @@ pub mod traffic;
 pub mod x87;
 
 /// JJFFE's two-word generator. The returned low 16 bits are not the full state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RandomState {
     pub a: u32,
     pub b: u32,

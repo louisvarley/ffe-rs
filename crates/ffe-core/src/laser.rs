@@ -133,7 +133,7 @@ pub fn spec(code: u8, frame_tics: u32) -> Option<LaserSpec> {
 
 /// The mutable laser words of a ship object (`+0xe8` refire, `+0xea` heat,
 /// `+0x11e` energy).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct State {
     pub refire: u16,
     pub heat: u16,
@@ -324,7 +324,7 @@ pub fn hit(origin: [i64; 3], direction: [f64; 3], targets: &[Target]) -> Option<
 /// The shield/hull words F953 damages (`+0xe0/+0xe2` shields, `+0xe4` hull as
 /// mass*4). Only ships take this path in the original; stations and planets
 /// return without damage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DamageState {
     /// Current shields (`+0xe0`).
     pub shields: u16,

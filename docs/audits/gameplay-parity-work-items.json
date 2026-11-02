@@ -217,13 +217,14 @@
     "id": "PAR-18",
     "priority": "P1",
     "title": "Persist and restore the complete live simulation state",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed gameplay deviation",
     "finding": "Navigator::from_save clears ships, missiles/effects and respawns traffic; RNG is skipped/reseeded and the integer OriginalFlight/control state is reconstructed from floating Flight. This changes threats, speed selection, bays and other outcomes on reload. Native file encoding itself need not change gameplay.",
     "source": "F65/F66/F67 and object/state records",
     "implementation": "crates/ffe-rs/src/saves.rs:100; crates/ffe-rs/src/navigation.rs:2185; crates/ffe-rs/src/flight.rs:93; crates/ffe-rs/src/original_flight.rs:86",
     "acceptance": "Save at parked pad, climb, rotating dock, combat/missile flight, jump transition and landed surface; compare continuation with uninterrupted execution including RNG, integer fractions, caps, signed set speed and bay ownership.",
-    "dependencies": "PAR-06, PAR-12, PAR-17, ui-22"
+    "dependencies": "PAR-06, PAR-12, PAR-17, ui-22",
+    "progress": "2026-11-02: the live NPC ships (every NpcShip field: AI state, damage, guns, pylons, missile RNG, docking timers, leader/contract links) and the stations' traffic records (bays, door, clearance) are saved with the navigator and restored on load, so a reload keeps the same threats, traders and occupied bays instead of a fresh F688 spawn; older saves still respawn. The --capture-save round trip is byte-equal with three ships and a station record. Missiles in flight, effects, the shared RNG words and the integer OriginalFlight/control state are still rebuilt rather than restored."
   },
   {
     "id": "PAR-19",

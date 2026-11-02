@@ -633,6 +633,8 @@ mod tests {
             }),
             final_leg: true,
             spawned: Some(5),
+            ships: Vec::new(),
+            traffic: Vec::new(),
         }
     }
 
