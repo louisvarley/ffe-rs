@@ -75,7 +75,7 @@
     "implementation": "crates/ffe-rs/src/input.rs:283; crates/ffe-rs/src/original_flight.rs:86,284,557,590; crates/ffe-rs/src/main.rs:2188,2690",
     "acceptance": "Record physical key -> mapped key -> active/mode -> F1121 set speed -> thrust -> actual velocity. Test fresh key after intro, held intro key, launch, autopilot cancel, engines off, reverse speed, menus and reload. Source controls are default; optional mappings belong only in Port Options.",
     "dependencies": "PAR-01, PAR-04, flight-5",
-    "progress": "2026-10-26: Signed selected speed persists independently of actual velocity through save/model rebuild. New settings default to Classic; saved preferences preserved. Remaining input/cancel/source-replay checks are open."
+    "progress": "2026-10-26: Signed selected speed persists independently of actual velocity through save/model rebuild. New settings default to Classic; saved preferences preserved. Remaining input/cancel/source-replay checks are open. 2026-11-02: DATA_008866 is written only by the new-game set-up (0) and read by F1018 and F750, so the autopilot cancel always zeroes the set speed; the port's cancel does that, and OriginalFlight::from_flight's forward-speed fallback applies only to states without a saved set speed (older saves). Key-to-thrust replay checks remain."
   },
   {
     "id": "PAR-07",

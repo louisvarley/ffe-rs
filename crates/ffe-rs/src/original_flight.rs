@@ -157,9 +157,12 @@ impl OriginalFlight {
         Ok((state, model))
     }
 
-    /// Start from a flight state: its position, velocity and orientation, the
-    /// set speed at the current speed along the nose (F1018's switch to manual),
-    /// and the ship's limits and gun mounts when the cache has them.
+    /// Start from a flight state: its position, velocity and orientation, its
+    /// saved signed set speed (`DATA_008918`; only a state from an older save
+    /// without one falls back to the speed along the nose), and the ship's
+    /// limits and gun mounts when the cache has them. F1018's autopilot cancel
+    /// is separate: it sets the set speed from `DATA_008866`, which only the
+    /// new game writes (0).
     pub fn from_flight(flight: &Flight, stats: Option<&ShipStats>) -> Self {
         let axes = crate::camera::ship_axes(flight);
         let to_units = |v: f64| v * UNITS_PER_FLIGHT_UNIT / MM_PER_SECOND;
