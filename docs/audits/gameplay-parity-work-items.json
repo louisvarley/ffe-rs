@@ -125,7 +125,8 @@
     "source": "F1088/F1091/F1094/F650/F651/F671/F573",
     "implementation": "crates/ffe-rs/src/docking.rs:95; crates/ffe-rs/src/navigation.rs:2210; crates/ffe-rs/src/main.rs:4290,4338,4740",
     "acceptance": "Compare source door stages, bay, object placement and velocity on every release frame for rotating and nonrotating stations; remove spatial grace/teleport substitutions.",
-    "dependencies": "PAR-09, flight-11, flight-9"
+    "dependencies": "PAR-09, flight-11, flight-9",
+    "progress": "2026-11-02 source reading: F1088 (mode 0x22 -> 0x36 for an indoor station, +0x14c & 0x20 clear) zeroes the player's +0x3e..+0x52 and sets z = 0x10000 (65.5 m along the station's own axis, in its frame, +0x57 = 1), runs F1042/F1093, negates rows 0 and 2 and sets +0x1b8 = 0xfffff4a3 for models 0x45/0x4f (else 0xb5d), sets the station's +0xc9 = 0xff and door word +0x9e = 0xffff. Mode 0x36's movement handler F1030 is empty: the ship stays there while F1089 waits for the door word to reach 0, then sets mode 0x26 (F1031: the player flies out under F1037/F1041/F601 with F1033's scan; 0x26 holds while the scan reports region flag 0x20, then mode 0). An open-air port (0x20 set) takes mode 0x38 with the ship copied to the port's position and rows (F1520), then F1090 -> 0x24. The port's launch_point teleport and spatial grace replace all of this; porting it needs the ship to fly inside the station's rotating frame (KNOWN_ISSUES 'Station velocity is not ported')."
   },
   {
     "id": "PAR-11",
