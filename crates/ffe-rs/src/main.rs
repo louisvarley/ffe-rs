@@ -5955,52 +5955,31 @@ fn run() -> Result<(), String> {
                     pending_log.add(Source::Combat, event.message());
                 }
             }
-            // F1014 (via F1011/F1012): flying fast low in an atmosphere heats
-            // the hull; F1033: so does a star contact. Over 0xffff it burns up.
+            // F1033: a star contact heats the hull. (In flight below 20 km
+            // F1035 calls F1015 -> F1016 -> F1017, which is empty; F1014's
+            // speed heating runs only from the landed handlers F1011/F1012,
+            // where the ship is still.) Over 0xffff it burns up.
             if let Some(nav) = nav
                 .as_ref()
                 .filter(|nav| nav.sequence.is_none() && !nav.landed_view())
             {
                 let player = ship_position(&original, &state);
-                let speed_word = (state.speed() * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT
-                    / ffe_rs::original_flight::MM_PER_SECOND)
-                    .max(0.0) as u32;
                 let surface = |body: &ffe_rs::navigation::Body| {
                     (distance(player, body.position) - body.radius as f64) as i64
                 };
-                let air = nav
-                    .bodies
-                    .iter()
-                    .filter(|body| matches!(body.kind, NavKind::Planet | NavKind::Moon))
-                    .filter(|body| body.class & 0x40 != 0)
-                    .any(|body| surface(body) <= i64::from(ffe_rs::damage::HEAT_ALTITUDE));
                 let star = nav
                     .bodies
                     .iter()
                     .filter(|body| body.kind == NavKind::Star)
                     .find(|body| (0..=ffe_rs::damage::SCOOP_DISTANCE).contains(&surface(body)))
                     .map(|body| body.model);
-                let mut heat = ffe_rs::damage::Heat::Rose {
-                    heat: state.hull_heat,
-                    warn: false,
-                };
-                if air {
-                    heat = ffe_rs::damage::atmosphere_heat(
-                        state.hull_heat,
-                        speed_word,
-                        frame_tics,
-                        state.heat_shielded(),
-                    );
-                }
-                if let (Some(model), ffe_rs::damage::Heat::Rose { heat: now, warn }) = (star, heat)
-                {
-                    heat = match ffe_rs::damage::star_heat(now, model, frame_tics) {
-                        ffe_rs::damage::Heat::Rose { heat, .. } => {
-                            ffe_rs::damage::Heat::Rose { heat, warn }
-                        }
-                        burnt => burnt,
-                    };
-                }
+                let heat = star.map_or(
+                    ffe_rs::damage::Heat::Rose {
+                        heat: state.hull_heat,
+                        warn: false,
+                    },
+                    |model| ffe_rs::damage::star_heat(state.hull_heat, model, frame_tics),
+                );
                 match heat {
                     ffe_rs::damage::Heat::Rose { heat, warn } => {
                         state.hull_heat = heat;
