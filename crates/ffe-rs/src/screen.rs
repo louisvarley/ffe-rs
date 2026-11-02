@@ -404,6 +404,17 @@ pub struct ContractRow {
     pub reward: u32,
 }
 
+/// One line of F317's mining equipment list (0xa200/0xa201).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiningRow {
+    /// The find (0xa202 + `+0x1f`) or "In Cargo Bay".
+    pub status: String,
+    pub system: String,
+    pub planet: String,
+    /// The hopper's tonnes; empty for a machine aboard.
+    pub hopper: String,
+}
+
 /// F286's seven status pages in section order, as the port's console note
 /// names them (F318's titles are `0x9c04..0x9c0a`).
 pub const STATUS_TITLES: [&str; 7] = [
@@ -653,6 +664,8 @@ pub struct Screen {
     pub roster: Option<Vec<RosterRow>>,
     /// F316's outstanding contracts.
     pub contracts: Option<Vec<ContractRow>>,
+    /// F317's mining equipment list.
+    pub mining_list: Option<Vec<MiningRow>>,
     /// The cabin, model and cargo block under any status page.
     pub status_backdrop: Option<StatusBackdrop>,
     /// F2's page 0, F283's ship equipment status (drawn over the view).
@@ -1148,6 +1161,7 @@ impl Screen {
             cargo_inventory: None,
             roster: None,
             contracts: None,
+            mining_list: None,
             status_backdrop: None,
             equipment_status: None,
             clock: String::new(),
@@ -2094,6 +2108,25 @@ impl Screen {
         }
     }
 
+    /// F317's mining equipment list: F318's `0x9c0a` title, then up to twelve
+    /// machines from (24,35) in 10-pixel lines, each behind the marker bitmap
+    /// 0x31 at (x-18,y-1): the find, the system at the 0x28 tab, the planet
+    /// and the hopper at the 0x46 tab.
+    fn draw_mining_list(&mut self, rows: &[MiningRow]) {
+        const TEXT: u8 = 0x0f;
+        self.shadow_text(30, 5, "MINING EQUIPMENT LIST", STATUS_TITLE);
+        for (index, row) in rows.iter().take(12).enumerate() {
+            let y = 0x23 + index as i32 * 10;
+            if let Some(marker) = &self.marker {
+                marker.blit_colours(&mut self.frame, &self.palette, 0x18 - 0x12, y - 1);
+            }
+            self.shadow_text(0x18, y, &row.status, TEXT);
+            self.shadow_text(0x18 + 0x50, y, &row.system, TEXT);
+            self.shadow_text(0x18 + 0x50 + 0x46, y, &row.planet, TEXT);
+            self.shadow_text(0x18 + 0x50 + 0x46 + 0x5a, y, &row.hopper, TEXT);
+        }
+    }
+
     /// F316's outstanding contracts: F318's `0x9c09` title tabbed to x 120,
     /// its headings at (2,15) with the tab stops 124, 202, 232 and 292
     /// ("Contract", "Location", "Time", "Other Info", "To Pay"), then each
@@ -2883,6 +2916,9 @@ impl Screen {
             }
             if let Some(rows) = self.contracts.clone() {
                 self.draw_contracts(&rows);
+            }
+            if let Some(rows) = self.mining_list.clone() {
+                self.draw_mining_list(&rows);
             }
         }
         if state.mode == Mode::Docked {

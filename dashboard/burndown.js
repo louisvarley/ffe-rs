@@ -1048,6 +1048,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 97,
       note: "Assassination contracts now need a kill: the target (a trader leaving the nearest port with two military bodyguards) is placed once per visit to its system and destroying it settles the contract; arrival alone no longer pays."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 97,
+      note: "Mining machines (F242-F252, F317): d while landed deploys a machine with F246's surface survey and yield table, F243 digs a tonne a day into the hopper, d beside a machine loads the hopper or takes the machine back, and status page 6 lists them. Part of equipment (gameplay-2), which stays in-progress."
     }
   ]
 };

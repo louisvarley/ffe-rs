@@ -344,6 +344,101 @@ fn build_save(
 
 /// The persisted view of the live preference pages. The remap table is not
 /// edited by this build, so it is carried through unchanged.
+/// How close the ship must stand to a machine for F247 to load from it.
+const MINING_REACH: f64 = 1.0e6;
+
+/// F1122: `d` pressed while landed. Beside a machine of this system F247
+/// loads its hopper (or takes the empty machine aboard); otherwise, with a
+/// machine in the hold, F246 deploys it and reports the assessment.
+fn mining_action(
+    nav: &mut Navigator,
+    cache: &ffe_content::VerifiedCache,
+    state: &mut Flight,
+    player: [i64; 3],
+) -> Vec<String> {
+    use ffe_core::mining;
+    let hold = trade::hold_of(state, trade::capacity(nav, cache, state));
+    let free = u16::try_from((hold.capacity - hold.used).max(0)).unwrap_or(u16::MAX);
+    let near = state.mining.iter().position(|machine| {
+        nav.machine_position(machine)
+            .is_some_and(|at| distance(at, player) <= MINING_REACH)
+    });
+    if let Some(index) = near {
+        let commodity_name = |commodity: usize| {
+            nav.market_tables()
+                .and_then(|tables| tables.name(commodity).map(str::to_owned))
+                .unwrap_or_else(|| format!("goods {commodity}"))
+        };
+        return match mining::load(&mut state.mining[index], free) {
+            mining::Load::Cargo {
+                commodity,
+                tonnes,
+                full,
+            } => {
+                if state.hold.len() <= commodity {
+                    state.hold.resize(commodity + 1, 0);
+                }
+                state.hold[commodity] = state.hold[commodity].saturating_add(tonnes);
+                let name = commodity_name(commodity);
+                let mut line = format!("Loading {tonnes}t of {name}");
+                if full {
+                    line.push_str(". Hopper not empty - Cargo Bay Full.");
+                }
+                vec![line]
+            }
+            mining::Load::Machine => {
+                let machine = state.mining.remove(index);
+                state.loadout.add_mining(machine.code);
+                vec![mining::string(0xa20d).to_owned()]
+            }
+            mining::Load::NoRoom => vec!["Your cargo hold is full.".to_owned()],
+        };
+    }
+    let Some(planet) = nav.landed_planet() else {
+        return vec!["There is nowhere here to mine.".to_owned()];
+    };
+    if state.loadout.mining_count() == 0 {
+        return vec!["No mining machine in the cargo bay.".to_owned()];
+    }
+    let Some(code) = state.loadout.remove_mining() else {
+        return Vec::new();
+    };
+    let body = &nav.bodies[planet];
+    let tech = u32::from(nav.tech_level(cache).unwrap_or(0));
+    let clock = (nav.clock * 1000.0) as u32;
+    let mut rng =
+        ffe_core::RandomState::new(clock ^ 0x6d69_6e65, clock.rotate_left(9) ^ 0x4d42_3400);
+    let coin = rng.next_u16() & 1 != 0;
+    let assessment = mining::assess(
+        body.temperature,
+        body.model,
+        body.size_word,
+        tech,
+        coin,
+        |limit| u32::from(rng.next_u16()) % limit.max(1),
+    );
+    let machine = mining::Machine {
+        code,
+        system: nav.current_system_code(),
+        system_name: nav.system_name().to_owned(),
+        planet: body.name.clone(),
+        offset: nav.planet_offset(planet, player).unwrap_or([0; 3]),
+        hopper: 0,
+        reserve: assessment.reserve,
+        find: assessment.find,
+        day: nav.day(),
+    };
+    let celsius = i32::from(body.temperature) - 0x111;
+    state.mining.push(machine);
+    vec![
+        mining::string(0xa20c).to_owned(),
+        format!(
+            "MB4 Mining Assessment: Surface (at {celsius}^C) is {}.",
+            mining::string(assessment.message)
+        ),
+    ]
+}
+
 /// The Improved combat aids' contacts list ([`ffe_rs::enhanced_combat`]):
 /// the visible ships, hostiles first, then the nearest.
 fn combat_contacts(nav: &Navigator, player_at: [i64; 3]) -> Vec<ffe_rs::enhanced_combat::Contact> {
@@ -4200,6 +4295,17 @@ fn run() -> Result<(), String> {
                         }
                         _ => Some(state.launch()),
                     }
+                } else if pressed(Key::D) && nav.as_ref().is_some_and(|nav| nav.landed.is_some()) {
+                    // F1122/F246/F247: `d` landed loads from a machine beside
+                    // the ship, else drops one from the hold.
+                    if let Some(nav) = nav.as_mut() {
+                        let at = ship_position(&original, &state);
+                        for line in mining_action(nav, &cache, &mut state, at) {
+                            pending_log.add(Source::Mission, line);
+                        }
+                        sound.play(Cue::UiBeep);
+                    }
+                    None
                 } else if pressed(Key::D)
                     && state.system_flight
                     && state.mode == ffe_rs::flight::Mode::Flight
@@ -5542,6 +5648,7 @@ fn run() -> Result<(), String> {
             (status_shown && status_section == 3).then(|| cargo_inventory(&cache, &state));
         screen.roster = (status_shown && status_section == 4).then(|| mission_roster(&state));
         screen.contracts = (status_shown && status_section == 5).then(|| mission_contracts(&state));
+        screen.mining_list = (status_shown && status_section == 6).then(|| mining_rows(&state));
         views.console = ConsoleState {
             acceleration,
             paused,
@@ -6166,6 +6273,28 @@ fn run() -> Result<(), String> {
                         ffe_rs::screen::SystemEffect::from_effect(scene.as_ref(), effect, unit)
                     })
                     .collect();
+                // F243: the deployed mining machines of this system (model
+                // 0x6e/0x6f), standing on their planets.
+                for machine in &state.mining {
+                    if let Some(at) = nav.machine_position(machine) {
+                        let axes = nav
+                            .bodies
+                            .iter()
+                            .find(|body| body.name == machine.planet)
+                            .map_or(
+                                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                                |body| body.orientation,
+                            );
+                        effects.push(ffe_rs::screen::SystemEffect {
+                            model: machine.model(),
+                            centre: at.map(|v| v as f64 / unit),
+                            axes,
+                            timer: 0,
+                            size: 0,
+                            scale: None,
+                        });
+                    }
+                }
                 // F1054's chaff object (model 0xa4) is an ordinary object in
                 // the source's list; the port draws it through the effect path.
                 effects.extend(nav.decoys.iter().map(|decoy| ffe_rs::screen::SystemEffect {
@@ -6333,6 +6462,10 @@ fn run() -> Result<(), String> {
         if let Some(nav) = nav.as_mut() {
             let day = nav.day();
             let code = nav.current_system_code();
+            // F243's event 0x10: each deployed machine digs a tonne a day.
+            for machine in &mut state.mining {
+                machine.dig(day);
+            }
             // F291: an assassination's target is in its system once per visit.
             let targets = state.missions.targets_in(code);
             for name in nav.place_contract_targets(&cache, &targets) {
@@ -7616,6 +7749,30 @@ fn mission_roster(state: &Flight) -> Vec<ffe_rs::screen::RosterRow> {
 }
 
 /// F316's rows: every active removal job.
+/// F317's rows: each machine aboard ("In Cargo Bay") and each deployed one
+/// with its find, system, planet and hopper.
+fn mining_rows(state: &Flight) -> Vec<ffe_rs::screen::MiningRow> {
+    let aboard = state
+        .loadout
+        .mining_machines()
+        .map(|_| ffe_rs::screen::MiningRow {
+            status: ffe_core::mining::string(0xa201).to_owned(),
+            system: "-".to_owned(),
+            planet: "-".to_owned(),
+            hopper: String::new(),
+        });
+    let deployed = state
+        .mining
+        .iter()
+        .map(|machine| ffe_rs::screen::MiningRow {
+            status: machine.label().to_owned(),
+            system: machine.system_name.clone(),
+            planet: machine.planet.clone(),
+            hopper: format!("{}t", machine.hopper),
+        });
+    deployed.chain(aboard).take(12).collect()
+}
+
 fn mission_contracts(state: &Flight) -> Vec<ffe_rs::screen::ContractRow> {
     state
         .missions
@@ -7669,7 +7826,9 @@ fn status_sections(
     // military packages), page 5 DATA_009084's (the removal jobs).
     let roster = active(&[Kind::Passenger, Kind::Parcel, Kind::MilitaryDelivery]);
     let contracts = active(&[Kind::Assassination]);
-    [true, true, false, cargo, roster, contracts, false]
+    // F286: page 6 needs DATA_009104's machine list.
+    let mining = state.loadout.mining_count() > 0 || !state.mining.is_empty();
+    [true, true, false, cargo, roster, contracts, mining]
 }
 
 /// F294's list: each commodity in the hold (`DATA_008896` order) and its tonnes.

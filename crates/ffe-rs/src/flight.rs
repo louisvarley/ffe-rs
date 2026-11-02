@@ -139,6 +139,10 @@ pub struct Flight {
     /// F303/F306/F307). Saves from before the mission slice load empty.
     #[serde(default)]
     pub missions: ffe_core::missions::State,
+    /// F246's deployed mining machines (`DATA_009106` records with a system
+    /// code); the machines still aboard are `loadout.mining`.
+    #[serde(default)]
+    pub mining: Vec<ffe_core::mining::Machine>,
 }
 
 fn default_rng() -> Random {
@@ -188,6 +192,7 @@ impl Default for Flight {
             rng: default_rng(),
             death: None,
             missions: ffe_core::missions::State::default(),
+            mining: Vec::new(),
         }
     }
 }

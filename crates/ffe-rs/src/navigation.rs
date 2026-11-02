@@ -114,6 +114,10 @@ pub struct Body {
     pub spin: i8,
     /// The object's bay count (`+0xce`): F880 gives a station 3 (7 for kind 0x22).
     pub bays: u16,
+    /// The object's temperature word (`+0xe0`, kelvin) and its `+0xa6` size
+    /// word, which F246's mining assessment reads.
+    pub temperature: i16,
+    pub size_word: i16,
 }
 
 /// The original navigation computer's entries: stations and starports, in system
@@ -565,6 +569,8 @@ pub fn bodies_since(
                 0
             },
             bays: list.word(slot, 0xce),
+            temperature: list.word(slot, 0xe0) as i16,
+            size_word: list.word(slot, 0xa6) as i16,
         });
     }
     Ok(out)
@@ -2665,6 +2671,47 @@ impl Navigator {
         }) {
             ship.state = npc::State::Escaped;
         }
+    }
+
+    /// The planet the player is landed on (a starport's planet for a pad),
+    /// where F246 drops a mining machine.
+    pub fn landed_planet(&self) -> Option<usize> {
+        let index = self.landed.as_ref()?.index;
+        match self.bodies.get(index)?.kind {
+            Kind::Starport | Kind::Station => self.bodies[index].parent,
+            _ => Some(index),
+        }
+    }
+
+    /// `point` in planet `index`'s own frame (its orientation rows).
+    pub fn planet_offset(&self, index: usize, point: [i64; 3]) -> Option<[i64; 3]> {
+        let body = self.bodies.get(index)?;
+        let d: [f64; 3] = std::array::from_fn(|k| (point[k] - body.position[k]) as f64);
+        Some(std::array::from_fn(|r| {
+            (0..3)
+                .map(|k| d[k] * body.orientation[r][k])
+                .sum::<f64>()
+                .round() as i64
+        }))
+    }
+
+    /// A deployed machine's position in the system frame now, when its planet
+    /// is in this system.
+    pub fn machine_position(&self, machine: &ffe_core::mining::Machine) -> Option<[i64; 3]> {
+        if machine.system != self.current_system_code() {
+            return None;
+        }
+        let body = self
+            .bodies
+            .iter()
+            .find(|body| body.name == machine.planet)?;
+        Some(std::array::from_fn(|k| {
+            body.position[k]
+                + (0..3)
+                    .map(|r| machine.offset[r] as f64 * body.orientation[r][k])
+                    .sum::<f64>()
+                    .round() as i64
+        }))
     }
 
     /// F291: put each assassination contract's target in this system once:
@@ -6276,6 +6323,8 @@ mod tests {
             orientation: [[0.0; 3]; 3],
             spin: 0,
             bays: 0,
+            temperature: 0,
+            size_word: 0,
         }
     }
 

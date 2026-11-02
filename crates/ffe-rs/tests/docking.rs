@@ -22,6 +22,8 @@ fn station() -> Body {
         orientation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         spin: 12,
         bays: 3,
+        temperature: 0,
+        size_word: 0,
     }
 }
 
