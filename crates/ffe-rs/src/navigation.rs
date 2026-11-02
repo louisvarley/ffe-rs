@@ -2499,14 +2499,30 @@ impl Navigator {
         match body.kind {
             Kind::Station => self
                 .port_for(body)
-                .map(|port| port.axis.map(|a| a * (port.front + STATION_APPROACH)))
+                .map(|port| {
+                    port.axis
+                        .map(|a| a * (port.front + self.station_approach()))
+                })
                 .unwrap_or([0.0; 3]),
             Kind::Starport => {
                 let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
-                up.map(|v| v * STARPORT_APPROACH)
+                up.map(|v| v * self.starport_approach())
             }
             _ => [0.0; 3],
         }
+    }
+
+    /// The station approach the autopilot flies to: the Docking Options
+    /// distance (a port addition) or the default.
+    fn station_approach(&self) -> f64 {
+        self.station_approach_km
+            .map_or(STATION_APPROACH, |km| f64::from(km) * 1.0e6)
+    }
+
+    /// The starport approach altitude: the Docking Options altitude or F741's.
+    fn starport_approach(&self) -> f64 {
+        self.starport_approach_km
+            .map_or(STARPORT_APPROACH, |km| f64::from(km) * 1.0e6)
     }
 
     /// F741's autopilot approach point at an open-air starport: `0x1770` words
@@ -2519,7 +2535,7 @@ impl Navigator {
             .filter(|b| b.kind == Kind::Starport)?;
         let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
         Some(std::array::from_fn(|k| {
-            body.position[k] + (up[k] * STARPORT_APPROACH).round() as i64
+            body.position[k] + (up[k] * self.starport_approach()).round() as i64
         }))
     }
 
@@ -5901,7 +5917,7 @@ impl Navigator {
         let final_starport = starport && self.final_leg;
         let (offset, stop) = if starport {
             let up = unit([body.rows[3], body.rows[4], body.rows[5]].map(f64::from));
-            (up.map(|v| v * STARPORT_APPROACH), APPROACH_STOP)
+            (up.map(|v| v * self.starport_approach()), APPROACH_STOP)
         } else {
             match port {
                 Some(port) if self.final_leg => slot_leg(&port, ship),

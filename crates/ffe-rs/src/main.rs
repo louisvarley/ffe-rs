@@ -1704,6 +1704,12 @@ fn run() -> Result<(), String> {
             model_viewer.is_some(),
         ) {
             if let Some(nav) = nav.as_mut() {
+                // Docking Options: the approach distances, for both autopilot
+                // paths (index 0 keeps F741's own offset words).
+                nav.station_approach_km = (prefs.station_approach > 0)
+                    .then(|| ffe_rs::prefs::STATION_APPROACH_KM[prefs.station_approach]);
+                nav.starport_approach_km = (prefs.starport_approach > 0)
+                    .then(|| ffe_rs::prefs::STARPORT_APPROACH_KM[prefs.starport_approach]);
                 // World Options: read when the next system's traffic spawns.
                 nav.traffic_extra = ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic];
                 nav.traffic_off = prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF;
