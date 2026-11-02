@@ -4798,9 +4798,6 @@ fn run() -> Result<(), String> {
                         .and_then(|nav| {
                             let info = player_info?;
                             let index = nav.landing_parent(ship_at, info.radii().0)?;
-                            if launch_grace == Some(index) {
-                                return None;
-                            }
                             let body = nav.bodies.get(index)?;
                             if body.kind == NavKind::Starport {
                                 // F994/F569: the player is parented to the starport's
@@ -4873,7 +4870,15 @@ fn run() -> Result<(), String> {
                                 landing_tools.as_ref(),
                             )
                             .map(|contact| {
-                                if contact.flags & 0x40 != 0
+                                // F1088/F1089 leave the ship in mode 0x26 (F1031),
+                                // which never docks and holds while the scan
+                                // reports the region (0x20); outside it the ship is
+                                // in free flight (mode 0) and F1021's test applies.
+                                if launch_grace == Some(index) {
+                                    if contact.flags & 0x20 == 0 {
+                                        launch_grace = None;
+                                    }
+                                } else if contact.flags & 0x40 != 0
                                     && contact.flags & 0x20 != 0
                                     && contact.flags & 0x80 == 0
                                 {
@@ -5202,9 +5207,8 @@ fn run() -> Result<(), String> {
                                 }
                             }
                         }
-                        // A launch leaves the ship outside the station it left
-                        // (the port's launch point, PAR-10); its scan stays off
-                        // until the ship is clear of the hull.
+                        // Clear of the station's hull the launch's mode 0x26 is
+                        // over too, even if the scan never ran past the region.
                         if let (Some(nav), Some(index)) = (nav.as_ref(), launch_grace) {
                             let ship = model.absolute_position();
                             let body = &nav.bodies[index];

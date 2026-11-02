@@ -1535,6 +1535,9 @@ pub struct Deadline {
     pub day: u32,
 }
 
+/// F1088's launch seat: `+0x4e = 0x10000` in the station's frame (mm).
+pub const LAUNCH_SEAT: i32 = 0x10000;
+
 /// The player's index in a station's bay table (the original's `DATA_008857`; 0 is an
 /// empty bay).
 pub const PLAYER: u8 = 1;
@@ -3442,10 +3445,20 @@ impl Navigator {
     /// position. F1088 copies it to the ship when the launch's door opens, so the
     /// launch starts inside the station at the open slot, not outside its hull.
     pub fn launch_seat(&self, index: usize) -> Option<[i64; 3]> {
-        self.bodies
+        let body = self
+            .bodies
             .get(index)
-            .filter(|body| matches!(body.kind, Kind::Station | Kind::Starport))
-            .map(|body| body.position)
+            .filter(|body| matches!(body.kind, Kind::Station | Kind::Starport))?;
+        if body.kind == Kind::Station {
+            // F1088: the ship's position in the station's rotating frame is
+            // (0, 0, 0x10000); F1677 turns it by the station's rows, so the
+            // seat is 0x10000 mm along its third (forward) row.
+            let forward = body.orientation[2];
+            return Some(std::array::from_fn(|k| {
+                body.position[k] + (forward[k] * f64::from(LAUNCH_SEAT)).round() as i64
+            }));
+        }
+        Some(body.position)
     }
 
     /// Where F994 puts a ship of collision radius `radius` on the bay's pad:

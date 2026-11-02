@@ -236,7 +236,17 @@ fn the_launch_ends_in_the_station() {
     let seat = nav
         .launch_seat(station)
         .expect("a docked station has a seat");
-    assert_eq!(seat, nav.bodies[station].position);
+    // F1088: (0, 0, 0x10000) in the station's rotating frame, 65.5 m from its
+    // centre along its forward row.
+    let centre = nav.bodies[station].position;
+    let offset: f64 = (0..3)
+        .map(|k| ((seat[k] - centre[k]) as f64).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        (offset - f64::from(ffe_rs::navigation::LAUNCH_SEAT)).abs() < 2.0,
+        "{offset}"
+    );
     assert_ne!(
         seat,
         port.launch_point(),

@@ -115,3 +115,84 @@ fn a_fast_ship_off_the_slot_strikes_the_hull() {
         fast.iter().find(|c| c.1 & 0xc0 != 0)
     );
 }
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn a_launch_from_f1088s_seat_flies_out_of_the_slot() {
+    let cache = cache();
+    let nav = Navigator::new(&cache).unwrap();
+    let index = nav
+        .bodies
+        .iter()
+        .position(|body| body.kind == Kind::Station)
+        .unwrap();
+    let station = &nav.bodies[index];
+    let port = nav.port(index).unwrap();
+    let records = cache.asset("base:model/records").unwrap();
+    let stats = cache.asset("base:ship/stats").unwrap();
+    let station_info = ModelInfo::read(records, stats, station.model).unwrap();
+    let ship_info = ModelInfo::read(records, stats, 20).unwrap();
+    let library = Library(&cache);
+    let tools = ffe_core::surface::SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: ffe_core::surface::DEFAULT_DETAIL,
+    };
+    let seat = nav.launch_seat(index).unwrap();
+    let forward = port.axis;
+    let up = station.orientation[1];
+    let right = cross(up, forward);
+    let speed = 30.0;
+    let flight = Flight {
+        mode: Mode::Flight,
+        ship: 20,
+        system_flight: true,
+        position: seat.map(|v| v as f64 / UNITS_PER_FLIGHT_UNIT),
+        velocity: forward.map(|v| v * speed / UNITS_PER_FLIGHT_UNIT * 1000.0),
+        axes: Some([right, up, forward]),
+        set_speed: None,
+        ..Flight::default()
+    };
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    let body = landing_body(station, &station_info);
+    let mut flags = Vec::new();
+    // F1031 holds mode 0x26 while the scan reports the region; run until it
+    // does not (the region reaches well beyond the docking face).
+    for _ in 0..30_000 {
+        let contact = model
+            .step_station(
+                0.02,
+                &Keys::default(),
+                &body,
+                station.position,
+                &ship_info,
+                Some(&tools),
+            )
+            .unwrap();
+        flags.push(contact.flags);
+        if contact.flags & 0x20 == 0 {
+            break;
+        }
+    }
+    let at = model.absolute_position();
+    let along: f64 = (0..3)
+        .map(|k| (at[k] - station.position[k]) as f64 * port.axis[k])
+        .sum();
+    eprintln!(
+        "seat along {:.0} m; region left at along {:.0} m (front {:.0} m); flags seen {:#x}",
+        (0..3)
+            .map(|k| (seat[k] - station.position[k]) as f64 * port.axis[k])
+            .sum::<f64>()
+            / 1000.0,
+        along / 1000.0,
+        port.front / 1000.0,
+        flags.iter().fold(0u8, |a, f| a | f)
+    );
+    assert!(
+        flags.iter().all(|f| f & 0x80 == 0),
+        "a hull strike on the way out"
+    );
+    assert!(along > port.front, "still inside");
+    assert_eq!(*flags.last().unwrap() & 0x20, 0, "still in the region");
+}
