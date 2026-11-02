@@ -239,3 +239,25 @@ bind.Z=Down
 A remapped physical key no longer acts as itself. The bindings are read at
 start-up; there is no remapping screen. Recordings keep the raw keys and the
 config, so a replay applies the same bindings.
+
+## Game controllers (Windows)
+
+A connected game pad (XInput or any pad `gilrs` supports) is read every frame
+and turned into the active control preset's keys, so it works everywhere the
+keyboard does and is recorded with `--record`:
+
+| pad | action |
+|---|---|
+| left stick | pitch and yaw |
+| right / left trigger | faster / slower |
+| right / left bumper | roll right / left |
+| A (south) | fire |
+| B (east) | launch a missile (M) |
+| X (west) | combat target (T) |
+| Y (north) | next view (F1) |
+| d-pad up / down | time acceleration up / down |
+| Start | the Escape pages |
+| Back / Select | the galaxy map (G) |
+
+Linux builds do not open pads (the backend needs udev); `ffe_rs::gamepad`
+documents the mapping.

@@ -237,7 +237,7 @@ window.FFE_BURNDOWN = {
         { id: "ui-5", title: "Menu and text rendering for every screen", status: "in-progress", version: "v0.58" },
         { id: "ui-6", title: "Galaxy and system map screens", status: "done", version: "v0.48n" },
         { id: "ui-7", title: "Intro and new-game flow", status: "in-progress", version: "reopened-source-audit" },
-        { id: "ui-8", title: "Mouse and joystick input", status: "todo" },
+        { id: "ui-8", title: "Mouse and joystick input", status: "done", version: "gamepad" },
         { id: "ui-9", title: "Options, key bindings screen", status: "done", version: "v0.48p" },
         { id: "ui-10", title: "Original palette effects and screen transitions", status: "in-progress", version: "v0.71" },
         { id: "ui-11", title: "Far and near transitions, clipping and planet approach fidelity", status: "in-progress", version: "v0.68" },
@@ -1058,6 +1058,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 97,
       note: "Military strikes (F626-F628): assassination, photograph and bombing contracts open by rank with the source's payments and enemy-capital targets; the target, or a base to photograph (Military Cameras, d within 10 km) or destroy, is placed in the target system, and photographs and bombings pay on return."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 96,
+      note: "Game controllers: on Windows a pad (gilrs) is read every frame and turned into the active preset's keys (sticks steer, triggers throttle, bumpers roll, face buttons fire/missile/target/view), recorded with the input. Mouse steering was already in place, so mouse and joystick input (ui-8) is done."
     }
   ]
 };

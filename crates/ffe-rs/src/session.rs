@@ -340,6 +340,17 @@ impl Session {
 
     /// This frame's input: the next recorded frame when replaying, else the window's.
     pub fn frame(&mut self, window: &mut Window, dt: f64) -> Frame {
+        self.frame_with(window, dt, |_| {})
+    }
+
+    /// [`Self::frame`], with `live` adding to a live frame before it is
+    /// recorded (the game controller's keys), so a replay sees them too.
+    pub fn frame_with(
+        &mut self,
+        window: &mut Window,
+        dt: f64,
+        live: impl FnOnce(&mut Frame),
+    ) -> Frame {
         let frame = match self.replay.as_mut() {
             Some((frames, next)) => match frames.get(*next) {
                 Some(frame) => {
@@ -354,7 +365,11 @@ impl Session {
                     ..Frame::default()
                 },
             },
-            None => Frame::capture(window, dt),
+            None => {
+                let mut frame = Frame::capture(window, dt);
+                live(&mut frame);
+                frame
+            }
         };
         if let Some(file) = self.record.as_mut() {
             let _ = writeln!(file, "{}", frame.line());

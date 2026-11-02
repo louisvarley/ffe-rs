@@ -14,6 +14,7 @@ pub mod flight;
 pub mod front_end;
 pub mod galaxy_map;
 pub mod gameover;
+pub mod gamepad;
 pub mod hud;
 pub mod indexed;
 pub mod input;

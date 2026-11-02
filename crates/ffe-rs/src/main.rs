@@ -1149,6 +1149,7 @@ fn run() -> Result<(), String> {
     prefs.combat_improved = config.combat_improved;
     // The `bind.*` entries of config.cfg (the file is the remapping screen).
     let bindings = ffe_rs::session::bindings(&config.remap);
+    let mut gamepads = ffe_rs::gamepad::Gamepads::new();
     let mut stored_config = config;
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
@@ -1559,7 +1560,11 @@ fn run() -> Result<(), String> {
         let real_dt = real_now.duration_since(last).as_secs_f64().min(0.1);
         last = real_now;
         // This frame's input and time: live, or the next recorded frame.
-        let mut inp = session.frame(&mut window, real_dt);
+        // A game controller's keys join the live frame before it is recorded.
+        let preset = input::Preset::from_modern(prefs.modern);
+        let mut inp = session.frame_with(&mut window, real_dt, |frame| {
+            gamepads.apply(preset, &mut frame.down, &mut frame.pressed);
+        });
         inp.remap(&bindings);
         let measured = inp.dt;
         // The planet capture is scripted: a fixed 0.1 s (the original model's
