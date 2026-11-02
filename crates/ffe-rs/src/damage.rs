@@ -214,6 +214,76 @@ impl SystemEvent {
     }
 }
 
+/// The hull temperature (`DATA_008804+0x1ec`): F1014 heats it in an
+/// atmosphere, F1033 next to a star, and F1007's whole-second event cools it.
+/// Above 0xffff the ship burns up (F953 with -1); crossing 0x8000 shows
+/// JJFFE's 0x99e6 warning.
+pub const HEAT_LIMIT: u32 = 0xffff;
+/// F1014 runs below this altitude (`0x1312d00`, 20 km).
+pub const HEAT_ALTITUDE: i32 = 0x0131_2d00;
+/// JJFFE's 0x99e6 text (`DATA_006139_plus1`).
+pub const HEAT_WARNING: &str = "You're going to die soon!";
+
+/// What one heating step did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Heat {
+    /// The new temperature; `warn` when it crossed 0x8000 (F1097's 0x99e6).
+    Rose { heat: u32, warn: bool },
+    /// Over [`HEAT_LIMIT`]: F953 destroys the ship.
+    Burnt,
+}
+
+/// F1014 (JJFFE's frame-rate-independent form): `speed * min(tics, 0xffff)`
+/// in 32 bits, shifted right 0x16 with Atmospheric Shielding (`ship+0xcb &
+/// 0x40`) or 0x13 without, capped at 0x1000.
+pub fn atmosphere_heat(heat: u32, speed_word: u32, frame_tics: u32, shielded: bool) -> Heat {
+    let shift = if shielded { 0x16 } else { 0x13 };
+    let product = speed_word.wrapping_mul(frame_tics.min(0xffff)) as i32;
+    let add = (product >> shift).min(0x1000);
+    let total = (heat as i32).wrapping_add(add);
+    if total > HEAT_LIMIT as i32 {
+        return Heat::Burnt;
+    }
+    Heat::Rose {
+        heat: total as u32,
+        warn: (total ^ heat as i32) & 0x8000 != 0,
+    }
+}
+
+/// F1033's star contact (star models 0x89 and up): `tics >> 8` for 0x8c and
+/// up, `tics >> 10` below. The source only destroys the ship when the sum
+/// overflows (a signed compare of the old and new values).
+pub fn star_heat(heat: u32, star_model: u32, frame_tics: u32) -> Heat {
+    if star_model < 0x89 {
+        return Heat::Rose { heat, warn: false };
+    }
+    let add = if star_model >= 0x8c {
+        frame_tics >> 8
+    } else {
+        frame_tics >> 10
+    };
+    let total = heat.wrapping_add(add);
+    if (heat as i32) > (total as i32) {
+        return Heat::Burnt;
+    }
+    Heat::Rose {
+        heat: total,
+        warn: false,
+    }
+}
+
+/// F1007's cooling, once per whole-second event: `seconds << 9` with
+/// Atmospheric Shielding, `<< 7` without, never below zero.
+pub fn cool(heat: u32, seconds: u32, shielded: bool) -> u32 {
+    if heat == 0 {
+        return 0;
+    }
+    // The dword is signed: a value a wrapped F1014 product left negative is
+    // cleared here (`jnl`).
+    let drop = if shielded { seconds << 9 } else { seconds << 7 };
+    (heat as i32).wrapping_sub(drop as i32).max(0) as u32
+}
+
 /// F1033's scoop gate: a star contact within 30 km while moving at least
 /// `0x2328` speed units. `distance` is F569's contact distance in millimetres.
 pub fn scoop_ready(distance: i64, speed_word: i32, fitted: bool) -> bool {
@@ -223,6 +293,75 @@ pub fn scoop_ready(distance: i64, speed_word: i32, fitted: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn f1014_heats_by_speed_and_time_and_burns_past_ffff() {
+        // 0x2000 * 994 >> 0x13 = 15; shielded >> 0x16 = 1.
+        assert_eq!(
+            atmosphere_heat(0, 0x2000, 994, false),
+            Heat::Rose {
+                heat: 15,
+                warn: false
+            }
+        );
+        assert_eq!(
+            atmosphere_heat(0, 0x2000, 994, true),
+            Heat::Rose {
+                heat: 1,
+                warn: false
+            }
+        );
+        // The time is capped at 0xffff tics; the 32-bit product wraps as the
+        // source's `mul` does (a wrapped, negative product cools).
+        assert_eq!(
+            atmosphere_heat(0, 0x8000, 0x2_0000, false),
+            atmosphere_heat(0, 0x8000, 0xffff, false)
+        );
+        assert_eq!(
+            atmosphere_heat(500, 0x0100_0000, 994, false),
+            Heat::Rose {
+                heat: (500i32 - 960) as u32,
+                warn: true
+            }
+        );
+        assert_eq!(
+            atmosphere_heat(0x7ff0, 0x10_0000, 994, false),
+            Heat::Rose {
+                heat: 0x7ff0 + 1988,
+                warn: true
+            }
+        );
+        assert_eq!(atmosphere_heat(0xff00, 0x10_0000, 994, false), Heat::Burnt);
+    }
+
+    #[test]
+    fn stars_heat_by_class_and_the_second_event_cools() {
+        assert_eq!(
+            star_heat(0, 0x88, 994),
+            Heat::Rose {
+                heat: 0,
+                warn: false
+            }
+        );
+        assert_eq!(
+            star_heat(0, 0x89, 994),
+            Heat::Rose {
+                heat: 0,
+                warn: false
+            }
+        );
+        assert_eq!(
+            star_heat(0, 0x8c, 994),
+            Heat::Rose {
+                heat: 3,
+                warn: false
+            }
+        );
+        assert_eq!(cool(1000, 3, false), 1000 - 384);
+        assert_eq!(cool(1000, 3, true), 0);
+        assert_eq!(cool(0, 3, false), 0);
+        assert_eq!(cool((-460i32) as u32, 1, false), 0);
+    }
 
     fn stats() -> ShipStats {
         ShipStats {

@@ -168,13 +168,14 @@
     "id": "PAR-14",
     "priority": "P1",
     "title": "Verify source fuel scooping gates and capacity changes",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed adapter requiring parity trace",
     "finding": "The playable uses nearest-star surface distance, floating speed conversion, a cooldown and port cargo-capacity accounting. Helper threshold tests do not establish F1033 contact/class, atmosphere, heat, cargo-used and timing behaviour.",
     "source": "F1033/F929/F903",
     "implementation": "crates/ffe-rs/src/main.rs:4923; crates/ffe-rs/src/damage.rs:214; crates/ffe-rs/src/flight.rs:675",
     "acceptance": "Sweep contact flags, altitude, speed, fitted/mounting state, fuel species, full hold, pause and acceleration; compare exact increment events and heat/damage with the original.",
-    "dependencies": "PAR-01, PAR-02, PAR-12"
+    "dependencies": "PAR-01, PAR-02, PAR-12",
+    "progress": "2026-11-02: F1033 read against the port: star contact model range, fitted bit, 30 km, speed 0x2328, the 0x2468a-tic interval, the used/capacity test, 0x9906 and the silent sample 0x11 ('nowt') match. The missing hull temperature (DATA_008804+0x1ec) is ported: F1014's atmosphere heat (JJFFE frame-rate form, shift 0x16/0x13 by Atmospheric Shielding, cap 0x1000, burn above 0xffff, 0x99e6 'You're going to die soon!' on crossing 0x8000), F1033's star heat (tics>>8 for 0x8c+, >>10 for 0x89+) and F1007's whole-second cooling (<<9/<<7). The star contact is the port's 30 km surface test, not F569's contact flag; no executed trace yet."
   },
   {
     "id": "PAR-15",

@@ -127,6 +127,9 @@ pub struct Flight {
     /// F1033's scoop cooldown, in accelerated seconds (`0x2468a` tics).
     #[serde(skip)]
     pub scoop_cooldown: f64,
+    /// The hull temperature (`DATA_008804+0x1ec`, see `damage::HEAT_LIMIT`).
+    #[serde(default)]
+    pub hull_heat: u32,
     /// The original's shared random stream (`DATA_008818`/`DATA_008820`) for
     /// the damage and servicing rolls.
     #[serde(skip, default = "default_rng")]
@@ -189,6 +192,7 @@ impl Default for Flight {
             damage: Damage::default(),
             last_service_day: None,
             scoop_cooldown: 0.0,
+            hull_heat: 0,
             rng: default_rng(),
             death: None,
             missions: ffe_core::missions::State::default(),
@@ -812,6 +816,19 @@ impl Flight {
         let slot = &mut self.hold[ffe_core::hyperspace::HYDROGEN];
         *slot = slot.saturating_add(1);
         Some(*slot)
+    }
+
+    /// Atmospheric Shielding (`ship+0xcb & 0x40`, general bit 30).
+    pub fn heat_shielded(&self) -> bool {
+        self.loadout.general & (1 << 30) != 0
+    }
+
+    /// F953 with -1: the hull burnt up (F1014/F1033's overheating).
+    pub fn burn_up(&mut self) {
+        if self.hull[1] == 0 {
+            self.hull = [0, 1];
+        }
+        self.hull[0] = 0;
     }
 
     /// Whether the player's hull has been used up (F942 destroys the object).
