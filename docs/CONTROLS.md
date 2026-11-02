@@ -224,3 +224,18 @@ prototype flight. The CLI `--capture*`, `--smoke-frames`, `--skip-intro` and
   `saves/display.cfg` are read once as a migration. The original's commander-file
   preference block is not imported. `bind.*` keys are reserved for the still
   unported remapping screen (`docs/notes/persistence.md`).
+
+## Remapping keys
+
+`saves/config.cfg` takes `bind.<game key>=<physical key>` lines, with minifb's
+key names (`A`, `Up`, `LeftShift`, `NumPad8`, `F1`, ...). Each makes the
+physical key act as the game key everywhere in the game, for example:
+
+```
+bind.A=Up
+bind.Z=Down
+```
+
+A remapped physical key no longer acts as itself. The bindings are read at
+start-up; there is no remapping screen. Recordings keep the raw keys and the
+config, so a replay applies the same bindings.

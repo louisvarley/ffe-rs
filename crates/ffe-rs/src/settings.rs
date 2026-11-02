@@ -11,10 +11,10 @@
 //! file leaves the caller's defaults. Saving is atomic (temporary file, sync,
 //! rename) and reports errors to the caller.
 //!
-//! The `bind.*` keys are reserved for input remapping. The port has no
-//! remapping screen yet, so they are read and written unchanged but do not
-//! drive the key tables; see `docs/CONTROLS.md` and the owner decisions in
-//! `docs/notes/persistence.md`.
+//! The `bind.*` keys remap the keyboard: `bind.<game key>=<physical key>`
+//! with minifb key names (`bind.A=Up` makes Up act as A). Entries that do not
+//! name two keys are kept unchanged and have no effect. There is no remapping
+//! screen; see `docs/CONTROLS.md`.
 
 use crate::display::DisplaySettings;
 use std::collections::BTreeMap;

@@ -1046,6 +1046,8 @@ fn run() -> Result<(), String> {
     prefs.pirates = config.pirates;
     prefs.advanced_traffic = config.advanced_traffic;
     prefs.combat_improved = config.combat_improved;
+    // The `bind.*` entries of config.cfg (the file is the remapping screen).
+    let bindings = ffe_rs::session::bindings(&config.remap);
     let mut stored_config = config;
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
@@ -1456,7 +1458,8 @@ fn run() -> Result<(), String> {
         let real_dt = real_now.duration_since(last).as_secs_f64().min(0.1);
         last = real_now;
         // This frame's input and time: live, or the next recorded frame.
-        let inp = session.frame(&mut window, real_dt);
+        let mut inp = session.frame(&mut window, real_dt);
+        inp.remap(&bindings);
         let measured = inp.dt;
         // The planet capture is scripted: a fixed 0.1 s (the original model's
         // largest frame) per presented frame, so the approach takes minutes of

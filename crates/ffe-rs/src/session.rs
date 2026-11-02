@@ -42,6 +42,17 @@ fn key_name(key: Key) -> String {
     format!("{key:?}")
 }
 
+/// The `bind.<game key>=<physical key>` entries of `config.cfg` that name
+/// keys (minifb names such as `A`, `Up`, `LeftShift`). Other entries are kept
+/// in the file but have no effect.
+pub fn bindings(remap: &std::collections::BTreeMap<String, String>) -> Vec<(Key, Key)> {
+    remap
+        .iter()
+        .filter_map(|(game, physical)| Some((key_from(game)?, key_from(physical)?)))
+        .filter(|(game, physical)| game != physical)
+        .collect()
+}
+
 fn key_from(name: &str) -> Option<Key> {
     ALL_KEYS.iter().copied().find(|key| key_name(*key) == name)
 }
@@ -76,6 +87,33 @@ impl Frame {
             left: window.get_mouse_down(MouseButton::Left),
             right: window.get_mouse_down(MouseButton::Right),
         }
+    }
+
+    /// Apply the player's key bindings: each `(game, physical)` pair makes
+    /// the physical key act as the game key. A remapped physical key no longer
+    /// acts as itself; a game key keeps its own physical key unless another
+    /// binding takes it. Recordings keep the raw keys, so a replay applies the
+    /// same bindings from its recorded config.
+    pub fn remap(&mut self, bindings: &[(Key, Key)]) {
+        if bindings.is_empty() {
+            return;
+        }
+        let map = |keys: &[Key]| -> Vec<Key> {
+            let mut out: Vec<Key> = Vec::with_capacity(keys.len());
+            for key in keys {
+                let mapped = bindings
+                    .iter()
+                    .find(|(_, physical)| physical == key)
+                    .map_or(*key, |(game, _)| *game);
+                if !out.contains(&mapped) {
+                    out.push(mapped);
+                }
+            }
+            out
+        };
+        self.down = map(&self.down);
+        self.pressed = map(&self.pressed);
+        self.repeated = map(&self.repeated);
     }
 
     pub fn is_key_down(&self, key: Key) -> bool {
@@ -346,6 +384,23 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bindings_make_a_physical_key_act_as_a_game_key() {
+        let mut remap = std::collections::BTreeMap::new();
+        remap.insert("A".to_owned(), "Up".to_owned());
+        remap.insert("pitch_up".to_owned(), "KeyZ".to_owned());
+        let bindings = bindings(&remap);
+        assert_eq!(bindings, [(Key::A, Key::Up)]);
+        let mut frame = Frame {
+            down: vec![Key::Up, Key::W],
+            pressed: vec![Key::Up],
+            ..Frame::default()
+        };
+        frame.remap(&bindings);
+        assert_eq!(frame.down, [Key::A, Key::W]);
+        assert_eq!(frame.pressed, [Key::A]);
+    }
 
     #[test]
     fn frames_round_trip_through_their_text() {

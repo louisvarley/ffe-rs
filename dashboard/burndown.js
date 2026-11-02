@@ -167,7 +167,7 @@ window.FFE_BURNDOWN = {
         { id: "world-5", title: "Planet surfaces and landing approach", status: "in-progress", version: "reopened-source-audit" },
         { id: "world-6", title: "Starports: services and events (cstarport)", status: "in-progress", version: "v0.73" },
         { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "in-progress", version: "galaxy-v21" },
-        { id: "world-8", title: "Navigation: system and galaxy maps", status: "todo" },
+        { id: "world-8", title: "Navigation: system and galaxy maps", status: "in-progress" },
         { id: "world-9", title: "Lighting by the local star (ships, stations, lift) and day/night", status: "in-progress", version: "v0.48k" },
         { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" },
         { id: "world-11", title: "Terrain distance query and complex-shape collisions (F1876 mode 1, F576-F583), starports placed on planets", status: "done", version: "v0.51e" },
@@ -189,10 +189,10 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-6", title: "Agents: AI behaviour (cagent)", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-7", title: "Police, pirates and other encounters", status: "in-progress", version: "v0.63" },
         { id: "gameplay-8", title: "Combat scenario replay against the reference", status: "todo" },
-        { id: "gameplay-9", title: "Bulletin board and missions (cbbs)", status: "todo" },
-        { id: "gameplay-10", title: "Journal and mission state", status: "todo" },
-        { id: "gameplay-11", title: "Shuttles and station traffic (shuttle)", status: "todo" },
-        { id: "gameplay-12", title: "Communications and messages", status: "todo" },
+        { id: "gameplay-9", title: "Bulletin board and missions (cbbs)", status: "in-progress" },
+        { id: "gameplay-10", title: "Journal and mission state", status: "in-progress" },
+        { id: "gameplay-11", title: "Shuttles and station traffic (shuttle)", status: "in-progress" },
+        { id: "gameplay-12", title: "Communications and messages", status: "in-progress" },
         { id: "gameplay-13", title: "Player death and the escape capsule", status: "todo" },
         { id: "gameplay-14", title: "Rank, reputation, legal status and the fines office", status: "done", version: "v1.04" },
         { id: "gameplay-15", title: "Time-driven events over a long run (daily market/BBS/shipyard/deadline tick)", status: "done", version: "v0.99" },
@@ -261,10 +261,10 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "persist-1", title: "Legacy commander import (read-only)", status: "todo" },
-        { id: "persist-2", title: "Native versioned save format", status: "todo" },
-        { id: "persist-3", title: "Save, load and quick-save in the game", status: "todo" },
+        { id: "persist-2", title: "Native versioned save format", status: "done", version: "audit" },
+        { id: "persist-3", title: "Save, load and quick-save in the game", status: "done", version: "audit" },
         { id: "persist-4", title: "Imported saves replayed against the reference", status: "todo" },
-        { id: "persist-5", title: "Config and input-remap persistence", status: "todo" }
+        { id: "persist-5", title: "Config and input-remap persistence", status: "done", version: "remap" }
       ]
     },
     {
@@ -1033,6 +1033,11 @@ window.FFE_BURNDOWN = {
       date: "2026-10-29",
       remaining: 100,
       note: "Modern graphics: the star no longer shines through ships and stations: its core lies behind them and blooms round their edges, and its glare and lens flare dim as they cover it. Remaining count unchanged."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 97,
+      note: "Audit of todo items against the code: native versioned JSON saves (persist-2) and in-game save, load and quick-save (persist-3) were already complete; config.cfg now also applies its bind.<game key>=<physical key> remaps (persist-5). The system and galaxy maps, BBS missions, journal, message pages and station traffic exist and move to in-progress."
     }
   ]
 };
