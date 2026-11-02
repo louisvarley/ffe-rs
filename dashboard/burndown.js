@@ -1078,6 +1078,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 96,
       note: "Shared random pair (PAR-17 in progress): traffic, effects, dust, hyperspace arrival, the ships' missile/ECM rolls and the player's damage and servicing rolls now draw from one saved DATA_008818/8820 stream in call order, seeded as F147 does. Also fixes a degenerate explosion/debris orientation when a random forward lay along the helper axis."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 96,
+      note: "One frame clock (PAR-12 in progress): F1418's millisecond-to-tic arithmetic is computed once per frame and every gameplay system reads it (clock, days, traffic, ships, missiles, effects, lasers, scoop) instead of converting time separately; the death view's effects now follow time acceleration."
     }
   ]
 };

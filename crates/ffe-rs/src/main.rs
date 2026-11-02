@@ -1559,6 +1559,7 @@ fn run() -> Result<(), String> {
     }
     let mut last = Instant::now();
     let mut accumulator = 0.0;
+    let mut frame_timer = ffe_core::FrameTimer::default();
     let mut frames = 0;
     // A scripted new-game capture stops a moment after F1031 clears the pad.
     let capture_takeoff =
@@ -1591,6 +1592,14 @@ fn run() -> Result<(), String> {
         } else {
             measured
         };
+        // F1418: this frame's whole milliseconds become the system and
+        // accelerated tic deltas once, and every gameplay system below reads
+        // that one value (PAR-12).
+        let frame = frame_timer.advance(
+            elapsed,
+            ffe_rs::console::TIME_ACCELERATION
+                [acceleration.min(ffe_rs::console::TIME_ACCELERATION.len() - 1)],
+        );
         // F917's game-over screen owns the frame until its loop ends. The death
         // stream starts it; the F953 path below is the current trigger. Input,
         // flight and traffic stay frozen, as in the original's state 0x2c.
@@ -1855,9 +1864,7 @@ fn run() -> Result<(), String> {
                     // the arrival time, which ends the transit (F1066/F1094).
                     transit_over = nav.transit_step(&cache, elapsed);
                 } else {
-                    let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
-                        / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
-                    nav.advance(&cache, elapsed * factor);
+                    nav.advance(&cache, frame.seconds());
                     // F688: a system's traffic exists from the moment the
                     // player is in it (the reference's new game already has
                     // ships at the start pad). The jump arrival and station
@@ -5309,10 +5316,7 @@ fn run() -> Result<(), String> {
         // Traffic control: doors, clearance timeouts and the docking and launch stages.
         if active && !death_control && !paused && model_lab.is_none() && model_viewer.is_none() {
             if let Some(nav) = nav.as_mut() {
-                let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
-                    / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
-                let tics = (elapsed * ffe_rs::original_flight::TICS_PER_SECOND * factor) as u32;
-                for event in nav.tick_traffic(tics, elapsed * factor) {
+                for event in nav.tick_traffic(frame.tics, frame.seconds()) {
                     match event {
                         Traffic::Stage(text) => {
                             // F863's progress line uses F271's replace flag, so
@@ -5400,10 +5404,7 @@ fn run() -> Result<(), String> {
             && state.mode == ffe_rs::flight::Mode::Flight
         {
             if let Some(nav) = nav.as_mut() {
-                let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
-                    / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
                 let player = ship_position(&original, &state);
-                let tics = (elapsed * ffe_rs::original_flight::TICS_PER_SECOND * factor) as u32;
                 // Inside a docking or launch sequence the player's object is at
                 // the station: no NPC shot can reach it (F817's box would have
                 // nothing to test).
@@ -5415,8 +5416,8 @@ fn run() -> Result<(), String> {
                         .and_then(|scene| scene.model_radius(state.ship))
                         .map_or(10_000, i64::from)
                 };
-                let events = nav.tick_ships(elapsed * factor, tics, player, radius);
-                nav.tick_life(&cache, elapsed * factor);
+                let events = nav.tick_ships(frame.seconds(), frame.tics, player, radius);
+                nav.tick_life(&cache, frame.seconds());
                 // F714: canisters the ship's scoop takes into the hold.
                 if nav.sequence.is_none() && nav.docked.is_none() && !nav.landed_view() {
                     let hold = trade::hold_of(&state, trade::capacity(nav, &cache, &state));
@@ -5621,7 +5622,7 @@ fn run() -> Result<(), String> {
                 let player_velocity = state
                     .velocity
                     .map(|value| value * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
-                for event in nav.tick_missiles_at(elapsed * factor, player, player_velocity, radius)
+                for event in nav.tick_missiles_at(frame.seconds(), player, player_velocity, radius)
                 {
                     match event {
                         ffe_rs::missile::MissileEvent::Hit { name, outcome, .. } => {
@@ -5722,8 +5723,7 @@ fn run() -> Result<(), String> {
             // F1104's external view: the traffic AI is off, but F942's explosion
             // (model 0x9b) and F926's debris still age and draw.
             if let Some(nav) = nav.as_mut() {
-                let tics = (elapsed * ffe_core::effects::TICS_PER_SECOND) as u32;
-                nav.tick_effects(elapsed, tics);
+                nav.tick_effects(frame.seconds(), frame.tics);
             }
         }
         // A new state (docking, a scenario, a load) ends the original flight model.
@@ -5984,19 +5984,17 @@ fn run() -> Result<(), String> {
         // Lasers (F1040/F931): Space holds the fire input, the current view picks
         // the mount, and F931's refire/heat/energy gates decide whether a shot
         // happens this frame. The beam is F1776's model 0x9c at the gun.
-        let acceleration_factor = f64::from(ffe_rs::console::TIME_ACCELERATION[acceleration])
-            / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
-        // DATA_009155 is elapsed time in the original's 1/49710 s tics, not a
-        // 50 Hz frame count: F730's refire word (0x795c) and F930's beam branch
-        // are both in those tics.
-        let frame_tics = combat::frame_tics(elapsed, acceleration_factor);
+        // DATA_009155 is elapsed time in the original's tics (F1418's
+        // accelerated delta), not a 50 Hz frame count: F730's refire word
+        // (0x795c) and F930's beam branch are both in those tics.
+        let frame_tics = frame.tics;
         let player_stats = scene
             .as_ref()
             .and_then(|scene| scene.ship_stats(state.ship));
         if active && !death_control && !paused && state.mode == ffe_rs::flight::Mode::Flight {
             // F938 reads `ship+0xc8 & 1` (the laser cooling booster) directly.
             state.combat.cooling_booster = state.loadout.cooling_booster();
-            let event_seconds = state.combat.tick(frame_tics, elapsed * acceleration_factor);
+            let event_seconds = state.combat.tick(frame_tics, frame.seconds());
             if let Some(stats) = player_stats {
                 state.ensure_thrusters(&stats);
                 // F938: shield recharge and the Hull Auto-Repair System.
@@ -6062,7 +6060,7 @@ fn run() -> Result<(), String> {
             }
             // F1033's fuel scoop: a star contact within 30 km at speed, one
             // tonne of hydrogen per about three seconds.
-            state.scoop_cooldown = (state.scoop_cooldown - elapsed * acceleration_factor).max(0.0);
+            state.scoop_cooldown = (state.scoop_cooldown - frame.seconds()).max(0.0);
             if state.loadout.fuel_scoop()
                 && state.scoop_cooldown == 0.0
                 && nav.as_ref().is_some_and(|nav| nav.sequence.is_none())

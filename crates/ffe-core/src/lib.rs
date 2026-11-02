@@ -131,3 +131,121 @@ impl TimerCounters {
         Ok(())
     }
 }
+
+/// The original's time units per second at 1x (`0x3e2` per 20 ms).
+pub const TICS_PER_SECOND: f64 = 49_700.0;
+/// The 1x acceleration word (`DATA_007706` = `0x3e2`).
+pub const REAL_TIME: u32 = 0x3e2;
+
+/// One frame's time as F1418 hands it to the game (PAR-12): the whole
+/// milliseconds measured, the system and accelerated tic deltas (each
+/// `ms * word / 20`, truncated per frame as the source's DIV does) and the
+/// number of 50 Hz callbacks (`Timer50Hz`) the frame crossed. Every
+/// gameplay system in a frame reads this one value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Frame {
+    pub ms: u32,
+    pub real_tics: u32,
+    pub tics: u32,
+    pub ticks_50hz: u32,
+}
+
+impl Frame {
+    /// The accelerated tics in seconds of game time.
+    pub fn seconds(&self) -> f64 {
+        f64::from(self.tics) / TICS_PER_SECOND
+    }
+
+    /// The system tics in seconds of real time.
+    pub fn real_seconds(&self) -> f64 {
+        f64::from(self.real_tics) / TICS_PER_SECOND
+    }
+}
+
+/// F1418's frame clock: the timestamp in whole milliseconds (the presented
+/// frame's fraction of a millisecond carries to the next frame, as the
+/// source's `tmLastTime` does), `tmNext50Hz` and the two counters.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FrameTimer {
+    pub counters: TimerCounters,
+    now_ms: u64,
+    next_50hz_ms: u64,
+    carry_ms: f64,
+}
+
+impl FrameTimer {
+    /// Advance by `seconds` of presented time at the acceleration word
+    /// `acceleration` (`DATA_007706`, [`REAL_TIME`] for 1x).
+    pub fn advance(&mut self, seconds: f64, acceleration: u32) -> Frame {
+        let total = self.carry_ms
+            + if seconds.is_finite() {
+                seconds.max(0.0) * 1000.0
+            } else {
+                0.0
+            };
+        // A whole millisecond lost to float rounding is not lost.
+        let ms = (total + 1e-9).floor().min(f64::from(u32::MAX / REAL_TIME));
+        self.carry_ms = (total - ms).max(0.0);
+        let ms = ms as u32;
+        self.now_ms += u64::from(ms);
+        let mut ticks_50hz = 0;
+        while self.now_ms >= self.next_50hz_ms + 20 {
+            self.next_50hz_ms += 20;
+            ticks_50hz += 1;
+        }
+        let real_tics = timer_delta(ms, REAL_TIME).unwrap_or(u32::MAX);
+        let tics = timer_delta(ms, acceleration).unwrap_or(u32::MAX);
+        let _ = self.counters.advance(ms, acceleration);
+        Frame {
+            ms,
+            real_tics,
+            tics,
+            ticks_50hz,
+        }
+    }
+}
+
+#[cfg(test)]
+mod frame_timer_tests {
+    use super::*;
+
+    fn run(fps: f64, seconds: f64, acceleration: u32) -> (u64, u64, u64) {
+        let mut timer = FrameTimer::default();
+        let frames = (seconds * fps).round() as usize;
+        let (mut tics, mut ms, mut ticks) = (0u64, 0u64, 0u64);
+        for _ in 0..frames {
+            let frame = timer.advance(1.0 / fps, acceleration);
+            tics += u64::from(frame.tics);
+            ms += u64::from(frame.ms);
+            ticks += u64::from(frame.ticks_50hz);
+        }
+        (ms, tics, ticks)
+    }
+
+    #[test]
+    fn a_twenty_ms_frame_is_994_tics() {
+        let mut timer = FrameTimer::default();
+        let frame = timer.advance(0.02, REAL_TIME);
+        assert_eq!(
+            (frame.ms, frame.real_tics, frame.tics, frame.ticks_50hz),
+            (20, 994, 994, 1)
+        );
+        let fast = timer.advance(0.02, 0x26d6);
+        assert_eq!((fast.real_tics, fast.tics), (994, 0x26d6));
+        assert!((frame.seconds() - 0.02).abs() < 1e-12);
+    }
+
+    #[test]
+    fn every_frame_rate_sees_the_same_milliseconds_and_50hz_callbacks() {
+        // Ten seconds at 20, 50, 60 and 144 fps: the same whole milliseconds and
+        // the same 500 Timer50Hz calls; the tic total differs only by F1418's
+        // per-frame truncation (under one tic a frame).
+        for fps in [20.0, 50.0, 60.0, 144.0] {
+            let (ms, tics, ticks) = run(fps, 10.0, REAL_TIME);
+            assert_eq!(ms, 10_000, "{fps} fps");
+            assert_eq!(ticks, 500, "{fps} fps");
+            let frames = (10.0 * fps) as u64;
+            assert!(497_000 - tics <= frames, "{fps} fps: {tics}");
+        }
+    }
+}

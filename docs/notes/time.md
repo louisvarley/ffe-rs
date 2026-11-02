@@ -51,6 +51,33 @@ old placement froze the green date whenever there was no model). Pause, the
 F224 preference pages, focus loss and the death/game-over hold stop it; the
 dashboard's time acceleration (`6`..`0`, `DATA_009012`) scales each frame.
 
+## The frame clock (F1418, PAR-12)
+
+`F1418_TimerAdvance` (`ffe.asm:85652`) measures each frame in whole
+milliseconds and adds `ms * 0x3e2 / 20` to the system counter (`DATA_009157`)
+and `ms * DATA_007706 / 20` to the accelerated counter (`DATA_009156`), each
+an integer DIV per frame, then runs `Timer50Hz` once for every 20 ms boundary
+the frame crossed. Every gameplay system in that frame reads the same delta.
+
+The port's `ffe_core::FrameTimer` does the same arithmetic once per presented
+frame (`main.rs`, right after the frame's time is known). The fraction of a
+millisecond carries to the next frame, as the source's timestamp does. The
+resulting `ffe_core::Frame` (`ms`, `real_tics`, `tics`, `ticks_50hz`) feeds
+`Navigator::advance` (the clock and F152's days), traffic control, the NPC
+ships and their missiles, ambient life, effects (including the death view's,
+which previously ignored time acceleration), the player's laser/shield tick
+and the fuel scoop. Before, each of these converted `elapsed * factor` to tics
+separately. Tests: `frame_timer_tests` in `ffe-core` (a 20 ms frame is 994
+tics; 20/50/60/144 fps give the same milliseconds and the same 500 50 Hz
+calls in ten seconds, and the tic totals differ only by the per-frame
+truncation).
+
+Still open: the original flight model and the prototype accumulator keep
+their own steps; NPC event-6 controllers count 20 ms of game time rather than
+`Timer50Hz` calls; high time acceleration still runs one large physics step
+per frame without extra collision work; replaying a scripted input at
+different frame rates and matching the draw ledger is not yet done.
+
 ## F633: the daily starport update
 
 `F633` (`ffe.asm:43279`) is reached through the station module's action

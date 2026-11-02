@@ -145,14 +145,14 @@
     "id": "PAR-12",
     "priority": "P1",
     "title": "Unify source event clocks, time acceleration and physical integration",
-    "status": "todo",
+    "status": "in-progress",
     "certainty": "Confirmed scheduler mismatch",
     "finding": "The frame loop, fixed prototype accumulator, whole-second events, AI updates and 0.1 s physics clamp use different scheduling paths. TICS_PER_SECOND is 49700 while F152 uses 0xc22e=49710. High acceleration can advance clocks/events without equivalent collision/frame work.",
     "source": "F152/F151/F706/F727/F1031/F1046",
     "implementation": "crates/ffe-rs/src/main.rs:1458,4255,4892; crates/ffe-rs/src/original_flight.rs:21,803; crates/ffe-core/src/player.rs:371",
     "acceptance": "Same scripted input and RNG consumption at 20/50/60/144 fps, pauses, focus loss and acceleration boundaries; distinguish source timer domains and reproduce event ordering, not merely elapsed calendar time.",
     "dependencies": "PAR-01, flight-4, flight-6, flight-8",
-    "progress": "2026-11-02: timer domains checked: the clock runs at 0x3e2/20 = 49,700 tics/s (TICS_PER_SECOND) and F152's whole-second events every 0xc22e = 49,710 tics (THINK_TICS); both are kept as distinct constants. Scheduler/frame-rate replay remains."
+    "progress": "2026-11-02: timer domains checked: the clock runs at 0x3e2/20 = 49,700 tics/s (TICS_PER_SECOND) and F152's whole-second events every 0xc22e = 49,710 tics (THINK_TICS); both are kept as distinct constants. Scheduler/frame-rate replay remains. 2026-11-02: ffe_core::FrameTimer reproduces F1418 (whole ms, per-frame ms*word/20 DIV for the system and accelerated counters, Timer50Hz count) and is computed once per frame; the clock, F152 days, traffic, NPC ships, missiles, life, effects, lasers/shields and the scoop all read it (effects in the death view now follow acceleration). Open: the flight model's own step and the prototype accumulator, event-6 controllers on Timer50Hz, accelerated collision work and a multi-fps replay of the draw ledger."
   },
   {
     "id": "PAR-13",
