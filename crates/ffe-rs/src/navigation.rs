@@ -675,7 +675,12 @@ pub fn landing_body(body: &Body, model: &ffe_core::objects::ModelInfo) -> ffe_co
         position: body.position,
         parent: 0,
         index: 2,
-        kind: if body.kind == Kind::Starport { 1 } else { 0 },
+        // `+0x87`: 1 for a station or starport object, 0 for a world.
+        kind: if matches!(body.kind, Kind::Starport | Kind::Station) {
+            1
+        } else {
+            0
+        },
         locked: body.kind == Kind::Starport,
         orientation: std::array::from_fn(|k| {
             (body.orientation[k / 3][k % 3] * 2_147_483_647.0) as i32
@@ -698,14 +703,21 @@ impl Navigator {
     pub fn landing_parent(&self, from: [i64; 3], ship_radius: i64) -> Option<usize> {
         let reach =
             |body: &Body| distance(from, body.position) - (body.radius + ship_radius) as f64;
-        self.bodies
-            .iter()
-            .enumerate()
-            .filter(|(_, body)| body.kind == Kind::Starport)
-            .map(|(index, body)| (reach(body), index))
-            .filter(|(gap, _)| *gap <= 0.0)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, index)| index)
+        let nearest = |kind: Kind| {
+            self.bodies
+                .iter()
+                .enumerate()
+                .filter(|(_, body)| body.kind == kind)
+                .map(|(index, body)| (reach(body), index))
+                .filter(|(gap, _)| *gap <= 0.0)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, index)| index)
+        };
+        // An orbital station's own frame (its spinning rows) when the ship is
+        // inside its hull radius: F569 then scans its collision stream, the bay
+        // and slot included (F1021/F1024's docking contact).
+        nearest(Kind::Starport)
+            .or_else(|| nearest(Kind::Station))
             .or_else(|| {
                 self.bodies
                     .iter()

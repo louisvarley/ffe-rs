@@ -958,6 +958,31 @@ impl OriginalFlight {
         )
     }
 
+    /// One frame with F569's collision scan against an orbital station, the
+    /// player's frame: F1024/F1019's docking test reads the result (a soft
+    /// touch, `0x40`, on the bay inside the station's region, `0x20`), and a
+    /// hull strike is F575's crash and bounce. As for a planet the ship enters
+    /// the station's rotating frame (its spinning rows) for the tick.
+    pub fn step_station(
+        &mut self,
+        elapsed: f64,
+        keys: &Keys,
+        station: &Body,
+        station_position: [i64; 3],
+        player_model: &ModelInfo,
+        tools: Option<&SurfaceTools>,
+    ) -> Result<Contact, String> {
+        self.step_scan(
+            elapsed,
+            keys,
+            station,
+            station_position,
+            None,
+            player_model,
+            tools,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn step_scan(
         &mut self,

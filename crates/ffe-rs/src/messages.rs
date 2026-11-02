@@ -77,8 +77,6 @@ pub enum Source {
     Docking,
     /// F381 clearance and F1088/F1089 launch (`ffe.asm:44601-44656`).
     Launch,
-    /// F953/F942 hull collisions (`ffe.asm:70650`, `71190`).
-    Collision,
     /// F931/F941/F953 lasers, missiles and ship hits (`ffe.asm:71190`).
     Combat,
     /// F234/F236 fines and police reports (`docs/notes/legal.md`).
@@ -96,13 +94,12 @@ pub enum Source {
 }
 
 impl Source {
-    pub const ALL: [Source; 13] = [
+    pub const ALL: [Source; 12] = [
         Source::Autopilot,
         Source::Target,
         Source::Navigation,
         Source::Docking,
         Source::Launch,
-        Source::Collision,
         Source::Combat,
         Source::Legal,
         Source::Trade,
@@ -120,7 +117,6 @@ impl Source {
             Source::Navigation => "F352 + F350/F351 (ffe.asm:27185-27207)",
             Source::Docking => "F654/F655 + F863 replace progress (ffe.asm:44601, 60421)",
             Source::Launch => "F381/F654/F655 + F1088/F1089 launch (ffe.asm:44601)",
-            Source::Collision => "F953/F942 collision (ffe.asm:70650, 71190)",
             Source::Combat => "F931/F941/F953 lasers, missiles, hits (ffe.asm:71190)",
             Source::Legal => "F234/F236/F783 fines and police (docs/notes/legal.md)",
             Source::Trade => "F323/F328 market (ffe.asm station stream)",
@@ -761,7 +757,7 @@ mod tests {
 
     #[test]
     fn every_source_has_a_dos_citation() {
-        assert_eq!(Source::ALL.len(), 13);
+        assert_eq!(Source::ALL.len(), 12);
         for source in Source::ALL {
             let citation = source.citation();
             assert!(!citation.is_empty(), "{source:?} has no citation");

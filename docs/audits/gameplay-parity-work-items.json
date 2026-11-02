@@ -107,13 +107,14 @@
     "id": "PAR-09",
     "priority": "P1",
     "title": "Replace orbital docking corridor tests and harmless pushes with source contacts",
-    "status": "todo",
+    "status": "in_progress",
     "certainty": "Confirmed gameplay substitute",
     "finding": "Port::contact accepts a 15%-of-face corridor (minimum 60 m), 250 m/s entry limit and teleports/rezeros bad approaches without source damage. Navigator::contact calls this in normal player flight. Original collision/clearance/pad tests must decide docking and crashes.",
     "source": "F575/F576/F580/F652/F655/F1019/F1024",
     "implementation": "crates/ffe-rs/src/docking.rs:12,95,100; crates/ffe-rs/src/navigation.rs:4107; crates/ffe-rs/src/main.rs:4197",
     "acceptance": "For every station model compare cleared/uncleared entry, bay, hull/slot edge, angular mismatch, moving station and entry speed; same damage, bounce, law/traffic and dock transition. No guessed corridor or silent position reset.",
-    "dependencies": "PAR-05, flight-10"
+    "dependencies": "PAR-05, flight-10",
+    "progress": "2026-11-02: the corridor test, 250 m/s limit and teleporting 'pushed clear' are gone from normal flight. Inside an orbital station's hull radius the ship flies in the station's rotating frame for each tick and F569/F570/F575 scan the station's collision stream; F1021/F1024's rule reads the result (region 0x20 with a soft touch 0x40 and no crash: dock when cleared, F1022's warning and the 0x24 climb when not, the pad-1 bay check), and a hull strike is F575's crash/bounce with F953 damage. tests/station_dock.rs: entering the slot on the axis gives 0x22 then 0x62, 120 m off the axis at 200 m/s gives 0x80 outside the region. Still open: F595's station orbital velocity (the tick does not subtract it), per-station-model and moving-station comparisons against the executed original."
   },
   {
     "id": "PAR-10",

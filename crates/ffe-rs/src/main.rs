@@ -7,7 +7,6 @@ use ffe_rs::console::{
 };
 use ffe_rs::death::{self, Outcome};
 use ffe_rs::display::{self, DisplaySettings, Presenter};
-use ffe_rs::docking::Contact;
 use ffe_rs::flight::{Flight, STEP};
 use ffe_rs::front_end::{self, Intro, IntroAction, IntroTimeline};
 use ffe_rs::galaxy_map::GalaxyMap;
@@ -4799,6 +4798,9 @@ fn run() -> Result<(), String> {
                         .and_then(|nav| {
                             let info = player_info?;
                             let index = nav.landing_parent(ship_at, info.radii().0)?;
+                            if launch_grace == Some(index) {
+                                return None;
+                            }
                             let body = nav.bodies.get(index)?;
                             if body.kind == NavKind::Starport {
                                 // F994/F569: the player is parented to the starport's
@@ -4852,7 +4854,34 @@ fn run() -> Result<(), String> {
                         .step_pad(elapsed, &keys, landing_tools.as_ref())
                         .map(Some)
                 } else if let Some((index, parent, at, info, sibling)) = landing {
-                    if let Some((port, port_at)) = sibling {
+                    let station = nav
+                        .as_ref()
+                        .and_then(|nav| nav.bodies.get(index))
+                        .is_some_and(|body| body.kind == NavKind::Station);
+                    if station {
+                        // An orbital station: F569 in its spinning frame. A soft
+                        // touch in its region (`0x20 | 0x40`, no crash bit) is
+                        // F1021/F1024's docking or no-clearance test; a hull
+                        // strike is F575's crash and bounce like any other.
+                        model
+                            .step_station(
+                                elapsed,
+                                &keys,
+                                &parent,
+                                at,
+                                &info,
+                                landing_tools.as_ref(),
+                            )
+                            .map(|contact| {
+                                if contact.flags & 0x40 != 0
+                                    && contact.flags & 0x20 != 0
+                                    && contact.flags & 0x80 == 0
+                                {
+                                    region_touch = Some((index, contact.pad));
+                                }
+                                Some(contact)
+                            })
+                    } else if let Some((port, port_at)) = sibling {
                         // The starport's pad: F994's planet frame with the port as
                         // a sibling, so F569 runs F576/F580's contact stream.
                         model
@@ -5039,7 +5068,26 @@ fn run() -> Result<(), String> {
                             };
                         }
                         if let (Some((index, pad)), Some(nav)) = (region_touch, nav.as_mut()) {
+                            let station = nav
+                                .bodies
+                                .get(index)
+                                .is_some_and(|body| body.kind == NavKind::Station);
                             match nav.region_touch(index, pad) {
+                                // F1024: a cleared ship touching the bay docks
+                                // (F652, then the lift stages).
+                                ffe_rs::navigation::RegionTouch::Land if station => {
+                                    if nav.begin_docking(index) {
+                                        acceleration = 0;
+                                        model.set_time_acceleration(0);
+                                        // F1019/F1024: the airlock cue (`0x13`).
+                                        sound.play(Cue::Docking);
+                                        let name = nav.bodies[index].name.clone();
+                                        pending_log.replace(
+                                            Source::Docking,
+                                            format!("{name}: docking, aligning with the lift."),
+                                        );
+                                    }
+                                }
                                 ffe_rs::navigation::RegionTouch::Land => landed_at = Some(index),
                                 ffe_rs::navigation::RegionTouch::Climb(warning) => {
                                     // F1021: no landing, F1013's climb again.
@@ -5154,53 +5202,17 @@ fn run() -> Result<(), String> {
                                 }
                             }
                         }
-                        // The stations: the slot docks a cleared ship, the hull pushes it clear.
-                        if let Some(nav) = nav.as_mut().filter(|_| state.system_flight) {
+                        // A launch leaves the ship outside the station it left
+                        // (the port's launch point, PAR-10); its scan stays off
+                        // until the ship is clear of the hull.
+                        if let (Some(nav), Some(index)) = (nav.as_ref(), launch_grace) {
                             let ship = model.absolute_position();
-                            if let Some(index) = launch_grace {
-                                let body = &nav.bodies[index];
-                                let clear = nav
-                                    .port(index)
-                                    .map_or(body.radius as f64, |port| port.front * 1.1 + 1.0e3);
-                                if distance(ship, body.position) >= clear {
-                                    launch_grace = None;
-                                }
-                            }
-                            if launch_grace.is_none() && nav.takeoff.is_none() && !nav.landed_view()
-                            {
-                                if let Some((index, contact)) =
-                                    nav.contact(ship, state.speed() * 9.7)
-                                {
-                                    let name = nav.bodies[index].name.clone();
-                                    match contact {
-                                        Contact::None => {}
-                                        Contact::Docked => {
-                                            if nav.begin_docking(index) {
-                                                acceleration = 0;
-                                                model.set_time_acceleration(0);
-                                                // F1019/F1024: the airlock cue
-                                                // (`0x13`). The song stops at the
-                                                // docked state (F1091).
-                                                sound.play(Cue::Docking);
-                                                pending_log.replace(
-                                                    Source::Docking,
-                                                    format!(
-                                                        "{name}: docking, aligning with the lift."
-                                                    ),
-                                                );
-                                            }
-                                        }
-                                        Contact::Collision { clear, reason } => {
-                                            model.teleport(clear);
-                                            model.face(nav.bodies[index].position);
-                                            model.apply(&mut state);
-                                            pending_log.add(
-                                                Source::Collision,
-                                                format!("{name}: {}. Pushed clear.", reason.text()),
-                                            );
-                                        }
-                                    }
-                                }
+                            let body = &nav.bodies[index];
+                            let clear = nav
+                                .port(index)
+                                .map_or(body.radius as f64, |port| port.front * 1.1 + 1.0e3);
+                            if distance(ship, body.position) >= clear {
+                                launch_grace = None;
                             }
                         }
                         let (view, turret) = model.view();

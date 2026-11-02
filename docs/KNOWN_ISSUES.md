@@ -185,5 +185,12 @@ uninitialised stack). Note that F577's far branch (distance beyond 2^30 units)
 tests the sum of the bodies' outer radii (`+0x138`), not the collision radii
 (`+0x140`) that its near branch uses (a JJFFE "FIX" applied to one branch only),
 so a planet's atmosphere counts as contact at long range; the port keeps this.
-The playable still pushes the ship clear of a station instead of running this
-code (`docs/NAVIGATION.md`).
+Near an orbital station the playable now runs this code too: inside the
+station's hull radius the ship is put in the station's spinning frame for the
+tick (`OriginalFlight::step_station`) and F569 scans the station's collision
+stream, so a soft touch in the station region (`0x20 | 0x40`) is F1021/F1024's
+docking or no-clearance case and a hull strike is F575's crash and bounce. The
+port's old corridor test and "pushed clear" teleport are gone. F595's station
+velocity is still not ported: the ship's velocity is not made relative to the
+station's orbit for the tick (as for a planet), and the launch still places
+the ship outside instead of F1088's parked start (PAR-10).
