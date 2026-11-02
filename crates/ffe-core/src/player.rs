@@ -392,6 +392,26 @@ impl Player {
         Ok(())
     }
 
+    /// F1041 alone in a world, then F601 (F602 with the engines off) and
+    /// F1512: the composition the `--world-step` oracle executes, without
+    /// F1013's take-off wrapper (which [`Player::step_in`] adds for mode 0x24).
+    pub fn world_step(
+        &mut self,
+        keys: &ThrusterKeys,
+        time: i64,
+        world: &mut Bodies,
+        index: usize,
+    ) -> Result<(), String> {
+        self.orient_and_thrust_in(keys, world, index)?;
+        if self.flags & 1 != 0 {
+            self.motion.accelerate_uncapped(time as u32);
+        } else {
+            self.motion.accelerate(time as u32);
+        }
+        self.motion.advance(time);
+        Ok(())
+    }
+
     /// One whole tick in a world, as F1021 runs it: [`Player::step_in`], then
     /// the collision scan (F1033 calls F569): the player is copied into its
     /// body, [`Bodies::collide`] may switch it between the linear and rotating
@@ -419,6 +439,31 @@ impl Player {
         tools: Option<&SurfaceTools>,
     ) -> Result<Contact, String> {
         self.step_in(keys, time, world, index)?;
+        self.scan(world, index, tools)
+    }
+
+    /// [`Player::world_step`] and the collision scan: the `--world-tick`
+    /// oracle's composition (F1041 directly, then F569), without F1013.
+    pub fn world_tick(
+        &mut self,
+        keys: &ThrusterKeys,
+        time: i64,
+        world: &mut Bodies,
+        index: usize,
+        tools: Option<&SurfaceTools>,
+    ) -> Result<Contact, String> {
+        self.world_step(keys, time, world, index)?;
+        self.scan(world, index, tools)
+    }
+
+    /// F1033's F569 after a step: copy the player into its body, run the scan
+    /// (which may switch frames) and take the altitude from it.
+    fn scan(
+        &mut self,
+        world: &mut Bodies,
+        index: usize,
+        tools: Option<&SurfaceTools>,
+    ) -> Result<Contact, String> {
         world.body[index].take_motion(&self.motion);
         world.frame_tics = self.frame_tics;
         let contact = world

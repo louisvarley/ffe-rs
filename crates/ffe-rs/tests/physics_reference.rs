@@ -844,7 +844,7 @@ fn executed_reference_world_step() {
             right: k[8],
             left: k[9],
         };
-        player.step_in(&keys, case.time, &mut world, 7).unwrap();
+        player.world_step(&keys, case.time, &mut world, 7).unwrap();
         let a = &case.after;
         let expected = [
             [a.matrix[0], a.matrix[1], a.matrix[2]],
@@ -1076,7 +1076,7 @@ fn executed_reference_world_tick() {
             right: k[8],
             left: k[9],
         };
-        let contact = player.tick_with(&keys, case.time, &mut world, 7, Some(&tools));
+        let contact = player.world_tick(&keys, case.time, &mut world, 7, Some(&tools));
         let Ok(contact) = contact else {
             panic!("tick {} declined: {:?}", case.case, contact.err());
         };

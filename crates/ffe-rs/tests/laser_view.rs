@@ -112,6 +112,10 @@ fn targets(nav: &Navigator) -> Vec<laser::Target> {
 fn a_60hz_pulse_sequence_aims_fires_and_damages_an_npc() {
     let cache = cache();
     let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    // The start system is safe (F686's new-game pass rolls no pirates), so
+    // the capture's guaranteed traffic supplies one beside the station.
+    let launch = nav.station().map_or([0; 3], |(_, at)| at);
+    assert!(nav.respawn_traffic(&cache, launch, [0.0, 0.0, 1.0]));
     let viewer = ModelViewer::new(&cache).unwrap();
     let mut screen = Screen::new(&cache).unwrap();
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
