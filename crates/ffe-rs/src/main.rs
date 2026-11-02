@@ -5835,6 +5835,7 @@ fn run() -> Result<(), String> {
         // F236's unlawful-discharge message is the frame's report when the
         // shot is the system's first; keep it over the hit text below.
         let mut legal_message: Option<String> = None;
+        let mut contract_kills: Vec<u32> = Vec::new();
         if can_fire && held_controls.contains(&Key::Space) {
             if let Some(mount) = combat::mount(views.mode) {
                 match state.combat.fire(mount, frame_tics) {
@@ -5995,6 +5996,11 @@ fn run() -> Result<(), String> {
                                             }
                                         }
                                         None => {}
+                                    }
+                                    if let Some(contract) =
+                                        outcome.and_then(|attack| attack.contract)
+                                    {
+                                        contract_kills.push(contract);
                                     }
                                     // F770: the last hostile's death ends the
                                     // battle and stops the song.
@@ -6318,10 +6324,24 @@ fn run() -> Result<(), String> {
         // event tick, not the docking state, so this runs in flight too. The
         // reward is whole credits and `DATA_008888` is in tenths, so it is
         // multiplied by ten (see `docs/notes/missions.md`).
-        if let Some(nav) = nav.as_ref() {
+        if let Some(nav) = nav.as_mut() {
             let day = nav.day();
             let code = nav.current_system_code();
-            for outcome in state.missions.tick(day, code) {
+            // F291: an assassination's target is in its system once per visit.
+            let targets = state.missions.targets_in(code);
+            for name in nav.place_contract_targets(&cache, &targets) {
+                pending_log.add(
+                    Source::Mission,
+                    format!("Your contract's target, the {name}, is leaving port."),
+                );
+            }
+            let mut outcomes = state.missions.tick(day, code);
+            for contract in contract_kills.drain(..) {
+                if let Ok(outcome) = state.missions.target_destroyed(contract, day, code) {
+                    outcomes.push(outcome);
+                }
+            }
+            for outcome in outcomes {
                 if outcome.reward > 0 {
                     state.credits = state
                         .credits

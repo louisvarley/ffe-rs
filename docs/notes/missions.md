@@ -159,10 +159,14 @@ generated post through `Navigator::mission_offer` and clears it with
    also not drawn: the port accepts the row directly and uses 0x992a's
    confirmation. Owner decision needed: port the base contract and detail
    pages, or keep the package list.
-2. **Assassination/removal combat.** The contract pays on arrival at the target
-   system (F303/F485's "people coming with us" is not modelled). F291's hostile
-   spawn (`SpawnAssassins`, `DATA_005112`) is not wired, so an assassination is
-   a delivery to the named system rather than a fight. F303's special
+2. **Assassination/removal combat.** The contract no longer pays on arrival:
+   in the target system, `Navigator::place_contract_targets` (the port's F291
+   target object) puts the target once per visit, a trader leaving the place
+   nearest the player for the next place with two military bodyguards in
+   formation, and destroying it (`Attack::contract`) settles the contract
+   through F303 (`State::target_destroyed`). Killing a clean trader is still a
+   crime, so the bodyguards and police respond. F291's assassin spawn against
+   the player (`SpawnAssassins`, `DATA_005112`) is still not wired. F303's special
    `(basic_data & 0x1f) == 0x14` "Sorry, I can't pay at the moment" branch
    (0x9c35, the 0x99b4 removal title) is not detected because the port stores
    the removal title's text, not its code; removal settles with 0x9c34. This is

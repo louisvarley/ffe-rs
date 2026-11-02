@@ -1173,6 +1173,9 @@ pub struct Navigator {
     pub pirates: bool,
     /// World Options' Advanced traffic ([`npc::Life`]).
     pub advanced_traffic: bool,
+    /// Assassination contracts whose target this system's spawn already
+    /// placed (cleared at each system's spawn).
+    contract_spawned: Vec<u32>,
     /// Game seconds to Advanced traffic's next hyperspace arrival or departure.
     life_clock: f64,
     autopilot_notice: Option<String>,
@@ -1617,6 +1620,8 @@ pub struct Attack {
     pub police: bool,
     /// F942 destroyed the ship.
     pub destroyed: bool,
+    /// The destroyed ship was an assassination contract's target.
+    pub contract: Option<u32>,
 }
 
 /// What a soft touch inside a starport's region (F1033's `0x20` with `0x40`)
@@ -2061,6 +2066,7 @@ impl Navigator {
             police: true,
             pirates: true,
             advanced_traffic: false,
+            contract_spawned: Vec::new(),
             life_clock: npc::LIFE_SECONDS,
             autopilot_notice: None,
             locked: None,
@@ -2643,6 +2649,96 @@ impl Navigator {
         }) {
             ship.state = npc::State::Escaped;
         }
+    }
+
+    /// F291: put each assassination contract's target in this system once:
+    /// a trader leaving the place nearest the player with two military
+    /// bodyguards in formation. Returns the new targets' names.
+    pub fn place_contract_targets(
+        &mut self,
+        cache: &VerifiedCache,
+        contracts: &[u32],
+    ) -> Vec<String> {
+        let mut placed = Vec::new();
+        if self.spawned != Some(self.current) || self.transit.is_some() {
+            return placed;
+        }
+        for &contract in contracts {
+            if self.contract_spawned.contains(&contract) {
+                continue;
+            }
+            self.contract_spawned.push(contract);
+            let player = self.player_at;
+            let mut places: Vec<(usize, [i64; 3], i64)> = self
+                .bodies
+                .iter()
+                .enumerate()
+                .filter(|(_, body)| body.kind.is_place())
+                .map(|(index, body)| (index, body.position, body.radius))
+                .collect();
+            places.sort_by(|a, b| distance(player, a.1).total_cmp(&distance(player, b.1)));
+            let Some(&(_, from, radius)) = places.first() else {
+                continue;
+            };
+            let (to, to_at) = places
+                .get(1)
+                .map_or((places[0].0, from), |&(index, at, _)| (index, at));
+            let Some(tables) = cache
+                .asset("base:world/system-tables")
+                .and_then(|blob| Tables::new(blob).ok())
+            else {
+                continue;
+            };
+            let allegiance = tables
+                .details(self.entries[self.current].params.code)
+                .allegiance
+                >> 6;
+            let clock = clock_words(self.clock);
+            let mut rng =
+                npc::Random::new(clock[0] ^ contract.rotate_left(5), clock[1] ^ 0x0bad_5eed);
+            let model = npc::model_for(npc::Role::Trader, allegiance, &mut rng);
+            let Some(spec) = crate::ships::npc_spec(cache, model) else {
+                continue;
+            };
+            let toward = {
+                let to = [
+                    (to_at[0] - from[0]) as f64,
+                    (to_at[1] - from[1]) as f64,
+                    (to_at[2] - from[2]) as f64,
+                ];
+                let length = to.iter().map(|v| v * v).sum::<f64>().sqrt();
+                if length < 1.0 {
+                    [0.0, 0.0, 1.0]
+                } else {
+                    to.map(|v| v / length)
+                }
+            };
+            let out = radius as f64 + 8.0e6;
+            let position = std::array::from_fn(|axis| from[axis] + (toward[axis] * out) as i64);
+            let mut id = self.ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
+            let target = npc::contract_target(&spec, id, position, to_at, to, contract, &mut rng);
+            let leader = target.id;
+            placed.push(target.name.clone());
+            self.ships.push(target);
+            id += 1;
+            for formation in [[500_000, 0, -400_000], [-500_000, 0, -400_000]] {
+                let model = npc::model_for(npc::Role::Military, allegiance, &mut rng);
+                let Some(spec) = crate::ships::npc_spec(cache, model) else {
+                    continue;
+                };
+                let at = std::array::from_fn(|axis| position[axis] + formation[axis]);
+                let mut guard = npc::hyperspace_arrival(&spec, id, at, to_at, to, &mut rng);
+                guard.role = npc::Role::Military;
+                guard.laser = npc::Role::Military.laser_code(&spec, &mut rng);
+                guard.station = None;
+                guard.state = npc::State::Escort;
+                guard.leader = Some(leader);
+                guard.formation = formation;
+                self.ships.push(guard);
+                id += 1;
+            }
+        }
+        placed
     }
 
     /// Advanced traffic's view of this system: F870's population and danger.
@@ -3654,6 +3750,7 @@ impl Navigator {
         self.missiles.clear();
         self.decoys.clear();
         self.spawned = Some(self.current);
+        self.contract_spawned.clear();
         !self.ships.is_empty()
     }
 
@@ -4263,7 +4360,12 @@ impl Navigator {
                 self.starport(station).release(npc::traffic_id(id));
             }
         }
+        let contract = destroyed
+            .then(|| self.ships.iter().find(|ship| ship.id == id))
+            .flatten()
+            .and_then(|ship| ship.contract);
         Some(Attack {
+            contract,
             damage: result,
             crime,
             bounty: if destroyed && matches!(result, ffe_core::laser::Damage::Destroyed) {

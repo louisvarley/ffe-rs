@@ -1092,6 +1092,9 @@ pub struct NpcShip {
     /// Port addition (Advanced traffic): another ship this one is fighting
     /// or running from, flown at in place of the player.
     pub npc_target: Option<u32>,
+    /// The assassination contract this ship is the target of: destroying it
+    /// completes the contract (F291's target object).
+    pub contract: Option<u32>,
     /// Seconds of a [`State::Flee`] left before the jump.
     pub flee: f64,
     /// Seconds of the F1536 shield-hit flash left.
@@ -1188,6 +1191,7 @@ impl NpcShip {
             flee: 0.0,
             responding: false,
             npc_target: None,
+            contract: None,
             flash: 0.0,
             death: 0.0,
             station: None,
@@ -2396,6 +2400,7 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             flee: 0.0,
             responding: false,
             npc_target: None,
+            contract: None,
             flash: 0.0,
             death: 0.0,
             station: None,
@@ -2775,6 +2780,22 @@ pub fn hyperspace_arrival(
     ship.id = id;
     ship.forward = normalise(sub(anchor, position));
     ship.begin_transit(station, anchor);
+    ship
+}
+
+/// An assassination contract's target (F291): a trader leaving `anchor`'s
+/// place for `station`'s, carrying the contract id.
+pub fn contract_target(
+    spec: &Spec,
+    id: u32,
+    position: [i64; 3],
+    anchor: [i64; 3],
+    station: usize,
+    contract: u32,
+    rng: &mut Random,
+) -> NpcShip {
+    let mut ship = hyperspace_arrival(spec, id, position, anchor, station, rng);
+    ship.contract = Some(contract);
     ship
 }
 

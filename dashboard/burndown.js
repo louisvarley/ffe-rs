@@ -1043,6 +1043,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 97,
       note: "F534's cabin check: passenger contracts fill cabins (DATA_008892 from the active contracts) and an offer with too few free cabins is refused with 0x9928. The escape capsule item (gameplay-13) is the shipped v0.85 death/capsule work and moves to in-progress with gameplay-25."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 97,
+      note: "Assassination contracts now need a kill: the target (a trader leaving the nearest port with two military bodyguards) is placed once per visit to its system and destroying it settles the contract; arrival alone no longer pays."
     }
   ]
 };

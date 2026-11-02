@@ -502,6 +502,25 @@ fn accepted_text(offer: &Offer, origin: u32, origin_name: &str) -> String {
 impl State {
     /// F534: accept an offer. The caller removes the advertisement (`F535`) and
     /// pays nothing; the reward is paid by [`Self::settle`] on arrival.
+    /// The active assassination contracts whose target is in `system`.
+    pub fn targets_in(&self, system: u32) -> Vec<u32> {
+        self.missions
+            .iter()
+            .filter(|mission| {
+                mission.status == Status::Active
+                    && mission.kind == Kind::Assassination
+                    && mission.destination == system
+            })
+            .map(|mission| mission.id)
+            .collect()
+    }
+
+    /// The target of assassination contract `id` was destroyed in `system`:
+    /// F303's completion and payment.
+    pub fn target_destroyed(&mut self, id: u32, day: u32, system: u32) -> Result<Outcome, String> {
+        self.settle(id, day, system)
+    }
+
     /// The passengers of every active contract: `DATA_008892`, the occupied
     /// cabins F401 and F534 read.
     pub fn passengers_aboard(&self) -> u32 {
@@ -725,7 +744,12 @@ impl State {
             .missions
             .iter()
             .filter(|mission| mission.status == Status::Active)
-            .filter(|mission| mission.destination == system || mission.overdue(day))
+            // An assassination is settled by destroying its target, not by
+            // arriving (see `State::target_destroyed`).
+            .filter(|mission| {
+                (mission.destination == system && mission.kind != Kind::Assassination)
+                    || mission.overdue(day)
+            })
             .map(|mission| mission.id)
             .collect();
         let mut outcomes = Vec::new();
@@ -734,7 +758,9 @@ impl State {
                 .missions
                 .iter()
                 .find(|mission| mission.id == id)
-                .is_some_and(|mission| mission.destination == system);
+                .is_some_and(|mission| {
+                    mission.destination == system && mission.kind != Kind::Assassination
+                });
             if at_destination {
                 if let Ok(outcome) = self.settle(id, day, system) {
                     outcomes.push(outcome);
