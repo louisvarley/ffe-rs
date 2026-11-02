@@ -519,7 +519,8 @@ fn executed_reference_child_models() {
             .collect();
         if !failed.is_empty() {
             if std::env::var_os("FFE_CHILD_VERBOSE").is_some() {
-                let (a, b) = (lookups(&nested), lookups(&original.nested));
+                // The masked events, as compared above.
+                let (a, b) = (&ours, &theirs);
                 if let Some(i) = (0..a.len().max(b.len())).find(|i| a.get(*i) != b.get(*i)) {
                     eprintln!(
                         "  model {index} first nested difference at {i}: rust {:?} original {:?}",

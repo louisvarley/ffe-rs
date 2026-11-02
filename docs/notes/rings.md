@@ -85,3 +85,20 @@ child's F1750 scale follows it.
 
 When the ring draws correctly, pass the seed in `draw_discs` (globals 2/3) to
 switch it on, and add an `effects_view`-style frame test of Saturn.
+
+## Oracle status after opcode 25 (2026-11-02)
+
+With opcode 25's alignment ported, models **273 and 287** now execute natively
+(before, they stopped at the alignment and were counted as "not executed"). At
+the default depth all 439 compared models match; at depth `0x50000`
+(`verify-child-models.py --depth 0x50000`) these two differ. With
+`--verbose` (which now reports the masked events actually compared), the first
+difference is event 25 for a child called after the alignment: the hash of the
+child's +0x48 observer point and +0x38 direction. Event 24 (the child's +0x14
+matrix and locals) still matches, F1771/F1744's arithmetic matches the
+source, and F1685 computes +0x38 as `+0x134 x +0x14` and +0x48 as the shifted,
+negated position `x +0x14` (`FUNC_001670_VecMatTMul`, rows, as
+`transform_rows`). So the open question is the child's +0x134 (or the
+position/shift feeding +0x48) after an aligned parent. Whoever continues the
+rings should start there; the `FFE_CHILD_DIRECTION`/`FFE_CHILD_MATRIX`
+overrides in the harness make single cases easy to replay.
