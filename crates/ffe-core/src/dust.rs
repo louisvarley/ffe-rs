@@ -277,6 +277,13 @@ impl Field {
         self.rng
     }
 
+    /// Lend the field the game's shared pair (PAR-17): F1035 draws from
+    /// `DATA_008818`/`DATA_008820` like everything else; the caller takes
+    /// the words back with [`Self::random`].
+    pub fn set_random(&mut self, rng: Random) {
+        self.rng = rng;
+    }
+
     /// F1035's single attempt. `Ok(index)` is a spawned particle; `Err` names
     /// the gate that returned. The draw is consumed before the stopped-time
     /// gate exactly as the source orders it.

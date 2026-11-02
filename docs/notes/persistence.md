@@ -135,12 +135,12 @@ JSON shape (one top-level object, `deny_unknown_fields` at every level):
   subsystem.
 - `original_flight` says the key-O model was running; `acceleration` is the
   console step. Both are port-only facts.
-- Traffic, missiles and short-lived effects are **not** stored. The port's RNG is
-  not one interleaved stream: markets and traffic seed per system/station/day
-  (`EXP-006`/`EXP-015`), so there is no `DATA_008818/8820` pair to write. The
-  saved clock and system preserve those deterministic seeds; a loaded game
-  respawns traffic. This is the main deliberate difference from the source's
-  object-array save.
+- The live NPC ships and the stations' traffic records are stored (PAR-18);
+  missiles and short-lived effects are not. The game's shared random pair
+  (`DATA_008818/8820`, `Navigator::random`) is saved as `random` (PAR-17), so
+  a loaded game continues the same draws. Saves without it resume from F147's
+  seed. Markets, bulletin boards and offers keep their per-station streams
+  (`EXP-006`), regenerated from the saved clock and system.
 
 ### 2.1 Validation and errors
 

@@ -39,7 +39,7 @@ window.FFE_BURNDOWN = {
         {"id": "parity-14", "title": "[P1] Verify source fuel scooping gates and capacity changes", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-14"},
         {"id": "parity-15", "title": "[P1] Replace NPC speed caps and simplified flight state transitions", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-15"},
         {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
-        {"id": "parity-17", "title": "[P1] Restore source RNG state and call order for gameplay", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-17"},
+        {"id": "parity-17", "title": "[P1] Restore source RNG state and call order for gameplay", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-17"},
         {"id": "parity-18", "title": "[P1] Persist and restore the complete live simulation state", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-18"},
         {"id": "parity-19", "title": "[P1] Remove the non-source 7-tonne starting hold and reconcile fitted capacity", "status": "done", "version": "source-audit", "priority": "P1", "auditId": "PAR-19"},
         {"id": "parity-20", "title": "[P1] Replay market, shipyard, BBS and daily mission events using source state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-20"},
@@ -1073,6 +1073,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 96,
       note: "NPC flight AI on the original physics (PAR-15 in progress): ships with statistics are guided by F597 and flown by F601 thrust, F585 turns and F1512 moves instead of the port's speed caps; pirates close at their own top speed, break off inside the standoff and come round again. The npc_ai and npc_missiles fixtures now undock the player so hostile fire is not held."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 96,
+      note: "Shared random pair (PAR-17 in progress): traffic, effects, dust, hyperspace arrival, the ships' missile/ECM rolls and the player's damage and servicing rolls now draw from one saved DATA_008818/8820 stream in call order, seeded as F147 does. Also fixes a degenerate explosion/debris orientation when a random forward lay along the helper axis."
     }
   ]
 };

@@ -512,6 +512,10 @@ pub fn ai_state(code: u8) -> Option<&'static AiState> {
     AI_STATES.get(usize::from(code))
 }
 
+/// `DATA_008818`/`DATA_008820` after F146/F147: the one pair F922, F1530 and
+/// F1476 all advance.
+pub const SHARED_SEED: [u32; 2] = [0x1234_5678, 0x4567_89ab];
+
 /// F922 (`ffe.asm:68974`): the original's bounded random number. `a` and `b`
 /// are `DATA_008818`/`DATA_008820`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -523,6 +527,23 @@ pub struct Random {
 impl Random {
     pub const fn new(a: u32, b: u32) -> Self {
         Self { a, b }
+    }
+
+    /// The game's shared pair as F147 sets it for a new game
+    /// (`ffe.asm:14923`, start modes below 5) and F146 at start-up.
+    pub const fn start() -> Self {
+        Self::new(SHARED_SEED[0], SHARED_SEED[1])
+    }
+
+    /// The same words as F1530's/F1476's callers see them (`ffe_core::RandomState`).
+    pub const fn state(self) -> crate::RandomState {
+        crate::RandomState::new(self.a, self.b)
+    }
+
+    /// Take the words back from a lent [`crate::RandomState`].
+    pub fn take(&mut self, lent: crate::RandomState) {
+        self.a = lent.a;
+        self.b = lent.b;
     }
 
     /// F922's bounded draw: a new state, then `((a & 0xffff) * limit) >> 16`.

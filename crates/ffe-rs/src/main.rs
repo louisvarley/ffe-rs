@@ -410,17 +410,15 @@ fn mining_action(
     };
     let body = &nav.bodies[planet];
     let tech = u32::from(nav.tech_level(cache).unwrap_or(0));
-    let clock = (nav.clock * 1000.0) as u32;
-    let mut rng =
-        ffe_core::RandomState::new(clock ^ 0x6d69_6e65, clock.rotate_left(9) ^ 0x4d42_3400);
-    let coin = rng.next_u16() & 1 != 0;
+    // F246's coin is one F1530 bit from the shared pair (PAR-17).
+    let coin = nav.random.advance() & 1 != 0;
     let assessment = mining::assess(
         body.temperature,
         body.model,
         body.size_word,
         tech,
         coin,
-        |limit| u32::from(rng.next_u16()) % limit.max(1),
+        |limit| nav.random.bounded(limit),
     );
     let machine = mining::Machine {
         code,
@@ -2926,17 +2924,14 @@ fn run() -> Result<(), String> {
                             )
                             .map_or(0, |info| info.radii().1);
                             let decoy = nav.deploy_chaff(position, radius);
-                            let seed = (nav.clock * 1000.0) as u32
-                                ^ (nav.decoys.len() as u32).wrapping_mul(0x9e37_79b9);
-                            let mut rng = ffe_core::RandomState::new(
-                                seed,
-                                seed.rotate_left(13) ^ 0x4567_89ab,
-                            );
+                            // F1054's pull rolls are F1530 words (PAR-17).
+                            let mut rng = nav.random.state();
                             let pulled = nav.retarget_missiles(
                                 ffe_core::missile::PLAYER_TARGET,
                                 decoy,
                                 |_| rng.next_u16() & 0x1000 != 0,
                             );
+                            nav.random.take(rng);
                             sound.play(Cue::Chaff);
                             message = if pulled == 0 {
                                 "Chaff deployed.".to_owned()
@@ -5485,7 +5480,10 @@ fn run() -> Result<(), String> {
                         ffe_rs::navigation::ShipEvent::Hit {
                             name, damage, beam, ..
                         } => {
+                            // F953/F952's rolls draw from the shared pair (PAR-17).
+                            state.rng = nav.random;
                             let (outcome, system) = state.take_damage_with_systems(damage, mass);
+                            nav.random = state.rng;
                             if let Some(event) = system {
                                 pending_log.add(Source::Combat, event.message());
                             }
@@ -6020,10 +6018,12 @@ fn run() -> Result<(), String> {
                 }
             }
             // F933/F934: the daily servicing roll from the game clock.
-            if let Some(nav) = nav.as_ref() {
+            if let Some(nav) = nav.as_mut() {
+                state.rng = nav.random;
                 for event in state.service_day(nav.day()) {
                     pending_log.add(Source::Combat, event.message());
                 }
+                nav.random = state.rng;
             }
             // F1033: a star contact heats the hull. (In flight below 20 km
             // F1035 calls F1015 -> F1016 -> F1017, which is empty; F1014's
@@ -7898,8 +7898,8 @@ fn jettison_canister(
         .map_or(0.0, f64::from);
     let at = ship_position(original, state);
     let position: [i64; 3] = std::array::from_fn(|i| at[i] - (forward[i] * radius).round() as i64);
-    let seed = (nav.clock * 1000.0) as u32 ^ 0x0099_0000;
-    let mut rng = ffe_core::npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
+    // F291's push and F926's canister draws come from the shared pair (PAR-17).
+    let mut rng = nav.random;
     let unit_speed = 49_700.0 / 512.0;
     let push: [f64; 3] = std::array::from_fn(|i| {
         let jitter = f64::from(rng.bounded(0x1_0000)) - 32_768.0;
@@ -7913,6 +7913,7 @@ fn jettison_canister(
     nav.effects.push(ffe_core::effects::canister(
         position, velocity, axes, push, cargo, &mut rng,
     ));
+    nav.random = rng;
 }
 
 /// F295's rows: every active passenger, parcel and military package.
@@ -8129,7 +8130,7 @@ fn playership_destroyed(
         velocity,
         cargo,
         axes,
-        state.ticks as f64 * STEP,
+        &mut nav.random,
     ));
     let craft = death::escape_craft(&state.loadout);
     let craft_stats =

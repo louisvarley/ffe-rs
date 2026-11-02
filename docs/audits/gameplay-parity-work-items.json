@@ -208,13 +208,14 @@
     "id": "PAR-17",
     "priority": "P1",
     "title": "Restore source RNG state and call order for gameplay",
-    "status": "todo",
+    "status": "in-progress",
     "certainty": "Confirmed gameplay deviation",
     "finding": "Markets, effects, dust and NPC adapters initialise independent streams from system/position/clock. The original shares DATA_008818/8820 calls. Identical formulas cannot reproduce stocks, encounters, damage or missions with a different draw order.",
     "source": "F1476/F1530/F922/F622/F633/F942/F1035",
     "implementation": "crates/ffe-rs/src/navigation.rs:2370,3197,3926,4015; crates/ffe-rs/src/death.rs:296; crates/ffe-rs/src/flight.rs:105; docs/DEVIATIONS.md",
     "acceptance": "Record a baseline draw ledger including object-event and rendering dependencies; match both source words and downstream outcomes. Optional port presentation must not silently choose a different gameplay seed.",
-    "dependencies": "flight-6, world-4"
+    "dependencies": "flight-6, world-4",
+    "progress": "2026-11-02: one shared DATA_008818/8820 pair (Navigator::random, F147's 0x12345678/0x456789ab seed) now feeds F922/F1530 for traffic spawns, ambient life, contract targets and strike bases, hit/explosion/debris effects, ECM, hyperspace arrival (F909/F912), space dust (F1035), the ships' F754/F757 rolls (lent per ship in object order), the player's F953/F952 damage and F933/F934 servicing rolls, F291's jettison, F246's mining survey and F1054's chaff; the pair is saved. Markets, BBS and military offers keep per-station streams (EXP-006); drawing keeps its own (SIM-010). Matching the source's exact draw ledger against the executed original is still open."
   },
   {
     "id": "PAR-18",

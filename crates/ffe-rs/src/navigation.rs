@@ -1225,6 +1225,13 @@ pub struct Navigator {
     /// The space-dust field (F1035/F769), ticked in flight and drawn by the
     /// follow-up. Its own stream is seeded from the system code (EXP-020).
     pub dust: dust::Field,
+    /// The game's shared random pair (`DATA_008818`/`DATA_008820`, PAR-17):
+    /// F922's bounded draws and F1530's words for traffic, contract targets,
+    /// effects, ECM, hyperspace arrival, dust, the ships' F754/F757 rolls and
+    /// the player's damage and servicing rolls all advance this one stream in
+    /// call order. Markets, bulletin boards and offers keep their per-station
+    /// streams (EXP-006); model drawing keeps its own (SIM-010).
+    pub random: npc::Random,
     /// The player's legal standing (`DATA_008646` bit 0 / `DATA_008647`): the
     /// police alert that makes police and military ships hostile.
     pub legal: npc::Legal,
@@ -1944,6 +1951,9 @@ pub struct NavigatorSave {
     /// The stations' traffic records (bays, door, clearance), sorted by body.
     #[serde(default)]
     pub traffic: Vec<(usize, Starport)>,
+    /// The shared random pair (PAR-17). Older saves resume from F147's seed.
+    #[serde(default)]
+    pub random: Option<[u32; 2]>,
 }
 
 /// A mid-docking or mid-launch stage (F1067-F1088).
@@ -2121,6 +2131,7 @@ impl Navigator {
             warned_at: None,
             ships: Vec::new(),
             dust: dust::Field::new(seed.0, seed.1),
+            random: npc::Random::start(),
             legal: npc::Legal::default(),
             career: npc::Career::default(),
             jurisdiction,
@@ -2389,6 +2400,7 @@ impl Navigator {
                 records.sort_by_key(|(index, _)| *index);
                 records
             },
+            random: Some([self.random.a, self.random.b]),
         }
     }
 
@@ -2461,6 +2473,9 @@ impl Navigator {
         nav.effects.clear();
         nav.ships = save.ships.clone();
         nav.spawned = (!nav.ships.is_empty()).then_some(nav.current);
+        if let Some([a, b]) = save.random {
+            nav.random = npc::Random::new(a, b);
+        }
         // The stations' records come back with the ships that hold their
         // bays. A save without them (older files) has ships ask again.
         for (index, port) in &save.traffic {
@@ -2677,12 +2692,7 @@ impl Navigator {
             return;
         }
         let life = self.life(cache);
-        let clock = clock_words(self.clock);
-        let mut rng = npc::Random::new(
-            clock[0] ^ 0x1f3d_5b79 ^ self.ships.len() as u32,
-            clock[1].rotate_left(7) ^ 0x2a4c_6e80,
-        );
-        self.life_clock = life.interval(f64::from(rng.bounded(1000)) / 1000.0);
+        self.life_clock = life.interval(f64::from(self.random.bounded(1000)) / 1000.0);
         let player = self.player_at;
         let options = npc::SpawnOptions {
             extra_traders: self.traffic_extra,
@@ -2690,7 +2700,7 @@ impl Navigator {
             ..npc::SpawnOptions::default()
         };
         let alive = self.ships.iter().filter(|ship| ship.alive()).count();
-        if rng.bounded(2) == 0 && alive < options.cap() {
+        if self.random.bounded(2) == 0 && alive < options.cap() {
             // An arrival at the place nearest the player.
             let Some((index, place)) = self
                 .bodies
@@ -2705,8 +2715,8 @@ impl Navigator {
                 return;
             };
             let radius = self.bodies[index].radius as f64 + npc::ARRIVAL_DISTANCE;
-            let angle = f64::from(rng.bounded(65_536)) / 65_536.0 * std::f64::consts::TAU;
-            let lift = (f64::from(rng.bounded(65_536)) / 65_536.0 - 0.5) * 0.6;
+            let angle = f64::from(self.random.bounded(65_536)) / 65_536.0 * std::f64::consts::TAU;
+            let lift = (f64::from(self.random.bounded(65_536)) / 65_536.0 - 0.5) * 0.6;
             let position = [
                 place[0] + (angle.cos() * radius) as i64,
                 place[1] + (lift * radius) as i64,
@@ -2722,12 +2732,12 @@ impl Navigator {
                 .details(self.entries[self.current].params.code)
                 .allegiance
                 >> 6;
-            let model = npc::model_for(npc::Role::Trader, allegiance, &mut rng);
+            let model = npc::model_for(npc::Role::Trader, allegiance, &mut self.random);
             let Some(spec) = crate::ships::npc_spec(cache, model) else {
                 return;
             };
             let id = self.ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
-            let ship = npc::hyperspace_arrival(&spec, id, position, place, index, &mut rng);
+            let ship = npc::hyperspace_arrival(&spec, id, position, place, index, &mut self.random);
             self.effects.push(effects::exit_cloud(position, 4 * 49_710));
             self.ships.push(ship);
         } else if let Some(ship) = self.ships.iter_mut().find(|ship| {
@@ -2783,10 +2793,7 @@ impl Navigator {
                 .details(self.entries[self.current].params.code)
                 .allegiance
                 >> 6;
-            let clock = clock_words(self.clock);
-            let mut rng =
-                npc::Random::new(clock[0] ^ contract.rotate_left(3), clock[1] ^ 0x0ba5_e000);
-            let model = npc::model_for(npc::Role::Military, allegiance, &mut rng);
+            let model = npc::model_for(npc::Role::Military, allegiance, &mut self.random);
             let Some(spec) = crate::ships::npc_spec(cache, model) else {
                 continue;
             };
@@ -2798,10 +2805,17 @@ impl Navigator {
             let out = radius as f64 + 15.0e6;
             let position = std::array::from_fn(|k| place[k] + (up[k] * out) as i64);
             let id = self.ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
-            let mut base =
-                npc::contract_target(&spec, id, position, position, index, *contract, &mut rng);
+            let mut base = npc::contract_target(
+                &spec,
+                id,
+                position,
+                position,
+                index,
+                *contract,
+                &mut self.random,
+            );
             base.role = npc::Role::Military;
-            base.laser = npc::Role::Military.laser_code(&spec, &mut rng);
+            base.laser = npc::Role::Military.laser_code(&spec, &mut self.random);
             base.name = name.clone();
             base.station = None;
             base.state = npc::State::Hold;
@@ -2929,10 +2943,7 @@ impl Navigator {
                 .details(self.entries[self.current].params.code)
                 .allegiance
                 >> 6;
-            let clock = clock_words(self.clock);
-            let mut rng =
-                npc::Random::new(clock[0] ^ contract.rotate_left(5), clock[1] ^ 0x0bad_5eed);
-            let model = npc::model_for(npc::Role::Trader, allegiance, &mut rng);
+            let model = npc::model_for(npc::Role::Trader, allegiance, &mut self.random);
             let Some(spec) = crate::ships::npc_spec(cache, model) else {
                 continue;
             };
@@ -2952,20 +2963,21 @@ impl Navigator {
             let out = radius as f64 + 8.0e6;
             let position = std::array::from_fn(|axis| from[axis] + (toward[axis] * out) as i64);
             let mut id = self.ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
-            let target = npc::contract_target(&spec, id, position, to_at, to, contract, &mut rng);
+            let target =
+                npc::contract_target(&spec, id, position, to_at, to, contract, &mut self.random);
             let leader = target.id;
             placed.push(target.name.clone());
             self.ships.push(target);
             id += 1;
             for formation in [[500_000, 0, -400_000], [-500_000, 0, -400_000]] {
-                let model = npc::model_for(npc::Role::Military, allegiance, &mut rng);
+                let model = npc::model_for(npc::Role::Military, allegiance, &mut self.random);
                 let Some(spec) = crate::ships::npc_spec(cache, model) else {
                     continue;
                 };
                 let at = std::array::from_fn(|axis| position[axis] + formation[axis]);
-                let mut guard = npc::hyperspace_arrival(&spec, id, at, to_at, to, &mut rng);
+                let mut guard = npc::hyperspace_arrival(&spec, id, at, to_at, to, &mut self.random);
                 guard.role = npc::Role::Military;
-                guard.laser = npc::Role::Military.laser_code(&spec, &mut rng);
+                guard.laser = npc::Role::Military.laser_code(&spec, &mut self.random);
                 guard.station = None;
                 guard.state = npc::State::Escort;
                 guard.leader = Some(leader);
@@ -3961,9 +3973,8 @@ impl Navigator {
                 station: Some(index),
             })
             .collect();
-        let clock = clock_words(self.clock);
-        let seed = code ^ clock[0] ^ (player[0] as u32) ^ (player[2] as u32).rotate_left(11);
-        let mut rng = npc::Random::new(seed, clock[1] ^ 0x4567_89ab);
+        // F688 draws from the shared pair (PAR-17).
+        let mut rng = self.random;
         let mut ships = npc::restore(&self.persisted, player, 0);
         self.persisted.clear();
         ships.retain(|ship| match ship.role {
@@ -4008,6 +4019,7 @@ impl Navigator {
         if let Some(life) = options.advanced.filter(|_| !self.traffic_off) {
             self.busy_surface_ports(cache, player, allegiance, life, &mut ships, &mut rng);
         }
+        self.random = rng;
         self.occupy_station_bays(&mut ships);
         self.ships = ships;
         self.player_at = player;
@@ -4120,13 +4132,9 @@ impl Navigator {
                 sparks.push(index);
             }
         }
-        let seed = (self.clock * 1000.0) as u32
-            ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9)
-            ^ 0x2000_0000;
-        let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
         let sparks: Vec<Effect> = sparks
             .into_iter()
-            .map(|index| self.effects[index].spark(&mut rng))
+            .map(|index| self.effects[index].spark(&mut self.random))
             .collect();
         let player = self.player_at;
         self.effects
@@ -4141,7 +4149,10 @@ impl Navigator {
     /// supplies the player's position/velocity, F1033's altitude and the
     /// "Space dust, clouds etc" option.
     pub fn tick_dust(&mut self, elapsed: f64, spawn: &dust::Spawn) {
+        // F1035 draws from the shared pair (PAR-17).
+        self.dust.set_random(self.random);
         self.dust.advance(elapsed, spawn);
+        self.random = self.dust.random();
     }
 
     /// One frame of NPC traffic: the flight AI, F931's fire and F927's recycle of
@@ -4223,7 +4234,11 @@ impl Navigator {
                 .npc_target
                 .and_then(|id| leaders.iter().find(|(leader, _, _, _)| *leader == id))
                 .map_or(player, |(_, position, _, _)| *position);
+            // F754/F757's F1530 rolls draw from the shared pair in object
+            // order (PAR-17): lend it to the ship for its tick.
+            ship.missile_rng = self.random.state();
             ship.tick_with_station(seconds, tics, aim, escort, station.as_ref(), &mut requests);
+            self.random.take(ship.missile_rng);
             if let Some(launch) = ship.take_launch().filter(|_| exposed) {
                 events.push(ShipEvent::MissileLaunch {
                     owner: launch.owner,
@@ -4816,15 +4831,11 @@ impl Navigator {
         if losses.is_empty() {
             return losses;
         }
-        let seed = (self.clock * 1000.0) as u32
-            ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9)
-            ^ if naval { 0x8000_0000 } else { 0x4000_0000 };
-        let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
         for loss in &losses {
             self.effects.push(ffe_core::effects::missile_explosion(
                 loss.position,
                 loss.axes,
-                &mut rng,
+                &mut self.random,
             ));
         }
         if self
@@ -4912,20 +4923,16 @@ impl Navigator {
         let mass = ship.damage.mass;
         let speed = velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
         let attack = self.player_attack(id, damage)?;
-        let seed = (self.clock * 1000.0) as u32
-            ^ id.rotate_left(7)
-            ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9);
-        let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
         // F931 calls F939 once per hit, whether the shields or the hull took it.
         self.effects.push(effects::hit(
             at.unwrap_or(position),
             velocity,
             axes,
             speed,
-            &mut rng,
+            &mut self.random,
         ));
         if attack.damage == ffe_core::laser::Damage::Destroyed {
-            let mut burst = effects::explosion(position, velocity, cargo, axes, &mut rng);
+            let mut burst = effects::explosion(position, velocity, cargo, axes, &mut self.random);
             for effect in &mut burst {
                 effect.set_mass(mass);
             }
@@ -5122,17 +5129,13 @@ impl Navigator {
             ship.damage.mass,
         );
         let speed = velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
-        let seed = (self.clock * 1000.0) as u32
-            ^ id.rotate_left(9)
-            ^ (self.effects.len() as u32).wrapping_mul(0x9e37_79b9);
-        let mut rng = npc::Random::new(seed, seed.rotate_left(13) ^ 0x1357_9bdf);
         self.effects
-            .push(effects::hit(at, velocity, axes, speed, &mut rng));
+            .push(effects::hit(at, velocity, axes, speed, &mut self.random));
         if result == ffe_core::laser::Damage::Destroyed {
             if let (Some(station), true) = (station, held_bay) {
                 self.starport(station).release(npc::traffic_id(id));
             }
-            let mut burst = effects::explosion(position, velocity, cargo, axes, &mut rng);
+            let mut burst = effects::explosion(position, velocity, cargo, axes, &mut self.random);
             for effect in &mut burst {
                 effect.set_mass(mass);
             }
@@ -5522,15 +5525,11 @@ impl Navigator {
     /// (`random(0x2000) | 0x4000`, exponent 0x33: about 7.5 to 11 AU), F912
     /// advances F1530 and F1507 places the ship on that orbit about the
     /// system's root with `DATA_008818` as the longitude and `DATA_008820` as
-    /// the phase. The original's random state is not reproduced; this one is
-    /// seeded from the system and the clock.
-    fn hyperspace_arrival(&self, cache: &VerifiedCache) -> Result<[i64; 3], String> {
+    /// the phase, all from the game's shared pair (PAR-17).
+    fn hyperspace_arrival(&mut self, cache: &VerifiedCache) -> Result<[i64; 3], String> {
         let sine = SineTable::from_bytes(cache.asset("base:math/sine").ok_or("no sine table")?)?;
-        let code = self.entries[self.current].params.code;
-        let clock = clock_words(self.clock);
-        let mut rng = npc::Random::new(code ^ clock[0], clock[1].rotate_left(7) ^ 0x2f6b_3c91);
-        let mantissa = (rng.bounded(0x2000) | 0x4000) as i16;
-        rng.advance();
+        let mantissa = (self.random.bounded(0x2000) | 0x4000) as i16;
+        self.random.advance();
         let radius = ffe_core::ffp::Ffp {
             mantissa,
             exponent: 0x33,
@@ -5538,8 +5537,8 @@ impl Navigator {
         Ok(ffe_core::objects::orbit_point(
             &sine,
             radius,
-            rng.a as i32,
-            rng.b,
+            self.random.a as i32,
+            self.random.b,
         ))
     }
 

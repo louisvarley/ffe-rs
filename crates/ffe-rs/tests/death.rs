@@ -137,13 +137,21 @@ fn a_dead_ship_cannot_be_saved_and_old_saves_load_alive() {
 #[test]
 fn f942s_explosion_and_debris_spawn_at_the_player() {
     let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-    let effects = death::player_explosion([100, 200, 300], [1.0, 2.0, 3.0], 8, axes, 42.0);
+    let mut rng = ffe_core::npc::Random::start();
+    // F942's pod counts are the pair's first two F922 draws.
+    let mut copy = rng;
+    let pods = (copy.bounded(6) as i32 - 2).max(0) + (copy.bounded(4) as i32 - 1).max(0);
+    let effects = death::player_explosion([100, 200, 300], [1.0, 2.0, 3.0], 8, axes, &mut rng);
     assert!(effects
         .iter()
         .any(|effect| effect.model == ffe_core::effects::EXPLOSION_MODEL));
-    assert!(effects
-        .iter()
-        .any(|effect| effect.model == ffe_core::effects::DEBRIS_MODEL));
+    assert_eq!(
+        effects
+            .iter()
+            .filter(|effect| effect.model == ffe_core::effects::DEBRIS_MODEL)
+            .count(),
+        pods as usize
+    );
     assert!(effects
         .iter()
         .all(|effect| effect.position == [100, 200, 300]));

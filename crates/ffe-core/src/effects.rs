@@ -575,6 +575,13 @@ fn random_axes(base: [f64; 3], rng: &mut Random) -> ([f64; 3], [f64; 3]) {
         base[1] * pitch.cos() + (right[1] * yaw.cos() + up[1] * yaw.sin()) * pitch.sin(),
         base[2] * pitch.cos() + (right[2] * yaw.cos() + up[2] * yaw.sin()) * pitch.sin(),
     ]);
+    // The up row needs a helper that is not along the new forward row, or
+    // a forward near the first helper gives a zero cross product.
+    let helper = if forward[1].abs() < 0.9 {
+        [0.0, 1.0, 0.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
     let right = normalise(cross(helper, forward));
     (forward, normalise(cross(forward, right)))
 }
@@ -599,6 +606,23 @@ fn normalise(v: [f64; 3]) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn random_axes_stay_unit_for_every_draw() {
+        // Every forward row the draws can give, including ones along the
+        // helper axis, makes a finite orthonormal pair.
+        let mut rng = Random::start();
+        for base in [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]] {
+            for _ in 0..20_000 {
+                let (forward, up) = random_axes(base, &mut rng);
+                let length = |v: [f64; 3]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
+                assert!((length(forward) - 1.0).abs() < 1e-9, "{forward:?}");
+                assert!((length(up) - 1.0).abs() < 1e-9, "{up:?}");
+                let dot: f64 = (0..3).map(|k| forward[k] * up[k]).sum();
+                assert!(dot.abs() < 1e-9);
+            }
+        }
+    }
 
     fn axes() -> [[f64; 3]; 3] {
         [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]

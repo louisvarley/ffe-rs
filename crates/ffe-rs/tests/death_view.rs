@@ -116,8 +116,13 @@ fn f1104s_death_hold_and_tombstone() {
             .map(|v| v * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT),
         10,
         axes,
-        1.0,
+        &mut ffe_core::npc::Random::start(),
     ));
+    // A few frames into F942's burst (the first frame's model is not yet
+    // drawn; the pod count is a draw and may be zero).
+    for _ in 0..10 {
+        nav.tick_effects(0.02, 994);
+    }
     let outcome = death::begin(&mut state, None);
     assert_eq!(outcome, Outcome::Destroyed);
     assert_eq!(state.death.unwrap().phase, DeathPhase::Exploding);

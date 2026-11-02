@@ -635,6 +635,7 @@ mod tests {
             spawned: Some(5),
             ships: Vec::new(),
             traffic: Vec::new(),
+            random: None,
         }
     }
 

@@ -325,18 +325,16 @@ pub fn board(state: &mut Flight, craft: EscapeCraft, stats: Option<&ShipStats>) 
 }
 
 /// F942/F926's effects for the player: the model-0x9b explosion and debris at
-/// the old position, with the ship's velocity and axes. `clock` seeds the
-/// original's bounded random (the caller passes the game clock or ticks).
+/// the old position, with the ship's velocity and axes. The draws come from
+/// `rng`, the game's shared pair (`Navigator::random`, PAR-17).
 pub fn player_explosion(
     position: [i64; 3],
     velocity: [f64; 3],
     cargo: u16,
     axes: [[f64; 3]; 3],
-    clock: f64,
+    rng: &mut ffe_core::npc::Random,
 ) -> Vec<ffe_core::effects::Effect> {
-    let seed = (clock * 1000.0) as u32 ^ (position[0] as u32).rotate_left(7);
-    let mut rng = ffe_core::npc::Random::new(seed, seed.rotate_left(13) ^ 0x4567_89ab);
-    ffe_core::effects::explosion(position, velocity, cargo, axes, &mut rng)
+    ffe_core::effects::explosion(position, velocity, cargo, axes, rng)
 }
 
 /// [`player_explosion`] for a ship of `mass` t (F942's distance word).
@@ -346,9 +344,9 @@ pub fn player_explosion_of(
     velocity: [f64; 3],
     cargo: u16,
     axes: [[f64; 3]; 3],
-    clock: f64,
+    rng: &mut ffe_core::npc::Random,
 ) -> Vec<ffe_core::effects::Effect> {
-    let mut effects = player_explosion(position, velocity, cargo, axes, clock);
+    let mut effects = player_explosion(position, velocity, cargo, axes, rng);
     for effect in &mut effects {
         effect.set_mass(mass);
     }
