@@ -196,3 +196,59 @@ fn a_launch_from_f1088s_seat_flies_out_of_the_slot() {
     assert!(along > port.front, "still inside");
     assert_eq!(*flags.last().unwrap() & 0x20, 0, "still in the region");
 }
+
+/// F572's co-rotation: a ship at rest in a spinning station's frame keeps its
+/// station-local position and rows as the station turns.
+#[test]
+fn a_ship_turns_with_the_station_frame() {
+    let rows = |angle: f64| -> [[f64; 3]; 3] {
+        let (s, c) = angle.sin_cos();
+        // A turn about the station's forward (docking) axis.
+        [[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]]
+    };
+    let centre = [5_000_000i64, -2_000_000, 7_000_000];
+    let local = [30_000.0, 0.0, 65_536.0];
+    let start = rows(0.0);
+    let abs = |r: [[f64; 3]; 3]| -> [i64; 3] {
+        std::array::from_fn(|i| {
+            centre[i] + (0..3).map(|k| r[k][i] * local[k]).sum::<f64>().round() as i64
+        })
+    };
+    let p0 = abs(start);
+    let flight = Flight {
+        mode: Mode::Flight,
+        ship: 20,
+        system_flight: true,
+        position: p0.map(|v| v as f64 / UNITS_PER_FLIGHT_UNIT),
+        axes: Some(start),
+        set_speed: Some(0),
+        ..Flight::default()
+    };
+    let mut model = OriginalFlight::from_flight(&flight, None);
+    let mut previous = start;
+    for step in 1..=90 {
+        let now = rows(f64::from(step) * 0.01);
+        let turn: [[f64; 3]; 3] = std::array::from_fn(|i| {
+            std::array::from_fn(|j| (0..3).map(|k| now[k][i] * previous[k][j]).sum())
+        });
+        model.co_rotate(centre, turn);
+        previous = now;
+    }
+    let expected = abs(previous);
+    let got = model.absolute_position();
+    for k in 0..3 {
+        assert!((got[k] - expected[k]).abs() < 50, "{got:?} vs {expected:?}");
+    }
+    // The ship's right row turned with the station's.
+    // (F1520 re-normalises to a hair under unit length, so compare directions.)
+    let right = model.player().motion.orientation[0].map(f64::from);
+    let length = right.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let right = right.map(|v| v / length);
+    for k in 0..3 {
+        assert!(
+            (right[k] - previous[0][k]).abs() < 1e-3,
+            "{right:?} vs {:?}",
+            previous[0]
+        );
+    }
+}

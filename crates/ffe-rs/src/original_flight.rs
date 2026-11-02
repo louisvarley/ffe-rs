@@ -715,6 +715,30 @@ impl OriginalFlight {
         self.player.motion.orientation = [right, up, forward].map(|row| row.map(q));
     }
 
+    /// Turn the free-flying ship with a body's frame: `turn` takes a point fixed
+    /// in the body's frame at the previous frame to the same point now (the
+    /// body's rows' change). F572 puts a ship near a spinning station in the
+    /// station's rotating frame, where it stays at rest unless it thrusts; the
+    /// port keeps the ship in the system frame, so it carries the ship's offset
+    /// from `centre`, its velocity and its rows by the same turn.
+    pub fn co_rotate(&mut self, centre: [i64; 3], turn: [[f64; 3]; 3]) {
+        if self.pad_world.is_some() {
+            return;
+        }
+        let apply = |v: [f64; 3]| -> [f64; 3] {
+            std::array::from_fn(|i| (0..3).map(|j| turn[i][j] * v[j]).sum())
+        };
+        let motion = &mut self.player.motion;
+        let offset: [f64; 3] = std::array::from_fn(|k| (motion.position[k] - centre[k]) as f64);
+        let turned = apply(offset);
+        motion.position = std::array::from_fn(|k| centre[k] + turned[k].round() as i64);
+        motion.velocity = apply(motion.velocity.map(f64::from)).map(|v| v.round() as i32);
+        for row in &mut motion.orientation {
+            *row = apply(row.map(f64::from)).map(|v| v.round() as i32);
+        }
+        motion.renormalise();
+    }
+
     /// Move the ship without touching its velocity or set speed (a change of frame).
     pub fn shift(&mut self, position: [i64; 3]) {
         let before = self.absolute_position();

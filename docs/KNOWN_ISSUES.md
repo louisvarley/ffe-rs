@@ -190,7 +190,9 @@ station's hull radius the ship is put in the station's spinning frame for the
 tick (`OriginalFlight::step_station`) and F569 scans the station's collision
 stream, so a soft touch in the station region (`0x20 | 0x40`) is F1021/F1024's
 docking or no-clearance case and a hull strike is F575's crash and bounce. The
-port's old corridor test and "pushed clear" teleport are gone. F595's station
-velocity is still not ported: the ship's velocity is not made relative to the
-station's orbit for the tick (as for a planet), and the launch still places
-the ship outside instead of F1088's parked start (PAR-10).
+port's old corridor test and "pushed clear" teleport are gone. The scan uses the
+station's spun rows (F866) and the ship co-rotates with the station frame
+(F572). F595's station velocity itself is not ported: the navigator carries
+the ship with the station's orbital motion instead (its frame following), and
+the launch starts at F1088's seat but waits for the door in the lift stages
+rather than parked at the seat (PAR-10).

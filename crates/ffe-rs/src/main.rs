@@ -1224,6 +1224,9 @@ fn run() -> Result<(), String> {
     // step with no model builds one from the state rather than silently
     // flying the prototype physics (PAR-23).
     let mut prototype_selected = false;
+    // The station whose rotating frame the ship was in last frame, and its rows
+    // then (F572's co-rotation, see `OriginalFlight::co_rotate`).
+    let mut station_turn: Option<(usize, [[f64; 3]; 3])> = None;
     // When each external-view or turret key went down, for the original's
     // held-key ramp.
     let mut held_since: HashMap<Key, Instant> = HashMap::new();
@@ -4843,6 +4846,16 @@ fn run() -> Result<(), String> {
                 };
                 let mut landed_at = None;
                 let mut region_touch = None;
+                // Only a frame spent in a station's scan keeps the rows to turn
+                // the ship by on the next one.
+                let in_station = landing.as_ref().is_some_and(|(index, ..)| {
+                    nav.as_ref()
+                        .and_then(|nav| nav.bodies.get(*index))
+                        .is_some_and(|body| body.kind == NavKind::Station)
+                });
+                if !in_station {
+                    station_turn = None;
+                }
                 let step_result = if let Some(mode) = landed_state {
                     model.step_landed(elapsed, &keys, mode);
                     Ok(None)
@@ -4856,6 +4869,33 @@ fn run() -> Result<(), String> {
                         .and_then(|nav| nav.bodies.get(index))
                         .is_some_and(|body| body.kind == NavKind::Station);
                     if station {
+                        // The station's rows now: its base rows turned by F866's
+                        // spin at this clock, as the renderer draws it, so the slot
+                        // the scan tests is the slot on screen.
+                        let rows_now = nav
+                            .as_ref()
+                            .and_then(|nav| nav.spun_rows(&cache, index))
+                            .unwrap_or([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+                        // F572: near the station the ship is in its rotating
+                        // frame, at rest there unless it thrusts, so it turns
+                        // with the station from one frame to the next.
+                        if let Some((previous_index, previous)) = station_turn {
+                            if previous_index == index {
+                                // A point fixed in the station: abs = rows^T local,
+                                // so it moves by rows_now^T * previous.
+                                let turn: [[f64; 3]; 3] = std::array::from_fn(|i| {
+                                    std::array::from_fn(|j| {
+                                        (0..3).map(|k| rows_now[k][i] * previous[k][j]).sum()
+                                    })
+                                });
+                                model.co_rotate(at, turn);
+                            }
+                        }
+                        station_turn = Some((index, rows_now));
+                        let mut parent = parent;
+                        parent.orientation = std::array::from_fn(|k| {
+                            (rows_now[k / 3][k % 3] * 2_147_483_647.0) as i32
+                        });
                         // An orbital station: F569 in its spinning frame. A soft
                         // touch in its region (`0x20 | 0x40`, no crash bit) is
                         // F1021/F1024's docking or no-clearance test; a hull

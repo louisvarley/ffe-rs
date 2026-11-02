@@ -2823,6 +2823,29 @@ impl Navigator {
             .find_map(|ship| ship.contract)
     }
 
+    /// An orbital station's rows at the current clock: its base rows turned by
+    /// F866's spin (`+0xc8`), as the renderer and the collision scan use them.
+    /// `None` for a body that is not a spinning station or without the sine
+    /// table.
+    pub fn spun_rows(&self, cache: &VerifiedCache, index: usize) -> Option<[[f64; 3]; 3]> {
+        let body = self
+            .bodies
+            .get(index)
+            .filter(|body| body.kind == Kind::Station)?;
+        let sine = SineTable::from_bytes(cache.asset("base:math/sine")?).ok()?;
+        let tics = ffe_core::model_animation::START_TICS
+            .wrapping_add((self.clock * crate::original_flight::TICS_PER_SECOND) as u64 as u32);
+        let spin = ffe_core::model_animation::OrbitalRotation::station(body.spin)
+            .matrix(&sine, tics)
+            .unwrap_or(ffe_core::model::IDENTITY);
+        let spin: [[f64; 3]; 3] = std::array::from_fn(|k| {
+            std::array::from_fn(|j| f64::from(spin[3 * k + j]) / 2_147_483_648.0)
+        });
+        Some(std::array::from_fn(|k| {
+            std::array::from_fn(|i| (0..3).map(|j| spin[k][j] * body.orientation[j][i]).sum())
+        }))
+    }
+
     /// The planet the player is landed on (a starport's planet for a pad),
     /// where F246 drops a mining machine.
     pub fn landed_planet(&self) -> Option<usize> {
@@ -5863,7 +5886,7 @@ impl Navigator {
     /// it is deliberately not called by the live player loop.
     pub fn source_command(
         &mut self,
-        _cache: &VerifiedCache,
+        cache: &VerifiedCache,
         flight: &mut OriginalFlight,
     ) -> Option<(ffe_core::autopilot::Guidance, Body)> {
         if self.landed_view() || self.sequence.is_some() {
@@ -5972,8 +5995,8 @@ impl Navigator {
         if self.final_leg && guidance.distance_shift <= 0 && flight.acceleration_step() != 0 {
             if body.kind == Kind::Starport && self.starport(index).touch(PLAYER) {
                 let info = ffe_core::objects::ModelInfo::read(
-                    _cache.asset("base:model/records")?,
-                    _cache.asset("base:ship/stats")?,
+                    cache.asset("base:model/records")?,
+                    cache.asset("base:ship/stats")?,
                     flight.player().motion.model,
                 )?;
                 let seat = self.takeoff_seat(index, info.radii().1 as i32)?;
@@ -5989,8 +6012,11 @@ impl Navigator {
             }
         }
         if self.final_leg {
-            let rows = body
-                .orientation
+            // An orbital station's rows at this clock (its F866 spin), so the
+            // ship lines up with the slot as it now stands.
+            let rows = self
+                .spun_rows(cache, index)
+                .unwrap_or(body.orientation)
                 .map(|r| r.map(|v| (v * 2_147_483_647.0) as i32));
             guidance.turns = ffe_core::autopilot::match_orientation(
                 flight.player().motion.orientation,
@@ -6013,7 +6039,7 @@ impl Navigator {
                     // once; one accelerated frame of physics in between would
                     // drop the ship from the approach point onto the port.
                     if arrived {
-                        return self.source_command(_cache, flight);
+                        return self.source_command(cache, flight);
                     }
                 }
                 other => {
