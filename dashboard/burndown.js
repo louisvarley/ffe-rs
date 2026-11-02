@@ -34,13 +34,13 @@ window.FFE_BURNDOWN = {
         {"id": "parity-09", "title": "[P1] Replace orbital docking corridor tests and harmless pushes with source contacts", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-09"},
         {"id": "parity-10", "title": "[P1] Use original indoor departure placement and moving lift/door state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-10"},
         {"id": "parity-11", "title": "[P1] Complete source autopilot world and target adapters", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-11"},
-        {"id": "parity-12", "title": "[P1] Unify source event clocks, time acceleration and physical integration", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-12"},
+        {"id": "parity-12", "title": "[P1] Unify source event clocks, time acceleration and physical integration", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-12"},
         {"id": "parity-13", "title": "[P1] Complete hyperjump initiation, transit, misjump and source arrival", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-13"},
-        {"id": "parity-14", "title": "[P1] Verify source fuel scooping gates and capacity changes", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-14"},
+        {"id": "parity-14", "title": "[P1] Verify source fuel scooping gates and capacity changes", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-14"},
         {"id": "parity-15", "title": "[P1] Replace NPC speed caps and simplified flight state transitions", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-15"},
         {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
         {"id": "parity-17", "title": "[P1] Restore source RNG state and call order for gameplay", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-17"},
-        {"id": "parity-18", "title": "[P1] Persist and restore the complete live simulation state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-18"},
+        {"id": "parity-18", "title": "[P1] Persist and restore the complete live simulation state", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-18"},
         {"id": "parity-19", "title": "[P1] Remove the non-source 7-tonne starting hold and reconcile fitted capacity", "status": "done", "version": "source-audit", "priority": "P1", "auditId": "PAR-19"},
         {"id": "parity-20", "title": "[P1] Replay market, shipyard, BBS and daily mission events using source state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-20"},
         {"id": "parity-21", "title": "[P1] Drive all explosion, debris and hit effects from source object states", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-21"},
@@ -1063,6 +1063,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 96,
       note: "Game controllers: on Windows a pad (gilrs) is read every frame and turned into the active preset's keys (sticks steer, triggers throttle, bumpers roll, face buttons fire/missile/target/view), recorded with the input. Mouse steering was already in place, so mouse and joystick input (ui-8) is done."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 96,
+      note: "Parity pass: no silent prototype/placeholder fallback outside --dev (PAR-23); the world-step/tick oracles run F1041 alone again and the laser view gets its own pirate, so physics, world-tick and combat pass (55 of 57 oracles pass on Linux); hull temperature from F1033 star contact with F1007 cooling (PAR-14); saves keep the live NPC ships and stations' traffic records (PAR-18); an --npc-trace harness mode for PAR-15. No parity item is complete yet, so the count is unchanged."
     }
   ]
 };
