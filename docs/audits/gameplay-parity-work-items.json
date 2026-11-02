@@ -300,6 +300,6 @@
     "implementation": "crates/ffe-rs/src/main.rs:1284-1323 versus 1004-1064",
     "acceptance": "Compare initial Enter boot, post-death Enter boot, alternate start, intro load and escape/resume paths: identical source fields, seat/rows/frame, HUD, model, input release, fuel and services before the first tick.",
     "dependencies": "PAR-07, PAR-08, PAR-18, PAR-23",
-    "progress": "2026-10-26: Initial boot and post-Game-Over new commander call one source pad/equipment/ship initializer. Both start types remain parked for 600 frames; F997 and bay sentinel also apply after restart. Full live death/restart/resume replay remains."
+    "progress": "2026-10-26: Initial boot and post-Game-Over new commander call one source pad/equipment/ship initializer. Both start types remain parked for 600 frames; F997 and bay sentinel also apply after restart. Full live death/restart/resume replay remains. 2026-11-02: the post-GAME-OVER new game now also resets the commander record (ranks and slots carried over before) and the rest of the first boot's per-game state: engines and status pages, status section/scroll, a pending jump, held time acceleration, the landed pose, the gear warning, the beam hold and the targetter arming. Equipment and combat words already came from the one new_commander initializer."
   }
 ]

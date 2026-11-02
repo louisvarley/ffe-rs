@@ -1637,6 +1637,9 @@ fn run() -> Result<(), String> {
                         let (new_state, model) = OriginalFlight::new_commander(&cache, new_nav)?;
                         state = new_state;
                         original = Some(model);
+                        // A new commander after GAME OVER starts as the first
+                        // boot does (PAR-24): no ranks or slots carry over.
+                        commander = saves::Commander::default();
                         views = ViewState::default();
                         dock = DockState::default();
                         acceleration = 0;
@@ -1661,6 +1664,17 @@ fn run() -> Result<(), String> {
                 }
                 gameover_viewer = None;
                 status_page = false;
+                // The rest of the first boot's per-game state (PAR-24).
+                engines_page = false;
+                status_section = 0;
+                status_next = 0;
+                equipment_scroll = 0;
+                in_transit = None;
+                held_acceleration = None;
+                landed_pose = None;
+                gear_warned = false;
+                beam_time = 0.0;
+                targeter = ffe_rs::targeter::Arming::default();
                 launch_grace = None;
                 galaxy = None;
                 parked_galaxy = None;
