@@ -535,6 +535,23 @@ there), and launch straight into F733's countdown.
 
 ## 4. What remains
 
+- **NPC flight on the original physics (2026-11-02).** A ship whose `Spec`
+  carries the statistics' `Limits` (every ship the game spawns, from
+  `ships::npc_spec`) no longer uses the speed-cap ramp. Each frame
+  `NpcShip::fly` runs the object pipeline: F597's guidance
+  (`autopilot::guide`) toward the state's target gives the thrust words, the
+  velocity cap and the turn rates; F601 (`Motion::accelerate`) integrates the
+  thrust within the limits; F585 (`Motion::orient`) turns, halved for models
+  0x35 and up and quartered for 0x3b and up; F1512 (`Motion::advance`) moves.
+  The motion record is saved with the ship. An attacker inside `STANDOFF`
+  breaks off into the pass (F753's state 3), which aims 4 km ahead along its
+  nose, and comes round again when the pass ends. `tests/npc_physics.rs`:
+  a Cobra Mk III 20 km out closes to 5 km in about 27 s, peaks near 790 m/s
+  and makes its pass. Ships without statistics (hand-built test specs) keep
+  the old kinematics. Still open: the police response boost is not applied to
+  physics ships, the target's velocity is not passed to F597, and the
+  per-state frame trace against `--npc-trace` is not matched.
+
 - **The full per-state AI.** The port runs the flight cycle, the pirate states,
   the station cycle above and the jump states; the missile control rows
   (0x13-0x1b), F770's trading approach's own motion and the per-state exact

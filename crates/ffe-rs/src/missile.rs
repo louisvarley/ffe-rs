@@ -306,6 +306,8 @@ mod tests {
             max_speed: 0.0,
             accel: 0.0,
             turn_rate: 0.0,
+            limits: None,
+            motion: Default::default(),
             speed: 0.0,
             hostile: true,
             laser: None,

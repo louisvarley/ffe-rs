@@ -7,7 +7,7 @@ use crate::ffp::{self, Ffp};
 
 /// The fields of a physics object (`PhysObj`) the motion routines read and
 /// write, at their original offsets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Motion {
     /// The orientation (`+0x0..+0x23`): rows right, up, forward; Q31 dwords.
     pub orientation: [[i32; 3]; 3],

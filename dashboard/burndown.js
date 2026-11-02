@@ -37,7 +37,7 @@ window.FFE_BURNDOWN = {
         {"id": "parity-12", "title": "[P1] Unify source event clocks, time acceleration and physical integration", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-12"},
         {"id": "parity-13", "title": "[P1] Complete hyperjump initiation, transit, misjump and source arrival", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-13"},
         {"id": "parity-14", "title": "[P1] Verify source fuel scooping gates and capacity changes", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-14"},
-        {"id": "parity-15", "title": "[P1] Replace NPC speed caps and simplified flight state transitions", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-15"},
+        {"id": "parity-15", "title": "[P1] Replace NPC speed caps and simplified flight state transitions", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-15"},
         {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
         {"id": "parity-17", "title": "[P1] Restore source RNG state and call order for gameplay", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-17"},
         {"id": "parity-18", "title": "[P1] Persist and restore the complete live simulation state", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-18"},
@@ -1068,6 +1068,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 96,
       note: "Parity pass: no silent prototype/placeholder fallback outside --dev (PAR-23); the world-step/tick oracles run F1041 alone again and the laser view gets its own pirate, so physics, world-tick and combat pass (55 of 57 oracles pass on Linux); hull temperature from F1033 star contact with F1007 cooling (PAR-14); saves keep the live NPC ships and stations' traffic records (PAR-18); an --npc-trace harness mode for PAR-15. No parity item is complete yet, so the count is unchanged."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 96,
+      note: "NPC flight AI on the original physics (PAR-15 in progress): ships with statistics are guided by F597 and flown by F601 thrust, F585 turns and F1512 moves instead of the port's speed caps; pirates close at their own top speed, break off inside the standoff and come round again. The npc_ai and npc_missiles fixtures now undock the player so hostile fire is not held."
     }
   ]
 };

@@ -103,6 +103,8 @@ fn setup(cache: &ffe_content::VerifiedCache) -> (Navigator, ModelViewer, Screen,
     let forward = nav.bodies[nav.docked.expect("docked")].orientation[2];
     nav.respawn_traffic(cache, at, forward);
     assert!(!nav.ships.is_empty(), "the capture spawned no traffic");
+    // The player has launched: hostile ships hold fire at a docked player.
+    nav.docked = None;
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
     // The player sits 300 km in front of the pirate, looking back at it. The
     // pirate's default forward is +z, so it is already aimed at the player: its

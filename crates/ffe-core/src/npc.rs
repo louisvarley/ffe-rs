@@ -646,6 +646,10 @@ pub struct Spec {
     /// The cargo space (`+0x116`): F942 uses `min(4, cargo >> 1)` extra debris
     /// pods. F773 also spends it on the ship's fitted equipment.
     pub cargo: u16,
+    /// The statistics' six thrust limits (F598/F600), when known: the ship then
+    /// flies by the original's object physics (F597 guidance, F601, F585,
+    /// F1512) instead of the port's speed model.
+    pub limits: Option<crate::thrust::Limits>,
 }
 
 impl Spec {
@@ -739,6 +743,9 @@ pub const STATION_CRUISE_SPEED: f64 = 4.0e4;
 /// 40 m, so the final approach can still brake at the pad.
 pub const STATION_ACCEL: f64 = 2.0e4;
 
+/// F1511's velocity unit in millimetres per second (`v * t / 512` with the
+/// game's 49,700 tics a second).
+pub const MM_PER_VELOCITY_UNIT: f64 = TICS_PER_SECOND / 512.0;
 /// The original's tics per second at 1x (`DATA_009155` is 994 per 20 ms).
 pub const TICS_PER_SECOND: f64 = TICS_PER_FRAME as f64 * 50.0;
 /// The base turn rate in radians per second. F585 limits the per-frame turn and
@@ -1049,6 +1056,13 @@ pub struct NpcShip {
     /// The turn limit from F585: [`TURN_RATE`], halved for models 0x35..0x3a and
     /// quartered from 0x3b.
     pub turn_rate: f64,
+    /// [`Spec::limits`]: with them the ship flies by the original physics.
+    #[serde(default)]
+    pub limits: Option<crate::thrust::Limits>,
+    /// The object's physics words (`+0x0..+0x11e` as F601/F585/F1512 use them):
+    /// the velocity accumulators, rates and thrust carried between frames.
+    #[serde(default)]
+    pub motion: crate::physics::Motion,
     /// The current speed along `forward`.
     pub speed: f64,
     /// Whether the ship attacks the player. Pirates and Thargoids start true;
@@ -1164,6 +1178,12 @@ impl NpcShip {
             max_speed: spec.top_speed(),
             accel: spec.accel(),
             turn_rate: TURN_RATE / f64::from(turn_divisor(spec.model)),
+            limits: spec.limits,
+            motion: crate::physics::Motion {
+                model: spec.model,
+                drift: 0x3c,
+                ..crate::physics::Motion::default()
+            },
             speed: 0.0,
             hostile,
             laser,
@@ -1697,64 +1717,86 @@ impl NpcShip {
         };
         let to = sub(target, self.position);
         let distance = length(to);
-        let desired = if distance > 1.0 {
-            scale(to, 1.0 / distance)
+        if let Some(limits) = self.limits {
+            // The original's object physics (F727/F725): F597's guidance to the
+            // state's target, F601's thrust integration within the statistics'
+            // limits, F585's turn (halved for the larger models) and F1512's
+            // position step. A pass aims past the target, as F756's evasion
+            // flies through instead of braking onto it.
+            let aim = if self.state == State::Pass {
+                add(self.position, self.forward.map(|v| (v * 4.0e6) as i64))
+            } else {
+                target
+            };
+            self.fly(aim, dt, &limits);
+            if self.state == State::Attack && distance < STANDOFF {
+                // F753: within the close range the attacker breaks off into
+                // state 3's evasion (the port's pass) and comes round again.
+                self.state = State::Pass;
+                self.pass = PASS_SECONDS;
+            }
         } else {
-            self.forward
-        };
-        self.forward = turn_toward(self.forward, desired, self.turn_rate * dt);
-        self.up = upright(self.forward);
-        let wanted = match self.state {
-            State::Hold => (self.max_speed * 0.5).min(0.7 * (2.0 * self.accel * distance).sqrt()),
-            State::Transit | State::Depart => {
-                if distance <= ARRIVE {
-                    0.0
-                } else {
-                    self.max_speed
-                        .min(0.7 * (2.0 * self.accel * (distance - ARRIVE)).sqrt())
+            let desired = if distance > 1.0 {
+                scale(to, 1.0 / distance)
+            } else {
+                self.forward
+            };
+            self.forward = turn_toward(self.forward, desired, self.turn_rate * dt);
+            self.up = upright(self.forward);
+            let wanted = match self.state {
+                State::Hold => {
+                    (self.max_speed * 0.5).min(0.7 * (2.0 * self.accel * distance).sqrt())
                 }
-            }
-            State::Approach => self
-                .max_speed
-                .min(0.7 * (2.0 * self.accel * distance).sqrt()),
-            State::Attack => {
-                let room = (distance - STANDOFF).max(0.0);
-                let combat = self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt());
-                if self.responding {
-                    // Called in: cruise to the player and brake into range.
-                    let run = (distance - RESPONSE_ARRIVE).max(0.0);
-                    combat.max(RESPONSE_SPEED.min(0.7 * (2.0 * RESPONSE_ACCEL * run).sqrt()))
-                } else {
-                    combat
+                State::Transit | State::Depart => {
+                    if distance <= ARRIVE {
+                        0.0
+                    } else {
+                        self.max_speed
+                            .min(0.7 * (2.0 * self.accel * (distance - ARRIVE)).sqrt())
+                    }
                 }
+                State::Approach => self
+                    .max_speed
+                    .min(0.7 * (2.0 * self.accel * distance).sqrt()),
+                State::Attack => {
+                    let room = (distance - STANDOFF).max(0.0);
+                    let combat = self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt());
+                    if self.responding {
+                        // Called in: cruise to the player and brake into range.
+                        let run = (distance - RESPONSE_ARRIVE).max(0.0);
+                        combat.max(RESPONSE_SPEED.min(0.7 * (2.0 * RESPONSE_ACCEL * run).sqrt()))
+                    } else {
+                        combat
+                    }
+                }
+                State::Escort => {
+                    let room = (distance - STANDOFF).max(0.0);
+                    self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt())
+                }
+                State::Pass | State::Flee | State::Evade => self.max_speed,
+                State::Docked | State::Launch | State::Dead | State::Escaped => 0.0,
+            };
+            // F597: if the ship cannot stop before the standoff, it commits to the
+            // pass (the original's overshoot branch) instead of braking.
+            if self.state == State::Attack
+                && self.speed > 0.5 * self.max_speed
+                && distance < 4.0 * STANDOFF
+                && self.speed * self.speed > 2.0 * self.accel * (distance - STANDOFF).max(0.0)
+            {
+                self.state = State::Pass;
+                self.pass = PASS_SECONDS;
             }
-            State::Escort => {
-                let room = (distance - STANDOFF).max(0.0);
-                self.max_speed.min(0.7 * (2.0 * self.accel * room).sqrt())
+            let accel = if self.responding {
+                self.accel.max(RESPONSE_ACCEL)
+            } else {
+                self.accel
+            };
+            let change = (wanted - self.speed).clamp(-accel * dt, accel * dt);
+            self.speed = (self.speed + change).max(0.0);
+            self.velocity = scale(self.forward, self.speed);
+            for axis in 0..3 {
+                self.position[axis] += (self.velocity[axis] * dt).round() as i64;
             }
-            State::Pass | State::Flee | State::Evade => self.max_speed,
-            State::Docked | State::Launch | State::Dead | State::Escaped => 0.0,
-        };
-        // F597: if the ship cannot stop before the standoff, it commits to the
-        // pass (the original's overshoot branch) instead of braking.
-        if self.state == State::Attack
-            && self.speed > 0.5 * self.max_speed
-            && distance < 4.0 * STANDOFF
-            && self.speed * self.speed > 2.0 * self.accel * (distance - STANDOFF).max(0.0)
-        {
-            self.state = State::Pass;
-            self.pass = PASS_SECONDS;
-        }
-        let accel = if self.responding {
-            self.accel.max(RESPONSE_ACCEL)
-        } else {
-            self.accel
-        };
-        let change = (wanted - self.speed).clamp(-accel * dt, accel * dt);
-        self.speed = (self.speed + change).max(0.0);
-        self.velocity = scale(self.forward, self.speed);
-        for axis in 0..3 {
-            self.position[axis] += (self.velocity[axis] * dt).round() as i64;
         }
         if self.state == State::Transit && distance <= ARRIVE && station.is_none() {
             self.state = State::Hold;
@@ -1820,6 +1862,42 @@ impl NpcShip {
             point: hit.point,
             distance: hit.distance,
         })
+    }
+
+    /// One frame of the original's object physics toward `target`: F597
+    /// (`autopilot::guide`) turns the target into thrust words, a velocity cap
+    /// and turn rates; F601 integrates the thrust within `limits`, F585 turns
+    /// the rows and F1512 moves the ship. The port's float fields (position,
+    /// velocity in mm/s, forward/up) are kept in step with the object words.
+    fn fly(&mut self, target: [i64; 3], dt: f64, limits: &crate::thrust::Limits) {
+        let tics = (dt * TICS_PER_SECOND).round().max(0.0) as u32;
+        if tics == 0 {
+            return;
+        }
+        let q31 = |v: f64| (v.clamp(-1.0, 1.0) * 2_147_483_647.0) as i32;
+        let right = normalise(cross(self.up, self.forward));
+        let motion = &mut self.motion;
+        motion.model = self.model;
+        motion.position = self.position;
+        motion.velocity = self
+            .velocity
+            .map(|v| (v / MM_PER_VELOCITY_UNIT).round() as i32);
+        motion.orientation = [right, self.up, self.forward].map(|row| row.map(q31));
+        let guidance = crate::autopilot::guide(motion, self.position, target, [0; 3], limits, 0);
+        motion.thrust = guidance.thrust;
+        motion.cap = guidance.cap;
+        motion.autopilot = guidance.turns;
+        motion.accelerate(tics);
+        let mut scanner = crate::physics::Scanner::default();
+        motion.orient(tics as i32, true, tics as i32, &mut scanner);
+        motion.advance(i64::from(tics));
+        motion.renormalise();
+        self.position = motion.position;
+        self.velocity = motion.velocity.map(|v| f64::from(v) * MM_PER_VELOCITY_UNIT);
+        let rows = motion.orientation.map(|row| normalise(row.map(f64::from)));
+        self.forward = rows[2];
+        self.up = rows[1];
+        self.speed = length(self.velocity);
     }
 
     /// Port addition (Advanced traffic): F931's shot at another ship, with
@@ -2305,6 +2383,8 @@ pub struct Persisted {
     pub max_speed: f64,
     pub accel: f64,
     pub turn_rate: f64,
+    pub limits: Option<crate::thrust::Limits>,
+    pub motion: crate::physics::Motion,
 }
 
 /// F675: the ships that follow the player through a jump. The original keeps a
@@ -2342,6 +2422,8 @@ pub fn persist(ships: &[NpcShip], player: [i64; 3]) -> Vec<Persisted> {
             max_speed: ship.max_speed,
             accel: ship.accel,
             turn_rate: ship.turn_rate,
+            limits: ship.limits,
+            motion: ship.motion,
         })
         .collect()
 }
@@ -2378,6 +2460,8 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             max_speed: record.max_speed,
             accel: record.accel,
             turn_rate: record.turn_rate,
+            limits: record.limits,
+            motion: record.motion,
             speed: length(record.velocity),
             hostile: record.hostile,
             laser: record.laser,
@@ -3366,6 +3450,7 @@ mod tests {
     fn spec(model: u32) -> Option<Spec> {
         let names = ["Eagle", "Viper", "Cobra Mk III", "Shuttle"];
         (14..=0x50).contains(&model).then(|| Spec {
+            limits: None,
             model,
             name: names[(model as usize) % names.len()].to_owned(),
             radius: 10_000,
@@ -4053,6 +4138,7 @@ mod tests {
     /// drive word.
     fn thargoid_spec(model: u32, cargo: u16, guns: i8) -> Spec {
         Spec {
+            limits: None,
             model,
             name: "Unknown".to_owned(),
             radius: 90_000,

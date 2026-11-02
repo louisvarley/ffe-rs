@@ -183,13 +183,14 @@
     "id": "PAR-15",
     "priority": "P1",
     "title": "Replace NPC speed caps and simplified flight state transitions",
-    "status": "todo",
+    "status": "in-progress",
     "certainty": "Confirmed gameplay substitute",
     "finding": "NPC Spec derives floating top speeds and an acceleration ramp; Ship::tick moves toward a chosen speed instead of integrating original object thrust/caps through every source state. The cagent/AI done labels therefore do not establish source combat difficulty.",
     "source": "F706/F725/F727/F752/F770/F773 and DATA_006258",
     "implementation": "crates/ffe-core/src/npc.rs:665,1714; crates/ffe-rs/src/navigation.rs:3328",
     "acceptance": "Trace traders, escorts, pirates, police and heavy freighters under the same objects/seed; match per-state target, thrust, turn, velocity and event time at 1x and accelerated time.",
-    "dependencies": "PAR-11, PAR-12, PAR-17, gameplay-18"
+    "dependencies": "PAR-11, PAR-12, PAR-17, gameplay-18",
+    "progress": "NPC ships with ship statistics now fly by the original's object physics: F597 guidance (autopilot::guide) to the state's target, F601 thrust within the statistics' limits, F585 turns (halved/quartered for the larger models), F1512 moves. The speed caps and acceleration ramp remain only for ships without statistics. Per-state trace matching against --npc-trace is still open."
   },
   {
     "id": "PAR-16",

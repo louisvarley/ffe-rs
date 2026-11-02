@@ -174,6 +174,7 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
         missiles: stats.missiles,
         cargo: u16::try_from(stats.cargo.max(0)).unwrap_or(0),
         rating: stats.rating,
+        limits: Some(stats.limits()),
     })
 }
 

@@ -164,6 +164,8 @@ fn npc_launches_chaff_pulls_and_ecm_destroys() {
     let at = nav.station().map(|(_, at)| at).expect("a start station");
     let forward = nav.bodies[nav.docked.expect("docked")].orientation[2];
     nav.respawn_traffic(&cache, at, forward);
+    // The player has launched: hostile ships hold fire at a docked player.
+    nav.docked = None;
     let pirate = nav
         .ships
         .iter()

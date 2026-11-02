@@ -8,7 +8,7 @@ use crate::model::multiply;
 use crate::model_math::fraction;
 
 /// An object's thrust limits: `[maximum, minimum]` per axis (x, y, z).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Limits {
     pub axes: [[i16; 2]; 3],
 }
