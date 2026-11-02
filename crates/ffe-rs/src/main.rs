@@ -1220,6 +1220,11 @@ fn run() -> Result<(), String> {
     // `--dev`'s O chord toggles it; a player build always flies the original
     // model once the ship is in free flight.
     let mut original: Option<OriginalFlight> = None;
+    // `--dev`'s O chord chose the synthetic prototype flight. Without it, free
+    // flight always runs the original model: a frame that reaches the flight
+    // step with no model builds one from the state rather than silently
+    // flying the prototype physics (PAR-23).
+    let mut prototype_selected = false;
     // When each external-view or turret key went down, for the original's
     // held-key ramp.
     let mut held_since: HashMap<Key, Instant> = HashMap::new();
@@ -1275,11 +1280,20 @@ fn run() -> Result<(), String> {
     let mut gameover_viewer: Option<ModelViewer> = None;
     // The flight view's station is the original model 74 when the cache has it;
     // otherwise the placeholder wireframe stays.
+    // The original models and ship statistics are essential: without them the
+    // ships fly with stand-in limits and the stations are wireframes. Only
+    // `--dev` may continue on the placeholder (PAR-23).
     let mut scene = match ModelViewer::new(&cache) {
         Ok(scene) => Some(scene),
-        Err(error) => {
+        Err(error) if options.dev => {
             eprintln!("Station model unavailable, using the placeholder: {error}");
             None
+        }
+        Err(error) => {
+            return Err(format!(
+                "The game's models could not be read from data.bin ({error}). \
+                 Re-import the game data (see README)."
+            ))
         }
     };
     if let Some(dir) = &options.capture_gameover {
@@ -2421,8 +2435,10 @@ fn run() -> Result<(), String> {
                     {
                         if original.take().is_some() {
                             state.axes = None;
+                            prototype_selected = true;
                             message = "Prototype flight model (developer).".to_owned();
                         } else {
+                            prototype_selected = false;
                             let stats = scene
                                 .as_ref()
                                 .and_then(|scene| scene.ship_stats(state.ship));
@@ -4565,6 +4581,19 @@ fn run() -> Result<(), String> {
                 mouse_steer,
                 reverse,
             );
+            if original.is_none()
+                && !prototype_selected
+                && state.mode == ffe_rs::flight::Mode::Flight
+                && state.system_flight
+            {
+                let stats = scene
+                    .as_ref()
+                    .and_then(|scene| scene.ship_stats(state.ship));
+                original = Some(
+                    OriginalFlight::from_flight(&state, stats.as_ref())
+                        .with_time_acceleration(acceleration),
+                );
+            }
             if let Some(model) = original.as_mut() {
                 // F598/F600 clamp against the object's six limit words; a
                 // damaged thruster or F929's engine failure changes them.
