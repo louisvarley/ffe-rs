@@ -503,6 +503,9 @@ static int state_combat_mode;
 static int missile_probe_mode;
 static int laser_probe_mode;
 static int legal_probe_mode;
+/* --npc-trace <frames> [start-key]: every 25th frame from 160, each live ship
+   object's model, AI state, type, velocity words, thrust words and position. */
+static int npc_trace_mode;
 /* The legal probe's intro start key: 0x02 is DOS "1" (start type 1, Ross 154);
    0x39 is "any other key" -> F147(0), the default start (Gateway/Hope). */
 static unsigned long probe_start_key = 0x02;
@@ -1010,6 +1013,26 @@ void TimerFrameUpdate(void)
                    ref_fines[0], ref_fines[1], ref_fines[2], ref_fines[3],
                    ref_fines[4], ref_fines[5], ref_cash,
                    (ref_msgindex + 9) % 10, msg);
+            fflush(stdout);
+        }
+        if (frames + 1 >= limit) exit(0);
+    } else if (npc_trace_mode) {
+        if (frames >= 160 && frames % 25 == 0) {
+            unsigned char *list = ref_pl_object_list;
+            unsigned i;
+            for (i = 1; i <= 0x72; ++i) {
+                unsigned char *o = list + i * 0x152 + 0x74;
+                if (o[0x87] != 0xb) continue;
+                printf("{\"frame\":%lu,\"slot\":%u,\"model\":%lu,\"state\":%u,\"type\":%u,"
+                       "\"parent\":%u,\"velocity\":[%ld,%ld,%ld],\"thrust\":[%d,%d,%d],"
+                       "\"position\":[%lld,%lld,%lld],\"target\":%u}\n",
+                       frames, i, (unsigned long)(o[0x82] | o[0x83] << 8 | o[0x84] << 16 | o[0x85] << 24),
+                       (unsigned)o[0xff], (unsigned)o[0x118], (unsigned)o[0x56],
+                       *(long *)(o + 0x8c), *(long *)(o + 0x90), *(long *)(o + 0x94),
+                       (int)*(short *)(o + 0xb6), (int)*(short *)(o + 0xb8), (int)*(short *)(o + 0xba),
+                       *(long long *)(o + 0x3e), *(long long *)(o + 0x46), *(long long *)(o + 0x4e),
+                       (unsigned)o[0x100]);
+            }
             fflush(stdout);
         }
         if (frames + 1 >= limit) exit(0);
@@ -6285,7 +6308,9 @@ int main(int argc, char **argv)
     laser_probe_mode = argc == 3 && !strcmp(argv[1], "--laser-probe");
     legal_probe_mode = (argc == 3 || argc == 4) && !strcmp(argv[1], "--legal-probe");
     if (legal_probe_mode && argc == 4) probe_start_key = strtoul(argv[3], 0, 0);
-    state_mode = (argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode || laser_probe_mode)) || legal_probe_mode;
+    npc_trace_mode = (argc == 3 || argc == 4) && !strcmp(argv[1], "--npc-trace");
+    if (npc_trace_mode && argc == 4) probe_start_key = strtoul(argv[3], 0, 0);
+    state_mode = (argc == 3 && (!strcmp(argv[1], "--state") || state_combat_mode || missile_probe_mode || laser_probe_mode)) || legal_probe_mode || npc_trace_mode;
     if (argc != 2 && !state_mode)
         fail("usage: jjffe-smoke <frames> | --state <frames> | --state-combat <frames> | --laser-probe <frames> | --legal-probe <frames> [start-key] | --flight <idle|takeoff|planet> <frames> | --vectors | --font | --blit | --models");
     count = argv[state_mode ? 2 : 1];
