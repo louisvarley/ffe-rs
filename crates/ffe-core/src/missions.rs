@@ -502,6 +502,27 @@ fn accepted_text(offer: &Offer, origin: u32, origin_name: &str) -> String {
 impl State {
     /// F534: accept an offer. The caller removes the advertisement (`F535`) and
     /// pays nothing; the reward is paid by [`Self::settle`] on arrival.
+    /// The passengers of every active contract: `DATA_008892`, the occupied
+    /// cabins F401 and F534 read.
+    pub fn passengers_aboard(&self) -> u32 {
+        self.missions
+            .iter()
+            .filter(|mission| mission.status == Status::Active)
+            .map(|mission| u32::from(mission.passengers))
+            .sum()
+    }
+
+    /// F534's cabin check: an offer with more passengers than the free cabins
+    /// is refused with 0x9928.
+    pub fn cabin_refusal(&self, offer: &Offer, cabins: u32) -> Option<String> {
+        let free = cabins.saturating_sub(self.passengers_aboard());
+        (u32::from(offer.passengers) > free).then(|| {
+            bulletin::template(0x9928)
+                .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+                .unwrap_or_else(|| "You do not have enough cabin space available.".to_owned())
+        })
+    }
+
     pub fn accept(
         &mut self,
         offer: &Offer,
@@ -977,6 +998,30 @@ mod tests {
         assert_eq!(state.journal.len(), 1);
         assert_eq!(state.pages.len(), 1);
         assert_eq!(state.pages[0].kind, PageKind::Message);
+    }
+
+    #[test]
+    fn passengers_fill_cabins_and_a_full_ship_is_refused() {
+        let mut state = State::default();
+        let destinations = [Destination {
+            code: 7,
+            name: "Hope".to_owned(),
+            population: 4,
+            danger: 0,
+        }];
+        let offer = offer(&post(0x981a, 900, 7, 1), &world(&destinations)).unwrap();
+        assert!(offer.passengers > 0);
+        assert!(state
+            .cabin_refusal(&offer, 0)
+            .unwrap()
+            .contains("cabin space"));
+        let cabins = u32::from(offer.passengers);
+        assert_eq!(state.cabin_refusal(&offer, cabins), None);
+        state.accept(&offer, 0, 1, "Ross 154").unwrap();
+        assert_eq!(state.passengers_aboard(), cabins);
+        assert!(state.cabin_refusal(&offer, cabins).is_some());
+        state.settle(1, 20, 7).unwrap();
+        assert_eq!(state.passengers_aboard(), 0);
     }
 
     #[test]

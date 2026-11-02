@@ -4004,7 +4004,15 @@ fn run() -> Result<(), String> {
                                 let system = nav.system_name().to_owned();
                                 match nav.mission_offer(&cache, station, row) {
                                     Ok(Some(offer)) => {
-                                        match state.missions.accept(&offer, day, code, &system) {
+                                        let cabins = u32::from(state.loadout.cabin_capacity());
+                                        let accepted =
+                                            match state.missions.cabin_refusal(&offer, cabins) {
+                                                Some(refusal) => Err(refusal),
+                                                None => state
+                                                    .missions
+                                                    .accept(&offer, day, code, &system),
+                                            };
+                                        match accepted {
                                             Ok(accepted) => {
                                                 let _ = nav.clear_post(&cache, station, row);
                                                 message = accepted.text.clone();
@@ -6033,6 +6041,9 @@ fn run() -> Result<(), String> {
         }
         if let Some(nav) = nav.as_ref() {
             screen.system = nav.system_name().to_owned();
+            // DATA_008892: the cabins the active passenger contracts fill.
+            state.loadout.occupied_cabins =
+                u16::try_from(state.missions.passengers_aboard()).unwrap_or(u16::MAX);
             screen.station = nav
                 .station()
                 .map_or_else(String::new, |(n, _)| n.to_owned());

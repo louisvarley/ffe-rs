@@ -193,7 +193,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-10", title: "Journal and mission state", status: "in-progress" },
         { id: "gameplay-11", title: "Shuttles and station traffic (shuttle)", status: "in-progress" },
         { id: "gameplay-12", title: "Communications and messages", status: "in-progress" },
-        { id: "gameplay-13", title: "Player death and the escape capsule", status: "todo" },
+        { id: "gameplay-13", title: "Player death and the escape capsule", status: "in-progress" },
         { id: "gameplay-14", title: "Rank, reputation, legal status and the fines office", status: "done", version: "v1.04" },
         { id: "gameplay-15", title: "Time-driven events over a long run (daily market/BBS/shipyard/deadline tick)", status: "done", version: "v0.99" },
         { id: "gameplay-16", title: "NPC traffic: F688/F635 spawning, ship damage, lock and target readout", status: "done", version: "v0.60" },
@@ -1038,6 +1038,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 97,
       note: "Audit of todo items against the code: native versioned JSON saves (persist-2) and in-game save, load and quick-save (persist-3) were already complete; config.cfg now also applies its bind.<game key>=<physical key> remaps (persist-5). The system and galaxy maps, BBS missions, journal, message pages and station traffic exist and move to in-progress."
+    },
+    {
+      date: "2026-11-02",
+      remaining: 97,
+      note: "F534's cabin check: passenger contracts fill cabins (DATA_008892 from the active contracts) and an offer with too few free cabins is refused with 0x9928. The escape capsule item (gameplay-13) is the shipped v0.85 death/capsule work and moves to in-progress with gameplay-25."
     }
   ]
 };

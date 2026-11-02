@@ -167,9 +167,10 @@ generated post through `Navigator::mission_offer` and clears it with
    (0x9c35, the 0x99b4 removal title) is not detected because the port stores
    the removal title's text, not its code; removal settles with 0x9c34. This is
    reported, not faked.
-3. **Cabins and the rank roll.** The port has no passenger-cabin count
-   (`Status::cabins_total` is zero), so F534's "You do not have enough cabin
-   space" check (0x9928) is not enforced. F521's `F922(9)` roll against
+3. **Cabins and the rank roll.** F534's cabin check is enforced: an offer
+   with more passengers than the free cabins (fitted cabins less the active
+   contracts' passengers, `State::passengers_aboard`, kept in
+   `Loadout::occupied_cabins` as `DATA_008892`) is refused with 0x9928. F521's `F922(9)` roll against
    `DATA_008922` (the "I don't deal with someone of your reputation" refusal,
    0x991e) is also not drawn, because the port accepts the row's offer directly;
    `missions::State::reputation` is kept and F303 raises/lowers it, but it does
