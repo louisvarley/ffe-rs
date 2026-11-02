@@ -51,6 +51,10 @@ pub enum Kind {
     Parcel,
     Assassination,
     MilitaryDelivery,
+    /// F626/F627/F628's military assassination (0x9857), photograph
+    /// (0x9855) and bombing (0x9856) contracts; the mission's `code` says
+    /// which.
+    MilitaryStrike,
 }
 
 impl Kind {
@@ -60,6 +64,7 @@ impl Kind {
             Kind::Parcel => "parcel",
             Kind::Assassination => "removal",
             Kind::MilitaryDelivery => "military delivery",
+            Kind::MilitaryStrike => "military operation",
         }
     }
 }
@@ -104,9 +109,19 @@ pub struct Mission {
     pub client: String,
     pub status: Status,
     pub settled_day: Option<u32>,
+    /// A military photograph or bombing has been carried out; the contract
+    /// pays on return to the system it was accepted in.
+    #[serde(default)]
+    pub done: bool,
 }
 
 impl Mission {
+    /// The military strike this is (0x9855 photograph, 0x9856 bombing,
+    /// 0x9857 assassination), if any.
+    pub fn strike(&self) -> Option<u16> {
+        (self.kind == Kind::MilitaryStrike).then_some(self.code)
+    }
+
     /// The day F303/F301's comparison uses: the contract's `+0xc` deadline.
     pub fn overdue(&self, day: u32) -> bool {
         day > self.deadline_day
@@ -421,6 +436,101 @@ pub fn military_offers(
     offers
 }
 
+/// `DATA_006211`/`DATA_006212`/`DATA_006213`: the assassination, photograph
+/// and bombing payments.
+const STRIKE_PAYMENTS: [[u32; 8]; 3] = [
+    [4000, 4500, 5000, 5500, 6000, 7000, 8000, 10000],
+    [10000, 11000, 12000, 13000, 14000, 15000, 16000, 17000],
+    [15000, 16000, 17000, 18000, 19000, 20000, 22000, 25000],
+];
+
+/// `DATA_006210`: the capital each allegiance's military sends its strikes
+/// against (F625 picks a system round it with F857).
+pub const ENEMY_CAPITALS: [u32; 6] = [
+    0x12a4_9718,
+    0x12a4_9718,
+    0x0aa4_1718,
+    0x0aa4_1718,
+    0x0aa4_1718,
+    0x0aa4_1718,
+];
+
+/// F626/F627/F628: the military assassination (rank points over 0x100,
+/// 0x9857 with a 0x99bc title), photograph (over 0x271, 0x9855 with a 0x9966
+/// title) and bombing (over 0x510, 0x9856) contracts. `enemy` holds the
+/// systems round the enemy capital (F625's F857 pick, population 3 or more,
+/// or 1 for a bombing); the deadline is today + 14 + RND(64) and the payment
+/// one of eight.
+pub fn military_strike_offers(
+    rng: &mut crate::npc::Random,
+    world: &World<'_>,
+    enemy: &[Destination],
+    day: u32,
+    rank_points: u32,
+) -> Vec<Offer> {
+    let jobs = [
+        (0x9857_u16, 0x100_u32, 3_u32, 0x99bc_u16, 0_usize),
+        (0x9855, 0x271, 3, 0x9966, 1),
+        (0x9856, 0x510, 1, 0x9966, 2),
+    ];
+    let mut offers = Vec::new();
+    for (code, minimum, population, title_base, table) in jobs {
+        if rank_points <= minimum {
+            continue;
+        }
+        let choices: Vec<&Destination> = enemy
+            .iter()
+            .filter(|destination| {
+                destination.code != world.code && destination.population >= population
+            })
+            .collect();
+        if choices.is_empty() {
+            continue;
+        }
+        let destination = choices[rng.bounded(choices.len() as u32) as usize];
+        let pick = rng.bounded(8) as usize;
+        let deadline_days = 14 + rng.bounded(0x40);
+        let seed = rng.bounded(0x1_0000);
+        let reward = STRIKE_PAYMENTS[table][pick];
+        let title_code = title_base + pick as u16;
+        let title = bulletin::render_code(
+            title_code,
+            &[
+                Var::Int(0),
+                Var::Int(0),
+                Var::System(destination.code),
+                Var::Seed(seed),
+                Var::Int(0),
+            ],
+            world,
+        )
+        .unwrap_or_else(|| format!("[{title_code:#06x}]"));
+        let vars = [
+            Var::Int(i64::from(reward)),
+            Var::Int(i64::from(day.saturating_add(deadline_days))),
+            Var::System(destination.code),
+            Var::Seed(seed),
+            Var::Text(title.clone()),
+        ];
+        let text = bulletin::render_code(code, &vars, world).unwrap_or_default();
+        offers.push(Offer {
+            kind: Kind::MilitaryStrike,
+            code,
+            destination: destination.code,
+            destination_name: destination.name.clone(),
+            reward,
+            passengers: 0,
+            cargo: title,
+            seed,
+            basic_data: 0x2000,
+            deadline_days,
+            text,
+            client: String::new(),
+        });
+    }
+    offers
+}
+
 fn same_offer(mission: &Mission, offer: &Offer) -> bool {
     mission.kind == offer.kind
         && mission.code == offer.code
@@ -502,22 +612,67 @@ fn accepted_text(offer: &Offer, origin: u32, origin_name: &str) -> String {
 impl State {
     /// F534: accept an offer. The caller removes the advertisement (`F535`) and
     /// pays nothing; the reward is paid by [`Self::settle`] on arrival.
-    /// The active assassination contracts whose target is in `system`.
+    /// The active assassination contracts (civilian and military) whose
+    /// target is in `system`.
     pub fn targets_in(&self, system: u32) -> Vec<u32> {
         self.missions
             .iter()
             .filter(|mission| {
                 mission.status == Status::Active
-                    && mission.kind == Kind::Assassination
+                    && (mission.kind == Kind::Assassination || mission.strike() == Some(0x9857))
                     && mission.destination == system
             })
             .map(|mission| mission.id)
             .collect()
     }
 
+    /// The active photograph/bombing contracts whose base is in `system` and
+    /// not yet done: `(id, code)`.
+    pub fn bases_in(&self, system: u32) -> Vec<(u32, u16)> {
+        self.missions
+            .iter()
+            .filter(|mission| {
+                mission.status == Status::Active
+                    && !mission.done
+                    && mission.destination == system
+                    && matches!(mission.strike(), Some(0x9855 | 0x9856))
+            })
+            .map(|mission| (mission.id, mission.code))
+            .collect()
+    }
+
+    /// A photograph or bombing was carried out: it pays on the return to the
+    /// origin system. Returns the journal line.
+    pub fn strike_done(&mut self, id: u32, day: u32) -> Option<String> {
+        let mission = self
+            .missions
+            .iter_mut()
+            .find(|mission| mission.id == id && mission.status == Status::Active)?;
+        mission.done = true;
+        let text = match mission.code {
+            0x9855 => format!(
+                "Photographs taken. Return to {} by the deadline for payment.",
+                mission.origin_name
+            ),
+            _ => format!(
+                "Target destroyed. Return to {} by the deadline for payment.",
+                mission.origin_name
+            ),
+        };
+        self.record(day, EntryKind::Accepted, text.clone());
+        Some(text)
+    }
+
     /// The target of assassination contract `id` was destroyed in `system`:
     /// F303's completion and payment.
     pub fn target_destroyed(&mut self, id: u32, day: u32, system: u32) -> Result<Outcome, String> {
+        let assassination = self.missions.iter().any(|mission| {
+            mission.id == id
+                && (mission.kind == Kind::Assassination || mission.strike() == Some(0x9857))
+        });
+        if !assassination {
+            return Err("That contract is not paid for a kill.".to_owned());
+        }
         self.settle(id, day, system)
     }
 
@@ -578,6 +733,7 @@ impl State {
             client: offer.client.clone(),
             status: Status::Active,
             settled_day: None,
+            done: false,
         };
         self.missions.push(mission);
         self.next_id = id.saturating_add(1);
@@ -624,7 +780,8 @@ impl State {
         if status != Status::Active {
             return Err("That mission is no longer active.".to_owned());
         }
-        if destination != system {
+        let returned = self.missions[index].done && origin == system;
+        if destination != system && !returned {
             return Err("That mission is not for this system.".to_owned());
         }
         let late = day > self.missions[index].deadline_day;
@@ -655,12 +812,12 @@ impl State {
             self.missions[index].settled_day = Some(day);
             let code = match kind {
                 Kind::Parcel => 0x9c34,
-                Kind::MilitaryDelivery => 0x9c33,
+                Kind::MilitaryDelivery | Kind::MilitaryStrike => 0x9c33,
                 Kind::Passenger if passengers <= 1 => 0x9c31,
                 Kind::Passenger => 0x9c32,
                 Kind::Assassination => 0x9c34,
             };
-            if kind != Kind::MilitaryDelivery {
+            if !matches!(kind, Kind::MilitaryDelivery | Kind::MilitaryStrike) {
                 self.reputation = self.reputation.saturating_add(1).min(MAX_REPUTATION);
             } else {
                 // F303's seed==0 branch awards the military rank points. The
@@ -692,7 +849,9 @@ impl State {
         };
         self.record(day, journal_kind, text.clone());
         self.push_page(PageKind::Message, day, text.clone());
-        if status == Status::Complete && kind == Kind::MilitaryDelivery {
+        if status == Status::Complete
+            && matches!(kind, Kind::MilitaryDelivery | Kind::MilitaryStrike)
+        {
             // F304/F305's rank page (F306, song 7). The package constructor
             // does not award a medal: F509's basic_data low bits are 0, so
             // F303 selects `DATA_005115[0]`/`DATA_005116[0]`, both 0xff, and
@@ -747,7 +906,9 @@ impl State {
             // An assassination is settled by destroying its target, not by
             // arriving (see `State::target_destroyed`).
             .filter(|mission| {
-                (mission.destination == system && mission.kind != Kind::Assassination)
+                (mission.destination == system
+                    && !matches!(mission.kind, Kind::Assassination | Kind::MilitaryStrike))
+                    || (mission.done && mission.origin == system)
                     || mission.overdue(day)
             })
             .map(|mission| mission.id)
@@ -759,7 +920,9 @@ impl State {
                 .iter()
                 .find(|mission| mission.id == id)
                 .is_some_and(|mission| {
-                    mission.destination == system && mission.kind != Kind::Assassination
+                    (mission.destination == system
+                        && !matches!(mission.kind, Kind::Assassination | Kind::MilitaryStrike))
+                        || (mission.done && mission.origin == system)
                 });
             if at_destination {
                 if let Ok(outcome) = self.settle(id, day, system) {
@@ -1024,6 +1187,43 @@ mod tests {
         assert_eq!(state.journal.len(), 1);
         assert_eq!(state.pages.len(), 1);
         assert_eq!(state.pages[0].kind, PageKind::Message);
+    }
+
+    #[test]
+    fn military_strikes_open_by_rank_and_pay_on_return() {
+        let destinations = [Destination {
+            code: 7,
+            name: "Hope".to_owned(),
+            population: 4,
+            danger: 0,
+        }];
+        let enemy = [Destination {
+            code: 99,
+            name: "Achenar".to_owned(),
+            population: 6,
+            danger: 1,
+        }];
+        let world = world(&destinations);
+        let mut rng = crate::npc::Random::new(5, 6);
+        assert!(military_strike_offers(&mut rng, &world, &enemy, 10, 0x100).is_empty());
+        let offers = military_strike_offers(&mut rng, &world, &enemy, 10, 0x600);
+        let codes: Vec<u16> = offers.iter().map(|offer| offer.code).collect();
+        assert_eq!(codes, [0x9857, 0x9855, 0x9856]);
+        let photo = &offers[1];
+        assert!(photo.reward >= 10000 && photo.reward <= 17000);
+        assert_eq!(photo.destination, 99);
+        let mut state = State::default();
+        let id = state.accept(photo, 10, 1, "Ross 154").unwrap().id;
+        assert_eq!(state.bases_in(99), [(id, 0x9855)]);
+        // Arriving does not pay, and a kill is not a photograph.
+        assert!(state.tick(12, 99).is_empty());
+        assert!(state.target_destroyed(id, 12, 99).is_err());
+        assert!(state.strike_done(id, 12).is_some());
+        assert!(state.bases_in(99).is_empty());
+        let outcomes = state.tick(15, 1);
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].reward, photo.reward);
+        assert_eq!(state.military_points, 500);
     }
 
     #[test]

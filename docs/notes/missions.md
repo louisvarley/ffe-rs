@@ -148,7 +148,24 @@ generated post through `Navigator::mission_offer` and clears it with
 
 ## Missing data and owner decisions
 
-1. **Military constructors.** The package constructor (F629/F630/F631/F632)
+1. **Military strikes (ported 2026-11-02).** F626/F627/F628 are ad
+   constructors like the package: F623 picks one of DATA_006201's sixteen
+   entries, and the strikes open above 0x100 (assassination, 0x9857 with a
+   0x99bc title, DATA_006211's 4000-10000), 0x271 (photograph, 0x9855 with a
+   0x9966 title, DATA_006212's 10000-17000) and 0x510 rank points (bombing,
+   0x9856, DATA_006213's 15000-25000). F625 targets a system round the enemy
+   capital (DATA_006210, by allegiance; the port picks from the systems
+   `galaxy_around` finds near it), deadline today + 14 + RND(64).
+   `missions::military_strike_offers` makes all three when the rank allows
+   (`Kind::MilitaryStrike`). The in-system part is the port's reconstruction:
+   the military assassination places a target like the civilian one and pays
+   on the kill; a photograph or bombing places the base (a parked military
+   hull named after the contract's title) 15 km off the place nearest the
+   player. Accepting a photograph fits the Military Cameras (general bit 2);
+   `d` within 10 km of the base takes the photographs (F1122's camera
+   branch). Destroying the base does the bombing. Either pays when the player
+   returns to the system the contract was accepted in.
+1. **Military constructors (earlier note).** The package constructor (F629/F630/F631/F632)
    and its list (F493) are ported; F632's constant `0xffe2091a` resolves to
    `-(50 * 0x996e) + 150`, giving the 150/550/750 base rewards (the full
    arithmetic is in `missions::military_offers`). The other F623 constructors

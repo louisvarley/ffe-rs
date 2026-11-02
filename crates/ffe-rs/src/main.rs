@@ -344,6 +344,12 @@ fn build_save(
 
 /// The persisted view of the live preference pages. The remap table is not
 /// edited by this build, so it is carried through unchanged.
+/// The Military Cameras' general-equipment bit (`ship+0xc8 & 4`, F1122's
+/// camera test; equipment record "Military Cameras", code 0x12).
+const MILITARY_CAMERAS: u32 = 1 << 2;
+/// How close the ship must be to a military base to photograph it.
+const PHOTO_RANGE: f64 = 10.0e6;
+
 /// How close the ship must stand to a machine for F247 to load from it.
 const MINING_REACH: f64 = 1.0e6;
 
@@ -4223,6 +4229,11 @@ fn run() -> Result<(), String> {
                                 if let Some(offer) = offer {
                                     match state.missions.accept(&offer, day, code, &system) {
                                         Ok(accepted) => {
+                                            if offer.code == 0x9855 {
+                                                // A photograph job comes with the
+                                                // Military Cameras (general bit 2).
+                                                state.loadout.general |= MILITARY_CAMERAS;
+                                            }
                                             message = accepted.text.clone();
                                             pending_log.add(Source::Mission, accepted.text);
                                             sound.play(Cue::Message);
@@ -4305,6 +4316,33 @@ fn run() -> Result<(), String> {
                         }
                         sound.play(Cue::UiBeep);
                     }
+                    None
+                } else if pressed(Key::D)
+                    && state.loadout.general & MILITARY_CAMERAS != 0
+                    && state.mode == ffe_rs::flight::Mode::Flight
+                    && nav.as_ref().is_some_and(|nav| {
+                        nav.strike_base_near(ship_position(&original, &state), PHOTO_RANGE)
+                            .is_some_and(|id| {
+                                state.missions.missions.iter().any(|mission| {
+                                    mission.id == id
+                                        && mission.strike() == Some(0x9855)
+                                        && !mission.done
+                                })
+                            })
+                    })
+                {
+                    // F1122/F1125: the Military Cameras photograph the base.
+                    let at = ship_position(&original, &state);
+                    if let Some(id) = nav
+                        .as_ref()
+                        .and_then(|nav| nav.strike_base_near(at, PHOTO_RANGE))
+                    {
+                        let day = nav.as_ref().map_or(0, |nav| nav.day());
+                        if let Some(text) = state.missions.strike_done(id, day) {
+                            pending_log.add(Source::Mission, text);
+                        }
+                    }
+                    sound.play(Cue::UiBeep);
                     None
                 } else if pressed(Key::D)
                     && state.system_flight
@@ -6474,9 +6512,34 @@ fn run() -> Result<(), String> {
                     format!("Your contract's target, the {name}, is leaving port."),
                 );
             }
+            // A photograph or bombing job's base, once per visit.
+            let bases: Vec<(u32, String)> = state
+                .missions
+                .bases_in(code)
+                .into_iter()
+                .filter_map(|(id, _)| {
+                    let mission = state.missions.missions.iter().find(|m| m.id == id)?;
+                    Some((id, mission.cargo.clone()))
+                })
+                .collect();
+            for name in nav.place_strike_bases(&cache, &bases) {
+                pending_log.add(
+                    Source::Mission,
+                    format!("Military target located: the {name}."),
+                );
+            }
             let mut outcomes = state.missions.tick(day, code);
             for contract in contract_kills.drain(..) {
-                if let Ok(outcome) = state.missions.target_destroyed(contract, day, code) {
+                let bombing = state
+                    .missions
+                    .missions
+                    .iter()
+                    .any(|mission| mission.id == contract && mission.strike() == Some(0x9856));
+                if bombing {
+                    if let Some(text) = state.missions.strike_done(contract, day) {
+                        pending_log.add(Source::Mission, text);
+                    }
+                } else if let Ok(outcome) = state.missions.target_destroyed(contract, day, code) {
                     outcomes.push(outcome);
                 }
             }
@@ -7777,7 +7840,12 @@ fn mission_contracts(state: &Flight) -> Vec<ffe_rs::screen::ContractRow> {
     state
         .missions
         .active()
-        .filter(|m| m.kind == ffe_core::missions::Kind::Assassination)
+        .filter(|m| {
+            matches!(
+                m.kind,
+                ffe_core::missions::Kind::Assassination | ffe_core::missions::Kind::MilitaryStrike
+            )
+        })
         .map(|m| ffe_rs::screen::ContractRow {
             contract: format!("Kill {}, return to {}", m.cargo, m.origin_name),
             system: m.destination_name.clone(),
@@ -7825,7 +7893,7 @@ fn status_sections(
     // F286: page 4 needs DATA_009073's contracts (passengers, parcels and
     // military packages), page 5 DATA_009084's (the removal jobs).
     let roster = active(&[Kind::Passenger, Kind::Parcel, Kind::MilitaryDelivery]);
-    let contracts = active(&[Kind::Assassination]);
+    let contracts = active(&[Kind::Assassination, Kind::MilitaryStrike]);
     // F286: page 6 needs DATA_009104's machine list.
     let mining = state.loadout.mining_count() > 0 || !state.mining.is_empty();
     [true, true, false, cargo, roster, contracts, mining]

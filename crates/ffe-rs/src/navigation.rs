@@ -2673,6 +2673,87 @@ impl Navigator {
         }
     }
 
+    /// A military photograph/bombing contract's base, placed once per visit to
+    /// its system: an installation (the port's stand-in, a parked military
+    /// hull named after the contract's target) 15 km off the place nearest
+    /// the player. `bases` are `(contract, name)`.
+    pub fn place_strike_bases(
+        &mut self,
+        cache: &VerifiedCache,
+        bases: &[(u32, String)],
+    ) -> Vec<String> {
+        let mut placed = Vec::new();
+        if self.spawned != Some(self.current) || self.transit.is_some() {
+            return placed;
+        }
+        for (contract, name) in bases {
+            if self.contract_spawned.contains(contract) {
+                continue;
+            }
+            self.contract_spawned.push(*contract);
+            let player = self.player_at;
+            let Some((index, place, radius)) = self
+                .bodies
+                .iter()
+                .enumerate()
+                .filter(|(_, body)| body.kind.is_place())
+                .min_by(|a, b| {
+                    distance(player, a.1.position).total_cmp(&distance(player, b.1.position))
+                })
+                .map(|(index, body)| (index, body.position, body.radius))
+            else {
+                continue;
+            };
+            let Some(tables) = cache
+                .asset("base:world/system-tables")
+                .and_then(|blob| Tables::new(blob).ok())
+            else {
+                continue;
+            };
+            let allegiance = tables
+                .details(self.entries[self.current].params.code)
+                .allegiance
+                >> 6;
+            let clock = clock_words(self.clock);
+            let mut rng =
+                npc::Random::new(clock[0] ^ contract.rotate_left(3), clock[1] ^ 0x0ba5_e000);
+            let model = npc::model_for(npc::Role::Military, allegiance, &mut rng);
+            let Some(spec) = crate::ships::npc_spec(cache, model) else {
+                continue;
+            };
+            let up = self.bodies[index]
+                .orientation
+                .get(1)
+                .copied()
+                .unwrap_or([0.0, 1.0, 0.0]);
+            let out = radius as f64 + 15.0e6;
+            let position = std::array::from_fn(|k| place[k] + (up[k] * out) as i64);
+            let id = self.ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
+            let mut base =
+                npc::contract_target(&spec, id, position, position, index, *contract, &mut rng);
+            base.role = npc::Role::Military;
+            base.laser = npc::Role::Military.laser_code(&spec, &mut rng);
+            base.name = name.clone();
+            base.station = None;
+            base.state = npc::State::Hold;
+            base.max_speed = 0.0;
+            base.speed = 0.0;
+            base.orbit_radius = 0.0;
+            placed.push(base.name.clone());
+            self.ships.push(base);
+        }
+        placed
+    }
+
+    /// The contract base within `reach` of `point`, if any.
+    pub fn strike_base_near(&self, point: [i64; 3], reach: f64) -> Option<u32> {
+        self.ships
+            .iter()
+            .filter(|ship| ship.alive())
+            .filter(|ship| distance(ship.position, point) <= reach)
+            .find_map(|ship| ship.contract)
+    }
+
     /// The planet the player is landed on (a starport's planet for a pad),
     /// where F246 drops a mining machine.
     pub fn landed_planet(&self) -> Option<usize> {
@@ -3212,12 +3293,34 @@ impl Navigator {
                 .wrapping_mul(0x9e37_79b9)
                 .wrapping_add(day),
         );
-        Ok(missions::military_offers(
+        let mut offers = missions::military_offers(&mut rng, &world, day, rank_points);
+        // F626-F628: the strikes against the enemy capital's neighbourhood.
+        let capital = missions::ENEMY_CAPITALS
+            .get(usize::from(world.allegiance))
+            .copied()
+            .unwrap_or(missions::ENEMY_CAPITALS[0]);
+        let enemy: Vec<bulletin::Destination> = galaxy_around(cache, capital, NEIGHBOUR_REACH)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.params.code != code)
+            .map(|entry| {
+                let market = tables.market(entry.params.code);
+                bulletin::Destination {
+                    code: entry.params.code,
+                    name: entry.name,
+                    population: market.population,
+                    danger: market.danger,
+                }
+            })
+            .collect();
+        offers.extend(missions::military_strike_offers(
             &mut rng,
             &world,
+            &enemy,
             day,
             rank_points,
-        ))
+        ));
+        Ok(offers)
     }
 
     /// F535: remove the accepted advertisement from the board (the original
