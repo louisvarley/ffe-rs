@@ -105,6 +105,14 @@ pub(crate) fn journal_layout(profile: &str) -> Option<(u32, usize)> {
     }
 }
 
+/// The journal stories (`DATA_002280`, 170 entries; v33), floppy 1.02 only.
+pub(crate) fn stories_layout(profile: &str) -> Option<(u32, usize)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0x9b59c, ffe_core::journal::STORIES)),
+        _ => None,
+    }
+}
+
 /// Model string table (`DATA_004682`) RVA (v11), keyed by ship-name ffcode
 /// (`0x4000 | n`, the `+0xe` word of a model's statistics block), matched
 /// against JJFFE 2.8a7 in floppy 1.02 only.
@@ -596,6 +604,18 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some((rva, count)) = stories_layout(profile.id) {
+                let stories = ffe_convert::embedded::decode_journal_stories(&bytes, rva, count)?;
+                assets.push(Asset {
+                    id: "base:text/journal-stories".to_owned(),
+                    path: "text/journal-stories.bin".to_owned(),
+                    kind: AssetKind::JournalStories {
+                        stories: count as u32,
+                        source_offset: stories.source_offset as u64,
+                    },
+                    bytes: stories.bytes,
+                });
+            }
             if let Some((start, table, count, statics, words)) = scripts_layout(profile.id) {
                 let scripts = ffe_convert::embedded::decode_mission_scripts(
                     &bytes, start, table, count, statics, words,
@@ -790,6 +810,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         + usize::from(message_layout(profile.id).is_some())
         + usize::from(journal_layout(profile.id).is_some())
         + usize::from(scripts_layout(profile.id).is_some())
+        + usize::from(stories_layout(profile.id).is_some())
         + usize::from(star_point_layout(profile.id).is_some())
         + usize::from(dot_table_layout(profile.id).is_some())
         + if intro_layout(profile.id).is_some() {
@@ -817,7 +838,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 32,
+        format: "ffe-content-cache".to_owned(), format_version: 33,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

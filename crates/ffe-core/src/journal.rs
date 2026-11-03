@@ -107,6 +107,131 @@ impl<'a> Journal<'a> {
     }
 }
 
+/// `DATA_002280`'s 170 stories (cache v33, `base:text/journal-stories`):
+/// what F88 queues when a journal runs out of articles.
+pub const STORIES: usize = 0xaa;
+
+/// One story.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Story {
+    /// Type 0: rows of five articles, one per journal slot (-1 none); row
+    /// `n` is released `n` issue periods after the first.
+    Grid {
+        rows: Vec<[i32; 5]>,
+        priority: u16,
+        flags: u16,
+    },
+    /// Type 1: one article for one journal slot.
+    Single {
+        article: i32,
+        journal: i32,
+        priority: u16,
+        flags: u16,
+    },
+}
+
+impl Story {
+    pub fn priority(&self) -> u16 {
+        match self {
+            Story::Grid { priority, .. } | Story::Single { priority, .. } => *priority,
+        }
+    }
+
+    /// `+0xe` bit 0: the story needs script global 0x16 set.
+    pub fn flags(&self) -> u16 {
+        match self {
+            Story::Grid { flags, .. } | Story::Single { flags, .. } => *flags,
+        }
+    }
+}
+
+/// The stories asset: a `u16` count, then per story a type byte, `u16`
+/// priority and flags, and either a `u16` row count and five `i32` per row
+/// (type 0) or the article and journal `i32` (type 1).
+pub fn encode_stories(stories: &[Story]) -> Vec<u8> {
+    let mut out = (stories.len() as u16).to_le_bytes().to_vec();
+    for story in stories {
+        match story {
+            Story::Grid {
+                rows,
+                priority,
+                flags,
+            } => {
+                out.push(0);
+                out.extend_from_slice(&priority.to_le_bytes());
+                out.extend_from_slice(&flags.to_le_bytes());
+                out.extend_from_slice(&(rows.len() as u16).to_le_bytes());
+                for row in rows {
+                    for article in row {
+                        out.extend_from_slice(&article.to_le_bytes());
+                    }
+                }
+            }
+            Story::Single {
+                article,
+                journal,
+                priority,
+                flags,
+            } => {
+                out.push(1);
+                out.extend_from_slice(&priority.to_le_bytes());
+                out.extend_from_slice(&flags.to_le_bytes());
+                out.extend_from_slice(&article.to_le_bytes());
+                out.extend_from_slice(&journal.to_le_bytes());
+            }
+        }
+    }
+    out
+}
+
+/// Read the stories asset.
+pub fn decode_stories(bytes: &[u8]) -> Result<Vec<Story>, String> {
+    let mut at = 0usize;
+    let mut take = |n: usize| -> Result<&[u8], String> {
+        let slice = bytes.get(at..at + n).ok_or("journal stories cut short")?;
+        at += n;
+        Ok(slice)
+    };
+    let u16_at = |b: &[u8]| u16::from_le_bytes([b[0], b[1]]);
+    let i32_at = |b: &[u8]| i32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    let count = usize::from(u16_at(take(2)?));
+    let mut stories = Vec::with_capacity(count);
+    for _ in 0..count {
+        let kind = take(1)?[0];
+        let priority = u16_at(take(2)?);
+        let flags = u16_at(take(2)?);
+        stories.push(match kind {
+            0 => {
+                let rows = usize::from(u16_at(take(2)?));
+                let mut grid = Vec::with_capacity(rows);
+                for _ in 0..rows {
+                    let mut row = [0i32; 5];
+                    for slot in &mut row {
+                        *slot = i32_at(take(4)?);
+                    }
+                    grid.push(row);
+                }
+                Story::Grid {
+                    rows: grid,
+                    priority,
+                    flags,
+                }
+            }
+            1 => Story::Single {
+                article: i32_at(take(4)?),
+                journal: i32_at(take(4)?),
+                priority,
+                flags,
+            },
+            other => return Err(format!("bad journal story type {other}")),
+        });
+    }
+    if at != bytes.len() {
+        return Err("trailing bytes after the journal stories".to_owned());
+    }
+    Ok(stories)
+}
+
 /// The asset bytes for `articles`.
 pub fn encode(articles: &[Vec<u8>]) -> Result<Vec<u8>, String> {
     let count = u16::try_from(articles.len()).map_err(|_| "too many journal articles")?;

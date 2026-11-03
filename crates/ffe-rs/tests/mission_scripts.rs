@@ -84,3 +84,90 @@ fn a_new_game_starts_the_scripts() {
     assert_eq!((live.len(), engine.subscription_count()), (20, 94));
     assert!(host.log[0].ends_with("Imperial Herald"));
 }
+
+/// The scripts create the journals and F68/F90 publish their issues: a new
+/// game, then 120 days of daily messages, with the shared pair standing in
+/// for the game's draws.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_scripts_publish_the_journals() {
+    use ffe_core::journal::{decode_stories, Journal};
+    use ffe_core::script::engine::Host;
+    use ffe_core::script::run::{Game, Scripts};
+    struct Draws {
+        random: ffe_core::npc::Random,
+        notices: Vec<String>,
+    }
+    impl Host for Draws {}
+    impl Game for Draws {
+        fn bounded(&mut self, bound: u32) -> u32 {
+            self.random.bounded(bound)
+        }
+        fn advance(&mut self) -> i32 {
+            self.random.advance() as i32
+        }
+        fn post(&mut self, text: &str) {
+            self.notices.push(text.to_owned());
+        }
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let image = Image::new(cache.asset("base:script/missions").unwrap()).unwrap();
+    let stories = decode_stories(cache.asset("base:text/journal-stories").unwrap()).unwrap();
+    assert_eq!(stories.len(), 170);
+    let archive = Journal::new(cache.asset("base:text/journal").unwrap()).unwrap();
+    let mut game = Draws {
+        random: ffe_core::npc::Random::start(),
+        notices: Vec::new(),
+    };
+    let mut scripts = Scripts::new(&image);
+    let start = 0x121cf7 + 1200;
+    scripts
+        .new_game(&image, &stories, &mut game, start, true)
+        .unwrap();
+    let names: Vec<String> = scripts
+        .library
+        .journals
+        .iter()
+        .map(|journal| String::from_utf8_lossy(&journal.name).into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Imperial Herald",
+            "Federal Times",
+            "RIG",
+            "Frontier News",
+            "Universal Scientist"
+        ]
+    );
+    for day in start + 1..start + 120 {
+        scripts
+            .daily(&image, &stories, &mut game, day, true)
+            .unwrap();
+    }
+    for (slot, journal) in scripts.library.journals.iter().enumerate() {
+        let issue = scripts.library.shown(slot);
+        println!(
+            "{}: next {} shown {issue:?}",
+            names[slot],
+            journal.next_issue - start
+        );
+        for article in issue.iter().take(2) {
+            let headline = archive.article(*article as usize).unwrap().headline;
+            println!("   {}", String::from_utf8_lossy(headline));
+        }
+    }
+    println!(
+        "{} notices, first: {:?}",
+        game.notices.len(),
+        game.notices.first()
+    );
+    assert_eq!(game.notices.len(), 20);
+    assert!(scripts
+        .library
+        .journals
+        .iter()
+        .all(|j| j.next_issue == start + 140));
+}

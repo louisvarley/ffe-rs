@@ -1,0 +1,256 @@
+//! The scripts and the journals together: [`Scripts`] owns the interpreter
+//! state and the journal library, answers the statements and tokens that
+//! belong to the journals (statements 10-18, tokens 0x20, 0x2d, 0x2e) and
+//! passes everything else to the [`Game`].
+
+use serde::{Deserialize, Serialize};
+
+use super::engine::{Engine, Host};
+use super::Image;
+use crate::journal::Story;
+use crate::journal_library::{self, Library, Published};
+
+/// The game side: the engine's hooks plus what the journals need.
+pub trait Game: Host {
+    /// F922: a uniform draw below `bound` from the shared pair.
+    fn bounded(&mut self, _bound: u32) -> u32 {
+        0
+    }
+    /// F1530: advance the shared pair, returning its first word.
+    fn advance(&mut self) -> i32 {
+        0
+    }
+    /// A console line (F89's `0xa600`).
+    fn post(&mut self, _text: &str) {}
+}
+
+/// The persisted script and journal state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Scripts {
+    pub engine: Engine,
+    pub library: Library,
+}
+
+/// The engine's host while scripts run: journal statements are answered
+/// here, everything else goes to the game.
+struct Bridge<'a> {
+    library: &'a mut Library,
+    game: &'a mut dyn Game,
+    today: u32,
+}
+
+struct Draws<'a> {
+    game: &'a mut dyn Game,
+    globals: &'a [i32],
+}
+
+impl journal_library::Context for Draws<'_> {
+    fn global(&mut self, index: usize) -> i32 {
+        self.globals.get(index).copied().unwrap_or(0)
+    }
+    fn bounded(&mut self, bound: u32) -> u32 {
+        self.game.bounded(bound)
+    }
+    fn advance(&mut self) -> i32 {
+        self.game.advance()
+    }
+}
+
+impl Host for Bridge<'_> {
+    fn player(&mut self, case: i32) -> i32 {
+        self.game.player(case)
+    }
+    fn set_player(&mut self, case: i32, value: i32) {
+        self.game.set_player(case, value);
+    }
+    fn random(&mut self) -> u32 {
+        self.game.random()
+    }
+    fn query(&mut self, token: u8, args: &[i32]) -> i32 {
+        let arg = |n: usize| args.get(n).copied().unwrap_or(0);
+        let mut draws = Draws {
+            game: &mut *self.game,
+            globals: &[],
+        };
+        match token {
+            0x20 => i32::from(self.library.in_issue(arg(0), arg(1))),
+            0x2d => self.library.random_word(arg(0), &mut draws),
+            0x2e => self
+                .library
+                .article_word(arg(0), arg(1), arg(2), &mut draws),
+            _ => self.game.query(token, args),
+        }
+    }
+    fn assign(&mut self, token: u8, args: &[i32], value: i32) -> Option<(i32, i32, i32)> {
+        self.game.assign(token, args, value)
+    }
+    fn statement(&mut self, opcode: u8, args: &[i32], text: &[u8]) -> i32 {
+        let arg = |n: usize| args.get(n).copied().unwrap_or(0);
+        let library = &mut *self.library;
+        match opcode {
+            10 => library.create(
+                text,
+                arg(0),
+                arg(1) as u32,
+                arg(2) as u32,
+                arg(3) as u32,
+                self.today,
+            ),
+            11 => {
+                library.set_delivered(arg(0), true);
+                0
+            }
+            12 => {
+                library.set_delivered(arg(0), false);
+                0
+            }
+            13 => {
+                library.end(arg(0));
+                0
+            }
+            14 => {
+                library.queue(arg(0), arg(1), arg(2), 0, 0);
+                0
+            }
+            15 => {
+                library.remove(arg(0), arg(1));
+                0
+            }
+            16 => {
+                library.replace(arg(0), arg(1), arg(2));
+                0
+            }
+            17 => {
+                library.subscribe(arg(0), arg(1) as u32, self.today);
+                0
+            }
+            18 => {
+                library.unsubscribe(arg(0));
+                0
+            }
+            _ => self.game.statement(opcode, args, text),
+        }
+    }
+}
+
+impl Scripts {
+    pub fn new(image: &Image) -> Self {
+        Self {
+            engine: Engine::new(image),
+            library: Library::default(),
+        }
+    }
+
+    fn bridge<'a>(library: &'a mut Library, game: &'a mut dyn Game, today: u32) -> Bridge<'a> {
+        Bridge {
+            library,
+            game,
+            today,
+        }
+    }
+
+    /// Raise the scripts' event 7 for each published article and post its
+    /// notice.
+    fn announce(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        published: Vec<Published>,
+    ) -> Result<(), String> {
+        for issue in published {
+            let mut bridge = Self::bridge(&mut self.library, game, today);
+            self.engine.raise(
+                image,
+                &mut bridge,
+                journal_library::EVENT_PUBLISHED,
+                issue.journal as i32,
+                issue.article,
+            )?;
+            if let Some(notice) = issue.notice {
+                game.post(&notice);
+            }
+        }
+        Ok(())
+    }
+
+    /// F57's new-game message (4): F55 starts mission 0, then F68 publishes
+    /// each journal's first issue.
+    pub fn new_game(
+        &mut self,
+        image: &Image,
+        stories: &[Story],
+        game: &mut dyn Game,
+        today: u32,
+        docked: bool,
+    ) -> Result<(), String> {
+        self.engine.clear();
+        self.library.reset();
+        {
+            let mut bridge = Self::bridge(&mut self.library, game, today);
+            self.engine.new_game(image, &mut bridge)?;
+        }
+        let published = {
+            let mut draws = Draws {
+                game: &mut *game,
+                globals: &self.engine.globals,
+            };
+            self.library.start(stories, today, docked, &mut draws)
+        };
+        self.announce(image, game, today, published)
+    }
+
+    /// The daily message (15): F59's day ticks, then F90's issues.
+    pub fn daily(
+        &mut self,
+        image: &Image,
+        stories: &[Story],
+        game: &mut dyn Game,
+        today: u32,
+        docked: bool,
+    ) -> Result<(), String> {
+        {
+            let mut bridge = Self::bridge(&mut self.library, game, today);
+            self.engine.day_ticks(image, &mut bridge, today)?;
+        }
+        let published = {
+            let mut draws = Draws {
+                game: &mut *game,
+                globals: &self.engine.globals,
+            };
+            self.library.daily(stories, today, docked, &mut draws)
+        };
+        self.announce(image, game, today, published)
+    }
+
+    /// F60 each frame: the time ticks.
+    pub fn time(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        tics: u32,
+    ) -> Result<(), String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.time_ticks(image, &mut bridge, today, tics)
+    }
+
+    /// F90's docking message (5).
+    pub fn docked(&mut self) {
+        self.library.docked();
+    }
+
+    /// F48 from the game: a game event the scripts may be waiting on.
+    pub fn raise(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        event: i32,
+        a: i32,
+        b: i32,
+    ) -> Result<(), String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.raise(image, &mut bridge, event, a, b)
+    }
+}

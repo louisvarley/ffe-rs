@@ -1165,6 +1165,11 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-11-03",
       remaining: 91,
+      note: "gameplay-41 progress: the mission-script interpreter is ported (expressions, assignments, all 61 statements' operands, event subscriptions, the scheduler and the time/day ticks), and the journal scheduler with it (cache v33 adds the 170 stories). On the real scripts a new game starts 20 mission instances, creates the Imperial Herald, Federal Times, RIG, Frontier News and Universal Scientist, and the daily ticks publish their issues with the original's notices. Still to do: the game hooks the other statements need, saves, the journal viewer and F76's article macros."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
       note: "Stashed 2026-10-28/29 work re-applied on main: opcode 17 beams and Saturn's ring are drawn (visible-14/15 added and done, so the count is unchanged); F750's under-attack and F941's incoming-missile alerts, the original's quieter combat log, X for the escape capsule (brake on B), the Modern intro/gravestone through the presenter, no dust while dying, the upscaled console panel and the FFED3D .X reader (ffe-tools inspect-ffed3d). The port's older hostile-engagement AI and safe-system pirate chance were left out in favour of PAR-15/PAR-17."
     }
   ]

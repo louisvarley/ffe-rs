@@ -751,6 +751,73 @@ fn relocations(bytes: &[u8]) -> Result<std::collections::BTreeSet<u32>, String> 
     Ok(found)
 }
 
+/// The journal stories (cache v33): `DATA_002280`'s `count` 16-byte entries
+/// (type, pointer or article, rows or journal, `u16` priority and flags),
+/// each type 0 grid read through its pointer.
+pub fn decode_journal_stories(
+    bytes: &[u8],
+    rva: u32,
+    count: usize,
+) -> Result<EmbeddedTable, String> {
+    use ffe_core::journal::{decode_stories, encode_stories, Story, ARTICLES};
+    let section = DataSection::parse(bytes)?;
+    let first = section.offset(rva, 16 * count)?;
+    let article = |value: i32, what: &str| -> Result<i32, String> {
+        if value == -1 || (0..ARTICLES as i32).contains(&value) {
+            Ok(value)
+        } else {
+            Err(format!("journal story {what} names article {value}"))
+        }
+    };
+    let mut stories = Vec::with_capacity(count);
+    for index in 0..count {
+        let at = first + 16 * index;
+        let kind = dword(bytes, at)?;
+        let value = dword(bytes, at + 4)?;
+        let second = dword(bytes, at + 8)? as i32;
+        let priority = word(bytes, at + 12)?;
+        let flags = word(bytes, at + 14)?;
+        stories.push(match kind {
+            0 => {
+                let rows = usize::try_from(second)
+                    .ok()
+                    .filter(|rows| (1..=64).contains(rows))
+                    .ok_or_else(|| format!("journal story {index} has {second} rows"))?;
+                let grid_rva = value
+                    .checked_sub(section.image_base)
+                    .ok_or_else(|| format!("journal story {index} grid is not an address"))?;
+                let grid = section.offset(grid_rva, 20 * rows)?;
+                let mut out = Vec::with_capacity(rows);
+                for row in 0..rows {
+                    let mut slots = [0i32; 5];
+                    for (slot, cell) in slots.iter_mut().enumerate() {
+                        *cell = article(dword(bytes, grid + 20 * row + 4 * slot)? as i32, "grid")?;
+                    }
+                    out.push(slots);
+                }
+                Story::Grid {
+                    rows: out,
+                    priority,
+                    flags,
+                }
+            }
+            1 => Story::Single {
+                article: article(value as i32, "single")?,
+                journal: second,
+                priority,
+                flags,
+            },
+            other => return Err(format!("journal story {index} has type {other}")),
+        });
+    }
+    let encoded = encode_stories(&stories);
+    decode_stories(&encoded)?;
+    Ok(EmbeddedTable {
+        source_offset: first,
+        bytes: encoded,
+    })
+}
+
 /// The mission scripts (cache v32): the region `start..table + 4 * count`
 /// that holds the script graph and `DATA_001697`'s `count` struct pointers,
 /// with every relocated pointer rewritten (see [`ffe_core::script`]). The

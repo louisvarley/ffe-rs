@@ -1,7 +1,11 @@
 # The ship library's journals (MISSION.DAT)
 
-Status (2026-11-03): **archive imported (cache v31); viewer and macros not
-ported.** The port's `Screen::Journal` is still the contract log
+Status (2026-11-03): **archive (v31) and stories (v33) imported; the
+scheduler is ported (`ffe_core::journal_library`, driven by the scripts
+through `ffe_core::script::run::Scripts`); the viewer, F76's macros and the
+game wiring are not done yet.** On the real data a new game creates the five
+journals and 120 days of daily messages publish 20 issues
+(`tests/mission_scripts.rs`). The port's `Screen::Journal` is still the contract log
 (`docs/notes/missions.md`).
 
 ## Archive

@@ -21,6 +21,7 @@
 use std::collections::BTreeSet;
 
 pub mod engine;
+pub mod run;
 
 /// Asset magic.
 pub const MAGIC: &[u8; 4] = b"FFSC";

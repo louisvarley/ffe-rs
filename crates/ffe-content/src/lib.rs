@@ -152,6 +152,12 @@ pub enum AssetKind {
         missions: u32,
         source_offset: u64,
     },
+    /// The journal stories (`DATA_002280`; v33), in
+    /// [`ffe_core::journal::decode_stories`]' layout.
+    JournalStories {
+        stories: u32,
+        source_offset: u64,
+    },
     /// The galaxy map's star light-point tables (`DATA_007820`, `7821`, `7822`, `7828`; v23).
     StarPointTables {
         source_offset: u64,
@@ -307,7 +313,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=32) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=33) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -418,6 +424,10 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         if manifest.format_version < 32 && matches!(record.asset, AssetKind::MissionScripts { .. })
         {
             return Err("The mission scripts require cache v32.".to_owned());
+        }
+        if manifest.format_version < 33 && matches!(record.asset, AssetKind::JournalStories { .. })
+        {
+            return Err("The journal stories require cache v33.".to_owned());
         }
         if manifest.format_version < 22 && matches!(record.asset, AssetKind::SystemStrings { .. }) {
             return Err("The system strings require cache v22.".to_owned());
@@ -742,6 +752,15 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::MessageStrings { .. } => {
             ffe_core::message_strings::Messages::new(bytes)?;
+        }
+        AssetKind::JournalStories { stories, .. } => {
+            let decoded = ffe_core::journal::decode_stories(bytes)?;
+            if decoded.len() != *stories as usize {
+                return Err(format!(
+                    "journal holds {} stories, not {stories}",
+                    decoded.len()
+                ));
+            }
         }
         AssetKind::MissionScripts { missions, .. } => {
             let image = ffe_core::script::Image::new(bytes)?;
