@@ -3537,6 +3537,44 @@ impl Navigator {
         Ok(missions::offer(&post, &world))
     }
 
+    /// Run `f` with the bulletin board's view of station `index`'s system
+    /// (names, allegiance, destinations), as the adverts and the scripts'
+    /// texts expand against it.
+    pub fn with_world<R>(
+        &self,
+        cache: &VerifiedCache,
+        index: usize,
+        f: impl FnOnce(&bulletin::World<'_>) -> R,
+    ) -> Result<R, String> {
+        let code = self.entries[self.current].params.code;
+        let blob = cache
+            .asset("base:world/system-tables")
+            .ok_or("this cache has no system tables (cache v15)")?;
+        let tables = Tables::new(blob)?;
+        let details = tables.details(code);
+        let market = tables.market(code);
+        let name = self.system_name().to_owned();
+        let station_name = self
+            .bodies
+            .get(index)
+            .map(|body| body.name.clone())
+            .unwrap_or_default();
+        let destinations = self.offers_destinations(cache);
+        let names_bytes = cache.asset("base:text/names");
+        let names = names_bytes.and_then(|bytes| Names::new(bytes).ok());
+        let world = bulletin::World {
+            code,
+            name: &name,
+            population: market.population,
+            danger: market.danger,
+            allegiance: (details.allegiance >> 6) as u16,
+            station_name: &station_name,
+            destinations: &destinations,
+            names: names.as_ref(),
+        };
+        Ok(f(&world))
+    }
+
     /// F493/F494/F623/F629-F632's military package list for a station. The
     /// source stores `DATA_009004`; the port regenerates it deterministically
     /// from the station, system and game day, so the same day shows the same

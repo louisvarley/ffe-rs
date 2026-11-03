@@ -132,3 +132,29 @@ statements and tokens the real scripts use, to order the game hooks:
 So after the journals the next hooks are the station conversation UI the
 scripted adverts use (F331 adverts, F342/F326 menus, F345-F349 responses
 and pages, F352 console lines, the 0x24/0x23/0x2d text buffer).
+
+## Station menus (wired 2026-11-03)
+
+The engine keeps the station menu the scripts drive (`script::menu`):
+F331/F332 open a screen (`DATA_009054`, title `9052`, words
+`9056/9057/9061`), F345/F346 add entries (F346 at F921's index seeded by
+the code), F347 sets the header, F349/F352 post console lines, F360 selects
+(codes 0x9800-0x9873 go to the station's own handlers, everything else is
+written to globals 1-3 and 0), and F326 rebuilds the current screen: the
+bulletin board (F453) clears the menu (F331/F342's signal 2), takes the
+station's adverts and signals 1 so the scripts add theirs; the military
+office (F493) signals 3; screens 1 and 11 (F541) only redraw.
+
+In the playable the bulletin board lists the station's adverts and then the
+scripts'; choosing a script advert runs F360, and a screen the scripts open
+is the new `Screen::Script` page (layout row 1, their title and responses);
+their console lines use the log source `Script`. "Hang up." (0x983f) goes
+back to the bulletin board (its handler in `DATA_005288` is inferred from
+the neighbouring entries). Leaving the station closes the scripts' screen
+(F339). `tests/station_view.rs script_adverts_and_conversation_frames`
+draws the board with the new game's script adverts and a journal
+subscription conversation.
+
+Not yet: the station's own entries are not passed to the scripts
+(`Host::native_entries`), the other station screens do not signal the
+scripts, and the object/ship statements and F76's article macros remain.

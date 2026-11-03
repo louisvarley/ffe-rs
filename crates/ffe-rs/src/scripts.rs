@@ -145,3 +145,80 @@ pub fn issue_text(
         })
         .collect()
 }
+
+/// A script record's text: its code from the executable's message strings,
+/// with the record's words as the variables (F350/F329 expand them through
+/// F1344). Codes the cache does not hold show as their number.
+pub fn entry_text(
+    messages: &ffe_core::message_strings::Messages<'_>,
+    world: &ffe_core::bulletin::World<'_>,
+    entry: &ffe_core::script::menu::Entry,
+) -> String {
+    use ffe_core::bulletin::Var;
+    let Some(bytes) = u16::try_from(entry.code)
+        .ok()
+        .and_then(|code| messages.get(code))
+    else {
+        return format!("[{:#06x}]", entry.code);
+    };
+    let vars = entry.vars().map(|value| {
+        // An ffcode argument is another message: expand it as text.
+        match u16::try_from(value).ok().filter(|code| *code >= 0x8000) {
+            Some(code) => messages
+                .get(code)
+                .map(|text| Var::Text(String::from_utf8_lossy(text).into_owned()))
+                .unwrap_or(Var::Int(i64::from(value))),
+            None => Var::Int(i64::from(value)),
+        }
+    });
+    ffe_core::bulletin::render_bytes(bytes, &vars, world)
+}
+
+/// What a selection left for the game to do.
+#[derive(Debug, Default)]
+pub struct Outcome {
+    /// F349/F352's console lines, expanded.
+    pub lines: Vec<String>,
+    /// Station codes the scripts chose themselves (F360 on 0x98xx).
+    pub native: Vec<i32>,
+}
+
+/// Collect the scripts' console lines and native selections.
+pub fn drain(
+    scripts: &mut Scripts,
+    messages: &ffe_core::message_strings::Messages<'_>,
+    world: &ffe_core::bulletin::World<'_>,
+) -> Outcome {
+    let menu = &mut scripts.engine.menu;
+    Outcome {
+        lines: menu
+            .lines
+            .drain(..)
+            .map(|line| entry_text(messages, world, &line.entry))
+            .collect(),
+        native: menu.selected.drain(..).map(|entry| entry.code).collect(),
+    }
+}
+
+/// Run `f` on the flight's scripts with hooks over the flight and the
+/// navigator, collecting their console posts. `None` when the flight has no
+/// scripts.
+pub fn with_hooks<R>(
+    state: &mut crate::flight::Flight,
+    nav: &mut crate::navigation::Navigator,
+    f: impl FnOnce(&mut Scripts, &mut Hooks<'_>, u32) -> R,
+) -> Option<(R, Vec<String>)> {
+    let clock = nav.clock();
+    let system = nav.current_code();
+    let scripts = state.scripts.as_mut()?;
+    let mut posts = Vec::new();
+    let mut hooks = Hooks {
+        credits: &mut state.credits,
+        random: &mut nav.random,
+        system,
+        clock,
+        posts: &mut posts,
+    };
+    let result = f(scripts, &mut hooks, absolute_day(clock));
+    Some((result, posts))
+}

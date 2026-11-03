@@ -48,10 +48,13 @@ pub enum Screen {
     /// F490/F491/F493's military mission list: the package offers from
     /// F623/F629-F632. Reachable from the 0x9827/0x9828 recruitment ads.
     Military,
+    /// A screen the mission scripts opened (F331): their title, header and
+    /// response entries on the comms layout (`docs/notes/mission-scripts.md`).
+    Script,
 }
 
 impl Screen {
-    pub const ALL: [Screen; 11] = [
+    pub const ALL: [Screen; 12] = [
         Screen::Services,
         Screen::Shipyard,
         Screen::Market,
@@ -63,6 +66,7 @@ impl Screen {
         Screen::Journal,
         Screen::Comms,
         Screen::Military,
+        Screen::Script,
     ];
 }
 
@@ -449,6 +453,14 @@ pub fn layout(screen: Screen) -> Layout {
             buttons: 2,
             back: false,
         },
+        // Layout row 1 (F343's comms): ten-pixel rows with one button; the
+        // scripts' own entries ("Hang up.") are the way out.
+        Screen::Script => Layout {
+            pitch: 10,
+            entry_x: 140,
+            buttons: 1,
+            back: false,
+        },
         Screen::Upgrades => Layout {
             pitch: 10,
             entry_x: 152,
@@ -493,6 +505,8 @@ pub fn title(screen: Screen, station: &str) -> String {
         Screen::Comms => "Communications",
         // F493's list page follows the 0x9908/0x9909 HQ page.
         Screen::Military => "Military Missions",
+        // The scripts' title code is expanded by the caller.
+        Screen::Script => "",
     };
     match screen {
         Screen::Journal | Screen::Comms | Screen::Military => name.to_owned(),
@@ -669,7 +683,7 @@ impl DockState {
     pub fn back(&mut self) {
         self.open(match self.screen {
             Screen::Upgrades | Screen::Repairs | Screen::Ships | Screen::Police => Screen::Shipyard,
-            Screen::Military => Screen::Bulletin,
+            Screen::Military | Screen::Script => Screen::Bulletin,
             Screen::Services => Screen::Services,
             _ => Screen::Services,
         });
@@ -874,6 +888,8 @@ pub fn row_count(
     match screen {
         Screen::Services => SERVICES.len(),
         Screen::Shipyard => SHIPYARD.len(),
+        // The caller passes the scripts' entry count as the board's rows.
+        Screen::Script => bulletin_rows,
         Screen::Bulletin => bulletin_rows,
         Screen::Market => market_rows,
         Screen::Upgrades => upgrade_rows,
@@ -898,6 +914,7 @@ pub fn is_prompt(text: &str) -> bool {
 pub fn hint(screen: Screen, bulletin_rows: usize, ship_rows: usize) -> &'static str {
     match screen {
         Screen::Services | Screen::Shipyard => SERVICES_HINT,
+        Screen::Script => "",
         Screen::Market => MARKET_HINT,
         Screen::Upgrades => UPGRADES_HINT,
         Screen::Ships => {

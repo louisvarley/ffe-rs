@@ -1313,6 +1313,11 @@ fn run() -> Result<(), String> {
     let mut pending_log = PendingLog::default();
     // The mission scripts and journals (cache v33; older caches have none).
     let script_assets = ffe_rs::scripts::Assets::load(&cache);
+    let script_messages = cache
+        .asset("base:text/messages")
+        .and_then(|bytes| ffe_core::message_strings::Messages::new(bytes).ok());
+    let mut last_dock_screen: Option<StationScreen> = None;
+    let mut reopen_board = false;
 
     let mut last_prompt = String::new();
     // `player+0xc6` bit 1: F1008's micrometeorite warning has been given.
@@ -1968,6 +1973,10 @@ fn run() -> Result<(), String> {
                         }
                     }
                     if let Some(scripts) = state.scripts.as_mut() {
+                        // F339: leaving the station closes the scripts' screen.
+                        if !docked {
+                            scripts.engine.menu.active = false;
+                        }
                         if let Err(error) =
                             ffe_rs::scripts::days(scripts, assets, &mut hooks, &crossed, docked)
                         {
@@ -3863,6 +3872,64 @@ fn run() -> Result<(), String> {
                     } else {
                         Vec::new()
                     };
+                    // The mission scripts' station menu: F453 signals the
+                    // scripts when the bulletin board opens, their console
+                    // lines go to the log, and a screen they open (F331) is
+                    // shown as the conversation page.
+                    let docked_at = nav.as_ref().and_then(|nav| nav.docked);
+                    if let (Some(nav), Some(station)) = (nav.as_mut(), docked_at) {
+                        if let Some(assets) = script_assets.as_ref() {
+                            if dock.screen == StationScreen::Bulletin
+                                && (last_dock_screen != Some(StationScreen::Bulletin)
+                                    || reopen_board)
+                            {
+                                reopen_board = false;
+                                if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
+                                    &mut state,
+                                    nav,
+                                    |scripts, hooks, today| {
+                                        scripts.open_screen(&assets.image, hooks, today, 2)
+                                    },
+                                ) {
+                                    eprintln!("mission scripts: {error}");
+                                }
+                            }
+                            if let (Some(scripts), Some(messages)) =
+                                (state.scripts.as_mut(), script_messages.as_ref())
+                            {
+                                let outcome = nav
+                                    .with_world(&cache, station, |world| {
+                                        ffe_rs::scripts::drain(scripts, messages, world)
+                                    })
+                                    .unwrap_or_default();
+                                for line in outcome.lines {
+                                    pending_log.add(Source::Script, line);
+                                }
+                                for code in outcome.native {
+                                    // 0x983f "Hang up.": back to the board.
+                                    if code == 0x983f {
+                                        scripts.engine.menu.active = false;
+                                        dock.open(StationScreen::Bulletin);
+                                        reopen_board = true;
+                                    }
+                                }
+                                let menu = &scripts.engine.menu;
+                                if menu.active && !(2..=8).contains(&menu.screen) {
+                                    if dock.screen != StationScreen::Script {
+                                        dock.open(StationScreen::Script);
+                                    }
+                                } else if dock.screen == StationScreen::Script {
+                                    dock.open(StationScreen::Bulletin);
+                                    reopen_board = true;
+                                }
+                            }
+                        }
+                    }
+                    last_dock_screen = Some(dock.screen);
+                    let script_entries = state
+                        .scripts
+                        .as_ref()
+                        .map_or(0, |scripts| scripts.engine.menu.entries.len());
                     // F622/F633's BBS and hull stock. Both are generated once
                     // per station and brought up to the day; the buy updates
                     // the same list.
@@ -3882,6 +3949,13 @@ fn run() -> Result<(), String> {
                             }
                         },
                         None => (0, 0),
+                    };
+                    // The scripts' entries follow the station's adverts; on
+                    // the conversation page they are the whole list.
+                    let bulletin_rows = match dock.screen {
+                        StationScreen::Bulletin => bulletin_rows + script_entries,
+                        StationScreen::Script => script_entries,
+                        _ => bulletin_rows,
                     };
                     let journal_rows = state.missions.journal.len();
                     let comms_rows = state.missions.pages.len();
@@ -3989,7 +4063,10 @@ fn run() -> Result<(), String> {
                                     dock_action = Some(StationAction::BuyShip { row: index });
                                 } else if dock.screen == StationScreen::Police {
                                     dock_action = Some(police_action(nav.as_ref()));
-                                } else if dock.screen == StationScreen::Bulletin {
+                                } else if matches!(
+                                    dock.screen,
+                                    StationScreen::Bulletin | StationScreen::Script
+                                ) {
                                     dock_action = Some(StationAction::Post { row: index });
                                 } else if dock.screen == StationScreen::Comms {
                                     dock_action = Some(StationAction::ReadPage { row: index });
@@ -4013,7 +4090,10 @@ fn run() -> Result<(), String> {
                             dock_action = Some(StationAction::Repair { row: dock.selected });
                         } else if dock.screen == StationScreen::Ships {
                             dock_action = Some(StationAction::BuyShip { row: dock.selected });
-                        } else if dock.screen == StationScreen::Bulletin {
+                        } else if matches!(
+                            dock.screen,
+                            StationScreen::Bulletin | StationScreen::Script
+                        ) {
                             dock_action = Some(StationAction::Post { row: dock.selected });
                         } else if dock.screen == StationScreen::Comms {
                             dock_action = Some(StationAction::ReadPage { row: dock.selected });
@@ -4045,7 +4125,10 @@ fn run() -> Result<(), String> {
                                         dock_action = Some(StationAction::Repair { row: index });
                                     } else if dock.screen == StationScreen::Police {
                                         dock_action = Some(police_action(nav.as_ref()));
-                                    } else if dock.screen == StationScreen::Bulletin {
+                                    } else if matches!(
+                                        dock.screen,
+                                        StationScreen::Bulletin | StationScreen::Script
+                                    ) {
                                         dock.selected = index;
                                         dock_action = Some(StationAction::Post { row: index });
                                     } else if dock.screen == StationScreen::Military {
@@ -4321,7 +4404,38 @@ fn run() -> Result<(), String> {
                             // the advertisement is cleared and F290/F349's page
                             // is written; any other advertisement is shown.
                             let station = nav.as_ref().and_then(|nav| nav.docked);
-                            if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
+                            // The scripts' entries follow the station's adverts
+                            // (and fill the conversation page): F361/F360.
+                            let posts = match (nav.as_mut(), station) {
+                                (Some(nav), Some(station)) => nav
+                                    .station_offers(&cache, station)
+                                    .map_or(0, |offers| offers.posts.len()),
+                                _ => 0,
+                            };
+                            let script_row = match dock.screen {
+                                StationScreen::Script => Some(row),
+                                StationScreen::Bulletin => row.checked_sub(posts),
+                                _ => None,
+                            };
+                            let script_entry = script_row.and_then(|index| {
+                                state.scripts.as_ref().and_then(|scripts| {
+                                    scripts.engine.menu.entries.get(index).copied()
+                                })
+                            });
+                            if let (Some(entry), Some(assets), Some(nav)) =
+                                (script_entry, script_assets.as_ref(), nav.as_mut())
+                            {
+                                sound.play(Cue::Message);
+                                if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
+                                    &mut state,
+                                    nav,
+                                    |scripts, hooks, today| {
+                                        scripts.select(&assets.image, hooks, today, entry)
+                                    },
+                                ) {
+                                    eprintln!("mission scripts: {error}");
+                                }
+                            } else if let (Some(nav), Some(station)) = (nav.as_mut(), station) {
                                 let day = nav.day();
                                 let code = nav.current_system_code();
                                 let system = nav.system_name().to_owned();
@@ -6996,14 +7110,24 @@ fn run() -> Result<(), String> {
                             .station_offers(&cache, station)
                             .map(|offers| offers.posts.clone())
                             .unwrap_or_default();
+                        // The scripts' adverts (F453's signal) follow the station's.
+                        let mut texts: Vec<String> =
+                            posts.iter().map(|post| post.text.clone()).collect();
+                        texts.extend(script_texts(
+                            &state,
+                            nav,
+                            &cache,
+                            station,
+                            script_messages.as_ref(),
+                        ));
                         let visible = station::layout(StationScreen::Bulletin).visible();
-                        dock.selected = dock.selected.min(posts.len().saturating_sub(1));
-                        dock.scroll = dock.scroll.min(posts.len().saturating_sub(visible));
-                        let rows = posts
+                        dock.selected = dock.selected.min(texts.len().saturating_sub(1));
+                        dock.scroll = dock.scroll.min(texts.len().saturating_sub(visible));
+                        let rows = texts
                             .iter()
                             .skip(dock.scroll)
-                            .map(|post| ffe_rs::station::DockRow {
-                                main: post.text.clone(),
+                            .map(|text| ffe_rs::station::DockRow {
+                                main: text.clone(),
                                 detail: None,
                                 columns: Vec::new(),
                                 fitted: false,
@@ -7016,7 +7140,49 @@ fn run() -> Result<(), String> {
                             status,
                             scroll: dock.scroll,
                             selected: dock.selected,
-                            total: posts.len(),
+                            total: texts.len(),
+                        });
+                    } else if dock.screen == StationScreen::Script {
+                        // F541/F540: the scripts' screen with their title and
+                        // response entries.
+                        let texts =
+                            script_texts(&state, nav, &cache, station, script_messages.as_ref());
+                        let title = match (state.scripts.as_ref(), script_messages.as_ref()) {
+                            (Some(scripts), Some(messages)) => {
+                                let menu = &scripts.engine.menu;
+                                let entry = ffe_core::script::menu::Entry {
+                                    code: menu.title,
+                                    words: menu.words,
+                                    ..Default::default()
+                                };
+                                nav.with_world(&cache, station, |world| {
+                                    ffe_rs::scripts::entry_text(messages, world, &entry)
+                                })
+                                .unwrap_or_default()
+                            }
+                            _ => String::new(),
+                        };
+                        let visible = station::layout(StationScreen::Script).visible();
+                        dock.selected = dock.selected.min(texts.len().saturating_sub(1));
+                        dock.scroll = dock.scroll.min(texts.len().saturating_sub(visible));
+                        let rows = texts
+                            .iter()
+                            .skip(dock.scroll)
+                            .map(|text| ffe_rs::station::DockRow {
+                                main: text.clone(),
+                                detail: None,
+                                columns: Vec::new(),
+                                fitted: false,
+                            })
+                            .collect();
+                        screen.dock = Some(ffe_rs::station::DockView {
+                            screen: dock.screen,
+                            title,
+                            rows,
+                            status,
+                            scroll: dock.scroll,
+                            selected: dock.selected,
+                            total: texts.len(),
                         });
                     } else if dock.screen == StationScreen::Military {
                         let day = nav.day();
@@ -8650,4 +8816,28 @@ fn main() {
         }
         std::process::exit(2);
     }
+}
+
+/// The scripts' menu entries as text (the bulletin board's script adverts or
+/// the conversation page's responses).
+fn script_texts(
+    state: &Flight,
+    nav: &Navigator,
+    cache: &ffe_content::VerifiedCache,
+    station: usize,
+    messages: Option<&ffe_core::message_strings::Messages<'_>>,
+) -> Vec<String> {
+    let (Some(scripts), Some(messages)) = (state.scripts.as_ref(), messages) else {
+        return Vec::new();
+    };
+    nav.with_world(cache, station, |world| {
+        scripts
+            .engine
+            .menu
+            .entries
+            .iter()
+            .map(|entry| ffe_rs::scripts::entry_text(messages, world, entry))
+            .collect()
+    })
+    .unwrap_or_default()
 }

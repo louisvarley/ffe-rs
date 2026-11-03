@@ -93,10 +93,12 @@ pub enum Source {
     Ship,
     /// F89's new-issue notice (0xa600) for the ship library's journals.
     Journal,
+    /// F349/F352: a console line the mission scripts post.
+    Script,
 }
 
 impl Source {
-    pub const ALL: [Source; 13] = [
+    pub const ALL: [Source; 14] = [
         Source::Autopilot,
         Source::Target,
         Source::Navigation,
@@ -110,6 +112,7 @@ impl Source {
         Source::Station,
         Source::Ship,
         Source::Journal,
+        Source::Script,
     ];
 
     /// The DOS FFE label/line that writes the entry.
@@ -128,6 +131,7 @@ impl Source {
             Source::Station => "F343/F327 station screen prompt (docs/notes/station.md)",
             Source::Ship => "F1008/F1097 undercarriage warning 0x98ce (ffe.asm:74772)",
             Source::Journal => "F89 0xa600 new journal issue (ffe.asm:11420)",
+            Source::Script => "F349/F352 mission-script console line (ffe.asm:27059)",
         }
     }
 }
@@ -768,7 +772,7 @@ mod tests {
 
     #[test]
     fn every_source_has_a_dos_citation() {
-        assert_eq!(Source::ALL.len(), 13);
+        assert_eq!(Source::ALL.len(), 14);
         for source in Source::ALL {
             let citation = source.citation();
             assert!(!citation.is_empty(), "{source:?} has no citation");

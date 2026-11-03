@@ -1175,6 +1175,11 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-11-03",
       remaining: 91,
+      note: "gameplay-41 progress: the scripted adverts and conversations reach the station screens. The engine keeps the station menu the scripts drive (F331/F332, F345-F347, F349/F352, F360, F326), the bulletin board lists the scripts' adverts after the station's (the journal subscription offers and the special jobs on a new game), and choosing one opens their conversation page; the journal subscription conversation charges and replies as in the original. Next: the station's other signals, ship/object statements and the journal viewer."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
       note: "Stashed 2026-10-28/29 work re-applied on main: opcode 17 beams and Saturn's ring are drawn (visible-14/15 added and done, so the count is unchanged); F750's under-attack and F941's incoming-missile alerts, the original's quieter combat log, X for the escape capsule (brake on B), the Modern intro/gravestone through the presenter, no dust while dying, the upscaled console panel and the FFED3D .X reader (ffe-tools inspect-ffed3d). The port's older hostile-engagement AI and safe-system pirate chance were left out in favour of PAR-15/PAR-17."
     }
   ]

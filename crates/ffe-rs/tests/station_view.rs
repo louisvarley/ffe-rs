@@ -1034,3 +1034,155 @@ fn default_start_services_board_is_old_blackelk() {
     );
     save(&screen, "start-services-ours.ppm");
 }
+
+/// The scripts on the station screens: the new game's bulletin board with
+/// the scripts' adverts after the station's, then the journal subscription
+/// conversation they open (`script-board.ppm`, `script-conversation.ppm`).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn script_adverts_and_conversation_frames() {
+    let cache = cache();
+    let assets = ffe_rs::scripts::Assets::load(&cache).expect("cache v33");
+    let messages =
+        ffe_core::message_strings::Messages::new(cache.asset("base:text/messages").unwrap())
+            .unwrap();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let station = nav.docked.expect("the new game starts docked");
+    let mut state = Flight {
+        mode: Mode::Docked,
+        credits: 1_000_000,
+        ..Flight::default()
+    };
+    let posts: Vec<String> = nav
+        .station_offers(&cache, station)
+        .unwrap()
+        .posts
+        .iter()
+        .map(|post| post.text.clone())
+        .collect();
+    {
+        let clock = nav.clock();
+        let system = nav.current_code();
+        let mut posts_out = Vec::new();
+        let mut hooks = ffe_rs::scripts::Hooks {
+            credits: &mut state.credits,
+            random: &mut nav.random,
+            system,
+            clock,
+            posts: &mut posts_out,
+        };
+        state.scripts = Some(ffe_rs::scripts::new_game(&assets, &mut hooks, true).unwrap());
+    }
+    ffe_rs::scripts::with_hooks(&mut state, &mut nav, |scripts, hooks, today| {
+        scripts.open_screen(&assets.image, hooks, today, 2)
+    })
+    .unwrap()
+    .0
+    .unwrap();
+    let texts = |state: &Flight, nav: &Navigator| -> Vec<String> {
+        let scripts = state.scripts.as_ref().unwrap();
+        nav.with_world(&cache, station, |world| {
+            scripts
+                .engine
+                .menu
+                .entries
+                .iter()
+                .map(|entry| ffe_rs::scripts::entry_text(&messages, world, entry))
+                .collect()
+        })
+        .unwrap()
+    };
+    let script_rows = texts(&state, &nav);
+    println!(
+        "station posts {}, script adverts {script_rows:?}",
+        posts.len()
+    );
+    let offer_row = script_rows
+        .iter()
+        .position(|text| text.contains("subscription offer"))
+        .expect("a journal subscription advert");
+    let name = nav.bodies[station].name.clone();
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.system = nav.system_name().to_owned();
+    let all: Vec<String> = posts
+        .iter()
+        .cloned()
+        .chain(script_rows.iter().cloned())
+        .collect();
+    let rows = |texts: &[String]| -> Vec<DockRow> {
+        texts
+            .iter()
+            .map(|text| DockRow {
+                main: text.clone(),
+                detail: None,
+                columns: Vec::new(),
+                fitted: false,
+            })
+            .collect()
+    };
+    // Scroll to the scripts' adverts.
+    let visible = station::layout(StationScreen::Bulletin).visible();
+    let scroll = posts.len().min(all.len().saturating_sub(visible));
+    draw(
+        &mut screen,
+        Some(DockView {
+            screen: StationScreen::Bulletin,
+            title: station::title(StationScreen::Bulletin, &name),
+            rows: rows(&all[scroll..]),
+            status: station::Status::default(),
+            scroll,
+            selected: posts.len(),
+            total: all.len(),
+        }),
+        None,
+        "",
+    );
+    save(&screen, "script-board.ppm");
+    // Choose the subscription offer: the scripts open their conversation.
+    let offer = state.scripts.as_ref().unwrap().engine.menu.entries[offer_row];
+    ffe_rs::scripts::with_hooks(&mut state, &mut nav, |scripts, hooks, today| {
+        scripts.select(&assets.image, hooks, today, offer)
+    })
+    .unwrap()
+    .0
+    .unwrap();
+    let menu = state.scripts.as_ref().unwrap().engine.menu.clone();
+    assert!(menu.active);
+    assert_eq!(menu.screen, 1);
+    let title = nav
+        .with_world(&cache, station, |world| {
+            ffe_rs::scripts::entry_text(
+                &messages,
+                world,
+                &ffe_core::script::menu::Entry {
+                    code: menu.title,
+                    words: menu.words,
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap();
+    let responses = texts(&state, &nav);
+    let line = nav
+        .with_world(&cache, station, |world| {
+            ffe_rs::scripts::entry_text(&messages, world, &menu.lines.last().unwrap().entry)
+        })
+        .unwrap();
+    println!("title {title:?} responses {responses:?} line {line:?}");
+    assert_eq!(responses.len(), 5);
+    draw(
+        &mut screen,
+        Some(DockView {
+            screen: StationScreen::Script,
+            title,
+            rows: rows(&responses),
+            status: station::Status::default(),
+            scroll: 0,
+            selected: 0,
+            total: responses.len(),
+        }),
+        None,
+        &line,
+    );
+    save(&screen, "script-conversation.ppm");
+}
