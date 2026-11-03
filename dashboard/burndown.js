@@ -162,14 +162,14 @@ window.FFE_BURNDOWN = {
       tasks: [
         { id: "world-1", title: "Name generation (cname): types 1-0x14", status: "done", version: "v0.51g" },
         { id: "world-2", title: "System generation: stars, planets and station placement (csysgen)", status: "done", version: "v0.51i" },
-        { id: "world-3", title: "System object types and orbits (csystem)", status: "todo" },
+        { id: "world-3", title: "System object types and orbits (csystem)", status: "done" },
         { id: "world-4", title: "Galaxy generation and the RNG stream question (KNOWN_ISSUES F1476)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-5", title: "Planet surfaces and landing approach", status: "in-progress", version: "reopened-source-audit" },
         { id: "world-6", title: "Starports: services and events (cstarport)", status: "in-progress", version: "v0.73" },
         { id: "world-7", title: "Hyperspace jumps and arrival (chyper)", status: "in-progress", version: "galaxy-v21" },
         { id: "world-8", title: "Navigation: system and galaxy maps", status: "in-progress" },
         { id: "world-9", title: "Lighting by the local star (ships, stations, lift) and day/night", status: "in-progress", version: "v0.48k" },
-        { id: "world-10", title: "Multiple systems replay against the reference", status: "todo" },
+        { id: "world-10", title: "Multiple systems replay against the reference", status: "done" },
         { id: "world-11", title: "Terrain distance query and complex-shape collisions (F1876 mode 1, F576-F583), starports placed on planets", status: "done", version: "v0.51e" },
         { id: "world-12", title: "Surface landing 0x32/0x34, F1050/F1054 landed view and L takeoff", status: "done", version: "v0.68" },
         { id: "world-13", title: "Source model scale and near-surface radius/frame transitions", status: "in-progress", version: "reopened-source-audit" }
@@ -1113,6 +1113,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 95,
       note: "Message strings imported (content-2 in progress, cache v30): the ten string arrays behind the original's 0x8000+ message codes (1,284 strings, including every 0x98xx console message, the preference pages, mining and the bulletin board) come from the player's FIRSTENC.EXE, each table matched entry by entry against JJFFE. The journal and the remaining fonts are still open. CI was red on main from three lint warnings; fixed, and macOS added to CI."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 93,
+      note: "world-3 and world-10 done on the reference oracles (verify-world.py, re-run today on the v30 cache): F875/F878 system generation matches the executed original for 4,156 systems and 63,810 objects (4 non-terminating cases skipped), and F880's object creation with its orbits for 1,024 systems and 17,762 physics objects; both traces repeat and tampered rows are rejected. The body-update oracle covers the orbits advancing."
     }
   ]
 };
