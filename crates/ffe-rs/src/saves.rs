@@ -682,6 +682,59 @@ mod tests {
         loaded.validate().unwrap();
     }
 
+    /// Save migration (release-3): every field a later build added carries a
+    /// default, so the oldest version-2 save, written before any of them,
+    /// still loads. The test finds the optional fields (each loads when it
+    /// alone is missing), removes them all at once and loads the result.
+    #[test]
+    fn the_oldest_version_two_saves_still_load() {
+        let bytes = encode_game(&sample()).unwrap();
+        let full: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let mut optional = Vec::new();
+        for section in ["state", "navigation"] {
+            let keys: Vec<String> = full[section].as_object().unwrap().keys().cloned().collect();
+            for key in keys {
+                let mut trial = full.clone();
+                trial[section].as_object_mut().unwrap().remove(&key);
+                if decode_game(&serde_json::to_vec(&trial).unwrap()).is_ok() {
+                    optional.push((section, key));
+                }
+            }
+        }
+        // The fields added since the first version-2 saves are among them.
+        for added in [
+            "ships",
+            "traffic",
+            "random",
+            "deep_space",
+            "markets",
+            "world_epoch",
+        ] {
+            assert!(
+                optional
+                    .iter()
+                    .any(|(section, key)| *section == "navigation" && key == added),
+                "navigation.{added} is required"
+            );
+        }
+        for added in ["missions", "mining", "hull_heat", "loadout"] {
+            assert!(
+                optional
+                    .iter()
+                    .any(|(section, key)| *section == "state" && key == added),
+                "state.{added} is required"
+            );
+        }
+        let mut oldest = full.clone();
+        for (section, key) in &optional {
+            oldest[*section].as_object_mut().unwrap().remove(key);
+        }
+        let loaded = decode_game(&serde_json::to_vec(&oldest).unwrap())
+            .expect("a save without every later field loads");
+        loaded.validate().unwrap();
+        assert_eq!(loaded.version, VERSION);
+    }
+
     #[test]
     fn version_one_snapshots_migrate_and_default_the_new_fields() {
         let v1 = br#"{

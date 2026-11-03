@@ -323,7 +323,7 @@ window.FFE_BURNDOWN = {
       tasks: [
         { id: "release-1", title: "Full playthrough checkpoints against the reference", status: "todo" },
         { id: "release-2", title: "Linux and macOS builds", status: "todo" },
-        { id: "release-3", title: "Save and config migration", status: "todo" },
+        { id: "release-3", title: "Save and config migration", status: "done" },
         { id: "release-4", title: "Packaging and distribution audit", status: "todo" },
         { id: "release-5", title: "Clean-machine player-data import", status: "todo" },
         { id: "release-6", title: "Choose the Rust code licence", status: "todo" },
@@ -1103,6 +1103,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 96,
       note: "Saves keep station markets (PAR-20 in progress): stock after your trades, prices and the daily drift survive a save and load instead of being regenerated. Two cache tests broken by the shared random pair were fixed (effects kill damage, the recycled-ship pick)."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 95,
+      note: "Save and config migration done (release-3): version-1 snapshots migrate, the oldest version-2 save (every later field missing) loads, the old controls/display sidecars migrate into config.cfg, and launcher.cfg ignores unknown or bad lines; each has a test."
     }
   ]
 };
