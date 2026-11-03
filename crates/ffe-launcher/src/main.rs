@@ -28,19 +28,68 @@ const CANVAS: Vec2 = vec2(1536.0, 1024.0);
 const WARNING: Color32 = Color32::from_rgb(240, 190, 70);
 const FAILED: Color32 = Color32::from_rgb(255, 96, 80);
 
-fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Frontier: First Encounters (Elite 3) Launcher")
-            .with_inner_size([1152.0, 768.0])
-            .with_min_inner_size([768.0, 512.0]),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "ffe-rs Launcher",
-        options,
-        Box::new(|cc| Ok(Box::new(App::new(&cc.egui_ctx)))),
-    )
+/// The game's console output from the last launch.
+const GAME_LOG: &str = "last-run.log";
+/// The launcher's own errors (a Windows GUI program has no console).
+const LAUNCHER_LOG: &str = "launcher.log";
+
+fn main() {
+    // A GUI program on Windows has no console: a panic would vanish without
+    // a word. Log it beside the saves and show it.
+    std::panic::set_hook(Box::new(|info| {
+        let message = format!("The launcher stopped unexpectedly:\n\n{info}");
+        report_fatal(&message);
+    }));
+    // OpenGL first; Windows falls back to Direct3D 12 / Vulkan (wgpu) where
+    // no OpenGL 2 driver exists (virtual machines, Remote Desktop, basic
+    // display adapters).
+    #[cfg(windows)]
+    let renderers = [eframe::Renderer::Glow, eframe::Renderer::Wgpu];
+    #[cfg(not(windows))]
+    let renderers = [eframe::Renderer::Glow];
+    let mut failures = Vec::new();
+    for renderer in renderers {
+        let options = eframe::NativeOptions {
+            renderer,
+            viewport: egui::ViewportBuilder::default()
+                .with_title("Frontier: First Encounters (Elite 3) Launcher")
+                .with_inner_size([1152.0, 768.0])
+                .with_min_inner_size([768.0, 512.0])
+                .with_icon(draw::window_icon()),
+            ..Default::default()
+        };
+        match eframe::run_native(
+            "ffe-rs Launcher",
+            options,
+            Box::new(|cc| Ok(Box::new(App::new(&cc.egui_ctx)))),
+        ) {
+            Ok(()) => return,
+            Err(error) => failures.push(format!("{renderer}: {error}")),
+        }
+    }
+    report_fatal(&format!(
+        "The launcher could not open its window. Updating the graphics driver usually fixes this.\n\n{}",
+        failures.join("\n")
+    ));
+    std::process::exit(1);
+}
+
+/// Write `message` to `saves/launcher.log` and show it (a message box on
+/// Windows and macOS, standard error elsewhere).
+fn report_fatal(message: &str) {
+    let saves = config::find_root().join("saves");
+    let _ = std::fs::create_dir_all(&saves);
+    let _ = std::fs::write(saves.join(LAUNCHER_LOG), message);
+    eprintln!("{message}");
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        let _ = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("Frontier: First Encounters Launcher")
+            .set_description(message)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -208,7 +257,19 @@ impl App {
                 self.notice = Some(if status.success() {
                     (Level::Good, "The game has closed.".to_owned())
                 } else {
-                    (Level::Bad, format!("The game stopped with {status}."))
+                    // The game prints its reason last (see About > game log).
+                    let reason = std::fs::read_to_string(self.saves.join(GAME_LOG))
+                        .ok()
+                        .and_then(|log| {
+                            log.lines()
+                                .map(str::trim)
+                                .rfind(|line| !line.is_empty() && !line.starts_with("Press Enter"))
+                                .map(str::to_owned)
+                        });
+                    match reason {
+                        Some(reason) => (Level::Bad, format!("The game stopped: {reason}")),
+                        None => (Level::Bad, format!("The game stopped with {status}.")),
+                    }
                 });
                 self.child = None;
                 // The game saves its own options; pick up what it changed.
@@ -283,6 +344,23 @@ impl App {
                 .arg(dir.join(format!("{}.ffe-input", config::stamp(seconds))));
         }
         command.current_dir(&self.root);
+        // No console window: the game's messages go to saves/last-run.log,
+        // and with no terminal on stdin it exits at once on an error instead
+        // of waiting for Enter.
+        let _ = std::fs::create_dir_all(&self.saves);
+        command.stdin(std::process::Stdio::null());
+        if let Ok(log) = std::fs::File::create(self.saves.join(GAME_LOG)) {
+            if let Ok(copy) = log.try_clone() {
+                command.stdout(copy);
+            }
+            command.stderr(log);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
         match command.spawn() {
             Ok(child) => {
                 self.child = Some(child);
@@ -577,7 +655,9 @@ impl App {
             "game",
         );
         match action {
-            RowAction::Status if status.text == "Build data" => self.start(Job::Build),
+            RowAction::Status if status.text == "Build data" && self.child.is_none() => {
+                self.start(Job::Build)
+            }
             RowAction::Status => self.page = Page::About,
             RowAction::Browse(path) => self.verify_game_folder(path),
             RowAction::None => {}
@@ -1139,11 +1219,15 @@ impl App {
                 section(ui, "Content cache");
                 report(ui, self.data_report.as_ref(), self.busy(Job::Data) || self.busy(Job::Build));
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(self.game_ok() && !self.busy(Job::Build), egui::Button::new("Rebuild data.bin")).clicked() {
+                    if ui.add_enabled(self.game_ok() && !self.busy(Job::Build) && self.child.is_none(), egui::Button::new("Rebuild data.bin")).on_disabled_hover_text("Close the game first: it has data.bin open.").clicked() {
                         self.start(Job::Build);
                     }
                     if ui.button("Open data folder").clicked() {
                         open_folder(&self.root);
+                    }
+                    let log = self.saves.join(GAME_LOG);
+                    if ui.add_enabled(log.is_file(), egui::Button::new("Open last game log")).clicked() {
+                        open_folder(&log);
                     }
                 });
                 section(ui, "FFED3D");

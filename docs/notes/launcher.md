@@ -31,3 +31,25 @@ beside the executable, else the nearest of four parent folders with a
 records and checks the folder. Folder pickers are native on Windows and macOS
 (`rfd`); Linux uses zenity or kdialog when installed, with the typed path on
 Settings > Files & start as the fallback.
+
+## Windows
+
+- `ffe-launcher.exe` is a windowed (GUI-subsystem) program with its own icon
+  (`assets/icon.ico`, embedded by `build.rs` through `winresource`; a missing
+  resource compiler only loses the icon) and window icon.
+- The game is a console program; the launcher starts it with
+  `CREATE_NO_WINDOW`, no stdin and its output in `saves/last-run.log`. A
+  failed start shows the game's last message on the launcher's footer, and
+  About opens the log.
+- OpenGL is tried first; where Windows has no OpenGL 2 driver (virtual
+  machines, Remote Desktop, basic display adapters) the launcher reopens with
+  wgpu (Direct3D 12 / Vulkan).
+- A panic or a window that cannot open writes `saves/launcher.log` and shows a
+  message box, since a GUI program has no console.
+- Before the first `data.bin` exists, the data folder is the nearest folder
+  with `game\FIRSTENC.EXE` (or the checkout's `Cargo.toml`), so
+  `target\release\ffe-launcher.exe` builds `data.bin` in the checkout, as
+  `play.bat` does. Rebuilding is disabled while the game runs (Windows locks
+  the open file). Fonts come from `%WINDIR%\Fonts` (Segoe UI).
+- Checked by cross-building both executables for `x86_64-pc-windows-gnu`
+  (the launcher links as a Windows GUI program); not yet run on Windows.

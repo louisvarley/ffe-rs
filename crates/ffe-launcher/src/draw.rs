@@ -31,7 +31,7 @@ pub fn fonts(ctx: &egui::Context) {
         (
             REGULAR,
             &[
-                "C:\\Windows\\Fonts\\segoeui.ttf",
+                "segoeui.ttf",
                 "/System/Library/Fonts/Supplemental/Arial.ttf",
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -40,7 +40,7 @@ pub fn fonts(ctx: &egui::Context) {
         (
             BOLD,
             &[
-                "C:\\Windows\\Fonts\\segoeuib.ttf",
+                "segoeuib.ttf",
                 "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -49,7 +49,7 @@ pub fn fonts(ctx: &egui::Context) {
         (
             ITALIC,
             &[
-                "C:\\Windows\\Fonts\\segoeuii.ttf",
+                "segoeuii.ttf",
                 "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
@@ -62,9 +62,22 @@ pub fn fonts(ctx: &egui::Context) {
         .get(&FontFamily::Proportional)
         .cloned()
         .unwrap_or_default();
+    // Windows keeps its fonts in %WINDIR%\Fonts (not always on C:).
+    let windows_fonts = std::env::var_os("WINDIR")
+        .map(|dir| std::path::PathBuf::from(dir).join("Fonts"))
+        .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows\\Fonts"));
     for (name, paths) in candidates {
         let mut family = Vec::new();
-        if let Some(bytes) = paths.iter().find_map(|path| std::fs::read(path).ok()) {
+        let read = |path: &&str| {
+            let path = std::path::Path::new(path);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                windows_fonts.join(path)
+            };
+            std::fs::read(path).ok()
+        };
+        if let Some(bytes) = paths.iter().find_map(read) {
             definitions
                 .font_data
                 .insert(name.to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
@@ -127,6 +140,12 @@ pub fn style(ctx: &egui::Context) {
             );
         }
     });
+}
+
+/// The window and taskbar icon (`assets/icon.png`; the `.exe` carries
+/// `assets/icon.ico`, see `build.rs`).
+pub fn window_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default()
 }
 
 /// The cleaned mockup artwork (`assets/background.jpg`: the approved

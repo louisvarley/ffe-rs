@@ -114,17 +114,27 @@ fn on_off(value: bool) -> &'static str {
 
 /// The folder that holds (or will hold) `data.bin` and `saves`: beside the
 /// launcher, else the nearest of four parent folders with a `data.bin`, as
-/// the game itself searches.
+/// the game itself searches. Before the first build there is no `data.bin`:
+/// then the nearest folder with the game files in `game\` (the checkout's
+/// layout, `target\release\ffe-launcher.exe` four levels below) or with
+/// the workspace's `Cargo.toml`, else the launcher's own folder.
 pub fn find_root() -> PathBuf {
     let beside = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."));
-    beside
-        .ancestors()
-        .take(5)
+    root_from(&beside)
+}
+
+pub fn root_from(beside: &Path) -> PathBuf {
+    let candidates = || beside.ancestors().take(5);
+    candidates()
         .find(|dir| dir.join("data.bin").is_file())
-        .map_or(beside.clone(), Path::to_path_buf)
+        .or_else(|| candidates().find(|dir| dir.join("game").join("FIRSTENC.EXE").is_file()))
+        .or_else(|| {
+            candidates().find(|dir| dir.join("Cargo.toml").is_file() && dir.join("crates").is_dir())
+        })
+        .map_or_else(|| beside.to_path_buf(), Path::to_path_buf)
 }
 
 /// The game executable beside the launcher.
@@ -185,6 +195,22 @@ mod tests {
         read.read("start=9\nnonsense\nrecord=maybe\n");
         assert_eq!(read.start, 0);
         assert!(!read.record);
+    }
+
+    #[test]
+    fn the_root_is_the_checkout_before_the_first_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let release = dir.path().join("target").join("release");
+        std::fs::create_dir_all(&release).unwrap();
+        // A plain folder: the launcher's own.
+        assert_eq!(root_from(&release), release);
+        // The checkout's game folder.
+        std::fs::create_dir_all(dir.path().join("game")).unwrap();
+        std::fs::write(dir.path().join("game").join("FIRSTENC.EXE"), b"x").unwrap();
+        assert_eq!(root_from(&release), dir.path());
+        // A data.bin wins.
+        std::fs::write(release.join("data.bin"), b"x").unwrap();
+        assert_eq!(root_from(&release), release);
     }
 
     #[test]
