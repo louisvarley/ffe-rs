@@ -1311,6 +1311,9 @@ fn run() -> Result<(), String> {
     // (`message` below) never enter it.
     let mut log_channel = Channel::default();
     let mut pending_log = PendingLog::default();
+    // The mission scripts and journals (cache v33; older caches have none).
+    let script_assets = ffe_rs::scripts::Assets::load(&cache);
+
     let mut last_prompt = String::new();
     // `player+0xc6` bit 1: F1008's micrometeorite warning has been given.
     let mut gear_warned = false;
@@ -1464,6 +1467,7 @@ fn run() -> Result<(), String> {
         state.combat = Combat::new_game();
         state.loadout = ffe_core::equipment::Loadout::new_game();
     }
+    let mut was_docked = nav.as_ref().is_some_and(|nav| nav.docked.is_some());
     // A scripted undock for screenshots: start the launch sequence immediately.
     if let Some(dir) = &options.capture {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
@@ -1937,6 +1941,45 @@ fn run() -> Result<(), String> {
                     let at = ship_position(&original, &state);
                     let forward = ship_axes(&state)[2];
                     nav.spawn_traffic(&cache, at, forward);
+                }
+                // The mission scripts and journals: F59/F90 on every new day,
+                // F90's docking message when the ship has just docked.
+                if let Some(assets) = script_assets.as_ref() {
+                    let crossed = nav.take_crossed_days();
+                    let docked = nav.docked.is_some();
+                    let arrived = docked && !was_docked;
+                    was_docked = docked;
+                    let clock = nav.clock();
+                    let system = nav.current_code();
+                    let mut posts = Vec::new();
+                    let mut hooks = ffe_rs::scripts::Hooks {
+                        credits: &mut state.credits,
+                        random: &mut nav.random,
+                        system,
+                        clock,
+                        posts: &mut posts,
+                    };
+                    // A new game, a new commander after GAME OVER, or a save
+                    // from before the scripts: F57's new game first.
+                    if state.scripts.is_none() {
+                        match ffe_rs::scripts::new_game(assets, &mut hooks, docked) {
+                            Ok(scripts) => state.scripts = Some(scripts),
+                            Err(error) => eprintln!("mission scripts: {error}"),
+                        }
+                    }
+                    if let Some(scripts) = state.scripts.as_mut() {
+                        if let Err(error) =
+                            ffe_rs::scripts::days(scripts, assets, &mut hooks, &crossed, docked)
+                        {
+                            eprintln!("mission scripts: {error}");
+                        }
+                        if arrived {
+                            scripts.docked();
+                        }
+                    }
+                    for post in posts {
+                        pending_log.add(Source::Journal, post);
+                    }
                 }
             }
         }

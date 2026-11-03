@@ -96,11 +96,32 @@ pub struct Engine {
     /// `DATA_008550` (the day of the last time-tick reset), `8551..8553`
     /// (the time ticks) and `8554..8557` (the day ticks).
     pub timers: [u32; 8],
-    /// F44's tree: each key's subscription count.
+    /// F44's tree: each key's subscription count (saved as a list, since
+    /// JSON maps need string keys).
+    #[serde(with = "subscription_list")]
     subscriptions: BTreeMap<Key, u32>,
     /// The event F48 is dispatching (for the event tokens).
     #[serde(skip)]
     trigger: Option<(i32, i32, i32)>,
+}
+
+mod subscription_list {
+    use super::Key;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<S: Serializer>(map: &BTreeMap<Key, u32>, out: S) -> Result<S::Ok, S::Error> {
+        map.iter()
+            .map(|(key, count)| (*key, *count))
+            .collect::<Vec<_>>()
+            .serialize(out)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        input: D,
+    ) -> Result<BTreeMap<Key, u32>, D::Error> {
+        Ok(Vec::<(Key, u32)>::deserialize(input)?.into_iter().collect())
+    }
 }
 
 /// F31's event tokens whose evaluator case is empty: they stand for "this

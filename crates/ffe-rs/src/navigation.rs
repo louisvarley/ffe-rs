@@ -1310,6 +1310,8 @@ pub struct Navigator {
     offers: HashMap<(u32, usize), StationOffers>,
     /// The day marker for the once-a-day updates (F152's `DATA_008808`).
     calendar: Calendar,
+    /// The days [`Self::tick_days`] crossed since [`Self::take_crossed_days`].
+    crossed: Vec<u32>,
     /// The mission/contract deadlines the missions stream has registered. They
     /// are counted in [`Self::day`]s and expire on the day tick.
     deadlines: Vec<Deadline>,
@@ -2266,6 +2268,7 @@ impl Navigator {
             saved_markets: HashMap::new(),
             offers: HashMap::new(),
             calendar: Calendar::at(0),
+            crossed: Vec::new(),
             deadlines: Vec::new(),
             expired: Vec::new(),
             galaxy_tables: cache
@@ -3378,6 +3381,21 @@ impl Navigator {
         Ok(offers)
     }
 
+    /// The days crossed since the last call, as the original's absolute day
+    /// numbers (`DATA_008807`, 0x121cf7 on a new game).
+    pub fn take_crossed_days(&mut self) -> Vec<u32> {
+        let base = (self.start_clock.max(0.0) / 86_400.0) as u32;
+        std::mem::take(&mut self.crossed)
+            .into_iter()
+            .map(|day| base + day)
+            .collect()
+    }
+
+    /// The world clock in seconds (the absolute day is `clock / 86400`).
+    pub fn clock(&self) -> f64 {
+        self.clock
+    }
+
     /// The last whole day whose periodic updates ran (`DATA_008808`).
     pub fn last_day_tick(&self) -> u32 {
         self.calendar.day()
@@ -3397,6 +3415,7 @@ impl Navigator {
         if days.is_empty() {
             return Vec::new();
         }
+        self.crossed.extend(days.clone());
         // The tables are taken out of `self` so the markets can be visited while
         // the drift draws from them.
         let blob = self.market_tables.clone();
@@ -5559,6 +5578,11 @@ impl Navigator {
     /// The system on offer with this code, if any.
     pub fn entry_for_code(&self, code: u32) -> Option<usize> {
         self.entries.iter().position(|e| e.params.code == code)
+    }
+
+    /// The current system's code (`DATA_008885`), 0 with no system.
+    pub fn current_code(&self) -> u32 {
+        self.system_code(self.current).unwrap_or(0)
     }
 
     /// The system code of an entry (the galaxy list's row as a destination).

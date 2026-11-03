@@ -192,3 +192,42 @@ fn census_of_statements_and_tokens() {
     println!("statements {}", list(&statements));
     println!("tokens {}", list(&tokens));
 }
+
+/// The script and journal state survive a save as JSON.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_script_state_round_trips_through_a_save() {
+    use ffe_core::journal::decode_stories;
+    use ffe_core::script::engine::Host;
+    use ffe_core::script::run::{Game, Scripts};
+    struct Draws(ffe_core::npc::Random);
+    impl Host for Draws {}
+    impl Game for Draws {
+        fn bounded(&mut self, bound: u32) -> u32 {
+            self.0.bounded(bound)
+        }
+        fn advance(&mut self) -> i32 {
+            self.0.advance() as i32
+        }
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let image = Image::new(cache.asset("base:script/missions").unwrap()).unwrap();
+    let stories = decode_stories(cache.asset("base:text/journal-stories").unwrap()).unwrap();
+    let mut game = Draws(ffe_core::npc::Random::start());
+    let mut scripts = Scripts::new(&image);
+    scripts
+        .new_game(&image, &stories, &mut game, 0x121cf7, true)
+        .unwrap();
+    let json = serde_json::to_string(&scripts).unwrap();
+    let pretty = serde_json::to_vec_pretty(&scripts).unwrap().len();
+    println!("pretty save size {pretty}");
+    assert!(pretty < 400_000, "{pretty}");
+    let back: Scripts = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, scripts);
+    assert_eq!(
+        back.engine.subscription_count(),
+        scripts.engine.subscription_count()
+    );
+}

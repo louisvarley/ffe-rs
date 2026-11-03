@@ -146,6 +146,10 @@ pub struct Flight {
     /// code); the machines still aboard are `loadout.mining`.
     #[serde(default)]
     pub mining: Vec<ffe_core::mining::Machine>,
+    /// The mission scripts and the ship library's journals (cache v33).
+    /// Saves from before them start the scripts afresh on load.
+    #[serde(default)]
+    pub scripts: Option<ffe_core::script::run::Scripts>,
 }
 
 fn default_rng() -> Random {
@@ -197,6 +201,7 @@ impl Default for Flight {
             death: None,
             missions: ffe_core::missions::State::default(),
             mining: Vec::new(),
+            scripts: None,
         }
     }
 }

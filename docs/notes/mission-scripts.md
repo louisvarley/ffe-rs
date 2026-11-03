@@ -1,7 +1,14 @@
 # Mission scripts (F31/F41)
 
 Status (2026-11-03): **script graph imported (cache v32); interpreter
-ported (`ffe_core::script::engine`), game hooks not yet wired.** Tracked
+ported (`ffe_core::script::engine`) and running in the playable
+(`ffe_rs::scripts`): a new game (or an older save) starts them, each new
+day runs F59's day ticks and F90's issues, docking runs F90's docking
+message, and their state is saved with the flight (about 280 KB of JSON).
+The game hooks answer the player's cash, system, the date/time and the
+shared random pair; the station-conversation and object statements are
+not wired yet.** The message subtypes F59/F90 react to (15 a new day, 5
+docking) are inferred: their senders were not found in JJFFE's code. Tracked
 as dashboard item `gameplay-41`.
 
 On a new game with no game hooks answered, F55 starts 20 instances
