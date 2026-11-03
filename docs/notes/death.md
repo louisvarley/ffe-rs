@@ -195,9 +195,8 @@ cleared.
   external-view hold; the port models it as `Death::Exploding` and starts
   `GameOver::tombstone` at 5.001 s. F917's own 950,000-tic spin ends with the
   longjmp to the front end.
-- **Old ship derelict.** F1098 hands the old hull to the AI (`+0xff = 0x16`);
-  the port shows F942's explosion and does not simulate the derelict's later
-  states (no player-hull AI object exists in the port).
+- **Old ship derelict.** Done 2026-11-03 (see the section below): the old hull
+  drifts in AI state 0x16 until F767 removes it.
 - **Manual key.** DOS FFE's `x` launches the capsule (`F1054`, `78206`). The
   port's `x` is the brake (`docs/CONTROLS.md`), so the port wires the F12
   console icon instead. Decide whether to move the brake or accept both on
