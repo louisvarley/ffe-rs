@@ -1070,10 +1070,13 @@ fn script_adverts_and_conversation_frames() {
             system,
             clock,
             posts: &mut posts_out,
+            legal: nav.legal,
+            career: nav.career,
+            tables: cache.asset("base:world/system-tables"),
         };
         state.scripts = Some(ffe_rs::scripts::new_game(&assets, &mut hooks, true).unwrap());
     }
-    ffe_rs::scripts::with_hooks(&mut state, &mut nav, |scripts, hooks, today| {
+    ffe_rs::scripts::with_hooks(&mut state, &mut nav, &cache, |scripts, hooks, today| {
         scripts.open_screen(&assets.image, hooks, today, 2)
     })
     .unwrap()
@@ -1140,7 +1143,7 @@ fn script_adverts_and_conversation_frames() {
     save(&screen, "script-board.ppm");
     // Choose the subscription offer: the scripts open their conversation.
     let offer = state.scripts.as_ref().unwrap().engine.menu.entries[offer_row];
-    ffe_rs::scripts::with_hooks(&mut state, &mut nav, |scripts, hooks, today| {
+    ffe_rs::scripts::with_hooks(&mut state, &mut nav, &cache, |scripts, hooks, today| {
         scripts.select(&assets.image, hooks, today, offer)
     })
     .unwrap()
@@ -1214,6 +1217,9 @@ fn script_advert_macros_ask_the_scripts() {
             system,
             clock,
             posts: &mut posts,
+            legal: nav.legal,
+            career: nav.career,
+            tables: cache.asset("base:world/system-tables"),
         };
         state.scripts = Some(ffe_rs::scripts::new_game(&assets, &mut hooks, true).unwrap());
     }
@@ -1221,7 +1227,7 @@ fn script_advert_macros_ask_the_scripts() {
     for day in 0..500u32 {
         nav.clock += 86_400.0;
         let today = ffe_rs::scripts::absolute_day(nav.clock);
-        ffe_rs::scripts::with_hooks(&mut state, &mut nav, |scripts, hooks, _| {
+        ffe_rs::scripts::with_hooks(&mut state, &mut nav, &cache, |scripts, hooks, _| {
             scripts
                 .daily(&assets.image, &assets.stories, hooks, today, true)
                 .unwrap();

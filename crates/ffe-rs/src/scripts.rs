@@ -60,6 +60,7 @@ pub mod veto {
 pub fn permits(
     state: &mut crate::flight::Flight,
     nav: &mut crate::navigation::Navigator,
+    cache: &ffe_content::VerifiedCache,
     assets: Option<&Assets>,
     global: usize,
     value: i32,
@@ -67,7 +68,7 @@ pub fn permits(
     let Some(assets) = assets else {
         return true;
     };
-    match with_hooks(state, nav, |scripts, hooks, today| {
+    match with_hooks(state, nav, cache, |scripts, hooks, today| {
         scripts.permits(&assets.image, hooks, today, global, value)
     }) {
         Some((Ok(allowed), _)) => allowed,
@@ -96,6 +97,13 @@ pub struct Hooks<'a> {
     pub clock: f64,
     /// Console lines to post (F89's `0xa600`).
     pub posts: &'a mut Vec<String>,
+    /// The player's legal record (`DATA_009093`/`9095`); the caller writes it
+    /// back.
+    pub legal: ffe_core::npc::Legal,
+    /// The military points (`DATA_008912`/`8913`); written back too.
+    pub career: ffe_core::npc::Career,
+    /// `base:world/system-tables`, for F871's allegiance.
+    pub tables: Option<&'a [u8]>,
 }
 
 impl Host for Hooks<'_> {
@@ -125,6 +133,49 @@ impl Host for Hooks<'_> {
 
     fn random(&mut self) -> u32 {
         self.random.advance()
+    }
+
+    fn query(&mut self, token: u8, args: &[i32]) -> i32 {
+        let arg = |n: usize| args.get(n).copied().unwrap_or(0);
+        let slot = |n: i32| usize::try_from(n).ok().filter(|slot| *slot < 6);
+        match token {
+            // DATA_009093[x]: the offences each jurisdiction holds.
+            0x1f => slot(arg(0)).map_or(0, |s| self.legal.records[s] as i32),
+            // 1: DATA_008913 (Imperial), 2: DATA_008912 (Federal) points.
+            0x22 => match arg(0) {
+                1 => self.career.imperial as i32,
+                2 => self.career.federal as i32,
+                _ => 0,
+            },
+            // DATA_009095[x]: the fines.
+            0x23 => slot(arg(0)).map_or(0, |s| self.legal.fines[s] as i32),
+            // F871: the system's allegiance (`+10 >> 6`).
+            0x31 => self
+                .tables
+                .and_then(|bytes| ffe_core::galaxy::Tables::new(bytes).ok())
+                .map_or(0, |tables| {
+                    tables
+                        .control(arg(0) as u32, [self.career.federal, self.career.imperial])
+                        .allegiance as i32
+                }),
+            _ => 0,
+        }
+    }
+
+    fn assign(&mut self, token: u8, args: &[i32], value: i32) -> Option<(i32, i32, i32)> {
+        let index = args.first().copied().unwrap_or(-1);
+        let slot = usize::try_from(index).ok().filter(|slot| *slot < 6)?;
+        match token {
+            0x1f => {
+                self.legal.records[slot] = value as u32;
+                Some((0x15, 0, index))
+            }
+            0x23 => {
+                self.legal.fines[slot] = value.max(0) as u32;
+                Some((0x0a, 0, index))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -252,6 +303,7 @@ pub fn drain(
 pub fn with_hooks<R>(
     state: &mut crate::flight::Flight,
     nav: &mut crate::navigation::Navigator,
+    cache: &ffe_content::VerifiedCache,
     f: impl FnOnce(&mut Scripts, &mut Hooks<'_>, u32) -> R,
 ) -> Option<(R, Vec<String>)> {
     let clock = nav.clock();
@@ -264,8 +316,14 @@ pub fn with_hooks<R>(
         system,
         clock,
         posts: &mut posts,
+        legal: nav.legal,
+        career: nav.career,
+        tables: cache.asset("base:world/system-tables"),
     };
     let result = f(scripts, &mut hooks, absolute_day(clock));
+    let (legal, career) = (hooks.legal, hooks.career);
+    nav.legal = legal;
+    nav.career = career;
     Some((result, posts))
 }
 
@@ -439,6 +497,7 @@ pub fn expand_all(
     let clock = nav.clock();
     let system = nav.current_code();
     let mut random = std::mem::replace(&mut nav.random, Random::start());
+    let (legal, career) = (nav.legal, nav.career);
     let today = absolute_day(clock);
     let out = {
         let Some(scripts) = state.scripts.as_mut() else {
@@ -454,6 +513,9 @@ pub fn expand_all(
                 system,
                 clock,
                 posts: &mut posts,
+                legal,
+                career,
+                tables: cache.asset("base:world/system-tables"),
             };
             let texts = Texts {
                 assets,

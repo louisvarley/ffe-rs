@@ -1965,6 +1965,9 @@ fn run() -> Result<(), String> {
                         system,
                         clock,
                         posts: &mut posts,
+                        legal: nav.legal,
+                        career: nav.career,
+                        tables: cache.asset("base:world/system-tables"),
                     };
                     // A new game, a new commander after GAME OVER, or a save
                     // from before the scripts: F57's new game first.
@@ -1988,6 +1991,9 @@ fn run() -> Result<(), String> {
                             scripts.docked();
                         }
                     }
+                    let (legal, career) = (hooks.legal, hooks.career);
+                    nav.legal = legal;
+                    nav.career = career;
                     for post in posts {
                         pending_log.add(Source::Journal, post);
                     }
@@ -2429,6 +2435,7 @@ fn run() -> Result<(), String> {
                         ffe_rs::scripts::permits(
                             &mut state,
                             nav,
+                            &cache,
                             script_assets.as_ref(),
                             ffe_rs::scripts::veto::SHOT_OR_JETTISON,
                             0x3e8 + commodity as i32,
@@ -2897,6 +2904,7 @@ fn run() -> Result<(), String> {
                         let jump = if ffe_rs::scripts::permits(
                             &mut state,
                             nav,
+                            &cache,
                             script_assets.as_ref(),
                             ffe_rs::scripts::veto::JUMP,
                             1,
@@ -3559,6 +3567,7 @@ fn run() -> Result<(), String> {
                                 match if ffe_rs::scripts::permits(
                                     &mut state,
                                     nav,
+                                    &cache,
                                     script_assets.as_ref(),
                                     ffe_rs::scripts::veto::LAUNCH,
                                     1,
@@ -3922,6 +3931,7 @@ fn run() -> Result<(), String> {
                                 if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
                                     &mut state,
                                     nav,
+                                    &cache,
                                     |scripts, hooks, today| {
                                         scripts.open_screen(&assets.image, hooks, today, 2)
                                     },
@@ -4344,6 +4354,7 @@ fn run() -> Result<(), String> {
                                     if ffe_rs::scripts::permits(
                                         &mut state,
                                         nav,
+                                        &cache,
                                         script_assets.as_ref(),
                                         ffe_rs::scripts::veto::LAUNCH,
                                         1,
@@ -4356,6 +4367,7 @@ fn run() -> Result<(), String> {
                                     if ffe_rs::scripts::permits(
                                         &mut state,
                                         nav,
+                                        &cache,
                                         script_assets.as_ref(),
                                         ffe_rs::scripts::veto::LAUNCH,
                                         1,
@@ -4531,6 +4543,7 @@ fn run() -> Result<(), String> {
                                 if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
                                     &mut state,
                                     nav,
+                                    &cache,
                                     |scripts, hooks, today| {
                                         scripts.select(&assets.image, hooks, today, entry)
                                     },
@@ -4716,6 +4729,7 @@ fn run() -> Result<(), String> {
                             match if ffe_rs::scripts::permits(
                                 &mut state,
                                 nav,
+                                &cache,
                                 script_assets.as_ref(),
                                 ffe_rs::scripts::veto::LAUNCH,
                                 1,
@@ -4832,6 +4846,7 @@ fn run() -> Result<(), String> {
                         Some(nav) => ffe_rs::scripts::permits(
                             &mut state,
                             nav,
+                            &cache,
                             script_assets.as_ref(),
                             ffe_rs::scripts::veto::DOCKING,
                             ffe_rs::scripts::PLAYER_ID,
@@ -6523,6 +6538,7 @@ fn run() -> Result<(), String> {
                         Some(nav) => ffe_rs::scripts::permits(
                             &mut state,
                             nav,
+                            &cache,
                             script_assets.as_ref(),
                             ffe_rs::scripts::veto::SHOT_OR_JETTISON,
                             0x7cf + ((i32::from(code) >> 3) & 0xf),
