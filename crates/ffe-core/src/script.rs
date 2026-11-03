@@ -548,6 +548,66 @@ pub struct Mission {
     pub static_count: i32,
 }
 
+impl Image {
+    /// How often each statement opcode and each expression token appears in
+    /// every reachable stream (a static census for the port's notes).
+    pub fn census(&self) -> Result<([u32; 256], [u32; 256]), String> {
+        let mut statements = [0u32; 256];
+        let mut tokens = [0u32; 256];
+        fn expression(image: &Image, at: u32, tokens: &mut [u32; 256]) -> Result<u32, String> {
+            let token = image.byte(at)?;
+            tokens[usize::from(token)] += 1;
+            let Some(&(expressions, dwords)) = EXPRESSION_SHAPES.get(usize::from(token)) else {
+                return Ok(at + 1);
+            };
+            if token < 2 {
+                return Ok(at + 1);
+            }
+            let mut next = at + 1 + 4 * u32::from(dwords);
+            for _ in 0..expressions {
+                next = expression(image, next, tokens)?;
+            }
+            Ok(next)
+        }
+        for mission in 0..self.missions() {
+            let record = self.mission_struct(mission)?;
+            for index in self.reachable_states(&record)? {
+                let state = self.state(&record, index)?;
+                let mut streams = Vec::new();
+                if let Some(entry) = self.entry(state)? {
+                    streams.push(entry);
+                }
+                for condition in 0..self.conditions(state)? {
+                    let at = self.condition(state, condition)?;
+                    streams.push(expression(self, at, &mut tokens)?);
+                }
+                for mut at in streams {
+                    loop {
+                        let opcode = self.byte(at)?;
+                        statements[usize::from(opcode)] += 1;
+                        // Count the operand expressions' tokens too.
+                        if let Some(shape) = statement_shape(opcode) {
+                            let mut next = at + 1;
+                            for operand in shape {
+                                next = match operand {
+                                    Operand::Expression => expression(self, next, &mut tokens)?,
+                                    _ => break,
+                                };
+                            }
+                        }
+                        let (_, next) = self.skip_statement(at)?;
+                        at = next;
+                        if opcode == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Ok((statements, tokens))
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -609,65 +669,5 @@ pub(crate) mod tests {
         let mut bad = bytes.clone();
         bad[0] = b'X';
         assert!(Image::new(&bad).is_err());
-    }
-}
-
-impl Image {
-    /// How often each statement opcode and each expression token appears in
-    /// every reachable stream (a static census for the port's notes).
-    pub fn census(&self) -> Result<([u32; 256], [u32; 256]), String> {
-        let mut statements = [0u32; 256];
-        let mut tokens = [0u32; 256];
-        fn expression(image: &Image, at: u32, tokens: &mut [u32; 256]) -> Result<u32, String> {
-            let token = image.byte(at)?;
-            tokens[usize::from(token)] += 1;
-            let Some(&(expressions, dwords)) = EXPRESSION_SHAPES.get(usize::from(token)) else {
-                return Ok(at + 1);
-            };
-            if token < 2 {
-                return Ok(at + 1);
-            }
-            let mut next = at + 1 + 4 * u32::from(dwords);
-            for _ in 0..expressions {
-                next = expression(image, next, tokens)?;
-            }
-            Ok(next)
-        }
-        for mission in 0..self.missions() {
-            let record = self.mission_struct(mission)?;
-            for index in self.reachable_states(&record)? {
-                let state = self.state(&record, index)?;
-                let mut streams = Vec::new();
-                if let Some(entry) = self.entry(state)? {
-                    streams.push(entry);
-                }
-                for condition in 0..self.conditions(state)? {
-                    let at = self.condition(state, condition)?;
-                    streams.push(expression(self, at, &mut tokens)?);
-                }
-                for mut at in streams {
-                    loop {
-                        let opcode = self.byte(at)?;
-                        statements[usize::from(opcode)] += 1;
-                        // Count the operand expressions' tokens too.
-                        if let Some(shape) = statement_shape(opcode) {
-                            let mut next = at + 1;
-                            for operand in shape {
-                                next = match operand {
-                                    Operand::Expression => expression(self, next, &mut tokens)?,
-                                    _ => break,
-                                };
-                            }
-                        }
-                        let (_, next) = self.skip_statement(at)?;
-                        at = next;
-                        if opcode == 0 {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        Ok((statements, tokens))
     }
 }
