@@ -291,9 +291,14 @@ fn case_ambiguous_files_and_symbolic_links_are_rejected() {
     )
     .unwrap();
     let report = inspect_game(temp.path()).unwrap();
-    assert!(report.diagnostics.iter().any(|entry| {
-        entry.path == "FIRSTENC.EXE" && entry.message.contains("multiple entries")
-    }));
+    // A case-insensitive filesystem (macOS's default) keeps one file for both
+    // names, so the ambiguity only exists where both entries were created.
+    let entries = fs::read_dir(temp.path()).unwrap().count();
+    if entries == 3 {
+        assert!(report.diagnostics.iter().any(|entry| {
+            entry.path == "FIRSTENC.EXE" && entry.message.contains("multiple entries")
+        }));
+    }
     assert!(report
         .diagnostics
         .iter()
