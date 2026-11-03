@@ -1133,6 +1133,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 90,
       note: "audio-4 done: F1910's continuous engine bed (sample 0x0f at raw>>9 volume, raw+0x10000 pitch, raw = max|thrust| - 0x221) now plays each flight frame, gated by the Engine sound option. F1759's positional volume is never called by the DOS build, so the mono mix stays like for like."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 90,
+      note: "gameplay-12 progress: the port's console and contract texts now use the executable's strings: traffic control's three refusals (0x98b7..0x98b9) and the no-clearance warning (0x98be) in full, the undercarriage warning (0x98ce), and F316's contract rows (0x9c1e + kind, so military strikes read IMP. NAVY / FED. MIL. Kill, Film or Bomb). Console lines break on the strings' newlines. A local-only test pins them to the player's FIRSTENC.EXE."
     }
   ]
 };

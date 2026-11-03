@@ -38,3 +38,63 @@ fn message_codes_give_the_executables_text() {
         ]
     );
 }
+
+/// The port's fixed console and contract texts are the executable's strings
+/// (`…` marks an F1399 expansion).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_ports_fixed_texts_are_the_executables() {
+    use ffe_core::missions::{Kind, Mission, Status};
+    use ffe_core::traffic::Reply;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let messages = Messages::new(cache.asset("base:text/messages").unwrap()).unwrap();
+    for (code, reply) in [
+        (0x98b7, Reply::Busy),
+        (0x98b8, Reply::Full),
+        (0x98b9, Reply::Fined),
+    ] {
+        assert_eq!(
+            messages.text(code).as_deref(),
+            Some(ffe_rs::navigation::refusal(reply)),
+            "{code:#x}"
+        );
+    }
+    let mut mission = Mission {
+        id: 1,
+        kind: Kind::MilitaryStrike,
+        code: 0x9857,
+        origin: 0,
+        origin_name: "…".to_owned(),
+        destination: 0,
+        destination_name: String::new(),
+        reward: 0,
+        accepted_day: 0,
+        deadline_day: 0,
+        passengers: 0,
+        cargo: "…".to_owned(),
+        seed: 0,
+        basic_data: 0,
+        client: String::new(),
+        status: Status::Active,
+        settled_day: None,
+        done: false,
+        side: 1,
+    };
+    for (code, strike, side) in [
+        (0x9c1f, 0x9857, 1),
+        (0x9c20, 0x9857, 2),
+        (0x9c24, 0x9855, 1),
+        (0x9c25, 0x9855, 2),
+        (0x9c26, 0x9856, 1),
+        (0x9c27, 0x9856, 2),
+    ] {
+        mission.code = strike;
+        mission.side = side;
+        assert_eq!(mission.row_code(), Some(code));
+        // The original's "……" is the return point's two expansions.
+        let text = messages.text(code).unwrap().replace("……", "…");
+        assert_eq!(mission.row_text(), text, "{code:#x}");
+    }
+}

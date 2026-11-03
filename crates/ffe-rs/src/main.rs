@@ -4479,7 +4479,7 @@ fn run() -> Result<(), String> {
                                 bay.index + 1,
                             ),
                             Some((index, other)) => {
-                                format!("{}: {}.", nav.bodies[index].name, refusal(other))
+                                format!("{}: {}", nav.bodies[index].name, refusal(other))
                             }
                             None => "No station or starport within 100 km to ask for clearance."
                                 .to_owned(),
@@ -5063,7 +5063,7 @@ fn run() -> Result<(), String> {
                                 gear_warned = true;
                                 pending_log.add(
                                     Source::Ship,
-                                    "Undercarriage down.   (It may be damaged by micrometeorites)",
+                                    "WARNING: Undercarriage down.\n   (It may be damaged by micrometeorites)",
                                 );
                             }
                         }
@@ -8089,7 +8089,7 @@ fn mission_contracts(state: &Flight) -> Vec<ffe_rs::screen::ContractRow> {
             )
         })
         .map(|m| ffe_rs::screen::ContractRow {
-            contract: format!("Kill {}, return to {}", m.cargo, m.origin_name),
+            contract: m.row_text(),
             system: m.destination_name.clone(),
             station: m.origin_name.clone(),
             time: mission_date(m.deadline_day),

@@ -510,8 +510,15 @@ impl MessageLog {
 
 /// `F1398`/`StringWrap`: break at spaces to keep each line within `width`
 /// pixels. Words longer than the window are hard-broken, as the original's
-/// back-up-to-the-last-space loop does.
+/// back-up-to-the-last-space loop does. A `\n` (the executable's strings use
+/// it, e.g. 0x98be) always starts a new line.
 pub fn wrap(font: &crate::indexed::BitmapFont, text: &str, width: usize) -> Vec<String> {
+    if text.contains('\n') {
+        return text
+            .split('\n')
+            .flat_map(|part| wrap(font, part, width))
+            .collect();
+    }
     let mut lines = Vec::new();
     let mut line = String::new();
     for word in text.split(' ') {

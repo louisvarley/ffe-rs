@@ -113,6 +113,10 @@ pub struct Mission {
     /// pays on return to the system it was accepted in.
     #[serde(default)]
     pub done: bool,
+    /// The issuing military's allegiance for a strike (1 Imperial, 2
+    /// Federal); 0 for a civilian contract or an older save.
+    #[serde(default)]
+    pub side: u8,
 }
 
 impl Mission {
@@ -120,6 +124,40 @@ impl Mission {
     /// 0x9857 assassination), if any.
     pub fn strike(&self) -> Option<u16> {
         (self.kind == Kind::MilitaryStrike).then_some(self.code)
+    }
+
+    /// F316's contract-page row: `0x9c1e + kind` for kinds 0..=2 (removal,
+    /// Imperial, Federal kill) and `0x9c21 + kind` for 3..=6 (Imperial and
+    /// Federal photograph, then bombing). The kind nibble is the strike's
+    /// base plus the issuing allegiance (1 Imperial, 2 Federal), matching the
+    /// strings' Imperial-then-Federal order. `None` for a non-contract.
+    pub fn row_code(&self) -> Option<u16> {
+        let side = u16::from(self.side.min(2));
+        match (self.kind, self.code) {
+            (Kind::Assassination, _) => Some(0x9c1e),
+            (Kind::MilitaryStrike, 0x9857) => Some(0x9c1e + side),
+            (Kind::MilitaryStrike, 0x9855) if side > 0 => Some(0x9c21 + 2 + side),
+            (Kind::MilitaryStrike, 0x9856) if side > 0 => Some(0x9c21 + 4 + side),
+            _ => None,
+        }
+    }
+
+    /// F316's row text for [`Mission::row_code`] with the target and return
+    /// point filled in.
+    pub fn row_text(&self) -> String {
+        let (prefix, verb) = match self.row_code() {
+            Some(0x9c1f) => ("IMP. NAVY: ", "Kill"),
+            Some(0x9c20) => ("FED. MIL.: ", "Kill"),
+            Some(0x9c24) => ("IMPERIAL NAVY: ", "Film"),
+            Some(0x9c25) => ("FED. MILITARY: ", "Film"),
+            Some(0x9c26) => ("IMPERIAL NAVY: ", "Bomb"),
+            Some(0x9c27) => ("FED. MILITARY: ", "Bomb"),
+            _ => ("", "Kill"),
+        };
+        format!(
+            "{prefix}{verb} {}, return to {}",
+            self.cargo, self.origin_name
+        )
     }
 
     /// The day F303/F301's comparison uses: the contract's `+0xc` deadline.
@@ -284,6 +322,9 @@ pub struct Offer {
     /// F295's client (`0x9203`: F791's name of kind 3 from the seed); empty
     /// for a military package, which has no name.
     pub client: String,
+    /// The issuing military's allegiance for a strike (1 Imperial, 2
+    /// Federal); 0 otherwise.
+    pub side: u8,
 }
 
 /// Read F453's row variables back into a contract. The post's variables are
@@ -350,6 +391,7 @@ pub fn offer(post: &Post, world: &World<'_>) -> Option<Offer> {
         deadline_days: ACCEPT_DAYS,
         text: post.text.clone(),
         client: bulletin::client_name(world, seed),
+        side: 0,
     })
 }
 
@@ -431,6 +473,7 @@ pub fn military_offers(
             deadline_days,
             text,
             client: String::new(),
+            side: 0,
         });
     }
     offers
@@ -526,6 +569,7 @@ pub fn military_strike_offers(
             deadline_days,
             text,
             client: String::new(),
+            side: world.allegiance as u8,
         });
     }
     offers
@@ -734,6 +778,7 @@ impl State {
             status: Status::Active,
             settled_day: None,
             done: false,
+            side: offer.side,
         };
         self.missions.push(mission);
         self.next_id = id.saturating_add(1);
@@ -1374,6 +1419,7 @@ mod tests {
             deadline_days: ACCEPT_DAYS,
             text: "Deliver a message to the Hope system.".to_owned(),
             client: String::new(),
+            side: 0,
         };
         state.accept(&offer, 0, 1, "Ross 154").unwrap();
         assert!(state.is_offer_active(&offer));

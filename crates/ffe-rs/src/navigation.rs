@@ -1734,11 +1734,14 @@ pub enum RegionTouch {
     WrongPad(Option<String>),
 }
 
-/// Why traffic control said no (the original's 0x98b7..0x98b9 messages).
+/// Why traffic control said no: the executable's 0x98b7..0x98b9 messages
+/// (busy, all bays full, outstanding fines).
 pub fn refusal(reply: Reply) -> &'static str {
     match reply {
-        Reply::Fined | Reply::Busy | Reply::Full => "CLEARANCE DENIED",
-        Reply::Granted(_) => "Clearance granted",
+        Reply::Busy => "CLEARANCE DENIED.\nTraffic Control busy. Please try later.",
+        Reply::Full => "CLEARANCE DENIED.\nAll bays full. Please try again later.",
+        Reply::Fined => "CLEARANCE DENIED.\nYou have large outstanding fine(s).",
+        Reply::Granted(_) => "Clearance granted.",
     }
 }
 
@@ -3871,7 +3874,7 @@ impl Navigator {
         // it; the port keeps that per port until the next landing or launch.
         let warning = (self.warned_at != Some(index)).then(|| {
             // Message 0x98be, the executable's string.
-            format!("{name}: You do not have clearance.")
+            format!("{name}: VACATE THE AREA IMMEDIATELY.\nYou do not have clearance.")
         });
         if self.cleared(index) {
             let bay = self
@@ -6227,7 +6230,7 @@ impl Navigator {
                     }
                 }
                 other => {
-                    let text = format!("{}: {}.", body.name, refusal(other));
+                    let text = format!("{}: {}", body.name, refusal(other));
                     self.autopilot_notice(text);
                 }
             }
@@ -6430,7 +6433,7 @@ impl Navigator {
                         command.arrived = false;
                     }
                     other => {
-                        self.notice = Some(format!("{}: {}.", body.name, refusal(other)));
+                        self.notice = Some(format!("{}: {}", body.name, refusal(other)));
                         command.arrived = false;
                         command.keys.slower = true;
                     }
@@ -6478,7 +6481,7 @@ impl Navigator {
                     command.arrived = false;
                 }
                 other => {
-                    self.notice = Some(format!("{}: {}.", body.name, refusal(other)));
+                    self.notice = Some(format!("{}: {}", body.name, refusal(other)));
                     command.arrived = false;
                     command.keys.slower = true;
                 }
