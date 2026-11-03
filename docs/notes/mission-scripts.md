@@ -158,9 +158,14 @@ the neighbouring entries). Leaving the station closes the scripts' screen
 draws the board with the new game's script adverts and a journal
 subscription conversation.
 
-Not yet: the station's own entries are not passed to the scripts
-(`Host::native_entries`) and the other station screens do not signal the
-scripts.
+The station's own adverts are F326's entries (`scripts::native_entry`
+through `Host::native_entries`): the board lists the menu as the scripts
+leave it, so F346's inserts fall among the station's adverts and move the
+advert they displace to the end, as in the original
+(`tests/station_view.rs the_board_lists_the_scripts_adverts_among_the_stations`);
+choosing a station advert is the station's, any other F361/F360's, and
+accepting a contract builds the board again. Not yet: the other station
+screens do not signal the scripts.
 
 ## Text macros and script queries (2026-11-03)
 
@@ -235,7 +240,12 @@ prints every mission's listing.
   escorts are). **39 (F664/F672)** makes a ship of a type named from its
   seed (F791 kind 0x12) waiting in a starport's bay until its departure
   time (F24/F23 of the script seconds); with no starport it starts far out
-  in transit. **41-43 (F669)** keep their attackers, now in AI state 9.
+  in transit. **41-43 (F669)** keep their attackers, now in AI state 9:
+  F770 flies them at their target and, within F1680's distance class 0xa
+  (about 8 km), puts them in state 1 with event 0x17 and hails the player
+  with `0x98d0` ("You're going to regret dealing with ...!", the ship's
+  `+0xa0` word naming the employer; `scripts::approaches`). F773's F703
+  gives each F772 ship its `+0xa0` word from the shared pair.
 - **F37's object targets.** 0x3e sets the AI state (`NpcShip::set_ai`,
   `npc::State::from_original`; 0x17, the scripts' parked state, holds the
   ship in place) and raises event 0x17; 0x41 the target; 0x24/0x3d the
@@ -309,5 +319,5 @@ attackers start 25 km from the player (F702's own orbit is 0x5000/0x31
 round the root); F1508's in-step interpolation and F1507's velocity are
 not applied; F879's surface point is the latitude/longitude direction at
 the planet's radius, not the terrain height; F40's orbit does not move
-(F1510's time term is left out). The station's own entries are not passed
-to the scripts.
+(F1510's time term is left out). F770's hail does not stop the music
+(F1903) or set up the combat velocity.

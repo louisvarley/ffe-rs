@@ -1269,6 +1269,16 @@ fn a_script_attacker_joins_the_system() {
         .sum::<f64>()
         .sqrt();
     assert!((range - 25_000_000.0).abs() < 6_000_000.0, "{range}");
+    // F770: still far off, it keeps closing; within distance class 0xa it
+    // attacks and hails the player.
+    assert!(ffe_rs::scripts::approaches(&mut nav, near).is_empty());
+    let ship = nav.ships.last_mut().unwrap();
+    ship.position = [near[0] + 1_000_000, near[1], near[2]];
+    let seed = ship.seed;
+    let hails = ffe_rs::scripts::approaches(&mut nav, near);
+    assert_eq!(hails, [(id as i32 + ffe_rs::scripts::SHIP_IDS, seed, true)]);
+    assert_eq!(nav.ships.last().unwrap().ai_state(), 1);
+    assert!(ffe_rs::scripts::approaches(&mut nav, near).is_empty());
 }
 
 /// The mission ships' statements carried out in a real system: a ship made
@@ -1437,5 +1447,55 @@ fn the_ship_library_shows_each_journals_first_issue() {
         let first = &articles[0];
         println!("{name}: {} / {}", first.publication, first.headline);
         assert!(!first.headline.trim().is_empty());
+    }
+}
+
+/// F326's board: the station's adverts are the menu's own entries and the
+/// scripts' go among them (F345 at the end, F346 at F921's place, moving the
+/// advert there to the end), so the board keeps every station advert once
+/// with the scripts' added.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_board_lists_the_scripts_adverts_among_the_stations() {
+    let cache = cache();
+    let assets = ffe_rs::scripts::Assets::load(&cache).expect("cache v33");
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let station = nav.docked.expect("the new game starts docked");
+    let mut state = Flight {
+        mode: Mode::Docked,
+        ..Flight::default()
+    };
+    ffe_rs::scripts::with_all(&mut state, &mut nav, &cache, |scripts, hooks, _| {
+        *scripts = Some(ffe_rs::scripts::new_game(&assets, hooks, true).unwrap());
+    });
+    let posts = nav.station_offers(&cache, station).unwrap().posts.clone();
+    let native: Vec<_> = posts
+        .iter()
+        .enumerate()
+        .map(|(index, post)| ffe_rs::scripts::native_entry(index, post.code))
+        .collect();
+    ffe_rs::scripts::with_hooks(&mut state, &mut nav, &cache, |scripts, hooks, today| {
+        hooks.native = native;
+        scripts.open_screen(&assets.image, hooks, today, 2)
+    })
+    .unwrap()
+    .0
+    .unwrap();
+    let entries = &state.scripts.as_ref().unwrap().engine.menu.entries;
+    let mut station_rows: Vec<usize> = entries
+        .iter()
+        .filter_map(ffe_rs::scripts::native_index)
+        .collect();
+    let moved = station_rows.windows(2).any(|pair| pair[0] > pair[1]);
+    station_rows.sort_unstable();
+    assert_eq!(station_rows, (0..posts.len()).collect::<Vec<_>>());
+    assert!(moved, "F346 moves the adverts it displaces to the end");
+    let scripted = entries.len() - posts.len();
+    println!("{} station adverts, {scripted} scripts'", posts.len());
+    assert!(scripted > 0, "a new game's scripts advertise");
+    for entry in entries {
+        if let Some(index) = ffe_rs::scripts::native_index(entry) {
+            assert_eq!(entry.code, i32::from(posts[index].code));
+        }
     }
 }

@@ -240,6 +240,29 @@ pub struct Hooks<'a> {
     pub cargo: Option<Cargo<'a>>,
     /// The contracts, for F314/F315's script records.
     pub contracts: Option<&'a mut ffe_core::missions::State>,
+    /// F326's own entries for the bulletin board (screen 2): the station's
+    /// adverts as [`native_entry`] records.
+    pub native: Vec<ffe_core::script::menu::Entry>,
+}
+
+/// The mark [`native_entry`] leaves in an entry's second extra word.
+const NATIVE: i32 = 0x4e41_5456;
+
+/// The station's advert `index` (message `code`) as an entry of F326's menu,
+/// so the scripts' F346 can insert theirs among the station's.
+pub fn native_entry(index: usize, code: u16) -> ffe_core::script::menu::Entry {
+    ffe_core::script::menu::Entry {
+        code: i32::from(code),
+        extra: [index as i32, NATIVE],
+        ..Default::default()
+    }
+}
+
+/// The station advert a menu entry stands for ([`native_entry`]).
+pub fn native_index(entry: &ffe_core::script::menu::Entry) -> Option<usize> {
+    (entry.extra[1] == NATIVE)
+        .then(|| usize::try_from(entry.extra[0]).ok())
+        .flatten()
 }
 
 impl Hooks<'_> {
@@ -472,6 +495,14 @@ pub fn player_values(
 }
 
 impl Host for Hooks<'_> {
+    fn native_entries(&mut self, screen: i32) -> Vec<ffe_core::script::menu::Entry> {
+        if screen == 2 {
+            self.native.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
     fn player(&mut self, case: i32) -> i32 {
         match case {
             // F21 0: the player's object id (`DATA_008861 + 0x86`); the
@@ -1154,6 +1185,7 @@ impl<'a> Hooks<'a> {
             allegiance: snapshot.allegiance,
             cargo: cargo.map(|cargo| Cargo { capacity, ..cargo }),
             contracts,
+            native: Vec::new(),
         }
     }
 
@@ -1258,6 +1290,49 @@ pub fn present(nav: &crate::navigation::Navigator) -> std::collections::BTreeSet
                 .filter_map(|effect| effect.tag),
         )
         .collect()
+}
+
+/// F770, AI state 9's control: a ship closing on its target that comes
+/// within F1680's distance class 0xa of it takes up the attack (state 1)
+/// and raises event 0x17. Returns each such ship's id and whether its target
+/// is the player, whom it hails with `0x98d0` and its `+0xa0` word.
+pub fn approaches(
+    nav: &mut crate::navigation::Navigator,
+    player: [i64; 3],
+) -> Vec<(i32, i32, bool)> {
+    let mut out = Vec::new();
+    let positions: Vec<(i32, [i64; 3])> = nav
+        .ships
+        .iter()
+        .filter(|ship| ship.alive())
+        .map(|ship| (ship.id as i32 + SHIP_IDS, ship.position))
+        .collect();
+    for ship in nav.ships.iter_mut().filter(|ship| ship.alive()) {
+        if ship.ai_state() != 9 {
+            continue;
+        }
+        let at = if ship.script_target == PLAYER_ID {
+            Some(player)
+        } else {
+            positions
+                .iter()
+                .find(|(id, _)| *id == ship.script_target)
+                .map(|(_, at)| *at)
+        };
+        let Some(at) = at else {
+            continue;
+        };
+        if ffe_core::dust::distance_class(ship.position, at, 0) >= 0xa {
+            continue;
+        }
+        ship.set_ai(1, target_of(ship.script_target));
+        out.push((
+            ship.id as i32 + SHIP_IDS,
+            ship.seed,
+            ship.script_target == PLAYER_ID,
+        ));
+    }
+    out
 }
 
 /// Where an object the scripts name is: the player, a ship, a body or a
@@ -1365,7 +1440,10 @@ pub fn apply(
         match action {
             Action::Create { ship, kind, model } => {
                 if let Some(spec) = spec_for(cache, model, Some(kind)) {
-                    let made = npc::script_ship(&spec, ship, player, &mut nav.random);
+                    let mut made = npc::script_ship(&spec, ship, player, &mut nav.random);
+                    // F773's F703: F1530, then `+0xa0` is the pair's first word.
+                    nav.random.advance();
+                    made.seed = nav.random.a as i32;
                     nav.ships.push(made);
                 }
             }
@@ -1383,6 +1461,8 @@ pub fn apply(
                 let direction = random_direction(&mut nav.random);
                 let position = std::array::from_fn(|k| player[k] + (direction[k] * 25.0e6) as i64);
                 let mut made = npc::script_attacker(&spec, ship, position, &mut nav.random);
+                nav.random.advance();
+                made.seed = nav.random.a as i32;
                 made.script_target = target;
                 made.bounty = word.max(0) as u32;
                 made.set_ai(9, target_of(target));

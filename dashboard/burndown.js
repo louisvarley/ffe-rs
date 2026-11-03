@@ -1196,6 +1196,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 91,
       note: "gameplay-41 progress: a scripted mission plays through. The game now raises the scripts' player events as F21's values change (the system on arrival, the docked object, the flight mode, the cabins), without which no mission waiting to be in a system could fire. F702 places the scripts' ships with F1530/F1507 from the shared pair and F40 with its own longitude and phase. A save keeps the scripts' ships' fields, their canisters and their body-held objects. Mission 25 (the storyline's military assassination) runs in a test from the offer to the $1500 reward with the port's hooks."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
+      note: "gameplay-41 progress: the station's adverts are F326's own entries, so the scripts' adverts fall among them on the board as F346 places them; the scripts' attackers close on their target in AI state 9 and, within F1680's class 0xa, attack (event 0x17) and hail the player with 0x98d0 (F770); F773's F703 gives the scripts' ships their +0xa0 word from the shared pair. Left as stand-ins: the attackers' starting place, F1508's interpolation, F879's terrain height and F40's orbital motion."
     }
   ]
 };

@@ -216,7 +216,9 @@ These do not change the simulation or the Classic look, but are listed for trans
 Every object statement the real scripts use is wired
 (`docs/notes/mission-scripts.md`, "Mission ships and objects"), with these
 stand-ins until the system objects are ported: F669's attackers start 25 km
-from the player rather than on F702's orbit round the root; F702/F1507's
+from the player rather than on F702's orbit round the root (about 2.3 AU
+out, which the port's NPC flight could not close in play), then close and
+hail as F770 does; F702/F1507's
 placements leave out F1508's in-step interpolation and F1507's velocity;
 F297's buildings sit on the planet's radius at their latitude and
 longitude, not on F879's terrain height; F40's objects do not move on

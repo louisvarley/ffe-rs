@@ -2029,6 +2029,40 @@ fn run() -> Result<(), String> {
                     // placements, damage, names and contracts.
                     let at = ship_position(&original, &state);
                     ffe_rs::scripts::apply(&mut state, nav, &cache, at);
+                    // F770: a script's attacker that has closed on its target
+                    // attacks (event 0x17) and hails the player (0x98d0).
+                    for (id, seed, hails) in ffe_rs::scripts::approaches(nav, at) {
+                        if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
+                            &mut state,
+                            nav,
+                            &cache,
+                            |scripts, hooks, today| {
+                                scripts.raise(&assets.image, hooks, today, 0x17, 0, id)
+                            },
+                        ) {
+                            eprintln!("mission scripts: {error}");
+                        }
+                        if let (true, Some(messages)) = (hails, script_messages.as_ref()) {
+                            let mut entry = ffe_core::script::menu::Entry {
+                                code: 0x98d0,
+                                ..Default::default()
+                            };
+                            entry.words = [seed; 3];
+                            let station = nav.docked.unwrap_or(0);
+                            for line in ffe_rs::scripts::expand_all(
+                                &mut state,
+                                nav,
+                                &cache,
+                                station,
+                                assets,
+                                messages,
+                                &commander.name,
+                                &[entry],
+                            ) {
+                                pending_log.add(Source::Script, line);
+                            }
+                        }
+                    }
                     // F924/F61: every object that has left the game since the
                     // last frame (destroyed, jumped out, scooped or cleared).
                     let present = ffe_rs::scripts::present(nav);
@@ -3996,11 +4030,27 @@ fn run() -> Result<(), String> {
                                     || reopen_board)
                             {
                                 reopen_board = false;
+                                // F326: the station's adverts are the board's
+                                // own entries; the scripts add theirs.
+                                let native: Vec<_> = nav
+                                    .station_offers(&cache, station)
+                                    .map(|offers| {
+                                        offers
+                                            .posts
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(index, post)| {
+                                                ffe_rs::scripts::native_entry(index, post.code)
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
                                 if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
                                     &mut state,
                                     nav,
                                     &cache,
                                     |scripts, hooks, today| {
+                                        hooks.native = native;
                                         scripts.open_screen(&assets.image, hooks, today, 2)
                                     },
                                 ) {
@@ -4038,7 +4088,16 @@ fn run() -> Result<(), String> {
                                         "{:?}{:?}{}{}",
                                         menu.entries, menu.words, menu.title, menu.screen
                                     );
-                                    let mut wanted = menu.entries.clone();
+                                    // The station's adverts keep their own
+                                    // text; only the scripts' are expanded.
+                                    let mut wanted: Vec<_> = menu
+                                        .entries
+                                        .iter()
+                                        .filter(|entry| {
+                                            ffe_rs::scripts::native_index(entry).is_none()
+                                        })
+                                        .copied()
+                                        .collect();
                                     wanted.push(ffe_core::script::menu::Entry {
                                         code: menu.title,
                                         words: menu.words,
@@ -4089,6 +4148,13 @@ fn run() -> Result<(), String> {
                         .scripts
                         .as_ref()
                         .map_or(0, |scripts| scripts.engine.menu.entries.len());
+                    // Once F326 has built the board, its rows are the menu's
+                    // entries: the station's adverts with the scripts' among
+                    // them.
+                    let board_built = state
+                        .scripts
+                        .as_ref()
+                        .is_some_and(|scripts| scripts.engine.menu.screen == 2);
                     // F622/F633's BBS and hull stock. Both are generated once
                     // per station and brought up to the day; the buy updates
                     // the same list.
@@ -4112,7 +4178,8 @@ fn run() -> Result<(), String> {
                     // The scripts' entries follow the station's adverts; on
                     // the conversation page they are the whole list.
                     let bulletin_rows = match dock.screen {
-                        StationScreen::Bulletin => bulletin_rows + script_entries,
+                        StationScreen::Bulletin if board_built => script_entries,
+                        StationScreen::Bulletin => bulletin_rows,
                         StationScreen::Script => script_entries,
                         _ => bulletin_rows,
                     };
@@ -4629,16 +4696,25 @@ fn run() -> Result<(), String> {
                                     .map_or(0, |offers| offers.posts.len()),
                                 _ => 0,
                             };
-                            let script_row = match dock.screen {
-                                StationScreen::Script => Some(row),
-                                StationScreen::Bulletin => row.checked_sub(posts),
-                                _ => None,
-                            };
-                            let script_entry = script_row.and_then(|index| {
-                                state.scripts.as_ref().and_then(|scripts| {
-                                    scripts.engine.menu.entries.get(index).copied()
+                            // F326's board lists the station's adverts with the
+                            // scripts' among them; a station advert is the
+                            // station's to handle, the rest F361/F360's.
+                            let menu_entry = state
+                                .scripts
+                                .as_ref()
+                                .filter(|scripts| {
+                                    dock.screen == StationScreen::Script
+                                        || scripts.engine.menu.screen == 2
                                 })
-                            });
+                                .and_then(|scripts| scripts.engine.menu.entries.get(row).copied());
+                            let (script_entry, row) = match menu_entry {
+                                Some(entry) => match ffe_rs::scripts::native_index(&entry) {
+                                    Some(index) => (None, index),
+                                    None => (Some(entry), row),
+                                },
+                                None => (None, row),
+                            };
+                            let row = if row < posts { row } else { usize::MAX };
                             if let (Some(entry), Some(assets), Some(nav)) =
                                 (script_entry, script_assets.as_ref(), nav.as_mut())
                             {
@@ -4670,6 +4746,8 @@ fn run() -> Result<(), String> {
                                         match accepted {
                                             Ok(accepted) => {
                                                 let _ = nav.clear_post(&cache, station, row);
+                                                // F535: the board is built again.
+                                                reopen_board = true;
                                                 message = accepted.text.clone();
                                                 pending_log.add(Source::Mission, accepted.text);
                                                 // F349/F351's message bell.
@@ -7418,10 +7496,29 @@ fn run() -> Result<(), String> {
                             .station_offers(&cache, station)
                             .map(|offers| offers.posts.clone())
                             .unwrap_or_default();
-                        // The scripts' adverts (F453's signal) follow the station's.
-                        let mut texts: Vec<String> =
-                            posts.iter().map(|post| post.text.clone()).collect();
-                        texts.extend(script_text_cache.1.iter().cloned());
+                        // F326's board: the station's adverts with the scripts'
+                        // among them (F453's signal), as the menu orders them.
+                        let menu = state
+                            .scripts
+                            .as_ref()
+                            .map(|scripts| &scripts.engine.menu)
+                            .filter(|menu| menu.screen == 2);
+                        let texts: Vec<String> = match menu {
+                            Some(menu) => {
+                                let mut scripted = script_text_cache.1.iter();
+                                menu.entries
+                                    .iter()
+                                    .map(|entry| match ffe_rs::scripts::native_index(entry) {
+                                        Some(index) => posts
+                                            .get(index)
+                                            .map(|post| post.text.clone())
+                                            .unwrap_or_default(),
+                                        None => scripted.next().cloned().unwrap_or_default(),
+                                    })
+                                    .collect()
+                            }
+                            None => posts.iter().map(|post| post.text.clone()).collect(),
+                        };
                         let visible = station::layout(StationScreen::Bulletin).visible();
                         dock.selected = dock.selected.min(texts.len().saturating_sub(1));
                         dock.scroll = dock.scroll.min(texts.len().saturating_sub(visible));
