@@ -158,3 +158,20 @@ subscription conversation.
 Not yet: the station's own entries are not passed to the scripts
 (`Host::native_entries`), the other station screens do not signal the
 scripts, and the object/ship statements and F76's article macros remain.
+
+## Text macros and script queries (2026-11-03)
+
+F1343 runs F77 on every expanded string, and F77 hands each `[` to F76
+(`ffe_core::script::brackets`). `[Mi<seed>(name)` is F64's query: global 7
+gets the seed, the name's id from `DATA_001698` (cache v34,
+`base:script/queries`, 68 names) pulses global 6, and the text the scripts
+write with statements 35, 36 and 45 replaces the macro. While a code's
+macros expand, `DATA_008568[0]` holds its first word (F1343), so
+`[MiL0(...)` reaches the instance that owns the record. Ported macros: `Gr`,
+`Mi`, `Ca`, `Fm`, `Ff`, `Cr`, `Co`, `Dr`, `Nu`, `Pn`; the journals' others
+are kept as written for now. F31's arithmetic tokens 0x2f, 0x36 (F23:
+seconds to a day number), 0x37 (F24) and 0x3b (a system code) are in the
+engine. The port's date codes read a value of 0x121cf7 or more as the
+original's absolute day number. On a new game the hitch-hikers' advert reads
+"... by 25-Feb-3251" and the Valhallan job "$50000 paid to the right
+Commander" (`tests/station_view.rs script_advert_macros_ask_the_scripts`).

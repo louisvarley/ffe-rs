@@ -75,6 +75,10 @@ pub struct Menu {
     pub lines: Vec<Line>,
     /// F326 asked for the current screen to be rebuilt.
     pub rebuild: bool,
+    /// Statements 35, 36 and 45: the text the scripts write for an F64
+    /// query (`DATA_008558`), as codes and words for the game to expand.
+    #[serde(skip)]
+    pub text: Vec<Entry>,
     /// The scripts selected an entry themselves (F360 from statements 25
     /// and 59); the game runs a native code's handler.
     pub selected: Vec<Entry>,

@@ -818,6 +818,43 @@ pub fn decode_journal_stories(
     })
 }
 
+/// The script query names (cache v34): `DATA_001698`'s `count` pairs of a
+/// name pointer and an id.
+pub fn decode_script_queries(
+    bytes: &[u8],
+    rva: u32,
+    count: usize,
+) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let first = section.offset(rva, 8 * count)?;
+    let mut queries = Vec::with_capacity(count);
+    for index in 0..count {
+        let pointer = dword(bytes, first + 8 * index)?;
+        let id = dword(bytes, first + 8 * index + 4)? as i32;
+        let name_rva = pointer
+            .checked_sub(section.image_base)
+            .ok_or_else(|| format!("script query {index} is not a pointer"))?;
+        let start = section.offset(name_rva, 1)?;
+        let text = bytes
+            .get(start..start.saturating_add(64).min(bytes.len()))
+            .ok_or("script query name outside the executable")?;
+        let end = text
+            .iter()
+            .position(|b| *b == 0)
+            .ok_or_else(|| format!("script query {index} is unterminated"))?;
+        if text[..end].iter().any(|b| !(0x20..0x7f).contains(b)) {
+            return Err(format!("script query {index} is not text"));
+        }
+        queries.push((id, text[..end].to_vec()));
+    }
+    let encoded = ffe_core::script::encode_queries(&queries);
+    ffe_core::script::decode_queries(&encoded)?;
+    Ok(EmbeddedTable {
+        source_offset: first,
+        bytes: encoded,
+    })
+}
+
 /// The mission scripts (cache v32): the region `start..table + 4 * count`
 /// that holds the script graph and `DATA_001697`'s `count` struct pointers,
 /// with every relocated pointer rewritten (see [`ffe_core::script`]). The

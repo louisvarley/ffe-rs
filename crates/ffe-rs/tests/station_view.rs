@@ -1186,3 +1186,71 @@ fn script_adverts_and_conversation_frames() {
     );
     save(&screen, "script-conversation.ppm");
 }
+
+/// The scripts' adverts with `[Mi...(name)` macros: F76 asks the scripts
+/// (F64) and their answer replaces the macro.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn script_advert_macros_ask_the_scripts() {
+    let cache = cache();
+    let assets = ffe_rs::scripts::Assets::load(&cache).expect("cache v34");
+    let messages =
+        ffe_core::message_strings::Messages::new(cache.asset("base:text/messages").unwrap())
+            .unwrap();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let station = nav.docked.unwrap();
+    let mut state = Flight {
+        mode: Mode::Docked,
+        credits: 1_000_000,
+        ..Flight::default()
+    };
+    {
+        let clock = nav.clock();
+        let system = nav.current_code();
+        let mut posts = Vec::new();
+        let mut hooks = ffe_rs::scripts::Hooks {
+            credits: &mut state.credits,
+            random: &mut nav.random,
+            system,
+            clock,
+            posts: &mut posts,
+        };
+        state.scripts = Some(ffe_rs::scripts::new_game(&assets, &mut hooks, true).unwrap());
+    }
+    let mut found = Vec::new();
+    for day in 0..500u32 {
+        nav.clock += 86_400.0;
+        let today = ffe_rs::scripts::absolute_day(nav.clock);
+        ffe_rs::scripts::with_hooks(&mut state, &mut nav, |scripts, hooks, _| {
+            scripts
+                .daily(&assets.image, &assets.stories, hooks, today, true)
+                .unwrap();
+            scripts.open_screen(&assets.image, hooks, today, 2).unwrap();
+        });
+        let entries = state.scripts.as_ref().unwrap().engine.menu.entries.clone();
+        let raw: Vec<bool> = entries
+            .iter()
+            .map(|entry| {
+                messages
+                    .get(entry.code as u16)
+                    .is_some_and(|text| text.contains(&b'['))
+            })
+            .collect();
+        if raw.iter().any(|has| *has) {
+            let texts = ffe_rs::scripts::expand_all(
+                &mut state, &mut nav, &cache, station, &assets, &messages, "Jameson", &entries,
+            );
+            for (text, has) in texts.into_iter().zip(raw) {
+                if has && !found.contains(&text) {
+                    println!("day {day}: {text}");
+                    found.push(text);
+                }
+            }
+        }
+        if found.len() >= 3 {
+            break;
+        }
+    }
+    assert!(!found.is_empty(), "no advert with a macro");
+    assert!(found.iter().all(|text| !text.contains("[Mi")), "{found:?}");
+}

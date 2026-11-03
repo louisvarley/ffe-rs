@@ -105,6 +105,14 @@ pub(crate) fn journal_layout(profile: &str) -> Option<(u32, usize)> {
     }
 }
 
+/// The script query names (`DATA_001698`, 68 entries; v34), floppy 1.02 only.
+pub(crate) fn queries_layout(profile: &str) -> Option<(u32, usize)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0x8e29c, ffe_core::script::QUERIES)),
+        _ => None,
+    }
+}
+
 /// The journal stories (`DATA_002280`, 170 entries; v33), floppy 1.02 only.
 pub(crate) fn stories_layout(profile: &str) -> Option<(u32, usize)> {
     match profile {
@@ -604,6 +612,18 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some((rva, count)) = queries_layout(profile.id) {
+                let queries = ffe_convert::embedded::decode_script_queries(&bytes, rva, count)?;
+                assets.push(Asset {
+                    id: "base:script/queries".to_owned(),
+                    path: "scripts/queries.bin".to_owned(),
+                    kind: AssetKind::ScriptQueries {
+                        queries: count as u32,
+                        source_offset: queries.source_offset as u64,
+                    },
+                    bytes: queries.bytes,
+                });
+            }
             if let Some((rva, count)) = stories_layout(profile.id) {
                 let stories = ffe_convert::embedded::decode_journal_stories(&bytes, rva, count)?;
                 assets.push(Asset {
@@ -811,6 +831,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         + usize::from(journal_layout(profile.id).is_some())
         + usize::from(scripts_layout(profile.id).is_some())
         + usize::from(stories_layout(profile.id).is_some())
+        + usize::from(queries_layout(profile.id).is_some())
         + usize::from(star_point_layout(profile.id).is_some())
         + usize::from(dot_table_layout(profile.id).is_some())
         + if intro_layout(profile.id).is_some() {
@@ -838,7 +859,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 33,
+        format: "ffe-content-cache".to_owned(), format_version: 34,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

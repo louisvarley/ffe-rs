@@ -268,6 +268,14 @@ fn expand(bytes: &[u8], world: &World<'_>, vars: &[Var; 5], depth: usize) -> Str
                     Some(Var::Int(value)) => (*value).max(0) as u32,
                     _ => 0,
                 };
+                // The mission scripts keep the original's absolute day number
+                // (`DATA_008807`, 0x121cf7 on 1-Jan-3250); the port's adverts
+                // count from the game's start.
+                let days = if days >= ABSOLUTE_EPOCH {
+                    days - ABSOLUTE_EPOCH
+                } else {
+                    days
+                };
                 out.push_str(&date_day_text(days));
             }
             0x3001..=0x3006 | 0x3019..=0x301d => {
@@ -337,6 +345,9 @@ pub fn render_code(code: u16, vars: &[Var; 5], world: &World<'_>) -> Option<Stri
 pub fn render_bytes(bytes: &[u8], vars: &[Var; 5], world: &World<'_>) -> String {
     expand(bytes, world, vars, 0)
 }
+
+/// `DATA_008807` on 1-Jan-3250 (the new game's day).
+pub const ABSOLUTE_EPOCH: u32 = 0x121cf7;
 
 /// F1358's date without the time, for FF30's date codes: day 0 is 1-Jan-3250
 /// and the game's calendar uses the fixed `DATA_007650` month lengths (no leap

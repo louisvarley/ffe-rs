@@ -240,6 +240,14 @@ impl Engine {
             0x1a => i32::from(x != 0 && y != 0),
             0x1b => i32::from(x != 0 || y != 0),
             0x2a | 0x2b => 0,
+            // F31's arithmetic cases that need no game state.
+            0x2f => (((x & 0x1fff) as u32) << 16 | ((x as u32 >> 13) & 0x1fff)) as i32,
+            0x36 => ((x as u32) / 0x1_5180 + 0x12_1cf7) as i32,
+            0x37 => (((x as u32) % 0x1_5180).wrapping_mul(0xc22e)) as i32,
+            0x3b => {
+                let z = args[2];
+                x.wrapping_add(0x1718) | (y.wrapping_add(0x1524) << 13) | (z << 26)
+            }
             t if event_token(t) => {
                 let (_, event, a_mode, _) = TOKENS[usize::from(t)];
                 let key_a = if a_mode == 3 { x } else { 0 };
@@ -512,6 +520,22 @@ impl Engine {
         Ok(())
     }
 
+    /// F64: ask the scripts for query `id` with `word` (the macro's seed):
+    /// global 7 is set to the word, global 6 pulses the id, and the text the
+    /// scripts write (statements 35, 36, 45) is returned.
+    pub fn query(
+        &mut self,
+        image: &Image,
+        host: &mut dyn Host,
+        word: i32,
+        id: i32,
+    ) -> Result<Vec<Entry>, String> {
+        self.menu.text.clear();
+        self.set_global(image, host, 7, word)?;
+        self.pulse(image, host, 6, id)?;
+        Ok(std::mem::take(&mut self.menu.text))
+    }
+
     /// F360: the scripts (or the player) choose `entry`.
     pub fn select(
         &mut self,
@@ -643,6 +667,21 @@ impl Engine {
                 self.clear_menu(image, host)?;
             }
             34 => self.close_timed(image, host)?,
+            35 | 36 | 45 => {
+                // F1344 into the query buffer: the code and up to two words.
+                let n = match opcode {
+                    35 => 1,
+                    36 => 2,
+                    _ => 3,
+                };
+                let v = read(self, at, n)?;
+                let mut entry = Entry {
+                    code: v[0],
+                    ..Entry::default()
+                };
+                entry.words[..n - 1].copy_from_slice(&v[1..n]);
+                self.menu.text.push(entry);
+            }
             _ => return Ok(None),
         }
         Ok(Some(false))

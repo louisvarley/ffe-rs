@@ -264,6 +264,19 @@ impl Scripts {
         self.engine.select(image, &mut bridge, entry)
     }
 
+    /// F64's query (`[Mi...(name)`): the text records the scripts write.
+    pub fn query(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        word: i32,
+        id: i32,
+    ) -> Result<Vec<crate::script::menu::Entry>, String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.query(image, &mut bridge, word, id)
+    }
+
     /// A game signal on a script global (set, then back to 0).
     pub fn pulse(
         &mut self,

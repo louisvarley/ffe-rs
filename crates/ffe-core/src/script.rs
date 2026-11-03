@@ -20,6 +20,7 @@
 
 use std::collections::BTreeSet;
 
+pub mod brackets;
 pub mod engine;
 pub mod menu;
 pub mod run;
@@ -32,6 +33,58 @@ pub const POINTER_BLOB: u32 = 0x4000_0000;
 pub const POINTER_STATIC: u32 = 0x8000_0000;
 /// Missions in `DATA_001697` (floppy 1.02).
 pub const MISSIONS: usize = 105;
+
+/// `DATA_001698`'s 68 names the `[Mi...(name)` macro asks the scripts for
+/// (F64): each name's id goes to global 6 (cache v34, `base:script/queries`).
+pub const QUERIES: usize = 0x44;
+
+/// The query names: `u16` count, then per name an `i32` id and the NUL-ended
+/// name.
+pub fn encode_queries(queries: &[(i32, Vec<u8>)]) -> Vec<u8> {
+    let mut out = (queries.len() as u16).to_le_bytes().to_vec();
+    for (id, name) in queries {
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(name);
+        out.push(0);
+    }
+    out
+}
+
+/// Read the query names.
+pub fn decode_queries(bytes: &[u8]) -> Result<Vec<(i32, String)>, String> {
+    let count = bytes
+        .get(..2)
+        .map(|b| usize::from(u16::from_le_bytes([b[0], b[1]])))
+        .ok_or("script queries cut short")?;
+    let mut at = 2;
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        let id = bytes
+            .get(at..at + 4)
+            .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .ok_or("script queries cut short")?;
+        at += 4;
+        let rest = bytes.get(at..).ok_or("script queries cut short")?;
+        let end = rest
+            .iter()
+            .position(|b| *b == 0)
+            .ok_or("unterminated script query")?;
+        out.push((id, String::from_utf8_lossy(&rest[..end]).into_owned()));
+        at += end + 1;
+    }
+    if at != bytes.len() {
+        return Err("trailing bytes after the script queries".to_owned());
+    }
+    Ok(out)
+}
+
+/// F63/F64: the id of query `name` (case-insensitive), if any.
+pub fn query_id(queries: &[(i32, String)], name: &str) -> Option<i32> {
+    queries
+        .iter()
+        .find(|(_, query)| query.eq_ignore_ascii_case(name))
+        .map(|(id, _)| *id)
+}
 
 /// A decoded pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

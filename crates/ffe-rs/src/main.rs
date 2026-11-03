@@ -1318,6 +1318,8 @@ fn run() -> Result<(), String> {
         .and_then(|bytes| ffe_core::message_strings::Messages::new(bytes).ok());
     let mut last_dock_screen: Option<StationScreen> = None;
     let mut reopen_board = false;
+    // The scripts' menu rows and title as last expanded (key, rows, title).
+    let mut script_text_cache: (String, Vec<String>, String) = Default::default();
 
     let mut last_prompt = String::new();
     // `player+0xc6` bit 1: F1008's micrometeorite warning has been given.
@@ -3894,33 +3896,79 @@ fn run() -> Result<(), String> {
                                     eprintln!("mission scripts: {error}");
                                 }
                             }
-                            if let (Some(scripts), Some(messages)) =
-                                (state.scripts.as_mut(), script_messages.as_ref())
-                            {
-                                let outcome = nav
-                                    .with_world(&cache, station, |world| {
-                                        ffe_rs::scripts::drain(scripts, messages, world)
-                                    })
-                                    .unwrap_or_default();
-                                for line in outcome.lines {
+                            if let Some(messages) = script_messages.as_ref() {
+                                // F349/F352's lines and the scripts' own
+                                // selections of station codes.
+                                let (lines, native) = match state.scripts.as_mut() {
+                                    Some(scripts) => (
+                                        std::mem::take(&mut scripts.engine.menu.lines),
+                                        std::mem::take(&mut scripts.engine.menu.selected),
+                                    ),
+                                    None => (Vec::new(), Vec::new()),
+                                };
+                                let entries: Vec<_> = lines.iter().map(|line| line.entry).collect();
+                                for line in ffe_rs::scripts::expand_all(
+                                    &mut state,
+                                    nav,
+                                    &cache,
+                                    station,
+                                    assets,
+                                    messages,
+                                    &commander.name,
+                                    &entries,
+                                ) {
                                     pending_log.add(Source::Script, line);
                                 }
-                                for code in outcome.native {
-                                    // 0x983f "Hang up.": back to the board.
-                                    if code == 0x983f {
-                                        scripts.engine.menu.active = false;
+                                // The menu's rows and title, expanded once per
+                                // change as F327 draws them on a rebuild.
+                                let wanted = state.scripts.as_ref().map(|scripts| {
+                                    let menu = &scripts.engine.menu;
+                                    let key = format!(
+                                        "{:?}{:?}{}{}",
+                                        menu.entries, menu.words, menu.title, menu.screen
+                                    );
+                                    let mut wanted = menu.entries.clone();
+                                    wanted.push(ffe_core::script::menu::Entry {
+                                        code: menu.title,
+                                        words: menu.words,
+                                        ..Default::default()
+                                    });
+                                    (key, wanted)
+                                });
+                                if let Some((key, wanted)) = wanted {
+                                    if key != script_text_cache.0 {
+                                        let mut texts = ffe_rs::scripts::expand_all(
+                                            &mut state,
+                                            nav,
+                                            &cache,
+                                            station,
+                                            assets,
+                                            messages,
+                                            &commander.name,
+                                            &wanted,
+                                        );
+                                        let title = texts.pop().unwrap_or_default();
+                                        script_text_cache = (key, texts, title);
+                                    }
+                                }
+                                if let Some(scripts) = state.scripts.as_mut() {
+                                    for entry in native {
+                                        // 0x983f "Hang up.": back to the board.
+                                        if entry.code == 0x983f {
+                                            scripts.engine.menu.active = false;
+                                            dock.open(StationScreen::Bulletin);
+                                            reopen_board = true;
+                                        }
+                                    }
+                                    let menu = &scripts.engine.menu;
+                                    if menu.active && !(2..=8).contains(&menu.screen) {
+                                        if dock.screen != StationScreen::Script {
+                                            dock.open(StationScreen::Script);
+                                        }
+                                    } else if dock.screen == StationScreen::Script {
                                         dock.open(StationScreen::Bulletin);
                                         reopen_board = true;
                                     }
-                                }
-                                let menu = &scripts.engine.menu;
-                                if menu.active && !(2..=8).contains(&menu.screen) {
-                                    if dock.screen != StationScreen::Script {
-                                        dock.open(StationScreen::Script);
-                                    }
-                                } else if dock.screen == StationScreen::Script {
-                                    dock.open(StationScreen::Bulletin);
-                                    reopen_board = true;
                                 }
                             }
                         }
@@ -7113,13 +7161,7 @@ fn run() -> Result<(), String> {
                         // The scripts' adverts (F453's signal) follow the station's.
                         let mut texts: Vec<String> =
                             posts.iter().map(|post| post.text.clone()).collect();
-                        texts.extend(script_texts(
-                            &state,
-                            nav,
-                            &cache,
-                            station,
-                            script_messages.as_ref(),
-                        ));
+                        texts.extend(script_text_cache.1.iter().cloned());
                         let visible = station::layout(StationScreen::Bulletin).visible();
                         dock.selected = dock.selected.min(texts.len().saturating_sub(1));
                         dock.scroll = dock.scroll.min(texts.len().saturating_sub(visible));
@@ -7145,23 +7187,8 @@ fn run() -> Result<(), String> {
                     } else if dock.screen == StationScreen::Script {
                         // F541/F540: the scripts' screen with their title and
                         // response entries.
-                        let texts =
-                            script_texts(&state, nav, &cache, station, script_messages.as_ref());
-                        let title = match (state.scripts.as_ref(), script_messages.as_ref()) {
-                            (Some(scripts), Some(messages)) => {
-                                let menu = &scripts.engine.menu;
-                                let entry = ffe_core::script::menu::Entry {
-                                    code: menu.title,
-                                    words: menu.words,
-                                    ..Default::default()
-                                };
-                                nav.with_world(&cache, station, |world| {
-                                    ffe_rs::scripts::entry_text(messages, world, &entry)
-                                })
-                                .unwrap_or_default()
-                            }
-                            _ => String::new(),
-                        };
+                        let texts = script_text_cache.1.clone();
+                        let title = script_text_cache.2.clone();
                         let visible = station::layout(StationScreen::Script).visible();
                         dock.selected = dock.selected.min(texts.len().saturating_sub(1));
                         dock.scroll = dock.scroll.min(texts.len().saturating_sub(visible));
@@ -8816,28 +8843,4 @@ fn main() {
         }
         std::process::exit(2);
     }
-}
-
-/// The scripts' menu entries as text (the bulletin board's script adverts or
-/// the conversation page's responses).
-fn script_texts(
-    state: &Flight,
-    nav: &Navigator,
-    cache: &ffe_content::VerifiedCache,
-    station: usize,
-    messages: Option<&ffe_core::message_strings::Messages<'_>>,
-) -> Vec<String> {
-    let (Some(scripts), Some(messages)) = (state.scripts.as_ref(), messages) else {
-        return Vec::new();
-    };
-    nav.with_world(cache, station, |world| {
-        scripts
-            .engine
-            .menu
-            .entries
-            .iter()
-            .map(|entry| ffe_rs::scripts::entry_text(messages, world, entry))
-            .collect()
-    })
-    .unwrap_or_default()
 }
