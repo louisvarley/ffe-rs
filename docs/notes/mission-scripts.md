@@ -104,3 +104,24 @@ callback: it evaluates the condition and, when true, runs its statements.
 
 F57 handles game events: 1 frees every instance, 4 (new game) runs F55,
 which clears the timers, starts mission 0 and runs F68 (the journals).
+
+## Census (floppy 1.02, every reachable stream)
+
+`tests/mission_scripts.rs census_of_statements_and_tokens` counts the
+statements and tokens the real scripts use, to order the game hooks:
+
+- **Statements:** assignment 7 (715), go to state 9 (320), if 2 (225),
+  F345 response entries 0x17 (172), kill 8 (162), start mission 1 (124),
+  F352 console 0x1d (101), jump 3 (94), F349 pages 0x16 (66), F346 0x18
+  (65), text building 0x24 (64), F326 6 (62), F347 0x20 (42), F331 adverts
+  4 (38), F342 5 (24), F360 0x36 (28), and a long tail. Journals: 10 (5),
+  11-13 (4), 14 (273), 16 (1), 17 (5).
+- **Tokens:** constants and variables dominate; then `==` (632), `||`
+  (234), `&&` (172), the journal issue test 0x20 (266), random 0x32 (113),
+  cargo 0x25 (71), 0x31 (51), 0x38 (24), 0x36 (19). The event-only tokens
+  0x1c-0x1e, 0x21 and 0x26-0x29 do not occur, so the uninitialised-value
+  deviation above never applies to the real scripts.
+
+So after the journals the next hooks are the station conversation UI the
+scripted adverts use (F331 adverts, F342/F326 menus, F345-F349 responses
+and pages, F352 console lines, the 0x24/0x23/0x2d text buffer).

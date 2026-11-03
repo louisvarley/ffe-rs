@@ -171,3 +171,24 @@ fn the_scripts_publish_the_journals() {
         .iter()
         .all(|j| j.next_issue == start + 140));
 }
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn census_of_statements_and_tokens() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let image = Image::new(cache.asset("base:script/missions").unwrap()).unwrap();
+    let (statements, tokens) = image.census().unwrap();
+    let list = |counts: &[u32; 256]| {
+        counts
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| **n > 0)
+            .map(|(k, n)| format!("{k:#x}:{n}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    println!("statements {}", list(&statements));
+    println!("tokens {}", list(&tokens));
+}
