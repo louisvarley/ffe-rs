@@ -44,7 +44,7 @@ window.FFE_BURNDOWN = {
         {"id": "parity-19", "title": "[P1] Remove the non-source 7-tonne starting hold and reconcile fitted capacity", "status": "done", "version": "source-audit", "priority": "P1", "auditId": "PAR-19"},
         {"id": "parity-20", "title": "[P1] Replay market, shipyard, BBS and daily mission events using source state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-20"},
         {"id": "parity-21", "title": "[P1] Drive all explosion, debris and hit effects from source object states", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-21"},
-        {"id": "parity-22", "title": "[P1] Replay missile, ECM, escape and legal outcomes in the complete event loop", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-22"},
+        {"id": "parity-22", "title": "[P1] Replay missile, ECM, escape and legal outcomes in the complete event loop", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-22"},
         {"id": "parity-23", "title": "[P1] Remove silent fallback to the synthetic playable from normal starts/loads", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-23"},
         {"id": "parity-24", "title": "[P1] Use the same source new-game setup after death and on every resume path", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-24"}
       ]
@@ -1093,6 +1093,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 96,
       note: "Explosion effects (PAR-21 in progress) checked against the executed original's death probe: timer rates and spark timing match; sparks now keep their thrower's size word (big from the explosion, small from debris) and debris pods carry their cargo word."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 96,
+      note: "Escape leaves a derelict (PAR-22 in progress): the ship abandoned for a capsule or Stowmaster now drifts where it was until 67 km away, as F1098 leaves it, and escaping clears the wanted state."
     }
   ]
 };

@@ -217,3 +217,14 @@ cleared.
   only requirement is the general-equipment bit. The task's "cabin/equipment
   requirement" is therefore the equipment bit (and, for the Stowmaster, the
   two cabins it grants, not consumes).
+
+## F1098's derelict (2026-11-03)
+
+When an escape capsule or Stowmaster launches (the automatic death path or the
+F12 icon), F1098 keeps the old ship's object: `+0x118 = 1`, its thrust words
+`+0xb6..+0xba` zeroed, control `+0x87 = 0xb` and AI state `+0xff = 0x16`, where
+F713 only moves it and F767 removes it at distance class 0xd. The player's
+object becomes the new craft, and the wanted state (`DATA_008647`,
+`DATA_008646` bit 0) is cleared. The port leaves an `effects::Kind::Derelict`
+with the old model, position, velocity and axes, removed at `DEBRIS_RANGE`,
+and calls `Legal::clear_alert` (`main.rs::leave_derelict`).

@@ -273,13 +273,14 @@
     "id": "PAR-22",
     "priority": "P1",
     "title": "Replay missile, ECM, escape and legal outcomes in the complete event loop",
-    "status": "todo",
+    "status": "in-progress",
     "certainty": "Integration fidelity still unproven; source constants alone are insufficient",
     "finding": "Existing missile/ECM and escape helpers cover several numeric/state branches, but runtime cadence, object ownership/recycling, shared RNG and the simplified NPC world can change fusing, evasion, fines and survival. F1098 derelict behaviour is explicitly absent.",
     "source": "F754/F757/F758/F718/F721/F935/F1098/F931/F941/F953",
     "implementation": "crates/ffe-core/src/missile.rs; crates/ffe-rs/src/missile.rs; crates/ffe-rs/src/death.rs; crates/ffe-rs/src/navigation.rs",
     "acceptance": "Whole encounter traces: player/NPC launches, both ECM types, decoys/mines, witness reporting, subsystem failure and capsule/Stowmaster escape; preserve old-ship AI, cargo/equipment and exact source event order.",
-    "dependencies": "PAR-15, PAR-16, PAR-17, gameplay-5"
+    "dependencies": "PAR-15, PAR-16, PAR-17, gameplay-5",
+    "progress": "2026-11-03: F1098's derelict is ported: the ship left for an escape capsule or Stowmaster drifts in AI state 0x16 until F767's distance class 0xd removes it, and the wanted state is cleared as F1098 does. Open: whole-encounter traces of launches, ECM, decoys/mines, witness reporting and escape against the executed original."
   },
   {
     "id": "PAR-23",

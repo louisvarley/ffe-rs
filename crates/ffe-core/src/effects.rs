@@ -125,6 +125,10 @@ pub enum Kind {
     /// A hyperspace cloud (model 0x9a): F738's departure cloud (AI state
     /// 0x1d, F764) or F740/F1094's exit cloud (state 0x1e, F763).
     Cloud,
+    /// F1098: the ship the player left for an escape craft, in AI state 0x16
+    /// with its thrust zeroed: F713 only moves it and F767 removes it at
+    /// distance class 0xd ([`DEBRIS_RANGE`]).
+    Derelict,
 }
 
 /// One short-lived visual object in the system frame.
@@ -301,6 +305,8 @@ impl Effect {
                 }
                 Update::Nothing
             }
+            // F713: movement only.
+            Kind::Derelict => Update::Nothing,
             Kind::Debris => {
                 self.think = self.think.saturating_add(tics);
                 while self.think >= THINK_TICS && self.countdown >= 0 {
@@ -344,7 +350,7 @@ impl Effect {
 
     /// F767: a drifting pod goes once it is `DEBRIS_RANGE` from `player`.
     pub fn out_of_range(&self, player: [i64; 3]) -> bool {
-        self.kind == Kind::Debris
+        matches!(self.kind, Kind::Debris | Kind::Derelict)
             && (0..3).any(|axis| (self.position[axis] - player[axis]).abs() >= DEBRIS_RANGE)
     }
 
@@ -516,6 +522,27 @@ pub fn exit_cloud(position: [i64; 3], life: u64) -> Effect {
     cloud(position, true, 1, life)
 }
 
+/// F1098's derelict: the old ship's object, drifting on its velocity.
+pub fn derelict(model: u32, position: [i64; 3], velocity: [f64; 3], axes: [[f64; 3]; 3]) -> Effect {
+    Effect {
+        kind: Kind::Derelict,
+        model,
+        position,
+        velocity,
+        forward: axes[2],
+        up: axes[1],
+        timer: 0,
+        countdown: 0,
+        think: 0,
+        alive: true,
+        shift: 0,
+        cargo: None,
+        size: 0,
+        life: 0,
+        exit: false,
+    }
+}
+
 fn cloud(position: [i64; 3], exit: bool, size: u16, life: u64) -> Effect {
     Effect {
         kind: Kind::Cloud,
@@ -643,6 +670,19 @@ mod tests {
         assert_eq!(pod.size, 15);
         let spark = pod.spark(&mut rng);
         assert_eq!((spark.size, spark.shift), (pod.size, -1));
+    }
+
+    #[test]
+    fn a_derelict_drifts_until_f767_removes_it() {
+        let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        // 100 m/s along z from the origin.
+        let mut hull = derelict(0x24, [0; 3], [0.0, 0.0, 100_000.0], axes);
+        assert_eq!(hull.tick(1.0, 49_700), Update::Nothing);
+        assert_eq!(hull.position, [0, 0, 100_000]);
+        assert!(hull.alive() && !hull.out_of_range([0; 3]));
+        // F767: gone at distance class 0xd (2^26 mm, about 67 km).
+        hull.position[2] = DEBRIS_RANGE;
+        assert!(hull.out_of_range([0; 3]));
     }
 
     #[test]

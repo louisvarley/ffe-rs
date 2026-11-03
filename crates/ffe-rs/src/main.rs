@@ -3554,6 +3554,16 @@ fn run() -> Result<(), String> {
                                 let stats = scene
                                     .as_ref()
                                     .and_then(|scene| scene.ship_stats(craft.model()));
+                                if let Some(nav) = nav.as_mut() {
+                                    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+                                    leave_derelict(
+                                        nav,
+                                        state.ship,
+                                        ship_position(&original, &state),
+                                        state.velocity.map(|value| value * unit),
+                                        ship_axes(&state),
+                                    );
+                                }
                                 death::board(&mut state, craft, stats.as_ref());
                                 if original.is_some() {
                                     original = Some(
@@ -8145,6 +8155,21 @@ fn ship_position(original: &Option<OriginalFlight>, state: &Flight) -> [i64; 3] 
     )
 }
 
+/// F1098: the ship the player left becomes a derelict (AI state 0x16, thrust
+/// zeroed) drifting where it was, and the wanted state (`DATA_008647` and
+/// `DATA_008646` bit 0) is cleared.
+fn leave_derelict(
+    nav: &mut Navigator,
+    model: u32,
+    position: [i64; 3],
+    velocity: [f64; 3],
+    axes: [[f64; 3]; 3],
+) {
+    nav.effects
+        .push(ffe_core::effects::derelict(model, position, velocity, axes));
+    nav.legal.clear_alert();
+}
+
 /// F910's outcome for the player: the console message, F911's destroyed drive
 /// (class 1, which cannot jump), or F925 removing the ship, which goes
 /// straight to F1104's death state with no explosion and no escape. `true`
@@ -8210,9 +8235,11 @@ fn playership_destroyed(
     let craft = death::escape_craft(&state.loadout);
     let craft_stats =
         craft.and_then(|craft| scene.and_then(|scene| scene.ship_stats(craft.model())));
+    let old_model = state.ship;
     let outcome = death::begin(state, craft_stats.as_ref());
     match outcome {
         Outcome::Escaped(_) => {
+            leave_derelict(nav, old_model, position, velocity, axes);
             // The new object is the player's ship now: rebuild the original
             // flight model around the capsule/fighter's statistics, keeping the
             // old position and velocity F1098 copied.
