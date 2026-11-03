@@ -322,7 +322,7 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "release-1", title: "Full playthrough checkpoints against the reference", status: "todo" },
-        { id: "release-2", title: "Linux and macOS builds", status: "todo" },
+        { id: "release-2", title: "Linux and macOS builds", status: "done" },
         { id: "release-3", title: "Save and config migration", status: "done" },
         { id: "release-4", title: "Packaging and distribution audit", status: "todo" },
         { id: "release-5", title: "Clean-machine player-data import", status: "todo" },
@@ -1123,6 +1123,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 92,
       note: "ui-3 done: F11's combat computer view (6) joins the missile (F10) and external (F9) views. With the Combat Computer fitted, F1054's chase camera backs off to keep the nearest ship in frame and F1109 prints each ship's range, hull/shields and type in amber below it."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
+      note: "release-2 done: CI now builds, lints (clippy -D warnings) and tests on Linux, macOS and Windows and makes release builds of the game, tools and launcher on each (runs 336/337 green on all three). CI had been red on main from three lint warnings and a macOS-only filesystem assumption in a test; both fixed."
     }
   ]
 };
