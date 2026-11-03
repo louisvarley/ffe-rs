@@ -260,13 +260,14 @@
     "id": "PAR-21",
     "priority": "P1",
     "title": "Drive all explosion, debris and hit effects from source object states",
-    "status": "todo",
+    "status": "in-progress",
     "certainty": "Confirmed lifecycle substitute",
     "finding": "Effect::tick integrates floating velocity and removes objects after port-chosen lifetimes. Renderer supplies a fixed explosion input instead of F764/F769 growth/state evolution. This affects the destruction scene, visibility and object recycling/RNG as well as appearance.",
     "source": "F939/F942/F926/F764/F769/F927/F1536",
     "implementation": "crates/ffe-core/src/effects.rs:44,120; crates/ffe-rs/src/main.rs:5262; crates/ffe-rs/src/screen.rs:2641",
     "acceptance": "Match birth records, age/global words, fragment calls, movement, duration and slot removal for player/NPC/missile destruction; source reference must choose the rendered input rather than forcing fragments visible.",
-    "dependencies": "PAR-08, PAR-12, PAR-17, ui-12"
+    "dependencies": "PAR-08, PAR-12, PAR-17, ui-12",
+    "progress": "2026-11-03: checked against the executed death probe: F708's explosion word falls by tics>>2 and F709's particle word by tics>>1 per update, F708's window and F712's debris sparks appear when the original's do, with the original's distance words (+2/-1). Sparks now clone their thrower's global word 1 (+0x9e: 0xffff from the explosion, the pod's cargo code from debris) and pods carry F926's string+0x7200 word; the renderer passes the live timer and these words. Open: integer F1512 movement, slot recycling (F927) and a frame-by-frame trace comparison."
   },
   {
     "id": "PAR-22",

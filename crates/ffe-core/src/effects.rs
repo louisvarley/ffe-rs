@@ -65,10 +65,14 @@
 //! The explosion model's own command stream gates its twelve fragment calls on
 //! object global word 4 (`+0xa4`): the arithmetic and bit branches in model 155
 //! select no fragment for the `0xffffffff` F942 writes there, but select all
-//! twelve for FFP 1.0 (`0x4000`). [`EXPLOSION_MASS_GLOBAL`] and
-//! [`EXPLOSION_MASS`] carry the value the renderer passes so the original's
-//! fragment set is visible; the gate and both values are asserted in the
-//! cached-frame test (`crates/ffe-rs/tests/effects_view.rs`).
+//! twelve for FFP 1.0 (`0x4000`). The renderer passes the object's live timer
+//! word as [`EXPLOSION_MASS_GLOBAL`], as the original reads `+0xa4`, so the
+//! fragments follow F708's countdown; the gate is asserted in the cached-frame
+//! test (`crates/ffe-rs/tests/effects_view.rs`). Global word 1 (`+0x9e`) is
+//! `0xffff` on the explosion, the cargo code on a pod, and cloned into each
+//! spark from its thrower. The executed death probe (`jjffe-smoke
+//! --death-probe`) matches these words and the timers' rates: the explosion's
+//! word falls by `tics >> 2` and a particle's by `tics >> 1` each update.
 
 use crate::npc::Random;
 
@@ -324,9 +328,17 @@ impl Effect {
 
     /// The F939 spark this object throws: F708 passes flag 2 (distance word
     /// `+2`, four times the size), F712 flag 4 (`-1`).
+    ///
+    /// F939 clones the thrower (F1533), so the spark keeps its global word 1
+    /// (`+0x9e`): `0xffff` from the explosion, the pod's cargo code from a
+    /// debris pod (the executed death probe's `g1` 65535 and 15).
     pub fn spark(&self, rng: &mut Random) -> Effect {
         let mut spark = hit(self.position, [0.0; 3], self.axes(), 0.0, rng);
         spark.shift = self.shift + if self.kind == Kind::Debris { -1 } else { 2 };
+        spark.size = match self.kind {
+            Kind::Explosion => EXPLOSION_SIZE,
+            _ => self.size,
+        };
         spark
     }
 
@@ -470,7 +482,10 @@ pub fn explosion(
             alive: true,
             shift: 0,
             cargo: Some(load),
-            size: 0,
+            // F926: `+0x9e = string + 0x7200` (16 bits) with the string
+            // `0x8e00 + cargo`, so global word 1 is the cargo code (15 for a
+            // wreck pod, as the executed death probe shows).
+            size: load,
             life: 0,
             exit: false,
         });
@@ -606,6 +621,29 @@ fn normalise(v: [f64; 3]) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sparks_keep_their_throwers_global_word_one() {
+        // The executed death probe: explosion sparks have `+0x9e` 0xffff and
+        // the distance word +2; debris sparks 15 (a wreck pod) and -1.
+        let mut rng = Random::start();
+        let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let burst = explosion([0; 3], [0.0; 3], 0, axes, &mut rng);
+        let spark = burst[0].spark(&mut rng);
+        assert_eq!((spark.size, spark.shift), (0xffff, 2));
+        // A seed whose explosion throws a wreck pod.
+        let pod = (1u32..)
+            .find_map(|seed| {
+                let mut rng = Random::new(seed, seed.rotate_left(13));
+                explosion([0; 3], [0.0; 3], 8, axes, &mut rng)
+                    .into_iter()
+                    .find(|e| e.kind == Kind::Debris && e.cargo == Some(WRECK_CARGO))
+            })
+            .unwrap();
+        assert_eq!(pod.size, 15);
+        let spark = pod.spark(&mut rng);
+        assert_eq!((spark.size, spark.shift), (pod.size, -1));
+    }
 
     #[test]
     fn random_axes_stay_unit_for_every_draw() {

@@ -146,7 +146,9 @@ fn hit_particle_explosion_and_frames() {
     // F942/F926: the kill spawns the model-0x9b explosion and F926 debris.
     let before = nav.effects.len();
     assert_eq!(
-        nav.damage_ship_at(id, 1000, Some(hit_point))
+        // Enough for any hull the spawn picks (the shared random pair
+        // chooses the model).
+        nav.damage_ship_at(id, 1_000_000, Some(hit_point))
             .map(|attack| attack.damage),
         Some(laser::Damage::Destroyed)
     );

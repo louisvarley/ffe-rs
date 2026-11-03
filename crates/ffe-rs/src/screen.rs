@@ -308,8 +308,8 @@ impl SystemEffect {
             timer: effect.timer,
             size: match effect.kind {
                 ffe_core::effects::Kind::Explosion => ffe_core::effects::EXPLOSION_SIZE,
-                ffe_core::effects::Kind::Cloud => effect.size,
-                _ => 0,
+                // Clouds' ramp, debris pods' and sparks' cloned `+0x9e`.
+                _ => effect.size,
             },
             scale,
         }
