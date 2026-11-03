@@ -8,12 +8,13 @@ game, tools and launcher and opens it; the launcher itself is
 - **Play**: the original game files (required) and the FFED3D resources
   (optional), each with a status, an open-folder button and Browse. The game
   row runs `ffe_tools::inspect_game` (the English floppy 1.02 / CD 1.01
-  fingerprints) and, once the files pass, builds `data.bin` when it is
-  missing or older than v29 (`ffe_tools::cache::build_data` into
-  `data-new.bin`, then renamed). The FFED3D row checks `resources/` for the
-  skybox, star texture, `texNNN` textures, the `.X` models and `ffewin.cfg`.
-  LAUNCH starts `ffe-rs --root <data folder> --start N [--skip-intro]
-  [--record recordings/<utc>.ffe-input]`. Clicking a status opens About.
+  fingerprints). There is no cache file: the game builds its content from
+  the game folder at every start (`ffe_tools::cache::build_bytes`, about a
+  quarter of a second). The FFED3D row checks `resources/` for the skybox,
+  star texture, `texNNN` textures, the `.X` models and `ffewin.cfg`. LAUNCH
+  starts `ffe-rs --root <data folder> --game <game folder> --start N
+  [--skip-intro] [--record recordings/<utc>.ffe-input]`. Clicking a status
+  opens About.
 - **Settings**: Port options (combat aids, traffic, police, pirates, Advanced
   traffic, docking approach), Display, Game options (controls, the original's
   other and map options), Sound, and Files & start (start system, intro,
@@ -21,13 +22,13 @@ game, tools and launcher and opens it; the launcher itself is
   written with `ffe_rs::settings` (`saves/config.cfg`), so the in-game pages
   and the launcher share one file; `bind.*` remaps are kept. Editing is
   disabled while the game runs, and the file is re-read when it closes.
-- **About**: the full verification reports, Rebuild data.bin and Open data
-  folder.
+- **About**: the full verification reports, Open saves folder and Open last
+  game log.
 
 The launcher's own choices are `saves/launcher.cfg` (game and FFED3D
-folders, start, intro, recording). The data folder is found as the game does:
-beside the executable, else the nearest of four parent folders with a
-`data.bin`. FFED3D's files are not loaded by the game yet; the launcher only
+folders, start, intro, recording). The data folder (saves and recordings) is
+the nearest of the launcher's folder and four parents with launcher settings,
+a `game\FIRSTENC.EXE` or the workspace's `Cargo.toml`. FFED3D's files are not loaded by the game yet; the launcher only
 records and checks the folder. Folder pickers are native on Windows and macOS
 (`rfd`); Linux uses zenity or kdialog when installed, with the typed path on
 Settings > Files & start as the fallback.
@@ -46,10 +47,6 @@ Settings > Files & start as the fallback.
   wgpu (Direct3D 12 / Vulkan).
 - A panic or a window that cannot open writes `saves/launcher.log` and shows a
   message box, since a GUI program has no console.
-- Before the first `data.bin` exists, the data folder is the nearest folder
-  with `game\FIRSTENC.EXE` (or the checkout's `Cargo.toml`), so
-  `target\release\ffe-launcher.exe` builds `data.bin` in the checkout, as
-  `play.bat` does. Rebuilding is disabled while the game runs (Windows locks
-  the open file). Fonts come from `%WINDIR%\Fonts` (Segoe UI).
+- Fonts come from `%WINDIR%\Fonts` (Segoe UI).
 - Checked by cross-building both executables for `x86_64-pc-windows-gnu`
   (the launcher links as a Windows GUI program); not yet run on Windows.

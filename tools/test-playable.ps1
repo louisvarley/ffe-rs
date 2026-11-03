@@ -3,8 +3,8 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $exe = Join-Path $root 'target\release\ffe-rs.exe'
 if (!(Test-Path -LiteralPath $exe)) { throw 'Build the release ffe-rs executable first.' }
-$cache = Join-Path $root 'data.bin'
-if (!(Test-Path -LiteralPath $cache)) { throw 'Build data.bin first.' }
+$game = Join-Path $root 'game'
+if (!(Test-Path -LiteralPath (Join-Path $game 'FIRSTENC.EXE'))) { throw 'Put the game files in .\game first.' }
 
 if (-not ('PlayableWindowTest' -as [type])) {
     Add-Type @'
@@ -123,8 +123,7 @@ function Capture([string]$Name) {
 }
 try {
     [void][IO.Directory]::CreateDirectory($testRoot)
-    Copy-Item -LiteralPath $cache -Destination (Join-Path $testRoot 'data.bin')
-    $process = Start-Process -FilePath $exe -ArgumentList @('--root', ('"' + $testRoot + '"')) -PassThru
+    $process = Start-Process -FilePath $exe -ArgumentList @('--root', ('"' + $testRoot + '"'), '--game', ('"' + $game + '"')) -PassThru
     for ($i = 0; $i -lt 50; $i++) {
         Start-Sleep -Milliseconds 100
         $process.Refresh()
@@ -277,7 +276,7 @@ try {
     [void][PlayableWindowTest]::SendMessage($window, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)
     if (!$process.WaitForExit(5000)) { throw 'Window did not close.' }
     if ($process.ExitCode -ne 0) { throw "Window exit code $($process.ExitCode)" }
-    $process = Start-Process -FilePath $exe -ArgumentList @('--root', ('"' + $testRoot + '"')) -PassThru
+    $process = Start-Process -FilePath $exe -ArgumentList @('--root', ('"' + $testRoot + '"'), '--game', ('"' + $game + '"')) -PassThru
     Start-Sleep -Seconds 1
     $process.Refresh()
     $window = $process.MainWindowHandle

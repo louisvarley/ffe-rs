@@ -896,7 +896,7 @@ impl ModelViewer {
 
     pub fn from_models(mut models: Vec<ViewerModel>, table: SineTable) -> Result<Self, String> {
         if models.is_empty() {
-            return Err("The cache holds no models. Build a v7 data.bin to view them.".to_owned());
+            return Err("The game content holds no models.".to_owned());
         }
         models.sort_by_key(|m| m.index);
         Ok(Self {

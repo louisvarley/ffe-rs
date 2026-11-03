@@ -186,11 +186,14 @@ pub fn inspect_data(path: &Path) -> Result<Manifest, String> {
     Ok(ffe_content::read(&bytes)?.into_manifest())
 }
 
-pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
+/// Build the content cache from the game files at `root` in memory (about a
+/// quarter of a second): the game reads it straight from the game folder,
+/// with no `data.bin` needed. The bytes are the same as [`build_data`]
+/// writes.
+pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
     let root = root
         .canonicalize()
         .map_err(|error| format!("{}: {error}", root.display()))?;
-    let destination = output_destination(&root, output)?;
     let inspection = inspect_game(&root)?;
     if !inspection.inspection_passed {
         let errors: Vec<_> = inspection
@@ -750,7 +753,16 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
         ],
         files: Vec::new(),
     };
-    let bytes = ffe_content::build(manifest, assets)?;
+    ffe_content::build(manifest, assets)
+}
+
+/// [`build_bytes`] written to a new file at `output` (outside the game folder).
+pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
+    let canonical = root
+        .canonicalize()
+        .map_err(|error| format!("{}: {error}", root.display()))?;
+    let destination = output_destination(&canonical, output)?;
+    let bytes = build_bytes(&canonical)?;
     let verified = ffe_content::read(&bytes)?;
     let mut file = fs::OpenOptions::new()
         .write(true)

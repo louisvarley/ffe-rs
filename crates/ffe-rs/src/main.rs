@@ -52,7 +52,6 @@ const TAKEOFF_HINT: &str =
     "Lifting off: raise the set speed (W or Enter) and pitch up (Up or A) to clear the starport.";
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -92,6 +91,10 @@ enum Boot {
 
 struct Options {
     root: PathBuf,
+    /// The original game files the content is built from at startup
+    /// (`--game`, else the launcher's `saves/launcher.cfg` choice, else
+    /// `<root>/game`).
+    game: PathBuf,
     smoke_frames: Option<usize>,
     /// Directory for a scripted undock capture (starts the launch sequence and
     /// saves every tenth frame, then exits).
@@ -162,9 +165,14 @@ fn options() -> Result<Options, String> {
     let mut record = None;
     let mut replay = None;
     let mut replay_exit = false;
+    let mut game: Option<PathBuf> = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--root" && root.is_none() {
+        if arg == "--game" && game.is_none() {
+            game = Some(PathBuf::from(
+                args.next().ok_or("--game requires a directory")?,
+            ));
+        } else if arg == "--root" && root.is_none() {
             root = Some(PathBuf::from(
                 args.next().ok_or("--root requires a directory")?,
             ));
@@ -265,27 +273,35 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs --root <repo-with-data.bin> [--start 0..5|sol] [--skip-intro] [--dev] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR] [--record FILE] [--replay FILE [--replay-exit]]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs [--game <game files folder>] [--root <data folder>] [--start 0..5|sol] [--skip-intro] [--dev] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR] [--record FILE] [--replay FILE [--replay-exit]]",arg.to_string_lossy()));
         }
     }
     let root = match root {
         Some(root) => root,
-        // Beside the executable, else the nearest of up to four parent folders with
-        // a data.bin (so target\release\ffe-rs.exe finds the checkout's cache).
+        // Beside the executable, else the nearest of up to four parent folders
+        // with saved launcher settings or a `game` folder (so
+        // target\release\ffe-rs.exe finds the checkout).
         None => {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let beside = exe.parent().ok_or("executable has no parent")?.to_owned();
             beside
                 .ancestors()
                 .take(5)
-                .find(|dir| dir.join("data.bin").is_file())
+                .find(|dir| {
+                    dir.join("saves").join("launcher.cfg").is_file()
+                        || dir.join("game").join("FIRSTENC.EXE").is_file()
+                })
                 .map_or(beside.clone(), Path::to_path_buf)
         }
     };
+    let game = game
+        .or_else(|| configured_game(&root))
+        .unwrap_or_else(|| root.join("game"));
     Ok(Options {
         root: root
             .canonicalize()
             .map_err(|e| format!("Cannot resolve root: {e}"))?,
+        game,
         smoke_frames,
         capture,
         capture_planet,
@@ -306,23 +322,41 @@ fn options() -> Result<Options, String> {
     })
 }
 
-fn read_cache(path: &Path) -> Result<Vec<u8>, String> {
-    let meta = fs::symlink_metadata(path)
-        .map_err(|e| format!("{}: {e}. Run ffe-tools build-data first.", path.display()))?;
-    if !meta.is_file()
-        || meta.file_type().is_symlink()
-        || meta.len() > ffe_content::MAX_CACHE_BYTES as u64
-    {
-        return Err("Cache must be a bounded regular file.".to_owned());
+/// The game folder the launcher saved (`game=` in `saves/launcher.cfg`).
+fn configured_game(root: &Path) -> Option<PathBuf> {
+    let path = root.join("saves").join("launcher.cfg");
+    let meta = fs::symlink_metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > 16 * 1024 {
+        return None;
     }
-    let mut bytes = Vec::new();
-    fs::File::open(path)
-        .and_then(|f| {
-            f.take(ffe_content::MAX_CACHE_BYTES as u64 + 1)
-                .read_to_end(&mut bytes)
-        })
-        .map_err(|e| format!("Cannot read cache: {e}"))?;
-    Ok(bytes)
+    fs::read_to_string(path)
+        .ok()?
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("game="))
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Build the content from the original game files in memory (the same
+/// fingerprint checks and conversion as `ffe-tools build-data`, about a
+/// quarter of a second). There is no separate cache file to keep in step.
+fn load_content(game: &Path) -> Result<ffe_content::VerifiedCache, String> {
+    if !game.join("FIRSTENC.EXE").is_file() {
+        return Err(format!(
+            "The Frontier: First Encounters game files were not found in {}.\n\
+             Choose your game folder in the launcher (launcher.bat), or start the game \
+             with --game <folder containing FIRSTENC.EXE>.",
+            game.display()
+        ));
+    }
+    let bytes = ffe_tools::cache::build_bytes(game).map_err(|error| {
+        format!(
+            "The game files in {} could not be read: {error}",
+            game.display()
+        )
+    })?;
+    ffe_content::read(&bytes)
 }
 
 /// Build one native save from the live state. `nav` is `None` in the prototype
@@ -1043,7 +1077,7 @@ const NEAR_WORLD_ACCELERATION: usize = 2;
 
 fn run() -> Result<(), String> {
     let options = options()?;
-    let cache = ffe_content::read(&read_cache(&options.root.join("data.bin"))?)?;
+    let cache = load_content(&options.game)?;
     let mut screen = Screen::new(&cache)?;
     // Diagnostic frames of the preference pages and of the space colour, for
     // the port's screenshot comparisons. No window is opened.
@@ -1291,8 +1325,8 @@ fn run() -> Result<(), String> {
         }
         Err(error) => {
             return Err(format!(
-                "The game's models could not be read from data.bin ({error}). \
-                 Re-import the game data (see README)."
+                "The game's models could not be read from the game files ({error}). \
+                 Check the game files in the launcher."
             ))
         }
     };
@@ -3966,7 +4000,7 @@ fn run() -> Result<(), String> {
                                 ships.name(ship).unwrap_or("unnamed")
                             )
                         }
-                        None => "No ship list: rebuild data.bin (cache v12).".to_owned(),
+                        None => "No ship list in the game content.".to_owned(),
                     };
                 }
                 if let Some(station_action) = dock_action {

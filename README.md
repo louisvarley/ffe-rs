@@ -37,24 +37,25 @@ The Windows executable is built in this checkout. From the repository root:
 **The launcher:** double-click `launcher.bat`. It builds the game, tools and
 launcher, then opens a window where you browse to and verify your game files
 (and, optionally, FFED3D's resources), change the port and game settings and
-press LAUNCH; it builds `data.bin` for you when it is missing or outdated. See
-`docs/notes/launcher.md`.
+press LAUNCH. See `docs/notes/launcher.md`.
 
-**Easiest on Windows:** double-click `play.bat`. It builds the release game and
-tools, creates or updates `data.bin` from your files in `.\game` when it is
-missing or older than this build needs (currently cache v29), and launches the
-game; on any error the window stays open with the message. Every run also records
+**Without the launcher:** double-click `play.bat`. It builds the release game
+and launches it on your files in `.\game`; on any error the window stays open with the message. Every run also records
 your keyboard and mouse to `recordings\<date-time>.ffe-input`; `replay.bat recordings\FILE`
 (or `ffe-rs --replay FILE [--replay-exit]`) plays a recording back exactly, so a problem can
 be reproduced from the file; a recording also stores the display and control preferences it was made with, so a replay maps every click and key as the player's game did (a replay never writes them to `saves`). `FFE_TRACE=1` prints the flight state and each click's logical point while it runs. `ffe-rs --record FILE` records without the batch file. Rebuilding by hand:
-`cargo build --release --locked -p ffe-rs -p ffe-tools`.
-The root directory must contain your locally generated **v29** `data.bin` (build command
-below, or let `play.bat` make it). The game verifies it before opening a window.
-Without `--root`, it looks beside its own executable and then up to four parent
-folders, so `target\release\ffe-rs.exe` finds the checkout's `data.bin`. If
-startup fails, the console waits for Enter so the error can be read. No original
-assets, reference source or x86 executable are linked into the native game
-binary. Do not distribute the cache or captures.
+`cargo build --release --locked -p ffe-rs`.
+**The game reads its content straight from your game files** at every start
+(the same fingerprint checks and conversion as `ffe-tools build-data`, about a
+quarter of a second); there is no cache file to build or keep up to date. The
+folder is `--game <folder>`, else the one chosen in the launcher
+(`saves\launcher.cfg`), else `.\game` beside the data folder. The data folder
+(`--root`, holding `saves` and `recordings`) defaults to the nearest of the
+executable's folder and four parents with launcher settings or a `game` folder,
+so `target\release\ffe-rs.exe` finds the checkout. If startup fails, the
+console waits for Enter so the error can be read. No original assets,
+reference source or x86 executable are linked into the native game binary. Do
+not distribute the game files or captures.
 
 ### Developer options
 
@@ -420,7 +421,11 @@ help (`Get-Help .\tools\redraw-swarmui.ps1 -Full`) for the options. It skips
 the font and raw texture blocks and only resizes images under 16 pixels. For
 Z-Image Turbo use `-Steps 8 -CfgScale 1`; leave `-ModelTiling` off with it.
 
-## Build and verify the partial content cache
+## Build and verify the partial content cache (developers)
+
+The game no longer needs this file: it builds the same content in memory from
+the game folder. `data.bin` remains for the developer tests
+(`FFE_WORLD_CACHE`), the reference verifiers and `inspect-data`.
 
 ```powershell
 # Must be a NEW file outside the player's game folder:

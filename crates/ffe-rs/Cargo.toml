@@ -11,6 +11,7 @@ ffe-core = { path = "../ffe-core" }
 ffe-content = { path = "../ffe-content" }
 ffe-audio = { path = "../ffe-audio" }
 ffe-render = { path = "../ffe-render" }
+ffe-tools = { path = "../ffe-tools" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 minifb = { version = "0.28", default-features = false, features = ["x11"] }

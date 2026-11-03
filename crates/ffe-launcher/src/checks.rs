@@ -1,11 +1,8 @@
 //! What the launcher verifies: the original game files (through
-//! `ffe_tools::inspect_game`, the same fingerprint check `build-data` uses),
-//! the generated `data.bin`, and an optional FFED3D resource folder.
+//! `ffe_tools::inspect_game`, the fingerprint check the game's own loading
+//! runs) and an optional FFED3D resource folder.
 
 use std::path::{Path, PathBuf};
-
-/// The content cache version this build of the game reads (as `play.bat`).
-pub const CACHE_VERSION: u32 = 29;
 
 /// How a check came out, for the badge colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,44 +127,6 @@ pub fn verify_game(folder: &Path) -> Report {
     }
 }
 
-/// The generated cache: present, readable, verified and the version this
-/// build needs.
-pub fn verify_data(path: &Path) -> Report {
-    if !path.is_file() {
-        return Report {
-            level: Level::Warning,
-            summary: "data.bin not built yet".to_owned(),
-            lines: vec![Line::warning(format!(
-                "{} does not exist. Verify your game files, then press Build data.",
-                path.display()
-            ))],
-        };
-    }
-    match ffe_tools::cache::inspect_data(path) {
-        Ok(manifest) => {
-            let mut lines = vec![Line::good(format!(
-                "Content cache v{} from {}",
-                manifest.format_version, manifest.source_profile
-            ))];
-            lines.push(Line::good(format!("{} assets", manifest.files.len())));
-            if manifest.format_version < CACHE_VERSION {
-                lines.push(Line::warning(format!(
-                    "This game needs cache v{CACHE_VERSION}; press Build data to update it."
-                )));
-            }
-            Report::from_lines("data.bin ready", "data.bin unusable", lines)
-        }
-        Err(error) => Report {
-            level: Level::Bad,
-            summary: "data.bin unusable".to_owned(),
-            lines: vec![
-                Line::bad(error),
-                Line::warning("Press Build data to rebuild it."),
-            ],
-        },
-    }
-}
-
 /// The FFED3D resource folder. Accepts the folder that holds `resources`, or
 /// `resources` itself.
 pub fn ffed3d_resources(folder: &Path) -> PathBuf {
@@ -266,40 +225,6 @@ fn is_hd_texture(name: &str) -> bool {
         && matches!(extension, "png" | "dds" | "tga")
 }
 
-/// Build `data.bin` from the game files: a new file beside it, then renamed
-/// over the old one, so a failed build never leaves a broken cache.
-pub fn build_data(game: &Path, data: &Path) -> Report {
-    let fresh = data.with_file_name("data-new.bin");
-    let _ = std::fs::remove_file(&fresh);
-    match ffe_tools::cache::build_data(game, &fresh) {
-        Ok(manifest) => match std::fs::rename(&fresh, data) {
-            Ok(()) => Report {
-                level: Level::Good,
-                summary: "data.bin built".to_owned(),
-                lines: vec![Line::good(format!(
-                    "Content cache v{} from {}, {} assets",
-                    manifest.format_version,
-                    manifest.source_profile,
-                    manifest.files.len()
-                ))],
-            },
-            Err(error) => Report {
-                level: Level::Bad,
-                summary: "Could not replace data.bin".to_owned(),
-                lines: vec![Line::bad(error.to_string())],
-            },
-        },
-        Err(error) => {
-            let _ = std::fs::remove_file(&fresh);
-            Report {
-                level: Level::Bad,
-                summary: "Build failed".to_owned(),
-                lines: vec![Line::bad(error)],
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,11 +265,5 @@ mod tests {
         assert_eq!(verify_ffed3d(&resources).level, Level::Good);
         std::fs::remove_file(resources.join("textures/skybox3.tga")).unwrap();
         assert_eq!(verify_ffed3d(dir.path()).level, Level::Warning);
-    }
-
-    #[test]
-    fn a_missing_cache_asks_for_a_build() {
-        let report = verify_data(Path::new("/definitely/not/data.bin"));
-        assert_eq!(report.level, Level::Warning);
     }
 }

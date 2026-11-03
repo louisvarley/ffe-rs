@@ -111,9 +111,7 @@ enum Tab {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Job {
     Game,
-    Data,
     Ffed3d,
-    Build,
 }
 
 struct App {
@@ -126,11 +124,8 @@ struct App {
     game_text: String,
     ffed3d_text: String,
     game_report: Option<Report>,
-    data_report: Option<Report>,
     ffed3d_report: Option<Report>,
     jobs: Vec<(Job, Receiver<Report>)>,
-    /// Build `data.bin` once the next game verification passes.
-    build_after_verify: bool,
     child: Option<Child>,
     notice: Option<(Level, String)>,
     background: TextureHandle,
@@ -159,24 +154,17 @@ impl App {
             page: Page::Play,
             tab: Tab::Port,
             game_report: None,
-            data_report: None,
             ffed3d_report: None,
             jobs: Vec::new(),
-            build_after_verify: true,
             child: None,
             notice: None,
             background,
         };
-        app.start(Job::Data);
         app.start(Job::Game);
         if app.launcher.ffed3d.is_some() {
             app.start(Job::Ffed3d);
         }
         app
-    }
-
-    fn data_path(&self) -> PathBuf {
-        self.root.join("data.bin")
     }
 
     fn busy(&self, job: Job) -> bool {
@@ -189,27 +177,18 @@ impl App {
         }
         let (send, receive) = mpsc::channel();
         let game = self.launcher.game.clone();
-        let data = self.data_path();
         let ffed3d = self.launcher.ffed3d.clone();
         std::thread::spawn(move || {
             let report = match job {
                 Job::Game => checks::verify_game(&game),
-                Job::Data => checks::verify_data(&data),
                 Job::Ffed3d => match ffed3d {
                     Some(folder) => checks::verify_ffed3d(&folder),
                     None => return,
                 },
-                Job::Build => checks::build_data(&game, &data),
             };
             let _ = send.send(report);
         });
         self.jobs.push((job, receive));
-    }
-
-    fn data_ready(&self) -> bool {
-        self.data_report
-            .as_ref()
-            .is_some_and(|report| report.level == Level::Good)
     }
 
     fn game_ok(&self) -> bool {
@@ -231,25 +210,7 @@ impl App {
         for (job, report) in finished {
             match job {
                 Job::Game => self.game_report = Some(report),
-                Job::Data => self.data_report = Some(report),
                 Job::Ffed3d => self.ffed3d_report = Some(report),
-                Job::Build => {
-                    self.notice = Some((report.level, report.summary.clone()));
-                    self.data_report = None;
-                    self.start(Job::Data);
-                }
-            }
-        }
-        // Verified game files and a missing or outdated cache: build it.
-        if self.build_after_verify
-            && self.game_ok()
-            && !self.busy(Job::Data)
-            && !self.busy(Job::Game)
-            && self.data_report.is_some()
-        {
-            self.build_after_verify = false;
-            if !self.data_ready() {
-                self.start(Job::Build);
             }
         }
         if let Some(child) = &mut self.child {
@@ -285,7 +246,6 @@ impl App {
         self.game_text = self.launcher.game.display().to_string();
         self.save_launcher();
         self.game_report = None;
-        self.build_after_verify = true;
         self.start(Job::Game);
     }
 
@@ -329,6 +289,7 @@ impl App {
         };
         let mut command = Command::new(game);
         command.arg("--root").arg(&self.root);
+        command.arg("--game").arg(&self.launcher.game);
         command.arg("--start").arg(self.launcher.start.to_string());
         if self.launcher.skip_intro {
             command.arg("--skip-intro");
@@ -556,9 +517,6 @@ impl App {
         if self.busy(Job::Game) {
             return busy("Verifying...");
         }
-        if self.busy(Job::Build) {
-            return busy("Preparing data...");
-        }
         match &self.game_report {
             None if !self.launcher.game.is_dir() => Status {
                 icon: Icon::Circle,
@@ -576,15 +534,6 @@ impl App {
                 }
                 .to_owned(),
                 colour: FAILED,
-                busy: false,
-            },
-            Some(_) if self.busy(Job::Data) || self.data_report.is_none() => {
-                busy("Checking data...")
-            }
-            Some(_) if !self.data_ready() => Status {
-                icon: Icon::Warning,
-                text: "Build data".to_owned(),
-                colour: WARNING,
                 busy: false,
             },
             Some(_) => Status {
@@ -655,9 +604,6 @@ impl App {
             "game",
         );
         match action {
-            RowAction::Status if status.text == "Build data" && self.child.is_none() => {
-                self.start(Job::Build)
-            }
             RowAction::Status => self.page = Page::About,
             RowAction::Browse(path) => self.verify_game_folder(path),
             RowAction::None => {}
@@ -681,7 +627,7 @@ impl App {
             RowAction::None => {}
         }
         // LAUNCH.
-        let ready = self.data_ready() && self.game_ok() && self.child.is_none();
+        let ready = self.game_ok() && self.child.is_none();
         let button = rect(320.0, 782.0, 1508.0, 888.0);
         let response = ui.interact(
             button,
@@ -704,10 +650,8 @@ impl App {
         } else {
             let reason = if self.child.is_some() {
                 "The game is running."
-            } else if !self.game_ok() {
-                "Choose and verify your game files first."
             } else {
-                "The content cache is not ready yet."
+                "Choose and verify your game files first."
             };
             response.on_hover_text(reason)
         };
@@ -1210,19 +1154,14 @@ impl App {
                 ui.label(RichText::new(
                     "ffe-rs is a native Rust port of Frontier: First Encounters, checked against the JJFFE \
                      reconstruction of the original. It needs your own copy of the game: the launcher \
-                     fingerprints the files, builds the content cache (data.bin) from them and starts the game.",
+                     fingerprints the files and the game reads its content straight from them at startup.",
                 ).color(CREAM));
                 ui.add_space(4.0);
-                ui.label(RichText::new(format!("Data folder: {}", self.root.display())).color(DIM));
+                ui.label(RichText::new(format!("Saves and recordings: {}", self.root.display())).color(DIM));
                 section(ui, "Game files");
                 report(ui, self.game_report.as_ref(), self.busy(Job::Game));
-                section(ui, "Content cache");
-                report(ui, self.data_report.as_ref(), self.busy(Job::Data) || self.busy(Job::Build));
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(self.game_ok() && !self.busy(Job::Build) && self.child.is_none(), egui::Button::new("Rebuild data.bin")).on_disabled_hover_text("Close the game first: it has data.bin open.").clicked() {
-                        self.start(Job::Build);
-                    }
-                    if ui.button("Open data folder").clicked() {
+                    if ui.button("Open saves folder").clicked() {
                         open_folder(&self.root);
                     }
                     let log = self.saves.join(GAME_LOG);
@@ -1243,7 +1182,7 @@ impl App {
                 ).italics().color(DIM));
                 section(ui, "Notes");
                 ui.label(RichText::new(
-                    "Never share data.bin, recordings of copyrighted content or the game files. The \
+                    "Never share the game files or recordings of copyrighted content. The \
                      launcher artwork is concept art, not original game assets.",
                 ).color(DIM));
             });

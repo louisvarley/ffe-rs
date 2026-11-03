@@ -269,7 +269,7 @@ impl GameAudio {
     }
 
     /// The normal game engine with the cache's decoded effects and every cached
-    /// song. `cache` is the verified `data.bin`; its `base:effect/*` WAVs are
+    /// song. `cache` is the verified game content; its `base:effect/*` WAVs are
     /// turned into the 16-voice mixer's sample set, and `base:music/<name>`
     /// seeds the matching song index. A v29 cache carries all 17; a v28 cache
     /// carries only song 0 (`qqfront`) and the player's `MUSIC/` folder supplies

@@ -112,12 +112,11 @@ fn on_off(value: bool) -> &'static str {
     }
 }
 
-/// The folder that holds (or will hold) `data.bin` and `saves`: beside the
-/// launcher, else the nearest of four parent folders with a `data.bin`, as
-/// the game itself searches. Before the first build there is no `data.bin`:
-/// then the nearest folder with the game files in `game\` (the checkout's
-/// layout, `target\release\ffe-launcher.exe` four levels below) or with
-/// the workspace's `Cargo.toml`, else the launcher's own folder.
+/// The folder that holds `saves` and `recordings`: the nearest of the
+/// launcher's folder and four parents with saved launcher settings, a
+/// `game\FIRSTENC.EXE` (the checkout's layout, `target\release\` below it)
+/// or the workspace's `Cargo.toml`, else the launcher's own folder. The game
+/// searches the same way.
 pub fn find_root() -> PathBuf {
     let beside = std::env::current_exe()
         .ok()
@@ -129,7 +128,7 @@ pub fn find_root() -> PathBuf {
 pub fn root_from(beside: &Path) -> PathBuf {
     let candidates = || beside.ancestors().take(5);
     candidates()
-        .find(|dir| dir.join("data.bin").is_file())
+        .find(|dir| dir.join("saves").join(LAUNCHER_FILE).is_file())
         .or_else(|| candidates().find(|dir| dir.join("game").join("FIRSTENC.EXE").is_file()))
         .or_else(|| {
             candidates().find(|dir| dir.join("Cargo.toml").is_file() && dir.join("crates").is_dir())
@@ -198,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn the_root_is_the_checkout_before_the_first_build() {
+    fn the_root_is_the_checkout_without_saved_settings() {
         let dir = tempfile::tempdir().unwrap();
         let release = dir.path().join("target").join("release");
         std::fs::create_dir_all(&release).unwrap();
@@ -208,8 +207,9 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("game")).unwrap();
         std::fs::write(dir.path().join("game").join("FIRSTENC.EXE"), b"x").unwrap();
         assert_eq!(root_from(&release), dir.path());
-        // A data.bin wins.
-        std::fs::write(release.join("data.bin"), b"x").unwrap();
+        // Saved launcher settings win.
+        std::fs::create_dir_all(release.join("saves")).unwrap();
+        std::fs::write(release.join("saves").join(LAUNCHER_FILE), b"x").unwrap();
         assert_eq!(root_from(&release), release);
     }
 

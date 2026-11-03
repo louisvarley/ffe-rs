@@ -1070,6 +1070,7 @@ dependencies = [
  "ffe-convert",
  "ffe-core",
  "ffe-render",
+ "ffe-tools",
  "fontdue",
  "gilrs",
  "minifb",

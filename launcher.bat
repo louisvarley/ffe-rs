@@ -1,7 +1,7 @@
 @echo off
 rem Build ffe-rs, its tools and the launcher, then open the launcher. The
-rem launcher verifies your game files, builds data.bin when needed, holds the
-rem settings and starts the game. Requires the Rust toolchain (cargo).
+rem launcher verifies your game files, holds the settings and starts the game,
+rem which reads its content straight from your game folder. Requires the Rust toolchain (cargo).
 setlocal
 cd /d "%~dp0"
 

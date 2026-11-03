@@ -749,8 +749,9 @@ impl Default for Jitter {
 impl Screen {
     pub fn new(cache: &VerifiedCache) -> Result<Self, String> {
         let asset = |id| {
-            cache.asset(id).ok_or_else(|| format!(
-            "Cache lacks {id}. This build needs the v2 cache; build-data to a NEW path, verify it, then replace your generated data.bin."))
+            cache.asset(id).ok_or_else(|| {
+                format!("The game content lacks {id}; check the game files in the launcher.")
+            })
         };
         let panel_id = "base:bitmap/primary/043";
         let record = cache
