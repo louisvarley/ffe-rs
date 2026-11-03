@@ -21,6 +21,7 @@
 use std::collections::BTreeSet;
 
 pub mod engine;
+pub mod menu;
 pub mod run;
 
 /// Asset magic.
@@ -546,6 +547,141 @@ pub struct Mission {
     pub locals: i32,
     pub statics: Pointer,
     pub static_count: i32,
+}
+
+impl Image {
+    /// One expression as text: `(token child ...)`, constants in hex, `P n`
+    /// player value, `G n` global, `S n` static, `L n` local.
+    pub fn expression_text(&self, at: u32) -> Result<(String, u32), String> {
+        let token = self.byte(at)?;
+        if (2..=6).contains(&token) {
+            let value = self.dword(at + 1)?;
+            let text = match token {
+                2 => format!("{value:#x}"),
+                3 => format!("P{value}"),
+                4 => format!("G{value}"),
+                5 => format!("S{value}"),
+                _ => format!("L{value}"),
+            };
+            return Ok((text, at + 5));
+        }
+        let Some(&(expressions, _)) = EXPRESSION_SHAPES.get(usize::from(token)) else {
+            return Ok((format!("?{token:#x}"), at + 1));
+        };
+        if token < 2 {
+            return Ok((format!("?{token:#x}"), at + 1));
+        }
+        let mut next = at + 1;
+        let mut parts = vec![format!("{token:#x}")];
+        for _ in 0..expressions {
+            let (part, after) = self.expression_text(next)?;
+            parts.push(part);
+            next = after;
+        }
+        Ok((format!("({})", parts.join(" ")), next))
+    }
+
+    fn target_text(&self, at: u32) -> Result<(String, u32), String> {
+        let token = self.byte(at)?;
+        if (3..=6).contains(&token) {
+            let value = self.dword(at + 1)?;
+            let kind = ["P", "G", "S", "L"][usize::from(token - 3)];
+            return Ok((format!("{kind}{value}"), at + 5));
+        }
+        let mut next = at + 1;
+        let mut parts = vec![format!("T{token:#x}")];
+        for _ in target_shape(token).unwrap_or(&[]) {
+            let (part, after) = self.expression_text(next)?;
+            parts.push(part);
+            next = after;
+        }
+        Ok((parts.join(" "), next))
+    }
+
+    /// The statements at `at` up to opcode 0, one line each, prefixed with
+    /// their offsets.
+    pub fn listing(&self, mut at: u32) -> Result<Vec<String>, String> {
+        let mut lines = Vec::new();
+        for _ in 0..4096 {
+            let opcode = self.byte(at)?;
+            let start = at;
+            let mut parts = vec![format!("{start:#06x}: {opcode}")];
+            at += 1;
+            let mut mission = None;
+            for operand in statement_shape(opcode).unwrap_or(&[]) {
+                match operand {
+                    Operand::Expression => {
+                        let (text, next) = self.expression_text(at)?;
+                        parts.push(text);
+                        at = next;
+                    }
+                    Operand::Dword => {
+                        let value = self.dword(at)?;
+                        mission = Some(value);
+                        let shown = if opcode == 2 || opcode == 3 {
+                            format!("->{:#06x}", (at as i64 + i64::from(value)) as u32)
+                        } else {
+                            format!("{value}")
+                        };
+                        parts.push(shown);
+                        at += 4;
+                    }
+                    Operand::String => {
+                        let mut text = Vec::new();
+                        while self.byte(at)? != 0 {
+                            text.push(self.byte(at)?);
+                            at += 1;
+                        }
+                        at += 1;
+                        parts.push(format!("{:?}", String::from_utf8_lossy(&text)));
+                    }
+                    Operand::Target => {
+                        let (text, next) = self.target_text(at)?;
+                        parts.push(format!("=> {text}"));
+                        at = next;
+                    }
+                    Operand::Parameters => {
+                        let index = mission.unwrap_or(0).max(0) as usize;
+                        let count = self.mission_struct(index)?.parameter_count.max(0);
+                        for _ in 0..count {
+                            let (text, next) = self.expression_text(at)?;
+                            parts.push(text);
+                            at = next;
+                        }
+                        let (text, next) = self.target_text(at)?;
+                        parts.push(format!("=> {text}"));
+                        at = next;
+                    }
+                }
+            }
+            lines.push(parts.join(" "));
+            if opcode == 0 {
+                break;
+            }
+        }
+        Ok(lines)
+    }
+
+    /// Every reachable state of `mission` as text.
+    pub fn mission_listing(&self, mission: usize) -> Result<Vec<String>, String> {
+        let record = self.mission_struct(mission)?;
+        let mut out = vec![format!("mission {mission}: {record:?}")];
+        for index in self.reachable_states(&record)? {
+            let state = self.state(&record, index)?;
+            out.push(format!("state {index}:"));
+            if let Some(entry) = self.entry(state)? {
+                out.push("  entry:".to_owned());
+                out.extend(self.listing(entry)?.into_iter().map(|l| format!("    {l}")));
+            }
+            for condition in 0..self.conditions(state)? {
+                let at = self.condition(state, condition)?;
+                let (text, body) = self.expression_text(at)?;
+                out.push(format!("  when {text}:"));
+                out.extend(self.listing(body)?.into_iter().map(|l| format!("    {l}")));
+            }
+        }
+        Ok(out)
+    }
 }
 
 impl Image {

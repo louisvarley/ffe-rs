@@ -84,6 +84,9 @@ impl Host for Bridge<'_> {
     fn assign(&mut self, token: u8, args: &[i32], value: i32) -> Option<(i32, i32, i32)> {
         self.game.assign(token, args, value)
     }
+    fn native_entries(&mut self, screen: i32) -> Vec<crate::script::menu::Entry> {
+        self.game.native_entries(screen)
+    }
     fn statement(&mut self, opcode: u8, args: &[i32], text: &[u8]) -> i32 {
         let arg = |n: usize| args.get(n).copied().unwrap_or(0);
         let library = &mut *self.library;
@@ -233,6 +236,45 @@ impl Scripts {
     ) -> Result<(), String> {
         let mut bridge = Self::bridge(&mut self.library, game, today);
         self.engine.time_ticks(image, &mut bridge, today, tics)
+    }
+
+    /// The player opens station screen `screen` (F326's builder, e.g. 2 the
+    /// bulletin board): the station's entries and the scripts' own.
+    pub fn open_screen(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        screen: i32,
+    ) -> Result<(), String> {
+        self.engine.menu.screen = screen;
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.build_screen(image, &mut bridge)
+    }
+
+    /// The player chooses `entry` from the menu (F361/F360).
+    pub fn select(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        entry: crate::script::menu::Entry,
+    ) -> Result<(), String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.select(image, &mut bridge, entry)
+    }
+
+    /// A game signal on a script global (set, then back to 0).
+    pub fn pulse(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        index: usize,
+        value: i32,
+    ) -> Result<(), String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.pulse(image, &mut bridge, index, value)
     }
 
     /// F90's docking message (5).

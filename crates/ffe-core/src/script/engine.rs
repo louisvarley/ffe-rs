@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::menu::{self, Entry, Line, Menu};
 use super::{Image, Operand, Pointer, EXPRESSION_SHAPES, TOKENS};
 
 /// `DATA_008561`'s 150 instance slots.
@@ -58,6 +59,11 @@ pub trait Host {
     fn statement(&mut self, _opcode: u8, _args: &[i32], _text: &[u8]) -> i32 {
         0
     }
+    /// F326's builder for `screen`: the station's own entries for it (the
+    /// bulletin board's adverts, the market's rows, ...).
+    fn native_entries(&mut self, _screen: i32) -> Vec<Entry> {
+        Vec::new()
+    }
 }
 
 /// A host that answers nothing (tests and the headless start).
@@ -103,6 +109,9 @@ pub struct Engine {
     /// The event F48 is dispatching (for the event tokens).
     #[serde(skip)]
     trigger: Option<(i32, i32, i32)>,
+    /// The station menu the scripts drive (F326-F360).
+    #[serde(default)]
+    pub menu: Menu,
 }
 
 mod subscription_list {
@@ -143,6 +152,7 @@ impl Engine {
             timers: [0; 8],
             subscriptions: BTreeMap::new(),
             trigger: None,
+            menu: Menu::default(),
         }
     }
 
@@ -344,9 +354,18 @@ impl Engine {
         at: &mut u32,
         ctx: usize,
     ) -> Result<(), String> {
+        // F41's 48-byte record is a local: a field a statement does not set
+        // keeps what an earlier statement of the same stream left there.
+        let mut record = Entry::default();
         for _ in 0..0x10_0000 {
             let opcode = image.byte(*at)?;
             *at += 1;
+            if let Some(stop) = self.menu_statement(image, host, at, ctx, opcode, &mut record)? {
+                if stop {
+                    return Ok(());
+                }
+                continue;
+            }
             match opcode {
                 0 => return Ok(()),
                 1 => {
@@ -418,6 +437,224 @@ impl Engine {
             }
         }
         Err("statement stream does not end".to_owned())
+    }
+
+    // ---- F326-F360: the station menu ---------------------------------------
+
+    /// F34: set global `index` and raise its event.
+    pub fn set_global(
+        &mut self,
+        image: &Image,
+        host: &mut dyn Host,
+        index: usize,
+        value: i32,
+    ) -> Result<(), String> {
+        if let Some(word) = self.globals.get_mut(index) {
+            *word = value;
+        }
+        self.raise(image, host, EVENT_GLOBAL, 0, index as i32)
+    }
+
+    /// A game signal: global `index` set to `value` and back to 0 (F453's
+    /// bulletin-board 1, F493's military 3, F381's launch request, ...).
+    pub fn pulse(
+        &mut self,
+        image: &Image,
+        host: &mut dyn Host,
+        index: usize,
+        value: i32,
+    ) -> Result<(), String> {
+        self.set_global(image, host, index, value)?;
+        self.set_global(image, host, index, 0)
+    }
+
+    /// F342: signal 2 on global 0, then an empty menu.
+    pub fn clear_menu(&mut self, image: &Image, host: &mut dyn Host) -> Result<(), String> {
+        self.pulse(image, host, 0, 2)?;
+        self.menu.clear();
+        Ok(())
+    }
+
+    /// F326: show the current screen again. The list screens rebuild their
+    /// entries: the bulletin board (2, F453) and the military office (7,
+    /// F493) clear the menu (F331/F342's signal 2), take the station's
+    /// entries and then signal the scripts (1 and 3) to add theirs; the
+    /// market (3), ship lists (5, 6) clear and refill; repairs (4) and the
+    /// shipyard (8) refill. Every other screen (1 and 11, F541, and F335)
+    /// only redraws what the scripts put there.
+    pub fn build_screen(&mut self, image: &Image, host: &mut dyn Host) -> Result<(), String> {
+        let screen = self.menu.screen;
+        self.menu.rebuild = true;
+        if !(2..=8).contains(&screen) {
+            return Ok(());
+        }
+        if matches!(screen, 2 | 3 | 5 | 6 | 7) {
+            self.clear_menu(image, host)?;
+        }
+        let mut entries = host.native_entries(screen);
+        entries.truncate(menu::ENTRIES);
+        self.menu.entries = entries;
+        match screen {
+            2 => {
+                self.pulse(image, host, 0, 1)?;
+                self.menu.header = Entry {
+                    code: if self.menu.entries.is_empty() {
+                        0x98de
+                    } else {
+                        0x98dd
+                    },
+                    ..Entry::default()
+                };
+            }
+            7 => self.pulse(image, host, 0, 3)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// F360: the scripts (or the player) choose `entry`.
+    pub fn select(
+        &mut self,
+        image: &Image,
+        host: &mut dyn Host,
+        entry: Entry,
+    ) -> Result<(), String> {
+        match menu::selection(&entry) {
+            None => self.menu.selected.push(entry),
+            Some(writes) => {
+                for (index, value) in writes {
+                    self.set_global(image, host, index, value)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The menu statements (F41's 4-6, 22-25, 27-34, 44, 46, 55, 56, 59):
+    /// `Some(stop)` when `opcode` is one of them.
+    fn menu_statement(
+        &mut self,
+        image: &Image,
+        host: &mut dyn Host,
+        at: &mut u32,
+        ctx: usize,
+        opcode: u8,
+        record: &mut Entry,
+    ) -> Result<Option<bool>, String> {
+        let mut read = |engine: &mut Self, at: &mut u32, n: usize| -> Result<[i32; 6], String> {
+            let mut values = [0; 6];
+            for value in values.iter_mut().take(n) {
+                *value = engine.evaluate(image, host, at, ctx)?;
+            }
+            Ok(values)
+        };
+        let set = |record: &mut Entry, values: &[i32]| {
+            record.code = values[0];
+            for (word, value) in record.words.iter_mut().zip(&values[1..]) {
+                *word = *value;
+            }
+        };
+        match opcode {
+            4 => {
+                let v = read(self, at, 6)?;
+                let menu = &mut self.menu;
+                menu.active = true;
+                menu.screen = v[0];
+                menu.title = v[1];
+                menu.words = [v[3], v[4], v[5]];
+                if v[2] != 0 {
+                    record.code = v[2];
+                    menu.lines.push(Line {
+                        entry: Entry {
+                            flags: -1,
+                            ..*record
+                        },
+                        new: false,
+                    });
+                }
+                self.clear_menu(image, host)?;
+            }
+            5 => self.clear_menu(image, host)?,
+            6 => self.build_screen(image, host)?,
+            22 | 28 => {
+                let n = if opcode == 22 { 1 } else { 2 };
+                let v = read(self, at, n)?;
+                record.flags = -1;
+                set(record, &v[..n]);
+                self.menu.lines.push(Line {
+                    entry: *record,
+                    new: true,
+                });
+            }
+            23 | 27 | 55 | 56 => {
+                let n = match opcode {
+                    23 => 1,
+                    27 => 2,
+                    55 => 3,
+                    _ => 4,
+                };
+                let v = read(self, at, n)?;
+                set(record, &v[..n]);
+                self.menu.append(*record);
+            }
+            24 | 44 => {
+                let n = if opcode == 24 { 1 } else { 2 };
+                let v = read(self, at, n)?;
+                set(record, &v[..n]);
+                self.menu.insert(*record);
+            }
+            25 => {
+                let v = read(self, at, 1)?;
+                record.code = v[0];
+                record.flags = 0;
+                self.select(image, host, *record)?;
+            }
+            59 => {
+                let v = read(self, at, 5)?;
+                set(record, &v[..4]);
+                record.extra[0] = v[4];
+                record.flags = 0;
+                self.select(image, host, *record)?;
+            }
+            29..=31 => {
+                let n = usize::from(opcode - 28);
+                let v = read(self, at, n)?;
+                record.flags = -1;
+                set(record, &v[..n]);
+                self.menu.lines.push(Line {
+                    entry: *record,
+                    new: false,
+                });
+            }
+            32 | 46 => {
+                let n = if opcode == 32 { 1 } else { 2 };
+                let v = read(self, at, n)?;
+                record.flags = -1;
+                set(record, &v[..n]);
+                self.menu.header = *record;
+            }
+            33 => {
+                let v = read(self, at, 2)?;
+                self.close_timed(image, host)?;
+                self.menu.timed = true;
+                self.menu.timer = v[1].wrapping_mul(0xc22e);
+                self.menu.screen = v[0];
+                self.menu.title = 0;
+                self.clear_menu(image, host)?;
+            }
+            34 => self.close_timed(image, host)?,
+            _ => return Ok(None),
+        }
+        Ok(Some(false))
+    }
+
+    /// F359: a timed screen signals 2 on global 0 when it closes.
+    fn close_timed(&mut self, image: &Image, host: &mut dyn Host) -> Result<(), String> {
+        if self.menu.timed {
+            self.pulse(image, host, 0, 2)?;
+        }
+        self.menu.timed = false;
+        Ok(())
     }
 
     // ---- F51/F52/F38 -------------------------------------------------------
@@ -825,7 +1062,11 @@ mod tests {
         // A script (or the game) setting the word re-checks it.
         engine.globals[3] = 9;
         engine.raise(&image, &mut host, EVENT_GLOBAL, 0, 3).unwrap();
-        assert_eq!(host.statements, vec![(22, vec![7])]);
+        // Opcode 22 is F349: a new console line for code 7.
+        assert_eq!(engine.menu.lines.len(), 1);
+        assert_eq!(engine.menu.lines[0].entry.code, 7);
+        assert!(engine.menu.lines[0].new);
+        assert!(host.statements.is_empty());
     }
 
     #[test]

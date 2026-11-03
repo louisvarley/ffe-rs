@@ -231,3 +231,143 @@ fn the_script_state_round_trips_through_a_save() {
         scripts.engine.subscription_count()
     );
 }
+
+/// Opening a bulletin board after a new game: the scripts add their own
+/// adverts to the station's (here none) on F453's signal.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_scripts_advertise_on_the_bulletin_board() {
+    use ffe_core::journal::decode_stories;
+    use ffe_core::message_strings::Messages;
+    use ffe_core::script::engine::Host;
+    use ffe_core::script::run::{Game, Scripts};
+    struct Station {
+        random: ffe_core::npc::Random,
+        system: i32,
+        clock: i32,
+    }
+    impl Host for Station {
+        fn player(&mut self, case: i32) -> i32 {
+            match case {
+                2 => 100_000,
+                4 => self.system,
+                5..=11 => self.clock,
+                _ => 0,
+            }
+        }
+    }
+    impl Game for Station {
+        fn bounded(&mut self, bound: u32) -> u32 {
+            self.random.bounded(bound)
+        }
+        fn advance(&mut self) -> i32 {
+            self.random.advance() as i32
+        }
+    }
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let image = Image::new(cache.asset("base:script/missions").unwrap()).unwrap();
+    let stories = decode_stories(cache.asset("base:text/journal-stories").unwrap()).unwrap();
+    let messages = Messages::new(cache.asset("base:text/messages").unwrap()).unwrap();
+    let mut game = Station {
+        random: ffe_core::npc::Random::start(),
+        system: 0,
+        clock: 0,
+    };
+    let mut scripts = Scripts::new(&image);
+    let start = 0x121cf7;
+    scripts
+        .new_game(&image, &stories, &mut game, start, true)
+        .unwrap();
+    let mut seen = std::collections::BTreeSet::new();
+    for day in 0..400 {
+        game.clock = day * 86_400;
+        scripts
+            .daily(&image, &stories, &mut game, start + day as u32, true)
+            .unwrap();
+        scripts
+            .open_screen(&image, &mut game, start + day as u32, 2)
+            .unwrap();
+        for entry in &scripts.engine.menu.entries {
+            if seen.insert(entry.code) {
+                let text = messages.text(entry.code as u16).unwrap_or_default();
+                println!(
+                    "day {day}: {:#x} {:?} {}",
+                    entry.code,
+                    entry.words,
+                    &text[..text.len().min(90)]
+                );
+            }
+        }
+    }
+    println!("header {:#x}", scripts.engine.menu.header.code);
+    assert!(!seen.is_empty(), "no script adverts");
+    // Choose the RIG subscription offer and follow the conversation.
+    let today = start + 400;
+    scripts.open_screen(&image, &mut game, today, 2).unwrap();
+    let show = |scripts: &Scripts, what: &str| {
+        let menu = &scripts.engine.menu;
+        println!(
+            "-- {what}: screen {} title {:#x} header {:#x} active {}",
+            menu.screen, menu.title, menu.header.code, menu.active
+        );
+        for entry in &menu.entries {
+            let text = messages.text(entry.code as u16).unwrap_or_default();
+            println!(
+                "   {:#x} {:?} {}",
+                entry.code,
+                entry.words,
+                &text[..text.len().min(80)]
+            );
+        }
+        for line in &menu.lines {
+            let text = messages.text(line.entry.code as u16).unwrap_or_default();
+            println!(
+                "   line {:#x} {:?}",
+                line.entry.code,
+                &text[..text.len().min(80)]
+            );
+        }
+    };
+    let offer = *scripts
+        .engine
+        .menu
+        .entries
+        .iter()
+        .find(|entry| entry.code == 0xa8ca)
+        .unwrap();
+    scripts.select(&image, &mut game, today, offer).unwrap();
+    show(&scripts, "after choosing the offer");
+    if let Some(first) = scripts.engine.menu.entries.first().copied() {
+        scripts.engine.menu.lines.clear();
+        scripts.select(&image, &mut game, today, first).unwrap();
+        show(&scripts, "after the first response");
+        let thanks = scripts.engine.menu.lines.last().unwrap().entry.code;
+        assert_eq!(
+            messages.text(thanks as u16).as_deref(),
+            Some("Thank you for taking a subscription to RIG.")
+        );
+    }
+}
+
+/// `FFE_SCRIPT_MISSION=n` (or `all`) prints a mission's states as text.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn list_a_mission() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let image = Image::new(cache.asset("base:script/missions").unwrap()).unwrap();
+    let which = std::env::var("FFE_SCRIPT_MISSION").unwrap_or_else(|_| "0".to_owned());
+    let missions: Vec<usize> = if which == "all" {
+        (0..image.missions()).collect()
+    } else {
+        vec![which.parse().unwrap()]
+    };
+    for mission in missions {
+        for line in image.mission_listing(mission).unwrap() {
+            println!("{line}");
+        }
+    }
+}
