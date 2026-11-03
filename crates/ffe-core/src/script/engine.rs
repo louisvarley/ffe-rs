@@ -112,6 +112,9 @@ pub struct Engine {
     /// The station menu the scripts drive (F326-F360).
     #[serde(default)]
     pub menu: Menu,
+    /// `DATA_008560`: the object F61 is reporting while it raises event 0x16.
+    #[serde(skip)]
+    reporting: i32,
 }
 
 mod subscription_list {
@@ -153,6 +156,7 @@ impl Engine {
             subscriptions: BTreeMap::new(),
             trigger: None,
             menu: Menu::default(),
+            reporting: 0,
         }
     }
 
@@ -240,6 +244,8 @@ impl Engine {
             0x1a => i32::from(x != 0 && y != 0),
             0x1b => i32::from(x != 0 || y != 0),
             0x2a | 0x2b => 0,
+            // `DATA_008560 == x`: the object F61 is reporting.
+            0x34 => i32::from(x == self.reporting),
             // F31's arithmetic cases that need no game state.
             0x2f => (((x & 0x1fff) as u32) << 16 | ((x as u32 >> 13) & 0x1fff)) as i32,
             0x36 => ((x as u32) / 0x1_5180 + 0x12_1cf7) as i32,
@@ -494,6 +500,20 @@ impl Engine {
         }
         self.set_global(image, host, index, 0)?;
         Ok(true)
+    }
+
+    /// F924's removal message through F61: object `id` left the game
+    /// (destroyed, jumped out or cleared); event 0x16 with `DATA_008560`.
+    pub fn object_removed(
+        &mut self,
+        image: &Image,
+        host: &mut dyn Host,
+        id: i32,
+    ) -> Result<(), String> {
+        let outer = std::mem::replace(&mut self.reporting, id);
+        let result = self.raise(image, host, 0x16, 0, id);
+        self.reporting = outer;
+        result
     }
 
     /// F342: signal 2 on global 0, then an empty menu.
@@ -1126,6 +1146,23 @@ mod tests {
         assert_eq!(engine.menu.lines[0].entry.code, 7);
         assert!(engine.menu.lines[0].new);
         assert!(host.statements.is_empty());
+    }
+
+    #[test]
+    fn a_removed_object_reaches_the_conditions_waiting_on_it() {
+        // Entry: local 1 = 0x15 (the object to watch). Condition: object
+        // local 1 removed (token 0x34) -> console line 9.
+        let entry = [7, 2, 0x15, 0, 0, 0, 6, 1, 0, 0, 0, 0];
+        let condition = [0x34, 6, 1, 0, 0, 0, 22, 2, 9, 0, 0, 0, 0];
+        let image = Image::new(&tiny(&entry, &condition)).unwrap();
+        let mut engine = Engine::new(&image);
+        engine.new_game(&image, &mut NullHost).unwrap();
+        // Token 0x34 subscribes to event 0x16 for the watched object.
+        engine.object_removed(&image, &mut NullHost, 0x14).unwrap();
+        assert!(engine.menu.lines.is_empty());
+        engine.object_removed(&image, &mut NullHost, 0x15).unwrap();
+        assert_eq!(engine.menu.lines.len(), 1);
+        assert_eq!(engine.menu.lines[0].entry.code, 9);
     }
 
     #[test]

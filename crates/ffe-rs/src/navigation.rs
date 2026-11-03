@@ -5618,6 +5618,45 @@ impl Navigator {
         self.entries.iter().position(|e| e.params.code == code)
     }
 
+    /// F669 for a script (statements 41-43): a ship from F772's type list
+    /// `kind` that attacks the player, placed `range` mm from `near` in a
+    /// direction from the shared pair (the port's stand-in for F702). Returns
+    /// whether it was made.
+    pub fn spawn_script_ship(
+        &mut self,
+        cache: &VerifiedCache,
+        id: u32,
+        kind: usize,
+        near: [i64; 3],
+        range: f64,
+    ) -> bool {
+        let Some(table) = npc::SHIP_TYPES.get(kind).copied().filter(|t| !t.is_empty()) else {
+            return false;
+        };
+        let pick = self.random.bounded(table.len() as u32) as usize;
+        let mut spec = None;
+        for model in table[pick..].iter().chain(table[..pick].iter()) {
+            if let Some(found) = crate::ships::npc_spec(cache, *model) {
+                spec = Some((found, *model));
+                break;
+            }
+        }
+        let Some((mut spec, model)) = spec else {
+            return false;
+        };
+        let angle = f64::from(self.random.bounded(0x1_0000)) / 65_536.0 * std::f64::consts::TAU;
+        let lift = (f64::from(self.random.bounded(0x1_0000)) / 65_536.0 - 0.5) * 0.4;
+        let position = [
+            near[0] + (angle.cos() * range) as i64,
+            near[1] + (lift * range) as i64,
+            near[2] + (angle.sin() * range) as i64,
+        ];
+        spec.model = model;
+        let ship = npc::script_attacker(&spec, id, position, &mut self.random);
+        self.ships.push(ship);
+        true
+    }
+
     /// The current system's code (`DATA_008885`), 0 with no system.
     pub fn current_code(&self) -> u32 {
         self.system_code(self.current).unwrap_or(0)

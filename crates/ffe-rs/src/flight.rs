@@ -150,6 +150,10 @@ pub struct Flight {
     /// Saves from before them start the scripts afresh on load.
     #[serde(default)]
     pub scripts: Option<ffe_core::script::run::Scripts>,
+    /// Ships the scripts created this frame (F665/F666/F668), for the game
+    /// to place; never saved.
+    #[serde(skip)]
+    pub script_spawns: Vec<crate::scripts::Spawn>,
 }
 
 fn default_rng() -> Random {
@@ -202,6 +206,7 @@ impl Default for Flight {
             missions: ffe_core::missions::State::default(),
             mining: Vec::new(),
             scripts: None,
+            script_spawns: Vec::new(),
         }
     }
 }

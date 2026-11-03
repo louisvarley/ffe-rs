@@ -277,6 +277,18 @@ impl Scripts {
         self.engine.query(image, &mut bridge, word, id)
     }
 
+    /// F924/F61: object `id` left the game.
+    pub fn object_removed(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        id: i32,
+    ) -> Result<(), String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.object_removed(image, &mut bridge, id)
+    }
+
     /// A game action the scripts may veto (see [`Engine::permits`]).
     pub fn permits(
         &mut self,

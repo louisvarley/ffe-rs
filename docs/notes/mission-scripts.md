@@ -187,3 +187,25 @@ jettison (5 = 0x3e8 + the commodity). The playable asks before each of
 them. Still open: F383's price multiplier (global 0xa, signal 0xb) on the
 upgrades screen, F316's contract-row signal (8) and F622/F633's daily
 station signal (0x10).
+
+## Mission ships, first slice (2026-11-03)
+
+- **Ids.** The scripts know the player as object 1 and each navigator ship
+  as `ship.id + 0x10` (`ffe_rs::scripts::SHIP_IDS`).
+- **Created ships.** Statements 41, 42 and 43 (F665/F666/F668 -> F669) make
+  a ship from F772's type list 0xc, 4 or 2 that attacks the player; the
+  port places it 25 km from the player in a direction from the shared pair
+  (its stand-in for F702) and returns its id to the script.
+- **Removal.** F924 sends module message 11 when an object leaves the game,
+  and F61 raises event 0x16 with `DATA_008560` set to it (token 0x34). The
+  playable raises it for every ship that is gone since the last frame
+  (destroyed, jumped out or cleared).
+- **Queries.** Token 0x24 (an object's model) and 0x3e (its AI state, from
+  the port's NPC state) read the player and the navigator's ships; 0x31,
+  0x1f, 0x22 and 0x23 read the allegiance, offences, military points and
+  fines.
+
+Not yet: F772/F773's other creations (statement 19, F664's departing ship
+for statement 39, F40 for 50), placing and steering ships (54, 57, 60),
+damage and explosions (21, 51, 52), the other object fields, and F383's
+price multiplier.

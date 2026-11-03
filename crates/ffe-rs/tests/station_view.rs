@@ -1073,6 +1073,9 @@ fn script_adverts_and_conversation_frames() {
             legal: nav.legal,
             career: nav.career,
             tables: cache.asset("base:world/system-tables"),
+            next_ship: 1,
+            spawns: Vec::new(),
+            ships: Vec::new(),
         };
         state.scripts = Some(ffe_rs::scripts::new_game(&assets, &mut hooks, true).unwrap());
     }
@@ -1220,6 +1223,9 @@ fn script_advert_macros_ask_the_scripts() {
             legal: nav.legal,
             career: nav.career,
             tables: cache.asset("base:world/system-tables"),
+            next_ship: 1,
+            spawns: Vec::new(),
+            ships: Vec::new(),
         };
         state.scripts = Some(ffe_rs::scripts::new_game(&assets, &mut hooks, true).unwrap());
     }
@@ -1259,4 +1265,28 @@ fn script_advert_macros_ask_the_scripts() {
     }
     assert!(!found.is_empty(), "no advert with a macro");
     assert!(found.iter().all(|text| !text.contains("[Mi")), "{found:?}");
+}
+
+/// F669 for a script: statement 41's attacker is made from F772's type list
+/// and placed near the player, hostile.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn a_script_attacker_joins_the_system() {
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let before = nav.ships.len();
+    let id = ffe_rs::scripts::next_ship_id(&nav, &[]);
+    let near = [1_000_000_000_i64, 0, 0];
+    assert!(nav.spawn_script_ship(&cache, id, 0xc, near, 25_000_000.0));
+    assert_eq!(nav.ships.len(), before + 1);
+    let ship = nav.ships.last().unwrap();
+    assert_eq!(ship.id, id);
+    assert!(ship.hostile);
+    assert!(ffe_core::npc::SHIP_TYPES[0xc].contains(&ship.model));
+    let range: f64 = (0..3)
+        .map(|k| (ship.position[k] - near[k]) as f64)
+        .map(|d| d * d)
+        .sum::<f64>()
+        .sqrt();
+    assert!((range - 25_000_000.0).abs() < 6_000_000.0, "{range}");
 }

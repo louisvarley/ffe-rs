@@ -42,6 +42,20 @@ impl Assets {
 
 /// The player's object id as the scripts see it.
 pub const PLAYER_ID: i32 = 1;
+/// A navigator ship's id as the scripts see it: `ship.id + SHIP_IDS`.
+pub const SHIP_IDS: i32 = 0x10;
+
+/// A ship a script created (F669 for statements 41-43): F772's type list,
+/// the target it attacks (`+0xfe`) and the word kept at `+0x11a`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Spawn {
+    /// The navigator id it will have.
+    pub ship: u32,
+    /// The `npc::SHIP_TYPES` index (F665 0xc, F666 4, F668 2).
+    pub kind: usize,
+    pub target: i32,
+    pub word: i32,
+}
 
 /// The script globals the game's vetoable actions use.
 pub mod veto {
@@ -53,6 +67,17 @@ pub mod veto {
     pub const JUMP: usize = 0xf;
     /// F650: a docking request (the ship's id).
     pub const DOCKING: usize = 0x17;
+}
+
+/// The navigator id the next script ship gets.
+pub fn next_ship_id(nav: &crate::navigation::Navigator, pending: &[Spawn]) -> u32 {
+    let ships = nav.ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
+    let queued = pending
+        .iter()
+        .map(|spawn| spawn.ship + 1)
+        .max()
+        .unwrap_or(0);
+    ships.max(queued).max(1)
 }
 
 /// Ask the scripts whether a game action may go ahead (`true` when there
@@ -104,6 +129,38 @@ pub struct Hooks<'a> {
     pub career: ffe_core::npc::Career,
     /// `base:world/system-tables`, for F871's allegiance.
     pub tables: Option<&'a [u8]>,
+    /// The id the next created ship gets, and the ships created.
+    pub next_ship: u32,
+    pub spawns: Vec<Spawn>,
+    /// The objects the scripts can ask about.
+    pub ships: Vec<ShipView>,
+}
+
+/// What a script reads of an object (F1532's record): its id, model
+/// (`+0x82`) and AI state (`+0xff`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShipView {
+    pub id: i32,
+    pub model: i32,
+    pub ai: i32,
+}
+
+/// The player and the navigator's ships as the scripts see them.
+pub fn ship_views(
+    state: &crate::flight::Flight,
+    nav: &crate::navigation::Navigator,
+) -> Vec<ShipView> {
+    let mut views = vec![ShipView {
+        id: PLAYER_ID,
+        model: state.ship as i32,
+        ai: 0,
+    }];
+    views.extend(nav.ships.iter().map(|ship| ShipView {
+        id: ship.id as i32 + SHIP_IDS,
+        model: ship.model as i32,
+        ai: i32::from(ship.state.original().first().copied().unwrap_or(0)),
+    }));
+    views
 }
 
 impl Host for Hooks<'_> {
@@ -149,6 +206,12 @@ impl Host for Hooks<'_> {
             },
             // DATA_009095[x]: the fines.
             0x23 => slot(arg(0)).map_or(0, |s| self.legal.fines[s] as i32),
+            // F1532's object: `+0x82` the model, `+0xff` the AI state.
+            0x24 | 0x3e => self
+                .ships
+                .iter()
+                .find(|ship| ship.id == arg(0))
+                .map_or(0, |ship| if token == 0x24 { ship.model } else { ship.ai }),
             // F871: the system's allegiance (`+10 >> 6`).
             0x31 => self
                 .tables
@@ -158,6 +221,31 @@ impl Host for Hooks<'_> {
                         .control(arg(0) as u32, [self.career.federal, self.career.imperial])
                         .allegiance as i32
                 }),
+            _ => 0,
+        }
+    }
+
+    fn statement(&mut self, opcode: u8, args: &[i32], _text: &[u8]) -> i32 {
+        let arg = |n: usize| args.get(n).copied().unwrap_or(0);
+        match opcode {
+            // F665/F666/F668 -> F669: a ship of type 0xc/4/2 that attacks
+            // `arg(0)` (F41 passes the target first, then the word).
+            41..=43 => {
+                let kind = match opcode {
+                    41 => 0xc,
+                    42 => 4,
+                    _ => 2,
+                };
+                let ship = self.next_ship;
+                self.next_ship += 1;
+                self.spawns.push(Spawn {
+                    ship,
+                    kind,
+                    target: arg(0),
+                    word: arg(1),
+                });
+                ship as i32 + SHIP_IDS
+            }
             _ => 0,
         }
     }
@@ -308,6 +396,8 @@ pub fn with_hooks<R>(
 ) -> Option<(R, Vec<String>)> {
     let clock = nav.clock();
     let system = nav.current_code();
+    let next_ship = next_ship_id(nav, &state.script_spawns);
+    let views = ship_views(state, nav);
     let scripts = state.scripts.as_mut()?;
     let mut posts = Vec::new();
     let mut hooks = Hooks {
@@ -319,11 +409,15 @@ pub fn with_hooks<R>(
         legal: nav.legal,
         career: nav.career,
         tables: cache.asset("base:world/system-tables"),
+        next_ship,
+        spawns: Vec::new(),
+        ships: views,
     };
     let result = f(scripts, &mut hooks, absolute_day(clock));
-    let (legal, career) = (hooks.legal, hooks.career);
+    let (legal, career, spawns) = (hooks.legal, hooks.career, std::mem::take(&mut hooks.spawns));
     nav.legal = legal;
     nav.career = career;
+    state.script_spawns.extend(spawns);
     Some((result, posts))
 }
 
@@ -498,6 +592,8 @@ pub fn expand_all(
     let system = nav.current_code();
     let mut random = std::mem::replace(&mut nav.random, Random::start());
     let (legal, career) = (nav.legal, nav.career);
+    let next_ship = next_ship_id(nav, &state.script_spawns);
+    let views = ship_views(state, nav);
     let today = absolute_day(clock);
     let out = {
         let Some(scripts) = state.scripts.as_mut() else {
@@ -516,6 +612,9 @@ pub fn expand_all(
                 legal,
                 career,
                 tables: cache.asset("base:world/system-tables"),
+                next_ship,
+                spawns: Vec::new(),
+                ships: views,
             };
             let texts = Texts {
                 assets,

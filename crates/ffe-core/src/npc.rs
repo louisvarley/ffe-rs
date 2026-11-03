@@ -2927,6 +2927,20 @@ pub fn hyperspace_arrival(
     ship
 }
 
+/// A mission script's attacker (F669 for statements 41-43): a hostile ship
+/// that closes on the player (`+0xff` 9 with the player as `+0xfe`).
+pub fn script_attacker(spec: &Spec, id: u32, position: [i64; 3], rng: &mut Random) -> NpcShip {
+    let mut spec = spec.clone();
+    let type_name = spec.name.clone();
+    spec.name = format!("{} {}", spec.name, id + 1);
+    let mut ship = NpcShip::new(&spec, Role::Pirate, position, position, rng);
+    ship.type_name = type_name;
+    ship.id = id;
+    ship.hostile = true;
+    ship.state = State::Attack;
+    ship
+}
+
 /// An assassination contract's target (F291): a trader leaving `anchor`'s
 /// place for `station`'s, carrying the contract id.
 pub fn contract_target(

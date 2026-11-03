@@ -1318,6 +1318,8 @@ fn run() -> Result<(), String> {
         .and_then(|bytes| ffe_core::message_strings::Messages::new(bytes).ok());
     let mut last_dock_screen: Option<StationScreen> = None;
     let mut reopen_board = false;
+    // The navigator ships present last frame (F924's removals are the rest).
+    let mut script_ships: std::collections::BTreeSet<u32> = Default::default();
     // The scripts' menu rows and title as last expanded (key, rows, title).
     let mut script_text_cache: (String, Vec<String>, String) = Default::default();
 
@@ -1959,6 +1961,8 @@ fn run() -> Result<(), String> {
                     let clock = nav.clock();
                     let system = nav.current_code();
                     let mut posts = Vec::new();
+                    let next_ship = ffe_rs::scripts::next_ship_id(nav, &state.script_spawns);
+                    let views = ffe_rs::scripts::ship_views(&state, nav);
                     let mut hooks = ffe_rs::scripts::Hooks {
                         credits: &mut state.credits,
                         random: &mut nav.random,
@@ -1968,6 +1972,9 @@ fn run() -> Result<(), String> {
                         legal: nav.legal,
                         career: nav.career,
                         tables: cache.asset("base:world/system-tables"),
+                        next_ship,
+                        spawns: Vec::new(),
+                        ships: views,
                     };
                     // A new game, a new commander after GAME OVER, or a save
                     // from before the scripts: F57's new game first.
@@ -1992,10 +1999,52 @@ fn run() -> Result<(), String> {
                         }
                     }
                     let (legal, career) = (hooks.legal, hooks.career);
+                    let spawns = std::mem::take(&mut hooks.spawns);
                     nav.legal = legal;
                     nav.career = career;
+                    state.script_spawns.extend(spawns);
                     for post in posts {
                         pending_log.add(Source::Journal, post);
+                    }
+                    // F669/F702: the ships the scripts created, near the player.
+                    let spawns = std::mem::take(&mut state.script_spawns);
+                    if !spawns.is_empty() {
+                        let at = ship_position(&original, &state);
+                        for spawn in spawns {
+                            nav.spawn_script_ship(&cache, spawn.ship, spawn.kind, at, 25_000_000.0);
+                        }
+                    }
+                    // F924/F61: every ship that has left the game since the
+                    // last frame (destroyed, jumped out or cleared).
+                    let present: std::collections::BTreeSet<u32> = nav
+                        .ships
+                        .iter()
+                        .filter(|ship| {
+                            !matches!(
+                                ship.state,
+                                ffe_core::npc::State::Dead | ffe_core::npc::State::Escaped
+                            )
+                        })
+                        .map(|ship| ship.id)
+                        .collect();
+                    let gone: Vec<u32> = script_ships.difference(&present).copied().collect();
+                    script_ships = present;
+                    for id in gone {
+                        if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
+                            &mut state,
+                            nav,
+                            &cache,
+                            |scripts, hooks, today| {
+                                scripts.object_removed(
+                                    &assets.image,
+                                    hooks,
+                                    today,
+                                    id as i32 + ffe_rs::scripts::SHIP_IDS,
+                                )
+                            },
+                        ) {
+                            eprintln!("mission scripts: {error}");
+                        }
                     }
                 }
             }
