@@ -285,7 +285,7 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         { id: "content-1", title: "Gameplay tables (ships, equipment, economy)", status: "in-progress", version: "market-v20" },
-        { id: "content-2", title: "Message strings, journal and remaining fonts", status: "todo" },
+        { id: "content-2", title: "Message strings, journal and remaining fonts", status: "in-progress" },
         { id: "content-3", title: "Music data (HMP) cached losslessly (17 songs, cache v29)", status: "done", version: "v0.86" },
         { id: "content-4", title: "Optional CD media inventory (videos and stills)", status: "todo" },
         { id: "content-5", title: "Import verification on CD 1.01 as well as floppy 1.02", status: "todo" },
@@ -1108,6 +1108,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 95,
       note: "Save and config migration done (release-3): version-1 snapshots migrate, the oldest version-2 save (every later field missing) loads, the old controls/display sidecars migrate into config.cfg, and launcher.cfg ignores unknown or bad lines; each has a test."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 95,
+      note: "Message strings imported (content-2 in progress, cache v30): the ten string arrays behind the original's 0x8000+ message codes (1,284 strings, including every 0x98xx console message, the preference pages, mining and the bulletin board) come from the player's FIRSTENC.EXE, each table matched entry by entry against JJFFE. The journal and the remaining fonts are still open. CI was red on main from three lint warnings; fixed, and macOS added to CI."
     }
   ]
 };

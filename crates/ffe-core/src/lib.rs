@@ -18,6 +18,7 @@ pub mod landing;
 pub mod laser;
 pub mod lift;
 pub mod market;
+pub mod message_strings;
 pub mod mining;
 pub mod missile;
 pub mod missions;

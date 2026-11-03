@@ -63,6 +63,30 @@ pub(crate) fn texture_layout(profile: &str) -> Option<(u32, u32)> {
     }
 }
 
+/// F1343's message string arrays (v30): `(handler, RVA, entries)` for each
+/// handler F1347 serves from a plain pointer table, in floppy 1.02. Every
+/// entry was matched against JJFFE 2.8a7's tables (the release text differs
+/// from JJFFE's in two of `DATA_004894`'s strings and one of `DATA_005053`'s;
+/// the executable's text is kept).
+pub(crate) fn message_layout(profile: &str) -> Option<&'static [(u8, u32, usize)]> {
+    const FLOPPY: [(u8, u32, usize); 10] = [
+        (0, 0xeb934, 44),   // DATA_007117 (F895)
+        (3, 0xeeef0, 59),   // DATA_007257 (F1115)
+        (5, 0xeecec, 2),    // DATA_007240 (F965)
+        (10, 0xd2838, 46),  // DATA_004894 (F226, the preference pages)
+        (12, 0xd8204, 486), // DATA_005299 (F319, the 0x98xx messages)
+        (14, 0xd5d4c, 129), // DATA_005104 (F277)
+        (15, 0xd40b8, 13),  // DATA_005037 (F241)
+        (17, 0xd430c, 30),  // DATA_005053 (F257, mining)
+        (19, 0x9aa18, 7),   // DATA_002245 (F84)
+        (20, 0x8e4bc, 468), // DATA_001699 (F62, the bulletin board and missions)
+    ];
+    match profile {
+        "ffe-floppy-1.02-en" => Some(&FLOPPY),
+        _ => None,
+    }
+}
+
 /// Model string table (`DATA_004682`) RVA (v11), keyed by ship-name ffcode
 /// (`0x4000 | n`, the `+0xe` word of a model's statistics block), matched
 /// against JJFFE 2.8a7 in floppy 1.02 only.
@@ -543,6 +567,17 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some(layout) = message_layout(profile.id) {
+                let table = ffe_convert::embedded::decode_message_tables(&bytes, layout)?;
+                assets.push(Asset {
+                    id: "base:text/messages".to_owned(),
+                    path: "text/messages.bin".to_owned(),
+                    kind: AssetKind::MessageStrings {
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             if let Some(table_rva) = system_strings_layout(profile.id) {
                 let table = decode_system_strings(&bytes, table_rva)?;
                 assets.push(Asset {
@@ -702,6 +737,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         + usize::from(market_layout(profile.id).is_some())
         + usize::from(galaxy_layout(profile.id).is_some())
         + usize::from(system_strings_layout(profile.id).is_some())
+        + usize::from(message_layout(profile.id).is_some())
         + usize::from(star_point_layout(profile.id).is_some())
         + usize::from(dot_table_layout(profile.id).is_some())
         + if intro_layout(profile.id).is_some() {
@@ -729,7 +765,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 29,
+        format: "ffe-content-cache".to_owned(), format_version: 30,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

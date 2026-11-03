@@ -621,6 +621,46 @@ pub fn decode_model_names(bytes: &[u8], rva: u32) -> Result<EmbeddedModelNames, 
     })
 }
 
+/// The message string arrays (cache v30): for each `(handler, rva, count)`,
+/// the pointer table F1347 indexes for F1343's handler, every pointer into the
+/// data section and to a NUL-terminated string. The result is the
+/// [`ffe_core::message_strings`] asset; `source_offset` is the first table's.
+pub fn decode_message_tables(
+    bytes: &[u8],
+    layout: &[(u8, u32, usize)],
+) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let mut tables = Vec::new();
+    let mut source_offset = None;
+    for &(handler, rva, count) in layout {
+        let first = section.offset(rva, 4 * count)?;
+        source_offset.get_or_insert(first);
+        let mut strings = Vec::with_capacity(count);
+        for index in 0..count {
+            let pointer = dword(bytes, first + 4 * index)?;
+            let string_rva = pointer
+                .checked_sub(section.image_base)
+                .ok_or_else(|| format!("message table {handler} entry {index} is not a pointer"))?;
+            let start = section.offset(string_rva, 1)?;
+            let text = bytes
+                .get(start..start.saturating_add(4096).min(bytes.len()))
+                .ok_or("message string outside the executable")?;
+            let end = text
+                .iter()
+                .position(|b| *b == 0)
+                .ok_or_else(|| format!("message table {handler} entry {index} is unterminated"))?;
+            strings.push(text[..end].to_vec());
+        }
+        tables.push((handler, strings));
+    }
+    let encoded = ffe_core::message_strings::encode(&tables)?;
+    ffe_core::message_strings::Messages::new(&encoded)?;
+    Ok(EmbeddedTable {
+        source_offset: source_offset.ok_or("no message tables")?,
+        bytes: encoded,
+    })
+}
+
 /// The default light and shade table (`DATA_007231..7234`, 36 bytes).
 pub fn decode_default_lighting(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
     use ffe_core::model_lighting::{default_lighting, DEFAULT_LIGHTING_BYTES};
