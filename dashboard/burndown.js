@@ -1128,6 +1128,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 91,
       note: "release-2 done: CI now builds, lints (clippy -D warnings) and tests on Linux, macOS and Windows and makes release builds of the game, tools and launcher on each (runs 336/337 green on all three). CI had been red on main from three lint warnings and a macOS-only filesystem assumption in a test; both fixed."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 90,
+      note: "audio-4 done: F1910's continuous engine bed (sample 0x0f at raw>>9 volume, raw+0x10000 pitch, raw = max|thrust| - 0x221) now plays each flight frame, gated by the Engine sound option. F1759's positional volume is never called by the DOS build, so the mono mix stays like for like."
     }
   ]
 };
