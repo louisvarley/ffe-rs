@@ -741,6 +741,17 @@ impl Image {
     /// How often each statement opcode and each expression token appears in
     /// every reachable stream (a static census for the port's notes).
     pub fn census(&self) -> Result<([u32; 256], [u32; 256]), String> {
+        let (statements, tokens, _) = self.census_by_mission()?;
+        Ok((statements, tokens))
+    }
+
+    /// [`Image::census`] plus, for each statement opcode, the missions whose
+    /// reachable streams use it.
+    #[allow(clippy::type_complexity)]
+    pub fn census_by_mission(
+        &self,
+    ) -> Result<([u32; 256], [u32; 256], Vec<BTreeSet<usize>>), String> {
+        let mut users = vec![BTreeSet::new(); 256];
         let mut statements = [0u32; 256];
         let mut tokens = [0u32; 256];
         fn expression(image: &Image, at: u32, tokens: &mut [u32; 256]) -> Result<u32, String> {
@@ -774,6 +785,7 @@ impl Image {
                     loop {
                         let opcode = self.byte(at)?;
                         statements[usize::from(opcode)] += 1;
+                        users[usize::from(opcode)].insert(mission);
                         // Count the operand expressions' tokens too.
                         if let Some(shape) = statement_shape(opcode) {
                             let mut next = at + 1;
@@ -793,7 +805,7 @@ impl Image {
                 }
             }
         }
-        Ok((statements, tokens))
+        Ok((statements, tokens, users))
     }
 }
 

@@ -340,6 +340,9 @@ mod tests {
             dock_span: 0.0,
             dock_retry: 0.0,
             dock_wait: 0.0,
+            seed: 0,
+            script_target: 0,
+            ai_code: None,
         }
     }
 

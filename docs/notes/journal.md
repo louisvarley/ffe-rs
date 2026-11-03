@@ -2,11 +2,17 @@
 
 Status (2026-11-03): **archive (v31) and stories (v33) imported; the
 scheduler is ported (`ffe_core::journal_library`, driven by the scripts
-through `ffe_core::script::run::Scripts`); the viewer, F76's macros and the
-game wiring are not done yet.** On the real data a new game creates the five
+through `ffe_core::script::run::Scripts`); the scripts run them in the game
+and the viewer shows them.** On the real data a new game creates the five
 journals and 120 days of daily messages publish 20 issues
-(`tests/mission_scripts.rs`). The port's `Screen::Journal` is still the contract log
-(`docs/notes/missions.md`).
+(`tests/mission_scripts.rs`). The station's Journal screen lists the five
+journals (F81) above the port's contract log (`docs/notes/missions.md`);
+choosing one shows its current issue (F71/F79): each article's
+publication and headline, then its body, with F76's macros expanded using
+the article's slot words (F95; `scripts::issue`). The masthead bitmap and
+F79's smooth scrolling are not drawn: the issue is the screen's usual
+paragraph list (`tests/station_view.rs
+the_ship_library_shows_each_journals_first_issue`).
 
 ## Archive
 

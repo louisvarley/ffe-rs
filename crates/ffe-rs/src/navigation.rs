@@ -120,6 +120,17 @@ pub struct Body {
     pub size_word: i16,
 }
 
+/// A mission script's object kept at a body (F297 on a planet's surface, F40
+/// on an orbit): the ship's id, the body and the offset, in the body's frame
+/// when `surface` (it turns with the body's rows), else in the system's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScriptSite {
+    pub ship: u32,
+    pub body: usize,
+    pub offset: [f64; 3],
+    pub surface: bool,
+}
+
 /// Port addition: how far off a ship's hull the autopilot holds when it flies
 /// to a ship (half a kilometre).
 pub const SHIP_STANDOFF: i64 = 500_000;
@@ -1249,11 +1260,17 @@ pub struct Navigator {
     /// jump, restored by F680 when the new system is entered.
     persisted: Vec<npc::Persisted>,
     /// The player's position at the last traffic tick, for F675's offsets.
-    player_at: [i64; 3],
+    pub player_at: [i64; 3],
     /// The system's short-lived visuals: F939 hit particles, F942 destruction
     /// objects and F926 debris (see `ffe_core::effects`). They outlive the ship
     /// that spawned them and are not saved.
     pub effects: Vec<Effect>,
+    /// Events the mission scripts caused (F953 on the player), reported with
+    /// the next frame's traffic events.
+    pub script_events: Vec<ShipEvent>,
+    /// The mission scripts' objects held to a body (F297's surface buildings
+    /// and F40's orbiting objects): ship id, body and offset.
+    pub script_sites: Vec<ScriptSite>,
     /// The id of the ship locked as the target (F1020's target byte for ships;
     /// the port keeps bodies in `locked` and ships here).
     pub ship_lock: Option<u32>,
@@ -2242,6 +2259,8 @@ impl Navigator {
             persisted: Vec::new(),
             player_at: [0; 3],
             effects: Vec::new(),
+            script_events: Vec::new(),
+            script_sites: Vec::new(),
             ship_lock: None,
             ship_target: None,
             missile_lock: None,
@@ -4390,7 +4409,7 @@ impl Navigator {
         player_radius: i64,
     ) -> Vec<ShipEvent> {
         self.player_at = player;
-        let mut events = Vec::new();
+        let mut events = std::mem::take(&mut self.script_events);
         // The port holds hostile fire and missiles while the player is docked,
         // on a pad or landed (see F931 below).
         let exposed = self.docked.is_none() && self.landed.is_none();
@@ -5614,47 +5633,48 @@ impl Navigator {
     }
 
     /// The system on offer with this code, if any.
-    pub fn entry_for_code(&self, code: u32) -> Option<usize> {
-        self.entries.iter().position(|e| e.params.code == code)
+    /// The name of the system with `code`, when the galaxy lists it.
+    pub fn system_name_for(&self, code: u32) -> Option<&str> {
+        let index = self.entry_for_code(code)?;
+        self.entries.get(index).map(|entry| entry.name.as_str())
     }
 
-    /// F669 for a script (statements 41-43): a ship from F772's type list
-    /// `kind` that attacks the player, placed `range` mm from `near` in a
-    /// direction from the shared pair (the port's stand-in for F702). Returns
-    /// whether it was made.
-    pub fn spawn_script_ship(
-        &mut self,
-        cache: &VerifiedCache,
-        id: u32,
-        kind: usize,
-        near: [i64; 3],
-        range: f64,
-    ) -> bool {
-        let Some(table) = npc::SHIP_TYPES.get(kind).copied().filter(|t| !t.is_empty()) else {
+    /// F953/F942 for a mission script (statements 21 and 51): `damage` on
+    /// ship `id`, with F942's explosion when it is destroyed. A script's
+    /// damage is no crime and earns no bounty or rating. Returns whether the
+    /// ship was destroyed.
+    pub fn script_damage(&mut self, id: u32, damage: u32) -> bool {
+        let Some(ship) = self
+            .ships
+            .iter_mut()
+            .find(|ship| ship.id == id && ship.alive())
+        else {
             return false;
         };
-        let pick = self.random.bounded(table.len() as u32) as usize;
-        let mut spec = None;
-        for model in table[pick..].iter().chain(table[..pick].iter()) {
-            if let Some(found) = crate::ships::npc_spec(cache, *model) {
-                spec = Some((found, *model));
-                break;
+        let (position, velocity, axes) = (ship.position, ship.velocity, ship.axes());
+        let (cargo, mass, station, held_bay) = (
+            ship.cargo,
+            ship.damage.mass,
+            ship.station,
+            ship.bay.is_some(),
+        );
+        let destroyed = ship.hit(damage) == ffe_core::laser::Damage::Destroyed;
+        if destroyed {
+            let mut burst = effects::explosion(position, velocity, cargo, axes, &mut self.random);
+            for effect in &mut burst {
+                effect.set_mass(mass);
+            }
+            self.effects.extend(burst);
+            if let (Some(station), true) = (station, held_bay) {
+                // F788: a destroyed ship releases its bay.
+                self.starport(station).release(npc::traffic_id(id));
             }
         }
-        let Some((mut spec, model)) = spec else {
-            return false;
-        };
-        let angle = f64::from(self.random.bounded(0x1_0000)) / 65_536.0 * std::f64::consts::TAU;
-        let lift = (f64::from(self.random.bounded(0x1_0000)) / 65_536.0 - 0.5) * 0.4;
-        let position = [
-            near[0] + (angle.cos() * range) as i64,
-            near[1] + (lift * range) as i64,
-            near[2] + (angle.sin() * range) as i64,
-        ];
-        spec.model = model;
-        let ship = npc::script_attacker(&spec, id, position, &mut self.random);
-        self.ships.push(ship);
-        true
+        destroyed
+    }
+
+    pub fn entry_for_code(&self, code: u32) -> Option<usize> {
+        self.entries.iter().position(|e| e.params.code == code)
     }
 
     /// The current system's code (`DATA_008885`), 0 with no system.

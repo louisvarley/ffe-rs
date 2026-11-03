@@ -281,6 +281,7 @@ fn f1105_external_camera_follows_the_explosion_instead_of_the_old_hull() {
         size: 0,
         life: 0,
         exit: false,
+        tag: None,
     };
     state.death.as_mut().unwrap().track_explosion(&effect);
     let mut views = ViewState {

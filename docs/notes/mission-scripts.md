@@ -5,9 +5,12 @@ ported (`ffe_core::script::engine`) and running in the playable
 (`ffe_rs::scripts`): a new game (or an older save) starts them, each new
 day runs F59's day ticks and F90's issues, docking runs F90's docking
 message, and their state is saved with the flight (about 280 KB of JSON).
-The game hooks answer the player's cash, system, the date/time and the
-shared random pair; the station-conversation and object statements are
-not wired yet.** The message subtypes F59/F90 react to (15 a new day, 5
+Every statement and target the real scripts use now reaches the game: the
+station conversations, the journals, the ships and objects they make,
+place, steer, damage and name, their contracts, fines, ranks and cargo,
+and the game's signals (F953 damage, F316 contract rows, F383 prices, F633
+station days, F60 time ticks). See "Mission ships and objects" below for
+what is still a stand-in.** The message subtypes F59/F90 react to (15 a new day, 5
 docking) are inferred: their senders were not found in JJFFE's code. Tracked
 as dashboard item `gameplay-41`.
 
@@ -156,8 +159,8 @@ draws the board with the new game's script adverts and a journal
 subscription conversation.
 
 Not yet: the station's own entries are not passed to the scripts
-(`Host::native_entries`), the other station screens do not signal the
-scripts, and the object/ship statements and F76's article macros remain.
+(`Host::native_entries`) and the other station screens do not signal the
+scripts.
 
 ## Text macros and script queries (2026-11-03)
 
@@ -184,9 +187,8 @@ action when a script has cleared it (`Engine::permits`): F381's launch
 (0x17 = the ship's id; the port's player is id 1), F931's laser shot
 (5 = 0x7cf + the laser byte's type, only when the shot is ready) and F291's
 jettison (5 = 0x3e8 + the commodity). The playable asks before each of
-them. Still open: F383's price multiplier (global 0xa, signal 0xb) on the
-upgrades screen, F316's contract-row signal (8) and F622/F633's daily
-station signal (0x10).
+them. F383's price multiplier, F316's contract rows and F633's daily
+station signal are wired too (see below).
 
 ## Mission ships, first slice (2026-11-03)
 
@@ -205,7 +207,85 @@ station signal (0x10).
   0x1f, 0x22 and 0x23 read the allegiance, offences, military points and
   fines.
 
-Not yet: F772/F773's other creations (statement 19, F664's departing ship
-for statement 39, F40 for 50), placing and steering ships (54, 57, 60),
-damage and explosions (21, 51, 52), the other object fields, and F383's
-price multiplier.
+Superseded by the next section: every object statement is now wired.
+
+## Mission ships and objects (2026-11-03)
+
+The census (`census_by_mission`) lists which missions use each statement;
+`tests/mission_scripts.rs list_a_mission` with `FFE_SCRIPT_MISSION=all`
+prints every mission's listing.
+
+- **Ids.** The player is 1, a navigator ship `ship.id + 0x10`, a system
+  body `0x1000 + index` and a script canister from `0x2000`
+  (`ffe_rs::scripts`). F27's searches (tokens 0x33, a starport by its
+  `+0xa0` code, `+0x14c & 0x10`; 0x3c, a planet, models 0x76..=0x85) walk
+  the bodies from the top as F27 walks the slots.
+- **Actions.** The hooks queue what the statements ask for
+  (`scripts::Action`), and `scripts::apply` carries it out after each run,
+  in order; the hooks keep a view of each new ship so the same run reads
+  back its AI state and target.
+- **19 (F772)** makes a ship of F772's type list (F658/F635's model,
+  `npc::model_for_type`), where the player is until **54 (F702)** places it
+  F1507's packed distance (`mantissa * 2^(exponent - 15)` mm) from the
+  parent in a direction from the shared pair. **57** stops it. **60** puts
+  it in AI state 0xb behind its leader at `DATA_001705`'s place
+  (`npc::SCRIPT_FORMATIONS`, scaled by `npc::FORMATION_SCALE` as F695's
+  escorts are). **39 (F664/F672)** makes a ship of a type named from its
+  seed (F791 kind 0x12) waiting in a starport's bay until its departure
+  time (F24/F23 of the script seconds); with no starport it starts far out
+  in transit. **41-43 (F669)** keep their attackers, now in AI state 9.
+- **F37's object targets.** 0x3e sets the AI state (`NpcShip::set_ai`,
+  `npc::State::from_original`; 0x17, the scripts' parked state, holds the
+  ship in place) and raises event 0x17; 0x41 the target; 0x24/0x3d the
+  model (on the player, F441 changes the ship); 0x38 the `+0xa0` word;
+  0x30 `DATA_008908`'s offence points (`Legal::points`, which F236 now
+  adds to); 0x25 the cargo (commodities `kind - 1000` in the player's hold
+  within its free space, equipment records `kind - 100` fitted or removed
+  one at a time by F390/F391 at no charge, counted by F392's
+  `Loadout::count`); 0x42 a station's price (F649).
+- **Queries.** Tokens 0x24/0x3d (model), 0x3e (AI), 0x38 (`+0xa0`), 0x40
+  (F1680's distance class), 0x41 (target), 0x25, 0x30, 0x33/0x3c and 0x35
+  (F658: a model for a type). F21's cases 1 (Elite score), 3 (reputation),
+  13 (the body the player is docked or landed at) and 14 (`DATA_008870`:
+  0x2a docked, 0x30 on a pad, the landed words, 0x2c dying, 4 in
+  hyperspace).
+- **Damage.** **21 (F953)** damages a ship or the player (a negative amount
+  is the most, so `21 P0 -1` kills the player through the usual death
+  path); **51 (F942)** destroys an object. F953's signal runs before every
+  laser hit on a ship and every hit on the player: globals 0xd (the
+  object), 0xe (the kind) and 0xc (the damage) are set, each raising its
+  event, and the damage dealt is what the scripts leave in 0xc (missions 2
+  and 10 count their buildings' hits this way).
+- **Names.** **26/47** set an object's name (`+0x124`) from a message code
+  and word.
+- **Canisters.** **52 (F926)** makes a canister of commodity `a` at an
+  object; **58 (F291)** jettisons a tonne from the player's hold. Both give
+  their ids back; a script canister is not lost to range and its removal
+  (scooped, destroyed) reaches the scripts as event 0x16.
+- **Objects.** **48 (F297)** puts a building of a model on a planet's
+  surface at `DATA_007130/7131`'s latitude and longitude; **50 (F40)** puts
+  an object of a model on an orbit at a packed distance round a body. Both
+  are fixed, shootable objects (`npc::script_object`, `ships::object_spec`)
+  that `apply` holds to their body each frame.
+- **Contracts.** **37/38 (F314/F315)** add and remove the scripts' own
+  records in the contracts list (six at most with the removal jobs); the
+  contracts page asks the scripts for each row (F316: global 8 the record,
+  then the code in 9 and its words in 1-3) and draws it across the page.
+  **49 (F290)** adds a delivery contract.
+- **Fines and ranks.** **40 (F236)** records an offence in a jurisdiction;
+  **53** is F305 (Imperial) or F304 (Federal) with F306's points and F307's
+  medal, posting their notices.
+- **Signals.** F60's time ticks run every frame on the game time passed;
+  F383 sets global 0xa to the tech multiplier and signals 0xb when the
+  Upgrades screen is built, and the second-hand records (`+0x14`) are
+  priced by what the scripts leave in 0xa (`equipment::fit_price_with`;
+  this replaces the port's earlier assumption that the branch was random);
+  F633 signals 0x10 with each station's id on every new day.
+
+Still stand-ins (deviation 2026-11-03 in `docs/DEVIATIONS.md`): F702/F1507's
+directions come from the shared pair rather than F1506's orbit phase;
+F669's attackers start 25 km from the player; F879's surface point is the
+latitude/longitude direction at the planet's radius, not the terrain
+height; F40's orbit does not move. The scripts' objects, canisters and the
+fields they set (`+0xa0`, the AI code, the target) are not kept in a
+save, and the station's own entries are not passed to the scripts.

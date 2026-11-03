@@ -254,6 +254,25 @@ pub struct State {
     /// screens do not need the thresholds.
     #[serde(default)]
     pub rank: u8,
+    /// The mission scripts' own contracts (F314's kind 7), shown on the
+    /// contracts page with the removal jobs.
+    #[serde(default)]
+    pub script_contracts: Vec<ScriptContract>,
+}
+
+/// F314's `DATA_008804+0x4ef0` list holds at most six contracts: the removal
+/// and military strike jobs and the scripts' own.
+pub const MAX_CONTRACTS: usize = 6;
+
+/// A mission script's contract record (F314 with kind 7, from F41's statement
+/// 37; statement 38's F315 removes it). F316 asks the scripts for its row:
+/// global 8 is the record's id, then the scripts leave the row's message
+/// code in global 9 and its words in 1-3.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptContract {
+    pub id: i32,
+    /// `+0x30`: the system it was made in (`DATA_008885`).
+    pub system: u32,
 }
 
 impl Default for State {
@@ -266,6 +285,7 @@ impl Default for State {
             reputation: 0,
             military_points: 0,
             rank: 0,
+            script_contracts: Vec::new(),
         }
     }
 }
@@ -1066,6 +1086,78 @@ impl State {
     }
 
     /// The active contracts, in acceptance order.
+    /// F314 for a script (kind 7): a new record in the contracts list, with
+    /// an id one above the list's highest; `-1` when the list is full.
+    pub fn add_script_contract(&mut self, system: u32) -> i32 {
+        let removals = self
+            .active()
+            .filter(|m| matches!(m.kind, Kind::Assassination | Kind::MilitaryStrike));
+        let ids: Vec<i32> = removals
+            .map(|m| m.id as i32)
+            .chain(self.script_contracts.iter().map(|c| c.id))
+            .collect();
+        if ids.len() >= MAX_CONTRACTS {
+            return -1;
+        }
+        let id = ids.iter().copied().max().unwrap_or(0).max(0) + 1;
+        self.script_contracts.push(ScriptContract { id, system });
+        id
+    }
+
+    /// F315: remove the scripts' record `id` (nothing when there is none).
+    pub fn remove_script_contract(&mut self, id: i32) {
+        self.script_contracts.retain(|contract| contract.id != id);
+    }
+
+    /// F290 for a script (statement 49): a delivery contract the scripts
+    /// made, with F290's five words (`+4` basic data, `+0` reward, `+8`
+    /// destination, `+0xc` deadline day, `+0x10` name seed). A basic word
+    /// whose low three bits are set carries that many passengers plus one,
+    /// as F638's do; otherwise it is a parcel.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_script_delivery(
+        &mut self,
+        basic_data: u32,
+        reward: u32,
+        destination: u32,
+        destination_name: &str,
+        deadline_day: u32,
+        seed: u32,
+        day: u32,
+        origin: u32,
+        origin_name: &str,
+    ) -> u32 {
+        let id = self.next_id.max(1);
+        let passengers = (basic_data & 7) as u8;
+        self.missions.push(Mission {
+            id,
+            kind: if passengers == 0 {
+                Kind::Parcel
+            } else {
+                Kind::Passenger
+            },
+            code: 0,
+            origin,
+            origin_name: origin_name.to_owned(),
+            destination,
+            destination_name: destination_name.to_owned(),
+            reward,
+            accepted_day: day,
+            deadline_day,
+            passengers: if passengers == 0 { 0 } else { passengers + 1 },
+            cargo: String::new(),
+            seed,
+            basic_data,
+            client: String::new(),
+            status: Status::Active,
+            settled_day: None,
+            done: false,
+            side: 0,
+        });
+        self.next_id = id.saturating_add(1);
+        id
+    }
+
     pub fn active(&self) -> impl Iterator<Item = &Mission> {
         self.missions
             .iter()
@@ -1494,5 +1586,27 @@ mod tests {
         for kind in [PageKind::Message, PageKind::Rank, PageKind::Medal] {
             assert!(kind.citation().contains('F'));
         }
+    }
+
+    #[test]
+    fn f314_keeps_six_contracts_and_f315_removes_one() {
+        let mut state = State::default();
+        let ids: Vec<i32> = (0..7).map(|_| state.add_script_contract(9)).collect();
+        assert_eq!(ids, [1, 2, 3, 4, 5, 6, -1]);
+        state.remove_script_contract(3);
+        assert_eq!(state.add_script_contract(9), 7);
+        assert_eq!(state.script_contracts.len(), MAX_CONTRACTS);
+    }
+
+    #[test]
+    fn f290_from_a_script_adds_a_delivery() {
+        let mut state = State::default();
+        let id = state.add_script_delivery(0, 6000, 22, "Lave", 0x12_1d10, 7, 0x12_1cf7, 1, "Sol");
+        let mission = state.active().find(|m| m.id == id).unwrap();
+        assert_eq!(mission.kind, Kind::Parcel);
+        assert_eq!((mission.reward, mission.deadline_day), (6000, 0x12_1d10));
+        let id = state.add_script_delivery(2, 1, 22, "Lave", 0x12_1d10, 7, 0x12_1cf7, 1, "Sol");
+        let mission = state.active().find(|m| m.id == id).unwrap();
+        assert_eq!((mission.kind, mission.passengers), (Kind::Passenger, 3));
     }
 }

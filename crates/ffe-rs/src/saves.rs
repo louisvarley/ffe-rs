@@ -615,6 +615,7 @@ mod tests {
                 offences: 3,
                 fines: [0, 6000, 0, 0, 0, 0],
                 records: [0; 6],
+                points: [0; 6],
             },
             ship_lock: Some(7),
             missile_lock: Some(9),

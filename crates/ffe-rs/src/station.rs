@@ -148,7 +148,18 @@ pub fn upgrades(
     loadout: &ffe_core::equipment::Loadout,
     lasers: &[u8; 4],
 ) -> Vec<UpgradeRow> {
-    ffe_core::equipment::outfitting(tech_level, loadout, lasers)
+    upgrades_with(tech_level, loadout, lasers, None)
+}
+
+/// [`upgrades`] with the mission scripts' F383 multiplier
+/// ([`DockState::price_multiplier`]).
+pub fn upgrades_with(
+    tech_level: u16,
+    loadout: &ffe_core::equipment::Loadout,
+    lasers: &[u8; 4],
+    scripted: Option<u32>,
+) -> Vec<UpgradeRow> {
+    ffe_core::equipment::outfitting_with(tech_level, loadout, lasers, scripted)
         .into_iter()
         .filter_map(|row| {
             ffe_core::equipment::get(row.index).map(|item| UpgradeRow {
@@ -633,6 +644,12 @@ pub struct DockState {
     pub company_seed: Option<u32>,
     /// F428's pending "Select Mounting." choice for an Upgrades laser row.
     pub mounting: Option<Mounting>,
+    /// F383's multiplier as the mission scripts left it when the Upgrades
+    /// screen was built (global 0xa after signal 0xb).
+    pub price_multiplier: Option<u32>,
+    /// The ship library journal being read (F81's choice `0x31 + slot`);
+    /// `None` is the list of journals.
+    pub journal: Option<usize>,
 }
 
 /// F428's mounting choice: the Upgrades row, Fit or Remove, and which of the
@@ -667,6 +684,8 @@ impl DockState {
         self.fake_market = false;
         self.company_seed = None;
         self.mounting = None;
+        self.price_multiplier = None;
+        self.journal = None;
     }
 
     /// F454: the stockmarket screen with F538's `0x80` illegal-goods mask.

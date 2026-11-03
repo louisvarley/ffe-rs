@@ -402,6 +402,9 @@ pub struct ContractRow {
     /// The deadline date.
     pub time: String,
     pub reward: u32,
+    /// A mission script's record (kind 7): `contract` is the row the
+    /// scripts gave, wrapped to 0x13b pixels with no other columns.
+    pub wide: bool,
 }
 
 /// One line of F317's mining equipment list (0xa200/0xa201).
@@ -2204,13 +2207,14 @@ impl Screen {
             let y = 27 + index as i32 * 24;
             let mut line = String::new();
             let mut line_y = y;
+            let wrap = if row.wide { 0x13b } else { 120 };
             for word in row.contract.split(' ') {
                 let candidate = if line.is_empty() {
                     word.to_owned()
                 } else {
                     format!("{line} {word}")
                 };
-                if self.font.width(&candidate).unwrap_or(0) > 120 && !line.is_empty() {
+                if self.font.width(&candidate).unwrap_or(0) > wrap && !line.is_empty() {
                     self.shadow_text(2, line_y, &line, TEXT);
                     line_y += 10;
                     line = word.to_owned();
@@ -2220,6 +2224,9 @@ impl Screen {
             }
             if !line.is_empty() {
                 self.shadow_text(2, line_y, &line, TEXT);
+            }
+            if row.wide {
+                continue;
             }
             self.shadow_text(124, y, &format!("{},", row.system), TEXT);
             self.shadow_text(124, y + 10, &row.station, TEXT);

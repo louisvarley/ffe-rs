@@ -179,7 +179,7 @@ fn census_of_statements_and_tokens() {
         ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
             .unwrap();
     let image = Image::new(cache.asset("base:script/missions").unwrap()).unwrap();
-    let (statements, tokens) = image.census().unwrap();
+    let (statements, tokens, users) = image.census_by_mission().unwrap();
     let list = |counts: &[u32; 256]| {
         counts
             .iter()
@@ -191,6 +191,11 @@ fn census_of_statements_and_tokens() {
     };
     println!("statements {}", list(&statements));
     println!("tokens {}", list(&tokens));
+    for (opcode, missions) in users.iter().enumerate() {
+        if opcode >= 19 && !missions.is_empty() {
+            println!("statement {opcode} in missions {missions:?}");
+        }
+    }
 }
 
 /// The script and journal state survive a save as JSON.

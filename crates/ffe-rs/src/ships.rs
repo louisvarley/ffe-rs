@@ -178,6 +178,34 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
     })
 }
 
+/// The NPC view of any model a mission script places (statements 48 and 50:
+/// F297's surface buildings and F40's objects): a ship's [`npc_spec`], else
+/// the model's radius with no drive or guns and a hull of `mass` tonnes.
+pub fn object_spec(cache: &VerifiedCache, model: u32, mass: u16) -> Option<ffe_core::npc::Spec> {
+    if let Some(spec) = npc_spec(cache, model) {
+        return Some(spec);
+    }
+    let info = ffe_core::objects::ModelInfo::read(
+        cache.asset("base:model/records")?,
+        cache.asset("base:ship/stats")?,
+        model,
+    )?;
+    Some(ffe_core::npc::Spec {
+        model,
+        name: format!("Object {model}"),
+        radius: info.radii().0.max(1),
+        mass,
+        shield_strength: 0,
+        thrust: 0,
+        drive: 0,
+        gun_mounts: 0,
+        missiles: 0,
+        cargo: 0,
+        rating: 0,
+        limits: None,
+    })
+}
+
 impl ShipList {
     /// Ships with an original name (the statistics `+0xe` ffcode expanded through
     /// cache v11's `DATA_004682`) and a model the viewer can draw. Empty without

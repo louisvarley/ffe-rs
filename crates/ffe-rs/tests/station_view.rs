@@ -321,6 +321,7 @@ fn docked_screens_draw_at_the_original_layout() {
         fuel_scoop_mounting: true,
         drive_removable: true,
         mount: None,
+        price_multiplier: None,
     };
     outfitting::remove(
         21,
@@ -1060,25 +1061,9 @@ fn script_adverts_and_conversation_frames() {
         .iter()
         .map(|post| post.text.clone())
         .collect();
-    {
-        let clock = nav.clock();
-        let system = nav.current_code();
-        let mut posts_out = Vec::new();
-        let mut hooks = ffe_rs::scripts::Hooks {
-            credits: &mut state.credits,
-            random: &mut nav.random,
-            system,
-            clock,
-            posts: &mut posts_out,
-            legal: nav.legal,
-            career: nav.career,
-            tables: cache.asset("base:world/system-tables"),
-            next_ship: 1,
-            spawns: Vec::new(),
-            ships: Vec::new(),
-        };
-        state.scripts = Some(ffe_rs::scripts::new_game(&assets, &mut hooks, true).unwrap());
-    }
+    ffe_rs::scripts::with_all(&mut state, &mut nav, &cache, |scripts, hooks, _| {
+        *scripts = Some(ffe_rs::scripts::new_game(&assets, hooks, true).unwrap());
+    });
     ffe_rs::scripts::with_hooks(&mut state, &mut nav, &cache, |scripts, hooks, today| {
         scripts.open_screen(&assets.image, hooks, today, 2)
     })
@@ -1210,25 +1195,9 @@ fn script_advert_macros_ask_the_scripts() {
         credits: 1_000_000,
         ..Flight::default()
     };
-    {
-        let clock = nav.clock();
-        let system = nav.current_code();
-        let mut posts = Vec::new();
-        let mut hooks = ffe_rs::scripts::Hooks {
-            credits: &mut state.credits,
-            random: &mut nav.random,
-            system,
-            clock,
-            posts: &mut posts,
-            legal: nav.legal,
-            career: nav.career,
-            tables: cache.asset("base:world/system-tables"),
-            next_ship: 1,
-            spawns: Vec::new(),
-            ships: Vec::new(),
-        };
-        state.scripts = Some(ffe_rs::scripts::new_game(&assets, &mut hooks, true).unwrap());
-    }
+    ffe_rs::scripts::with_all(&mut state, &mut nav, &cache, |scripts, hooks, _| {
+        *scripts = Some(ffe_rs::scripts::new_game(&assets, hooks, true).unwrap());
+    });
     let mut found = Vec::new();
     for day in 0..500u32 {
         nav.clock += 86_400.0;
@@ -1274,14 +1243,25 @@ fn script_advert_macros_ask_the_scripts() {
 fn a_script_attacker_joins_the_system() {
     let cache = cache();
     let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let mut state = Flight::default();
     let before = nav.ships.len();
     let id = ffe_rs::scripts::next_ship_id(&nav, &[]);
     let near = [1_000_000_000_i64, 0, 0];
-    assert!(nav.spawn_script_ship(&cache, id, 0xc, near, 25_000_000.0));
+    let model = ffe_core::npc::SHIP_TYPES[0xc][0];
+    state
+        .script_actions
+        .push(ffe_rs::scripts::Action::Attacker {
+            ship: id,
+            model,
+            target: ffe_rs::scripts::PLAYER_ID,
+            word: 0,
+        });
+    ffe_rs::scripts::apply(&mut state, &mut nav, &cache, near);
     assert_eq!(nav.ships.len(), before + 1);
     let ship = nav.ships.last().unwrap();
     assert_eq!(ship.id, id);
     assert!(ship.hostile);
+    assert_eq!(ship.ai_state(), 9);
     assert!(ffe_core::npc::SHIP_TYPES[0xc].contains(&ship.model));
     let range: f64 = (0..3)
         .map(|k| (ship.position[k] - near[k]) as f64)
@@ -1289,4 +1269,157 @@ fn a_script_attacker_joins_the_system() {
         .sum::<f64>()
         .sqrt();
     assert!((range - 25_000_000.0).abs() < 6_000_000.0, "{range}");
+}
+
+/// The mission ships' statements carried out in a real system: a ship made
+/// (19) and placed 8.4 km from the player (54), a second flying in its
+/// formation (60), a canister (52) and a building on a planet (48), then
+/// the script's damage destroying the first ship (21) and the objects
+/// leaving the game.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn mission_ships_are_made_placed_steered_and_destroyed() {
+    use ffe_rs::scripts::{Action, Place, PLAYER_ID, SHIP_IDS, TAG_IDS};
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let mut state = Flight::default();
+    let player = [2_000_000_000_i64, 0, 0];
+    let first = ffe_rs::scripts::next_ship_id(&nav, &[]);
+    let model = ffe_core::npc::SHIP_TYPES[0x11][0];
+    let planet = nav
+        .bodies
+        .iter()
+        .position(|body| body.kind == ffe_rs::navigation::Kind::Planet)
+        .unwrap();
+    let leader = first as i32 + SHIP_IDS;
+    let wingman = leader + 1;
+    let building = leader + 2;
+    state.script_actions = vec![
+        Action::Create {
+            ship: first,
+            kind: 0x11,
+            model,
+        },
+        Action::Create {
+            ship: first + 1,
+            kind: 0x11,
+            model,
+        },
+        Action::Place {
+            object: leader,
+            parent: PLAYER_ID,
+            distance: ffe_rs::scripts::packed_distance(0x0017_7fff),
+        },
+        Action::Formation {
+            object: wingman,
+            leader,
+            slot: 0,
+        },
+        Action::Canister {
+            tag: TAG_IDS,
+            cargo: 0x1f,
+            near: leader,
+        },
+        Action::Object {
+            ship: first + 2,
+            model: 0x66,
+            body: ffe_rs::scripts::BODY_IDS + planet as i32,
+            seed: 7,
+            place: Place::Surface {
+                latitude: 0x4000,
+                longitude: 0,
+            },
+        },
+    ];
+    ffe_rs::scripts::apply(&mut state, &mut nav, &cache, player);
+    let find = |nav: &Navigator, id: i32| {
+        nav.ships
+            .iter()
+            .find(|ship| ship.id as i32 + SHIP_IDS == id)
+            .cloned()
+    };
+    let lead = find(&nav, leader).expect("the leader exists");
+    let range: f64 = (0..3)
+        .map(|k| (lead.position[k] - player[k]) as f64)
+        .map(|d| d * d)
+        .sum::<f64>()
+        .sqrt();
+    assert!((range - 32_767.0 * 256.0).abs() < 2.0, "{range}");
+    let wing = find(&nav, wingman).unwrap();
+    assert_eq!(wing.state, ffe_core::npc::State::Escort);
+    assert_eq!(wing.leader, Some(lead.id));
+    assert_eq!(wing.formation, [400_000, 0, -400_000]);
+    let canister = nav.effects.iter().find(|e| e.tag == Some(TAG_IDS)).unwrap();
+    assert_eq!(canister.position, lead.position);
+    assert_eq!(canister.cargo, Some(0x1f));
+    let base = find(&nav, building).expect("the building exists");
+    let body = &nav.bodies[planet];
+    let height: f64 = (0..3)
+        .map(|k| (base.position[k] - body.position[k]) as f64)
+        .map(|d| d * d)
+        .sum::<f64>()
+        .sqrt();
+    let surface = if body.inner_radius > 0 {
+        body.inner_radius
+    } else {
+        body.radius
+    } as f64;
+    // On the solid surface, to the rows' rounding.
+    assert!(
+        (height - surface).abs() < surface * 1e-6,
+        "{height} {surface}"
+    );
+    let present = ffe_rs::scripts::present(&nav);
+    assert!([leader, wingman, building, TAG_IDS]
+        .iter()
+        .all(|id| present.contains(id)));
+    // F953's most damage (statement 21's -1) destroys the leader, and the
+    // canister goes with statement 51.
+    state.script_actions = vec![
+        Action::Damage {
+            object: leader,
+            amount: i32::MAX as u32,
+        },
+        Action::Explode { object: TAG_IDS },
+    ];
+    ffe_rs::scripts::apply(&mut state, &mut nav, &cache, player);
+    let present = ffe_rs::scripts::present(&nav);
+    assert!(!present.contains(&leader));
+    assert!(!present.contains(&TAG_IDS));
+    assert!(present.contains(&building));
+}
+
+/// The ship library (F81/F79): a new game's five journals and each one's
+/// first issue, its macros expanded.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_ship_library_shows_each_journals_first_issue() {
+    let cache = cache();
+    let assets = ffe_rs::scripts::Assets::load(&cache).expect("cache v33");
+    let messages =
+        ffe_core::message_strings::Messages::new(cache.asset("base:text/messages").unwrap())
+            .unwrap();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let station = nav.docked.expect("the new game starts docked");
+    let mut state = Flight {
+        mode: Mode::Docked,
+        ..Flight::default()
+    };
+    ffe_rs::scripts::with_all(&mut state, &mut nav, &cache, |scripts, hooks, _| {
+        *scripts = Some(ffe_rs::scripts::new_game(&assets, hooks, true).unwrap());
+    });
+    let journals = ffe_rs::scripts::journals(state.scripts.as_ref().unwrap());
+    let names: Vec<&str> = journals.iter().map(|(_, name)| name.as_str()).collect();
+    println!("{names:?}");
+    assert_eq!(journals.len(), 5);
+    assert!(names.contains(&"Imperial Herald"));
+    for (slot, name) in &journals {
+        let articles = ffe_rs::scripts::issue(
+            &mut state, &mut nav, &cache, station, &assets, &messages, "Jameson", *slot,
+        );
+        assert!(!articles.is_empty(), "{name} has no first issue");
+        let first = &articles[0];
+        println!("{name}: {} / {}", first.publication, first.headline);
+        assert!(!first.headline.trim().is_empty());
+    }
 }

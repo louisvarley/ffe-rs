@@ -150,10 +150,17 @@ pub struct Flight {
     /// Saves from before them start the scripts afresh on load.
     #[serde(default)]
     pub scripts: Option<ffe_core::script::run::Scripts>,
-    /// Ships the scripts created this frame (F665/F666/F668), for the game
-    /// to place; never saved.
+    /// What the scripts asked the game to do this frame (their ships,
+    /// canisters, damage and contracts), for [`crate::scripts::apply`];
+    /// never saved.
     #[serde(skip)]
-    pub script_spawns: Vec<crate::scripts::Spawn>,
+    pub script_actions: Vec<crate::scripts::Action>,
+    /// The player's `+0xa0` word as a script set it (F37 target 0x38).
+    #[serde(default)]
+    pub script_seed: i32,
+    /// The player's name (`+0x124`) as a script set it (statements 26/47).
+    #[serde(default)]
+    pub script_name: Option<String>,
 }
 
 fn default_rng() -> Random {
@@ -206,7 +213,9 @@ impl Default for Flight {
             missions: ffe_core::missions::State::default(),
             mining: Vec::new(),
             scripts: None,
-            script_spawns: Vec::new(),
+            script_actions: Vec::new(),
+            script_seed: 0,
+            script_name: None,
         }
     }
 }

@@ -28,6 +28,7 @@ fn roomy() -> Limits {
         fuel_scoop_mounting: false,
         drive_removable: true,
         mount: None,
+        price_multiplier: None,
     }
 }
 

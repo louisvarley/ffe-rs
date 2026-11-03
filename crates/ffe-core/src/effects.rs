@@ -162,6 +162,9 @@ pub struct Effect {
     pub life: u64,
     /// An exit cloud (state 0x1e) rather than a departure cloud (0x1d).
     pub exit: bool,
+    /// The object id a mission script knows this object by (statements 52
+    /// and 58 create canisters and hand their ids to the scripts).
+    pub tag: Option<i32>,
 }
 
 /// F926's first pods (`0x8e0f + 0x7200`): commodity 15.
@@ -350,7 +353,10 @@ impl Effect {
 
     /// F767: a drifting pod goes once it is `DEBRIS_RANGE` from `player`.
     pub fn out_of_range(&self, player: [i64; 3]) -> bool {
-        matches!(self.kind, Kind::Debris | Kind::Derelict)
+        // A mission script's canister stays until it is scooped or the
+        // script removes it.
+        self.tag.is_none()
+            && matches!(self.kind, Kind::Debris | Kind::Derelict)
             && (0..3).any(|axis| (self.position[axis] - player[axis]).abs() >= DEBRIS_RANGE)
     }
 
@@ -391,6 +397,7 @@ pub fn hit(
         size: 0,
         life: 0,
         exit: false,
+        tag: None,
     }
 }
 
@@ -416,6 +423,7 @@ pub fn missile_explosion(position: [i64; 3], axes: [[f64; 3]; 3], rng: &mut Rand
         size: 0,
         life: 0,
         exit: false,
+        tag: None,
     }
 }
 
@@ -447,6 +455,7 @@ pub fn explosion(
         size: 0,
         life: 0,
         exit: false,
+        tag: None,
     }];
     // F942: (F922(6) - 2) pods, then min(4, cargo >> 1) cargo pods.
     // F942: F922(6) - 2 pods of commodity 15, then, when the ship has cargo
@@ -494,6 +503,7 @@ pub fn explosion(
             size: load,
             life: 0,
             exit: false,
+            tag: None,
         });
     }
     effects
@@ -540,6 +550,7 @@ pub fn derelict(model: u32, position: [i64; 3], velocity: [f64; 3], axes: [[f64;
         size: 0,
         life: 0,
         exit: false,
+        tag: None,
     }
 }
 
@@ -560,6 +571,7 @@ fn cloud(position: [i64; 3], exit: bool, size: u16, life: u64) -> Effect {
         size,
         life,
         exit,
+        tag: None,
     }
 }
 
@@ -595,6 +607,7 @@ pub fn canister(
         size: 0,
         life: 0,
         exit: false,
+        tag: None,
     }
 }
 

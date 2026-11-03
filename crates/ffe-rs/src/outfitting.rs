@@ -40,6 +40,9 @@ pub struct Limits {
     /// F428's chosen gun mounting (`0x9870 + k`) when more than one qualifies;
     /// `None` takes the only one.
     pub mount: Option<usize>,
+    /// F383's multiplier as the mission scripts left it (`None`: the tech
+    /// multiplier).
+    pub price_multiplier: Option<u32>,
 }
 
 impl Limits {
@@ -54,6 +57,7 @@ impl Limits {
             fuel_scoop_mounting: true,
             drive_removable: true,
             mount: None,
+            price_multiplier: None,
         }
     }
 }
@@ -134,8 +138,8 @@ pub fn fit(
     limits: Limits,
 ) -> Result<String, String> {
     let item = equipment::get(index).ok_or_else(|| "No such equipment.".to_owned())?;
-    let price =
-        equipment::fit_price(index, tech_level).ok_or_else(|| "No such equipment.".to_owned())?;
+    let price = equipment::fit_price_with(index, tech_level, limits.price_multiplier)
+        .ok_or_else(|| "No such equipment.".to_owned())?;
     // F387 subtracts ten times the row's price (the cash unit is a tenth).
     let cost = price.saturating_mul(10);
     if *credits < cost {
@@ -219,7 +223,7 @@ pub fn remove(
     limits: Limits,
 ) -> Result<String, String> {
     let item = equipment::get(index).ok_or_else(|| "No such equipment.".to_owned())?;
-    let refund = equipment::removal_price(index, tech_level)
+    let refund = equipment::removal_price_with(index, tech_level, limits.price_multiplier)
         .ok_or_else(|| "No such equipment.".to_owned())?
         .saturating_mul(10);
     let missing = || format!("You have no {} to remove.", item.name);
@@ -312,6 +316,7 @@ mod tests {
             fuel_scoop_mounting: true,
             drive_removable: true,
             mount: None,
+            price_multiplier: None,
         }
     }
 

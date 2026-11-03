@@ -630,7 +630,12 @@ impl Role {
 /// record's allegiance word `>> 6`). Out-of-range types fall back to the
 /// original's first table so a hand-made system cannot panic.
 pub fn model_for(role: Role, allegiance: u32, rng: &mut Random) -> u32 {
-    let mut index = role.type_code();
+    model_for_type(role.type_code(), allegiance, rng)
+}
+
+/// F635 for F772's type-table index `index` (F658, which the mission
+/// scripts' F772 and token 0x35 call).
+pub fn model_for_type(mut index: usize, allegiance: u32, rng: &mut Random) -> u32 {
     if index <= 1 {
         index += 2 * (allegiance.min(4) as usize);
     }
@@ -1016,6 +1021,26 @@ pub enum State {
 }
 
 impl State {
+    /// The port's state for an original `+0xff` code a mission script sets
+    /// (target 0x3e): F669's 9 and the attack codes close on the target;
+    /// 0x17, the scripts' parked objects, holds its place like 0x06/0x0d-0x0f.
+    pub fn from_original(code: u8) -> Option<State> {
+        Some(match code {
+            0x00 | 0x08 => State::Transit,
+            0x01 | 0x02 | 0x04 | 0x05 | 0x09 => State::Attack,
+            0x03 => State::Pass,
+            0x06 | 0x0d | 0x0e | 0x0f | 0x17 => State::Hold,
+            0x07 => State::Depart,
+            0x0a | 0x0b => State::Escort,
+            0x0c => State::Evade,
+            0x1d => State::Flee,
+            0x1f | 0x21 => State::Launch,
+            0x20 | 0x24 => State::Docked,
+            0x23 => State::Approach,
+            _ => return None,
+        })
+    }
+
     /// The original `+0xff` values this state stands in for.
     pub fn original(self) -> &'static [u8] {
         match self {
@@ -1166,6 +1191,18 @@ pub struct NpcShip {
     pub dock_retry: f64,
     /// Seconds spent waiting for a bay or clearance.
     pub dock_wait: f64,
+    /// `+0xa0`: the word a mission script gave the ship (F672's name seed or
+    /// target 0x38).
+    #[serde(default)]
+    pub seed: i32,
+    /// `+0xfe` as a mission script set it (target 0x41, statements 41-43
+    /// and 60), in the scripts' ids.
+    #[serde(default)]
+    pub script_target: i32,
+    /// The `+0xff` code a mission script set (target 0x3e), reported while
+    /// the ship is still in the state it stands for.
+    #[serde(default)]
+    pub ai_code: Option<u8>,
 }
 
 impl NpcShip {
@@ -1257,11 +1294,55 @@ impl NpcShip {
             dock_span: 0.0,
             dock_retry: 0.0,
             dock_wait: 0.0,
+            seed: 0,
+            script_target: 0,
+            ai_code: None,
         }
     }
 
     pub fn alive(&self) -> bool {
         !matches!(self.state, State::Dead | State::Escaped)
+    }
+
+    /// The `+0xff` code the scripts read (token 0x3e): the code a script
+    /// set while the ship is still in that state, else the state's first.
+    pub fn ai_state(&self) -> u8 {
+        self.ai_code
+            .filter(|code| State::from_original(*code) == Some(self.state))
+            .unwrap_or_else(|| self.state.original().first().copied().unwrap_or(0))
+    }
+
+    /// A mission script sets the ship's AI state `code` (target 0x3e) with
+    /// its target `target` (`+0xfe`): `Some(None)` the player, `Some(Some(id))`
+    /// another ship, `None` unchanged (an attack then closes on the player).
+    pub fn set_ai(&mut self, code: u8, target: Option<Option<u32>>) {
+        let Some(state) = State::from_original(code) else {
+            return;
+        };
+        self.ai_code = Some(code);
+        self.state = state;
+        match state {
+            State::Attack | State::Pass => match target {
+                Some(Some(ship)) => self.npc_target = Some(ship),
+                _ => {
+                    self.hostile = true;
+                    self.npc_target = None;
+                }
+            },
+            State::Escort => {
+                if let Some(target) = target {
+                    self.leader = target;
+                    if target.is_none() {
+                        self.formation = [0; 3];
+                    }
+                }
+            }
+            State::Hold => {
+                self.anchor = self.position;
+                self.orbit_radius = 0.0;
+            }
+            _ => {}
+        }
     }
 
     /// Whether the ship should be drawn, locked or hit this frame. A docked or
@@ -2189,6 +2270,10 @@ pub struct Legal {
     /// `DATA_009093`: the offences recorded by each jurisdiction, one bit per
     /// [`OFFENCES`] index.
     pub records: [u32; 6],
+    /// `DATA_008908`: each jurisdiction's offence points (F236 adds the
+    /// offence's `+0`; the mission scripts read and write them, token 0x30).
+    #[serde(default)]
+    pub points: [u32; 6],
 }
 
 /// F544/F545's outcome when the player tries to pay the local fine.
@@ -2222,6 +2307,7 @@ impl Legal {
         let additional = self.fines[slot] != 0;
         let charged = record.fine.saturating_mul(10);
         self.fines[slot] = self.fines[slot].saturating_add(charged);
+        self.points[slot] = self.points[slot].saturating_add(record.points);
         if offence < 32 {
             self.records[slot] |= 1 << offence;
         }
@@ -2552,6 +2638,9 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             dock_span: 0.0,
             dock_retry: 0.0,
             dock_wait: 0.0,
+            seed: 0,
+            script_target: 0,
+            ai_code: None,
         })
         .collect()
 }
@@ -2940,6 +3029,81 @@ pub fn script_attacker(spec: &Spec, id: u32, position: [i64; 3], rng: &mut Rando
     ship.state = State::Attack;
     ship
 }
+
+/// A ship a mission script made with F772 (statement 19): created where the
+/// script will place it (statement 54), holding its place until a script
+/// steers it. F773 gives it no target.
+pub fn script_ship(spec: &Spec, id: u32, position: [i64; 3], rng: &mut Random) -> NpcShip {
+    let mut spec = spec.clone();
+    let type_name = spec.name.clone();
+    spec.name = format!("{} {}", spec.name, id + 1);
+    let mut ship = NpcShip::new(&spec, Role::Trader, position, position, rng);
+    ship.type_name = type_name;
+    ship.id = id;
+    ship.state = State::Hold;
+    ship.orbit_radius = 0.0;
+    ship.velocity = [0.0; 3];
+    ship.speed = 0.0;
+    ship
+}
+
+/// An object a mission script puts in the system (F297's surface buildings,
+/// F40's orbiting objects): it does not fly or fire, attacking it is no
+/// crime, and the scripts count its damage themselves (F953's signal).
+pub fn script_object(spec: &Spec, id: u32, position: [i64; 3], rng: &mut Random) -> NpcShip {
+    let mut ship = NpcShip::new(spec, Role::Pirate, position, position, rng);
+    ship.type_name = spec.name.clone();
+    ship.id = id;
+    ship.hostile = false;
+    ship.laser = None;
+    ship.state = State::Hold;
+    ship.orbit_radius = 0.0;
+    ship.max_speed = 0.0;
+    ship.accel = 0.0;
+    ship.turn_rate = 0.0;
+    ship.limits = None;
+    ship.velocity = [0.0; 3];
+    ship.speed = 0.0;
+    ship
+}
+
+/// `DATA_001705` (`ffedat.asm:699`): F41 statement 60's formation places,
+/// 27 offsets `(x, y, z)` in the leader's frame (`+0x102..+0x106`). The
+/// first nine are a vee behind the leader; the scripts add 9 for the other
+/// groupings.
+pub const SCRIPT_FORMATIONS: [[i16; 3]; 27] = [
+    [500, 0, -500],
+    [-500, 0, -500],
+    [1000, 0, -1000],
+    [0, 0, -1000],
+    [-1000, 0, -1000],
+    [500, 0, -1500],
+    [-500, 0, -1500],
+    [0, 0, -2000],
+    [0, 0, 500],
+    [-1000, -1000, 0],
+    [-1000, 0, 0],
+    [-1000, 1000, 0],
+    [0, -1000, 0],
+    [0, 1000, 0],
+    [1000, -1000, 0],
+    [1000, 0, 0],
+    [1000, 1000, 0],
+    [-500, -500, -500],
+    [500, -500, -500],
+    [-500, 500, -500],
+    [500, 500, -500],
+    [-500, -500, 500],
+    [500, -500, 500],
+    [-500, 500, 500],
+    [500, 500, 500],
+    [0, 0, 1000],
+    [0, 0, -1000],
+];
+
+/// The port's scale from the original formation words to its frame, as
+/// F695's pirate escorts use it (500 becomes 0.4e6 mm).
+pub const FORMATION_SCALE: i64 = 800;
 
 /// An assassination contract's target (F291): a trader leaving `anchor`'s
 /// place for `station`'s, carrying the contract id.
@@ -4353,6 +4517,46 @@ mod tests {
         // The source's 0x800e drive word has no DATA_006266 energy entry; the
         // port keeps that zero rather than inventing a loadout.
         assert_eq!(ship.laser, Some(laser::BEAM_20MW));
+    }
+
+    #[test]
+    fn a_script_sets_original_ai_codes_and_reads_them_back() {
+        let mut rng = Random::new(5, 6);
+        let mut ship = script_ship(&spec(0x1c).unwrap(), 3, [0; 3], &mut rng);
+        assert_eq!(ship.state, State::Hold);
+        assert!(!ship.hostile);
+        // 0x17, the scripts' parked state, holds the ship where it is and
+        // reads back as 0x17 while it holds.
+        ship.position = [7, 8, 9];
+        ship.set_ai(0x17, None);
+        assert_eq!(
+            (ship.state, ship.anchor, ship.ai_state()),
+            (State::Hold, [7, 8, 9], 0x17)
+        );
+        // F669's 9 at the player is an attack.
+        ship.set_ai(9, Some(None));
+        assert_eq!(ship.state, State::Attack);
+        assert!(ship.hostile);
+        assert_eq!(ship.ai_state(), 9);
+        // Formation (0xb) behind ship 4.
+        ship.set_ai(0xb, Some(Some(4)));
+        assert_eq!((ship.state, ship.leader), (State::Escort, Some(4)));
+        // A state the ship has left reads as the port's.
+        ship.state = State::Flee;
+        assert_eq!(ship.ai_state(), 0x1d);
+        // Unknown codes change nothing.
+        ship.set_ai(0x99, None);
+        assert_eq!(ship.state, State::Flee);
+    }
+
+    #[test]
+    fn a_script_object_stays_put_and_is_no_crime() {
+        let mut rng = Random::new(5, 6);
+        let object = script_object(&spec(0x1c).unwrap(), 2, [1, 2, 3], &mut rng);
+        assert_eq!(object.state, State::Hold);
+        assert_eq!(object.max_speed, 0.0);
+        assert!(!object.hostile && !object.role.clean());
+        assert!(object.laser.is_none());
     }
 
     #[test]

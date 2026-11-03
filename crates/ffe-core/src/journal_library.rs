@@ -630,6 +630,23 @@ impl Library {
 
     /// F71: the articles F78 shows for `journal` (its issue's shown records,
     /// head first).
+    /// The current issue's shown articles of `journal` with their slot words
+    /// (F95 puts them in `DATA_008568` while an article's macros expand).
+    pub fn shown_records(&self, journal: usize) -> Vec<(i32, [i32; 10])> {
+        let mut out = Vec::new();
+        let Some(entry) = self.journals.get(journal) else {
+            return out;
+        };
+        let mut at = index(entry.issue);
+        while let Some(record) = at {
+            if self.records[record].flags & SHOWN != 0 {
+                out.push((self.records[record].article, self.records[record].slots));
+            }
+            at = index(self.records[record].next);
+        }
+        out
+    }
+
     pub fn shown(&self, journal: usize) -> Vec<i32> {
         let mut out = Vec::new();
         let Some(entry) = self.journals.get(journal) else {

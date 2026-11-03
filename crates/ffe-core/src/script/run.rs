@@ -136,6 +136,11 @@ impl Host for Bridge<'_> {
     }
 }
 
+/// F953's script globals: the damage, the object and the kind.
+pub const DAMAGE_AMOUNT: usize = 0xc;
+pub const DAMAGE_OBJECT: usize = 0xd;
+pub const DAMAGE_KIND: usize = 0xe;
+
 impl Scripts {
     pub fn new(image: &Image) -> Self {
         Self {
@@ -313,6 +318,42 @@ impl Scripts {
     ) -> Result<(), String> {
         let mut bridge = Self::bridge(&mut self.library, game, today);
         self.engine.pulse(image, &mut bridge, index, value)
+    }
+
+    /// F34 from the game: set global `index` and raise its event.
+    pub fn set_global(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        index: usize,
+        value: i32,
+    ) -> Result<(), String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.set_global(image, &mut bridge, index, value)
+    }
+
+    /// F35: global `index` (0 outside the 71 words).
+    pub fn global(&self, index: usize) -> i32 {
+        self.engine.globals.get(index).copied().unwrap_or(0)
+    }
+
+    /// F953's signal before any damage: global 0xd the object's id, 0xe the
+    /// damage kind and 0xc the amount, each raising its event; the damage
+    /// dealt is global 0xc as the scripts leave it.
+    pub fn damage(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        object: i32,
+        kind: i32,
+        amount: i32,
+    ) -> Result<i32, String> {
+        self.set_global(image, game, today, DAMAGE_OBJECT, object)?;
+        self.set_global(image, game, today, DAMAGE_KIND, kind)?;
+        self.set_global(image, game, today, DAMAGE_AMOUNT, amount)?;
+        Ok(self.global(DAMAGE_AMOUNT))
     }
 
     /// F90's docking message (5).

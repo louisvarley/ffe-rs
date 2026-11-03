@@ -1319,7 +1319,12 @@ fn run() -> Result<(), String> {
     let mut last_dock_screen: Option<StationScreen> = None;
     let mut reopen_board = false;
     // The navigator ships present last frame (F924's removals are the rest).
-    let mut script_ships: std::collections::BTreeSet<u32> = Default::default();
+    let mut script_ships: std::collections::BTreeSet<i32> = Default::default();
+    // The world clock at the scripts' last F60 time tick.
+    let mut script_clock: Option<f64> = None;
+    // The journal issue being read (its slot and rows), expanded once when
+    // it is opened: its macros draw from the shared pair.
+    let mut journal_issue: Option<(usize, Vec<String>)> = None;
     // The scripts' menu rows and title as last expanded (key, rows, title).
     let mut script_text_cache: (String, Vec<String>, String) = Default::default();
 
@@ -1958,76 +1963,57 @@ fn run() -> Result<(), String> {
                     let docked = nav.docked.is_some();
                     let arrived = docked && !was_docked;
                     was_docked = docked;
+                    // F60's time ticks: the game tics since the last frame.
                     let clock = nav.clock();
-                    let system = nav.current_code();
-                    let mut posts = Vec::new();
-                    let next_ship = ffe_rs::scripts::next_ship_id(nav, &state.script_spawns);
-                    let views = ffe_rs::scripts::ship_views(&state, nav);
-                    let mut hooks = ffe_rs::scripts::Hooks {
-                        credits: &mut state.credits,
-                        random: &mut nav.random,
-                        system,
-                        clock,
-                        posts: &mut posts,
-                        legal: nav.legal,
-                        career: nav.career,
-                        tables: cache.asset("base:world/system-tables"),
-                        next_ship,
-                        spawns: Vec::new(),
-                        ships: views,
-                    };
-                    // A new game, a new commander after GAME OVER, or a save
-                    // from before the scripts: F57's new game first.
-                    if state.scripts.is_none() {
-                        match ffe_rs::scripts::new_game(assets, &mut hooks, docked) {
-                            Ok(scripts) => state.scripts = Some(scripts),
-                            Err(error) => eprintln!("mission scripts: {error}"),
-                        }
-                    }
-                    if let Some(scripts) = state.scripts.as_mut() {
-                        // F339: leaving the station closes the scripts' screen.
-                        if !docked {
-                            scripts.engine.menu.active = false;
-                        }
-                        if let Err(error) =
-                            ffe_rs::scripts::days(scripts, assets, &mut hooks, &crossed, docked)
-                        {
-                            eprintln!("mission scripts: {error}");
-                        }
-                        if arrived {
-                            scripts.docked();
-                        }
-                    }
-                    let (legal, career) = (hooks.legal, hooks.career);
-                    let spawns = std::mem::take(&mut hooks.spawns);
-                    nav.legal = legal;
-                    nav.career = career;
-                    state.script_spawns.extend(spawns);
+                    let tics = script_clock
+                        .map_or(0.0, |last| (clock - last).clamp(0.0, 86_400.0) * 49_710.0)
+                        as u32;
+                    script_clock = Some(clock);
+                    let places = ffe_rs::scripts::places(nav);
+                    let ((), posts) = ffe_rs::scripts::with_all(
+                        &mut state,
+                        nav,
+                        &cache,
+                        |scripts, hooks, today| {
+                            // A new game, a new commander after GAME OVER, or a
+                            // save from before the scripts: F57's new game first.
+                            if scripts.is_none() {
+                                match ffe_rs::scripts::new_game(assets, hooks, docked) {
+                                    Ok(made) => *scripts = Some(made),
+                                    Err(error) => eprintln!("mission scripts: {error}"),
+                                }
+                            }
+                            let Some(scripts) = scripts.as_mut() else {
+                                return;
+                            };
+                            // F339: leaving the station closes the scripts' screen.
+                            if !docked {
+                                scripts.engine.menu.active = false;
+                            }
+                            if let Err(error) = scripts.time(&assets.image, hooks, today, tics) {
+                                eprintln!("mission scripts: {error}");
+                            }
+                            if let Err(error) = ffe_rs::scripts::days(
+                                scripts, assets, hooks, &crossed, docked, &places,
+                            ) {
+                                eprintln!("mission scripts: {error}");
+                            }
+                            if arrived {
+                                scripts.docked();
+                            }
+                        },
+                    );
                     for post in posts {
                         pending_log.add(Source::Journal, post);
                     }
-                    // F669/F702: the ships the scripts created, near the player.
-                    let spawns = std::mem::take(&mut state.script_spawns);
-                    if !spawns.is_empty() {
-                        let at = ship_position(&original, &state);
-                        for spawn in spawns {
-                            nav.spawn_script_ship(&cache, spawn.ship, spawn.kind, at, 25_000_000.0);
-                        }
-                    }
-                    // F924/F61: every ship that has left the game since the
-                    // last frame (destroyed, jumped out or cleared).
-                    let present: std::collections::BTreeSet<u32> = nav
-                        .ships
-                        .iter()
-                        .filter(|ship| {
-                            !matches!(
-                                ship.state,
-                                ffe_core::npc::State::Dead | ffe_core::npc::State::Escaped
-                            )
-                        })
-                        .map(|ship| ship.id)
-                        .collect();
-                    let gone: Vec<u32> = script_ships.difference(&present).copied().collect();
+                    // What the scripts asked for: their ships, canisters,
+                    // placements, damage, names and contracts.
+                    let at = ship_position(&original, &state);
+                    ffe_rs::scripts::apply(&mut state, nav, &cache, at);
+                    // F924/F61: every object that has left the game since the
+                    // last frame (destroyed, jumped out, scooped or cleared).
+                    let present = ffe_rs::scripts::present(nav);
+                    let gone: Vec<i32> = script_ships.difference(&present).copied().collect();
                     script_ships = present;
                     for id in gone {
                         if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
@@ -2035,12 +2021,7 @@ fn run() -> Result<(), String> {
                             nav,
                             &cache,
                             |scripts, hooks, today| {
-                                scripts.object_removed(
-                                    &assets.image,
-                                    hooks,
-                                    today,
-                                    id as i32 + ffe_rs::scripts::SHIP_IDS,
-                                )
+                                scripts.object_removed(&assets.image, hooks, today, id)
                             },
                         ) {
                             eprintln!("mission scripts: {error}");
@@ -3953,8 +3934,27 @@ fn run() -> Result<(), String> {
                         .as_ref()
                         .and_then(|nav| nav.tech_level(&cache))
                         .unwrap_or(0);
+                    // F383 sets global 0xa to the tech multiplier and signals
+                    // 0xb, once as the screen is built: the scripts may change
+                    // the second-hand records' prices.
+                    if dock.screen == StationScreen::Upgrades && dock.price_multiplier.is_none() {
+                        if let Some(nav) = nav.as_mut() {
+                            dock.price_multiplier = Some(ffe_rs::scripts::upgrade_multiplier(
+                                &mut state,
+                                nav,
+                                &cache,
+                                script_assets.as_ref(),
+                                tech_level,
+                            ));
+                        }
+                    }
                     let upgrade_rows = if dock.screen == StationScreen::Upgrades {
-                        station::upgrades(tech_level, &state.loadout, &state.combat.lasers)
+                        station::upgrades_with(
+                            tech_level,
+                            &state.loadout,
+                            &state.combat.lasers,
+                            dock.price_multiplier,
+                        )
                     } else {
                         Vec::new()
                     };
@@ -4097,7 +4097,15 @@ fn run() -> Result<(), String> {
                         StationScreen::Script => script_entries,
                         _ => bulletin_rows,
                     };
-                    let journal_rows = state.missions.journal.len();
+                    let library = state
+                        .scripts
+                        .as_ref()
+                        .map(ffe_rs::scripts::journals)
+                        .unwrap_or_default();
+                    let journal_rows = match dock.journal {
+                        Some(_) => journal_issue.as_ref().map_or(0, |(_, rows)| rows.len()),
+                        None => library.len() + state.missions.journal.len(),
+                    };
                     let comms_rows = state.missions.pages.len();
                     let military_rows = if dock.screen == StationScreen::Military {
                         match nav
@@ -4235,6 +4243,16 @@ fn run() -> Result<(), String> {
                             StationScreen::Bulletin | StationScreen::Script
                         ) {
                             dock_action = Some(StationAction::Post { row: dock.selected });
+                        } else if dock.screen == StationScreen::Journal {
+                            // F81: a journal of the list opens its issue.
+                            if let (None, Some((slot, _))) =
+                                (dock.journal, library.get(dock.selected))
+                            {
+                                dock.journal = Some(*slot);
+                                dock.selected = 0;
+                                dock.scroll = 0;
+                                journal_issue = None;
+                            }
                         } else if dock.screen == StationScreen::Comms {
                             dock_action = Some(StationAction::ReadPage { row: dock.selected });
                         } else if dock.screen == StationScreen::Military {
@@ -4275,6 +4293,15 @@ fn run() -> Result<(), String> {
                                         dock.selected = index;
                                         dock_action =
                                             Some(StationAction::MilitaryPost { row: index });
+                                    } else if dock.screen == StationScreen::Journal {
+                                        if let (None, Some((slot, _))) =
+                                            (dock.journal, library.get(index))
+                                        {
+                                            dock.journal = Some(*slot);
+                                            dock.selected = 0;
+                                            dock.scroll = 0;
+                                            journal_issue = None;
+                                        }
                                     } else if let Some(entry) =
                                         station::menu_entry(dock.screen, index, 0)
                                     {
@@ -4483,6 +4510,14 @@ fn run() -> Result<(), String> {
                             } else {
                                 station::hint(screen, bbs, hulls).to_owned()
                             };
+                        }
+                        StationAction::Back
+                            if dock.screen == StationScreen::Journal && dock.journal.is_some() =>
+                        {
+                            // F81: back from an issue to the list of journals.
+                            dock.journal = None;
+                            dock.selected = 0;
+                            dock.scroll = 0;
                         }
                         StationAction::Back => {
                             dock.back();
@@ -5962,7 +5997,18 @@ fn run() -> Result<(), String> {
                         ffe_rs::navigation::ShipEvent::Hit {
                             name, damage, beam, ..
                         } => {
-                            // F953/F952's rolls draw from the shared pair (PAR-17).
+                            // F953 lets the mission scripts change the damage
+                            // (globals 0xc-0xe) before its rolls, which draw
+                            // from the shared pair (PAR-17).
+                            let damage = ffe_rs::scripts::damage(
+                                &mut state,
+                                nav,
+                                &cache,
+                                script_assets.as_ref(),
+                                ffe_rs::scripts::PLAYER_ID,
+                                0,
+                                damage,
+                            );
                             state.rng = nav.random;
                             let (outcome, system) = state.take_damage_with_systems(damage, mass);
                             nav.random = state.rng;
@@ -6233,7 +6279,24 @@ fn run() -> Result<(), String> {
         screen.cargo_inventory =
             (status_shown && status_section == 3).then(|| cargo_inventory(&cache, &state));
         screen.roster = (status_shown && status_section == 4).then(|| mission_roster(&state));
-        screen.contracts = (status_shown && status_section == 5).then(|| mission_contracts(&state));
+        screen.contracts = (status_shown && status_section == 5).then(|| {
+            let mut rows = mission_contracts(&state);
+            if let (Some(nav), Some(assets), Some(messages)) = (
+                nav.as_mut(),
+                script_assets.as_ref(),
+                script_messages.as_ref(),
+            ) {
+                rows.extend(script_contract_rows(
+                    &mut state,
+                    nav,
+                    &cache,
+                    assets,
+                    messages,
+                    &commander.name,
+                ));
+            }
+            rows
+        });
         screen.mining_list = (status_shown && status_section == 6).then(|| mining_rows(&state));
         views.console = ConsoleState {
             acceleration,
@@ -6692,8 +6755,18 @@ fn run() -> Result<(), String> {
                                     let name = ship.name.clone();
                                     let model = ship.model;
                                     nav.lock_ship(id);
-                                    let outcome =
-                                        nav.damage_ship_at(id, shot.damage, Some(hit.point));
+                                    // F953's script signal first (globals
+                                    // 0xc-0xe): the scripts may change it.
+                                    let damage = ffe_rs::scripts::damage(
+                                        &mut state,
+                                        nav,
+                                        &cache,
+                                        script_assets.as_ref(),
+                                        id as i32 + ffe_rs::scripts::SHIP_IDS,
+                                        0,
+                                        shot.damage,
+                                    );
+                                    let outcome = nav.damage_ship_at(id, damage, Some(hit.point));
                                     if let Some(attack) = outcome {
                                         state.credits = state.credits.saturating_add(attack.bounty);
                                         let mut text = match attack.damage {
@@ -7261,8 +7334,12 @@ fn run() -> Result<(), String> {
                         }
                     } else if dock.screen == StationScreen::Upgrades {
                         let tech_level = nav.tech_level(&cache).unwrap_or(0);
-                        let upgrades =
-                            station::upgrades(tech_level, &state.loadout, &state.combat.lasers);
+                        let upgrades = station::upgrades_with(
+                            tech_level,
+                            &state.loadout,
+                            &state.combat.lasers,
+                            dock.price_multiplier,
+                        );
                         let visible = station::layout(StationScreen::Upgrades).visible();
                         dock.selected = dock.selected.min(upgrades.len().saturating_sub(1));
                         dock.scroll = dock.scroll.min(upgrades.len().saturating_sub(visible));
@@ -7410,23 +7487,73 @@ fn run() -> Result<(), String> {
                         // The date line is the port's calendar for the entry's
                         // game day (the original shows the MISSION.DAT issue's
                         // date).
-                        let lines: Vec<(u32, String)> = if dock.screen == StationScreen::Journal {
-                            state
-                                .missions
-                                .journal
-                                .iter()
-                                .rev()
-                                .map(|entry| (entry.day, entry.text.clone()))
-                                .collect()
-                        } else {
-                            state
-                                .missions
-                                .pages
-                                .iter()
-                                .rev()
-                                .map(|page| (page.day, page.text.clone()))
-                                .collect()
-                        };
+                        // The ship library (F81/F79): the scripts' journals,
+                        // then the port's own mission journal; a chosen
+                        // journal shows its current issue.
+                        let mut title = station::title(dock.screen, &station_name);
+                        let lines: Vec<(Option<u32>, String)> =
+                            if dock.screen == StationScreen::Journal {
+                                let library = state
+                                    .scripts
+                                    .as_ref()
+                                    .map(ffe_rs::scripts::journals)
+                                    .unwrap_or_default();
+                                match dock.journal {
+                                    Some(slot) => {
+                                        if journal_issue.as_ref().map(|(at, _)| *at) != Some(slot) {
+                                            let rows = match (
+                                                script_assets.as_ref(),
+                                                script_messages.as_ref(),
+                                            ) {
+                                                (Some(assets), Some(messages)) => {
+                                                    issue_rows(&ffe_rs::scripts::issue(
+                                                        &mut state,
+                                                        nav,
+                                                        &cache,
+                                                        station,
+                                                        assets,
+                                                        messages,
+                                                        &commander.name,
+                                                        slot,
+                                                    ))
+                                                }
+                                                _ => Vec::new(),
+                                            };
+                                            journal_issue = Some((slot, rows));
+                                        }
+                                        if let Some((_, name)) =
+                                            library.iter().find(|(at, _)| *at == slot)
+                                        {
+                                            title = name.clone();
+                                        }
+                                        journal_issue
+                                            .as_ref()
+                                            .map(|(_, rows)| {
+                                                rows.iter().map(|row| (None, row.clone())).collect()
+                                            })
+                                            .unwrap_or_default()
+                                    }
+                                    None => {
+                                        library
+                                            .iter()
+                                            .map(|(_, name)| (None, name.clone()))
+                                            .chain(
+                                                state.missions.journal.iter().rev().map(|entry| {
+                                                    (Some(entry.day), entry.text.clone())
+                                                }),
+                                            )
+                                            .collect()
+                                    }
+                                }
+                            } else {
+                                state
+                                    .missions
+                                    .pages
+                                    .iter()
+                                    .rev()
+                                    .map(|page| (Some(page.day), page.text.clone()))
+                                    .collect()
+                            };
                         let visible = station::layout(dock.screen).visible();
                         dock.selected = dock.selected.min(lines.len().saturating_sub(1));
                         dock.scroll = dock.scroll.min(lines.len().saturating_sub(visible));
@@ -7434,11 +7561,16 @@ fn run() -> Result<(), String> {
                             .iter()
                             .skip(dock.scroll)
                             .map(|(day, text)| ffe_rs::station::DockRow {
-                                main: format!(
-                                    "{}: {}",
-                                    ffe_rs::galaxy_map::date_short_text(f64::from(*day) * 86_400.0),
-                                    text
-                                ),
+                                main: match day {
+                                    Some(day) => format!(
+                                        "{}: {}",
+                                        ffe_rs::galaxy_map::date_short_text(
+                                            f64::from(*day) * 86_400.0
+                                        ),
+                                        text
+                                    ),
+                                    None => text.clone(),
+                                },
                                 detail: None,
                                 columns: Vec::new(),
                                 fitted: false,
@@ -7446,7 +7578,7 @@ fn run() -> Result<(), String> {
                             .collect();
                         screen.dock = Some(ffe_rs::station::DockView {
                             screen: dock.screen,
-                            title: station::title(dock.screen, &station_name),
+                            title,
                             rows,
                             status,
                             scroll: dock.scroll,
@@ -8534,8 +8666,81 @@ fn mission_contracts(state: &Flight) -> Vec<ffe_rs::screen::ContractRow> {
             station: m.origin_name.clone(),
             time: mission_date(m.deadline_day),
             reward: m.reward,
+            wide: false,
         })
         .collect()
+}
+
+/// The journal viewer's rows for an issue (F71's text): each article's
+/// publication and headline, then its body in paragraphs of at most three of
+/// the page's lines.
+fn issue_rows(articles: &[ffe_rs::scripts::Article]) -> Vec<String> {
+    const PARAGRAPH: usize = 150;
+    let mut rows = Vec::new();
+    for article in articles {
+        rows.push(
+            [article.publication.trim(), article.headline.trim()]
+                .into_iter()
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join(": "),
+        );
+        for paragraph in article.body.split(['\n', '\r']) {
+            let mut row = String::new();
+            for word in paragraph.split_whitespace() {
+                if !row.is_empty() && row.len() + 1 + word.len() > PARAGRAPH {
+                    rows.push(std::mem::take(&mut row));
+                }
+                if !row.is_empty() {
+                    row.push(' ');
+                }
+                row.push_str(word);
+            }
+            if !row.is_empty() {
+                rows.push(row);
+            }
+        }
+    }
+    if rows.is_empty() {
+        rows.push("No issue has been published yet.".to_owned());
+    }
+    rows
+}
+
+/// F316's rows for the scripts' own contracts: each record's row as the
+/// scripts answer F316's signal, expanded.
+fn script_contract_rows(
+    state: &mut Flight,
+    nav: &mut Navigator,
+    cache: &ffe_content::VerifiedCache,
+    assets: &ffe_rs::scripts::Assets,
+    messages: &ffe_core::message_strings::Messages<'_>,
+    commander: &str,
+) -> Vec<ffe_rs::screen::ContractRow> {
+    let ids: Vec<i32> = state
+        .missions
+        .script_contracts
+        .iter()
+        .map(|contract| contract.id)
+        .collect();
+    let entries: Vec<_> = ids
+        .into_iter()
+        .filter_map(|id| ffe_rs::scripts::contract_row(state, nav, cache, assets, id))
+        .collect();
+    let station = nav.docked.unwrap_or(0);
+    ffe_rs::scripts::expand_all(
+        state, nav, cache, station, assets, messages, commander, &entries,
+    )
+    .into_iter()
+    .map(|contract| ffe_rs::screen::ContractRow {
+        contract,
+        system: String::new(),
+        station: String::new(),
+        time: String::new(),
+        reward: 0,
+        wide: true,
+    })
+    .collect()
 }
 
 /// A contract day as the status pages print it (`1-Jan-3250`).
@@ -8575,7 +8780,8 @@ fn status_sections(
     // F286: page 4 needs DATA_009073's contracts (passengers, parcels and
     // military packages), page 5 DATA_009084's (the removal jobs).
     let roster = active(&[Kind::Passenger, Kind::Parcel, Kind::MilitaryDelivery]);
-    let contracts = active(&[Kind::Assassination, Kind::MilitaryStrike]);
+    let contracts = active(&[Kind::Assassination, Kind::MilitaryStrike])
+        || !state.missions.script_contracts.is_empty();
     // F286: page 6 needs DATA_009104's machine list.
     let mining = state.loadout.mining_count() > 0 || !state.mining.is_empty();
     [true, true, false, cargo, roster, contracts, mining]
@@ -8786,7 +8992,12 @@ fn fit_or_remove(
     dock: &mut station::DockState,
 ) -> String {
     let tech_level = nav.tech_level(cache).unwrap_or(0);
-    let rows = station::upgrades(tech_level, &state.loadout, &state.combat.lasers);
+    let rows = station::upgrades_with(
+        tech_level,
+        &state.loadout,
+        &state.combat.lasers,
+        dock.price_multiplier,
+    );
     let Some(entry) = rows.get(row).copied() else {
         return "No such equipment.".to_owned();
     };
@@ -8804,6 +9015,7 @@ fn fit_or_remove(
         // (the integral part of the hull).
         drive_removable: stats.is_none_or(|stats| stats.drive >= 0),
         mount,
+        price_multiplier: dock.price_multiplier,
     };
     // F428: a laser with more than one candidate mounting asks which (0x9902).
     if let Some(candidates) = outfitting::mount_choice(entry.index, &state.combat, limits, remove) {

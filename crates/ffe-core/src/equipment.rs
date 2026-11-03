@@ -199,17 +199,42 @@ pub fn tech_multiplier(tech_level: u16) -> u32 {
 }
 
 /// The price to fit `index` at a starport of `tech_level` (`record.price *
-/// tech_multiplier`). The original's used branch uses a fresh random value from
-/// `F34`/`F35`; the port uses the same tech multiplier for both branches, so a
-/// second-hand price is deterministic (documented deviation).
+/// tech_multiplier`), with no mission script changing it.
 pub fn fit_price(index: usize, tech_level: u16) -> Option<u32> {
-    get(index).map(|item| item.price.saturating_mul(tech_multiplier(tech_level)))
+    fit_price_with(index, tech_level, None)
 }
 
 /// The removal price, computed the same way as [`fit_price`] (`F383` multiplies
 /// both words before storing them).
 pub fn removal_price(index: usize, tech_level: u16) -> Option<u32> {
-    get(index).map(|item| item.removal.saturating_mul(tech_multiplier(tech_level)))
+    removal_price_with(index, tech_level, None)
+}
+
+/// F383's multiplier for record `item`: the tech multiplier, or for a record
+/// with the `+0x14` byte set the value the mission scripts left in global
+/// 0xa (F383 sets it to the tech multiplier and signals 0xb first, so with
+/// no script changing it the two agree).
+pub fn multiplier_for(item: &Equipment, tech_level: u16, scripted: Option<u32>) -> u32 {
+    match scripted {
+        Some(value) if item.used => value,
+        _ => tech_multiplier(tech_level),
+    }
+}
+
+/// [`fit_price`] with the scripts' F383 multiplier.
+pub fn fit_price_with(index: usize, tech_level: u16, scripted: Option<u32>) -> Option<u32> {
+    get(index).map(|item| {
+        item.price
+            .saturating_mul(multiplier_for(item, tech_level, scripted))
+    })
+}
+
+/// [`removal_price`] with the scripts' F383 multiplier.
+pub fn removal_price_with(index: usize, tech_level: u16, scripted: Option<u32>) -> Option<u32> {
+    get(index).map(|item| {
+        item.removal
+            .saturating_mul(multiplier_for(item, tech_level, scripted))
+    })
 }
 
 /// One row of `F383`'s Upgrades list at a starport.
@@ -229,16 +254,30 @@ pub struct OutfittingRow {
 /// record` skips). `lasers` is `ship+0xd2..+0xd5`, which is where the laser
 /// category's fitted check reads.
 pub fn outfitting(tech_level: u16, loadout: &Loadout, lasers: &[u8; 4]) -> Vec<OutfittingRow> {
+    outfitting_with(tech_level, loadout, lasers, None)
+}
+
+/// [`outfitting`] with the mission scripts' F383 multiplier (global 0xa
+/// after F383's signal 0xb).
+pub fn outfitting_with(
+    tech_level: u16,
+    loadout: &Loadout,
+    lasers: &[u8; 4],
+    scripted: Option<u32>,
+) -> Vec<OutfittingRow> {
     EQUIPMENT
         .iter()
         .enumerate()
         .filter(|(_, item)| tech_level >= u16::from(item.tech_level))
-        .map(|(index, item)| OutfittingRow {
-            index,
-            price: item.price.saturating_mul(tech_multiplier(tech_level)),
-            removal: item.removal.saturating_mul(tech_multiplier(tech_level)),
-            mass: item.mass,
-            fitted: loadout.fitted(index, lasers),
+        .map(|(index, item)| {
+            let multiplier = multiplier_for(item, tech_level, scripted);
+            OutfittingRow {
+                index,
+                price: item.price.saturating_mul(multiplier),
+                removal: item.removal.saturating_mul(multiplier),
+                mass: item.mass,
+                fitted: loadout.fitted(index, lasers),
+            }
         })
         .collect()
 }
@@ -321,6 +360,24 @@ impl Loadout {
             Category::Missile => self.missiles.contains(&item.code),
             Category::Drive => self.drive != 0 && self.drive == item.code,
             Category::Mining => self.mining_count() != 0,
+        }
+    }
+
+    /// F392 as the mission scripts' cargo token (0x25) reads it: how many of
+    /// record `index` the ship carries (one for a general bit or the drive).
+    pub fn count(&self, index: usize, lasers: &[u8; 4]) -> u32 {
+        let Some(item) = get(index) else {
+            return 0;
+        };
+        let matching =
+            |codes: &[u8]| codes.iter().filter(|code| **code == item.code).count() as u32;
+        match item.category {
+            Category::Cabin => u32::from(self.cabins),
+            Category::Laser => matching(lasers),
+            Category::Shield => u32::from(self.shield_generators),
+            Category::Missile => matching(&self.missiles),
+            Category::Mining => self.mining_count() as u32,
+            Category::General | Category::Drive => u32::from(self.fitted(index, lasers)),
         }
     }
 
@@ -891,5 +948,50 @@ mod tests {
             "Class 1 Military Drive"
         );
         assert_eq!(loadout.drive_record().unwrap().mass, 6);
+    }
+
+    #[test]
+    fn f392s_count_reads_each_category() {
+        let mut loadout = Loadout::new_game();
+        let index = |category: Category, code: Option<u8>| {
+            equipment()
+                .iter()
+                .position(|item| item.category == category && code.is_none_or(|c| item.code == c))
+                .unwrap()
+        };
+        let lasers = [0; 4];
+        // Two KL760 homing missiles (0x82) and none of the others.
+        assert_eq!(
+            loadout.count(index(Category::Missile, Some(0x82)), &lasers),
+            2
+        );
+        loadout.shield_generators = 3;
+        assert_eq!(loadout.count(index(Category::Shield, None), &lasers), 3);
+        loadout.cabins = 2;
+        assert_eq!(loadout.count(index(Category::Cabin, None), &lasers), 2);
+        let laser = equipment()
+            .iter()
+            .find(|item| item.category == Category::Laser)
+            .unwrap();
+        let both = [laser.code, laser.code, 0, 0];
+        assert_eq!(
+            loadout.count(index(Category::Laser, Some(laser.code)), &both),
+            2
+        );
+    }
+
+    #[test]
+    fn f383s_scripted_multiplier_only_prices_the_second_hand_records() {
+        let used = equipment().iter().position(|item| item.used);
+        let new = equipment().iter().position(|item| !item.used).unwrap();
+        assert_eq!(fit_price_with(new, 0xcc, Some(120)), fit_price(new, 0xcc));
+        if let Some(used) = used {
+            let item = get(used).unwrap();
+            assert_eq!(
+                fit_price_with(used, 0xcc, Some(120)),
+                Some(item.price * 120)
+            );
+            assert_eq!(fit_price_with(used, 0xcc, None), fit_price(used, 0xcc));
+        }
     }
 }

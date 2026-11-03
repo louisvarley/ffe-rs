@@ -2456,6 +2456,7 @@ fn the_map_destination_survives_the_map_and_jumps() {
         size: 0,
         life: 0,
         exit: false,
+        tag: None,
     });
     let before = nav.clock;
     let jumped = nav.hyperspace_to_destination(&cache).unwrap();
