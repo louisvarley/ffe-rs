@@ -27,6 +27,7 @@ fn roomy() -> Limits {
         free_space: 1_000,
         fuel_scoop_mounting: false,
         drive_removable: true,
+        mount: None,
     }
 }
 
@@ -223,4 +224,39 @@ fn the_fuel_scoop_mounting_and_dependency_are_f394s() {
     outfitting::fit(29, TECH, &mut loadout, &mut combat, &mut credits, mounted).unwrap();
     outfitting::fit(30, TECH, &mut loadout, &mut combat, &mut credits, mounted).unwrap();
     assert!(loadout.fitted(30, &combat.lasers));
+}
+
+/// F428: with two empty mountings the laser waits for the player's choice
+/// (0x9902), then goes on the chosen one; with none it is 0x98ff.
+#[test]
+fn f428_asks_which_mounting() {
+    use ffe_rs::outfitting::{mount_choice, MOUNT_NAMES};
+    let laser = record("1MW Pulse Laser");
+    let mut loadout = Loadout::default();
+    let mut combat = Combat::default();
+    let mut credits = 1_000_000u32;
+    let limits = roomy();
+    assert_eq!(
+        mount_choice(laser, &combat, limits, false),
+        Some(vec![0, 1])
+    );
+    let chosen = Limits {
+        mount: Some(1),
+        ..limits
+    };
+    assert_eq!(mount_choice(laser, &combat, chosen, false), None);
+    outfitting::fit(laser, 10, &mut loadout, &mut combat, &mut credits, chosen).unwrap();
+    assert_eq!(combat.lasers[0], 0);
+    assert_ne!(combat.lasers[1], 0);
+    // One empty mounting left: no choice, it is fitted there.
+    assert_eq!(mount_choice(laser, &combat, limits, false), None);
+    outfitting::fit(laser, 10, &mut loadout, &mut combat, &mut credits, limits).unwrap();
+    assert_ne!(combat.lasers[0], 0);
+    assert_eq!(
+        outfitting::fit(laser, 10, &mut loadout, &mut combat, &mut credits, limits).unwrap_err(),
+        "Your ship does not have a gun mounting."
+    );
+    // Both hold the laser: removing asks which.
+    assert_eq!(mount_choice(laser, &combat, limits, true), Some(vec![0, 1]));
+    assert_eq!(MOUNT_NAMES[1], "Rear Gun Mounting");
 }

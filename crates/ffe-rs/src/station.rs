@@ -617,6 +617,31 @@ pub struct DockState {
     pub fake_market: bool,
     /// The `0x98d7` company-name seed from the advertisement.
     pub company_seed: Option<u32>,
+    /// F428's pending "Select Mounting." choice for an Upgrades laser row.
+    pub mounting: Option<Mounting>,
+}
+
+/// F428's mounting choice: the Upgrades row, Fit or Remove, and which of the
+/// four mountings (`0x9870 + k`) the player may pick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Mounting {
+    pub row: usize,
+    pub remove: bool,
+    pub mounts: [bool; 4],
+}
+
+impl Mounting {
+    /// The 0x9902 prompt and the candidates F348 lists, numbered for the
+    /// keys 1..4.
+    pub fn prompt(&self) -> String {
+        let mut text = "Select Mounting.".to_owned();
+        for (k, name) in crate::outfitting::MOUNT_NAMES.iter().enumerate() {
+            if self.mounts[k] {
+                text.push_str(&format!("\n{} {name}", k + 1));
+            }
+        }
+        text
+    }
 }
 
 impl DockState {
@@ -627,6 +652,7 @@ impl DockState {
         self.black_market = false;
         self.fake_market = false;
         self.company_seed = None;
+        self.mounting = None;
     }
 
     /// F454: the stockmarket screen with F538's `0x80` illegal-goods mask.

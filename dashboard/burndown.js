@@ -1138,6 +1138,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 90,
       note: "gameplay-12 progress: the port's console and contract texts now use the executable's strings: traffic control's three refusals (0x98b7..0x98b9) and the no-clearance warning (0x98be) in full, the undercarriage warning (0x98ce), and F316's contract rows (0x9c1e + kind, so military strikes read IMP. NAVY / FED. MIL. Kill, Film or Bomb). Console lines break on the strings' newlines. A local-only test pins them to the player's FIRSTENC.EXE."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 90,
+      note: "gameplay-2 progress: laser fitting follows F428/F434/F435. A laser with several free (or, for Remove, several matching) gun mountings asks \"Select Mounting.\" and goes on the chosen one; one candidate is fitted directly; none is 0x98ff \"Your ship does not have a gun mounting.\" The choice is taken on the console with keys 1..4 (listed in DEVIATIONS.md)."
     }
   ]
 };

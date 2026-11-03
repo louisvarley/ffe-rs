@@ -37,6 +37,9 @@ pub struct Limits {
     /// `statistics+0x14 >= 0`: F410/F411's removable drive. A negative word
     /// means the drive is an integral part of the hull.
     pub drive_removable: bool,
+    /// F428's chosen gun mounting (`0x9870 + k`) when more than one qualifies;
+    /// `None` takes the only one.
+    pub mount: Option<usize>,
 }
 
 impl Limits {
@@ -50,7 +53,63 @@ impl Limits {
             free_space: 0,
             fuel_scoop_mounting: true,
             drive_removable: true,
+            mount: None,
         }
+    }
+}
+
+/// F428's mounting names (`0x9870..0x9873`).
+pub const MOUNT_NAMES: [&str; 4] = [
+    "Front Gun Mounting",
+    "Rear Gun Mounting",
+    "Top Turret Mounting",
+    "Bottom Turret Mounting",
+];
+
+/// F428's candidate mountings for a laser: the empty ones for Fit, the ones
+/// holding `code` for Remove (`ship+0xd2 + k`, `k < ship+0xd1`).
+pub fn laser_mounts(code: u8, combat: &Combat, mounts: usize, remove: bool) -> Vec<usize> {
+    let wanted = if remove { code } else { 0 };
+    (0..mounts.min(combat.lasers.len()))
+        .filter(|slot| combat.lasers[*slot] == wanted)
+        .collect()
+}
+
+/// F428 for `index`: `Some(mounts)` when the item is a laser with more than
+/// one candidate mounting, so the player must choose (0x9902).
+pub fn mount_choice(
+    index: usize,
+    combat: &Combat,
+    limits: Limits,
+    remove: bool,
+) -> Option<Vec<usize>> {
+    let item = equipment::get(index)?;
+    if item.category != Category::Laser || limits.mount.is_some() {
+        return None;
+    }
+    let mounts = if remove {
+        combat.lasers.len()
+    } else {
+        limits.mounts
+    };
+    let candidates = laser_mounts(item.code, combat, mounts, remove);
+    (candidates.len() > 1).then_some(candidates)
+}
+
+/// F428/F434/F435: the chosen (or only) mounting, else 0x98ff; F434's
+/// 0x98fd when the chosen mounting is already armed.
+fn pick_mount(code: u8, combat: &Combat, limits: Limits, remove: bool) -> Result<usize, String> {
+    let candidates = laser_mounts(code, combat, limits.mounts, remove);
+    match limits.mount {
+        Some(slot) if candidates.contains(&slot) => Ok(slot),
+        Some(slot) if !remove && slot < limits.mounts.min(combat.lasers.len()) => Err(format!(
+            "You already have a weapon on your {} mounting.",
+            MOUNT_NAMES[slot.min(3)].trim_end_matches(" Mounting")
+        )),
+        _ => candidates
+            .first()
+            .copied()
+            .ok_or_else(|| "Your ship does not have a gun mounting.".to_owned()),
     }
 }
 
@@ -114,13 +173,9 @@ pub fn fit(
         }
         Category::Cabin => loadout.cabins = loadout.cabins.saturating_add(1),
         Category::Laser => {
-            let mounts = limits.mounts.min(combat.lasers.len());
-            if mounts == 0 {
-                return Err("Your ship does not have a gun mounting.".to_owned());
-            }
-            let slot = (0..mounts)
-                .find(|slot| combat.lasers[*slot] == 0)
-                .ok_or_else(|| "You already have a weapon on every gun mounting.".to_owned())?;
+            // F428: no empty mounting is 0x98ff; one is fitted directly; more
+            // need the player's choice ([`mount_choice`]).
+            let slot = pick_mount(item.code, combat, limits, false)?;
             combat.lasers[slot] = item.code;
         }
         Category::Drive => {
@@ -188,10 +243,18 @@ pub fn remove(
             loadout.cabins -= 1;
         }
         Category::Laser => {
-            let mounts = combat.lasers.len();
-            let slot = (0..mounts)
-                .find(|slot| combat.lasers[*slot] == item.code)
-                .ok_or_else(missing)?;
+            if !combat.lasers.contains(&item.code) {
+                return Err(missing());
+            }
+            let slot = pick_mount(
+                item.code,
+                combat,
+                Limits {
+                    mounts: combat.lasers.len(),
+                    ..limits
+                },
+                true,
+            )?;
             combat.lasers[slot] = 0;
         }
         Category::Drive => {
@@ -248,6 +311,7 @@ mod tests {
             free_space: 10,
             fuel_scoop_mounting: true,
             drive_removable: true,
+            mount: None,
         }
     }
 

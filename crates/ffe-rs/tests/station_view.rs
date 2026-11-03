@@ -320,6 +320,7 @@ fn docked_screens_draw_at_the_original_layout() {
         free_space: hold,
         fuel_scoop_mounting: true,
         drive_removable: true,
+        mount: None,
     };
     outfitting::remove(
         21,

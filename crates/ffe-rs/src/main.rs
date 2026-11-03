@@ -3860,6 +3860,37 @@ fn run() -> Result<(), String> {
                     if step != 0 {
                         dock.step(step, rows);
                     }
+                    // F428's pending mounting choice takes the number keys
+                    // (the candidates F348 listed); Backspace cancels it.
+                    let choosing = dock.mounting.is_some();
+                    if let Some(choice) = dock.mounting {
+                        for (key, slot) in [
+                            (Key::Key1, 0usize),
+                            (Key::Key2, 1),
+                            (Key::Key3, 2),
+                            (Key::Key4, 3),
+                        ] {
+                            if pressed(key) && choice.mounts[slot] {
+                                dock.mounting = None;
+                                if let Some(nav) = nav.as_ref() {
+                                    message = fit_or_remove(
+                                        nav,
+                                        &cache,
+                                        &mut state,
+                                        scene.as_ref(),
+                                        choice.row,
+                                        choice.remove,
+                                        Some(slot),
+                                        &mut dock,
+                                    );
+                                }
+                            }
+                        }
+                        if pressed(Key::Backspace) {
+                            dock.mounting = None;
+                            message = station::hint(dock.screen, 0, 0).to_owned();
+                        }
+                    }
                     // F354: keys 1..4 are actions 0x31..0x34, one per visible row.
                     for (key, number) in [
                         (Key::Key1, 1usize),
@@ -3867,7 +3898,7 @@ fn run() -> Result<(), String> {
                         (Key::Key3, 3),
                         (Key::Key4, 4),
                     ] {
-                        if pressed(key) {
+                        if pressed(key) && !choosing {
                             let index = dock.scroll + number - 1;
                             if index < rows {
                                 dock.selected = index;
@@ -3922,7 +3953,7 @@ fn run() -> Result<(), String> {
                             dock_action = Some(entry.action);
                         }
                     }
-                    if pressed(Key::Backspace) {
+                    if pressed(Key::Backspace) && !choosing {
                         dock_action = Some(StationAction::Back);
                     }
                     if let Some((x, y)) = dock_click {
@@ -4148,6 +4179,8 @@ fn run() -> Result<(), String> {
                                     scene.as_ref(),
                                     row,
                                     false,
+                                    None,
+                                    &mut dock,
                                 );
                             }
                         }
@@ -4160,6 +4193,8 @@ fn run() -> Result<(), String> {
                                     scene.as_ref(),
                                     row,
                                     true,
+                                    None,
+                                    &mut dock,
                                 );
                             }
                         }
@@ -8332,6 +8367,7 @@ fn axes_looking_at(from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
 /// F386's Fit/Remove on the Upgrades row `row`, against the current starport
 /// tech level (`DATA_008995`), the ship's gun/missile mounts and its free hold.
 /// Returns the console line F387/F388/F389 (or the refusal) would print.
+#[allow(clippy::too_many_arguments)]
 fn fit_or_remove(
     nav: &Navigator,
     cache: &ffe_content::VerifiedCache,
@@ -8339,6 +8375,8 @@ fn fit_or_remove(
     scene: Option<&ModelViewer>,
     row: usize,
     remove: bool,
+    mount: Option<usize>,
+    dock: &mut station::DockState,
 ) -> String {
     let tech_level = nav.tech_level(cache).unwrap_or(0);
     let rows = station::upgrades(tech_level, &state.loadout, &state.combat.lasers);
@@ -8358,7 +8396,22 @@ fn fit_or_remove(
         // F410/F411 refuse to remove a drive whose statistics word is negative
         // (the integral part of the hull).
         drive_removable: stats.is_none_or(|stats| stats.drive >= 0),
+        mount,
     };
+    // F428: a laser with more than one candidate mounting asks which (0x9902).
+    if let Some(candidates) = outfitting::mount_choice(entry.index, &state.combat, limits, remove) {
+        let mut mounts = [false; 4];
+        for slot in candidates.into_iter().filter(|slot| *slot < 4) {
+            mounts[slot] = true;
+        }
+        let choice = station::Mounting {
+            row,
+            remove,
+            mounts,
+        };
+        dock.mounting = Some(choice);
+        return choice.prompt();
+    }
     let result = if remove {
         outfitting::remove(
             entry.index,

@@ -217,3 +217,13 @@ Laser input is disarmed at game entry until held keys are released. Space used
 to leave the intro cannot fire or incur a discharge fine. A later Space press
 fires normally, including held fire. Implemented using HeldControls and tested
 by `intro_space_must_be_released_before_a_new_press_can_fire`.
+
+## 2026-11-03 — F428 mounting choice shown on the console
+
+When a laser can go on (or come off) more than one gun mounting, F428 lists
+the candidate mountings (0x9870..0x9873) with F348 under the 0x9902
+"Select Mounting." prompt. The port posts the prompt and the numbered
+candidates to the console and takes the choice from keys 1..4 (Backspace
+cancels) instead of drawing F348's entries; the fit/remove rules (0x98ff,
+the single-mounting shortcut, the chosen slot) follow F428/F434/F435 and are
+tested by `f428_asks_which_mounting`.
