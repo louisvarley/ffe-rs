@@ -120,6 +120,10 @@ pub struct Body {
     pub size_word: i16,
 }
 
+/// Port addition: how far off a ship's hull the autopilot holds when it flies
+/// to a ship (half a kilometre).
+pub const SHIP_STANDOFF: i64 = 500_000;
+
 /// The original navigation computer's entries: stations and starports, in system
 /// order. F927 allocates object slots from 0x72 downwards, so F1099's walk from
 /// 0x72 down (ffe.asm 80518-80527) visits the system list in creation order,
@@ -1253,6 +1257,9 @@ pub struct Navigator {
     /// The id of the ship locked as the target (F1020's target byte for ships;
     /// the port keeps bodies in `locked` and ships here).
     pub ship_lock: Option<u32>,
+    /// Port addition (Improved combat): the ship the autopilot flies to, in
+    /// place of a body ([`Self::engage_ship`]). Not saved.
+    pub ship_target: Option<u32>,
     /// The combat target (`DATA_008875`) the missile lock-on uses. F1096/F941
     /// launch at this target, not at the navigation target `ship_lock`.
     pub missile_lock: Option<u32>,
@@ -1689,6 +1696,10 @@ pub enum ShipEvent {
     /// F757/F935: an evading NPC fired an ECM burst. `naval` is the system's
     /// extra `DATA_008835` bit.
     Ecm { name: String, naval: bool },
+    /// F750: a hostile closed on the player and entered combat. The caller
+    /// drops time to 1x (F217) and, if it was accelerated, shows `0x98c3`
+    /// ("WARNING: Ship is Under Attack") and starts the battle sound.
+    UnderAttack { name: String },
 }
 
 /// F931/F941's unlawful-discharge report: F236's message plus whether a police
@@ -2230,6 +2241,7 @@ impl Navigator {
             player_at: [0; 3],
             effects: Vec::new(),
             ship_lock: None,
+            ship_target: None,
             missile_lock: None,
             missile_view: None,
             missiles: crate::missile::MissileField::default(),
@@ -4330,7 +4342,7 @@ impl Navigator {
             return events;
         }
         if self.advanced_traffic {
-            self.pick_fights(player);
+            self.pick_fights(player, exposed);
         }
         // F695's escorts hold a station in their leader's frame: right*+0x102 +
         // up*+0x104 + forward*+0x106 (F743's F610 target). F751 then hands the
@@ -4409,10 +4421,16 @@ impl Navigator {
                     naval,
                 });
             }
+            if ship.take_alert() && exposed {
+                events.push(ShipEvent::UnderAttack {
+                    name: ship.name.clone(),
+                });
+            }
         }
         for request in requests {
             self.apply_dock_request(request);
         }
+        self.keep_ships_out_of_worlds();
         // The police respond to a wanted player (the port's reconstruction of
         // DATA_008647; F783 clears the alert when the chase ends).
         if self.legal.wanted {
@@ -5164,18 +5182,60 @@ impl Navigator {
         }
     }
 
-    /// Port addition (Advanced traffic): who fights whom. A pirate well away
-    /// from the player goes for the nearest trader; a trader under attack runs
-    /// and jumps out; police not chasing the player go for a pirate that is
-    /// attacking someone. A pirate drops its prey when the player comes close.
-    fn pick_fights(&mut self, player: [i64; 3]) {
+    /// Port addition: the port's NPC flight has no terrain or gravity, so a ship
+    /// flying straight at its target (or placed round a surface port) could pass
+    /// into a world. A ship outside the docking cycle that ends a step inside a
+    /// star, or below a planet's or moon's lowest surface point, is put back on
+    /// that sphere along the line from its centre.
+    fn keep_ships_out_of_worlds(&mut self) {
+        const MARGIN: f64 = 1.0e5;
+        let solids: Vec<([i64; 3], f64)> = self
+            .bodies
+            .iter()
+            .filter_map(|body| match body.kind {
+                Kind::Star => Some((body.position, body.radius as f64)),
+                Kind::Planet | Kind::Moon => Some((body.position, body.inner_radius as f64)),
+                Kind::Station | Kind::Starport => None,
+            })
+            .filter(|(_, radius)| *radius > 0.0)
+            .collect();
+        for ship in self
+            .ships
+            .iter_mut()
+            .filter(|ship| ship.visible() && !ship.state.docking())
+        {
+            for (centre, radius) in &solids {
+                let away: [f64; 3] = std::array::from_fn(|k| (ship.position[k] - centre[k]) as f64);
+                let height = dot3(away, away).sqrt();
+                let floor = radius + MARGIN;
+                if height < floor {
+                    let up = if height > 1.0 {
+                        away.map(|v| v / height)
+                    } else {
+                        [0.0, 1.0, 0.0]
+                    };
+                    ship.position = std::array::from_fn(|k| centre[k] + (up[k] * floor) as i64);
+                    // Drop the speed into the ground.
+                    let into = dot3(ship.velocity, up).min(0.0);
+                    ship.velocity = std::array::from_fn(|k| ship.velocity[k] - up[k] * into);
+                }
+            }
+        }
+    }
+
+    /// Port addition (Advanced traffic): who fights whom. A pirate away from
+    /// the player (or with the player docked or landed) goes for the nearest
+    /// trader; one the player comes within `PLAYER_NEAR` of drops its prey
+    /// and turns on the player. A trader under attack runs and jumps out;
+    /// police not chasing the player go for a pirate that is attacking someone.
+    fn pick_fights(&mut self, player: [i64; 3], exposed: bool) {
+        // A ship as the fight picker sees it: id, position, role, hostile, target.
+        type FightEntry = (u32, [i64; 3], npc::Role, bool, Option<u32>);
         const PREY_RANGE: f64 = 20.0e6;
-        const PLAYER_NEAR: f64 = 8.0e6;
+        const PLAYER_NEAR: f64 = 10.0e6;
         const PLAYER_FAR: f64 = 15.0e6;
         const RUN_RANGE: f64 = 6.0e6;
-        // (id, position, role, hostile, its NPC target)
-        type Entry = (u32, [i64; 3], npc::Role, bool, Option<u32>);
-        let snapshot: Vec<Entry> = self
+        let snapshot: Vec<FightEntry> = self
             .ships
             .iter()
             .filter(|ship| ship.visible())
@@ -5190,7 +5250,7 @@ impl Navigator {
             })
             .collect();
         let find = |id: u32| snapshot.iter().find(|entry| entry.0 == id);
-        let nearest = |from: [i64; 3], keep: &dyn Fn(&Entry) -> bool| {
+        let nearest = |from: [i64; 3], keep: &dyn Fn(&FightEntry) -> bool| {
             snapshot
                 .iter()
                 .filter(|entry| keep(entry))
@@ -5214,9 +5274,9 @@ impl Navigator {
             let to_player = distance(player, ship.position);
             match ship.role {
                 npc::Role::Pirate if ship.hostile && ship.leader.is_none() => {
-                    if to_player < PLAYER_NEAR {
+                    if exposed && to_player < PLAYER_NEAR {
                         ship.npc_target = None;
-                    } else if ship.npc_target.is_none() && to_player > PLAYER_FAR {
+                    } else if ship.npc_target.is_none() && (!exposed || to_player > PLAYER_FAR) {
                         ship.npc_target = nearest(ship.position, &|entry| {
                             matches!(entry.2, npc::Role::Trader | npc::Role::Shuttle)
                         });
@@ -5891,6 +5951,7 @@ impl Navigator {
         }
         let index = self.selected_body()?;
         self.target = Some(index);
+        self.ship_target = None;
         self.autopilot_notice = None;
         self.locked = Some(index);
         self.final_leg = false;
@@ -5924,6 +5985,27 @@ impl Navigator {
         self.lock(index)
     }
 
+    /// Whether the autopilot is flying to a body or a ship.
+    pub fn autopilot_engaged(&self) -> bool {
+        self.target.is_some() || self.ship_target.is_some()
+    }
+
+    /// Port addition (Improved combat): engage the autopilot on ship `id`. It
+    /// flies to the ship and keeps station near it; there is nothing to dock.
+    pub fn engage_ship(&mut self, id: u32) -> Option<&ffe_core::npc::NpcShip> {
+        if self.landed_view() || self.sequence.is_some() {
+            return None;
+        }
+        self.ships
+            .iter()
+            .find(|ship| ship.id == id && ship.visible())?;
+        self.cancel();
+        self.ship_target = Some(id);
+        self.autopilot_notice = None;
+        self.view = View::Closed;
+        self.ships.iter().find(|ship| ship.id == id)
+    }
+
     /// Engage the autopilot on the locked body: it flies there and, at a station, asks
     /// for clearance and docks.
     pub fn engage_locked(&mut self) -> Option<&Body> {
@@ -5933,6 +6015,7 @@ impl Navigator {
         let index = self.locked?;
         self.bodies.get(index)?;
         self.target = Some(index);
+        self.ship_target = None;
         self.autopilot_notice = None;
         self.final_leg = false;
         self.clearance_at = None;
@@ -6031,8 +6114,9 @@ impl Navigator {
     /// `DATA_008866`, which the flight model starts at 0), otherwise the ship
     /// keeps coasting at the speed the autopilot had set.
     pub fn cancel(&mut self) -> bool {
-        let engaged = self.target.is_some() || self.final_leg;
+        let engaged = self.autopilot_engaged() || self.final_leg;
         self.target = None;
+        self.ship_target = None;
         self.final_leg = false;
         self.clearance_at = None;
         self.memory = Memory::default();
@@ -6075,9 +6159,27 @@ impl Navigator {
         &mut self,
         cache: &VerifiedCache,
         flight: &mut OriginalFlight,
-    ) -> Option<(ffe_core::autopilot::Guidance, Body)> {
+    ) -> Option<(ffe_core::autopilot::Guidance, Option<Body>)> {
         if self.landed_view() || self.sequence.is_some() {
             return None;
+        }
+        if let Some(id) = self.ship_target {
+            // A ship target: fly to it and hold [`SHIP_STANDOFF`] off it,
+            // matching its velocity. A ship that died or jumped ends the leg.
+            let Some(ship) = self
+                .ships
+                .iter()
+                .find(|ship| ship.id == id && ship.visible())
+            else {
+                self.ship_target = None;
+                return None;
+            };
+            let velocity = ship
+                .velocity
+                .map(|v| (v / crate::original_flight::MM_PER_SECOND).round() as i32);
+            let guidance =
+                flight.body_guidance(ship.position, velocity, ship.radius + SHIP_STANDOFF);
+            return Some((guidance, None));
         }
         let index = self.target?;
         let body = self.bodies.get(index)?.clone();
@@ -6174,7 +6276,7 @@ impl Navigator {
         if !arrived {
             if let Some(waypoint) = self.detour(flight.absolute_position(), point, index) {
                 let guidance = flight.guidance(waypoint, [0; 3], 0);
-                return Some((guidance, body));
+                return Some((guidance, Some(body)));
             }
         }
         // F746's accelerated near-pad completion, not the prototype's
@@ -6235,7 +6337,7 @@ impl Navigator {
                 }
             }
         }
-        Some((guidance, body))
+        Some((guidance, Some(body)))
     }
 
     /// The waypoint while the line from `ship` to `point` runs through a star,

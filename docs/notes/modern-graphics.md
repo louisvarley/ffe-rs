@@ -1,7 +1,7 @@
 # Modern graphics: the switch, the separation and the first technique
 
 Status (2026-10-27): **first slice implemented.** `crates/ffe-rs/src/modern.rs`, the presenter in
-`crates/ffe-rs/src/display.rs`, the Port Options rows in `prefs.rs`, `Ctrl+G` in `main.rs`. Deviation
+`crates/ffe-rs/src/display.rs`, the Advanced Options rows in `prefs.rs`, `Ctrl+G` in `main.rs`. Deviation
 ENH-021. Design background: `docs/RENDERING_DESIGN.md` (this is its "master button" and a first
 presentation-only feature, without the wgpu backend yet).
 
@@ -29,7 +29,7 @@ game state ──► Screen (the original's drawing, unchanged) ──► 320x20
 
 ## Switching
 
-- **Escape → Port Options → Graphics: Classic / Modern** (right-hand column; the icons are click
+- **Escape → Advanced Options → Graphics: Classic / Modern** (right-hand column; the icons are click
   targets like the original's, and the keyboard rows work too).
 - **Ctrl+G** flips it from anywhere; a message names the new mode. (Plain G is still the galaxy map;
   with Ctrl held it is not.)
@@ -56,6 +56,19 @@ their look. Tests: `modern::tests` (the Scale2x rules) and
 `display::tests::the_engines_share_the_frame_and_only_modern_smooths_it` (same frame, frame untouched,
 Classic unchanged and blocky, Modern smooth only on edges). The presentation evidence
 (`--capture-display DIR`) now writes `display-modern-4x.png` beside the Classic images.
+
+## Replacement screen art: cabins and the console panel
+
+Status (2026-10-29): implemented. At startup Modern reads the owner's larger versions of
+`img-export/images/cockpit/cabin<n>.png` (the six 320x158 cabins) and
+`img-export/images/sprite/primary-043.png` (the 320x43 console panel, of which the frame shows the
+42 rows from row 158; the art's part for the last row is cut off). Files still at the export's
+original size are ignored. Each is a `modern::Backdrop` over a full-width band of the frame: the
+renderer recognises the original art in the finished frame (a quarter of its detail pixels
+unchanged), and blends the replacement in only where the frame still shows the original's pixels.
+The scanner, icons, lights and text the game draws over the panel keep coming from the upscaled
+frame. The best-matching cabin and the panel are chosen independently. The game's frame,
+hit-testing and saves are untouched. Test: `modern::tests::a_replaced_panel_shows_below_the_view_and_not_under_the_scanner`.
 
 ## GPU 3-D view: the models at the window's resolution
 
@@ -95,7 +108,7 @@ executor (unchanged) ──► Frame { shapes, solids }      solids: each face's
 - **Separation.** The faces are copies taken while drawing. Classic never sets them aside, so its
   frame is the original's; Modern without a GPU (no adapter) keeps the faces in the frame and only
   upscales. The game state, the RNG and the clock are not reachable from `ffe-render` or `modern3d`.
-  Switching (Ctrl+G, Port Options) still takes effect on the next frame.
+  Switching (Ctrl+G, Advanced Options) still takes effect on the next frame.
 - **Cost.** About 5 ms a frame at 1920x1440 on an RTX 3090 (`--capture-display` prints it), most of
   it the synchronous read-back into the window buffer.
 - **Evidence.** `--capture-display DIR` writes `display-modern-3d.png` (the free-flight station at
@@ -416,6 +429,48 @@ real font after.
 - The game's drop shadows (each string drawn twice) come through as a real shadow.
 
 Not yet on the GPU (still the original's pixels behind the models): the rest of the HUD.
+
+### Whole screens: the intro and the gravestone
+
+Status (2026-10-29): **implemented.** Both screens are presented through `display::Presenter`
+with their text layer, like the flight and station screens (deviation note in
+`docs/DEVIATIONS.md`, 2026-10-29).
+
+- **Intro** (`Screen::draw_intro`, `run_intro`): F961's model is drawn in the same 320x158 view
+  as the flight view, so with a GPU its faces go through `Screen::draw_frame` into a `World`
+  (no sky, no dust) and the GPU draws the GAME!TEK logo, the planet and the ship at the window's
+  resolution, over the edge-upscaled F1575 clear. The planet's surface is subdivided one level
+  finer, as in flight. F962's bitmap and the credits lie over it. `intro_text` records each
+  credit's glyphs in the text layer, the one-pixel shadow first, so the real font draws both.
+- **Painter order in one model** (`Screen::draw_frame_layered`): model 176 runs the nebula, the
+  red planet, the Earth-like planet, the asteroids and the ship as children in one queue, at
+  their own scales, and the original layers them by painter order alone (the nebula's quads come
+  first but are far nearer in view space than the planet drawn over them). As one depth-tested
+  batch the nebula covered the planet and the ship. The scene is now cut into batches drawn each
+  over the last: a new one starts where a face lies more than twice as far as the nearest face
+  already in the batch. The planets' atmosphere rings stay the original's pixels: the scene's
+  shells put the eye inside the red planet's haze, which the GPU filled the sky with. Because
+  those pixels lie behind every batch, the faces painted before the last ring shape (the nebula)
+  are drawn into the frame too, in the original's order, and the GPU draws the rest.
+  Evidence: `tests/intro_modern.rs` writes Classic and Modern frames side by side
+  (`FFE_SHOT_DIR`).
+- **Gravestone** (`gameover.rs`, F917): it used to bypass the presenter (a fixed 640x480 buffer);
+  it is now presented like the other screens, and with a GPU the tombstone (model 172, or the rare
+  175) is drawn on the GPU. F917 draws on the full 320x200 screen (`ViewHeightGuard::full_screen`)
+  with F1479's centre still on row 79, so `World::full_screen` makes the GPU view cover all 200
+  rows, and `ffe-render`'s `Projection::y_offset` moves the projection's centre off the picture's
+  middle (`y_scale = 256/100`, `y_offset = 0.21`; zero for the flight view, whose output is
+  unchanged). F917 queues the whole tombstone under one depth key, so the original paints it in
+  program order: the slab, then the lettering, the date and the flowers, which lie not quite in the
+  slab's plane and which the depth test hid. A new batch (drawn over the last) starts at each face
+  that overlaps on the screen a face already in the batch, which is that order exactly, in 6 to 10
+  batches near the end; a steady frame costs about 5 ms on the GPU at 1280x960. The engraved text
+  is model faces, so the GPU draws it at the window's resolution (not the real font).
+- **Death:** from the moment of death through the explosion and the death camera, neither the
+  original's dust motes nor the GPU's speed dust are drawn (Classic and Modern).
+- Classic: the logical frames are unchanged (`tests/intro_view.rs` pins); with `capture` off
+  `draw_frame` is `draw_shapes`. Tests: `intro_view::modern_graphics_get_the_intro_model_and_credits`,
+  `death_view::no_dust_is_drawn_while_the_player_dies`, `intro_text`'s layout test.
 
 ## What comes next
 

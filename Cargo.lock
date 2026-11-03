@@ -1028,6 +1028,7 @@ name = "ffe-convert"
 version = "0.1.0"
 dependencies = [
  "ffe-core",
+ "miniz_oxide 0.8.9",
  "png 0.17.16",
 ]
 

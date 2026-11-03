@@ -693,7 +693,7 @@ every system the player is in now has its traffic from the first frame (the
 main loop asks `spawn_traffic`, which runs once per system); before this a
 starport take-off never spawned any.
 
-**World Options** (Preferences → Port Options → World Options, saved as
+**World Options** (Preferences → Advanced Options → World Options, saved as
 `traffic=`, `police=` and `pirates=` in `config.cfg`; an older
 `police_pirates=` line sets both):
 
@@ -721,9 +721,9 @@ capture (`SpawnOptions::guarantee`) keeps the record's count so its frames
 stay the same. Pirate groups from a real entry spawn `PIRATE_LURK` (25 km)
 outside the anchor orbit.
 
-## Port addition: Advanced traffic
+## Port addition: Advanced NPCs (formerly Advanced traffic)
 
-World Options → **Advanced traffic** (`advanced_traffic=` in `config.cfg`, off
+World Options → **Advanced NPCs** (`advanced_traffic=` in `config.cfg`, off
 by default). It reads F870's population (0..9) and danger (0..7) for the
 system (`npc::Life`) and adds:
 
@@ -737,11 +737,12 @@ system (`npc::Life`) and adds:
    either a trader arrives 25 km beyond the nearest place (exit cloud) and
    flies in, or an idle trader away from the player jumps out (departure
    cloud) (`Navigator::tick_life`).
-5. **Ships fight each other:** a pirate more than 15 km from the player takes
-   the nearest trader within 20 km; the trader runs and jumps out when the
-   pirate is within 6 km; idle police take a pirate that is attacking
-   someone; escorts join their leader's fight; a pirate drops its prey when
-   the player is within 8 km. These hits use F953 and the hit/explosion
+5. **Ships fight each other:** a pirate more than 15 km from the player (or
+   any pirate while the player is docked or landed) takes the nearest trader
+   within 20 km; the trader runs and jumps out when the pirate is within 6 km;
+   idle police take a pirate that is attacking someone; escorts join their
+   leader's fight; a pirate drops its prey and turns on the player when the
+   player, in flight, is within 10 km. These hits use F953 and the hit/explosion
    effects but never the player's legal record, rating or bounty
    (`Navigator::pick_fights`, `npc_hit`).
 7. **Busy surface ports:** the three starports nearest the player get

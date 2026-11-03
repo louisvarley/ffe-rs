@@ -5,6 +5,8 @@
 /legacy/
 /jjffe-master/
 /ffed3d-master/
+# The player's own FFED3D download (replacement models): local only, never committed.
+/full-download/
 /Frontier-First-Encounters*/
 legacy/Elite 3/
 legacy/Elite3/

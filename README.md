@@ -107,13 +107,13 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 |---|---|
 | Status page (ship systems and equipment) | F2 |
 | Systems map (choose a star with the centre) / hyperspace to the chosen star | G / H |
-| Preference pages (graphic detail, space colour, sound, others, maps, port options) | Escape |
-| Display options (window scale 1x-6x, fit, filter, pixels, fullscreen) | Escape -> Port Options -> Display Options |
+| Preference pages (graphic detail, space colour, sound, others, maps, advanced options) | Escape |
+| Display options (window scale 1x-6x, fit, filter, pixels, fullscreen) | Escape -> Advanced Options -> Display Options |
 | Fullscreen (port extension) | Alt+Enter |
 | Views (as the original): cycle / front / rear / turret / external; or click the console view icons (any window size) | F1 / F6 / F7 / F8 / F9 |
 | Missile view (with the viewer fitted and a missile in flight) | F10 |
 | Combat computer (source F11; view 6 is not ported, so it shows a note) | F11 |
-| Escape capsule (if fitted) | F12 |
+| Escape capsule (if fitted) | X or F12 |
 | External view: turn camera; zoom out / in (both of a pair resets) | arrows; + / - |
 | Change ship (the original's named craft) | Page Up / Page Down |
 | Original flight model on / off (set speed, original steering and physics) | automatic in flight; O is developer-only |
@@ -125,7 +125,7 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | Classic thrust / reverse; yaw; pitch; roll | Enter / Shift; `.` `,`; A / Z; `]` `[` |
 | Classic steering by mouse | hold the right button and move the mouse |
 | Modern thrust / reverse; yaw; pitch; roll | W / S; Right / Left; Up / Down; E / Q |
-| Brake / pause | X / P |
+| Brake (port addition) / pause | B / P |
 | Quit (in the preference pages) | click `Quit`, or select it and press Enter |
 | Buy / sell one unit of food (docked only) | B / N |
 | Quick-save / load / new numbered save | F5 / Shift+F5 / Ctrl+F5 |
@@ -133,7 +133,7 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 Modern input (W/S and arrows) is the initial preset. F3 switches to Classic,
 which follows the original's scheme: hold the **right mouse button** and move the
 mouse to steer, Enter raises the set speed and Shift lowers it, and the keyboard
-steering is `,` `.` yaw, A/Z pitch, `[`/`]` roll. Escape → `Port Options` exposes
+steering is `,` `.` yaw, A/Z pitch, `[`/`]` roll. Escape → `Advanced Options` exposes
 the same choice. The preset takes effect immediately, disarms held keys, and is
 persisted in the versioned `saves/config.cfg` (`docs/CONTROLS.md` has the full
 table and the routing audit). The port-only display choices and the other
@@ -275,7 +275,8 @@ The gameplay cube stays labelled synthetic until those are implemented.
    Look for the original proportional text and grey/red console at the bottom.
 2. **Launch and fly:** L launches. Briefly hold W (about 0.4 seconds) to
    reach roughly **12 units/s**; release to coast. Try the arrow keys,
-   then X to brake. F3 selects Classic controls (hold the right mouse button and
+   then B to brake (X is the escape capsule, as in the original). F3 selects
+   Classic controls (hold the right mouse button and
    move to steer; Enter raises thrust). F1 cycles the original's views.
 3. **Status and docking:** F2 opens the ship-systems page (F2 returns).
    Request clearance with D near a station and dock under 250 m/s within the

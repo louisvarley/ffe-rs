@@ -197,10 +197,15 @@ cleared.
   longjmp to the front end.
 - **Old ship derelict.** Done 2026-11-03 (see the section below): the old hull
   drifts in AI state 0x16 until F767 removes it.
-- **Manual key.** DOS FFE's `x` launches the capsule (`F1054`, `78206`). The
-  port's `x` is the brake (`docs/CONTROLS.md`), so the port wires the F12
-  console icon instead. Decide whether to move the brake or accept both on
-  different keys.
+- **Escape ending.** F1098 also clears the police alert (`DATA_008647 = 0`,
+  `DATA_008646 &= 0xfe`) and selects the front view (`+0xea = 0`); the port
+  does both on either path (`main::escaped`, `Legal::clear_alert`). It sets
+  the mode word `+0xe8 = 0x24` too; the port does not (its 0x24 is the
+  starport climb, which a capsule in space would never finish), so that is
+  not ported.
+- **Manual key.** DOS FFE's `x` launches the capsule (`F1054`, `78206`); the
+  port does too (2026-10-29, owner decision), alongside F12 and the console
+  icon. The port's brake, which the original does not have, moved to `B`.
 - **Cash/cargo.** F1098 neither clears nor transfers the hold; the port keeps
   it, even though the capsule's cargo space is smaller. That is the source
   behaviour, but it is visible in the cargo screen.

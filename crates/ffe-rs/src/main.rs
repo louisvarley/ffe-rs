@@ -761,6 +761,12 @@ fn write_display_capture(
     ) {
         eprintln!("{line}");
     }
+    if let Some(line) = modern.load_panel(
+        &root.join("img-export/images/sprite/primary-043.png"),
+        screen.panel_pixels(),
+    ) {
+        eprintln!("{line}");
+    }
     if let Some(line) = modern.load_font(&root.join("img-export/images/font/main.png")) {
         eprintln!("{line}");
     }
@@ -902,9 +908,14 @@ fn run_intro(
             sound.leave_front_end();
             return Ok(IntroExit::Start(1));
         }
-        screen.draw_intro(scene, tics, version)?;
+        // Modern graphics draw the intro's model on the GPU, as in flight.
+        screen.capture =
+            display.graphics == ffe_rs::modern::Graphics::Modern && presenter.gpu_available();
+        let drawn = screen.draw_intro(scene, tics, version);
+        screen.capture = false;
+        drawn?;
         presenter.modern_mut().set_text(screen.take_text());
-        presenter.present(window, screen.logical_pixels(), None, display)?;
+        presenter.present(window, screen.logical_pixels(), screen.world(), display)?;
         let real = last.elapsed().as_secs_f64().min(0.1);
         last = Instant::now();
         let inp = session.frame(window, real);
@@ -1188,11 +1199,19 @@ fn run() -> Result<(), String> {
     // The GPU view's upscaled model and planet textures: the owner's export, read again as the
     // files change.
     presenter.set_art_dir(options.root.join("img-export"));
-    // Modern graphics' replacement cabins and font: for now the owner's upscaled export,
-    // and a real font for the text.
+    // Modern graphics' replacement cabins and font: for now the owner's upscaled export.
     for line in presenter.modern_mut().load_cabins(
         &options.root.join("img-export/images/cockpit"),
         screen.cabin_pixels(),
+    ) {
+        eprintln!("{line}");
+    }
+    // The console panel (primary bitmap 43), when the export holds a larger one.
+    if let Some(line) = presenter.modern_mut().load_panel(
+        &options
+            .root
+            .join("img-export/images/sprite/primary-043.png"),
+        screen.panel_pixels(),
     ) {
         eprintln!("{line}");
     }
@@ -1730,7 +1749,14 @@ fn run() -> Result<(), String> {
                 }
             } else {
                 if let Some(viewer) = gameover_viewer.as_mut() {
-                    game.draw(&mut screen, viewer)?;
+                    // Modern graphics draw the tombstone on the GPU (full-screen view); the
+                    // scripted capture keeps the original's frame.
+                    screen.capture = prefs.display.graphics == ffe_rs::modern::Graphics::Modern
+                        && options.capture_gameover.is_none()
+                        && presenter.gpu_available();
+                    let drawn = game.draw(&mut screen, viewer);
+                    screen.capture = false;
+                    drawn?;
                 }
                 if let Some(dir) = &options.capture_gameover {
                     if frames % 20 == 0 {
@@ -1739,9 +1765,14 @@ fn run() -> Result<(), String> {
                 }
                 gameover = Some(game);
             }
-            window
-                .update_with_buffer(&screen.pixels, WIDTH, HEIGHT)
-                .map_err(|e| format!("Window update: {e}"))?;
+            // Through the presenter like every other screen, so Modern graphics apply.
+            presenter.modern_mut().set_text(screen.take_text());
+            presenter.present(
+                &mut window,
+                screen.logical_pixels(),
+                screen.world(),
+                &prefs.display,
+            )?;
             frames += 1;
             if options.smoke_frames.is_some_and(|limit| frames >= limit)
                 || (options.capture_gameover.is_some() && frames >= 700)
@@ -2148,6 +2179,11 @@ fn run() -> Result<(), String> {
             _ => digit_step,
         };
         if let Some(step) = chosen_step {
+            // A time step resumes a paused game, as the pause button and P do.
+            if paused {
+                paused = false;
+                held_controls.disarm(&keys_down);
+            }
             acceleration = step;
             if let Some(model) = original.as_mut() {
                 model.set_time_acceleration(step);
@@ -2250,7 +2286,7 @@ fn run() -> Result<(), String> {
             // F1056's action 0xf5 swaps F1117's normal page and F1120's engines-off page.
             engines_page = !engines_page;
             message = if engines_page {
-                "Ship systems: the engines and the undercarriage are on the diagram.".to_owned()
+                "Combat console: missiles and ship systems.".to_owned()
             } else {
                 "Flight console.".to_owned()
             };
@@ -2708,13 +2744,16 @@ fn run() -> Result<(), String> {
                 // same action) or the right-hand hot area 0x0f, with or without
                 // the map open.
                 // F1056's action 0xd0 under the autopilot lamp: F1018 while
-                // the autopilot flies (mode 2), else F1020.
+                // the autopilot flies (mode 2), else F1020. Port change (owner
+                // requested): the whole lamp (0x49) toggles the autopilot; the
+                // original's upper half (24,158..166) is the `t` target button.
                 let lamp_click = !engines_page
                     && !status_page
-                    && click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
-                        == Some(ffe_rs::console::SystemsClick::Autopilot);
-                let autopilot_off_click = lamp_click && nav.target.is_some();
-                let autopilot_on_click = lamp_click && nav.target.is_none();
+                    && (click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
+                        == Some(ffe_rs::console::SystemsClick::Autopilot)
+                        || console_click == Some(Click::Target));
+                let autopilot_off_click = lamp_click && nav.autopilot_engaged();
+                let autopilot_on_click = lamp_click && !nav.autopilot_engaged();
                 let jump_icon = !engines_page
                     && !status_page
                     && click_point.and_then(|(x, y)| ffe_rs::console::systems_click(x, y))
@@ -2851,7 +2890,9 @@ fn run() -> Result<(), String> {
                 // at a station asks for clearance and docks.
                 if nav.view == NavView::Closed {
                     let ship = ship_position(&original, &state);
-                    if pressed(Key::T) || console_click == Some(Click::Target) {
+                    if pressed(Key::T)
+                        || (console_click == Some(Click::Target) && (engines_page || status_page))
+                    {
                         let back =
                             inp.is_key_down(Key::LeftShift) || inp.is_key_down(Key::RightShift);
                         if state.loadout.auto_targetter() {
@@ -2901,28 +2942,9 @@ fn run() -> Result<(), String> {
                                 pending_log.replace(Source::Target, "Missile target lock off.");
                             }
                         } else if nav.ship_lock.is_some() {
-                            if let Some(ship) = nav.cycle_ship_lock(if back { -1 } else { 1 }) {
-                                pending_log.replace(
-                                    Source::Target,
-                                    format!(
-                                        "Locked on {} {}. Space fires; a ship cannot be flown to.",
-                                        ship.name,
-                                        range_label(
-                                            ship_position(&original, &state),
-                                            ship.position
-                                        )
-                                    ),
-                                );
-                            }
-                        } else if let Some(body) = nav.cycle_lock(ship, if back { -1 } else { 1 }) {
-                            pending_log.replace(
-                                Source::Target,
-                                format!(
-                                    "Locked on {} {}. K or AUTOPILOT flies there.",
-                                    body.name,
-                                    range_label(ship, body.position)
-                                ),
-                            );
+                            nav.cycle_ship_lock(if back { -1 } else { 1 });
+                        } else {
+                            nav.cycle_lock(ship, if back { -1 } else { 1 });
                         }
                     }
                     // F1054's 'e' (0x65), ';' (0x3b) and Insert (0x2): F935
@@ -2995,11 +3017,13 @@ fn run() -> Result<(), String> {
                             };
                         }
                     }
-                    // The Improved combat aids' contacts list: a click on a
-                    // row locks that ship, as a click on the ship does.
+                    // The Improved combat aids' contacts list (shown while the
+                    // console's left display is on its combat page): a click
+                    // on a row locks that ship, as a click on the ship does.
                     let contact_click = click_point
                         .filter(|_| {
                             prefs.combat_improved
+                                && engines_page
                                 && console_click.is_none()
                                 && nav.view == NavView::Closed
                                 && views.mode != ViewMode::Missile
@@ -3010,22 +3034,33 @@ fn run() -> Result<(), String> {
                                 .get(row)
                                 .map(|contact| contact.id)
                         });
+                    // Port change (owner requested): clicking anything in the
+                    // view or the contacts list while the autopilot flies ends
+                    // it, as the lamp does (F1018).
+                    let view_click = click_point
+                        .is_some_and(|(_, y)| console_click.is_none() && (12..118).contains(&y))
+                        || contact_click.is_some();
+                    if view_click && nav.autopilot_engaged() && nav.cancel() {
+                        if let Some(model) = original.as_mut() {
+                            model.halt();
+                        }
+                        message = "Autopilot off.".to_owned();
+                        pending_log.clear(Source::Autopilot);
+                    }
                     if let Some(id) = contact_click {
-                        nav.locked = None;
-                        let locked = nav
-                            .lock_ship(id)
-                            .map(|ship| (ship.name.clone(), ship.position));
-                        if let Some((name, at)) = locked {
-                            nav.missile_lock = Some(id);
+                        if nav.ship_lock == Some(id) {
+                            // A second click on the selected ship clears it.
+                            nav.ship_lock = None;
+                            if nav.missile_lock == Some(id) {
+                                nav.missile_lock = None;
+                            }
                             sound.play(Cue::UiBeep2);
-                            pending_log.replace(
-                                Source::Target,
-                                format!(
-                                    "Locked on {} {}. Space fires.",
-                                    name,
-                                    range_label(ship_position(&original, &state), at)
-                                ),
-                            );
+                        } else {
+                            nav.locked = None;
+                            if nav.lock_ship(id).is_some() {
+                                nav.missile_lock = Some(id);
+                                sound.play(Cue::UiBeep2);
+                            }
                         }
                     }
                     if let Some(point) = click_point.filter(|(_, y)| {
@@ -3058,37 +3093,18 @@ fn run() -> Result<(), String> {
                         if let Some(index) = hit {
                             if index < body_count {
                                 nav.ship_lock = None;
-                                if let Some(body) = nav.lock(index) {
+                                if nav.lock(index).is_some() {
                                     sound.play(Cue::UiBeep);
-                                    pending_log.replace(
-                                        Source::Target,
-                                        format!(
-                                            "Locked on {} {}. K or AUTOPILOT flies there.",
-                                            body.name,
-                                            range_label(ship, body.position)
-                                        ),
-                                    );
                                 }
                             } else {
                                 nav.locked = None;
                                 let id = nav.ships[index - body_count].id;
-                                let locked = nav
-                                    .lock_ship(id)
-                                    .map(|ship| (ship.name.clone(), ship.position));
-                                if let Some((name, at)) = locked {
+                                if nav.lock_ship(id).is_some() {
                                     // A clicked ship is F1099's combat target
                                     // (`player+0xed`), the same word F1096 launches
                                     // a missile at.
                                     nav.missile_lock = Some(id);
                                     sound.play(Cue::UiBeep2);
-                                    pending_log.replace(
-                                        Source::Target,
-                                        format!(
-                                            "Locked on {} {}. Space fires.",
-                                            name,
-                                            range_label(ship_position(&original, &state), at)
-                                        ),
-                                    );
                                 }
                             }
                         }
@@ -3253,12 +3269,9 @@ fn run() -> Result<(), String> {
                             message = "No autopilot fitted.".to_owned();
                         } else if nav.landed_view() || nav.sequence.is_some() {
                             message = "Launch before engaging the autopilot.".to_owned();
-                        } else if nav.locked.is_none() {
-                            message = if nav.ship_lock.is_some() {
-                                "A ship cannot be followed by the autopilot.".to_owned()
-                            } else {
-                                "Lock a target first: click it in the view, or press T.".to_owned()
-                            };
+                        } else if nav.locked.is_none() && nav.ship_lock.is_none() {
+                            message =
+                                "Lock a target first: click it in the view, or press T.".to_owned();
                         } else {
                             held_controls.disarm(&keys_down);
                             if original.is_none() {
@@ -3272,7 +3285,17 @@ fn run() -> Result<(), String> {
                                         .with_time_acceleration(acceleration),
                                 );
                             }
-                            if let Some(body) = nav.engage_locked() {
+                            // Port addition (Improved combat): a selected ship
+                            // is flown to, as a body is.
+                            let ship = nav
+                                .ship_lock
+                                .filter(|_| nav.locked.is_none())
+                                .and_then(|id| nav.engage_ship(id))
+                                .map(|ship| ship.name.clone());
+                            if let Some(name) = ship {
+                                pending_log
+                                    .replace(Source::Autopilot, format!("Autopilot to {name}."));
+                            } else if let Some(body) = nav.engage_locked() {
                                 if matches!(body.kind, NavKind::Station) {
                                     pending_log.replace(
                                         Source::Autopilot,
@@ -3491,7 +3514,7 @@ fn run() -> Result<(), String> {
                         let climbing = nav.as_ref().is_some_and(|nav| {
                             nav.takeoff_state() == Some(ffe_core::traffic::state::TAKEOFF)
                         });
-                        let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
+                        let autopilot = nav.as_ref().is_some_and(|nav| nav.autopilot_engaged());
                         if let (Some(model), Some(nav)) = (original.as_mut(), nav.as_mut()) {
                             if climbing {
                                 if let Some(takeoff) = nav.takeoff.as_mut() {
@@ -3546,7 +3569,8 @@ fn run() -> Result<(), String> {
                         inp.is_key_down(Key::LeftCtrl) || inp.is_key_down(Key::RightCtrl);
                     let status_keys = status_page || status_left;
                     if !status_keys
-                        && ((pressed(Key::F12) && !ctrl_down && !map_page_open)
+                        && (((pressed(Key::F12) && !ctrl_down) || pressed(Key::X))
+                            && !map_page_open
                             || (console_click == Some(Click::Capsule) && !map_page_open))
                     {
                         match death::escape_craft(&state.loadout) {
@@ -3565,6 +3589,8 @@ fn run() -> Result<(), String> {
                                     );
                                 }
                                 death::board(&mut state, craft, stats.as_ref());
+                                // F1098 selects the front view (`+0xea = 0`).
+                                views.mode = ViewMode::Front;
                                 if original.is_some() {
                                     original = Some(
                                         OriginalFlight::from_flight(&state, stats.as_ref())
@@ -3615,7 +3641,12 @@ fn run() -> Result<(), String> {
                     // F1 and F6..F12 belong to the status screen while it
                     // is up (F292).
                     .filter(|_| !status_keys)
-                    .and_then(input::view_command);
+                    .and_then(input::view_command)
+                    // The console's missile-view button is F10's action 0xfb.
+                    .or_else(|| {
+                        (console_click == Some(Click::Missile) && !map_page_open && !status_keys)
+                            .then_some(input::ViewCommand::Missile)
+                    });
                     let chosen = if let Some(command) = view_command {
                         match command {
                             input::ViewCommand::Cycle => {
@@ -4527,9 +4558,11 @@ fn run() -> Result<(), String> {
                     None
                 } else if pressed(Key::D) {
                     Some(state.request_docking())
-                } else if pressed(Key::B) || pressed(Key::N) {
+                } else if (pressed(Key::B) || pressed(Key::N))
+                    && state.mode == ffe_rs::flight::Mode::Docked
+                {
                     // At a station of a system the original's market; the prototype's
-                    // one-item trade otherwise.
+                    // one-item trade otherwise. Docked only: B is the brake in flight.
                     let buying = pressed(Key::B);
                     let station = nav.as_ref().and_then(|nav| nav.docked);
                     let shift = inp.is_key_down(Key::LeftShift) || inp.is_key_down(Key::RightShift);
@@ -4770,7 +4803,7 @@ fn run() -> Result<(), String> {
                     // A landed ship has no autopilot input (F1012 runs no F1037
                     // and the target is cleared by F1021); the clock and the
                     // body's motion still carry it.
-                    if nav.target.is_some()
+                    if nav.autopilot_engaged()
                         && !ffe_core::autopilot::can_engage(
                             if nav.landed_view() {
                                 0x30
@@ -5591,33 +5624,12 @@ fn run() -> Result<(), String> {
                             if let Some(event) = system {
                                 pending_log.add(Source::Combat, event.message());
                             }
-                            let laser = if beam { "beam laser" } else { "pulse laser" };
+                            // F953 posts no log entry for a hit: only the
+                            // subsystem damage above (0x98c9..0x98cb).
+                            let _ = (&name, beam);
                             match outcome {
-                                ffe_core::laser::Damage::Shields => {
-                                    let percent = if state.shields[1] == 0 {
-                                        0
-                                    } else {
-                                        state.shields[0] as i32 * 100 / i32::from(state.shields[1])
-                                    };
-                                    pending_log.add(
-                                        Source::Combat,
-                                        format!(
-                                            "{name} hits with its {laser}: shields {percent}% left."
-                                        ),
-                                    );
-                                }
-                                ffe_core::laser::Damage::Hull => {
-                                    let per_mille =
-                                        state.hull[0] as i32 * 250 / i32::from(mass.max(1));
-                                    pending_log.add(
-                                        Source::Combat,
-                                        format!(
-                                            "{name} hits with its {laser}: hull {}.{}%.",
-                                            per_mille / 10,
-                                            per_mille % 10
-                                        ),
-                                    );
-                                }
+                                ffe_core::laser::Damage::Shields
+                                | ffe_core::laser::Damage::Hull => {}
                                 ffe_core::laser::Damage::Destroyed => {
                                     if state.death.is_some() {
                                         // F1104's 81466 guard: further hits on a
@@ -5683,10 +5695,19 @@ fn run() -> Result<(), String> {
                                     launcher_radius,
                                 );
                                 sound.play(Cue::MissileLaunch);
-                                pending_log.add(
-                                    Source::Combat,
-                                    format!("{name} launches a missile at you."),
-                                );
+                                // F941: a missile aimed at the player posts
+                                // 0x98c4 through F349 (which first drops time
+                                // to 1x via F217) and plays the siren (0x1e).
+                                let _ = &name;
+                                if acceleration != 0 {
+                                    acceleration = 0;
+                                    held_acceleration = None;
+                                    if let Some(model) = original.as_mut() {
+                                        model.set_time_acceleration(0);
+                                    }
+                                }
+                                pending_log.add(Source::Combat, "WARNING: Incoming Missile");
+                                sound.play(Cue::Siren);
                             }
                         }
                         ffe_rs::navigation::ShipEvent::Ecm { name, naval } => {
@@ -5695,30 +5716,28 @@ fn run() -> Result<(), String> {
                             // destroys the models in DATA_000029 system-wide.
                             let losses = nav.ecm(naval);
                             sound.play(if naval { Cue::NavalEcm } else { Cue::Ecm });
-                            if losses.is_empty() {
-                                pending_log.add(Source::Combat, format!("{name} fires E.C.M."));
-                            } else {
-                                pending_log.add(
-                                    Source::Combat,
-                                    format!(
-                                        "{name}'s E.C.M. destroys {} missile{}.",
-                                        losses.len(),
-                                        if losses.len() == 1 { "" } else { "s" }
-                                    ),
-                                );
+                            // F935 posts no log entry.
+                            let _ = (&name, losses);
+                        }
+                        // The original logs none of these: police turning,
+                        // the alert clearing (F783) or a ship jumping out
+                        // (F738's hyperspace cloud is the only sign).
+                        ffe_rs::navigation::ShipEvent::PoliceHostile { .. }
+                        | ffe_rs::navigation::ShipEvent::AlertCleared
+                        | ffe_rs::navigation::ShipEvent::Escaped { .. } => {}
+                        ffe_rs::navigation::ShipEvent::UnderAttack { name: _ } => {
+                            // F750: F217 drops time to 1x; only when it was
+                            // accelerated does F349 post 0x98c3 and the siren
+                            // and battle song (F1906 0x1e, song 14) start.
+                            if acceleration != 0 {
+                                acceleration = 0;
+                                held_acceleration = None;
+                                if let Some(model) = original.as_mut() {
+                                    model.set_time_acceleration(0);
+                                }
+                                pending_log.add(Source::Combat, "WARNING: Ship is Under Attack");
+                                sound.start_battle();
                             }
-                        }
-                        ffe_rs::navigation::ShipEvent::PoliceHostile { name } => {
-                            pending_log.add(
-                                Source::Legal,
-                                format!("{name} is police and turns on you. You are wanted."),
-                            );
-                        }
-                        ffe_rs::navigation::ShipEvent::AlertCleared => {
-                            pending_log.add(Source::Legal, "The police have called off the chase.");
-                        }
-                        ffe_rs::navigation::ShipEvent::Escaped { name } => {
-                            pending_log.add(Source::Navigation, format!("{name} jumps out."));
                         }
                     }
                 }
@@ -5762,31 +5781,12 @@ fn run() -> Result<(), String> {
                             // `DATA_006269` damage.
                             let outcome = state.take_damage(damage, mass);
                             match outcome {
+                                // F953 logs nothing for a missile hit; the
+                                // shield/hull samples are its only report.
                                 ffe_core::laser::Damage::Shields => {
-                                    let percent = if state.shields[1] == 0 {
-                                        0
-                                    } else {
-                                        state.shields[0] as i32 * 100 / i32::from(state.shields[1])
-                                    };
-                                    pending_log.add(
-                                        Source::Combat,
-                                        format!(
-                                            "A missile is absorbed by your shields ({percent}% left)."
-                                        ),
-                                    );
                                     sound.play(Cue::ShieldHit);
                                 }
                                 ffe_core::laser::Damage::Hull => {
-                                    let per_mille =
-                                        state.hull[0] as i32 * 1000 / i32::from(mass.max(1) * 4);
-                                    pending_log.add(
-                                        Source::Combat,
-                                        format!(
-                                            "A missile hits your hull: {}.{}%.",
-                                            per_mille / 10,
-                                            per_mille % 10
-                                        ),
-                                    );
                                     sound.play(Cue::HullDamage);
                                 }
                                 ffe_core::laser::Damage::Destroyed => {
@@ -5815,9 +5815,7 @@ fn run() -> Result<(), String> {
                                 }
                             }
                         }
-                        ffe_rs::missile::MissileEvent::HitDecoy { .. } => {
-                            pending_log.add(Source::Combat, "A missile detonates on the chaff.");
-                        }
+                        ffe_rs::missile::MissileEvent::HitDecoy { .. } => {}
                         ffe_rs::missile::MissileEvent::Expired { .. } => {}
                     }
                 }
@@ -7388,7 +7386,7 @@ fn run() -> Result<(), String> {
                 // missile view (5).
                 if prefs.others[6]
                     && (ship.is_none() || prefs.others[7])
-                    && views.mode != ViewMode::External
+                    && !matches!(views.mode, ViewMode::External | ViewMode::Combat)
                     && (navigation || missile_view)
                 {
                     if let Some((sx, sy)) = projection
@@ -7423,7 +7421,13 @@ fn run() -> Result<(), String> {
             .map(|nav| {
                 use ffe_rs::enhanced_combat as aids;
                 let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
-                let contacts = combat_contacts(nav, player_at);
+                // The list only while the console's left display is on its
+                // combat (missile) page.
+                let contacts = if engines_page {
+                    combat_contacts(nav, player_at)
+                } else {
+                    Vec::new()
+                };
                 let (bracket, arrow) = match locked_ship {
                     Some(ship) => {
                         let centre = ship.position.map(|v| v as f64 / unit);
@@ -7520,7 +7524,7 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        let autopilot = nav.as_ref().is_some_and(|nav| nav.target.is_some());
+        let autopilot = nav.as_ref().is_some_and(|nav| nav.autopilot_engaged());
         // F1099 prints DATA_009124, the name of the player's parent object
         // (`+0x56`): at the new game Hope, the planet under Old Blackelk; in
         // flight the body whose frame the ship is in. A surface landing names
@@ -7621,8 +7625,9 @@ fn run() -> Result<(), String> {
             // altitude at least 0xb71b00 (`+0xc6` bit 0x40) and F903's jump
             // possible (`+0xc7` bit 0).
             p268: u8::from(nav.as_ref().is_some_and(|nav| nav.destination.is_some())),
-            // `player+0xec`: a navigation target is locked (the 0x49 arrow).
-            ec: u8::from(nav.as_ref().is_some_and(|nav| nav.locked.is_some())),
+            // `player+0xec`, the 0x49 arrow. Port change (owner requested): lit
+            // only while the autopilot flies, not whenever a target is locked.
+            ec: u8::from(autopilot),
             status: nav.as_ref().map_or(0, |nav| {
                 (if nav.altitude >= ffe_rs::navigation::HYPERSPACE_ALTITUDE {
                     0x40
@@ -7868,7 +7873,7 @@ fn run() -> Result<(), String> {
         }
         frames += 1;
         let arrived = options.capture_planet.is_some()
-            && nav.as_ref().is_some_and(|nav| nav.target.is_none());
+            && nav.as_ref().is_some_and(|nav| !nav.autopilot_engaged());
         if options.smoke_frames.is_some_and(|limit| frames >= limit)
             || (options.capture.is_some() && frames >= 1000)
             || takeoff_done_at.is_some_and(|done| frames >= done + 100)
@@ -8331,6 +8336,8 @@ fn playership_destroyed(
                 );
             }
             views.console.status_page = false;
+            // F1098 selects the front view (`+0xea = 0`).
+            views.mode = ViewMode::Front;
         }
         Outcome::Destroyed => {
             // F1104/F1105: follow the destruction object with the source

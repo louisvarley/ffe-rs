@@ -1262,7 +1262,43 @@ impl ModelViewer {
             }
             None => model,
         };
-        self.render_with(model, rows, position.map(|v| v as i32), light_view, inputs)
+        self.render_with(
+            model,
+            rows,
+            position.map(|v| v as i32),
+            light_view,
+            inputs,
+            0,
+        )
+    }
+
+    /// [`render_scene_with`] for a scene object drawn through F1680: `key_scale` is the
+    /// instance's `+0x130`, which every child call subtracts from its own scale. A planet
+    /// passes its descriptor's scale offset, keeping the ring child (model 314) inside the
+    /// 0..31 shift range instead of overflowing at 31.
+    pub fn render_scene_with_instance(
+        &self,
+        index: u32,
+        rows: [[f64; 3]; 3],
+        position: [f64; 3],
+        light_view: [f64; 3],
+        inputs: &AnimationInputs,
+        key_scale: i32,
+    ) -> Result<Frame, String> {
+        let model = self
+            .find(index)
+            .ok_or_else(|| format!("Model {index} is not in the cache."))?;
+        if position.iter().any(|v| v.abs() > 1.5e9) {
+            return Err("Model too far for the 32-bit view space.".to_owned());
+        }
+        self.render_with(
+            model,
+            rows,
+            position.map(|v| v as i32),
+            light_view,
+            inputs,
+            key_scale,
+        )
     }
 
     /// The matrix F1675 builds: yaw `a` about the vertical, then pitch `b` (binary angles).
@@ -1274,6 +1310,12 @@ impl ModelViewer {
     /// the object's additional scale offset converts it to world millimetres.
     pub fn world_units_per_model_unit(&self, index: u32) -> Option<f64> {
         self.world_units.get(index as usize).copied()
+    }
+
+    /// The descriptor's scale offset (`+0x18`), F1680's instance `+0x130` for a scene
+    /// object. Child calls subtract it from their scale (F1750).
+    pub fn model_scale_offset(&self, index: u32) -> Option<i32> {
+        Some(self.descriptors.get(index as usize)?[0])
     }
 
     /// F1686's cull radius of a model: its descriptor's radius shifted by its scale.
@@ -1439,6 +1481,7 @@ impl ModelViewer {
             // The default light, taken as view-relative in this inspection view.
             self.light_direction(),
             &self.inputs(),
+            0,
         )
     }
 
@@ -1449,6 +1492,7 @@ impl ModelViewer {
         position: [i32; 3],
         light_view: [f64; 3],
         inputs: &AnimationInputs,
+        key_scale: i32,
     ) -> Result<Frame, String> {
         let mut matrix = [0i32; 9];
         for (k, row) in rows.iter().enumerate() {
@@ -1456,13 +1500,18 @@ impl ModelViewer {
                 matrix[3 * k + axis] = (value * 2_147_483_647.0).round() as i32;
             }
         }
-        self.render_matrix(model, matrix, rows, position, light_view, inputs, None)
+        self.render_matrix(
+            model, matrix, rows, position, light_view, inputs, key_scale, None,
+        )
     }
 
     /// Run `model` with an exact object matrix (rows in Q31, as the original keeps it) and
     /// draw what it queues. `rows` are the same axes as unit vectors (for the observer and the
-    /// light). `stars` replaces the model's vertex records with a sector's star records and
-    /// gives its light points their tables (the galaxy map's model 0xab).
+    /// light). `key_scale` is F1680's instance `+0x130`: child calls subtract it from their
+    /// scale, so a scene planet passes its descriptor scale offset (the ring child would
+    /// otherwise shift by 31 and overflow). `stars` replaces the model's vertex records with
+    /// a sector's star records and gives its light points their tables (the galaxy map's
+    /// model 0xab).
     #[allow(clippy::too_many_arguments)]
     pub fn render_matrix(
         &self,
@@ -1472,6 +1521,7 @@ impl ModelViewer {
         position: [i32; 3],
         light_view: [f64; 3],
         inputs: &AnimationInputs,
+        key_scale: i32,
         stars: Option<(&StarField, &[u8])>,
     ) -> Result<Frame, String> {
         // Camera and light in object space, record units, for the original normal
@@ -1540,7 +1590,7 @@ impl ModelViewer {
         let instance = InstanceContext {
             position,
             generation: GENERATION,
-            key_scale: 0,
+            key_scale,
             operand_scale: model.scale as i32,
             textures: true,
         };
@@ -2178,6 +2228,33 @@ impl ModelViewer {
     /// F1721's fill colour: F1692/F1693, then F1691's descriptor colour for a
     /// textured material (the flat path's [`flat_colour`]). Without the
     /// descriptor table a textured polygon falls back to grey.
+    /// One beam fill's colour (F1761's): the side through F1694 and F1691, the lit half
+    /// adding the instance's shade 7 byte by byte; a cap through F1693 with its normal's
+    /// colour, then F1691.
+    fn beam_colour(
+        &self,
+        beam: &ffe_core::model_execute::BeamEmission,
+        colour: ffe_core::model_beam::BeamColour,
+    ) -> [u8; 3] {
+        use ffe_core::model_beam::BeamColour;
+        let (value, normal, shaded) = match colour {
+            BeamColour::Side { shaded } => (beam.beam.material, [0; 3], shaded),
+            BeamColour::Cap { material, normal } => (material, normal, false),
+        };
+        let instance = beam.context.colour;
+        let rgb = self
+            .textures
+            .descriptors()
+            .and_then(|table| flat_colour(value, instance, normal, table).ok())
+            .unwrap_or_else(|| resolve_colour(value, instance, normal));
+        if shaded {
+            let shade = self.shades()[7];
+            std::array::from_fn(|i| rgb[i].wrapping_add(shade[i]))
+        } else {
+            rgb
+        }
+    }
+
     fn polygon_colour(&self, polygon: &ffe_core::model_execute::PolygonEmission) -> [u8; 3] {
         if material(polygon.polygon.material).texture == 0 {
             return polygon.colour;
@@ -2257,6 +2334,11 @@ impl ModelViewer {
                 )),
                 Primitive::Polygon(polygon) => {
                     self.register_frame_colour(self.polygon_colour(polygon));
+                }
+                Primitive::Beam(beam) => {
+                    for fill in &beam.outline.fills {
+                        self.register_frame_colour(self.beam_colour(beam, fill.colour));
+                    }
                 }
                 Primitive::Thruster(entry) => match &entry.shape {
                     ThrusterShape::Glow { colours, .. } => {
@@ -2587,6 +2669,18 @@ impl ModelViewer {
                             }),
                         });
                         push!(Shape::Spans(spans, colour), light);
+                    }
+                }
+                Primitive::Beam(beam) => {
+                    // F1761's one complex-polygon entry: each fill (the side, or its
+                    // two shaded halves, then the visible end caps) through F1560's
+                    // edges and the span rasteriser, in queue order.
+                    for fill in &beam.outline.fills {
+                        let edges = ffe_core::model_polygon::edges(&fill.entries)?;
+                        if !edges.is_empty() {
+                            let rgb = self.rgb(self.beam_colour(beam, fill.colour));
+                            push!(Shape::Polygon(edges, rgb));
+                        }
                     }
                 }
                 Primitive::Polygon(polygon) => {

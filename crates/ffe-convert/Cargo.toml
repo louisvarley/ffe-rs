@@ -9,3 +9,4 @@ description = "Bounds-checked local asset decoders for the First Encounters reim
 [dependencies]
 ffe-core = { path = "../ffe-core" }
 png = "0.17"
+miniz_oxide = "0.8"

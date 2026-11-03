@@ -227,3 +227,73 @@ candidates to the console and takes the choice from keys 1..4 (Backspace
 cancels) instead of drawing F348's entries; the fit/remove rules (0x98ff,
 the single-mounting shortcut, the chosen slot) follow F428/F434/F435 and are
 tested by `f428_asks_which_mounting`.
+
+## 2026-10-28 — NPC combat, Advanced NPCs and Modern art (owner requested)
+
+Re-applied on 2026-11-03 on top of the PAR-15 object physics. The port's
+earlier hostile-engagement range (hold until 10 km, cruise in at 2 km/s) and
+its 15%/35% pirate chance in safe systems were dropped: PAR-15's F597/F601
+flight closes on the player by itself, and the extra roll would have moved the
+PAR-17 shared random pair off the original's call order.
+
+- **F750's combat alert (source behaviour).** A hostile attacking the player
+  (state Attack or Pass, no ship target of its own) enters combat inside
+  `2^23` mm. F217 drops time to 1x; only when it was accelerated does F349 post
+  `0x98c3` "WARNING: Ship is Under Attack" with the siren and battle song.
+  Nothing is posted while the player is docked or landed. Test:
+  `tests/npc_physics.rs` (`f750s_alert_fires_as_a_hostile_enters_combat_range`).
+- **Overshoot passes** (ships without statistics, the port's older flight) are
+  entered only from outside the standoff; a ship inside it looped on the player.
+- **A ship facing directly away still turns** (`turn_toward` treats nearly
+  opposite vectors as opposite; it used to cancel back and never turn).
+- **Advanced NPCs** (renamed from Advanced traffic): a pirate turns from its
+  trader prey to a player in flight within 10 km (was 8 km), and preys on
+  traders while the player is docked or landed. Test:
+  `tests/npc_ai.rs` (`with_advanced_traffic_a_pirate_turns_on_a_player_who_comes_near`).
+- **Log follows the original.** Laser and missile hits, chaff, NPC E.C.M.,
+  police turning and ships jumping out no longer post log entries (F953/F935/F738
+  post none). F941's "WARNING: Incoming Missile" (`0x98c4`) replaces the port's
+  launch text, drops time to 1x and sounds the siren. "Locked on …" notices are
+  gone.
+- **NPCs stay out of worlds:** a ship outside the docking cycle cannot end a
+  step inside a star or below a planet's lowest surface point
+  (`Navigator::keep_ships_out_of_worlds`; the port's NPC flight has no terrain).
+- **Improved combat contacts list** shows only on the console's combat
+  (missile) page; hostile ships red, the rest white; navigation-computer
+  squares (0x31, lit 0x2c for the selection); a second click clears the
+  selection; K / AUTOPILOT fly to a selected ship, holding 0.5 km off its hull
+  (session-only target).
+- **Pause:** choosing a time step resumes a paused game.
+- **Modern graphics** reads the owner's upscaled `img-export` cabins, console
+  panel (primary bitmap 43) and main font atlas; presentation only.
+- **Autopilot lamp (0x49)** toggles the autopilot over its whole square (the
+  original's upper half is the `t` target button), shows its red arrow only
+  while the autopilot flies (F1116 lights it whenever a target is locked), and
+  a click in the view or the contacts list while the autopilot flies ends it.
+- **Keys:** X launches the escape capsule as in DOS FFE (`F1054`, `78206`),
+  alongside F12 and the console icon; the port's brake, which the original
+  does not have, moved from X to B (B and N still buy and sell when docked).
+  The console's missile-view button opens the missile view as F10 does.
+- **Page names:** the port-only Escape page is labelled `Advanced Options`
+  (its control help lines and footnote were removed); the project's policy
+  term "Port Options" for permitted extensions is unchanged.
+
+## 2026-10-29 — dust while dying; Modern intro and gravestone (owner requested)
+
+- **No dust while the player dies.** From the moment of death (`Flight::death`
+  set, F1104's hold) through the explosion and the death camera, neither
+  F1035's space-dust motes (model 0x6d, Classic and Modern) nor Modern's GPU
+  speed dust are drawn. Only drawing changes: the dust stream keeps spawning
+  and ageing as before, so its random numbers and the game state are
+  untouched. Tests: `tests/death_view.rs`
+  (`no_dust_is_drawn_while_the_player_dies`).
+- **The intro and the gravestone go through the presenter.** With Modern
+  graphics the intro is upscaled, its credits (and their one-pixel shadows)
+  are drawn in the real font, and with a GPU its model (the GAME!TEK logo,
+  the planet, the ship) is drawn by the GPU view like the flight view's. The
+  gravestone (F917) is upscaled and, with a GPU, its tombstone is drawn by a
+  full-screen GPU view (all 200 rows, F1479's centre on row 79), in the
+  original's painting order. Classic's logical frames are unchanged; the
+  gravestone is now scaled to the window with the Display settings like every
+  other screen instead of as a fixed 640x480 buffer. See
+  `docs/notes/modern-graphics.md`.

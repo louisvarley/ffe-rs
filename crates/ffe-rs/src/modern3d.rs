@@ -84,6 +84,21 @@ pub struct World {
     /// For each logical pixel, the value a crisp HUD shape put there (empty: none): while the
     /// frame still shows it, the 3-D view shows through instead.
     pub crisp: Vec<Option<u32>>,
+    /// The view is the whole 320x200 screen (F917's tombstone, drawn under
+    /// `ViewHeightGuard::full_screen`), not the 320x158 flight view; F1479's centre stays on
+    /// row 79 either way.
+    pub full_screen: bool,
+}
+
+impl World {
+    /// The logical rows the 3-D view covers.
+    pub fn rows(&self) -> usize {
+        if self.full_screen {
+            LOGICAL_HEIGHT
+        } else {
+            VIEW_ROWS
+        }
+    }
 }
 
 /// One mote of speed dust: from where it is (`head`) to where it was (`tail`), in view space at
@@ -437,7 +452,8 @@ impl Gpu3d {
         if logical.len() < frame || world.snapshot.len() < frame || rect.width == 0 {
             return Ok(());
         }
-        let (view_width, view_height) = (rect.width, rect.height * VIEW_ROWS / LOGICAL_HEIGHT);
+        let rows = world.rows();
+        let (view_width, view_height) = (rect.width, rect.height * rows / LOGICAL_HEIGHT);
         if view_height == 0 {
             return Ok(());
         }
@@ -451,10 +467,12 @@ impl Gpu3d {
             return Ok(());
         };
         let pixels = renderer.render(&scene)?;
-        if self.rows.len() != view_height || self.columns.len() != view_width {
-            self.rows = (0..view_height)
-                .map(|dy| dy * VIEW_ROWS / view_height)
-                .collect();
+        let last = (view_height - 1) * rows / view_height;
+        if self.rows.len() != view_height
+            || self.rows.last() != Some(&last)
+            || self.columns.len() != view_width
+        {
+            self.rows = (0..view_height).map(|dy| dy * rows / view_height).collect();
             self.columns = (0..view_width)
                 .map(|dx| dx * LOGICAL_WIDTH / view_width)
                 .collect();
@@ -585,7 +603,10 @@ pub fn sunlight(place: [f64; 3], bodies: &[([f64; 3], f64)], star: ([f64; 3], f6
 /// space point a million units along its direction, when it is ahead and not far off the view.
 fn star_screen(star: &Star, projection: &ffe_render::Projection) -> Option<[f32; 2]> {
     let [x, y, z] = star.direction;
-    let screen = [x / z * projection.x_scale, y / z * projection.y_scale];
+    let screen = [
+        x / z * projection.x_scale,
+        y / z * projection.y_scale + projection.y_offset,
+    ];
     (z > 0.0 && screen[0].abs() <= 1.6 && screen[1].abs() <= 1.6).then_some(screen)
 }
 
@@ -593,7 +614,7 @@ fn star_screen(star: &Star, projection: &ffe_render::Projection) -> Option<[f32;
 fn screen_point(s: [f32; 2], projection: &ffe_render::Projection) -> [f32; 3] {
     [
         s[0] / projection.x_scale * 1.0e6,
-        s[1] / projection.y_scale * 1.0e6,
+        (s[1] - projection.y_offset) / projection.y_scale * 1.0e6,
         1.0e6,
     ]
 }
@@ -1090,12 +1111,9 @@ pub fn scene(
     time: f32,
 ) -> ffe_render::Scene {
     // The frame behind the models: Scale2x once, then the GPU's smooth filtering.
-    let mut upscaled = scale2x(
-        &world.snapshot[..LOGICAL_WIDTH * VIEW_ROWS],
-        LOGICAL_WIDTH,
-        VIEW_ROWS,
-    );
-    upscaled.truncate(LOGICAL_WIDTH * BACKGROUND_SCALE * VIEW_ROWS * BACKGROUND_SCALE);
+    let rows = world.rows();
+    let mut upscaled = scale2x(&world.snapshot[..LOGICAL_WIDTH * rows], LOGICAL_WIDTH, rows);
+    upscaled.truncate(LOGICAL_WIDTH * BACKGROUND_SCALE * rows * BACKGROUND_SCALE);
     let colour = |[r, g, b]: [u8; 3]| [r, g, b].map(|c| f32::from(c) / 255.0);
     // One of the original's pixels in this view's pixels.
     let pixel = width as f32 / LOGICAL_WIDTH as f32;
@@ -1285,10 +1303,14 @@ pub fn scene(
             batch
         })
         .collect();
+    // F1479: x lands at 160 + 256x/z of 320 columns, y at 79 - 256y/z of the view's rows (158,
+    // centred, or the full screen's 200, where row 79 is above the middle).
+    let half = rows as f32 / 2.0;
     let projection = ffe_render::Projection {
         x_scale: 256.0 / 160.0,
-        y_scale: 256.0 / 79.0,
+        y_scale: 256.0 / half,
         near: NEAR,
+        y_offset: 1.0 - 79.0 / half,
     };
     if !world.dust.is_empty() {
         batches.push(dust(&world.dust, pixel));
@@ -1309,10 +1331,9 @@ pub fn scene(
         height: height as u32,
         background: Some(ffe_render::Image {
             width: (LOGICAL_WIDTH * BACKGROUND_SCALE) as u32,
-            height: (VIEW_ROWS * BACKGROUND_SCALE) as u32,
+            height: (rows * BACKGROUND_SCALE) as u32,
             pixels: upscaled,
         }),
-        // F1479: x lands at 160 + 256x/z of 320 columns, y at 79 - 256y/z of 158 rows.
         projection,
         batches,
         maps,
@@ -1481,6 +1502,7 @@ mod tests {
             bodies: Vec::new(),
             hud: Vec::new(),
             crisp: Vec::new(),
+            full_screen: false,
         };
         let scene = scene(&world, 640, 316, &mut MapCache::default(), 0.0);
         assert_eq!(scene.batches.len(), 1);
@@ -1545,6 +1567,7 @@ mod tests {
             bodies: Vec::new(),
             hud: Vec::new(),
             crisp: Vec::new(),
+            full_screen: false,
         };
         // The HUD drew one pixel at the square's centre after the world phase.
         let mut logical = snapshot;

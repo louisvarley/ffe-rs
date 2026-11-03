@@ -1831,3 +1831,73 @@ fn the_hyperspace_tunnel_draws_through_the_transit() {
         assert!(!frame.shapes.is_empty(), "share {share}");
     }
 }
+
+/// Saturn's ring: model 134 calls child 314 only when global 2 >> 14 is non-zero,
+/// and F1680's instance +0x130 (the descriptor scale offset) keeps the child scale
+/// at 21 instead of 31, where its vertices overflow.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn saturn_draws_its_ring() {
+    use ffe_rs::model_viewer::{AnimationInputs, Shape};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    assert!(viewer.find(134).is_some(), "planet model 134");
+    assert!(viewer.find(314).is_some(), "ring model 314");
+    let scale_offset = viewer.model_scale_offset(134).unwrap();
+    eprintln!("planet 134 scale offset {scale_offset}");
+    let rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut inputs = AnimationInputs::test(0);
+    inputs.globals[2] = 0xffa1; // Saturn's seed 0x0123ffa1: global 2 >> 14 = 3
+    let extent = |key_scale: i32| {
+        let frame = viewer
+            .render_scene_with_instance(
+                134,
+                rows,
+                [0.0, 0.0, 8.0e8],
+                [0.0, 0.0, 1.0],
+                &inputs,
+                key_scale,
+            )
+            .unwrap();
+        let mut max = 0i32;
+        let mut count = 0;
+        for shape in &frame.shapes {
+            let points: Vec<[i16; 2]> = match shape {
+                Shape::Polygon(edges, _) => edges.iter().flatten().copied().collect(),
+                Shape::Curve(points, _) => points.to_vec(),
+                _ => continue,
+            };
+            count += 1;
+            for [x, y] in points {
+                max = max
+                    .max((i32::from(x) - 160).abs())
+                    .max((i32::from(y) - 79).abs());
+            }
+        }
+        eprintln!(
+            "key_scale {key_scale}: {} shapes, {count} ring entries, max {max}px, error {:?}",
+            frame.shapes.len(),
+            frame.children_error
+        );
+        (count, max)
+    };
+    let fixed = extent(scale_offset);
+    let broken = extent(0);
+    assert!(
+        fixed.0 > 0,
+        "the ring child queued no polygon/curve entries"
+    );
+    assert!(
+        fixed.1 < 2000,
+        "the ring's screen extent {}px is off the view",
+        fixed.1
+    );
+    assert!(
+        fixed.0 > broken.0,
+        "the F1680 key scale must queue more ring entries than the collapsed 0 ({} vs {})",
+        fixed.0,
+        broken.0
+    );
+}

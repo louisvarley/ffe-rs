@@ -10,8 +10,12 @@
 //!   makes) and amber when it is within laser range but off the sight;
 //! - an arrow on the edge of the view pointing the way to turn when the
 //!   locked ship is off the view or behind;
-//! - a contacts list down the right of the view, hostiles first, each name
-//!   and range in red, right-aligned against a marker box that locks the ship when clicked (as clicking the ship does).
+//! - while the console's left display is on its combat (missile) page, a
+//!   contacts list down the right of the view, hostiles first: a ship hostile
+//!   to the player in red, the rest in white, each right-aligned against the
+//!   navigation computer's square (lit for the selected ship). Clicking a row
+//!   selects the ship (as clicking the ship does), clicking it again clears
+//!   the selection, and the autopilot flies to a selected ship.
 //!
 //! The lasers are hitscan (F931 tests the ray when the trigger is pressed and
 //! nothing travels), so there is no lead to show: a ship under the sight is a
@@ -30,11 +34,12 @@ pub const CONTACT_STEP: i32 = 20;
 /// Rows that fit above the view's foot (y 158).
 pub const CONTACT_ROWS: usize = 6;
 
-/// Colours (COLPAL indices): F1099's combat red, the navigation green, and the
-/// list's plain white.
+/// Colours (COLPAL indices): F1099's combat red and the list's plain white.
 pub const HOSTILE_COLOUR: u8 = 0x10;
-pub const FRIENDLY_COLOUR: u8 = 0x11;
 pub const PLAIN_COLOUR: u8 = 15;
+/// The selected row's lit square (primary 0x2c); the others use the
+/// navigation computer's 0x31 (`console::NAV_MARKER_BITMAP`).
+pub const SELECTED_MARKER_BITMAP: &str = "base:bitmap/primary/044";
 /// The bright yellow the menus use for a selected row: "on target".
 pub const ON_TARGET_COLOUR: u8 = 18;
 

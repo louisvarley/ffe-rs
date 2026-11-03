@@ -229,7 +229,7 @@ impl GalaxyMap {
                 }
             }
             let frame =
-                viewer.render_matrix(model, matrix, rows, position, light, inputs, stars)?;
+                viewer.render_matrix(model, matrix, rows, position, light, inputs, 0, stars)?;
             shapes.extend(frame.shapes);
             Ok(())
         };

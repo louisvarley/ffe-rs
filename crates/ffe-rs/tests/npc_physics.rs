@@ -51,3 +51,35 @@ fn pirates_close_under_their_own_thrust() {
         assert!(passed, "model {model:#x} never broke off");
     }
 }
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn f750s_alert_fires_as_a_hostile_enters_combat_range() {
+    let cache = cache();
+    let spec = ffe_rs::ships::npc_spec(&cache, 0x24).expect("a ship");
+    let mut rng = Random::new(1, 2);
+    let mut ship = npc::hyperspace_arrival(&spec, 0, [0, 0, 20_000_000], [0; 3], 0, &mut rng);
+    ship.station = None;
+    ship.state = State::Attack;
+    ship.hostile = true;
+    ship.forward = [0.0, 0.0, -1.0];
+    let mut requests = Vec::new();
+    let mut first = None;
+    for _ in 0..6000 {
+        ship.tick_with_station(0.02, 994, [0; 3], None, None, &mut requests);
+        let range = ship
+            .position
+            .iter()
+            .map(|v| (*v as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if ship.take_alert() && first.is_none() {
+            first = Some(range);
+        }
+    }
+    let first = first.expect("F750's alert never fired");
+    assert!(
+        first < npc::COMBAT_RANGE,
+        "alert at {first} mm, outside 2^23"
+    );
+}

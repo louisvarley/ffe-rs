@@ -90,7 +90,7 @@ same Enter cannot also activate a page row, raise the set speed or launch.
 
 ## Persistence
 
-`Escape` -> `Port Options` -> `Display Options` (or `Alt+Enter` for full-screen).
+`Escape` -> `Advanced Options` -> `Display Options` (or `Alt+Enter` for full-screen).
 Scale, fit, filter and pixel aspect are written to `saves/display.cfg` as soon
 as they change:
 

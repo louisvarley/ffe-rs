@@ -194,16 +194,9 @@ fn port_only_clicks_and_view_changes_leave_the_log_clean() {
     // start-flow and F5 the engines page (F1056's action 0xf5), so neither is
     // in this list.
     assert_eq!(Click::Screen(5).unported(), None);
-    for (index, click) in [Click::Missile, Click::Combat].into_iter().enumerate() {
-        let note = click.unported().unwrap_or("");
-        assert!(!note.is_empty());
-        draw(
-            &mut screen,
-            ViewState::default(),
-            &format!("unported-{index}"),
-        );
-        assert_clean(&screen, "unported click");
-    }
+    // The missile-view and combat buttons are F10's and F11's actions now.
+    assert_eq!(Click::Missile.unported(), None);
+    assert_eq!(Click::Combat.unported(), None);
 
     for (index, mode) in [
         ViewMode::Front,

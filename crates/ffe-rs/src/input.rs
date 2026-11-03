@@ -281,7 +281,8 @@ pub fn flight_controls(
         thrust,
         yaw: flip(yaw, reverse[0]),
         pitch: flip(pitch, reverse[1]),
-        brake: down(held, Key::X),
+        // The port's brake (the original has none); X is F1054's escape capsule.
+        brake: down(held, Key::B),
     }
 }
 

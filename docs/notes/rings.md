@@ -1,7 +1,7 @@
 # Planetary rings: findings and hand-over (2026-10-28)
 
-Status: **rings are not drawn in the playable.** This note records what is
-known so the work can be picked up.
+Status: **fixed for rendered planets (2026-10-28); no frame capture yet.**
+Saturn's ring now draws. This note records the cause, the fix and what remains.
 
 ## How the original decides a ring
 
@@ -20,71 +20,79 @@ known so the work can be picked up.
   22). Its descriptor (FIRSTENC.EXE table at 0x0d0cfc) is scale 22, scale
   offset **9**, radius 112; model 134's is scale 22, offset 10, radius 116.
 
-## Why the playable shows no ring
+## Why the playable showed no ring
 
-`Screen::draw_discs` renders a planet with `AnimationInputs::test(0)`, so
-global 2 is 0 and the branch never calls 314. Passing the seed
-(`globals[2] = seed`, `globals[3] = seed >> 16`) makes the ring draw, but
-wrongly: a huge fan/band across the view, or nothing, depending on tilt.
+`Screen::draw_discs` rendered a planet through the **F1683/F1684 stand-alone
+display path** (which sets `+0x130` = 0) and with `AnimationInputs::test(0)`, so
+global 2 was 0 and the branch never called model 314. Forcing the seed alone
+made the ring draw wrongly: F1750 gives the ring child
+`scale = 0 + 22 + 9 - 0 = 31`, and `96 << 31` overflows the 32-bit vertex
+arithmetic.
 
-## What is verified (committed)
+The flight view's planets are scene objects drawn through **F1680**, not
+F1683. F1680 (`ffe.asm:102006..102027`) sets:
 
-- **F1771's non-zero case** is now ported (`model_execute` opcode 25 →
-  `model_math::table_root`, `fraction`, `rotate_by` = F1744). The port used to
-  refuse a non-zero direction.
-- **The top-level direction** (+0x38) is now set to the light in the object
-  frame (F1685), in `ModelViewer::render_matrix`; it was always zero.
-- The harness's `--child-model` mode (`jjffe-commands`) and
-  `child_models_reference` take `FFE_CHILD_GLOBAL2`, `FFE_CHILD_GLOBAL3`,
-  `FFE_CHILD_DIRECTION` (x,y,z) and `FFE_CHILD_MATRIX` (nine Q31 values) so a
-  slot can be run as a seeded, lit, tilted body. With these, model 134 with
-  Saturn's seed **matches the original event for event** (child set-up, the
-  ring's polygon/curve events, queue) at identity and at a 0.5 rad tilt, for
-  depth 2000, 4e8 and 1.5e9 and two light directions:
+```
+e = desc[+0x18] + obj[+0x7e] - shift
+if e < 0:  +0x130 = desc[+0x18] - e;  +0x148 = max(desc[+0x14] + e, 0)
+else:      position >>= e;            +0x130 = desc[+0x18];  +0x148 = desc[+0x14]
+```
 
-  ```
-  FFE_CHILD_GLOBAL2=0xffa1 FFE_CHILD_DIRECTION=12000,-20000,8000 \
-    FFE_CHILD_MATRIX=<9 Q31> jjffe-commands --child-model 134 1500000000 > t.json
-  FFE_CHILD_GLOBAL2=0xffa1 FFE_CHILD_DIRECTION=12000,-20000,8000 \
-    FFE_CHILD_MATRIX=<9 Q31> FFE_CHILD_DEPTH=1500000000 \
-    FFE_CHILD_EXE=game/FIRSTENC.EXE FFE_CHILD_TABLE_RVA=0x0d0cfc \
-    FFE_CHILD_CACHE=data.bin FFE_CHILD_VECTORS=t.json FFE_CHILD_VERBOSE=1 \
-    cargo test -p ffe-rs --test child_models_reference -- --ignored --nocapture
-  ```
+For any visible planet `e >= 0`, so the instance key scale `+0x130` is the
+descriptor's scale offset (10 for model 134), not 0. The ring child scale is
+then `0 + 22 + 9 - 10 = 21`: `96 << 21` fits, and the ring surrounds the
+planet. Only beyond ~2^38 mm (about 40 planet radii, where the planet is a dot)
+does `e` go negative; `draw_discs` does not render the surface that far out.
 
-## The open problem: the planet's instance set-up
+## The fix (2026-10-28)
 
-In that harness set-up **the original's ring is garbage too**: its polygon
-entries sit at packed (160,79), the screen centre, and its curve runs to
-(-847,-242) and (11022,70). The reason is the scales. The harness copies
-F1683: the planet's `+0x148` is descriptor `+0x14` (22) and `+0x130` is 0.
-F1750 then gives the ring child scale `0 + 22 + 9 - 0 = 31` (trace event
-`[20,1,31,0]`), and 96 << 31 overflows. The port's planet draw makes the same
-assumption, so it inherits the same garbage.
+- `ModelViewer::render_scene_with_instance` passes F1680's key scale into the
+  instance; `render_matrix` no longer hard-codes `key_scale: 0`.
+- `ModelViewer::model_scale_offset` exposes descriptor `+0x18`.
+- `Screen::draw_discs` passes the body seed as object words 2/3
+  (`globals[2] = seed`, `globals[3] = seed >> 16`) and the descriptor's scale
+  offset as the key scale.
+- Regression: `crates/ffe-rs/tests/planet_view.rs::saturn_draws_its_ring`
+  (local-only, `FFE_WORLD_CACHE`) runs model 134 with Saturn's seed at
+  `key_scale = 10` and at 0. Observed: **24 ring polygon/curve entries spanning
+  63 px** at the F1680 key scale, versus **1 degenerate entry at 0 px** with the
+  old 0. The `saturn_draws_its_ring` numbers are from the current `data.bin`.
 
-The real game cannot be drawing planets that way. Its planet objects must
-reach F1683/F1684 with a different `+0x148`/`+0x130` (or `+0x44` observer
-shift), which keeps the ring child in range. The next step is to find how the
-original draws a planet object:
+## Still open
 
-- `ffe.asm:102329` (F1684) sets `+0x148` from the descriptor's `+0x14`;
-  `ffe.asm:36024..36058` and `71607` also write `+0x148` (36049/36058 set
-  0x7f), and `102400/102443` read it. Find which path a planet takes and what
-  it does to `+0x148`, `+0x130` and `+0x44` (F1774 raises `+0x44`).
-- Check the object's distance word `+0x7e` for planets (F1680's class) and
-  whether it feeds those words.
-- A cheap empirical check: dump a Saturn object's instance (`+0x130`,
-  `+0x148`, `+0x44`) in the reference while Saturn is on screen, and rerun
-  `--child-model 134` with those values (add env overrides for them).
+- A frame-level comparison (Saturn through the reference and the port) would
+  confirm the ring's exact width, tilt and shade. The current test proves the
+  child runs with sane geometry, not pixel equality.
+- `draw_discs` still shrinks a distant planet's matrix by a power of two instead
+  of using F1680's full `e`/`+0x148` adjustment. That is now independent of the
+  ring's child scale, so it no longer breaks the ring, but a very distant
+  planet's ring size may still differ slightly. Visible planets keep
+  `key_scale = descriptor offset`, so the difference starts beyond the range
+  where the surface renderer is used.
 
-The port's own trick is separate: `draw_discs` shrinks a distant planet's
-matrix by a power of two instead of changing its scale. Forcing the shrink to
-0 at 12 radii gives the same broken ring, so the shrink is not the cause, but
-once the set-up is known the shrink may need to become a scale change so the
-child's F1750 scale follows it.
+## Earlier harness notes (unchanged, still useful)
 
-When the ring draws correctly, pass the seed in `draw_discs` (globals 2/3) to
-switch it on, and add an `effects_view`-style frame test of Saturn.
+The harness's `--child-model` mode (`jjffe-commands`) and
+`child_models_reference` take `FFE_CHILD_GLOBAL2`, `FFE_CHILD_GLOBAL3`,
+`FFE_CHILD_DIRECTION` (x,y,z) and `FFE_CHILD_MATRIX` (nine Q31 values) so a
+slot can be run as a seeded, lit, tilted body. With these, model 134 with
+Saturn's seed matched the original event for event (child set-up, the ring's
+polygon/curve events, queue) at identity and at a 0.5 rad tilt, for depth 2000,
+4e8 and 1.5e9 and two light directions:
+
+```
+FFE_CHILD_GLOBAL2=0xffa1 FFE_CHILD_DIRECTION=12000,-20000,8000 \
+  FFE_CHILD_MATRIX=<9 Q31> jjffe-commands --child-model 134 1500000000 > t.json
+FFE_CHILD_GLOBAL2=0xffa1 FFE_CHILD_DIRECTION=12000,-20000,8000 \
+  FFE_CHILD_MATRIX=<9 Q31> FFE_CHILD_DEPTH=1500000000 \
+  FFE_CHILD_EXE=game/FIRSTENC.EXE FFE_CHILD_TABLE_RVA=0x0d0cfc \
+  FFE_CHILD_CACHE=data.bin FFE_CHILD_VECTORS=t.json FFE_CHILD_VERBOSE=1 \
+  cargo test -p ffe-rs --test child_models_reference -- --ignored --nocapture
+```
+
+That harness used the F1683-style `+0x130 = 0`, which is correct for its
+synthetic set-up but not for a planet in the flight view; the ring it produced
+there was the original's own (garbage) output for those inputs.
 
 ## Oracle status after opcode 25 (2026-11-02)
 

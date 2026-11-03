@@ -105,7 +105,9 @@ window.FFE_BURNDOWN = {
         { id: "visible-10", title: "Clickable console view icons and flickering plumes", status: "done", version: "v0.47" },
         { id: "visible-11", title: "Intro handedness, shape detail and median-cut palette fixes", status: "done", version: "v0.88" },
         { id: "visible-12", title: "Intro text frames, merged surface depth and atmosphere ring", status: "done", version: "v0.89" },
-        { id: "visible-13", title: "Intro nebula behind the planet and F1766/F1814 star chains", status: "done", version: "v1.10" }
+        { id: "visible-13", title: "Intro nebula behind the planet and F1766/F1814 star chains", status: "done", version: "v1.10" },
+        { id: "visible-14", title: "Opcode 17 beams (F1761 landing-gear legs) drawn", status: "done", version: "stash re-apply" },
+        { id: "visible-15", title: "Planetary rings: model 314 through F1680's key scale and the body seed", status: "done", version: "stash re-apply" }
       ]
     },
     {
@@ -1154,6 +1156,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 91,
       note: "Item added (gameplay-41). The ship library journals turn out to be driven by the original's mission-script interpreter (F41/F31, about 2,700 lines of assembly plus helpers) running a script graph in the executable's data. The same engine sets up the journals, queues their articles and runs the scripted missions. Traced and written up in docs/notes/journal.md; the journal viewer waits on it."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
+      note: "Stashed 2026-10-28/29 work re-applied on main: opcode 17 beams and Saturn's ring are drawn (visible-14/15 added and done, so the count is unchanged); F750's under-attack and F941's incoming-missile alerts, the original's quieter combat log, X for the escape capsule (brake on B), the Modern intro/gravestone through the presenter, no dust while dying, the upscaled console panel and the FFED3D .X reader (ffe-tools inspect-ffed3d). The port's older hostile-engagement AI and safe-system pirate chance were left out in favour of PAR-15/PAR-17."
     }
   ]
 };

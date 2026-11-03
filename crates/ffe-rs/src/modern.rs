@@ -127,13 +127,21 @@ pub fn scale2x(source: &[u32], width: usize, height: usize) -> Vec<u32> {
 
 /// Logical rows a cabin backdrop covers; the console starts below them.
 pub const CABIN_ROWS: usize = 158;
+/// The console panel (primary bitmap 43, 320x43) is drawn at the first row below the cabin;
+/// the frame shows 42 of its rows.
+pub const PANEL_TOP: usize = CABIN_ROWS;
+pub const PANEL_ROWS: usize = LOGICAL_HEIGHT - PANEL_TOP;
+const PANEL_BITMAP_ROWS: usize = 43;
 /// The largest replacement image side accepted.
 const MAX_ART_SIDE: u32 = 8192;
 
-/// A higher-resolution replacement for a cabin backdrop.
+/// A higher-resolution replacement for a full-width band of the frame: a cabin backdrop or
+/// the console panel.
 pub struct Backdrop {
     name: String,
-    /// The original 320x158 art, as the game copies it into the frame.
+    /// The first logical row the band covers.
+    top: usize,
+    /// The original art, as the game copies it into the frame (320 wide).
     original: Vec<u32>,
     /// Every fourth pixel whose colour differs from its right-hand neighbour: the
     /// art's detail, which a flat screen cannot match by chance.
@@ -146,19 +154,25 @@ pub struct Backdrop {
 }
 
 impl Backdrop {
-    /// `original` is the 320x158 cabin; `art` any size, stretched over the same rectangle.
+    /// `original` is the band's rows from `top` (320 wide, e.g. the 320x158 cabin); `art` any
+    /// size, stretched over the same rectangle.
     pub fn new(
         name: &str,
+        top: usize,
         original: Vec<u32>,
         art: Vec<u32>,
         art_size: (usize, usize),
     ) -> Option<Self> {
-        (original.len() == LOGICAL_WIDTH * CABIN_ROWS
+        let rows = original.len() / LOGICAL_WIDTH;
+        (rows > 0
+            && original.len() == LOGICAL_WIDTH * rows
+            && top + rows <= LOGICAL_HEIGHT
             && art_size.0 > 0
             && art.len() == art_size.0 * art_size.1)
             .then(|| Self {
                 name: name.to_owned(),
-                detail: (0..LOGICAL_WIDTH * CABIN_ROWS)
+                top,
+                detail: (0..original.len())
                     .filter(|&i| {
                         i % LOGICAL_WIDTH + 1 < LOGICAL_WIDTH && original[i] != original[i + 1]
                     })
@@ -177,16 +191,22 @@ impl Backdrop {
         &self.name
     }
 
-    /// Whether the frame shows this cabin: at least a quarter of its detail pixels and
+    /// The logical rows the band covers.
+    fn rows(&self) -> usize {
+        self.original.len() / LOGICAL_WIDTH
+    }
+
+    /// Whether the frame shows this art: at least a quarter of its detail pixels and
     /// their (different) right-hand neighbours are in the frame unchanged, which no flat
     /// screen can do. Returns the matching count.
     fn matches(&self, logical: &[u32]) -> Option<usize> {
+        let shown = &logical[self.top * LOGICAL_WIDTH..];
         let count = self
             .detail
             .iter()
             .filter(|&&i| {
                 let i = i as usize;
-                logical[i] == self.original[i] && logical[i + 1] == self.original[i + 1]
+                shown[i] == self.original[i] && shown[i + 1] == self.original[i + 1]
             })
             .count();
         (!self.detail.is_empty() && count * 4 >= self.detail.len()).then_some(count)
@@ -597,7 +617,7 @@ impl ModernRenderer {
             let name = format!("cabin{index}");
             match decode_art(&bytes) {
                 Ok((_, (320, 158))) => {}
-                Ok((art, size)) => match Backdrop::new(&name, original.clone(), art, size) {
+                Ok((art, size)) => match Backdrop::new(&name, 0, original.clone(), art, size) {
                     Some(backdrop) => {
                         report.push(format!(
                             "Modern graphics: {name} replaced by {}x{} art from {}",
@@ -616,6 +636,37 @@ impl ModernRenderer {
             }
         }
         report
+    }
+
+    /// Load a replacement for the console panel (primary bitmap 43) from `path`; `original`
+    /// is the 320x42 of it the frame shows ([`crate::screen::Screen::panel_pixels`]). Art
+    /// still at the original 320x43 is skipped; larger art covers the whole bitmap, so the
+    /// part for its last row, below the frame, is cut off. Says what was used or rejected.
+    pub fn load_panel(&mut self, path: &Path, original: Vec<u32>) -> Option<String> {
+        let bytes = std::fs::read(path).ok()?;
+        let (mut art, size) = match decode_art(&bytes) {
+            Ok(decoded) => decoded,
+            Err(error) => return Some(format!("Modern graphics: {}: {error}", path.display())),
+        };
+        if size == (LOGICAL_WIDTH, PANEL_BITMAP_ROWS) {
+            return None;
+        }
+        let rows = ((size.1 * PANEL_ROWS + PANEL_BITMAP_ROWS / 2) / PANEL_BITMAP_ROWS).max(1);
+        art.truncate(size.0 * rows);
+        let name = "console panel";
+        let Some(backdrop) = Backdrop::new(name, PANEL_TOP, original, art, (size.0, rows)) else {
+            return Some(format!(
+                "Modern graphics: {name}: the game's panel is not 320x{PANEL_ROWS}"
+            ));
+        };
+        self.backdrops.retain(|other| other.name != name);
+        self.backdrops.push(backdrop);
+        Some(format!(
+            "Modern graphics: {name} replaced by {}x{} art from {}",
+            size.0,
+            size.1,
+            path.display()
+        ))
     }
 
     pub fn backdrops(&self) -> &[Backdrop] {
@@ -806,32 +857,50 @@ impl ModernRenderer {
             width,
             rect,
         );
-        self.draw_backdrop(logical, target, width, rect);
+        // The cabin above, the console panel below.
+        for band in [0, PANEL_TOP] {
+            self.draw_backdrop(band, logical, target, width, rect);
+        }
         self.clean = clean;
     }
 
-    /// Where the frame shows a replaced cabin, blend its art over the upscaled frame. The
-    /// cabin is recognised when at least a quarter of its detail is still visible; the mask
-    /// is sampled bilinearly in the frame's own coordinates, so the art meets the text and
-    /// shapes drawn over it with the same smooth edge the upscaled frame has.
-    fn draw_backdrop(&mut self, logical: &[u32], target: &mut [u32], width: usize, rect: Rect) {
+    /// Where the frame shows replaced art in the band starting at logical row `band`, blend
+    /// the art over the upscaled frame. The art is recognised when at least a quarter of its
+    /// detail is still visible; the mask is sampled bilinearly in the frame's own coordinates,
+    /// so the art meets the text and shapes drawn over it with the same smooth edge the
+    /// upscaled frame has.
+    fn draw_backdrop(
+        &mut self,
+        band: usize,
+        logical: &[u32],
+        target: &mut [u32],
+        width: usize,
+        rect: Rect,
+    ) {
         let Some(backdrop) = self
             .backdrops
             .iter_mut()
+            .filter(|backdrop| backdrop.top == band)
             .filter_map(|backdrop| Some((backdrop.matches(logical)?, backdrop)))
             .max_by_key(|(count, _)| *count)
             .map(|(_, backdrop)| backdrop)
         else {
             return;
         };
+        let band_rows = backdrop.rows();
         self.mask.clear();
         self.mask.extend(
-            logical[..LOGICAL_WIDTH * CABIN_ROWS]
+            logical[band * LOGICAL_WIDTH..][..LOGICAL_WIDTH * band_rows]
                 .iter()
                 .zip(&backdrop.original)
                 .map(|(shown, art)| u8::from(shown == art)),
         );
-        let rows = (rect.height * CABIN_ROWS).div_ceil(LOGICAL_HEIGHT);
+        // The window rows the band covers.
+        let first = band * rect.height / LOGICAL_HEIGHT;
+        let last = ((band + band_rows) * rect.height)
+            .div_ceil(LOGICAL_HEIGHT)
+            .min(rect.height);
+        let rows = last - first;
         if backdrop.fitted_size != (rect.width, rows) {
             backdrop.fitted = resize_area(
                 &backdrop.art,
@@ -846,8 +915,8 @@ impl ModernRenderer {
             .collect();
         let shown = &self.mask;
         let mask = |x: usize, y: usize| {
-            if y < CABIN_ROWS {
-                u32::from(shown[y * LOGICAL_WIDTH + x]) << 16
+            if (band..band + band_rows).contains(&y) {
+                u32::from(shown[(y - band) * LOGICAL_WIDTH + x]) << 16
             } else {
                 0
             }
@@ -856,13 +925,13 @@ impl ModernRenderer {
             ((u64::from(a) * u64::from(65536 - weight) + u64::from(b) * u64::from(weight)) >> 16)
                 as u32
         };
-        for dy in 0..rows {
+        for dy in first..last {
             let (y0, y1, fy) = linear_row(dy, rect.height, LOGICAL_HEIGHT);
             let row = (rect.y + dy) * width + rect.x;
             let Some(destination) = target.get_mut(row..row + rect.width) else {
                 continue;
             };
-            let art = &backdrop.fitted[dy * rect.width..][..rect.width];
+            let art = &backdrop.fitted[(dy - first) * rect.width..][..rect.width];
             for ((pixel, &(x0, x1, fx)), &replacement) in
                 destination.iter_mut().zip(&columns).zip(art)
             {
@@ -936,7 +1005,7 @@ mod tests {
         let mut renderer = ModernRenderer::new();
         renderer
             .backdrops
-            .push(Backdrop::new("cabin0", original.clone(), art, (640, 316)).unwrap());
+            .push(Backdrop::new("cabin0", 0, original.clone(), art, (640, 316)).unwrap());
         let mut logical = vec![0x202020; LOGICAL_WIDTH * LOGICAL_HEIGHT];
         logical[..LOGICAL_WIDTH * CABIN_ROWS].copy_from_slice(&original);
         // A block of "text" over the cabin.
@@ -963,6 +1032,42 @@ mod tests {
             renderer.render(&other, &mut target, 1280, rect);
             assert_eq!(target[10 * 1280 + 10], flat);
         }
+    }
+
+    #[test]
+    fn a_replaced_panel_shows_below_the_view_and_not_under_the_scanner() {
+        // A panel with detail below a flat view, a "scanner" drawn over part of it.
+        let original: Vec<u32> = (0..LOGICAL_WIDTH * PANEL_ROWS)
+            .map(|i| if i % 2 == 0 { 0x101010 } else { 0x111111 })
+            .collect();
+        let mut renderer = ModernRenderer::new();
+        renderer.backdrops.push(
+            Backdrop::new(
+                "console panel",
+                PANEL_TOP,
+                original.clone(),
+                vec![0xabcdef; 640 * 84],
+                (640, 84),
+            )
+            .unwrap(),
+        );
+        let mut logical = vec![0x202020; LOGICAL_WIDTH * LOGICAL_HEIGHT];
+        logical[PANEL_TOP * LOGICAL_WIDTH..].copy_from_slice(&original);
+        for y in 170..190 {
+            logical[y * LOGICAL_WIDTH + 100..y * LOGICAL_WIDTH + 140].fill(0xffffff);
+        }
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 800,
+        };
+        let mut target = vec![0; 1280 * 800];
+        renderer.render(&logical, &mut target, 1280, rect);
+        assert_eq!(target[790 * 1280 + 10] & 0xffffff, 0xabcdef);
+        assert_eq!(target[720 * 1280 + 480], 0xffffff);
+        // The view above is not touched.
+        assert_eq!(target[100 * 1280 + 10], 0x202020);
     }
 
     #[test]

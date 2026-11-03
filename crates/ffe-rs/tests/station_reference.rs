@@ -317,6 +317,8 @@ fn executed_reference_station_queues() {
                 QueueEvent::ThrusterLine(key) => Some([8, 0, *key]),
                 // Points, lines and chains stay hooked in the probe and are not queued there.
                 QueueEvent::Point(_) | QueueEvent::Line(_) | QueueEvent::Chain(_) => None,
+                // F1761 beams are not hooked by the probe yet.
+                QueueEvent::Beam(_) => None,
             })
             .collect();
         assert_eq!(

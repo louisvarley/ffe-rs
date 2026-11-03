@@ -542,3 +542,53 @@ fn the_last_credits_wrap_inside_the_screen() {
     screen.draw_intro(Some(&scene), 0x77a7d8, false).unwrap();
     assert_eq!(&first[..], &screen.logical_pixels()[..320 * 200]);
 }
+
+/// Modern graphics: with `capture` the intro's model faces go to the GPU view
+/// (a world with batches, the frame without them) and its credits to the
+/// replacement font's text layer; Classic's frame is unchanged afterwards.
+#[test]
+#[ignore = "Local-only intro frame render; set FFE_INTRO_CACHE to a v28 data.bin"]
+fn modern_graphics_get_the_intro_model_and_credits() {
+    use ffe_rs::front_end::{IntroTimeline, INTRO_END, TICS_PER_FRAME};
+    let cache = cache();
+    let mut screen = Screen::new(&cache).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    screen.capture = true;
+    screen.draw_intro(Some(&viewer), 0x10000, false).unwrap();
+    screen.capture = false;
+    let world = screen.world().expect("the intro sets its model aside");
+    assert!(world.batches.iter().any(|batch| !batch.is_empty()));
+    assert!(world.sky.is_none() && world.dust.is_empty());
+    // Model 176 (the planet, the nebula, the asteroids and the ship): the planet's ring stays
+    // the original's pixels, so the nebula painted before it is in the frame, not on the GPU
+    // (where its near quads would cover the planet).
+    screen.take_text();
+    screen.capture = true;
+    screen.draw_intro(Some(&viewer), 0x90000, false).unwrap();
+    screen.capture = false;
+    let world = screen.world().expect("the intro sets its model aside");
+    assert!(world.atmospheres.is_empty());
+    let nebula = world
+        .batches
+        .iter()
+        .flatten()
+        .filter_map(|solid| solid.texture.as_ref())
+        .any(|texture| (53..=58).contains(&(texture.bitmap & 0xfff)));
+    assert!(!nebula, "the nebula is on the GPU in front of the planet");
+    assert!(world.batches.iter().flatten().count() > 100);
+    screen.take_text();
+    screen.draw_intro(Some(&viewer), 0x10000, false).unwrap();
+    assert!(screen.world().is_none());
+    assert_eq!(frame_hash(&screen), 1_567_273_124_356_204_709);
+    // A frame with credits: every one reaches the text layer with its shadow.
+    let tics = (0x400..INTRO_END)
+        .step_by(TICS_PER_FRAME as usize * 25)
+        .find(|&tics| !IntroTimeline::at(tics).lines.is_empty())
+        .expect("the intro shows credits");
+    screen.take_text();
+    screen.draw_intro(Some(&viewer), tics, false).unwrap();
+    let text = screen.take_text();
+    assert!(!text.glyphs.is_empty());
+    assert_eq!(text.glyphs.len() % 2, 0);
+    assert_eq!(text.glyphs[0].x, text.glyphs[1].x + 1);
+}

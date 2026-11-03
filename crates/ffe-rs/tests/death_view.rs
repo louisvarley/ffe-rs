@@ -216,3 +216,66 @@ fn f1098s_capsule_escape_frame() {
     assert_eq!(death::EscapeCraft::Capsule.model(), 14);
     assert_eq!(death::EscapeCraft::Stowmaster.model(), 16);
 }
+
+/// Port deviation (`docs/DEVIATIONS.md`, 2026-10-29): from the player's death
+/// through the explosion and the death camera neither F1035's dust motes nor
+/// Modern's speed dust are drawn.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn no_dust_is_drawn_while_the_player_dies() {
+    let cache = cache();
+    let (_nav, mut state, _at) = start(&cache);
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let views = ViewState::default();
+    state.velocity = [0.0, 0.0, 2000.0];
+    let axes = state.axes.unwrap();
+    // A cloud of motes ahead of the ship, at the dust model's nearest scale.
+    let scale = viewer
+        .find(ffe_core::dust::MODEL)
+        .map(|model| (model.scale as i32 - 7).max(0) as u32);
+    let motes: Vec<ffe_rs::screen::SystemEffect> = (-4..=4)
+        .flat_map(|x| (-3..=3).map(move |y| (x, y)))
+        .map(|(x, y)| ffe_rs::screen::SystemEffect {
+            model: ffe_core::dust::MODEL,
+            centre: std::array::from_fn(|k| {
+                state.position[k]
+                    + axes[2][k] * 40.0
+                    + axes[0][k] * f64::from(x) * 4.0
+                    + axes[1][k] * f64::from(y) * 4.0
+            }),
+            axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            timer: 0,
+            size: 0,
+            scale,
+        })
+        .collect();
+    let frame = |state: &Flight, dust: bool, capture: bool| {
+        let mut screen = Screen::new(&cache).unwrap();
+        screen.capture = capture;
+        if dust {
+            screen.effects = motes.clone();
+        }
+        screen.draw(state, views, Some(&viewer), true, "");
+        let world = screen.world().cloned();
+        (screen.logical_pixels().to_vec(), world)
+    };
+    let (alive, _) = frame(&state, true, false);
+    let (clear, _) = frame(&state, false, false);
+    assert!(
+        changed(&clear, &alive) > 0,
+        "the test's motes are not visible"
+    );
+    assert_eq!(death::begin(&mut state, None), Outcome::Destroyed);
+    for seconds in [0.0, 1.0, death::GAME_OVER_SECONDS - 0.1] {
+        let mut dying = state.clone();
+        dying.death.as_mut().unwrap().tick(seconds);
+        let (with, without) = (frame(&dying, true, false).0, frame(&dying, false, false).0);
+        assert_eq!(
+            changed(&with, &without),
+            0,
+            "dust drawn {seconds} s into the death"
+        );
+        let (_, world) = frame(&dying, true, true);
+        assert!(world.is_some_and(|world| world.dust.is_empty()));
+    }
+}

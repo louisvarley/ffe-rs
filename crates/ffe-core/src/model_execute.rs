@@ -315,6 +315,8 @@ pub enum QueueEvent {
     ThrusterLine(u32),
     /// An F1814 particle chain (F1766).
     Chain(u32),
+    /// An F1761 beam (opcode 17): a complex-polygon entry keyed by its midpoint.
+    Beam(u32),
 }
 
 /// One render-order entry.
@@ -334,6 +336,17 @@ pub enum Primitive {
     /// names the text ([`TextEmission::queued`]); the caller draws its glyphs
     /// here.
     Text(usize),
+    /// F1760/F1761: a beam (a ship's landing-gear leg), one complex-polygon entry.
+    Beam(BeamEmission),
+}
+
+/// One beam F1761 queued: its record, the vertex context it ran in (the instance
+/// colour for its materials) and the fills it built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BeamEmission {
+    pub beam: crate::model_commands::Beam,
+    pub context: VertexContext,
+    pub outline: crate::model_beam::BeamOutline,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1461,9 +1474,48 @@ fn run(
                 result.blocks.push(BlockEmission { offset, key });
                 Some(command.size as i32)
             }
-            // Beams (17): operand records only; their drawing is not ported and
-            // they are absent from `ordered`.
-            17 => Some(command.size as i32),
+            // Beams (17): F1760 passes the six words to F1761, which projects both
+            // vertices (F1471), builds the tube and queues it by its midpoint.
+            17 => {
+                if let Some(live) = vertices.as_deref_mut() {
+                    for beam in program.beams.iter().filter(|b| b.offset == offset) {
+                        let mut end = |index: u8| {
+                            live.resolve(
+                                index as i8,
+                                working,
+                                instance.position,
+                                instance.generation,
+                                true,
+                            )
+                        };
+                        let a = end(beam.vertices[0])?;
+                        let b = end(beam.vertices[1])?;
+                        let inputs = crate::model_beam::BeamInputs {
+                            matrix: working.matrix,
+                            scale: instance.operand_scale,
+                            key_scale: instance.key_scale,
+                            normal_records: live.normal_records(),
+                            light: frame.light,
+                            normals: visibility.normals,
+                        };
+                        let outline = crate::model_beam::run(beam, &a, &b, &inputs)
+                            .map_err(|error| format!("{error} (beam at {offset:#x})"))?;
+                        if let (Some(outline), Some(queue)) = (outline, shared.order.as_mut()) {
+                            let key = outline.key;
+                            queue.push(
+                                key,
+                                Primitive::Beam(BeamEmission {
+                                    beam: beam.clone(),
+                                    context: working.clone(),
+                                    outline,
+                                }),
+                            )?;
+                            shared.queue.push(QueueEvent::Beam(key));
+                        }
+                    }
+                }
+                Some(command.size as i32)
+            }
             24 => {
                 for chain in program.chains.iter().filter(|c| c.offset == offset) {
                     let mut emission = ChainEmission {

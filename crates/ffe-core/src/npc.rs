@@ -740,6 +740,9 @@ pub const MAX_POLICE_PATROLS: usize = 4;
 pub const RESPONSE_SPEED: f64 = 2.0e6;
 pub const RESPONSE_ACCEL: f64 = 2.0e5;
 pub const RESPONSE_ARRIVE: f64 = 5.0e6;
+/// F750's switch to combat: F596's distance exponent below 10, i.e. inside
+/// `2^(13+10)` mm (the same length as F931's laser range).
+pub const COMBAT_RANGE: f64 = (1u64 << 23) as f64;
 /// F1536's model-0x9d flash stays for this many seconds (the original clears the
 /// flag on the next frame; a short visible flash replaces it in the port).
 pub const FLASH_SECONDS: f64 = 0.25;
@@ -1128,6 +1131,11 @@ pub struct NpcShip {
     /// Port addition: a police or military ship called in on a wanted
     /// player, flying in at [`RESPONSE_SPEED`] from wherever it patrolled.
     pub responding: bool,
+    /// F750: this hostile has closed into [`COMBAT_RANGE`] of the player and
+    /// entered combat (state 1); cleared when it stops attacking the player.
+    pub in_combat: bool,
+    /// F750's battle alert, waiting for the caller ([`Self::take_alert`]).
+    pub alert: bool,
     /// Port addition (Advanced traffic): another ship this one is fighting
     /// or running from, flown at in place of the player.
     pub npc_target: Option<u32>,
@@ -1236,6 +1244,8 @@ impl NpcShip {
             pass: 0.0,
             flee: 0.0,
             responding: false,
+            in_combat: false,
+            alert: false,
             npc_target: None,
             contract: None,
             flash: 0.0,
@@ -1443,6 +1453,12 @@ impl NpcShip {
         self.flee = 0.0;
         self.responding = true;
         true
+    }
+
+    /// F750's battle alert since the last call: this ship entered combat
+    /// with the player.
+    pub fn take_alert(&mut self) -> bool {
+        std::mem::take(&mut self.alert)
     }
 
     /// The right/up/forward axes, as `screen` and the camera use them.
@@ -1743,6 +1759,17 @@ impl NpcShip {
         };
         let to = sub(target, self.position);
         let distance = length(to);
+        // F750: a hostile attacking the player enters combat inside
+        // COMBAT_RANGE; the caller drops time to 1x and sounds the alert.
+        let hunting = self.hostile
+            && self.npc_target.is_none()
+            && matches!(self.state, State::Attack | State::Pass);
+        if !hunting {
+            self.in_combat = false;
+        } else if !self.in_combat && distance < COMBAT_RANGE {
+            self.in_combat = true;
+            self.alert = true;
+        }
         if let Some(limits) = self.limits {
             // The original's object physics (F727/F725): F597's guidance to the
             // state's target, F601's thrust integration within the statistics'
@@ -1806,7 +1833,7 @@ impl NpcShip {
             // pass (the original's overshoot branch) instead of braking.
             if self.state == State::Attack
                 && self.speed > 0.5 * self.max_speed
-                && distance < 4.0 * STANDOFF
+                && (STANDOFF..4.0 * STANDOFF).contains(&distance)
                 && self.speed * self.speed > 2.0 * self.accel * (distance - STANDOFF).max(0.0)
             {
                 self.state = State::Pass;
@@ -2512,6 +2539,8 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             pass: 0.0,
             flee: 0.0,
             responding: false,
+            in_combat: false,
+            alert: false,
             npc_target: None,
             contract: None,
             flash: 0.0,
@@ -3435,9 +3464,11 @@ fn turn_toward(from: [f64; 3], to: [f64; 3], amount: f64) -> [f64; 3] {
         return from;
     }
     let t = (amount / angle).clamp(0.0, 1.0);
-    // Spherical interpolation of unit vectors.
+    // Spherical interpolation of unit vectors. Nearly opposite vectors have no
+    // stable plane (the interpolation cancels back to `from` and the ship never
+    // turns), so they swing round at once, as exactly opposite ones always did.
     let sin = angle.sin();
-    if sin.abs() < 1e-9 {
+    if sin.abs() < 1e-6 {
         return to;
     }
     let a = ((1.0 - t) * angle).sin() / sin;
@@ -3502,6 +3533,12 @@ mod tests {
         // 20 ms at 1x is 994 tics.
         let tics = (994.0 * seconds / 0.02) as u32;
         ship.tick(seconds, tics, player, None);
+    }
+
+    #[test]
+    fn a_ship_facing_directly_away_still_turns() {
+        let turned = turn_toward([1.0, 0.0, 0.0], [-0.9999999999999999, 0.0, 0.0], 0.1);
+        assert_eq!(turned, [-0.9999999999999999, 0.0, 0.0]);
     }
 
     #[test]

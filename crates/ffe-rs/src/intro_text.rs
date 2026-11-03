@@ -14,6 +14,7 @@
 
 use crate::front_end::IntroLine;
 use crate::indexed::BitmapFont;
+use crate::modern::{TextGlyph, TextLayer};
 
 /// The raw credits and the character-width table from the cache (v27).
 pub struct IntroText {
@@ -156,13 +157,15 @@ impl IntroText {
     }
 
     /// F1587/F1589: draw one credit with a one-pixel black shadow, clipped to
-    /// the 320x200 display. `x`/`y` are the call's start position.
+    /// the 320x200 display. `x`/`y` are the call's start position. Each shadow
+    /// and glyph is also recorded in `layer`, for the modern engine's font.
     pub fn draw(
         &self,
         line: &IntroLine,
         font: &BitmapFont,
         palette: &[u32; 128],
         frame: &mut [u32],
+        layer: &mut TextLayer,
     ) -> Result<(), String> {
         let text = self.wrap(self.bytes(line)?, line.wrap);
         let mut x = line.x;
@@ -211,19 +214,33 @@ impl IntroText {
                         if let Some(glyph) = font.glyph(byte) {
                             // F1589 draws the shadow first at (+1,+1), then the
                             // glyph, so the glyph wins where they overlap.
-                            for (col, row) in glyph.pixels() {
-                                let sx = x + col as i32 + 1;
-                                let sy = y + row as i32 + 1;
-                                if (0..320).contains(&sx) && (0..200).contains(&sy) {
-                                    frame[sy as usize * 320 + sx as usize] = palette[0];
+                            for (dx, value) in [(1, palette[0]), (0, palette[usize::from(colour)])]
+                            {
+                                if layer.glyphs.len() >= TextLayer::LIMIT {
+                                    *layer = TextLayer::default();
                                 }
-                            }
-                            for (col, row) in glyph.pixels() {
-                                let px = x + col as i32;
-                                let py = y + row as i32;
-                                if (0..320).contains(&px) && (0..200).contains(&py) {
-                                    frame[py as usize * 320 + px as usize] =
-                                        palette[usize::from(colour)];
+                                let first = layer.pixels.len();
+                                for (col, row) in glyph.pixels() {
+                                    let px = x + col as i32 + dx;
+                                    let py = y + row as i32 + dx;
+                                    if (0..320).contains(&px) && (0..200).contains(&py) {
+                                        let at = py as usize * 320 + px as usize;
+                                        layer.pixels.push((at as u32, frame[at], value));
+                                        frame[at] = value;
+                                    }
+                                }
+                                let last = layer.pixels.len();
+                                if last > first {
+                                    layer.glyphs.push(TextGlyph {
+                                        code: byte,
+                                        x: x + dx,
+                                        y: y + dx,
+                                        advance: glyph.advance as u8,
+                                        colour: value,
+                                        top: 0,
+                                        bottom: 200,
+                                        pixels: first..last,
+                                    });
                                 }
                             }
                             x += glyph.advance as i32;
@@ -340,13 +357,40 @@ mod tests {
         let intro = text(vec![raw], widths(5));
         let mut frame = vec![0u32; 320 * 200];
         let palette: [u32; 128] = std::array::from_fn(|index| index as u32 + 1);
+        let mut layer = TextLayer::default();
         intro
-            .draw(&line(0, 10, 20, 0), &font(), &palette, &mut frame)
+            .draw(
+                &line(0, 10, 20, 0),
+                &font(),
+                &palette,
+                &mut frame,
+                &mut layer,
+            )
             .unwrap();
         // A at (10,20) and its shadow at (11,21); B at (76,126).
         assert_eq!(frame[20 * 320 + 10], palette[15]);
         assert_eq!(frame[21 * 320 + 11], palette[0]);
         assert_eq!(frame[126 * 320 + 76], palette[15]);
+        // The modern engine's font sees each shadow, then its glyph, at their pens.
+        let pens: Vec<_> = layer
+            .glyphs
+            .iter()
+            .map(|glyph| (glyph.code, glyph.x, glyph.y, glyph.colour))
+            .collect();
+        assert_eq!(
+            pens,
+            [
+                (b'A', 11, 21, palette[0]),
+                (b'A', 10, 20, palette[15]),
+                (b'B', 77, 127, palette[0]),
+                (b'B', 76, 126, palette[15]),
+            ]
+        );
+        // Undoing the recorded pixels in reverse leaves the frame as it was.
+        for &(at, old, _) in layer.pixels.iter().rev() {
+            frame[at as usize] = old;
+        }
+        assert!(frame.iter().all(|&pixel| pixel == 0));
     }
 
     #[test]

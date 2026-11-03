@@ -15,6 +15,7 @@ Usage:
   ffe-tools inspect-data --data <file> [--json]
   ffe-tools verify-reference --vectors <jsonl> --state <jsonl> [--json]
   ffe-tools model-census [--game <directory>] [--json]
+  ffe-tools inspect-ffed3d --dir <ffed3d folder> [--json]
   ffe-tools --help
   ffe-tools --version
 
@@ -35,6 +36,8 @@ inspect-data verifies every entry. Bounded native command execution is not yet
 complete station rendering. Submodels, gameplay tables, the other 16 songs and full conversion remain absent.
 verify-reference compares fixed legacy RNG/timer vectors and bounded new-game
 clock transitions against native Rust primitives. It is not full flight validation.
+inspect-ffed3d reads every replacement model in your own FFED3D download (read-only)
+and reports what the game's Modern graphics would use.
 model-census reports, read-only, how far each of the 465 original models gets
 through native import, decoding and execution, and what blocks the rest.
 ";
@@ -48,6 +51,7 @@ enum Command {
     InspectData,
     VerifyReference,
     ModelCensus,
+    InspectFfed3d,
 }
 
 struct Options {
@@ -85,6 +89,8 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
         Command::VerifyReference
     } else if command == "model-census" {
         Command::ModelCensus
+    } else if command == "inspect-ffed3d" {
+        Command::InspectFfed3d
     } else {
         return Err("Unknown command. Use --help for usage.".to_owned());
     };
@@ -137,6 +143,9 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
             } else {
                 state = Some(PathBuf::from(value));
             }
+        } else if arg == "--dir" && command == Command::InspectFfed3d && data.is_none() {
+            let value = args.next().ok_or("--dir requires a folder.")?;
+            data = Some(PathBuf::from(value));
         } else if arg == "--json" && !json {
             json = true;
         } else {
@@ -217,6 +226,46 @@ fn run() -> Result<u8, String> {
         return Ok(0);
     }
     let options = parse_options(args)?;
+    if options.command == Command::InspectFfed3d {
+        let dir = options
+            .data
+            .as_deref()
+            .ok_or("inspect-ffed3d requires --dir <folder>.")?;
+        let report = ffe_tools::ffed3d::inspect_ffed3d(dir)?;
+        if options.json {
+            serde_json::to_writer_pretty(&mut output, &report)
+                .map_err(|error| error.to_string())?;
+            writeln!(output).map_err(|error| error.to_string())?;
+        } else {
+            writeln!(
+                output,
+                "{}: {} of {} model folders readable",
+                report.models_dir,
+                report.readable,
+                report.models.len()
+            )
+            .map_err(|error| error.to_string())?;
+            for row in &report.models {
+                let status = match &row.error {
+                    Some(error) => format!("ERROR {error}"),
+                    None => format!(
+                        "{} triangles, {} materials, {} skins{}",
+                        row.triangles,
+                        row.materials,
+                        row.skins,
+                        if row.missing_skins.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", missing {}", row.missing_skins.join(" "))
+                        }
+                    ),
+                };
+                writeln!(output, "  {:>4}  {status}", row.slot)
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        return Ok(0);
+    }
     if options.command == Command::ModelCensus {
         let census = ffe_tools::census::model_census(&options.game)?;
         if options.json {

@@ -421,7 +421,7 @@ impl Prefs {
                 rows.push(row(
                     32,
                     68,
-                    "Port Options",
+                    "Advanced Options",
                     Action::Page(PORT),
                     Mark::Action,
                     true,
@@ -637,7 +637,7 @@ impl Prefs {
                 rows.push(row(
                     32,
                     126,
-                    "Port Options",
+                    "Advanced Options",
                     Action::Page(PORT),
                     Mark::Action,
                     true,
@@ -702,7 +702,7 @@ impl Prefs {
                 rows.push(row(
                     32,
                     126,
-                    "Port Options",
+                    "Advanced Options",
                     Action::Page(PORT),
                     Mark::Action,
                     true,
@@ -892,7 +892,7 @@ impl Prefs {
                 texts.push(Text {
                     x: 32,
                     y: 18,
-                    text: "Port options:",
+                    text: "Advanced options:",
                     colour: 18,
                 });
                 texts.push(Text {
@@ -906,36 +906,6 @@ impl Prefs {
                     y: 28,
                     text: "Graphics (Ctrl+G):",
                     colour: 15,
-                });
-                texts.push(Text {
-                    x: 48,
-                    y: 62,
-                    text: "Modern: W/S thrust, arrows steer, Q/E roll.",
-                    colour: 15,
-                });
-                texts.push(Text {
-                    x: 48,
-                    y: 72,
-                    text: "Classic: hold right mouse and move to steer.",
-                    colour: 15,
-                });
-                texts.push(Text {
-                    x: 48,
-                    y: 82,
-                    text: "Enter/Shift thrust; ,/. yaw; A/Z pitch; [ ] roll.",
-                    colour: 15,
-                });
-                texts.push(Text {
-                    x: 48,
-                    y: 92,
-                    text: "These rows switch the preset; docs/CONTROLS.md.",
-                    colour: 15,
-                });
-                texts.push(Text {
-                    x: 32,
-                    y: 146,
-                    text: "Port additions, not in the original DOS release.",
-                    colour: 18,
                 });
             }
             WORLD => {
@@ -972,14 +942,8 @@ impl Prefs {
                 texts.push(Text {
                     x: 176,
                     y: 96,
-                    text: "Advanced traffic:",
+                    text: "Advanced NPCs:",
                     colour: 16,
-                });
-                texts.push(Text {
-                    x: 32,
-                    y: 146,
-                    text: "Port additions, not in the original DOS release.",
-                    colour: 18,
                 });
             }
             DOCKING => {
@@ -1012,12 +976,6 @@ impl Prefs {
                     y: 110,
                     text: "music, time to 1x, then the approach.",
                     colour: 15,
-                });
-                texts.push(Text {
-                    x: 32,
-                    y: 146,
-                    text: "Port additions, not in the original DOS release.",
-                    colour: 18,
                 });
             }
             DISPLAY => {
@@ -1263,7 +1221,7 @@ mod tests {
                 "Sound Effects",
                 "Others",
                 "Maps",
-                "Port Options",
+                "Advanced Options",
                 "Quit",
                 "Load",
                 "Save",

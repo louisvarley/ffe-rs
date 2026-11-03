@@ -684,6 +684,9 @@ pub struct Screen {
     icons: Vec<Option<IndexedImage>>,
     /// The navigation list's marker, primary bitmap 0x31.
     marker: Option<IndexedImage>,
+    /// The lit (red) square, primary bitmap 0x2c: the Improved contacts
+    /// list's selected ship, against 0x31 for the rest.
+    marker_lit: Option<IndexedImage>,
     /// The docked screen's row button and arrows: primary bitmaps 0x2e, 0x2f
     /// and 0x30 (F328/F330).
     dock_icons: [Option<IndexedImage>; 3],
@@ -818,14 +821,15 @@ impl Screen {
                 }
             })
             .collect();
-        // The navigation list's 10x10 marker button (bitmap 0x31, primary table).
-        let marker_id = crate::console::NAV_MARKER_BITMAP;
-        screen.marker = cache
-            .manifest()
-            .files
-            .iter()
-            .find(|record| record.id == marker_id)
-            .and_then(|record| match record.asset {
+        // The navigation list's 10x10 marker button (bitmap 0x31, primary table),
+        // and the lit square (0x2c) the contacts list uses for its selection.
+        let bitmap = |id: &str| {
+            let record = cache
+                .manifest()
+                .files
+                .iter()
+                .find(|record| record.id == id)?;
+            match record.asset {
                 AssetKind::IndexedBitmap {
                     width,
                     height,
@@ -838,11 +842,14 @@ impl Screen {
                     height,
                     [offset_x, offset_y],
                     masked_zero,
-                    cache.asset(marker_id)?,
+                    cache.asset(id)?,
                 )
                 .ok(),
                 _ => None,
-            });
+            }
+        };
+        screen.marker = bitmap(crate::console::NAV_MARKER_BITMAP);
+        screen.marker_lit = bitmap(crate::enhanced_combat::SELECTED_MARKER_BITMAP);
         screen.dock_icons = std::array::from_fn(|k| {
             let asset_id = format!("base:bitmap/primary/{:03}", 0x2e + k);
             let record = cache.manifest().files.iter().find(|r| r.id == asset_id)?;
@@ -1177,6 +1184,7 @@ impl Screen {
             lock: String::new(),
             icons: Vec::new(),
             marker: None,
+            marker_lit: None,
             dock_icons: [None, None, None],
             prefs_on: None,
             prefs_off: None,
@@ -1543,31 +1551,30 @@ impl Screen {
             let Some((x, y)) = aids::contact_cell(index) else {
                 break;
             };
+            // The navigation computer's square (0x31), lit (0x2c) for the
+            // selected ship.
+            let marker = if contact.locked {
+                self.marker_lit.as_ref()
+            } else {
+                self.marker.as_ref()
+            };
+            if let Some(marker) = marker {
+                marker.blit_colours(&mut self.frame, &self.palette, x, y);
+            } else {
+                let colour = if contact.locked { 18 } else { 12 };
+                self.rect(x as usize, y as usize, 10, 10, colour);
+            }
+            // The name (with its id) and the range, right-aligned against the
+            // square: red for a ship hostile to the player, white for the rest.
             let colour = if contact.hostile {
                 aids::HOSTILE_COLOUR
             } else {
-                aids::FRIENDLY_COLOUR
+                aids::PLAIN_COLOUR
             };
-            // A filled box for the locked ship, an outline for the rest.
-            if contact.locked {
-                self.rect(x as usize, y as usize, 10, 10, colour);
-            } else {
-                self.line((x, y), (x + 9, y), colour);
-                self.line((x + 9, y), (x + 9, y + 9), colour);
-                self.line((x + 9, y + 9), (x, y + 9), colour);
-                self.line((x, y + 9), (x, y), colour);
-            }
-            // The name (with its id) and the range, right-aligned against
-            // the box, in the combat target's red.
             let name = contact.name.to_ascii_uppercase();
             for (line, text) in [(0, name.as_str()), (9, contact.range.as_str())] {
                 let left = (aids::CONTACT_TEXT_RIGHT - self.text_width(text)).max(0);
-                self.text(
-                    left as usize,
-                    (y + line) as usize,
-                    text,
-                    aids::HOSTILE_COLOUR,
-                );
+                self.text(left as usize, (y + line) as usize, text, colour);
             }
         }
     }
@@ -1644,6 +1651,17 @@ impl Screen {
                             .unwrap_or(radius / disc.radius);
                         let mut position = camera.point(disc.centre).map(|v| v * factor);
                         viewer.surface_seed.set(seed);
+                        // The object's `+0xa0` words: global 2 >> 14 picks the ring
+                        // (model 134 calls child 314 only when it is non-zero; Saturn's
+                        // seed low word 0xffa1 gives 3). The old test input left it 0,
+                        // so no planet ever drew a ring.
+                        let mut inputs = AnimationInputs::test(0);
+                        inputs.globals[2] = seed as u16;
+                        inputs.globals[3] = (seed >> 16) as u16;
+                        // F1680's instance +0x130 is the descriptor scale offset, which
+                        // F1750 subtracts from the ring child's scale. With 0 the child
+                        // shifted by 31 and its geometry overflowed.
+                        let key_scale = viewer.model_scale_offset(model).unwrap_or(0);
                         let light = camera.direction(disc.light);
                         // The view space is 32-bit: a distant planet is drawn through a
                         // matrix shrunk by a power of two (the position shrinks with it),
@@ -1662,7 +1680,9 @@ impl Screen {
                         let rows = disc
                             .orientation
                             .map(|axis| camera.direction(axis).map(|v| v * shrunk));
-                        if let Ok(frame) = viewer.render_scene(model, rows, position, light) {
+                        if let Ok(frame) = viewer.render_scene_with_instance(
+                            model, rows, position, light, &inputs, key_scale,
+                        ) {
                             self.draw_frame(viewer, &frame);
                             continue;
                         }
@@ -1955,6 +1975,14 @@ impl Screen {
     /// The six cabin backdrops (320x158 RGB each), in F955's order.
     pub fn cabin_pixels(&self) -> &[Vec<u32>] {
         &self.cabins
+    }
+
+    /// The console panel (primary bitmap 43) as the frame shows it below the view: 320x42 RGB.
+    pub fn panel_pixels(&self) -> Vec<u32> {
+        let mut frame = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];
+        self.panel
+            .blit_rgb(&mut frame, &self.palette, 0, VIEW_HEIGHT as i32);
+        frame.split_off(VIEW_HEIGHT * LOGICAL_WIDTH)
     }
 
     /// The expanded fixed low palette, for tests that check a drawn colour.
@@ -2403,8 +2431,9 @@ impl Screen {
         tics: u32,
         version: bool,
     ) -> Result<(), String> {
-        // A whole screen of its own: no 3-D view for the modern engine.
-        self.world = None;
+        // With `capture` the model's faces go to the modern engine like the flight
+        // view's: the intro's model is drawn in the same 320x158 view.
+        self.begin_scene();
         use crate::front_end::{IntroTimeline, PRIMARY_BITMAP_Y, VERSION_LINE};
         let intro = IntroTimeline::at(tics);
         let background = pack(intro.background) & 0xfff;
@@ -2420,7 +2449,13 @@ impl Screen {
             // `DATA_008812` is 1 by the time the intro loop runs (the executed
             // boot's default Shape Detail); the scene was wrongly built at 2,
             // whose finer subdivision aliased the band textures into speckle.
-            viewer.set_surface_detail(self.surface_detail);
+            // The modern engine draws the surface finer, as in flight.
+            let finer = if self.capture {
+                crate::modern3d::TERRAIN_DETAIL
+            } else {
+                0
+            };
+            viewer.set_surface_detail(self.surface_detail + finer);
         }
         let model = match scene {
             Some(viewer) if intro.model != 0 => {
@@ -2471,7 +2506,11 @@ impl Screen {
             .unwrap_or(self.palette[0]);
         self.frame[..LOGICAL_WIDTH * LOGICAL_HEIGHT].fill(clear);
         if let (Some(viewer), Some(frame)) = (scene, model) {
-            self.draw_shapes(viewer, &frame.shapes);
+            self.draw_frame_layered(viewer, &frame);
+        }
+        // The world phase ends here: the bitmap and the credits lie over the model.
+        if let Some(viewer) = scene.filter(|_| self.capture) {
+            self.end_scene(viewer, false);
         }
         if intro.bitmap {
             let bitmap = self
@@ -2488,10 +2527,22 @@ impl Screen {
             .as_ref()
             .ok_or("Cache lacks the intro credits/widths (cache v27).")?;
         for line in &intro.lines {
-            text.draw(line, &self.font, &self.palette, &mut self.frame)?;
+            text.draw(
+                line,
+                &self.font,
+                &self.palette,
+                &mut self.frame,
+                &mut self.text_layer,
+            )?;
         }
         if version && tics >= crate::front_end::INTRO_INPUT_FROM {
-            text.draw(&VERSION_LINE, &self.font, &self.palette, &mut self.frame)?;
+            text.draw(
+                &VERSION_LINE,
+                &self.font,
+                &self.palette,
+                &mut self.frame,
+                &mut self.text_layer,
+            )?;
         }
         self.present();
         Ok(())
@@ -2673,6 +2724,7 @@ impl Screen {
                     dust: std::mem::take(&mut self.dust),
                     hud: Vec::new(),
                     crisp: Vec::new(),
+                    full_screen: false,
                 });
                 let deferred = std::mem::take(&mut self.deferred);
                 self.draw_shapes(viewer, &deferred);
@@ -2690,7 +2742,8 @@ impl Screen {
                     unit[k] = 1.0;
                     camera.direction(unit).map(|c| c as f32)
                 };
-                if self.dust_visible && state.mode == Mode::Flight {
+                // No dust while the player dies (`docs/DEVIATIONS.md`, 2026-10-29).
+                if self.dust_visible && state.mode == Mode::Flight && state.death.is_none() {
                     self.speed_dust(state, &views, &camera);
                 }
                 self.sky_view = Some(crate::modern3d::SkyView {
@@ -2888,6 +2941,7 @@ impl Screen {
                     dust: std::mem::take(&mut self.dust),
                     hud: Vec::new(),
                     crisp: Vec::new(),
+                    full_screen: false,
                 });
                 if let Some(scene) = scene {
                     let deferred = std::mem::take(&mut self.deferred);
@@ -3364,6 +3418,115 @@ impl Screen {
         self.world.as_ref()
     }
 
+    /// Start a whole screen drawn from one model (the intro, the tombstone): nothing set aside
+    /// for the modern engine yet.
+    fn begin_scene(&mut self) {
+        self.world = None;
+        self.batches.clear();
+        self.atmospheres.clear();
+        self.lights.clear();
+        self.eclipses.clear();
+        self.body_batches.clear();
+        self.casters.clear();
+        self.star = None;
+        self.dust.clear();
+        self.glowing.clear();
+        self.burning.clear();
+        self.sky_view = None;
+        self.bitmaps.clear();
+        self.deferred.clear();
+    }
+
+    /// End such a screen's world phase (`capture` only): what was set aside becomes the modern
+    /// engine's [`crate::modern3d::World`] (no sky, no dust), and the shapes the objects draw
+    /// over their faces are drawn over it.
+    fn end_scene(&mut self, viewer: &ModelViewer, full_screen: bool) {
+        self.world = Some(crate::modern3d::World {
+            batches: std::mem::take(&mut self.batches),
+            atmospheres: std::mem::take(&mut self.atmospheres),
+            lights: std::mem::take(&mut self.lights),
+            eclipses: std::mem::take(&mut self.eclipses),
+            bodies: std::mem::take(&mut self.body_batches),
+            star: self.star.take(),
+            glowing: std::mem::take(&mut self.glowing),
+            burning: std::mem::take(&mut self.burning),
+            sky: None,
+            bitmaps: std::mem::take(&mut self.bitmaps),
+            snapshot: self.frame.clone(),
+            dust: Vec::new(),
+            hud: Vec::new(),
+            crisp: Vec::new(),
+            full_screen,
+        });
+        let deferred = std::mem::take(&mut self.deferred);
+        self.draw_shapes(viewer, &deferred);
+    }
+
+    /// [`Self::draw_frame`] for a whole scene in one model (the intro's model 176 runs its
+    /// nebula, planet, asteroids and ship as children in one queue). The original layers those by
+    /// painter order alone: the nebula's quads come first but lie far nearer in view space than
+    /// the planet drawn over them. So with [`Self::capture`] a new batch (drawn over the last)
+    /// starts wherever a face lies clearly behind the faces already in the batch, where the GPU's
+    /// depth test would otherwise reverse the original's order. The planets' atmosphere rings
+    /// stay the original's pixels (the scene's shells are not where the GPU's haze expects
+    /// them); since they go into the frame behind every batch, the faces painted before the last
+    /// such shape are drawn into the frame too, in the original's order.
+    fn draw_frame_layered(&mut self, viewer: &ModelViewer, frame: &Frame) {
+        if !self.capture {
+            self.draw_shapes(viewer, &frame.shapes);
+            return;
+        }
+        // How much farther than the nearest face so far a face must be to start a new layer:
+        // well past the ordering slack within one object.
+        const BEHIND: i64 = 2;
+        let mut solids: Vec<Option<Solid>> = (0..frame.shapes.len())
+            .map(|index| {
+                frame
+                    .solids
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .filter(|solid| !solid.views.is_empty())
+                    .cloned()
+            })
+            .collect();
+        // The shapes `draw_frame` leaves in the frame, other than those it draws over the batches.
+        let background = (0..frame.shapes.len())
+            .rev()
+            .find(|&index| {
+                solids[index].is_none()
+                    && !matches!(
+                        frame.shapes[index],
+                        Shape::Point(..) | Shape::Spans(..) | Shape::Label(..) | Shape::Line(..)
+                    )
+            })
+            .map_or(0, |index| index + 1);
+        solids[..background].fill(None);
+        let mut start = 0;
+        let mut nearest: Option<i64> = None;
+        for index in 0..=frame.shapes.len() {
+            let near = solids
+                .get(index)
+                .and_then(Option::as_ref)
+                .and_then(|solid| solid.views.iter().map(|v| i64::from(v[2])).min());
+            let end = index == frame.shapes.len();
+            if end || matches!((near, nearest), (Some(z), Some(n)) if n > 0 && z > n * BEHIND) {
+                let layer = Frame {
+                    shapes: frame.shapes[start..index].to_vec(),
+                    solids: solids[start..index].to_vec(),
+                    light: frame.light,
+                    origin: frame.origin,
+                    ..Frame::default()
+                };
+                self.draw_frame(viewer, &layer);
+                start = index;
+                nearest = None;
+            }
+            if let Some(z) = near {
+                nearest = Some(nearest.map_or(z, |n| n.min(z)));
+            }
+        }
+    }
+
     /// One object of the flight view: its shapes in order, except that with [`Self::capture`]
     /// on its model faces are set aside as one batch for the modern engine.
     fn draw_frame(&mut self, viewer: &ModelViewer, frame: &Frame) {
@@ -3450,7 +3613,9 @@ impl Screen {
     /// F6: every imported model executed by the verified port, in original order.
     /// Draw executed-model shapes in order into the 320x158 view.
     fn draw_shapes(&mut self, viewer: &ModelViewer, shapes: &[Shape]) {
-        self.draw_shapes_in(viewer, shapes, VIEW_HEIGHT);
+        // The executor's view height: 158, or 200 while F917's tombstone raises it.
+        let rows = ffe_core::model_execute::view_height().clamp(0, LOGICAL_HEIGHT as i32);
+        self.draw_shapes_in(viewer, shapes, rows as usize);
     }
 
     /// The same drawing without the flight view's y=158 clip, for the game-over
@@ -3940,6 +4105,11 @@ impl Screen {
             return;
         };
         let mut order = self.effects.clone();
+        // F1035's dust motes are not drawn from the player's death through the
+        // explosion and the death camera (`docs/DEVIATIONS.md`, 2026-10-29).
+        if state.death.is_some() {
+            order.retain(|effect| effect.model != ffe_core::dust::MODEL);
+        }
         order.sort_by(|a, b| {
             distance(camera.position, b.centre).total_cmp(&distance(camera.position, a.centre))
         });
@@ -4115,8 +4285,8 @@ impl Screen {
         model: u32,
         remaining: i64,
     ) -> Result<(), String> {
-        // A whole screen of its own: no 3-D view for the modern engine.
-        self.world = None;
+        // With `capture` the tombstone's faces go to the modern engine's full-screen view.
+        self.begin_scene();
         self.frame[..320 * LOGICAL_HEIGHT].fill(0x00_00_00_00);
         // F917 draws on the full 320x200 logical screen, not the 320x158 flight
         // view: the tombstone's lower text would otherwise be clipped.
@@ -4132,7 +4302,64 @@ impl Screen {
             [0.0, 0.0, distance],
             crate::gameover::TOMBSTONE_LIGHT,
         )?;
-        self.draw_shapes_full(viewer, &frame.shapes);
+        if self.capture {
+            // F917 queues the whole tombstone under one depth key, so the original paints its
+            // faces in program order: the slab, then the lettering, the date and the flowers on
+            // it, not quite in the slab's plane (the depth test would hide them). A new batch,
+            // drawn over the last, starts at each face that overlaps one already in the batch on
+            // the screen; faces that do not overlap give the same picture in any order.
+            let bounds = |index: usize| {
+                let solid = frame.solids.get(index).and_then(Option::as_ref)?;
+                let mut low = [f64::MAX; 2];
+                let mut high = [f64::MIN; 2];
+                for &[x, y, z] in &solid.views {
+                    // F1479; a corner behind the eye covers everything.
+                    let z = f64::from(z);
+                    let point = if z < 64.0 {
+                        return Some([[f64::MIN; 2], [f64::MAX; 2]]);
+                    } else {
+                        [
+                            160.0 + 256.0 * f64::from(x) / z,
+                            79.0 - 256.0 * f64::from(y) / z,
+                        ]
+                    };
+                    for k in 0..2 {
+                        low[k] = low[k].min(point[k]);
+                        high[k] = high[k].max(point[k]);
+                    }
+                }
+                Some([low, high])
+            };
+            let overlap = |a: [[f64; 2]; 2], b: [[f64; 2]; 2]| {
+                (0..2).all(|k| a[0][k] <= b[1][k] && b[0][k] <= a[1][k])
+            };
+            let mut start = 0;
+            let mut seen: Vec<[[f64; 2]; 2]> = Vec::new();
+            for index in 0..=frame.shapes.len() {
+                let area = (index < frame.shapes.len())
+                    .then(|| bounds(index))
+                    .flatten();
+                let end = index == frame.shapes.len();
+                if end || area.is_some_and(|area| seen.iter().any(|&b| overlap(area, b))) {
+                    let solids =
+                        &frame.solids[start.min(frame.solids.len())..index.min(frame.solids.len())];
+                    let part = Frame {
+                        shapes: frame.shapes[start..index].to_vec(),
+                        solids: solids.to_vec(),
+                        light: frame.light,
+                        origin: frame.origin,
+                        ..Frame::default()
+                    };
+                    self.draw_frame(viewer, &part);
+                    start = index;
+                    seen.clear();
+                }
+                seen.extend(area);
+            }
+            self.end_scene(viewer, true);
+        } else {
+            self.draw_shapes_full(viewer, &frame.shapes);
+        }
         self.present();
         Ok(())
     }

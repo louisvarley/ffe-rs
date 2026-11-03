@@ -78,8 +78,11 @@ smoothed nearest-ship range (`DATA_007269..7271`, at least 3 km, at most 8 km;
 F1053's distance word `-(range * 40)`), and F1099 runs F1109 over the ships:
 each one's range (`0.08km`), hull and shields (`100%,100%`) and type name in
 amber (0x5f) below it, from the message strings 0x8639/0x863a; the name labels
-(F1108) are not drawn in this view. Not ported: the Alt-arrow mouse nudge. F12
-is the source escape capsule. The
+(F1108) are not drawn in this view. Not ported: the Alt-arrow mouse nudge, and
+model 167's gun-line reticles (F1054 draws the ship's copy as model 0xa7, whose
+global 1, the copy's `+0x9e`, is 1 when F802's ray along the forward row hits an
+object within 0x7a1200). X (the DOS key, `78206`) and F12 launch the escape
+capsule. The
 port's own model viewer/lab and screenshot are developer-only `--dev` commands,
 so the source view keys are not repurposed in the player build.
 

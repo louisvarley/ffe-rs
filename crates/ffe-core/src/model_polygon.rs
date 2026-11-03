@@ -261,6 +261,13 @@ pub fn circle(centre: [i32; 3], axis: [i32; 3], radius: i32) -> Option<[[[i16; 2
             ],
         )
     };
+    circle_points(centre, u, v)
+}
+
+/// F1555: the six projections of a circle record (centre, `u`, `v`), as two cubic
+/// curves `[P0, P0 + v, P1 + v, P1]` and `[P0, P0 - v, P1 - v, P1]` with P0/P1 =
+/// centre ± u. `None` when any point fails F1557.
+pub fn circle_points(centre: [i32; 3], u: [i32; 3], v: [i32; 3]) -> Option<[[[i16; 2]; 4]; 2]> {
     let add =
         |a: [i32; 3], b: [i32; 3]| -> [i32; 3] { std::array::from_fn(|i| a[i].wrapping_add(b[i])) };
     let sub =

@@ -23,13 +23,16 @@ pub struct Image {
 }
 
 /// How view space maps to the picture: a point `(x, y, z)` (x right, y up, z ahead of the eye)
-/// lands at `x * x_scale / z` and `y * y_scale / z` in normalised coordinates (-1..1). `near` is
-/// the nearest depth drawn.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// lands at `x * x_scale / z` and `y * y_scale / z + y_offset` in normalised coordinates
+/// (-1..1). `near` is the nearest depth drawn. A non-zero `y_offset` moves the projection's
+/// centre off the picture's middle (an off-axis view, such as the original's full screen, whose
+/// centre stays on row 79 of 200).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Projection {
     pub x_scale: f32,
     pub y_scale: f32,
     pub near: f32,
+    pub y_offset: f32,
 }
 
 /// A texture as the original keeps it: a map of colour indices (row after row), coloured per
@@ -447,7 +450,7 @@ fn vs_scene(
     @location(5) palette: f32,
 ) -> Out {
     var out: Out;
-    out.position = vec4<f32>(p.x * u.scale.x, p.y * u.scale.y, u.scale.z * (1.0 + layer * 4.8e-7), p.z);
+    out.position = vec4<f32>(p.x * u.scale.x, p.y * u.scale.y + u.scale.w * p.z, u.scale.z * (1.0 + layer * 4.8e-7), p.z);
     out.colour = c;
     out.uv = uv;
     out.texture = i32(texture);
@@ -510,8 +513,8 @@ fn vs_wide(
     @location(4) colour: vec4<f32>,
 ) -> WideOut {
     let z = u.scale.z * (1.0 + layer * 4.8e-7);
-    let ca = vec4<f32>(a.x * u.scale.x, a.y * u.scale.y, z, a.z);
-    let cb = vec4<f32>(b.x * u.scale.x, b.y * u.scale.y, z, b.z);
+    let ca = vec4<f32>(a.x * u.scale.x, a.y * u.scale.y + u.scale.w * a.z, z, a.z);
+    let cb = vec4<f32>(b.x * u.scale.x, b.y * u.scale.y + u.scale.w * b.z, z, b.z);
     let half_view = u.viewport.xy * 0.5;
     let sa = ca.xy / ca.w * half_view;
     let sb = cb.xy / cb.w * half_view;
@@ -580,8 +583,8 @@ fn vs_flame(
     @location(6) edge: vec3<f32>,
 ) -> FlameOut {
     let half_view = u.viewport.xy * 0.5;
-    let ca = vec4<f32>(a.x * u.scale.x, a.y * u.scale.y, u.scale.z * 1.02, a.z);
-    let cb = vec4<f32>(b.x * u.scale.x, b.y * u.scale.y, u.scale.z * 1.02, b.z);
+    let ca = vec4<f32>(a.x * u.scale.x, a.y * u.scale.y + u.scale.w * a.z, u.scale.z * 1.02, a.z);
+    let cb = vec4<f32>(b.x * u.scale.x, b.y * u.scale.y + u.scale.w * b.z, u.scale.z * 1.02, b.z);
     let sa = ca.xy / ca.w * half_view;
     let sb = cb.xy / cb.w * half_view;
     // Radii in pixels: half the width over the depth, through the projection.
@@ -681,7 +684,7 @@ fn vs_sprite(
     let corner = corners[index];
     // Wide enough for the halo's tail to fade out (it is 1/2000 at 1.8 halo radii).
     let extent = max(size * 0.5, halo_size * 0.9) + 1.5;
-    var clip = vec4<f32>(p.x * u.scale.x, p.y * u.scale.y, u.scale.z * 1.02, p.z);
+    var clip = vec4<f32>(p.x * u.scale.x, p.y * u.scale.y + u.scale.w * p.z, u.scale.z * 1.02, p.z);
     clip.x = clip.x + corner.x * extent * 2.0 / u.viewport.x * clip.w;
     clip.y = clip.y + corner.y * extent * 2.0 / u.viewport.y * clip.w;
     var out: SpriteOut;
@@ -748,7 +751,7 @@ fn vs_shell(
 // quadratic, which matters when the planet is far away.
 @fragment
 fn fs_shell(i: ShellOut) -> @location(0) vec4<f32> {
-    let d = normalize(vec3<f32>(i.ndc.x / u.scale.x, i.ndc.y / u.scale.y, 1.0));
+    let d = normalize(vec3<f32>(i.ndc.x / u.scale.x, (i.ndc.y - u.scale.w) / u.scale.y, 1.0));
     let c = i.centre;
     let along = dot(c, d);
     let side = cross(c, d);
@@ -926,7 +929,7 @@ fn sky_colour(d: vec3<f32>, pixel: f32) -> vec3<f32> {
 @fragment
 fn fs_sky(i: BackOut) -> @location(0) vec4<f32> {
     let ndc = vec2<f32>(i.uv.x * 2.0 - 1.0, 1.0 - i.uv.y * 2.0);
-    let view = normalize(vec3<f32>(ndc.x / u.scale.x, ndc.y / u.scale.y, 1.0));
+    let view = normalize(vec3<f32>(ndc.x / u.scale.x, (ndc.y - u.scale.w) / u.scale.y, 1.0));
     let d = normalize(vec3<f32>(dot(u.sky_x.xyz, view), dot(u.sky_y.xyz, view), dot(u.sky_z.xyz, view)));
     // One pixel's angle, for the stars' sharp points.
     let pixel = 2.0 / (u.scale.x * u.viewport.x);
@@ -1513,7 +1516,7 @@ impl Renderer {
                 scene.projection.x_scale,
                 scene.projection.y_scale,
                 scene.projection.near,
-                0.0,
+                scene.projection.y_offset,
             ],
             viewport: [inner.0 as f32, inner.1 as f32, scene.time % 1000.0, 0.0],
             sky: match &scene.sky {
@@ -2197,6 +2200,7 @@ mod tests {
                 x_scale: 1.0,
                 y_scale: 1.0,
                 near: 1.0,
+                y_offset: 0.0,
             },
             // Drawn far after near: the depth test, not the order, decides.
             batches: vec![Batch {

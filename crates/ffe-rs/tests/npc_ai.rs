@@ -429,3 +429,23 @@ fn the_combat_computer_reads_out_the_pirate() {
         .count();
     assert!(lit > 20, "no F1109 readout drawn ({lit} amber pixels)");
 }
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn with_advanced_traffic_a_pirate_turns_on_a_player_who_comes_near() {
+    let cache = cache();
+    let (mut nav, viewer, _, _) = setup(&cache);
+    nav.advanced_traffic = true;
+    let radius = i64::from(viewer.model_radius(NEW_GAME_SHIP).unwrap());
+    let pirate = nav.ships.iter().find(|s| s.role == Role::Pirate).unwrap();
+    let (id, at) = (pirate.id, pirate.position);
+    let player = [at[0] + 5_000_000, at[1], at[2]];
+    for _ in 0..(20 * 50) {
+        nav.tick_ships(0.02, 994, player, radius);
+    }
+    let ship = nav.ships.iter().find(|s| s.id == id).unwrap();
+    assert_eq!(
+        ship.npc_target, None,
+        "the pirate kept its prey with the player beside it"
+    );
+}

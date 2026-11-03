@@ -62,8 +62,9 @@ top-left. Only the 8x8 icon square is a hot area.
   `Choose Music From:` at (60, 0); the 16 songs at x 160, y = 0, 9, ... 135.
 - Page 3: heading at (32, 18); rows y = 28..118; `Main Menu` at (48, 136).
 - Page 4: heading at (32, 18); rows y = 28..68; `Main Menu` at (48, 136).
-- Page 5 (port-only `Port Options`): heading (32, 18); `Controls:` (32, 28);
-  `Modern`/`Classic` rows at x 32, y 38/48; control help at (48, 62..92);
+- Page 5 (port-only, labelled `Advanced Options` since 2026-10-28 at the
+  owner's request): heading (32, 18); `Controls:` (32, 28);
+  `Modern`/`Classic` rows at x 32, y 38/48 (the control help lines were removed);
   `Display Options` row at (32, 104); `Main Menu` at (48, 136).
 - Page 6 (port-only `Display Options`): heading (32, 18); `Window scale:` (32, 26)
   and 1x..6x rows at x 32, y 36..86; `Fit:` (176, 26) and two rows at y 36/46;
@@ -182,7 +183,7 @@ tables.
   spawn gate), and Modern vs Classic controls (port page 5). Everything else
   keeps the original label, default and icon but is greyed and inert, with a
   page footnote.
-- Port additions (grey/yellow, documented): page 5 `Port Options` in the empty
+- Port additions (grey/yellow, documented): page 5 `Advanced Options` in the empty
   row at y 68, with `Modern`/`Classic` and the `Display Options` entry; page 6
   `Display Options` with window scale 1x-6x, pixel-perfect/fill-window fit,
   nearest/linear filter, 4:3/square pixels and a full-screen toggle (see

@@ -327,6 +327,8 @@ mod tests {
             pass: 0.0,
             flee: 0.0,
             responding: false,
+            in_combat: false,
+            alert: false,
             npc_target: None,
             contract: None,
             flash: 0.0,

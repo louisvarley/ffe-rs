@@ -477,6 +477,8 @@ fn executed_reference_child_models() {
                 QueueEvent::Thruster(key) => Some([7, 0, *key]),
                 QueueEvent::ThrusterLine(key) => Some([8, 0, *key]),
                 QueueEvent::Point(_) | QueueEvent::Line(_) | QueueEvent::Chain(_) => None,
+                // F1761 beams are not hooked by the probe yet.
+                QueueEvent::Beam(_) => None,
             })
             .collect();
         // Vertex-lookup events (1: text F1470, 7: child F1471) fire only on a cache miss.

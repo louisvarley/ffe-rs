@@ -243,7 +243,8 @@ impl Click {
             | Click::Navigation
             | Click::Hyperspace => None,
             Click::Screen(_) => Some("F5 (comms) is not ported yet."),
-            Click::Missile => Some("The missile view needs equipment (not ported)."),
+            // F10's action 0xfb: `main` opens the missile view or says why not.
+            Click::Missile => None,
             // F1056 (78528) calls F1098; `main` runs the launch or reports that
             // no escape craft is fitted.
             Click::Capsule => None,
@@ -528,7 +529,7 @@ impl Console {
             self.hide(0x16);
         }
         // The views are radio group 1: one image 1, the rest 0. 0x14 is the
-        // missile view's button (F1054's F5/F10).
+        // missile view's button (F1054's F5/F10), 0x13 the combat computer's.
         for id in [0x13usize, 0x14, 0x15, 0x16, 0x17, 0x18] {
             self.set_image(id, 0);
         }
@@ -578,9 +579,12 @@ impl Console {
             self.set_image(0x39, 1);
         } else {
             self.set_image(0x39, 0);
-            let image = u8::from(systems.ec != 0 && general[2] & 0x20 != 0);
-            self.set_image(0x49, image);
         }
+        // F1116 updates the 0x49 image only outside mode 2. The port's `ec` is
+        // "the autopilot flies" (owner requested), so it is updated in every
+        // mode: the red arrow while engaged, the green square otherwise.
+        let image = u8::from(systems.ec != 0 && general[2] & 0x20 != 0);
+        self.set_image(0x49, image);
         let image = if systems.e8 < 0x28 && (systems.e9 & 1 == 0 || systems.b6 & 2 != 0) {
             1
         } else {
