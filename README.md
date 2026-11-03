@@ -34,6 +34,12 @@ The Windows executable is built in this checkout. From the repository root:
 .\target\release\ffe-rs.exe --root .
 ```
 
+**The launcher:** double-click `launcher.bat`. It builds the game, tools and
+launcher, then opens a window where you browse to and verify your game files
+(and, optionally, FFED3D's resources), change the port and game settings and
+press LAUNCH; it builds `data.bin` for you when it is missing or outdated. See
+`docs/notes/launcher.md`.
+
 **Easiest on Windows:** double-click `play.bat`. It builds the release game and
 tools, creates or updates `data.bin` from your files in `.\game` when it is
 missing or older than this build needs (currently cache v29), and launches the

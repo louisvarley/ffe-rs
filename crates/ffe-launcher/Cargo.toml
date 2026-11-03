@@ -1,0 +1,21 @@
+[package]
+name = "ffe-launcher"
+version = "0.9.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Launcher for ffe-rs: game files, FFED3D resources, settings and launch"
+
+[dependencies]
+ffe-rs = { path = "../ffe-rs" }
+ffe-tools = { path = "../ffe-tools" }
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+# Native folder pickers. Linux uses zenity/kdialog when present (no GTK build
+# dependency), with the path field always editable.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+rfd = "0.15"
+
+[dev-dependencies]
+tempfile = "3"
