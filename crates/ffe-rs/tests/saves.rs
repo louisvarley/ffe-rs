@@ -173,6 +173,8 @@ fn quick_save_round_trip_rejects_a_corrupt_file_without_touching_it() {
         random: None,
         deep_space: false,
         markets: Vec::new(),
+        script_canisters: Vec::new(),
+        script_sites: Vec::new(),
     };
     let save = SaveGame::new(commander(), Flight::default(), Some(nav.clone()));
     let path = saves::save_quick(directory.path(), &save).unwrap();

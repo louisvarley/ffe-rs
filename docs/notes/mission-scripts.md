@@ -225,9 +225,11 @@ prints every mission's listing.
   in order; the hooks keep a view of each new ship so the same run reads
   back its AI state and target.
 - **19 (F772)** makes a ship of F772's type list (F658/F635's model,
-  `npc::model_for_type`), where the player is until **54 (F702)** places it
-  F1507's packed distance (`mantissa * 2^(exponent - 15)` mm) from the
-  parent in a direction from the shared pair. **57** stops it. **60** puts
+  `npc::model_for_type`), where the player is until **54 (F702)** places it:
+  F1530 advances the shared pair and F1507 (`objects::orbit_point`) puts it
+  on the orbit of the packed distance (`mantissa * 2^(exponent - 15)` mm)
+  round the parent's frame (0 the system's root), with the pair's words as
+  the longitude and the phase. **57** stops it. **60** puts
   it in AI state 0xb behind its leader at `DATA_001705`'s place
   (`npc::SCRIPT_FORMATIONS`, scaled by `npc::FORMATION_SCALE` as F695's
   escorts are). **39 (F664/F672)** makes a ship of a type named from its
@@ -264,9 +266,10 @@ prints every mission's listing.
   (scooped, destroyed) reaches the scripts as event 0x16.
 - **Objects.** **48 (F297)** puts a building of a model on a planet's
   surface at `DATA_007130/7131`'s latitude and longitude; **50 (F40)** puts
-  an object of a model on an orbit at a packed distance round a body. Both
-  are fixed, shootable objects (`npc::script_object`, `ships::object_spec`)
-  that `apply` holds to their body each frame.
+  an object of a model on F1507's orbit round a body, with the `+0xc6`
+  longitude and the phase's `arg << 16`. Both are fixed, shootable objects
+  (`npc::script_object`, `ships::object_spec`) that `apply` holds to their
+  body each frame.
 - **Contracts.** **37/38 (F314/F315)** add and remove the scripts' own
   records in the contracts list (six at most with the removal jobs); the
   contracts page asks the scripts for each row (F316: global 8 the record,
@@ -275,6 +278,18 @@ prints every mission's listing.
 - **Fines and ranks.** **40 (F236)** records an offence in a jurisdiction;
   **53** is F305 (Imperial) or F304 (Federal) with F306's points and F307's
   medal, posting their notices.
+- **Player events.** The game raises event 1 for F21's values as they
+  change (F909's arrival 4, F994/F1007's docked object 13, the flight mode
+  14 from the launch, docking, landing and death code, F398/F400's cabins
+  15, F302/F303/F485/F534's passengers 16); the playable compares them each
+  frame and raises the changed ones (`scripts::WATCHED`,
+  `Scripts::player_changed`), so a mission waiting to be in a system or
+  docked hears of it.
+- **Saves.** The scripts' ships are the navigator's, saved with their
+  `+0xa0` word, AI code and target; the save also keeps the scripts'
+  canisters (with their ids) and the objects held to a body
+  (`NavigatorSave::script_canisters`/`script_sites`); a site of another
+  system is dropped.
 - **Signals.** F60's time ticks run every frame on the game time passed;
   F383 sets global 0xa to the tech multiplier and signals 0xb when the
   Upgrades screen is built, and the second-hand records (`+0x14`) are
@@ -282,10 +297,17 @@ prints every mission's listing.
   this replaces the port's earlier assumption that the branch was random);
   F633 signals 0x10 with each station's id on every new day.
 
-Still stand-ins (deviation 2026-11-03 in `docs/DEVIATIONS.md`): F702/F1507's
-directions come from the shared pair rather than F1506's orbit phase;
-F669's attackers start 25 km from the player; F879's surface point is the
-latitude/longitude direction at the planet's radius, not the terrain
-height; F40's orbit does not move. The scripts' objects, canisters and the
-fields they set (`+0xa0`, the AI code, the target) are not kept in a
-save, and the station's own entries are not passed to the scripts.
+`tests/mission_scripts.rs an_assassination_mission_runs_from_the_offer_to_the_reward`
+plays mission 25 (the military assassination the storyline's mission 23
+offers) with the port's hooks: the conversation, accepting it (a contract
+and two attackers), arriving in the target system 0x6a45718 (its target waits in the
+starport's bay until its departure), killing the target after it has left
+(F236's offence) and the $1500 reward at home.
+
+Still stand-ins (deviation 2026-11-03 in `docs/DEVIATIONS.md`): F669's
+attackers start 25 km from the player (F702's own orbit is 0x5000/0x31
+round the root); F1508's in-step interpolation and F1507's velocity are
+not applied; F879's surface point is the latitude/longitude direction at
+the planet's radius, not the terrain height; F40's orbit does not move
+(F1510's time term is left out). The station's own entries are not passed
+to the scripts.

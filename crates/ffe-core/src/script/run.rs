@@ -320,6 +320,35 @@ impl Scripts {
         self.engine.pulse(image, &mut bridge, index, value)
     }
 
+    /// F52 from the game: start `mission` with `params` (see
+    /// [`Engine::start_with`]).
+    pub fn start_mission(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        mission: usize,
+        params: &[i32],
+    ) -> Result<i32, String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine
+            .start_with(image, &mut bridge, mission, params, 0)
+    }
+
+    /// F48(1, 0, case) from the game: one of F21's player values changed
+    /// (F909's system 4, F994/F1007's docked object 13, the flight mode 14
+    /// from the launch, docking, landing and death code, F398/F400's cabins
+    /// 15 and F302/F303/F485/F534's passengers 16).
+    pub fn player_changed(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        case: i32,
+    ) -> Result<(), String> {
+        self.raise(image, game, today, 1, 0, case)
+    }
+
     /// F34 from the game: set global `index` and raise its event.
     pub fn set_global(
         &mut self,

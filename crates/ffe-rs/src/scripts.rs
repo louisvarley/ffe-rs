@@ -50,14 +50,18 @@ pub const BODY_IDS: i32 = 0x1000;
 /// The first id of the canisters the scripts make (statements 52 and 58).
 pub const TAG_IDS: i32 = 0x2000;
 
-/// F702/F1507's packed distance (statement 54): a signed mantissa in the
-/// low word and an exponent in the high word. F1507 multiplies F1506's Q31
-/// direction by the mantissa and shifts by `exponent - 0x2e`, so the
-/// distance is `mantissa * 2^(exponent - 15)` mm.
+/// F702/F1507's packed distance (statements 54 and 50): an ffp number, the
+/// signed mantissa in the low word and the exponent in the high word.
+pub fn packed_ffp(value: i32) -> ffe_core::ffp::Ffp {
+    ffe_core::ffp::Ffp::new(value as i16, (value >> 16) as i16)
+}
+
+/// [`packed_ffp`] in millimetres: F1507 multiplies F1506's Q31 direction by
+/// the mantissa and shifts by `exponent - 0x2e`, so the distance is
+/// `mantissa * 2^(exponent - 15)` mm.
 pub fn packed_distance(value: i32) -> f64 {
-    let mantissa = f64::from(value as i16);
-    let exponent = (value >> 16) as i16;
-    mantissa * 2f64.powi(i32::from(exponent) - 15)
+    let ffp = packed_ffp(value);
+    f64::from(ffp.mantissa) * 2f64.powi(i32::from(ffp.exponent) - 15)
 }
 
 /// What the scripts asked the game to do, applied in order after each run
@@ -86,12 +90,13 @@ pub enum Action {
         starport: i32,
         leaves: i32,
     },
-    /// F702 (statement 54): `object` put `distance` mm from `parent` (the
-    /// player when the parent is unknown) in a random direction.
+    /// F702 (statement 54): `object` put on an orbit of the packed
+    /// `distance` round `parent` (0 the system's root), F1530 then F1507
+    /// with the shared pair as the longitude and the phase.
     Place {
         object: i32,
         parent: i32,
-        distance: f64,
+        distance: i32,
     },
     /// Statement 57: the object's velocity (`+0x8c..+0x94`) is zeroed.
     Stop { object: i32 },
@@ -156,8 +161,13 @@ pub enum Action {
 pub enum Place {
     /// F879's latitude and longitude words on the planet's surface.
     Surface { latitude: u16, longitude: u16 },
-    /// F1507's orbit distance (mm).
-    Orbit { distance: f64 },
+    /// F40's orbit: F1507 with the packed `distance`, `+0xc6`'s longitude
+    /// and `+0xbe`'s phase.
+    Orbit {
+        distance: i32,
+        longitude: i32,
+        phase: u32,
+    },
 }
 
 /// What a script reads of an object (F1532's record): its id, model
@@ -409,6 +419,21 @@ pub fn body_views(nav: &crate::navigation::Navigator) -> Vec<BodyView> {
         .collect()
 }
 
+/// F21's cases the game raises event 1 for when they change: the system
+/// (4), the docked object (13), the flight mode (14), the cabins (15) and
+/// their passengers (16).
+pub const WATCHED: [i32; 5] = [4, 13, 14, 15, 16];
+
+impl Hooks<'_> {
+    /// The [`WATCHED`] values now.
+    pub fn watched(&self) -> [i32; 5] {
+        WATCHED.map(|case| match case {
+            4 => self.system as i32,
+            _ => self.values[case as usize],
+        })
+    }
+}
+
 /// F21's player values the port keeps outside the hooks' other fields.
 pub fn player_values(
     state: &crate::flight::Flight,
@@ -435,6 +460,9 @@ pub fn player_values(
             None => 0,
         }
     };
+    // DATA_008890/8892: the cabins fitted and those with passengers.
+    values[15] = i32::from(state.loadout.cabins);
+    values[16] = i32::from(state.loadout.occupied_cabins);
     // DATA_008862: the object the player is docked or landed at.
     values[13] = place
         .map(|(index, _)| index)
@@ -697,8 +725,13 @@ impl Host for Hooks<'_> {
                     model,
                     body: arg(1),
                     seed: arg(2),
+                    // F40: the phase is F1510's time term (not modelled:
+                    // the object does not move) plus `arg(4) << 16`; the
+                    // longitude is the `+0xc6` word.
                     place: Place::Orbit {
-                        distance: packed_distance(arg(3)),
+                        distance: arg(3),
+                        longitude: i32::from(arg(6) as i16),
+                        phase: (arg(4) as u32) << 16,
                     },
                 });
                 ship as i32 + SHIP_IDS
@@ -726,7 +759,7 @@ impl Host for Hooks<'_> {
                 self.actions.push(Action::Place {
                     object: arg(0),
                     parent: arg(1),
-                    distance: packed_distance(arg(2)),
+                    distance: arg(2),
                 });
                 0
             }
@@ -1124,6 +1157,12 @@ impl<'a> Hooks<'a> {
         }
     }
 
+    /// What the run asked the game to do (for a caller that keeps the rest
+    /// of the state itself).
+    pub fn finish_actions(self) -> Vec<Action> {
+        self.actions
+    }
+
     pub fn finish(self) -> Leftover {
         Leftover {
             legal: self.legal,
@@ -1315,6 +1354,13 @@ pub fn apply(
 ) {
     use ffe_core::npc::{self, State};
     let actions = std::mem::take(&mut state.script_actions);
+    let sine = if actions.is_empty() {
+        None
+    } else {
+        cache
+            .asset("base:math/sine")
+            .and_then(|bytes| ffe_core::model_math::SineTable::from_bytes(bytes).ok())
+    };
     for action in actions.into_iter().chain(std::iter::once(Action::Sites)) {
         match action {
             Action::Create { ship, kind, model } => {
@@ -1393,10 +1439,24 @@ pub fn apply(
                 parent,
                 distance,
             } => {
-                let origin = object_position(nav, player, parent).unwrap_or(player);
-                let direction = random_direction(&mut nav.random);
-                let at: [i64; 3] =
-                    std::array::from_fn(|k| origin[k] + (direction[k] * distance) as i64);
+                // F702: `+0x56` is the parent's frame (0 the root's), F1530
+                // advances the pair and F1507 puts the object on the orbit.
+                let origin = if parent == 0 {
+                    [0; 3]
+                } else {
+                    object_position(nav, player, parent).unwrap_or(player)
+                };
+                let Some(sine) = sine.as_ref() else {
+                    continue;
+                };
+                nav.random.advance();
+                let point = ffe_core::objects::orbit_point(
+                    sine,
+                    packed_ffp(distance),
+                    nav.random.a as i32,
+                    nav.random.b,
+                );
+                let at: [i64; 3] = std::array::from_fn(|k| origin[k].wrapping_add(point[k]));
                 if let Some(ship) = ship_of_mut(nav, object) {
                     ship.position = at;
                     ship.anchor = at;
@@ -1577,22 +1637,42 @@ pub fn apply(
                         };
                         (up.map(|v| v * radius as f64), true)
                     }
-                    (Place::Orbit { distance }, _) => (
-                        random_direction(&mut nav.random).map(|v| v * distance),
-                        false,
-                    ),
+                    (
+                        Place::Orbit {
+                            distance,
+                            longitude,
+                            phase,
+                        },
+                        _,
+                    ) => match sine.as_ref() {
+                        Some(sine) => (
+                            ffe_core::objects::orbit_point(
+                                sine,
+                                packed_ffp(distance),
+                                longitude,
+                                phase,
+                            )
+                            .map(|v| v as f64),
+                            false,
+                        ),
+                        None => continue,
+                    },
                     (Place::Surface { .. }, None) => ([0.0; 3], false),
                 };
                 let mut made = npc::script_object(&spec, ship, player, &mut nav.random);
                 made.seed = seed;
                 nav.ships.push(made);
                 match index {
-                    Some(body) => nav.script_sites.push(crate::navigation::ScriptSite {
-                        ship,
-                        body,
-                        offset,
-                        surface,
-                    }),
+                    Some(body) => {
+                        let system = nav.current_code();
+                        nav.script_sites.push(crate::navigation::ScriptSite {
+                            ship,
+                            system,
+                            body,
+                            offset,
+                            surface,
+                        });
+                    }
                     None => {
                         let at = std::array::from_fn(|k| player[k] + offset[k] as i64);
                         if let Some(made) = nav.ships.last_mut() {
@@ -1605,8 +1685,9 @@ pub fn apply(
             Action::Sites => {
                 // F297/F40's objects stay with their body.
                 let sites = std::mem::take(&mut nav.script_sites);
+                let system = nav.current_code();
                 let mut kept = Vec::new();
-                for site in sites {
+                for site in sites.into_iter().filter(|site| site.system == system) {
                     let Some(body) = nav.bodies.get(site.body) else {
                         continue;
                     };
@@ -2233,7 +2314,7 @@ mod tests {
             Action::Place {
                 object: ship,
                 parent: PLAYER_ID,
-                distance: 32_767.0 * 1024.0,
+                distance: 0x0019_7fff,
             }
         );
         assert_eq!(

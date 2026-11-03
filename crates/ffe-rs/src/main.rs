@@ -1320,8 +1320,10 @@ fn run() -> Result<(), String> {
     let mut reopen_board = false;
     // The navigator ships present last frame (F924's removals are the rest).
     let mut script_ships: std::collections::BTreeSet<i32> = Default::default();
-    // The world clock at the scripts' last F60 time tick.
+    // The world clock at the scripts' last F60 time tick, and the player
+    // values the game raises event 1 for (`scripts::WATCHED`) as they were.
     let mut script_clock: Option<f64> = None;
+    let mut script_watched: Option<[i32; 5]> = None;
     // The journal issue being read (its slot and rows), expanded once when
     // it is opened: its macros draw from the shared pair.
     let mut journal_issue: Option<(usize, Vec<String>)> = None;
@@ -1992,6 +1994,23 @@ fn run() -> Result<(), String> {
                             }
                             if let Err(error) = scripts.time(&assets.image, hooks, today, tics) {
                                 eprintln!("mission scripts: {error}");
+                            }
+                            // F909, F994/F1007 and the mode changes: event 1
+                            // for each watched player value that changed.
+                            let watched = hooks.watched();
+                            if let Some(last) = script_watched.replace(watched) {
+                                for ((case, now), was) in
+                                    ffe_rs::scripts::WATCHED.into_iter().zip(watched).zip(last)
+                                {
+                                    if now == was {
+                                        continue;
+                                    }
+                                    if let Err(error) =
+                                        scripts.player_changed(&assets.image, hooks, today, case)
+                                    {
+                                        eprintln!("mission scripts: {error}");
+                                    }
+                                }
                             }
                             if let Err(error) = ffe_rs::scripts::days(
                                 scripts, assets, hooks, &crossed, docked, &places,

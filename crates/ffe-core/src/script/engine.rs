@@ -795,6 +795,36 @@ impl Engine {
         Ok(self.id(slot))
     }
 
+    /// F52 from the game: start `mission` with `params` as its parameters
+    /// (assigned through the mission's own parameter targets) and the
+    /// creator's `word`; returns the new instance id (0 when no slot is
+    /// free). The scheduler enters its first state.
+    pub fn start_with(
+        &mut self,
+        image: &Image,
+        host: &mut dyn Host,
+        mission: usize,
+        params: &[i32],
+        word: i32,
+    ) -> Result<i32, String> {
+        let record = image.mission_struct(mission)?;
+        let Some(slot) = self.claim(image, mission, word)? else {
+            return Ok(0);
+        };
+        if let Pointer::Blob(mut stream) = record.parameters {
+            for index in 0..usize::try_from(record.parameter_count.max(0)).unwrap_or(0) {
+                let value = params.get(index).copied().unwrap_or(0);
+                self.assign(image, host, &mut stream, slot, value)?;
+            }
+        }
+        let instance = &mut self.instances[slot];
+        instance.next = Some(image.state(&record, 0)?);
+        instance.next_index = 0;
+        let id = self.id(slot);
+        self.schedule(image, host)?;
+        Ok(id)
+    }
+
     /// F38: kill instance `id` (when it is the live instance in its slot).
     pub fn kill(&mut self, image: &Image, host: &mut dyn Host, id: i32) -> Result<(), String> {
         let slot = (id & 0xffff) as usize;

@@ -1191,6 +1191,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 91,
       note: "gameplay-41 progress: the scripts' ships and objects. Every statement the real scripts use now reaches the game: F772/F702/F672 make, place and depart their ships, statement 60 flies them in DATA_001705's formations, F37 sets their AI states, targets, models and cargo, F953/F942 damage and destroy them (and the player), F926/F291 make canisters, F297/F40 put buildings and orbiting objects in the system, F314/F315/F290 add contracts (the contracts page asks the scripts for their rows), F236 fines and F304/F305 ranks. The game signals the scripts as the original does: F953 before damage, F383's Upgrades prices, F633's station days and F60's time ticks. The ship library shows the five journals and their issues. Placement still uses stand-ins and a save does not keep the scripts' objects' fields (deviation 2026-11-03), so the item stays in progress."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
+      note: "gameplay-41 progress: a scripted mission plays through. The game now raises the scripts' player events as F21's values change (the system on arrival, the docked object, the flight mode, the cabins), without which no mission waiting to be in a system could fire. F702 places the scripts' ships with F1530/F1507 from the shared pair and F40 with its own longitude and phase. A save keeps the scripts' ships' fields, their canisters and their body-held objects. Mission 25 (the storyline's military assassination) runs in a test from the offer to the $1500 reward with the port's hooks."
     }
   ]
 };

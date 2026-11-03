@@ -121,14 +121,28 @@ pub struct Body {
 }
 
 /// A mission script's object kept at a body (F297 on a planet's surface, F40
-/// on an orbit): the ship's id, the body and the offset, in the body's frame
-/// when `surface` (it turns with the body's rows), else in the system's.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// on an orbit): the ship's id, the system and body, and the offset, in the
+/// body's frame when `surface` (it turns with the body's rows), else in the
+/// system's. A site of another system is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptSite {
     pub ship: u32,
+    pub system: u32,
     pub body: usize,
     pub offset: [f64; 3],
     pub surface: bool,
+}
+
+/// A mission script's canister in a save (statements 52 and 58): its id,
+/// place, motion and cargo.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ScriptCanister {
+    pub tag: i32,
+    pub position: [i64; 3],
+    pub velocity: [f64; 3],
+    pub forward: [f64; 3],
+    pub up: [f64; 3],
+    pub cargo: u16,
 }
 
 /// Port addition: how far off a ship's hull the autopilot holds when it flies
@@ -2075,6 +2089,12 @@ pub struct NavigatorSave {
     /// The visited stations' markets. Older saves regenerate them.
     #[serde(default)]
     pub markets: Vec<SavedMarket>,
+    /// The mission scripts' canisters and the objects they hold to a body
+    /// (the scripts keep their ids). Older saves have none.
+    #[serde(default)]
+    pub script_canisters: Vec<ScriptCanister>,
+    #[serde(default)]
+    pub script_sites: Vec<ScriptSite>,
 }
 
 /// A mid-docking or mid-launch stage (F1067-F1088).
@@ -2546,6 +2566,22 @@ impl Navigator {
                 markets.sort_by_key(|m| (m.code, m.station));
                 markets
             },
+            script_canisters: self
+                .effects
+                .iter()
+                .filter(|effect| effect.alive)
+                .filter_map(|effect| {
+                    Some(ScriptCanister {
+                        tag: effect.tag?,
+                        position: effect.position,
+                        velocity: effect.velocity,
+                        forward: effect.forward,
+                        up: effect.up,
+                        cargo: effect.cargo?,
+                    })
+                })
+                .collect(),
+            script_sites: self.script_sites.clone(),
         }
     }
 
@@ -2617,6 +2653,28 @@ impl Navigator {
         nav.missiles = crate::missile::MissileField::default();
         nav.effects.clear();
         nav.ships = save.ships.clone();
+        // The scripts' canisters and body-held objects keep their ids.
+        for canister in &save.script_canisters {
+            let mut effect = effects::canister(
+                canister.position,
+                canister.velocity,
+                [[0.0; 3], canister.up, canister.forward],
+                [0.0; 3],
+                canister.cargo,
+                // Its axes are the saved ones: the shared pair is not drawn.
+                &mut npc::Random::new(0, 0),
+            );
+            effect.forward = canister.forward;
+            effect.up = canister.up;
+            effect.tag = Some(canister.tag);
+            nav.effects.push(effect);
+        }
+        nav.script_sites = save
+            .script_sites
+            .iter()
+            .copied()
+            .filter(|site| site.body < nav.bodies.len())
+            .collect();
         nav.spawned = (!nav.ships.is_empty()).then_some(nav.current);
         if let Some([a, b]) = save.random {
             nav.random = npc::Random::new(a, b);

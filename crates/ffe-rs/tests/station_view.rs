@@ -1308,7 +1308,7 @@ fn mission_ships_are_made_placed_steered_and_destroyed() {
         Action::Place {
             object: leader,
             parent: PLAYER_ID,
-            distance: ffe_rs::scripts::packed_distance(0x0017_7fff),
+            distance: 0x0017_7fff,
         },
         Action::Formation {
             object: wingman,
@@ -1344,7 +1344,9 @@ fn mission_ships_are_made_placed_steered_and_destroyed() {
         .map(|d| d * d)
         .sum::<f64>()
         .sqrt();
-    assert!((range - 32_767.0 * 256.0).abs() < 2.0, "{range}");
+    // F1507's Q31 direction times the mantissa, to its rounding.
+    let expected = ffe_rs::scripts::packed_distance(0x0017_7fff);
+    assert!((range - expected).abs() < expected * 1e-4, "{range}");
     let wing = find(&nav, wingman).unwrap();
     assert_eq!(wing.state, ffe_core::npc::State::Escort);
     assert_eq!(wing.leader, Some(lead.id));
@@ -1373,6 +1375,20 @@ fn mission_ships_are_made_placed_steered_and_destroyed() {
     assert!([leader, wingman, building, TAG_IDS]
         .iter()
         .all(|id| present.contains(id)));
+    // A save keeps them: the ships with the fields the scripts set, the
+    // canister with its id and the building held to its planet.
+    let json = serde_json::to_string(&nav.save_state()).unwrap();
+    let mut nav = Navigator::from_save(&cache, &serde_json::from_str(&json).unwrap()).unwrap();
+    assert_eq!(ffe_rs::scripts::present(&nav), present);
+    let wing = find(&nav, wingman).unwrap();
+    assert_eq!((wing.ai_state(), wing.script_target), (0xb, leader));
+    assert_eq!(find(&nav, building).unwrap().seed, 7);
+    assert_eq!(nav.script_sites.len(), 1);
+    let random = nav.random;
+    state.script_actions.clear();
+    ffe_rs::scripts::apply(&mut state, &mut nav, &cache, player);
+    assert_eq!(nav.random, random, "holding a site draws nothing");
+    assert_eq!(find(&nav, building).unwrap().position, base.position);
     // F953's most damage (statement 21's -1) destroys the leader, and the
     // canister goes with statement 51.
     state.script_actions = vec![

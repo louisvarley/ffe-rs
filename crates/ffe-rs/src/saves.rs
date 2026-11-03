@@ -639,6 +639,8 @@ mod tests {
             random: None,
             deep_space: false,
             markets: Vec::new(),
+            script_canisters: Vec::new(),
+            script_sites: Vec::new(),
         }
     }
 

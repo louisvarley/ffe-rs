@@ -215,16 +215,13 @@ These do not change the simulation or the Classic look, but are listed for trans
 
 Every object statement the real scripts use is wired
 (`docs/notes/mission-scripts.md`, "Mission ships and objects"), with these
-stand-ins until the system objects are ported: F702/F1507 place a script's
-ship in a direction from the shared pair instead of F1506's orbit phase;
-F669's attackers start 25 km from the player; F297's buildings sit on the
-planet's radius at their latitude and longitude, not on F879's terrain
-height; F40's objects do not move on their orbit. The scripts' ships and
-buildings are ordinary navigator ships, their canisters ordinary effects,
-so a save keeps the ships but not the fields the scripts set on them
-(`+0xa0`, the AI code, the target) nor the canisters and buildings' body
-links. The journal viewer draws an issue as the Journal screen's paragraph
-list, without F80's masthead or F79's scrolling.
+stand-ins until the system objects are ported: F669's attackers start 25 km
+from the player rather than on F702's orbit round the root; F702/F1507's
+placements leave out F1508's in-step interpolation and F1507's velocity;
+F297's buildings sit on the planet's radius at their latitude and
+longitude, not on F879's terrain height; F40's objects do not move on
+their orbit. The journal viewer draws an issue as the Journal screen's
+paragraph list, without F80's masthead or F79's scrolling.
 
 ## 2026-10-25 — intro input carry-over (owner requested)
 

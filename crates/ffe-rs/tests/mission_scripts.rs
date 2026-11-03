@@ -376,3 +376,201 @@ fn list_a_mission() {
         }
     }
 }
+
+/// The game around a scripted mission: the player's cash, the shared pair,
+/// the contracts, the system and the time, and what the scripts asked for.
+struct Player {
+    credits: u32,
+    random: ffe_core::npc::Random,
+    posts: Vec<String>,
+    hold: Vec<u16>,
+    loadout: ffe_core::equipment::Loadout,
+    combat: ffe_rs::combat::Combat,
+    missions: ffe_core::missions::State,
+    legal: ffe_core::npc::Legal,
+    career: ffe_core::npc::Career,
+    system: u32,
+    day: u32,
+    actions: Vec<ffe_rs::scripts::Action>,
+    next_ship: u32,
+}
+
+impl Player {
+    /// One call into the scripts with the port's hooks, the way
+    /// `scripts::with_all` makes them in the game.
+    fn run<R>(
+        &mut self,
+        scripts: &mut ffe_core::script::run::Scripts,
+        f: impl FnOnce(&mut ffe_core::script::run::Scripts, &mut ffe_rs::scripts::Hooks<'_>, u32) -> R,
+    ) -> R {
+        use ffe_rs::scripts::{BodyView, Cargo, Hooks, ShipView, Snapshot, BODY_IDS, PLAYER_ID};
+        let snapshot = Snapshot {
+            system: self.system,
+            clock: f64::from(self.day) * 86_400.0,
+            legal: self.legal,
+            career: self.career,
+            next_ship: self.next_ship,
+            next_tag: ffe_rs::scripts::TAG_IDS,
+            ships: vec![ShipView {
+                id: PLAYER_ID,
+                model: 30,
+                ai: 0,
+                target: 0,
+                seed: 0,
+                distance: 0,
+            }],
+            // The target system's starport the mission names.
+            bodies: vec![BodyView {
+                id: BODY_IDS + 1,
+                model: 20,
+                seed: 0x9c80_553e,
+                class: 0x10,
+            }],
+            values: [0; 21],
+            allegiance: 2,
+            capacity: 20,
+        };
+        let mut hooks = Hooks::new(
+            snapshot,
+            &mut self.credits,
+            &mut self.random,
+            &mut self.posts,
+            None,
+            Some(Cargo {
+                hold: &mut self.hold,
+                capacity: 0,
+                loadout: &mut self.loadout,
+                combat: &mut self.combat,
+            }),
+            Some(&mut self.missions),
+        );
+        let result = f(scripts, &mut hooks, self.day);
+        self.next_ship = hooks.next_ship;
+        self.legal = hooks.legal;
+        self.career = hooks.career;
+        self.actions.extend(hooks.finish_actions());
+        result
+    }
+}
+
+/// Mission 25, the military assassination the storyline's mission 23 offers
+/// on the military board, played from the offer to the reward with the
+/// port's hooks: the conversation, accepting it (a contract, two attackers),
+/// arriving in its target system (0x6a45718) before the target leaves (its ship waits
+/// in the starport's bay), killing it after it has left (F236's offence and
+/// event 0x16) and going home for the $1500 reward.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn an_assassination_mission_runs_from_the_offer_to_the_reward() {
+    use ffe_rs::scripts::{Action, BODY_IDS, PLAYER_ID};
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let image = Image::new(cache.asset("base:script/missions").unwrap()).unwrap();
+    let mut scripts = ffe_core::script::run::Scripts::new(&image);
+    let origin = 0x0123_4567;
+    let target = 0x06a4_5718;
+    let start = 0x12_1cf7 + 100;
+    let mut player = Player {
+        credits: 1_000,
+        random: ffe_core::npc::Random::start(),
+        posts: Vec::new(),
+        hold: vec![0; 0x26],
+        loadout: Default::default(),
+        combat: Default::default(),
+        missions: Default::default(),
+        legal: Default::default(),
+        career: Default::default(),
+        system: origin,
+        day: start,
+        actions: Vec::new(),
+        next_ship: 1,
+    };
+    // The target leaves three days on (F21's seconds).
+    let leaves = ((start + 3 - 0x12_1cf7) * 86_400) as i32;
+    let id = player.run(&mut scripts, |scripts, hooks, today| {
+        scripts
+            .start_mission(&image, hooks, today, 25, &[0x10, 0x1234, leaves, 0])
+            .unwrap()
+    });
+    assert_ne!(id, 0);
+    let menu = &scripts.engine.menu;
+    assert!(menu.active);
+    let codes: Vec<i32> = menu.entries.iter().map(|entry| entry.code).collect();
+    assert!(codes.contains(&0xa9c5), "{codes:x?}");
+
+    // "OK - agreed." (0xa9c5): the contract and two F665 attackers.
+    player.run(&mut scripts, |scripts, hooks, today| {
+        let entry = ffe_core::script::menu::Entry {
+            code: 0xa9c5,
+            ..Default::default()
+        };
+        scripts.select(&image, hooks, today, entry).unwrap();
+    });
+    assert_eq!(player.missions.script_contracts.len(), 1);
+    let attackers = player
+        .actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                Action::Attacker {
+                    target: PLAYER_ID,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(attackers, 2);
+
+    // F909's arrival in the target system: the target waits in the starport's bay.
+    player.system = target;
+    player.actions.clear();
+    player.run(&mut scripts, |scripts, hooks, today| {
+        scripts.player_changed(&image, hooks, today, 4).unwrap();
+    });
+    let ship = player
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Departure {
+                ship,
+                starport,
+                leaves: when,
+                seed,
+                ..
+            } => {
+                assert_eq!((*starport, *when, *seed), (BODY_IDS + 1, leaves, 0x1234));
+                Some(*ship)
+            }
+            _ => None,
+        })
+        .expect("the target's ship");
+
+    // A day after it left, the player destroys it: F924's removal.
+    player.day = start + 4;
+    player.run(&mut scripts, |scripts, hooks, today| {
+        scripts
+            .object_removed(
+                &image,
+                hooks,
+                today,
+                ship as i32 + ffe_rs::scripts::SHIP_IDS,
+            )
+            .unwrap();
+    });
+    assert!(
+        player.legal.fines[3] > 0,
+        "F236's offence in jurisdiction 3"
+    );
+
+    // Home again: F303-style reward and the contract gone.
+    let before = player.credits;
+    player.system = origin;
+    player.run(&mut scripts, |scripts, hooks, today| {
+        scripts.player_changed(&image, hooks, today, 4).unwrap();
+    });
+    assert_eq!(player.credits, before + 0x3a98);
+    assert!(player.missions.script_contracts.is_empty());
+    assert!(scripts.engine.live().all(|(_, mission, _)| mission != 25));
+}
