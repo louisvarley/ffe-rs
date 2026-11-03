@@ -275,7 +275,7 @@ window.FFE_BURNDOWN = {
         { id: "audio-1", title: "Sound effects: the 23 effects and sound requests", status: "done", version: "v0.70" },
         { id: "audio-2", title: "HMP to MIDI parsing", status: "done", version: "v0.48q" },
         { id: "audio-3", title: "MIDI synthesis and music playback", status: "done", version: "v0.48q" },
-        { id: "audio-4", title: "Positional volume and mixing", status: "in-progress", version: "v0.70" },
+        { id: "audio-4", title: "Positional volume and mixing", status: "done", version: "v0.70" },
         { id: "audio-5", title: "Software mixer, WinMM waveOut sink and the intro song", status: "done", version: "v0.70" }
       ]
     },

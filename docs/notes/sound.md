@@ -803,3 +803,13 @@ Remaining work, in order:
    needs it; the original effect calls are mono.
 
 No dashboard, burndown or `docs/PORT_LOG.md` edits were made.
+
+## Engine noise (F1910)
+
+The JJFFE build's F1910 is the continuous engine bed: when the Space
+station/engine flag is set it calls `SoundPlaySample(0x10, raw >> 9,
+raw + 0x10000)` (sample 0x0f, voice 1). F1046 passes `max(|thrust|) - 0x221`
+each flight frame and F1042/F1043 pass 1 when that is negative.
+`GameAudio::engine_noise` implements it and the playable drives it from the
+player's thrust words while flying, unpaused and alive. Positional volume
+(F1759) is never called by the DOS build, so the mono mix is like for like.

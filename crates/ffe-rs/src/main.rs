@@ -6651,6 +6651,20 @@ fn run() -> Result<(), String> {
                 .map_or(0, |model| model.player().motion.rate[2]);
             views.combat.step(nearest, yaw_rate);
         }
+        // F1046/F1042/F1043's F1910 each flight frame: sample 0x10 follows the
+        // largest thrust word less 0x221, quiet (1) without thrust.
+        if !paused && state.mode == ffe_rs::flight::Mode::Flight && state.death.is_none() {
+            if let Some(model) = original.as_ref() {
+                let thrust = model.player().motion.thrust;
+                let strongest = thrust
+                    .iter()
+                    .map(|word| i32::from(*word).abs())
+                    .max()
+                    .unwrap_or(0);
+                let raw = strongest - 0x221;
+                sound.engine_noise(if raw >= 0 { raw } else { 1 });
+            }
+        }
         // The lift scenes of the docking and launching stages (the front view).
         screen.lift = None;
         // Draw the inside view until the launch completes (LaunchDone), not

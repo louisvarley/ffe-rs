@@ -361,6 +361,22 @@ impl GameAudio {
         true
     }
 
+    /// F1910 (JJFFE's build) as F1042/F1043/F1046 drive it each flight frame:
+    /// sample 0x10 re-sent with volume `raw` and pitch `raw + 0x10000`, gated
+    /// by the "Space station" sound switch (`DATA_009030`). `raw` is the
+    /// largest thrust word less 0x221 (F1046), or 1 with no thrust (F1042,
+    /// F1043). The mixer's 0x10 rule updates the playing voice in place. The
+    /// level is F1908's `level << 9` read back.
+    pub fn engine_noise(&mut self, raw: i32) -> bool {
+        if !self.audio.sound_flags().space_station {
+            return false;
+        }
+        let raw = raw.clamp(0, 0x7fff);
+        self.audio
+            .play_sample(sample::STATION, (raw >> 9) as u8, raw + 0x1_0000);
+        true
+    }
+
     /// Post a cue using `F1907`'s log volume, e.g. an object's `+0x88` byte.
     pub fn play_log(&mut self, cue: Cue, logvol: i16) -> bool {
         self.play_level(cue, log_volume(logvol))
@@ -619,6 +635,28 @@ mod tests {
         fn set_sound_flags(&mut self, flags: SoundFlags) {
             self.recorded().flags = flags;
         }
+    }
+
+    #[test]
+    fn engine_noise_follows_f1910() {
+        let recorder = Recorder::default();
+        recorder.recorded().flags = SoundFlags::default();
+        let mut game = GameAudio::new(recorder.clone());
+        // F1046: thrust 0x2000 less 0x221; F1042/F1043: 1 with no thrust.
+        let raw = 0x2000 - 0x221;
+        assert!(game.engine_noise(raw));
+        assert!(game.engine_noise(1));
+        assert_eq!(
+            recorder.recorded().samples,
+            vec![
+                (sample::STATION, (raw >> 9) as u8, raw + 0x1_0000),
+                (sample::STATION, 0, 1 + 0x1_0000)
+            ]
+        );
+        // The "Space station" switch (DATA_009030) gates it.
+        recorder.recorded().flags.space_station = false;
+        assert!(!game.engine_noise(raw));
+        assert_eq!(recorder.recorded().samples.len(), 2);
     }
 
     #[test]
