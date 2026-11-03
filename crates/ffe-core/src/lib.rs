@@ -47,6 +47,7 @@ pub mod objects;
 pub mod pads;
 pub mod physics;
 pub mod player;
+pub mod script;
 pub mod sector;
 pub mod shipyard;
 mod shipyard_table;

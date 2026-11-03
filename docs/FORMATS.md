@@ -218,9 +218,12 @@ contract, not the full schema/examples in sections 2.1 onward.
   671 articles): `MISSION.DAT` cut by the executable's `DATA_002292` offset table
   (RVA 0x9c0c4, 672 dwords, floppy 1.02) and F78-unscrambled, a `u16` count then
   NUL-terminated articles with F78's macros left in. See `crates/ffe-core/src/journal.rs`.
+  V32 adds `scripts/missions.bin` (`base:script/missions`, `mission_scripts`, 105
+  missions): the executable's script region (RVA 0x801c4..0x8e29c) with its
+  relocated pointers rewritten. See `docs/notes/mission-scripts.md`.
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
-  v10); v26 1794; v27 1796; v28 1797; v29 1815; v30 1816; v31 1817. Tools read every version. The playable requires v2 font content;
+  v10); v26 1794; v27 1796; v28 1797; v29 1815; v30 1816; v31 1817; v32 1818. Tools read every version. The playable requires v2 font content;
   F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps
   points-only inspection; v4 adds declared-face inspection. The lab requires
   matching command/vertex model indices, counts and descriptor offsets.

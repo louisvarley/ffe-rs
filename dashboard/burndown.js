@@ -223,7 +223,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-38", title: "Runtime module clock, source F3/F4 and landed/flight event routing", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-39", title: "Source autopilot runtime: retire intercept/slot substitutes and verify cancel", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-40", title: "Starport pad descent F741-F746/F652 with 0x59 geometry import", status: "in-progress", version: "reopened-source-audit" },
-        { id: "gameplay-41", title: "Mission-script engine (F41/F31): script import, journals and scripted missions", status: "todo" },
+        { id: "gameplay-41", title: "Mission-script engine (F41/F31): script import, journals and scripted missions", status: "in-progress", version: "scripts-v32" },
         { id: "gameplay-41", title: "F575 crash damage via F953 and source bounce flags", status: "done", version: "v1.14" }
       ]
     },
@@ -1156,6 +1156,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 91,
       note: "Item added (gameplay-41). The ship library journals turn out to be driven by the original's mission-script interpreter (F41/F31, about 2,700 lines of assembly plus helpers) running a script graph in the executable's data. The same engine sets up the journals, queues their articles and runs the scripted missions. Traced and written up in docs/notes/journal.md; the journal viewer waits on it."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
+      note: "gameplay-41 in progress (cache v32): the mission scripts are imported from the player's FIRSTENC.EXE. The script region is copied with its relocated pointers rewritten, and every one of the 105 missions, 333 reachable states and 665 conditions decodes to its end exactly as the original interpreter reads it (one known misparse in the original, mission 83). JJFFE's copy of the scripts differs from the floppy 1.02 executable, so the import uses the player's file. The interpreter port is next."
     },
     {
       date: "2026-11-03",

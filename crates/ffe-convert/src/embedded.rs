@@ -700,6 +700,134 @@ pub fn decode_journal(
     })
 }
 
+/// The executable's base relocations (type 3, HIGHLOW): the RVAs of every
+/// absolute pointer the loader adjusts.
+fn relocations(bytes: &[u8]) -> Result<std::collections::BTreeSet<u32>, String> {
+    let pe = dword(bytes, 60)? as usize;
+    let count = usize::from(word(bytes, pe + 6)?);
+    let optional_size = usize::from(word(bytes, pe + 20)?);
+    if optional_size < 96 + 6 * 8 {
+        return Err("PE optional header has no relocation directory".to_owned());
+    }
+    let directory = dword(bytes, pe + 24 + 96 + 5 * 8)?;
+    let size = dword(bytes, pe + 24 + 96 + 5 * 8 + 4)? as usize;
+    let table = pe + 24 + optional_size;
+    let mut file = None;
+    for index in 0..count {
+        let section = table + index * 40;
+        let virtual_size = dword(bytes, section + 8)?;
+        let rva = dword(bytes, section + 12)?;
+        let raw_size = dword(bytes, section + 16)?;
+        let raw = dword(bytes, section + 20)? as usize;
+        if (rva..rva.saturating_add(virtual_size.max(raw_size))).contains(&directory) {
+            file = Some(raw + (directory - rva) as usize);
+        }
+    }
+    let mut at = file.ok_or("PE relocation directory is outside every section")?;
+    let end = at.checked_add(size).ok_or("PE relocation size overflow")?;
+    range(bytes, at, size)?;
+    let mut found = std::collections::BTreeSet::new();
+    while at + 8 <= end {
+        let page = dword(bytes, at)?;
+        let block = dword(bytes, at + 4)? as usize;
+        if block == 0 {
+            break;
+        }
+        if block < 8 || at + block > end {
+            return Err("bad PE relocation block".to_owned());
+        }
+        for entry in 0..(block - 8) / 2 {
+            let value = word(bytes, at + 8 + 2 * entry)?;
+            match value >> 12 {
+                0 => {}
+                3 => {
+                    found.insert(page + u32::from(value & 0xfff));
+                }
+                kind => return Err(format!("unexpected PE relocation type {kind}")),
+            }
+        }
+        at += block;
+    }
+    Ok(found)
+}
+
+/// The mission scripts (cache v32): the region `start..table + 4 * count`
+/// that holds the script graph and `DATA_001697`'s `count` struct pointers,
+/// with every relocated pointer rewritten (see [`ffe_core::script`]). The
+/// only pointers that leave the region go to the `static_words` BSS words at
+/// `statics`. Every mission's states, entry streams and condition streams
+/// must decode to their terminating statement.
+pub fn decode_mission_scripts(
+    bytes: &[u8],
+    start: u32,
+    table: u32,
+    count: usize,
+    statics: u32,
+    static_words: u32,
+) -> Result<EmbeddedTable, String> {
+    use ffe_core::script::{Image, POINTER_BLOB, POINTER_STATIC};
+    let section = DataSection::parse(bytes)?;
+    let end = table
+        .checked_add(4 * count as u32)
+        .ok_or("mission script table overflow")?;
+    let length = end
+        .checked_sub(start)
+        .ok_or("mission scripts end before they start")? as usize;
+    let first = section.offset(start, length)?;
+    let mut blob = range(bytes, first, length)?.to_vec();
+    let mut pointers = std::collections::BTreeSet::new();
+    for rva in relocations(bytes)?.range(start..end) {
+        let at = (rva - start) as usize;
+        if at + 4 > length {
+            return Err(format!(
+                "relocation at {rva:#x} straddles the script region"
+            ));
+        }
+        let value = dword(bytes, first + at)?;
+        let target = value
+            .checked_sub(section.image_base)
+            .ok_or_else(|| format!("script pointer at {rva:#x} is not an address"))?;
+        let rewritten = if (start..end).contains(&target) {
+            POINTER_BLOB | (target - start)
+        } else if (statics..statics + 4 * static_words).contains(&target) && target % 4 == 0 {
+            POINTER_STATIC | ((target - statics) / 4)
+        } else {
+            return Err(format!("script pointer at {rva:#x} goes to {target:#x}"));
+        };
+        blob[at..at + 4].copy_from_slice(&rewritten.to_le_bytes());
+        pointers.insert(at as u32);
+    }
+    let encoded = Image::encode(&blob, table - start, count as u32, static_words, &pointers);
+    let image = Image::new(&encoded)?;
+    for mission in 0..image.missions() {
+        let record = image.mission_struct(mission)?;
+        for state in image
+            .reachable_states(&record)
+            .map_err(|why| format!("mission {mission}: {why}"))?
+        {
+            let state = image.state(&record, state)?;
+            if let Some(entry) = image.entry(state)? {
+                image
+                    .skip_statements(entry)
+                    .map_err(|why| format!("mission {mission} entry: {why}"))?;
+            }
+            for condition in 0..image.conditions(state)? {
+                let stream = image.condition(state, condition)?;
+                let body = image
+                    .skip_expression(stream)
+                    .map_err(|why| format!("mission {mission} condition: {why}"))?;
+                image
+                    .skip_statements(body)
+                    .map_err(|why| format!("mission {mission} condition body: {why}"))?;
+            }
+        }
+    }
+    Ok(EmbeddedTable {
+        source_offset: first,
+        bytes: encoded,
+    })
+}
+
 /// The default light and shade table (`DATA_007231..7234`, 36 bytes).
 pub fn decode_default_lighting(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
     use ffe_core::model_lighting::{default_lighting, DEFAULT_LIGHTING_BYTES};

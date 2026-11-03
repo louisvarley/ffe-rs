@@ -129,7 +129,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             raise RuntimeError("repeated cache builds differ")
         result = run_tool([str(tool), "inspect-data", "--data", str(first), "--json"])
         manifest = json.loads(result.stdout)
-        if manifest["complete_game_assets"] or manifest["format_version"] != 31 or len(manifest["files"]) != 1817:
+        if manifest["complete_game_assets"] or manifest["format_version"] != 32 or len(manifest["files"]) != 1818:
             raise RuntimeError("incorrect cache scope/count")
         # v30: F1343's message string arrays are imported as one asset.
         if not any(record.get("id") == "base:text/messages" for record in manifest["files"]):
@@ -137,6 +137,9 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
         # v31: MISSION.DAT's 671 journal articles through DATA_002292.
         if not any(record.get("id") == "base:text/journal" for record in manifest["files"]):
             raise RuntimeError("the v31 journal archive is missing")
+        # v32: the mission scripts under DATA_001697.
+        if not any(record.get("id") == "base:script/missions" for record in manifest["files"]):
+            raise RuntimeError("the v32 mission scripts are missing")
         sources = {record["path"]: record for record in manifest["source_files"]}
         for record in sources.values():
             source = (game / record["path"]).read_bytes()
@@ -149,7 +152,7 @@ def verify(tool: Path, game: Path, reference: Path) -> dict:
             for table, label in [("primary", "DATA_008240"), ("secondary", "DATA_008241")]
         }
         with zipfile.ZipFile(first) as archive:
-            if archive.testzip() is not None or len(archive.infolist()) != 1818:
+            if archive.testzip() is not None or len(archive.infolist()) != 1819:
                 raise RuntimeError("ZIP CRC/count failure")
             for record in manifest["files"]:
                 payload = archive.read(record["path"])

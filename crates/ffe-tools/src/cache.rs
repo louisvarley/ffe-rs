@@ -87,6 +87,15 @@ pub(crate) fn message_layout(profile: &str) -> Option<&'static [(u8, u32, usize)
     }
 }
 
+/// The mission scripts (v32), floppy 1.02 only: the region start, the
+/// `DATA_001697` table, its entries, and the static words in BSS.
+pub(crate) fn scripts_layout(profile: &str) -> Option<(u32, u32, usize, u32, u32)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0x801c4, 0x8e0f8, ffe_core::script::MISSIONS, 0x20bde0, 10)),
+        _ => None,
+    }
+}
+
 /// The journal offset table (`DATA_002292`, 672 dwords into `MISSION.DAT`;
 /// v31), floppy 1.02 only.
 pub(crate) fn journal_layout(profile: &str) -> Option<(u32, usize)> {
@@ -587,6 +596,20 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some((start, table, count, statics, words)) = scripts_layout(profile.id) {
+                let scripts = ffe_convert::embedded::decode_mission_scripts(
+                    &bytes, start, table, count, statics, words,
+                )?;
+                assets.push(Asset {
+                    id: "base:script/missions".to_owned(),
+                    path: "scripts/missions.bin".to_owned(),
+                    kind: AssetKind::MissionScripts {
+                        missions: count as u32,
+                        source_offset: scripts.source_offset as u64,
+                    },
+                    bytes: scripts.bytes,
+                });
+            }
             if let Some((rva, count)) = journal_layout(profile.id) {
                 let mission = inspection
                     .files
@@ -766,6 +789,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         + usize::from(system_strings_layout(profile.id).is_some())
         + usize::from(message_layout(profile.id).is_some())
         + usize::from(journal_layout(profile.id).is_some())
+        + usize::from(scripts_layout(profile.id).is_some())
         + usize::from(star_point_layout(profile.id).is_some())
         + usize::from(dot_table_layout(profile.id).is_some())
         + if intro_layout(profile.id).is_some() {
@@ -793,7 +817,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 31,
+        format: "ffe-content-cache".to_owned(), format_version: 32,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,
