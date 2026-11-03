@@ -24,6 +24,8 @@ pub enum ViewMode {
     /// Mode 5: the camera rides the last missile the player launched
     /// (`player+0xef`, `DATA_008877`; F1054's `JUMP_004340`).
     Missile,
+    /// Mode 6: F11's combat computer view (`crate::combat_computer`).
+    Combat,
 }
 
 impl ViewMode {
@@ -35,6 +37,7 @@ impl ViewMode {
             ViewMode::BottomTurret => "Bottom Turret View",
             ViewMode::External => "External View",
             ViewMode::Missile => "Missile View",
+            ViewMode::Combat => "Combat Computer",
         }
     }
 
@@ -54,7 +57,7 @@ impl ViewMode {
             }
             ViewMode::TopTurret | ViewMode::BottomTurret => ViewMode::External,
             // FUNC_001001's `DATA_008872`+1 is 6, and 6 > 4 wraps to 0.
-            ViewMode::External | ViewMode::Missile => ViewMode::Front,
+            ViewMode::External | ViewMode::Missile | ViewMode::Combat => ViewMode::Front,
         }
     }
 
@@ -220,6 +223,8 @@ pub struct ViewState {
     pub lock_external: bool,
     /// `DATA_008877`: the missile object view 5 rides, when one is alive.
     pub missile: Option<MissileCamera>,
+    /// View 6's camera words (`DATA_007269..7271`).
+    pub combat: crate::combat_computer::CombatCamera,
     /// What the console shows besides the views (time acceleration, speeds).
     pub console: crate::console::ConsoleState,
 }
@@ -232,6 +237,7 @@ impl Default for ViewState {
             turret: TurretCamera::default(),
             lock_external: true,
             missile: None,
+            combat: crate::combat_computer::CombatCamera::default(),
             console: crate::console::ConsoleState::default(),
         }
     }
@@ -357,6 +363,17 @@ impl Camera {
                             + missile.axes[1][i] * above
                     }),
                     axes: missile.axes,
+                }
+            }
+            // F1054's view 6: rot(B, C, 0x9f5), then rot(C, A, DATA_007271),
+            // and F1053 backs the eye off along the turned forward row.
+            ViewMode::Combat => {
+                let (up, forward) = rotate(up, forward, crate::combat_computer::PITCH);
+                let (forward, right) = rotate(forward, right, views.combat.yaw as u16);
+                let offset = views.combat.offset() / 256.0 / model_scale;
+                Self {
+                    position: std::array::from_fn(|i| state.position[i] + forward[i] * offset),
+                    axes: [right, up, forward],
                 }
             }
             // rot(C, A, yaw), then rot(B, C, pitch); the camera sits at

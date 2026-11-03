@@ -385,3 +385,47 @@ fn firing_at_hope_is_fined_and_shows_f236s_message() {
     // The illegal-fire flag is the system's, not the chase's.
     assert!(nav.legal.illegal_fire);
 }
+
+/// F11's combat computer view (6): the chase camera behind the player and
+/// F1109's amber readout (range, hull/shields, type) beside the pirate.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_combat_computer_reads_out_the_pirate() {
+    use ffe_rs::camera::ViewMode;
+    use ffe_rs::combat_computer::{readout, CombatCamera, COLOUR};
+    let cache = cache();
+    let (nav, viewer, mut screen, state) = setup(&cache);
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let player = state.position.map(|v| (v * unit).round() as i64);
+    let pirate = nav.ships.iter().find(|s| s.role == Role::Pirate).unwrap();
+    let info = readout(pirate, player, unit).expect("the pirate qualifies");
+    // 80 m: 0.08 km, F1109's Write2dpFrac.
+    assert_eq!(info.range, 8);
+    assert_eq!(info.lines[0], "0.08km");
+    assert!(info.lines[1].ends_with('%'));
+    // F1109 prints the type's name (`stats+0xe`), not the port's numbering.
+    assert_eq!(info.lines[2], pirate.type_name);
+    assert!(pirate.name.starts_with(&pirate.type_name));
+    ships(&mut screen, &nav);
+    screen.combat_readouts = nav
+        .ships
+        .iter()
+        .filter_map(|ship| readout(ship, player, unit))
+        .collect();
+    let mut views = ViewState {
+        mode: ViewMode::Combat,
+        combat: CombatCamera::enter(),
+        ..ViewState::default()
+    };
+    views.combat.step(Some(info.range), 0);
+    screen.draw(&state, views, Some(&viewer), true, "");
+    save(&screen, "combat-computer.ppm");
+    let amber = screen.palette()[usize::from(COLOUR)];
+    let lit = screen
+        .logical_pixels()
+        .iter()
+        .take(320 * 158)
+        .filter(|pixel| **pixel == amber)
+        .count();
+    assert!(lit > 20, "no F1109 readout drawn ({lit} amber pixels)");
+}

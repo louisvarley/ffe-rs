@@ -3588,6 +3588,7 @@ fn run() -> Result<(), String> {
                         Click::Rear => Some(ViewButton::Select(ViewMode::Rear)),
                         Click::External => Some(ViewButton::Select(ViewMode::External)),
                         Click::Turret => Some(ViewButton::Turret),
+                        Click::Combat => Some(ViewButton::Select(ViewMode::Combat)),
                         _ => None,
                     });
                     let turret = ViewMode::turret(gun_mounts, views.turret.pitch);
@@ -3600,13 +3601,21 @@ fn run() -> Result<(), String> {
                     // Missile Viewer (general bit 9) and a missile in flight
                     // (`player+0xef`); otherwise the key does nothing.
                     let mut view_note: Option<String> = None;
-                    let view_command = [Key::F1, Key::F6, Key::F7, Key::F8, Key::F9, Key::F10]
-                        .into_iter()
-                        .find(|key| pressed(*key))
-                        // F1 and F6..F12 belong to the status screen while it
-                        // is up (F292).
-                        .filter(|_| !status_keys)
-                        .and_then(input::view_command);
+                    let view_command = [
+                        Key::F1,
+                        Key::F6,
+                        Key::F7,
+                        Key::F8,
+                        Key::F9,
+                        Key::F10,
+                        Key::F11,
+                    ]
+                    .into_iter()
+                    .find(|key| pressed(*key))
+                    // F1 and F6..F12 belong to the status screen while it
+                    // is up (F292).
+                    .filter(|_| !status_keys)
+                    .and_then(input::view_command);
                     let chosen = if let Some(command) = view_command {
                         match command {
                             input::ViewCommand::Cycle => {
@@ -3616,6 +3625,7 @@ fn run() -> Result<(), String> {
                             input::ViewCommand::Rear => Some(ViewMode::Rear),
                             input::ViewCommand::Turret => turret,
                             input::ViewCommand::External => Some(ViewMode::External),
+                            input::ViewCommand::Combat => Some(ViewMode::Combat),
                             input::ViewCommand::Missile => {
                                 if views.mode == ViewMode::Missile {
                                     Some(ViewMode::Missile)
@@ -3644,17 +3654,20 @@ fn run() -> Result<(), String> {
                             None => None,
                         }
                     };
-                    // F11 is the source combat-computer key. View 6 is not
-                    // ported, so say so instead of leaving a silent dead key.
-                    if view_command.is_none()
-                        && clicked.is_none()
-                        && pressed(Key::F11)
-                        && !status_keys
-                    {
-                        view_note =
-                            Some("The combat computer needs equipment (not ported).".to_owned());
-                    }
+                    // F1056's 0xfb: view 6 needs the Combat Computer
+                    // (`ship+0xc8 & 0x40`); without it the key does nothing.
+                    let chosen = match chosen {
+                        Some(ViewMode::Combat) if !state.loadout.has_general(17) => {
+                            view_note =
+                                Some("F11: fit the Combat Computer at a starport.".to_owned());
+                            None
+                        }
+                        other => other,
+                    };
                     if let Some(next) = chosen {
+                        if next == ViewMode::Combat && views.mode != ViewMode::Combat {
+                            views.combat = ffe_rs::combat_computer::CombatCamera::enter();
+                        }
                         let changed = next != views.mode;
                         views.mode = next;
                         if changed {
@@ -6618,6 +6631,25 @@ fn run() -> Result<(), String> {
                         }
                     }));
             }
+        }
+        // F11's combat computer view (6): F1099/F1109's readouts and F1054's
+        // camera words, each frame the view is up.
+        screen.combat_readouts.clear();
+        if views.mode == ViewMode::Combat {
+            let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+            let player = ship_position(&original, &state);
+            if let Some(nav) = nav.as_ref() {
+                screen.combat_readouts.extend(
+                    nav.ships
+                        .iter()
+                        .filter_map(|ship| ffe_rs::combat_computer::readout(ship, player, unit)),
+                );
+            }
+            let nearest = screen.combat_readouts.iter().map(|r| r.range).min();
+            let yaw_rate = original
+                .as_ref()
+                .map_or(0, |model| model.player().motion.rate[2]);
+            views.combat.step(nearest, yaw_rate);
         }
         // The lift scenes of the docking and launching stages (the front view).
         screen.lift = None;

@@ -32,6 +32,8 @@ pub enum ViewCommand {
     Turret,
     External,
     Missile,
+    /// F11 (action 0xfb): the combat computer view.
+    Combat,
 }
 
 /// Map one flight key to its source view action. The caller applies the
@@ -44,6 +46,7 @@ pub fn view_command(key: Key) -> Option<ViewCommand> {
         Key::F8 => Some(ViewCommand::Turret),
         Key::F9 => Some(ViewCommand::External),
         Key::F10 => Some(ViewCommand::Missile),
+        Key::F11 => Some(ViewCommand::Combat),
         _ => None,
     }
 }
@@ -605,9 +608,9 @@ mod tests {
         assert_eq!(view_command(Key::F8), Some(ViewCommand::Turret));
         assert_eq!(view_command(Key::F9), Some(ViewCommand::External));
         assert_eq!(view_command(Key::F10), Some(ViewCommand::Missile));
+        assert_eq!(view_command(Key::F11), Some(ViewCommand::Combat));
         // The retired port help key and the debug keys are not view actions.
         assert_eq!(view_command(Key::Slash), None);
-        assert_eq!(view_command(Key::F11), None);
         assert_eq!(view_command(Key::F12), None);
     }
 

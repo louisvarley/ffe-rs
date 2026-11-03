@@ -185,7 +185,7 @@ pub fn mount(view: ViewMode) -> Option<usize> {
         ViewMode::Rear => Some(1),
         ViewMode::TopTurret => Some(2),
         ViewMode::BottomTurret => Some(3),
-        ViewMode::External => Some(0),
+        ViewMode::External | ViewMode::Combat => Some(0),
         // F1040's first check: the missile view (5) fires nothing.
         ViewMode::Missile => None,
     }
@@ -229,7 +229,9 @@ pub fn gun_origin(
     let words = stats.map_or([0, 0], |stats| match view_mode {
         // The missile view fires nothing (F1040); the front gun is only a
         // harmless placeholder for a caller that asks for a gun origin here.
-        ViewMode::Front | ViewMode::External | ViewMode::Missile => stats.front_gun,
+        ViewMode::Front | ViewMode::External | ViewMode::Missile | ViewMode::Combat => {
+            stats.front_gun
+        }
         ViewMode::Rear => stats.rear_gun,
         ViewMode::TopTurret => stats.top_turret,
         ViewMode::BottomTurret => stats.bottom_turret,

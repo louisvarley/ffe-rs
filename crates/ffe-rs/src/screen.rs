@@ -621,6 +621,9 @@ pub struct Screen {
     pub blink: bool,
     /// The names the labels toggle draws over the view (the original's F1108).
     pub labels: Vec<BodyLabel>,
+    /// F1109's readouts for the combat computer view (6); the caller fills
+    /// them only in that view.
+    pub combat_readouts: Vec<crate::combat_computer::Readout>,
     /// The galaxy map to draw instead of the flight view, when it is open.
     pub galaxy: Option<MapScene>,
     /// The galaxy map's console selection (`F834`/`F840`), applied on top of
@@ -1143,6 +1146,7 @@ impl Screen {
             targeter: None,
             blink: false,
             labels: Vec::new(),
+            combat_readouts: Vec::new(),
             galaxy: None,
             map_console: crate::console::MapConsole::default(),
             has_lock: false,
@@ -1254,7 +1258,7 @@ impl Screen {
             ViewMode::BottomTurret => 3,
             // F1099 skips F1111 in external, the missile view and the combat
             // computer (the missile view jumps over the whole HUD block).
-            ViewMode::External | ViewMode::Missile => return None,
+            ViewMode::External | ViewMode::Missile | ViewMode::Combat => return None,
         };
         (self.lasers[mount] != 0).then_some(mount)
     }
@@ -1961,6 +1965,28 @@ impl Screen {
     /// The labels the original's F989/F1108 would draw this frame.
     pub fn label_positions(&self, camera: &Camera) -> Vec<(String, i32, i32)> {
         body_label_positions(&self.labels, camera)
+    }
+
+    /// F1109: each ship's range, hull/shields and type in amber below it.
+    fn draw_combat_readouts(&mut self, camera: &Camera) {
+        let readouts = std::mem::take(&mut self.combat_readouts);
+        for readout in &readouts {
+            let Some((x, y)) = camera.project(readout.centre, true) else {
+                continue;
+            };
+            let Some((x, y)) = crate::combat_computer::text_origin(x, y) else {
+                continue;
+            };
+            for (row, line) in readout.lines.iter().enumerate() {
+                self.text_screen(
+                    x.max(0) as usize,
+                    y + (row * crate::messages::LINE_HEIGHT) as i32,
+                    line,
+                    crate::combat_computer::COLOUR,
+                );
+            }
+        }
+        self.combat_readouts = readouts;
     }
 
     fn draw_body_labels(&mut self, camera: &Camera) {
@@ -2870,8 +2896,13 @@ impl Screen {
             }
             // Text labels (`l`): the original's F989 walks the live objects and
             // F1108 draws each name at its screen position (colour 15).
-            if world && views.console.labels {
+            // F1099 draws the labels (F1108) only outside view 6, where F1109's
+            // readouts take their place.
+            if world && views.console.labels && view != ViewMode::Combat {
                 self.draw_body_labels(&camera);
+            }
+            if world && view == ViewMode::Combat {
+                self.draw_combat_readouts(&camera);
             }
             // F1104's death hold shows the external view alone: it clears the
             // whole screen once (F1577) and nothing redraws the console, the

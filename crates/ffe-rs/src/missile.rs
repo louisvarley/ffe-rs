@@ -285,6 +285,7 @@ mod tests {
             model: 23,
             role: Role::Pirate,
             name: "Pirate 1".to_owned(),
+            type_name: String::new(),
             position,
             velocity: [0.0; 3],
             forward: [0.0, 0.0, 1.0],

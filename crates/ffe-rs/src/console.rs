@@ -244,7 +244,6 @@ impl Click {
             | Click::Hyperspace => None,
             Click::Screen(_) => Some("F5 (comms) is not ported yet."),
             Click::Missile => Some("The missile view needs equipment (not ported)."),
-            Click::Combat => Some("The combat computer needs equipment (not ported)."),
             // F1056 (78528) calls F1098; `main` runs the launch or reports that
             // no escape craft is fitted.
             Click::Capsule => None,
@@ -530,7 +529,7 @@ impl Console {
         }
         // The views are radio group 1: one image 1, the rest 0. 0x14 is the
         // missile view's button (F1054's F5/F10).
-        for id in [0x14usize, 0x15, 0x16, 0x17, 0x18] {
+        for id in [0x13usize, 0x14, 0x15, 0x16, 0x17, 0x18] {
             self.set_image(id, 0);
         }
         let selected = match view {
@@ -539,6 +538,7 @@ impl Console {
             ViewMode::TopTurret | ViewMode::BottomTurret => 0x16,
             ViewMode::External => 0x15,
             ViewMode::Missile => 0x14,
+            ViewMode::Combat => 0x13,
         };
         if self.is_visible(selected) {
             self.set_image(selected, 1);

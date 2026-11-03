@@ -232,7 +232,7 @@ window.FFE_BURNDOWN = {
         { id: "ui-0", title: "Console buttons: time acceleration meter and screen buttons", status: "done", version: "v0.49i" },
         { id: "ui-1", title: "Cockpit instruments: scanner, gauges and status lights", status: "done", version: "v0.65" },
         { id: "ui-2", title: "Crosshair, targeting and the HUD overlay", status: "done", version: "v0.58" },
-        { id: "ui-3", title: "Missile, combat and external camera views", status: "todo" },
+        { id: "ui-3", title: "Missile, combat and external camera views", status: "done" },
         { id: "ui-4", title: "In-station screens: market, shipyard, bulletin board, status", status: "done", version: "v0.56" },
         { id: "ui-5", title: "Menu and text rendering for every screen", status: "in-progress", version: "v0.58" },
         { id: "ui-6", title: "Galaxy and system map screens", status: "done", version: "v0.48n" },
@@ -1118,6 +1118,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 93,
       note: "world-3 and world-10 done on the reference oracles (verify-world.py, re-run today on the v30 cache): F875/F878 system generation matches the executed original for 4,156 systems and 63,810 objects (4 non-terminating cases skipped), and F880's object creation with its orbits for 1,024 systems and 17,762 physics objects; both traces repeat and tampered rows are rejected. The body-update oracle covers the orbits advancing."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 92,
+      note: "ui-3 done: F11's combat computer view (6) joins the missile (F10) and external (F9) views. With the Combat Computer fitted, F1054's chase camera backs off to keep the nearest ship in frame and F1109 prints each ship's range, hull/shields and type in amber below it."
     }
   ]
 };

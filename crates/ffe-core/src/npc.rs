@@ -1050,6 +1050,10 @@ pub struct NpcShip {
     pub model: u32,
     pub role: Role,
     pub name: String,
+    /// The ship type's name without the port's numbering (the model's
+    /// `stats+0xe` string, which F1109 prints). Empty means `name`.
+    #[serde(default)]
+    pub type_name: String,
     /// Position in the system frame, original units (millimetres as the port's
     /// bodies use them).
     pub position: [i64; 3],
@@ -1178,6 +1182,7 @@ impl NpcShip {
             model: spec.model,
             role,
             name: spec.name.clone(),
+            type_name: spec.name.clone(),
             position,
             velocity: [0.0; 3],
             forward: [0.0, 0.0, 1.0],
@@ -2380,6 +2385,7 @@ pub struct Persisted {
     pub model: u32,
     pub role: Role,
     pub name: String,
+    pub type_name: String,
     pub offset: [i64; 3],
     pub velocity: [f64; 3],
     pub forward: [f64; 3],
@@ -2421,6 +2427,7 @@ pub fn persist(ships: &[NpcShip], player: [i64; 3]) -> Vec<Persisted> {
             model: ship.model,
             role: ship.role,
             name: ship.name.clone(),
+            type_name: ship.type_name.clone(),
             offset: [
                 ship.position[0] - player[0],
                 ship.position[1] - player[1],
@@ -2465,6 +2472,7 @@ pub fn restore(records: &[Persisted], player: [i64; 3], first_id: u32) -> Vec<Np
             model: record.model,
             role: record.role,
             name: record.name.clone(),
+            type_name: record.type_name.clone(),
             position: add(player, record.offset),
             velocity: record.velocity,
             forward: normalise(record.forward),
@@ -2880,8 +2888,10 @@ pub fn hyperspace_arrival(
     rng: &mut Random,
 ) -> NpcShip {
     let mut spec = spec.clone();
+    let type_name = spec.name.clone();
     spec.name = format!("{} {}", spec.name, id + 1);
     let mut ship = NpcShip::new(&spec, Role::Trader, position, anchor, rng);
+    ship.type_name = type_name;
     ship.id = id;
     ship.forward = normalise(sub(anchor, position));
     ship.begin_transit(station, anchor);
@@ -3095,8 +3105,10 @@ pub fn spawn(
         }
         let mut spec = picked?;
         spec.model = model;
+        let type_name = spec.name.clone();
         spec.name = format!("{} {}", spec.name, next_id + 1);
         let mut ship = NpcShip::new(&spec, role, position, anchor, rng);
+        ship.type_name = type_name;
         ship.id = next_id;
         next_id += 1;
         if !role.hostile() {

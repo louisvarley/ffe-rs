@@ -70,9 +70,16 @@ ship" on). F10's missile view needs the fitted Missile Viewer and
 `player+0xef` (`DATA_008877`); the camera is the missile object itself
 (`ViewMode::Missile` + `ViewState::missile`, F1054's `JUMP_004340`), and F1102
 forces the front view when that missile dies. F1099's view-5 branch draws only
-the combat target's amber (0x5f) range text. Not ported: the combat computer
-(view 6) and the Alt-arrow mouse nudge. F11 stays the source combat-computer key
-and has no action until view 6 exists (the port shows its not-ported note); F12 is the source escape capsule. The
+the combat target's amber (0x5f) range text. F11 is the combat
+computer (view 6, `crate::combat_computer`, 2026-11-03): F1056 enters it when
+the Combat Computer is fitted (`ship+0xc8 & 0x40`, console button 0x13), F1054
+places a chase camera pitched 0x9f5 behind the ship that backs off by the
+smoothed nearest-ship range (`DATA_007269..7271`, at least 3 km, at most 8 km;
+F1053's distance word `-(range * 40)`), and F1099 runs F1109 over the ships:
+each one's range (`0.08km`), hull and shields (`100%,100%`) and type name in
+amber (0x5f) below it, from the message strings 0x8639/0x863a; the name labels
+(F1108) are not drawn in this view. Not ported: the Alt-arrow mouse nudge. F12
+is the source escape capsule. The
 port's own model viewer/lab and screenshot are developer-only `--dev` commands,
 so the source view keys are not repurposed in the player build.
 
