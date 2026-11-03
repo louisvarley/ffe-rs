@@ -2761,3 +2761,107 @@ fn a_touch_in_a_starport_region_lands_only_with_the_autopilot_or_clearance() {
     let other = (0..7u8).find(|pad| !matches!(nav.region_touch(port, pad + 1), RegionTouch::Land));
     assert!(other.is_some(), "some pad is not the allocated bay");
 }
+
+/// F909/F910's mis-jumps, as the executed original does them
+/// (`jjffe-smoke --misjump`): a random one (`F1530() > 0xfe00`) goes nowhere
+/// and leaves the ship in deep space with no bodies; Left Alt held forces one
+/// that still arrives. `DATA_007190[F1530() & 0xf]` picks the outcome.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn misjumps_follow_f909_and_f910() {
+    use ffe_core::npc::Random;
+    use ffe_rs::navigation::{
+        DriveState, MisjumpEffect, Navigator, HYPERSPACE_ALTITUDE, MISJUMP_GATE, MISJUMP_OUTCOMES,
+    };
+    let cache = cache();
+    let fresh = || {
+        let mut nav = Navigator::new(&cache).unwrap();
+        nav.drive = Some(DriveState {
+            mass: 16,
+            class: 10,
+            fuel: 10,
+        });
+        nav.altitude = HYPERSPACE_ALTITUDE;
+        nav
+    };
+    let target = (1..15)
+        .find(|i| fresh().range_to(*i) == Some(435))
+        .expect("Alpha Centauri");
+    // The draws F909 makes before its gate: F922's orbit radius and F912's
+    // F1530. Find pairs that give each case.
+    let draws = |seed: Random| {
+        let mut r = seed;
+        r.bounded(0x2000);
+        r.advance();
+        let gate = r.advance() & 0xffff;
+        let outcome = MISJUMP_OUTCOMES[(r.advance() & 0xf) as usize];
+        (gate > MISJUMP_GATE, outcome)
+    };
+    let find = |random: bool, outcome: u8| {
+        (1u32..)
+            .map(|i| Random::new(i.wrapping_mul(0x9e37_79b9), i))
+            .find(|seed| draws(*seed) == (random, outcome))
+            .unwrap()
+    };
+    // A normal jump: no mis-jump, the destination is built.
+    let mut nav = fresh();
+    nav.random = find(false, 2);
+    let jumped = nav.hyperspace_with(&cache, target, false).unwrap();
+    assert_eq!(jumped.misjump, None);
+    assert_eq!(nav.current, target);
+    assert!(!nav.deep_space && !nav.bodies.is_empty());
+
+    // A random mis-jump: deep space, no bodies, the transit still runs.
+    for (outcome, effect) in [
+        (2, MisjumpEffect::None),
+        (3, MisjumpEffect::DriveDestroyed),
+        (6, MisjumpEffect::ShipLost),
+    ] {
+        let mut nav = fresh();
+        let start = nav.current;
+        nav.random = find(true, outcome);
+        let jumped = nav.hyperspace_with(&cache, target, false).unwrap();
+        let misjump = jumped.misjump.expect("a mis-jump");
+        assert!(!misjump.forced);
+        assert_eq!((misjump.outcome, misjump.effect), (outcome, effect));
+        assert_eq!(nav.current, start, "a random mis-jump goes nowhere");
+        assert!(nav.deep_space && nav.bodies.is_empty());
+        assert_eq!(nav.transit.is_some(), effect != MisjumpEffect::ShipLost);
+        // The deep-space state survives a save.
+        let restored = Navigator::from_save(&cache, &nav.save_state()).unwrap();
+        assert!(restored.deep_space && restored.bodies.is_empty());
+    }
+    let message = |random, forced, outcome| {
+        let mut nav = fresh();
+        nav.random = find(random, outcome);
+        nav.hyperspace_with(&cache, target, forced)
+            .unwrap()
+            .misjump
+            .and_then(|m| m.message())
+    };
+    assert_eq!(message(true, false, 2), Some("ATTENTION: Mis-Jump"));
+    assert_eq!(
+        message(true, false, 3),
+        Some("ATTENTION: Mis-Jump - Drive Destroyed")
+    );
+    assert_eq!(message(true, false, 6), None);
+
+    // Left Alt: a forced mis-jump arrives at the destination.
+    let mut nav = fresh();
+    nav.random = find(false, 2);
+    let jumped = nav.hyperspace_with(&cache, target, true).unwrap();
+    let misjump = jumped.misjump.expect("a forced mis-jump");
+    assert!(misjump.forced);
+    assert_eq!(misjump.message(), Some("WARNING: Forced Mis-Jump"));
+    assert_eq!(nav.current, target);
+    assert!(!nav.deep_space && !nav.bodies.is_empty());
+    // From deep space the next jump arrives normally.
+    let mut nav = fresh();
+    nav.random = find(true, 2);
+    nav.hyperspace_with(&cache, target, false).unwrap();
+    nav.finish_transit(&cache);
+    nav.random = find(false, 2);
+    nav.hyperspace_with(&cache, target, false).unwrap();
+    assert_eq!(nav.current, target);
+    assert!(!nav.deep_space && !nav.bodies.is_empty());
+}

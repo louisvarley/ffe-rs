@@ -48,8 +48,7 @@ mass 16) reaches 18.75 light years.
   and take-off state, then F905 regenerates the system's bodies; the scanner and the next map are rebuilt from those.
   A new game has no fuel: buy military fuel at the station's market.
 - The test systems (Test-1 to Test-4) now have codes of real sectors near Sol, so they have positions of their own.
-- Not here: the jump scene itself (F908's module mode 4, the `+0x106` visual timeout and F909's F148/F912 drawing),
-  misjumps (F910, the 1 in 256 chance), the galaxy map's mouse hover pick, and the systems beyond the set on offer
+- Not here: the galaxy map's mouse hover pick, and the systems beyond the set on offer
   (the 12 hand-coded ones, four test ones and a new game's start-system neighbours). Since 2026-10-26 `Navigator::new_game` offers the
   start system's real galaxy-table neighbours within 30 LY (`navigation::galaxy_around`), generated from F852/F860's
   star and F841 type word through F832's seed/mass/stars and F830/F869's name/population; Titican (4.42 LY from
@@ -104,3 +103,36 @@ nothing for the cloud (fixed in `model_execute`).
 `effects_view::hyperspace_clouds_draw_and_expire` draws both and checks their
 lifetimes. NPC arrivals mid-system (F740) are not modelled because the port's
 traffic does not jump in.
+
+## Mis-jumps (F909/F910, 2026-11-03)
+
+Checked against the executed original with the reference harness's
+`jjffe-smoke --misjump <outcome index> <forced> <frames>` (it swaps the
+`DATA_007752` randomiser pointer during F909 so the gate and F910's roll take
+chosen values, then prints the player, mode, clock rate, messages and live
+objects every 25 frames).
+
+- **Gate.** F909, after F922/F912 place the ship on its arrival orbit, draws
+  F1530: above `0xfe00` (about one jump in 128) is a **random mis-jump**.
+  Otherwise Left Alt held as the jump starts (`DATA_007695`, F1406's key state:
+  0 is pressed) is a **forced mis-jump**.
+- **Outcome.** F910 posts its message (0x98c5 "Mis-Jump" or 0x98c6 "Forced
+  Mis-Jump") and takes `DATA_007190[F1530() & 0xf]`: outcome 2 for 11 of the 16
+  values, 3 for two, and 4, 5 and 6 for one each (0 and 1 only through the
+  mission scripts' F148 event 0x14). 3 is F911: the drive becomes class 1 and
+  the message is 0x98c7 "Mis-Jump - Drive Destroyed". 6 is F925 on the
+  player's own ship: the game goes to F1104's state 0x2c (death) with no
+  explosion and no message.
+- **Where the ship ends up.** A random mis-jump returns before F860/F905: the
+  destination is never built, the transit still runs, and the ship drops out
+  with no parent and the old system's objects removed (deep space: only space
+  dust and the exit cloud appear). A forced mis-jump still arrives at the
+  destination.
+- **The port.** `Navigator::hyperspace_with(cache, index, forced)` keeps the
+  source's draw order on the shared random pair; `Jumped::misjump` carries the
+  outcome; `main.rs` reads Left Alt, posts the message, makes a destroyed
+  drive class 1 and sends a lost ship to the death state. Deep space is the
+  current system with no bodies (`Navigator::deep_space`, saved); the next jump
+  is measured from the departure system, a port choice, since the original's
+  map position after a mis-jump is not yet traced.
+  Test: `navigation::misjumps_follow_f909_and_f910`.

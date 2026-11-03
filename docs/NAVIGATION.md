@@ -89,10 +89,11 @@ ten times a second, which with `--replay` shows exactly what a recorded flight d
   x 145 << 8: about a third of a second a day of jump time.
 - **Exit (F1094).** Mode 0 at 1x, velocity 0x71b7 along the system's z axis, the
   system's traffic, and the hyperspace song when that switch is on.
-- **Not yet:** F909's mis-jumps (one jump in 128 by `F1530 > 0xfe00`, or Left Alt held:
-  F910's outcomes from `DATA_007190` - the "Mis-Jump", "Forced Mis-Jump" and "Mis-Jump
-  - Drive Destroyed" messages, deep space with no system, F925), the exit cloud F1094
-  leaves (model 0x9a, AI state 0x1e) and the mission events at the special systems.
+- **Mis-jumps (F909/F910).** One jump in 128 (`F1530 > 0xfe00`) goes nowhere and
+  leaves the ship in deep space; Left Alt held forces one that still arrives. F910's
+  `DATA_007190` outcome can destroy the drive or lose the ship
+  (`docs/notes/hyperspace.md`).
+- **Not yet:** the mission events at the special systems.
 
 ## Keys (the playable)
 

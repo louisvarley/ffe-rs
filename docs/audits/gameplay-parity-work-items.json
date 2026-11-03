@@ -158,13 +158,14 @@
     "id": "PAR-13",
     "priority": "P1",
     "title": "Complete hyperjump initiation, transit, misjump and source arrival",
-    "status": "todo",
+    "status": "in-progress",
     "certainty": "Confirmed gameplay substitute; core fuel formula not shown wrong",
     "finding": "F903 standalone range/fuel/time arithmetic uses model mass, as does current drive_state: do not replace that with guessed wet mass. Navigator::hyperspace instantly advances time and chooses an offset from the first planet, skipping the source transition and arrival placement.",
     "source": "F899-F909/F903/F908/F606",
     "implementation": "crates/ffe-core/src/hyperspace.rs:46; crates/ffe-rs/src/navigation.rs:4326,4433; crates/ffe-rs/src/main.rs:2136,6309",
     "acceptance": "Replay normal/military drives, exact and insufficient cargo, out of range, mode/altitude refusal, cancellation/failure/misjump, clock/cargo/waste and source arrival RNG/position. Compare consumption as a transaction with no debit on refusal.",
-    "dependencies": "PAR-02, PAR-03, PAR-12, world-7"
+    "dependencies": "PAR-02, PAR-03, PAR-12, world-7",
+    "progress": "2026-11-03: F909/F910 mis-jumps traced in the executed original (jjffe-smoke --misjump) and ported: the F1530 > 0xfe00 random gate and Left Alt's forced mis-jump, DATA_007190's outcome roll, F911's destroyed drive, F925's lost ship (death state), deep space with no bodies after a random mis-jump, and the three messages; on the shared random pair in the source's draw order, saved. Open: cancellation/F48 hooks, the mission-script outcomes 0/1, the post-mis-jump map position, and a whole-jump trace comparison."
   },
   {
     "id": "PAR-14",

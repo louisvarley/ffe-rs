@@ -636,6 +636,7 @@ mod tests {
             ships: Vec::new(),
             traffic: Vec::new(),
             random: None,
+            deep_space: false,
         }
     }
 

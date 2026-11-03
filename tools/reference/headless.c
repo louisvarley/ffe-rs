@@ -501,6 +501,28 @@ static int sent_accept;
 static int state_mode, vector_mode, sent_start;
 static int state_combat_mode;
 static int missile_probe_mode;
+
+/* --misjump <outcome> <forced> <frames>: the real game from the new game; at
+   frame 200 the jump F908 starts is made a mis-jump. While F909 runs, every
+   F1530 draw (through the DATA_007752 pointer) returns 0xfff0|outcome for the
+   random mis-jump (F1530 > 0xfe00) or `outcome` with Left Alt held for the
+   forced one, so F910's `F1530 & 0xf` picks DATA_007190[outcome]; the real
+   F1530 still advances DATA_008818/8820. Then the player, the live objects,
+   the mode, clock rate and messages are printed every 25 frames. */
+extern void ref_hyper_arrive(unsigned long code, unsigned long real);
+extern unsigned long (*ref_random_func)(void);
+extern unsigned char ref_misjump_table[];
+extern unsigned char ref_pl_keys[0x60];
+static int misjump_mode;
+static unsigned long misjump_outcome, misjump_forced, misjump_frame = 0, misjump_draws;
+static unsigned long (*misjump_original)(void);
+static unsigned long misjump_random(void)
+{
+    unsigned long value = misjump_original();
+    (void)value;
+    ++misjump_draws;
+    return misjump_forced ? (misjump_outcome & 0xf) : (0xfff0 | (misjump_outcome & 0xf));
+}
 static int laser_probe_mode;
 static int legal_probe_mode;
 /* --npc-trace <frames> [start-key]: every 25th frame from 160, each live ship
@@ -785,7 +807,8 @@ void InputKeybReadStates(UCHAR *keys)
     memset(keys, 0x80, 256);
     /* F1037 reads Return (0x1c) to raise the set speed; F1043 reads numpad 8
        (0x48) for forward thrust. Both are raw scancodes. */
-    if (flight_mode && flight_scenario != 0 && frames >= flight_thrust_frame) {
+    if (((flight_mode && flight_scenario != 0) || (misjump_mode && !misjump_frame)) &&
+        frames >= flight_thrust_frame) {
         keys[0x1c] = 0;
         keys[0x48] = 0;
     }
@@ -796,14 +819,14 @@ long InputKeybGetLastKey(void)
         sent_accept = 1;
         return 0x15;
     }
-    if ((state_mode || game_frame_mode || death_probe_mode || flight_mode) && !sent_start && !no_intro_start && frames >= 160) {
+    if ((state_mode || game_frame_mode || death_probe_mode || flight_mode || misjump_mode) && !sent_start && !no_intro_start && frames >= 160) {
         sent_start = 1;
         /* DOS 1 is start type 1; 0x39 ("any other key") is the default arm. */
         return (long)probe_start_key;
     }
     /* Action 9 (launch): the scancode table maps plain Tab (0x0f) to it. One
        edge is enough; F1056's JUMP_004417 handles it. */
-    if (flight_mode && flight_scenario != 0 && !flight_launch_sent && frames >= flight_launch_frame) {
+    if (((flight_mode && flight_scenario != 0) || misjump_mode) && !flight_launch_sent && frames >= flight_launch_frame) {
         flight_launch_sent = 1;
         return 0x0f;
     }
@@ -829,6 +852,63 @@ void TimerFrameUpdate(void)
             printf("{\"frame\":%lu,\"tics\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, state_u32(0), (unsigned long long)fingerprint(pixels, sizeof(pixels)));
         else
             printf("{\"frame\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, (unsigned long long)fingerprint(pixels, sizeof(pixels)));
+    } else if (misjump_mode) {
+        unsigned char *object = (unsigned char *)state_u32(0xc8);
+        /* After the scripted launch (Tab at frame 170), once F1031 has handed
+           the ship to free flight (mode 0). F909 itself has no altitude gate. */
+        if (!misjump_frame && object && frames > 400 && ref_state[0xe8] == 0)
+            misjump_frame = frames;
+        if (!misjump_frame && frames > 5000) fail("misjump: never reached free flight");
+        if (misjump_frame && frames == misjump_frame && object) {
+            unsigned long code = state_u32(0x27c);
+            fprintf(stderr, "misjump: outcome index %lu -> table %u, forced %lu, system %#lx, mode %#x, drive %u\n",
+                    misjump_outcome, ref_misjump_table[misjump_outcome & 0xf], misjump_forced, code,
+                    (unsigned)ref_state[0xe8], (unsigned)object[0xd0]);
+            /* F908's own steps around F909. */
+            ref_state[0xe8] = 4;
+            if (misjump_forced) ref_pl_keys[0x38] = 0;
+            misjump_original = ref_random_func;
+            ref_random_func = misjump_random;
+            ref_hyper_arrive(code, 1);
+            ref_random_func = misjump_original;
+            ref_pl_keys[0x38] = 0x80;
+            /* F908: the jump time (F901's, here two days) into +0x532c, which
+               F1066 divides by, and the visual timeout +0x106. */
+            state_set_u32(0x532c, 0x20000);
+            state_set_u32(0x106, 0x20000);
+            ref_time_accel = 0xf880000;
+            fprintf(stderr, "misjump: %lu F1530 draws in F909\n", misjump_draws);
+        }
+        if (misjump_frame && frames >= misjump_frame && ((frames - misjump_frame) % 25 == 0 || frames - misjump_frame < 4)) {
+            unsigned char *list = ref_pl_object_list;
+            unsigned char *player = (unsigned char *)state_u32(0xc8);
+            unsigned i, live = 0;
+            char msg[131];
+            int k;
+            memcpy(msg, ref_msglog + ((ref_msgindex + 9) % 10) * 1038, 130);
+            msg[130] = 0;
+            for (k = 0; k < 130; ++k) {
+                if (msg[k] == 0) break;
+                if ((unsigned char)msg[k] < 0x20 || (unsigned char)msg[k] > 0x7e) msg[k] = '.';
+            }
+            printf("{\"frame\":%lu,\"mode\":%u,\"rate\":%lu,\"timeout\":%lu,\"system\":%lu,\"player\":%lu,\"player_object\":%s,",
+                   frames, (unsigned)ref_state[0xe8], (unsigned long)ref_time_accel, state_u32(0x106),
+                   state_u32(0x1b4), state_u32(0xc0), player ? "true" : "false");
+            if (player)
+                printf("\"drive\":%u,\"parent\":%u,\"alive\":%u,\"hull\":%u,",
+                       (unsigned)player[0xd0], (unsigned)player[0x56], (unsigned)player[0x87],
+                       (unsigned)(player[0xe4] | player[0xe5] << 8));
+            printf("\"msg\":\"%s\",\"objects\":[", msg);
+            for (i = 1; i <= 0x72; ++i) {
+                unsigned char *o = list + i * 0x152 + 0x74;
+                unsigned long model;
+                if (o[0x87] == 0) continue;
+                model = o[0x82] | o[0x83] << 8 | o[0x84] << 16 | o[0x85] << 24;
+                printf("%s[%u,%lu,%u]", live++ ? "," : "", i, model, (unsigned)o[0x56]);
+            }
+            printf("]}\n");
+        }
+        if (frames + 1 >= limit) exit(0);
     } else if (death_probe_mode) {
         unsigned long player = state_u32(0xc0);
         unsigned char *object = (unsigned char *)state_u32(0xc8);
@@ -6266,6 +6346,15 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(-1);
     if (argc == 3 && !strcmp(argv[1], "--jitter-vertices")) return jitter_vertex_vectors(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "--vertex-program")) return vertex_program_vector(atoi(argv[2]));
+    if (argc == 5 && !strcmp(argv[1], "--misjump")) {
+        misjump_mode = 1;
+        misjump_outcome = strtoul(argv[2], 0, 0);
+        misjump_forced = strtoul(argv[3], 0, 0);
+        limit = strtoul(argv[4], 0, 0);
+        fprintf(stderr, "JJFFE misjump-v1: the real game from the new game, F908/F909 forced into a mis-jump with a chosen F910 outcome.\n");
+        asmmain(0, NULL);
+        return 2;
+    }
     if (argc == 3 && !strcmp(argv[1], "--death-probe")) {
         death_probe_mode = 1;
         limit = strtoul(argv[2], 0, 0);

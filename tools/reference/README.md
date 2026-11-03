@@ -204,3 +204,12 @@ nineteen records.
 - The child-model trace hash moves with every reference rebuild (event 26's
   uninitialised base handedness); read that oracle by its counts (440 compared,
   0 mismatched).
+
+## Mis-jump probe
+
+`jjffe-smoke --misjump <outcome index 0-15> <forced 0|1> <frames>` runs the new
+game, launches, and at the first free-flight frame makes F908/F909's jump a
+mis-jump with the chosen `DATA_007190` entry (random mis-jump for forced 0,
+Left Alt held for 1). It prints one JSON row every 25 frames: mode, clock rate,
+visual timeout, the player's drive and parent, the last message and the live
+objects. Run it in a scratch folder; see `docs/notes/hyperspace.md`.

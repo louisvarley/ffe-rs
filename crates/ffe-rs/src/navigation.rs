@@ -1284,6 +1284,10 @@ pub struct Navigator {
     carry: f64,
     /// F908's transit (mode 4) while a hyperspace jump runs.
     pub transit: Option<Transit>,
+    /// A random mis-jump left the ship in deep space (F909 returned before
+    /// F860/F905 built the destination, and the old system's objects were
+    /// removed): there are no bodies until the next jump.
+    pub deep_space: bool,
     /// The market tables and names (cache v20), when the cache has them.
     market_tables: Vec<u8>,
     /// The galaxy tables (cache v21): star positions and the hyperdrive records.
@@ -1373,6 +1377,8 @@ pub const HYPERSPACE_RATE: f64 = 262_144.0;
 /// A hyperspace jump made: where the ship arrives and what it cost.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Jumped {
+    /// F909/F910's mis-jump, when this jump was one.
+    pub misjump: Option<Misjump>,
     pub arrival: [i64; 3],
     /// The distance in the drive's units (about a hundredth of a light year).
     pub distance: i32,
@@ -1380,6 +1386,65 @@ pub struct Jumped {
     pub fuel: i32,
     /// Game days the jump took.
     pub days: f64,
+}
+
+/// F909's random mis-jump gate: `F1530() > 0xfe00` (one jump in about 128).
+pub const MISJUMP_GATE: u32 = 0xfe00;
+/// F910's outcome table `DATA_007190`, indexed by `F1530() & 0xf`. The mission
+/// scripts can replace the entry (F148 event 0x14); outcomes 0 and 1 (arrive
+/// far out in the destination) only come from them.
+pub const MISJUMP_OUTCOMES: [u8; 16] = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 4, 5, 6];
+
+/// What F910 did to the ship (checked against the executed original with
+/// `jjffe-smoke --misjump`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MisjumpEffect {
+    /// Outcomes 2, 4 and 5: the message only.
+    None,
+    /// Outcome 3 (F911): the drive is replaced by class 1, "Mis-Jump - Drive
+    /// Destroyed".
+    DriveDestroyed,
+    /// Outcome 6: F925 removes the player's ship; the game goes to F1104's
+    /// state 0x2c with no explosion and no message.
+    ShipLost,
+}
+
+/// F909/F910: a mis-jump, either random (the jump goes nowhere: deep space)
+/// or forced by Left Alt held as the jump starts (the jump still arrives).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Misjump {
+    pub forced: bool,
+    /// `DATA_007190`'s outcome.
+    pub outcome: u8,
+    pub effect: MisjumpEffect,
+}
+
+impl Misjump {
+    /// F910's roll: `DATA_007190[F1530() & 0xf]`.
+    pub fn roll(forced: bool, random: &mut npc::Random) -> Self {
+        let outcome = MISJUMP_OUTCOMES[(random.advance() & 0xf) as usize];
+        let effect = match outcome {
+            3 => MisjumpEffect::DriveDestroyed,
+            6 => MisjumpEffect::ShipLost,
+            _ => MisjumpEffect::None,
+        };
+        Self {
+            forced,
+            outcome,
+            effect,
+        }
+    }
+
+    /// The console message F349 posts (0x98c5, 0x98c6 or F911's 0x98c7);
+    /// outcome 6 posts none.
+    pub fn message(&self) -> Option<&'static str> {
+        match self.effect {
+            MisjumpEffect::ShipLost => None,
+            MisjumpEffect::DriveDestroyed => Some("ATTENTION: Mis-Jump - Drive Destroyed"),
+            MisjumpEffect::None if self.forced => Some("WARNING: Forced Mis-Jump"),
+            MisjumpEffect::None => Some("ATTENTION: Mis-Jump"),
+        }
+    }
 }
 
 /// Burn the fuel of a jump from the hold, as F901 does: hydrogen for a normal
@@ -1954,6 +2019,9 @@ pub struct NavigatorSave {
     /// The shared random pair (PAR-17). Older saves resume from F147's seed.
     #[serde(default)]
     pub random: Option<[u32; 2]>,
+    /// Stranded in deep space by a mis-jump: no bodies.
+    #[serde(default)]
+    pub deep_space: bool,
 }
 
 /// A mid-docking or mid-launch stage (F1067-F1088).
@@ -2154,6 +2222,7 @@ impl Navigator {
             notice: None,
             carry: 0.0,
             transit: None,
+            deep_space: false,
             market_tables: cache
                 .asset("base:market/tables")
                 .map(<[u8]>::to_vec)
@@ -2401,6 +2470,7 @@ impl Navigator {
                 records
             },
             random: Some([self.random.a, self.random.b]),
+            deep_space: self.deep_space,
         }
     }
 
@@ -2476,6 +2546,10 @@ impl Navigator {
         if let Some([a, b]) = save.random {
             nav.random = npc::Random::new(a, b);
         }
+        if save.deep_space {
+            nav.bodies.clear();
+            nav.deep_space = true;
+        }
         // The stations' records come back with the ships that hold their
         // bays. A save without them (older files) has ships ask again.
         for (index, port) in &save.traffic {
@@ -2534,7 +2608,7 @@ impl Navigator {
         {
             return Err("Save refers to a body that is not in its system.".to_owned());
         }
-        if nav.page >= nav.pages() || nav.selected >= nav.listed().len() {
+        if nav.page >= nav.pages() || nav.selected >= nav.listed().len().max(1) {
             return Err("Save's navigation selection is out of range.".to_owned());
         }
         // Ships restored in a bay take one from the rebuilt traffic records.
@@ -5471,6 +5545,17 @@ impl Navigator {
     /// game clock moves by the jump time; the caller burns `Jumped::fuel`. Refused with a
     /// reason when the system is out of range, the same system, or the hold has too little fuel.
     pub fn hyperspace(&mut self, cache: &VerifiedCache, index: usize) -> Result<Jumped, String> {
+        self.hyperspace_with(cache, index, false)
+    }
+
+    /// [`Self::hyperspace`] with F909's forced mis-jump: `forced` is Left Alt
+    /// held as the jump starts (`DATA_007695`, the key-state byte F909 reads).
+    pub fn hyperspace_with(
+        &mut self,
+        cache: &VerifiedCache,
+        index: usize,
+        forced: bool,
+    ) -> Result<Jumped, String> {
         if self.transit.is_some() {
             return Err("Already in hyperspace.".to_owned());
         }
@@ -5503,17 +5588,31 @@ impl Navigator {
             });
         }
         let days = f64::from(report.jump_time.unwrap_or(0)) / 65_536.0;
-        // F909 builds the destination at once (F860/F905) and F912 puts the
-        // ship on a random orbit about its root; F908 then leaves the clock to
-        // run through the jump time in mode 4 (see `transit_step`).
-        self.jump(cache, index)?;
+        // F909, in the source's order: F922/F912 put the ship on a random
+        // orbit about the root, then `F1530() > 0xfe00` is the random
+        // mis-jump; otherwise Left Alt held forces one. Either way F910 rolls
+        // its outcome. A random mis-jump returns before F860/F905: the jump
+        // goes nowhere and the old system's objects are removed (deep space).
+        // Otherwise the destination is built at once and F908 leaves the clock
+        // to run through the jump time in mode 4 (see `transit_step`).
         let arrival = self.hyperspace_arrival(cache)?;
+        let random = (self.random.advance() & 0xffff) > MISJUMP_GATE;
+        let misjump = (random || forced).then(|| Misjump::roll(!random, &mut self.random));
+        if random {
+            self.jump(cache, self.current)?;
+            self.bodies.clear();
+            self.deep_space = true;
+        } else {
+            self.jump(cache, index)?;
+        }
         self.player_at = arrival;
-        self.transit = Some(Transit {
-            remaining: days * 86_400.0,
-            total: days * 86_400.0,
-        });
+        self.transit =
+            (misjump.map(|m| m.effect) != Some(MisjumpEffect::ShipLost)).then_some(Transit {
+                remaining: days * 86_400.0,
+                total: days * 86_400.0,
+            });
         Ok(Jumped {
+            misjump,
             arrival,
             distance,
             fuel: report.fuel_needed,
@@ -5567,11 +5666,20 @@ impl Navigator {
     /// F908/F901 for the galaxy map's stored destination. `Err` carries the map's
     /// own message when the star is not one of the systems on offer.
     pub fn hyperspace_to_destination(&mut self, cache: &VerifiedCache) -> Result<Jumped, String> {
+        self.hyperspace_to_destination_with(cache, false)
+    }
+
+    /// [`Self::hyperspace_to_destination`] with Left Alt's forced mis-jump.
+    pub fn hyperspace_to_destination_with(
+        &mut self,
+        cache: &VerifiedCache,
+        forced: bool,
+    ) -> Result<Jumped, String> {
         let destination = self
             .destination
             .ok_or_else(|| "No hyperspace destination: choose a system on the map.".to_owned())?;
         match self.entry_for_code(destination.code) {
-            Some(index) => self.hyperspace(cache, index),
+            Some(index) => self.hyperspace_with(cache, index, forced),
             None => Err(
                 "Unexplored system: only the systems on offer can be entered (centre one of them)."
                     .to_owned(),
@@ -5586,6 +5694,7 @@ impl Navigator {
             return Err("no such system".to_owned());
         }
         self.current = index;
+        self.deep_space = false;
         self.world_epoch = self.clock;
         self.bodies = bodies(cache, &self.entries[index], clock_words(self.clock))?;
         self.jurisdiction = jurisdiction_of(cache, self.entries[index].params.code);

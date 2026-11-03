@@ -35,7 +35,7 @@ window.FFE_BURNDOWN = {
         {"id": "parity-10", "title": "[P1] Use original indoor departure placement and moving lift/door state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-10"},
         {"id": "parity-11", "title": "[P1] Complete source autopilot world and target adapters", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-11"},
         {"id": "parity-12", "title": "[P1] Unify source event clocks, time acceleration and physical integration", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-12"},
-        {"id": "parity-13", "title": "[P1] Complete hyperjump initiation, transit, misjump and source arrival", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-13"},
+        {"id": "parity-13", "title": "[P1] Complete hyperjump initiation, transit, misjump and source arrival", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-13"},
         {"id": "parity-14", "title": "[P1] Verify source fuel scooping gates and capacity changes", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-14"},
         {"id": "parity-15", "title": "[P1] Replace NPC speed caps and simplified flight state transitions", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-15"},
         {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
@@ -1083,6 +1083,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-02",
       remaining: 96,
       note: "One frame clock (PAR-12 in progress): F1418's millisecond-to-tic arithmetic is computed once per frame and every gameplay system reads it (clock, days, traffic, ships, missiles, effects, lasers, scoop) instead of converting time separately; the death view's effects now follow time acceleration."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 96,
+      note: "Hyperspace mis-jumps (PAR-13 in progress), traced in the executed original with a new --misjump probe: one jump in 128 strands the ship in deep space, Left Alt forces one, and F910's outcome table can destroy the drive or lose the ship. Also: the game reads its content straight from the game folder (no data.bin) and the launcher works on Windows."
     }
   ]
 };

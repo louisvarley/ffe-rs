@@ -107,12 +107,9 @@ impl ModelLab {
     pub fn new(cache: &VerifiedCache) -> Result<Self, String> {
         let load = |index| {
             let id = format!("base:model-vertices/{index:03}");
-            let record = cache
-                .manifest()
-                .files
-                .iter()
-                .find(|r| r.id == id)
-                .ok_or("Model lab requires cache v3 content (the model records from the game files).")?;
+            let record = cache.manifest().files.iter().find(|r| r.id == id).ok_or(
+                "Model lab requires cache v3 content (the model records from the game files).",
+            )?;
             let model = match record.asset {
                 AssetKind::ModelVertices {
                     index: source_index,

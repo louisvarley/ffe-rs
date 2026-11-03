@@ -614,3 +614,12 @@ _ref_recharge equ FUNC_000938
 
 GLOBAL _ref_body_update
 _ref_body_update equ FUNC_000866
+
+; Mis-jump probe (--misjump): F909 (the jump's arrival), the randomiser
+; pointer F909/F910 call through, and F910's outcome table.
+GLOBAL _ref_hyper_arrive
+GLOBAL _ref_random_func
+GLOBAL _ref_misjump_table
+_ref_hyper_arrive equ FUNC_000909
+_ref_random_func equ DATA_007752
+_ref_misjump_table equ DATA_007190

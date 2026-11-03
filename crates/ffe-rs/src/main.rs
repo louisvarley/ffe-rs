@@ -2787,7 +2787,10 @@ fn run() -> Result<(), String> {
                         );
                     }
                     if hyperspace {
-                        match nav.hyperspace_to_destination(&cache) {
+                        // F909 reads Left Alt's key state as the jump starts:
+                        // held, the jump is a forced mis-jump.
+                        let forced = inp.is_key_down(Key::LeftAlt);
+                        match nav.hyperspace_to_destination_with(&cache, forced) {
                             Ok(jumped) => {
                                 // F912: at the arrival point with no velocity
                                 // and no set speed; F1030 holds it there. The
@@ -2805,7 +2808,15 @@ fn run() -> Result<(), String> {
                                 );
                                 // F908's sample `0x21`.
                                 sound.play(Cue::Hyperspace);
-                                in_transit = Some(jumped);
+                                let lost = apply_misjump(
+                                    &jumped,
+                                    &mut state,
+                                    &mut pending_log,
+                                    &mut views,
+                                );
+                                if !lost {
+                                    in_transit = Some(jumped);
+                                }
                                 nav.view = NavView::Closed;
                             }
                             Err(error) => message = format!("Jump refused: {error}"),
@@ -8132,6 +8143,38 @@ fn ship_position(original: &Option<OriginalFlight>, state: &Flight) -> [i64; 3] 
         },
         |model| model.absolute_position(),
     )
+}
+
+/// F910's outcome for the player: the console message, F911's destroyed drive
+/// (class 1, which cannot jump), or F925 removing the ship, which goes
+/// straight to F1104's death state with no explosion and no escape. `true`
+/// when the ship was lost.
+fn apply_misjump(
+    jumped: &ffe_rs::navigation::Jumped,
+    state: &mut Flight,
+    log: &mut PendingLog,
+    views: &mut ViewState,
+) -> bool {
+    use ffe_rs::navigation::MisjumpEffect;
+    let Some(misjump) = jumped.misjump else {
+        return false;
+    };
+    if let Some(text) = misjump.message() {
+        log.add(Source::Combat, text);
+    }
+    match misjump.effect {
+        MisjumpEffect::DriveDestroyed => {
+            state.combat.drive = 1;
+            state.loadout.drive = 1;
+            false
+        }
+        MisjumpEffect::ShipLost => {
+            state.death = Some(death::Death::exploding());
+            views.mode = ViewMode::External;
+            true
+        }
+        MisjumpEffect::None => false,
+    }
 }
 
 /// F942/F1104 on the player: spawn the destruction object at the old position,
