@@ -1180,6 +1180,11 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-11-03",
       remaining: 91,
+      note: "gameplay-41 progress (cache v34): the scripts' texts expand in full. F76's [ macros are ported for the script texts (Mi asks the scripts through F64 with the imported DATA_001698 query names; Pn, Ca, Nu, Dr and the name macros), so the adverts read e.g. '... by 25-Feb-3251' and '$50000 paid to the right Commander'. The scripts can now refuse launches, hyperspace jumps, docking requests, laser shots and jettisons as in the original. Next: the ship/object statements (spawning, placing and steering mission ships) and the journal viewer."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
       note: "Stashed 2026-10-28/29 work re-applied on main: opcode 17 beams and Saturn's ring are drawn (visible-14/15 added and done, so the count is unchanged); F750's under-attack and F941's incoming-missile alerts, the original's quieter combat log, X for the escape capsule (brake on B), the Modern intro/gravestone through the presenter, no dust while dying, the upscaled console panel and the FFED3D .X reader (ffe-tools inspect-ffed3d). The port's older hostile-engagement AI and safe-system pirate chance were left out in favour of PAR-15/PAR-17."
     }
   ]
