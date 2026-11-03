@@ -221,6 +221,7 @@ window.FFE_BURNDOWN = {
         { id: "gameplay-38", title: "Runtime module clock, source F3/F4 and landed/flight event routing", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-39", title: "Source autopilot runtime: retire intercept/slot substitutes and verify cancel", status: "in-progress", version: "reopened-source-audit" },
         { id: "gameplay-40", title: "Starport pad descent F741-F746/F652 with 0x59 geometry import", status: "in-progress", version: "reopened-source-audit" },
+        { id: "gameplay-41", title: "Mission-script engine (F41/F31): script import, journals and scripted missions", status: "todo" },
         { id: "gameplay-41", title: "F575 crash damage via F953 and source bounce flags", status: "done", version: "v1.14" }
       ]
     },
@@ -1148,6 +1149,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 90,
       note: "content-2 progress (cache v31): the ship library's journal archive is imported. MISSION.DAT is cut by the executable's own offset table (DATA_002292, 672 entries) and unscrambled the way F78 does (a 32-bit bit shuffle), giving the 671 S.L.A.M / M.C.S / J.F. articles with their macros left in. The asset oracle passes on v31 (1,817 assets). Macro expansion and the viewer are still to do; the remaining fonts too."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 91,
+      note: "Item added (gameplay-41). The ship library journals turn out to be driven by the original's mission-script interpreter (F41/F31, about 2,700 lines of assembly plus helpers) running a script graph in the executable's data. The same engine sets up the journals, queues their articles and runs the scripted missions. Traced and written up in docs/notes/journal.md; the journal viewer waits on it."
     }
   ]
 };

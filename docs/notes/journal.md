@@ -82,3 +82,42 @@ Imperial").
 To port: F81's journal list and subscription state, the issue schedule
 (which article each issue shows), F76's macros against the port's names,
 systems and ranks, and F79/F80's drawing.
+
+## Who fills the journals: the mission-script engine
+
+Traced 2026-11-03. The journals are not set up by fixed code:
+
+- **Journal records** are `DATA_008569`, five of 0x38 bytes: `+0x00` name
+  (20 bytes, the `0xa600` "The new issue of ..." argument), `+0x14`
+  masthead bitmap, `+0x18` read flag, `+0x1c` issue period (days), `+0x20`
+  next issue date, `+0x24` flags (bit 0 delivered to the player while docked,
+  bit 1 subscribed until `+0x2c`, bit 2 ended), `+0x28` how long an issue's
+  articles stay, `+0x2c` subscription end, `+0x30` queued articles, `+0x34`
+  the current issue. Article records are a pool of 700 x 0x44 bytes
+  (`DATA_008579`: `+0` article number, `+4` flags (`0x100` shown, `0x400`
+  waiting for a newsagent), `+8` priority, `+0xc` release date, `+0x10`
+  published date, ten slot words, `+0x3c`/`+0x40` links).
+- **F101** creates a journal (name, masthead, first issue, period,
+  retention); **F98** queues an article; F102-F105 set and clear the flags;
+  F97 ends one. All of them are opcodes of the **mission-script
+  interpreter** F41 (`ffe.asm:4177`, about 1,600 lines) with its operand
+  decoder F31 (about 1,100 lines) and helpers F20-F66. The scripts are the
+  data graph under `DATA_001697` ("Mission struct table",
+  `ffebmp.asm:10433`), with variable names in `DATA_001698`, strings in
+  `DATA_001699` and the operator table after `DATA_001704`.
+- **F89** publishes an issue: it drops articles older than the retention,
+  moves the highest-priority released article to the current issue, raises
+  event 7 (F48) and, when asked, posts `0xa600`. **F88** refills an empty
+  queue from the 170 stories of `DATA_002280` (16 bytes each: type 0 a grid
+  of rows x five journals, type 1 one article for one journal; `+0xc`
+  priority; `+0xe` bit 0 needs script variable 0x16), choosing at random
+  among the highest-priority stories not yet used (`DATA_008565`'s bit set);
+  **F87** clears the used bits when a journal runs dry. F90 runs F89 on the
+  daily event (15) for every journal whose next issue is due, and marks the
+  waiting articles shown on docking (event 5).
+- The five journal slots are script variables 0x11..0x15 (`DATA_002300`,
+  read through F35 from `DATA_008548`).
+
+So the viewer needs the script engine first: a cache import of the script
+graph (pointer-relocated from the player's executable) and a port of F41/F31.
+That is tracked as dashboard item `gameplay-41`.
