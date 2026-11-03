@@ -139,8 +139,11 @@ JSON shape (one top-level object, `deny_unknown_fields` at every level):
   missiles and short-lived effects are not. The game's shared random pair
   (`DATA_008818/8820`, `Navigator::random`) is saved as `random` (PAR-17), so
   a loaded game continues the same draws. Saves without it resume from F147's
-  seed. Markets, bulletin boards and offers keep their per-station streams
-  (`EXP-006`), regenerated from the saved clock and system.
+  seed. The current system's visited markets are saved too (`markets`:
+  stock and prices after trading, the daily drift's stream and day; PAR-20),
+  so a load neither restocks a station nor reprices it. Bulletin boards and
+  offers keep their per-station streams (`EXP-006`), regenerated from the
+  saved clock and system.
 
 ### 2.1 Validation and errors
 

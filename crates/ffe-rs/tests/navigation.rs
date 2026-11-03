@@ -2865,3 +2865,35 @@ fn misjumps_follow_f909_and_f910() {
     assert_eq!(nav.current, target);
     assert!(!nav.deep_space && !nav.bodies.is_empty());
 }
+
+/// PAR-20: a save keeps the visited markets (stock after trading, prices, the
+/// daily drift's stream and day), so a load does not regenerate them.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn markets_survive_a_save_with_their_trades_and_drift() {
+    use ffe_rs::navigation::Navigator;
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    let station = nav.docked.expect("a new game starts docked");
+    // A trade the station's own generation would not give back.
+    nav.market(&cache, station).unwrap().market.entries[3].stock = 1234;
+    let before = nav.market(&cache, station).unwrap().clone();
+    let save = nav.save_state();
+    assert_eq!(save.markets.len(), 1);
+    let mut restored = Navigator::from_save(&cache, &save).unwrap();
+    assert_eq!(
+        restored.market(&cache, station).unwrap().market,
+        before.market
+    );
+    // The next day's drift draws from the saved stream: both copies agree.
+    nav.advance(&cache, 86_400.0 * 2.0);
+    restored.advance(&cache, 86_400.0 * 2.0);
+    assert_eq!(
+        restored.market(&cache, station).unwrap().market,
+        nav.market(&cache, station).unwrap().market
+    );
+    // A save from before markets were stored still loads (regenerated).
+    let mut old = save.clone();
+    old.markets.clear();
+    assert!(Navigator::from_save(&cache, &old).is_ok());
+}

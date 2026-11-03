@@ -637,6 +637,7 @@ mod tests {
             traffic: Vec::new(),
             random: None,
             deep_space: false,
+            markets: Vec::new(),
         }
     }
 

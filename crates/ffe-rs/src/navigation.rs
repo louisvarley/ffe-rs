@@ -1296,6 +1296,9 @@ pub struct Navigator {
     pub drive: Option<DriveState>,
     /// The markets of the stations visited in this system.
     markets: HashMap<(u32, usize), StationMarket>,
+    /// Markets a save carried, taken by [`Self::market`] in place of a fresh
+    /// generation (PAR-20).
+    saved_markets: HashMap<(u32, usize), SavedMarket>,
     /// The BBS advertisements and hull stock of each visited starport (F622).
     offers: HashMap<(u32, usize), StationOffers>,
     /// The day marker for the once-a-day updates (F152's `DATA_008808`).
@@ -1969,6 +1972,20 @@ pub struct NewGameState {
 /// Not stored: the NPC traffic, missiles and short-lived effects. The source
 /// saves its object array; the port respawns traffic deterministically from the
 /// system and clock when the live game first needs it. See
+/// A visited station's market in a save: its stock and prices, the stream its
+/// daily drift draws from and the day it was last brought up to (PAR-20). The
+/// system's conditions are re-read on load.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedMarket {
+    pub code: u32,
+    pub station: usize,
+    pub stock: Vec<i32>,
+    pub price: Vec<i32>,
+    pub random: [u32; 2],
+    pub day: u32,
+}
+
 /// `docs/notes/persistence.md`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2022,6 +2039,9 @@ pub struct NavigatorSave {
     /// Stranded in deep space by a mis-jump: no bodies.
     #[serde(default)]
     pub deep_space: bool,
+    /// The visited stations' markets. Older saves regenerate them.
+    #[serde(default)]
+    pub markets: Vec<SavedMarket>,
 }
 
 /// A mid-docking or mid-launch stage (F1067-F1088).
@@ -2228,6 +2248,7 @@ impl Navigator {
                 .map(<[u8]>::to_vec)
                 .unwrap_or_default(),
             markets: HashMap::new(),
+            saved_markets: HashMap::new(),
             offers: HashMap::new(),
             calendar: Calendar::at(0),
             deadlines: Vec::new(),
@@ -2471,6 +2492,23 @@ impl Navigator {
             },
             random: Some([self.random.a, self.random.b]),
             deep_space: self.deep_space,
+            markets: {
+                let mut markets: Vec<SavedMarket> = self
+                    .markets
+                    .iter()
+                    .map(|((code, station), market)| SavedMarket {
+                        code: *code,
+                        station: *station,
+                        stock: market.market.entries.iter().map(|e| e.stock).collect(),
+                        price: market.market.entries.iter().map(|e| e.price).collect(),
+                        random: [market.rng.a, market.rng.b],
+                        day: market.day,
+                    })
+                    .chain(self.saved_markets.values().cloned())
+                    .collect();
+                markets.sort_by_key(|m| (m.code, m.station));
+                markets
+            },
         }
     }
 
@@ -2549,6 +2587,15 @@ impl Navigator {
         if save.deep_space {
             nav.bodies.clear();
             nav.deep_space = true;
+        }
+        for market in &save.markets {
+            if market.stock.len() != ffe_core::market::GOODS
+                || market.price.len() != ffe_core::market::GOODS
+            {
+                return Err("Save's market has the wrong number of goods.".to_owned());
+            }
+            nav.saved_markets
+                .insert((market.code, market.station), market.clone());
         }
         // The stations' records come back with the ships that hold their
         // bays. A save without them (older files) has ships ask again.
@@ -3117,6 +3164,34 @@ impl Navigator {
         let tables = MarketTables::new(&self.market_tables)
             .map_err(|_| "this cache has no market tables (cache v20)".to_owned())?;
         let key = (code, index);
+        if let Some(saved) = self
+            .saved_markets
+            .remove(&key)
+            .filter(|_| !self.markets.contains_key(&key))
+        {
+            let mut market = Market {
+                entries: [ffe_core::market::Entry::default(); ffe_core::market::GOODS],
+            };
+            for (entry, (stock, price)) in market
+                .entries
+                .iter_mut()
+                .zip(saved.stock.iter().zip(saved.price.iter()))
+            {
+                entry.stock = *stock;
+                entry.price = *price;
+            }
+            self.markets.insert(
+                key,
+                StationMarket {
+                    market,
+                    rng: RandomState::new(saved.random[0], saved.random[1]),
+                    day: saved.day,
+                    population,
+                    danger,
+                    flags,
+                },
+            );
+        }
         if let std::collections::hash_map::Entry::Vacant(slot) = self.markets.entry(key) {
             let mut rng = RandomState::new(
                 code ^ 0x4d41_524b,
@@ -5720,6 +5795,7 @@ impl Navigator {
         self.docked = None;
         self.traffic.clear();
         self.markets.clear();
+        self.saved_markets.clear();
         self.offers.clear();
         self.sequence = None;
         self.takeoff = None;

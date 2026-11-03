@@ -248,13 +248,14 @@
     "id": "PAR-20",
     "priority": "P1",
     "title": "Replay market, shipyard, BBS and daily mission events using source state",
-    "status": "todo",
+    "status": "in-progress",
     "certainty": "Confirmed independent RNG/lazy-generation deviation; individual formulas may match",
     "finding": "Markets are first-visit generated from station seeds and are not restored with traffic; offered mission templates do not prove complete source scripts, deadlines or event hooks. Source outcome parity requires event chronology and the authoritative saved world, not formula tests alone.",
     "source": "F622/F633/F635/F619/F620/F301-F306 and mission tables",
     "implementation": "crates/ffe-rs/src/navigation.rs:2370; crates/ffe-rs/src/trade.rs; crates/ffe-core/src/missions.rs; docs/notes/time.md",
     "acceptance": "Compare first visit, day boundaries, timewarp, accepted missions, cargo/passengers, legal witnesses/fines, rewards, failure and reload in the same source trace; enumerate any absent script before marking done.",
-    "dependencies": "PAR-17, PAR-18, gameplay-1, gameplay-9"
+    "dependencies": "PAR-17, PAR-18, gameplay-1, gameplay-9",
+    "progress": "2026-11-03: saves now carry the current system's visited markets (stock after trading, prices, the daily drift's stream and day), so a load no longer regenerates them; the next day's drift matches an unsaved copy. Open: source chronology of first visit/day boundaries/timewarp, BBS and shipyard state, mission scripts and deadlines."
   },
   {
     "id": "PAR-21",

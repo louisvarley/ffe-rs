@@ -198,8 +198,11 @@ fn npcs_persist_across_a_jump_and_are_recycled() {
     ));
     assert!(!nav.ships.iter().any(|ship| ship.name == name));
 
-    // F927: a ship beyond the despawn range is recycled too.
-    if let Some(far) = nav.ships.first_mut() {
+    // F927: an idle ship beyond the despawn range is recycled too (ships with
+    // a station's business, hostiles and police stay: `NpcShip::finished`).
+    if let Some(far) = nav.ships.iter_mut().find(|ship| {
+        ship.station.is_none() && !ship.hostile && ship.role != ffe_core::npc::Role::Police
+    }) {
         far.position = [arrival[0] + 100_000_000, arrival[1], arrival[2]];
         let far_name = far.name.clone();
         nav.tick_ships(0.1, 4_971, arrival, 1_000);
