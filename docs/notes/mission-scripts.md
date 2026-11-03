@@ -1,7 +1,21 @@
 # Mission scripts (F31/F41)
 
-Status (2026-11-03): **script graph imported (cache v32); interpreter being
-ported.** Tracked as dashboard item `gameplay-41`.
+Status (2026-11-03): **script graph imported (cache v32); interpreter
+ported (`ffe_core::script::engine`), game hooks not yet wired.** Tracked
+as dashboard item `gameplay-41`.
+
+On a new game with no game hooks answered, F55 starts 20 instances
+(missions 0, 64, 2-11, five of 19, 65, 72, 73) holding 94 subscriptions;
+the first statements create the five journals: Imperial Herald (masthead
+1), Federal Times (2), RIG (3), Frontier News (5) and Universal Scientist
+(4), each with a first issue now, 28-day issues and 600-day retention
+(`tests/mission_scripts.rs`).
+
+**Deviation:** the evaluator cases the shipping game leaves empty for
+event tokens (0x1c, 0x1d, 0x1e, 0x21, 0x26-0x29, 0x2c) return an
+uninitialised stack word in the original. The port returns 1 while F48 is
+dispatching the token's own event (with its keys) and 0 otherwise, which is
+what the scripts are written to expect.
 
 The storyline and special missions (Turner's Quest, the Thargoid campaign,
 the special bulletin-board jobs, journal subscriptions, adverts), the ship

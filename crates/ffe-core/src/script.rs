@@ -548,7 +548,7 @@ pub struct Mission {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A one-mission image: struct at 0, state at 0x20, entry stream at
