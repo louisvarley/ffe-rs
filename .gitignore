@@ -103,3 +103,4 @@ ffe-rs.toml.local
 *.ffe-input
 *.ffe-input
 tools/redraw-swarmui.ps1
+/ffed3d
