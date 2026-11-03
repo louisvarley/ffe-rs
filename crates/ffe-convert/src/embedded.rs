@@ -661,6 +661,45 @@ pub fn decode_message_tables(
     })
 }
 
+/// The journal archive (cache v31): `DATA_002292`'s `count` file offsets into
+/// `MISSION.DAT` bound `count - 1` articles, each F78-unscrambled
+/// ([`ffe_core::journal::decode`]). `source_offset` is the table's.
+pub fn decode_journal(
+    bytes: &[u8],
+    mission: &[u8],
+    rva: u32,
+    count: usize,
+) -> Result<EmbeddedTable, String> {
+    let section = DataSection::parse(bytes)?;
+    let first = section.offset(rva, 4 * count)?;
+    let offsets = (0..count)
+        .map(|index| dword(bytes, first + 4 * index).map(|value| value as usize))
+        .collect::<Result<Vec<_>, _>>()?;
+    if offsets.last() != Some(&mission.len()) {
+        return Err(format!(
+            "the journal offsets end at {:?}, not MISSION.DAT's {} bytes",
+            offsets.last(),
+            mission.len()
+        ));
+    }
+    let mut articles = Vec::with_capacity(count.saturating_sub(1));
+    for (index, pair) in offsets.windows(2).enumerate() {
+        let (start, end) = (pair[0], pair[1]);
+        let source = mission
+            .get(start..end)
+            .filter(|_| start < end)
+            .ok_or_else(|| format!("journal article {index} at {start}..{end} is out of order"))?;
+        // A one-byte entry (the file's 0x7a separators) is an empty slot.
+        articles.push(ffe_core::journal::decode(source));
+    }
+    let encoded = ffe_core::journal::encode(&articles)?;
+    ffe_core::journal::Journal::new(&encoded)?;
+    Ok(EmbeddedTable {
+        source_offset: first,
+        bytes: encoded,
+    })
+}
+
 /// The default light and shade table (`DATA_007231..7234`, 36 bytes).
 pub fn decode_default_lighting(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
     use ffe_core::model_lighting::{default_lighting, DEFAULT_LIGHTING_BYTES};

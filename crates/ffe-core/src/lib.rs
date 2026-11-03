@@ -14,6 +14,7 @@ pub mod galaxy;
 pub mod handcoded;
 pub mod hmp;
 pub mod hyperspace;
+pub mod journal;
 pub mod landing;
 pub mod laser;
 pub mod lift;

@@ -213,16 +213,21 @@ contract, not the full schema/examples in sections 2.1 onward.
   song-table `index`) for all 17 original HMPs, byte-for-byte. A v28 cache keeps
   loading: its unit `music_hmp` record defaults to index 0, and songs 1..16 fall
   back to the player's `MUSIC/` folder. See `docs/notes/music.md`.
+- V30 adds `text/messages.bin` (`base:text/messages`, `message_strings`): F1343's
+  ten string arrays. V31 adds `text/journal.bin` (`base:text/journal`, `journal`,
+  671 articles): `MISSION.DAT` cut by the executable's `DATA_002292` offset table
+  (RVA 0x9c0c4, 672 dwords, floppy 1.02) and F78-unscrambled, a `u16` count then
+  NUL-terminated articles with F78's macros left in. See `crates/ffe-core/src/journal.rs`.
 - Total: v1 has 377 assets/378 ZIP entries; v2 378/379; v3 380/381; v4 382/383;
   v5 384/385; v6 385/386; v10 1776; v13 1778 (v11 and v12 add one asset each to
-  v10); v26 1794; v27 1796; v28 1797; v29 1815. Tools read every version. The playable requires v2 font content;
+  v10); v26 1794; v27 1796; v28 1797; v29 1815; v30 1816; v31 1817. Tools read every version. The playable requires v2 font content;
   F4 requires v3 station vertices and reports an upgrade error for v2. V3 keeps
   points-only inspection; v4 adds declared-face inspection. The lab requires
   matching command/vertex model indices, counts and descriptor offsets.
   V5 adds a fourth, normal-filtered outline view, requiring matching normal/vertex
   model indices, vertex counts and descriptor offsets.
   No submodels, gameplay tables, other font data,
-  journal, CD media or replacement art. No version can
+  journal macro expansion, CD media or replacement art. No version can
   label any archive as complete game content.
 - Reader limits: 64 MiB archive/aggregate payload, 2048 assets, 4 MiB manifest.
   Unsafe/duplicate/unsorted paths, duplicate IDs, symlinks, extra/missing entries,

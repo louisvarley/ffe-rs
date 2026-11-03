@@ -87,6 +87,15 @@ pub(crate) fn message_layout(profile: &str) -> Option<&'static [(u8, u32, usize)
     }
 }
 
+/// The journal offset table (`DATA_002292`, 672 dwords into `MISSION.DAT`;
+/// v31), floppy 1.02 only.
+pub(crate) fn journal_layout(profile: &str) -> Option<(u32, usize)> {
+    match profile {
+        "ffe-floppy-1.02-en" => Some((0x9c0c4, ffe_core::journal::ARTICLES + 1)),
+        _ => None,
+    }
+}
+
 /// Model string table (`DATA_004682`) RVA (v11), keyed by ship-name ffcode
 /// (`0x4000 | n`, the `+0xe` word of a model's statistics block), matched
 /// against JJFFE 2.8a7 in floppy 1.02 only.
@@ -578,6 +587,24 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
                     bytes: table.bytes,
                 });
             }
+            if let Some((rva, count)) = journal_layout(profile.id) {
+                let mission = inspection
+                    .files
+                    .iter()
+                    .find(|file| file.path == "MISSION.DAT")
+                    .ok_or("MISSION.DAT is missing; no cache written")?;
+                let mission = recorded_bytes(&root, mission)?;
+                let table = ffe_convert::embedded::decode_journal(&bytes, &mission, rva, count)?;
+                assets.push(Asset {
+                    id: "base:text/journal".to_owned(),
+                    path: "text/journal.bin".to_owned(),
+                    kind: AssetKind::Journal {
+                        articles: (count - 1) as u32,
+                        source_offset: table.source_offset as u64,
+                    },
+                    bytes: table.bytes,
+                });
+            }
             if let Some(table_rva) = system_strings_layout(profile.id) {
                 let table = decode_system_strings(&bytes, table_rva)?;
                 assets.push(Asset {
@@ -738,6 +765,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         + usize::from(galaxy_layout(profile.id).is_some())
         + usize::from(system_strings_layout(profile.id).is_some())
         + usize::from(message_layout(profile.id).is_some())
+        + usize::from(journal_layout(profile.id).is_some())
         + usize::from(star_point_layout(profile.id).is_some())
         + usize::from(dot_table_layout(profile.id).is_some())
         + if intro_layout(profile.id).is_some() {
@@ -765,7 +793,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
         ));
     }
     let manifest = Manifest {
-        format: "ffe-content-cache".to_owned(), format_version: 30,
+        format: "ffe-content-cache".to_owned(), format_version: 31,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(), source_profile: profile.id.to_owned(),
         source_files: inspection.files.into_iter().map(|record| SourceFile {
             path: record.path, size: record.size, sha256: record.sha256,

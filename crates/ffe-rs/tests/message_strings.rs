@@ -98,3 +98,25 @@ fn the_ports_fixed_texts_are_the_executables() {
         assert_eq!(mission.row_text(), text, "{code:#x}");
     }
 }
+
+/// The ship library's journal archive (cache v31): MISSION.DAT's articles
+/// through the executable's offset table, F78-unscrambled.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_journal_archive_is_mission_dats_articles() {
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let journal =
+        ffe_core::journal::Journal::new(cache.asset("base:text/journal").unwrap()).unwrap();
+    assert_eq!(journal.len(), ffe_core::journal::ARTICLES);
+    let first = journal.article(0).unwrap();
+    assert_eq!(first.publication, b"S.L.A.M");
+    assert_eq!(
+        first.headline,
+        b"THE THARGOIDS - UNLIKELY RUMOURS FROM [SyL1(I)".as_slice()
+    );
+    assert!(first.body.starts_with(b"A series of wild rumours"));
+    // Article 28 is one of the archive's empty one-byte slots.
+    assert_eq!(journal.raw(28), Some(&b""[..]));
+}

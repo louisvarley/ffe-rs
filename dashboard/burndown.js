@@ -1143,6 +1143,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 90,
       note: "gameplay-2 progress: laser fitting follows F428/F434/F435. A laser with several free (or, for Remove, several matching) gun mountings asks \"Select Mounting.\" and goes on the chosen one; one candidate is fitted directly; none is 0x98ff \"Your ship does not have a gun mounting.\" The choice is taken on the console with keys 1..4 (listed in DEVIATIONS.md)."
+    },
+    {
+      date: "2026-11-03",
+      remaining: 90,
+      note: "content-2 progress (cache v31): the ship library's journal archive is imported. MISSION.DAT is cut by the executable's own offset table (DATA_002292, 672 entries) and unscrambled the way F78 does (a 32-bit bit shuffle), giving the 671 S.L.A.M / M.C.S / J.F. articles with their macros left in. The asset oracle passes on v31 (1,817 assets). Macro expansion and the viewer are still to do; the remaining fonts too."
     }
   ]
 };

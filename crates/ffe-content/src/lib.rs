@@ -140,6 +140,12 @@ pub enum AssetKind {
     MessageStrings {
         source_offset: u64,
     },
+    /// The ship library's journal archive (`MISSION.DAT` through
+    /// `DATA_002292`; v31), in [`ffe_core::journal`]'s layout.
+    Journal {
+        articles: u32,
+        source_offset: u64,
+    },
     /// The galaxy map's star light-point tables (`DATA_007820`, `7821`, `7822`, `7828`; v23).
     StarPointTables {
         source_offset: u64,
@@ -295,7 +301,7 @@ const MODEL_TABLE_SLOTS: u32 = 466;
 pub const SHIP_STATS_BYTES: usize = 48;
 
 fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=30) {
+    if manifest.format != "ffe-content-cache" || !matches!(manifest.format_version, 1..=31) {
         return Err("unsupported content cache format/version".to_owned());
     }
     if manifest.complete_game_assets || manifest.unresolved.is_empty() {
@@ -399,6 +405,9 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         if manifest.format_version < 30 && matches!(record.asset, AssetKind::MessageStrings { .. })
         {
             return Err("The message strings require cache v30.".to_owned());
+        }
+        if manifest.format_version < 31 && matches!(record.asset, AssetKind::Journal { .. }) {
+            return Err("The journal archive requires cache v31.".to_owned());
         }
         if manifest.format_version < 22 && matches!(record.asset, AssetKind::SystemStrings { .. }) {
             return Err("The system strings require cache v22.".to_owned());
@@ -723,6 +732,15 @@ fn validate_payload(record: &CacheFile, bytes: &[u8]) -> Result<(), String> {
         }
         AssetKind::MessageStrings { .. } => {
             ffe_core::message_strings::Messages::new(bytes)?;
+        }
+        AssetKind::Journal { articles, .. } => {
+            let journal = ffe_core::journal::Journal::new(bytes)?;
+            if journal.len() != *articles as usize {
+                return Err(format!(
+                    "journal holds {} articles, not {articles}",
+                    journal.len()
+                ));
+            }
         }
         AssetKind::StarPointTables { .. } => {
             ffe_core::star_points::StarTables::new(bytes)?;
