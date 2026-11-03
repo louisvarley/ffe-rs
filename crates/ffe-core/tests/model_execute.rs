@@ -1086,7 +1086,7 @@ fn beams_chains_and_direction_alignment() {
     };
     execute(&bytes(&[0x0019, 0]), 8, &mut aimed, &visibility(), None, 8).unwrap();
     let (cos, sin) = ((3i64 << 31) / 5, (4i64 << 31) / 5);
-    let row = |v: i64| (i64::from(i32::MAX) * v >> 31) as i32;
+    let row = |v: i64| ((i64::from(i32::MAX) * v) >> 31) as i32;
     assert_eq!(aimed.basis[0], i32::MAX);
     assert_eq!(aimed.basis[4], row(cos));
     assert_eq!(aimed.basis[5], row(sin));

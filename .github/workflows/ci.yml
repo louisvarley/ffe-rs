@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out
@@ -57,7 +57,7 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Build tool and experimental playable binary
-        run: cargo build --release --locked -p ffe-tools -p ffe-rs
+        run: cargo build --release --locked -p ffe-tools -p ffe-rs -p ffe-launcher
 
   # Later phases will add:
   # - golden: deterministic traces on the base game only

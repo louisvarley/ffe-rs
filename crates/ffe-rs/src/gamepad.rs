@@ -130,7 +130,7 @@ impl Gamepads {
             while gilrs.next_event().is_some() {}
             let (_, pad) = gilrs.gamepads().next()?;
             let trigger = |button| pad.button_data(button).map_or(0.0, |data| data.value());
-            return Some(Pad {
+            Some(Pad {
                 stick_x: pad.value(Axis::LeftStickX),
                 stick_y: pad.value(Axis::LeftStickY),
                 left_trigger: trigger(Button::LeftTrigger2),
@@ -145,7 +145,7 @@ impl Gamepads {
                 dpad_down: pad.is_pressed(Button::DPadDown),
                 start: pad.is_pressed(Button::Start),
                 select: pad.is_pressed(Button::Select),
-            });
+            })
         }
         #[cfg(not(windows))]
         None

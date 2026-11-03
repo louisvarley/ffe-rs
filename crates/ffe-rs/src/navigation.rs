@@ -5170,7 +5170,9 @@ impl Navigator {
         const PLAYER_NEAR: f64 = 8.0e6;
         const PLAYER_FAR: f64 = 15.0e6;
         const RUN_RANGE: f64 = 6.0e6;
-        let snapshot: Vec<(u32, [i64; 3], npc::Role, bool, Option<u32>)> = self
+        // (id, position, role, hostile, its NPC target)
+        type Entry = (u32, [i64; 3], npc::Role, bool, Option<u32>);
+        let snapshot: Vec<Entry> = self
             .ships
             .iter()
             .filter(|ship| ship.visible())
@@ -5185,17 +5187,15 @@ impl Navigator {
             })
             .collect();
         let find = |id: u32| snapshot.iter().find(|entry| entry.0 == id);
-        let nearest =
-            |from: [i64; 3],
-             keep: &dyn Fn(&(u32, [i64; 3], npc::Role, bool, Option<u32>)) -> bool| {
-                snapshot
-                    .iter()
-                    .filter(|entry| keep(entry))
-                    .map(|entry| (entry.0, distance(from, entry.1)))
-                    .filter(|(_, range)| *range <= PREY_RANGE)
-                    .min_by(|a, b| a.1.total_cmp(&b.1))
-                    .map(|(id, _)| id)
-            };
+        let nearest = |from: [i64; 3], keep: &dyn Fn(&Entry) -> bool| {
+            snapshot
+                .iter()
+                .filter(|entry| keep(entry))
+                .map(|entry| (entry.0, distance(from, entry.1)))
+                .filter(|(_, range)| *range <= PREY_RANGE)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(id, _)| id)
+        };
         let mut runners: Vec<(u32, u32)> = Vec::new();
         for ship in &mut self.ships {
             if !ship.visible() {
