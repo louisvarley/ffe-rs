@@ -2424,7 +2424,17 @@ fn run() -> Result<(), String> {
                             Source::Trade,
                             "Cargo can only be jettisoned when in free flight.",
                         );
-                    } else if state.jettison(commodity) {
+                    } else if nav.as_mut().is_none_or(|nav| {
+                        // F291: the scripts may keep the cargo (global 5).
+                        ffe_rs::scripts::permits(
+                            &mut state,
+                            nav,
+                            script_assets.as_ref(),
+                            ffe_rs::scripts::veto::SHOT_OR_JETTISON,
+                            0x3e8 + commodity as i32,
+                        )
+                    }) && state.jettison(commodity)
+                    {
                         let name = items[index].0.clone();
                         pending_log
                             .add(Source::Trade, format!("Jettisoning {name} from cargo bay."));
@@ -2883,7 +2893,19 @@ fn run() -> Result<(), String> {
                         // F909 reads Left Alt's key state as the jump starts:
                         // held, the jump is a forced mis-jump.
                         let forced = inp.is_key_down(Key::LeftAlt);
-                        match nav.hyperspace_to_destination_with(&cache, forced) {
+                        // F908: the scripts may hold the jump (global 0xf).
+                        let jump = if ffe_rs::scripts::permits(
+                            &mut state,
+                            nav,
+                            script_assets.as_ref(),
+                            ffe_rs::scripts::veto::JUMP,
+                            1,
+                        ) {
+                            nav.hyperspace_to_destination_with(&cache, forced)
+                        } else {
+                            Err(String::new())
+                        };
+                        match jump {
                             Ok(jumped) => {
                                 // F912: at the arrival point with no velocity
                                 // and no set speed; F1030 holds it there. The
@@ -3534,7 +3556,18 @@ fn run() -> Result<(), String> {
                                     Err(why) => message = why,
                                 }
                             } else {
-                                match nav.begin_launch() {
+                                match if ffe_rs::scripts::permits(
+                                    &mut state,
+                                    nav,
+                                    script_assets.as_ref(),
+                                    ffe_rs::scripts::veto::LAUNCH,
+                                    1,
+                                ) {
+                                    nav.begin_launch()
+                                } else {
+                                    // F381: a script holds the ship (global 4).
+                                    Err(String::new())
+                                } {
                                     Ok(()) => {
                                         acceleration = 0;
                                         match original.as_mut().filter(|model| model.on_pad()) {
@@ -4308,9 +4341,30 @@ fn run() -> Result<(), String> {
                                 }
                                 let surface = nav.landed_body();
                                 let launch = if surface.is_some() {
-                                    nav.begin_surface_launch()
+                                    if ffe_rs::scripts::permits(
+                                        &mut state,
+                                        nav,
+                                        script_assets.as_ref(),
+                                        ffe_rs::scripts::veto::LAUNCH,
+                                        1,
+                                    ) {
+                                        nav.begin_surface_launch()
+                                    } else {
+                                        Err(String::new())
+                                    }
                                 } else {
-                                    nav.begin_launch()
+                                    if ffe_rs::scripts::permits(
+                                        &mut state,
+                                        nav,
+                                        script_assets.as_ref(),
+                                        ffe_rs::scripts::veto::LAUNCH,
+                                        1,
+                                    ) {
+                                        nav.begin_launch()
+                                    } else {
+                                        // F381: a script holds the ship (global 4).
+                                        Err(String::new())
+                                    }
                                 };
                                 match launch {
                                     Ok(()) if nav.takeoff.is_some() => {
@@ -4659,7 +4713,18 @@ fn run() -> Result<(), String> {
                     }
                     match nav.as_mut() {
                         Some(nav) if state.mode == ffe_rs::flight::Mode::Docked => {
-                            match nav.begin_launch() {
+                            match if ffe_rs::scripts::permits(
+                                &mut state,
+                                nav,
+                                script_assets.as_ref(),
+                                ffe_rs::scripts::veto::LAUNCH,
+                                1,
+                            ) {
+                                nav.begin_launch()
+                            } else {
+                                // F381: a script holds the ship (global 4).
+                                Err(String::new())
+                            } {
                                 Ok(()) if nav.takeoff.is_some() => {
                                     acceleration = 0;
                                     state.mode = ffe_rs::flight::Mode::Flight;
@@ -4762,7 +4827,18 @@ fn run() -> Result<(), String> {
                     sound.play(Cue::UiBeep);
                     None
                 } else if pressed(Key::D) {
-                    Some(state.request_docking())
+                    // F650: the scripts may refuse the request (global 0x17).
+                    let allowed = match nav.as_mut() {
+                        Some(nav) => ffe_rs::scripts::permits(
+                            &mut state,
+                            nav,
+                            script_assets.as_ref(),
+                            ffe_rs::scripts::veto::DOCKING,
+                            ffe_rs::scripts::PLAYER_ID,
+                        ),
+                        None => true,
+                    };
+                    allowed.then(|| state.request_docking())
                 } else if (pressed(Key::B) || pressed(Key::N))
                     && state.mode == ffe_rs::flight::Mode::Docked
                 {
@@ -6435,7 +6511,30 @@ fn run() -> Result<(), String> {
         let mut contract_kills: Vec<u32> = Vec::new();
         if can_fire && held_controls.contains(&Key::Space) {
             if let Some(mount) = combat::mount(views.mode) {
-                match state.combat.fire(mount, frame_tics) {
+                // F931: a shot that would go off asks the scripts first
+                // (global 5 = 0x7cf + the laser's type).
+                let code = state.combat.lasers.get(mount).copied().unwrap_or(0);
+                let ready = code != 0
+                    && state.combat.refire == 0
+                    && state.combat.heat <= 0xf000
+                    && state.combat.energy != 0;
+                let allowed = !ready
+                    || match nav.as_mut() {
+                        Some(nav) => ffe_rs::scripts::permits(
+                            &mut state,
+                            nav,
+                            script_assets.as_ref(),
+                            ffe_rs::scripts::veto::SHOT_OR_JETTISON,
+                            0x7cf + ((i32::from(code) >> 3) & 0xf),
+                        ),
+                        None => true,
+                    };
+                let fired = if allowed {
+                    state.combat.fire(mount, frame_tics)
+                } else {
+                    Err(ffe_core::laser::FireError::Refire)
+                };
+                match fired {
                     Ok(shot) => {
                         // F929: a shot that empties the pool refuels from the
                         // hold when the Auto Refueller is fitted.

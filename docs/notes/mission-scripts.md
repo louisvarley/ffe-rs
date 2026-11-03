@@ -175,3 +175,15 @@ engine. The port's date codes read a value of 0x121cf7 or more as the
 original's absolute day number. On a new game the hitch-hikers' advert reads
 "... by 25-Feb-3251" and the Valhallan job "$50000 paid to the right
 Commander" (`tests/station_view.rs script_advert_macros_ask_the_scripts`).
+
+## Game actions the scripts can refuse (2026-11-03)
+
+The original sets a script global before some actions and refuses the
+action when a script has cleared it (`Engine::permits`): F381's launch
+(global 4 = 1), F908's hyperspace jump (0xf = 1), F650's docking request
+(0x17 = the ship's id; the port's player is id 1), F931's laser shot
+(5 = 0x7cf + the laser byte's type, only when the shot is ready) and F291's
+jettison (5 = 0x3e8 + the commodity). The playable asks before each of
+them. Still open: F383's price multiplier (global 0xa, signal 0xb) on the
+upgrades screen, F316's contract-row signal (8) and F622/F633's daily
+station signal (0x10).

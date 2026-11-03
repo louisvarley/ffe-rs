@@ -40,6 +40,45 @@ impl Assets {
     }
 }
 
+/// The player's object id as the scripts see it.
+pub const PLAYER_ID: i32 = 1;
+
+/// The script globals the game's vetoable actions use.
+pub mod veto {
+    /// F381: a launch.
+    pub const LAUNCH: usize = 4;
+    /// F931/F291: a shot (`0x7cf + laser`) or a jettison (`0x3e8 + cargo`).
+    pub const SHOT_OR_JETTISON: usize = 5;
+    /// F908: a hyperspace jump.
+    pub const JUMP: usize = 0xf;
+    /// F650: a docking request (the ship's id).
+    pub const DOCKING: usize = 0x17;
+}
+
+/// Ask the scripts whether a game action may go ahead (`true` when there
+/// are no scripts).
+pub fn permits(
+    state: &mut crate::flight::Flight,
+    nav: &mut crate::navigation::Navigator,
+    assets: Option<&Assets>,
+    global: usize,
+    value: i32,
+) -> bool {
+    let Some(assets) = assets else {
+        return true;
+    };
+    match with_hooks(state, nav, |scripts, hooks, today| {
+        scripts.permits(&assets.image, hooks, today, global, value)
+    }) {
+        Some((Ok(allowed), _)) => allowed,
+        Some((Err(error), _)) => {
+            eprintln!("mission scripts: {error}");
+            true
+        }
+        None => true,
+    }
+}
+
 /// The original's day number (`DATA_008807`) for world seconds `clock`.
 pub fn absolute_day(clock: f64) -> u32 {
     (clock.max(0.0) / 86_400.0) as u32
@@ -62,6 +101,9 @@ pub struct Hooks<'a> {
 impl Host for Hooks<'_> {
     fn player(&mut self, case: i32) -> i32 {
         match case {
+            // F21 0: the player's object id (`DATA_008861 + 0x86`); the
+            // port's player is object 1.
+            0 => PLAYER_ID,
             2 => *self.credits as i32,
             4 => self.system as i32,
             5..=11 => {

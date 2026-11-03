@@ -476,6 +476,26 @@ impl Engine {
         self.set_global(image, host, index, 0)
     }
 
+    /// A game action the scripts may veto (F381's launch on global 4, F908's
+    /// jump on 0xf, F650's docking request on 0x17, F931's shot and F291's
+    /// jettison on 5): the global is set to `value`; when a script has
+    /// cleared it the action is refused, otherwise it is cleared again and
+    /// the action goes ahead.
+    pub fn permits(
+        &mut self,
+        image: &Image,
+        host: &mut dyn Host,
+        index: usize,
+        value: i32,
+    ) -> Result<bool, String> {
+        self.set_global(image, host, index, value)?;
+        if self.globals.get(index).copied().unwrap_or(0) == 0 {
+            return Ok(false);
+        }
+        self.set_global(image, host, index, 0)?;
+        Ok(true)
+    }
+
     /// F342: signal 2 on global 0, then an empty menu.
     pub fn clear_menu(&mut self, image: &Image, host: &mut dyn Host) -> Result<(), String> {
         self.pulse(image, host, 0, 2)?;

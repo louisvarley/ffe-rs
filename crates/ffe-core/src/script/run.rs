@@ -277,6 +277,19 @@ impl Scripts {
         self.engine.query(image, &mut bridge, word, id)
     }
 
+    /// A game action the scripts may veto (see [`Engine::permits`]).
+    pub fn permits(
+        &mut self,
+        image: &Image,
+        game: &mut dyn Game,
+        today: u32,
+        index: usize,
+        value: i32,
+    ) -> Result<bool, String> {
+        let mut bridge = Self::bridge(&mut self.library, game, today);
+        self.engine.permits(image, &mut bridge, index, value)
+    }
+
     /// A game signal on a script global (set, then back to 0).
     pub fn pulse(
         &mut self,
