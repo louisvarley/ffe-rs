@@ -39,10 +39,9 @@ verify-reference compares fixed legacy RNG/timer vectors and bounded new-game
 clock transitions against native Rust primitives. It is not full flight validation.
 inspect-ffed3d reads every replacement model in your own FFED3D download (read-only)
 and reports what the game's Modern graphics would use.
-build-assets packs your own images for Modern graphics (default folder `assets`,
-beside the working directory) into `assets.bin`: files named as FFED3D names its
-own under Textures/ and MODELS/ (they override FFED3D's), and the image export's
-upscales (only images whose size differs from the original's, with their keys).
+build-assets packs your replacements of FFED3D's art (default folder `assets`,
+beside the working directory, laid out as an FFED3D install: Textures/CABIN0.png,
+Textures/tex450.png, MODELS/<n>/...) into `assets.bin` for Modern graphics.
 It replaces an earlier assets.bin, and removes one when the folder is gone.
 model-census reports, read-only, how far each of the 465 original models gets
 through native import, decoding and execution, and what blocks the rest.
@@ -426,9 +425,9 @@ fn build_assets(args: &[OsString], output: &mut impl Write) -> Result<u8, String
     if std::fs::read(&out).is_ok_and(|old| old == bytes) {
         writeln!(
             output,
-            "build-assets: {} is up to date ({} images)",
+            "build-assets: {} is up to date ({} files)",
             out.display(),
-            manifest.images.len()
+            manifest.files.len()
         )
         .map_err(|e| e.to_string())?;
         return Ok(0);
@@ -438,18 +437,17 @@ fn build_assets(args: &[OsString], output: &mut impl Write) -> Result<u8, String
     std::fs::rename(&temporary, &out).map_err(|e| format!("{}: {e}", out.display()))?;
     writeln!(
         output,
-        "build-assets: {} images ({} bytes) packed into {}",
-        manifest.images.len(),
+        "build-assets: {} files ({} bytes) packed into {}",
+        manifest.files.len(),
         bytes.len(),
         out.display()
     )
     .map_err(|e| e.to_string())?;
-    for image in &manifest.images {
-        writeln!(
-            output,
-            "  {} {}x{} (original {}x{})",
-            image.image, image.size[0], image.size[1], image.source_size[0], image.source_size[1]
-        )
+    for file in &manifest.files {
+        match file.image {
+            Some([width, height]) => writeln!(output, "  {} {width}x{height}", file.path),
+            None => writeln!(output, "  {}", file.path),
+        }
         .map_err(|e| e.to_string())?;
     }
     Ok(0)

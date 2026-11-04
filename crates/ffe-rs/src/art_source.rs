@@ -1,9 +1,8 @@
-//! Where Modern graphics find the owner's own images: `assets.bin`, packed from
-//! the `assets` folder by `ffe-tools build-assets` (`ffe_content::art_pack`),
-//! else the `assets` folder itself (art not packed yet). Paths are the pack's:
-//! `Textures/tex450.png` and `Textures/CABIN0.png` (named as FFED3D names its
-//! files; they override FFED3D's), and the image export's `images/...` and
-//! `indexed/...`. Names match in any letter case.
+//! Where Modern graphics find art, at FFED3D's paths (`Textures/CABIN0.png`,
+//! `Textures/tex450.png`, `MODELS/<n>/...`), names in any letter case: the
+//! owner's replacements in `assets.bin` (packed from the `assets` folder by
+//! `ffe-tools build-assets`, `ffe_content::art_pack`), else in the `assets`
+//! folder itself (not packed yet); and an FFED3D install read as a folder.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,7 +40,7 @@ impl ArtSource {
         match std::fs::read(&pack) {
             Ok(bytes) => match read_pack(&bytes) {
                 Ok(read) => {
-                    let count = read.manifest.images.len();
+                    let count = read.manifest.files.len();
                     let files = read
                         .files
                         .into_iter()
@@ -52,7 +51,7 @@ impl ArtSource {
                             path: pack.clone(),
                             files: Arc::new(files),
                         }),
-                        format!("{count} images from {}", pack.display()),
+                        format!("{count} files from {}", pack.display()),
                     )
                 }
                 Err(error) => fallback(format!("{}: {error}", pack.display())),

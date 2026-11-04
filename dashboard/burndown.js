@@ -317,12 +317,15 @@ window.FFE_BURNDOWN = {
         { id: "enhanced-3", title: "Planet atmosphere and shadows", status: "in-progress", version: "modern-3" },
         { id: "enhanced-4", title: "HDR output and temporal AA (deferred)", status: "todo" },
         { id: "enhanced-5", title: "Frame and VRAM budgets measured", status: "todo" },
-        { id: "enhanced-6", title: "FFED3D textures (texNNN) on the models' textured faces in Modern", status: "done", version: "ffed3d-1" },
+        { id: "enhanced-6", title: "FFED3D textures (texNNN) and cabins in Modern, the owner's overrides first", status: "done", version: "ffed3d-1" },
         { id: "enhanced-7", title: "DirectX .X model reader (text, binary, MSZIP)", status: "todo" },
         { id: "enhanced-8", title: "FFED3D replacement models: placement, tris.ini, skins, sub-models, landing gear", status: "todo" },
-        { id: "enhanced-9", title: "FFED3D ship, station and asteroid shaders ported to WGSL", status: "todo" },
-        { id: "enhanced-10", title: "FFED3D skybox, stars and nebula", status: "todo" },
-        { id: "enhanced-11", title: "FFED3D planets and atmospheres (geosphere, planet.fx, atmosphere.fx, textures.cfg)", status: "todo" }
+        { id: "enhanced-9", title: "FFED3D panel (panel.X, panelicons) and HUD (FRONR font)", status: "todo" },
+        { id: "enhanced-10", title: "FFED3D space dust (tex704 billboards, AJ sizes)", status: "todo" },
+        { id: "enhanced-11", title: "FFED3D planets and atmospheres (geosphere, textures.cfg skins, fog, glow)", status: "todo" },
+        { id: "enhanced-12", title: "DirectX 12 window: wgpu DX12 swapchain at the window's resolution (no GPU readback)", status: "todo" },
+        { id: "enhanced-13", title: "FFED3D effects and lighting (star, lasers, explosions, engine glow)", status: "todo" },
+        { id: "enhanced-14", title: "Modern side by side with FFED3D: captured scenes tuned to match", status: "todo" }
       ]
     },
     {
@@ -1227,6 +1230,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-04",
       remaining: 95,
       note: "The owner's images are packed: launcher.bat/play.bat run ffe-tools build-assets after building, which packs the ignored assets/ folder (the former img-export/) into a checked, deterministic assets.bin: files named as FFED3D's (Textures/tex<N>.png, Textures/CABIN<n>.png) and the export's upscales (only images whose size differs from the original's). Modern reads it (else the folder) and the owner's images win over FFED3D's, which win over the original's. packs-1 done; packs-2 in progress (no game-version fingerprint yet)."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 98,
+      note: "Owner's Modern plan: look very like FFED3D on DirectX 12 with FFED3D's assets, keeping the port's stars; no .fx shader port. enhanced-9 becomes FFED3D's panel and HUD and enhanced-10 its space dust; three items added (DirectX 12 window, effects and lighting, side-by-side tuning). assets/ now mirrors an FFED3D install and every file is packed into assets.bin (format 2); the owner's cabins (assets/Textures/CABIN<n>.png) replace FFED3D's, which replace the original's. Remaining rises by three."
     }
   ]
 };

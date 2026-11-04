@@ -32,6 +32,8 @@ legacy/ffed3d-master/
 /assets/
 /assets.bin
 /assets.bin.tmp
+/assets-old/
+/assets-old/
 /saves/
 *upscaled/working/
 *.ffe-cache

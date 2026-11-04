@@ -17,7 +17,7 @@
 //! correction smoothly instead of repeating every fifth row).
 //!
 //! Second technique: **replacement backdrops.** A higher-resolution image of a cabin backdrop
-//! (the owner's `Textures/CABIN<n>.png` or upscaled `images/cockpit/cabin<n>.png`, from `assets.bin`)
+//! (the owner's `Textures/CABIN<n>.png` from `assets.bin`, else FFED3D's)
 //! replaces that cabin wherever the finished frame still shows the original cabin's pixels.
 //! The engine recognises the cabin by comparing the frame with the original art, so text,
 //! menus, models and the console drawn over it stay on top and the game is not consulted.
@@ -609,21 +609,21 @@ impl ModernRenderer {
     /// or rejected.
     pub fn load_cabins(
         &mut self,
-        source: &crate::art_source::ArtSource,
+        sources: &[&crate::art_source::ArtSource],
         cabins: &[Vec<u32>],
     ) -> Vec<String> {
         let mut report = Vec::new();
         for (index, original) in cabins.iter().enumerate() {
-            // FFED3D's name first (`Textures/CABIN0.png`), then the image export's.
-            let named = format!("Textures/CABIN{index}.png");
-            let exported = format!("images/cockpit/cabin{index}.png");
-            let Some(path) = source.first(&[named.as_str(), exported.as_str()]) else {
+            // `Textures/CABIN<n>.png` from the first source that has it: the owner's
+            // replacement, then FFED3D's.
+            let path = format!("Textures/CABIN{index}.png");
+            let Some((source, bytes)) = sources
+                .iter()
+                .find_map(|source| source.read(&path).map(|bytes| (source, bytes)))
+            else {
                 continue;
             };
-            let Some(bytes) = source.read(path) else {
-                continue;
-            };
-            let path = source.describe(path);
+            let path = source.describe(&path);
             let name = format!("cabin{index}");
             match decode_art(&bytes) {
                 Ok((_, (320, 158))) => {}
@@ -655,8 +655,8 @@ impl ModernRenderer {
         source: &crate::art_source::ArtSource,
         original: Vec<u32>,
     ) -> Option<String> {
-        // FFED3D's name for bitmap 43 first, then the image export's.
-        let path = source.first(&["Textures/tex43.png", "images/sprite/primary-043.png"])?;
+        // FFED3D's name for bitmap 43.
+        let path = source.first(&["Textures/tex43.png"])?;
         let bytes = source.read(path)?;
         let path = source.describe(path);
         let (mut art, size) = match decode_art(&bytes) {

@@ -770,7 +770,7 @@ fn write_display_capture(
     let (art, line) = ffe_rs::art_source::ArtSource::open(root);
     eprintln!("Modern graphics: {line}");
     if let Some(art) = &art {
-        for line in modern.load_cabins(art, screen.cabin_pixels()) {
+        for line in modern.load_cabins(&[art], screen.cabin_pixels()) {
             eprintln!("{line}");
         }
         if let Some(line) = modern.load_panel(art, screen.panel_pixels()) {
@@ -1209,19 +1209,25 @@ fn run() -> Result<(), String> {
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
     let mut presenter = Presenter::new();
-    // Modern graphics' art, in order: the owner's own images (`assets.bin`, packed from the
-    // `assets` folder by the build; `Textures/...` named as FFED3D's files override them),
-    // then FFED3D's, then the original's.
+    // Modern graphics' art, at FFED3D's paths, in order: the owner's replacements
+    // (`assets.bin`, packed from the `assets` folder by the build), then FFED3D's, then the
+    // original's.
     let (art, line) = ffe_rs::art_source::ArtSource::open(&options.root);
     eprintln!("Modern graphics: {line}");
+    let ffed3d_art = options
+        .ffed3d
+        .clone()
+        .map(ffe_rs::art_source::ArtSource::Folder);
+    let cabin_sources: Vec<&ffe_rs::art_source::ArtSource> =
+        art.iter().chain(ffed3d_art.iter()).collect();
+    for line in presenter
+        .modern_mut()
+        .load_cabins(&cabin_sources, screen.cabin_pixels())
+    {
+        eprintln!("{line}");
+    }
     if let Some(art) = &art {
         presenter.set_art_source(art.clone());
-        for line in presenter
-            .modern_mut()
-            .load_cabins(art, screen.cabin_pixels())
-        {
-            eprintln!("{line}");
-        }
         // The console panel (primary bitmap 43), when a larger one is given.
         if let Some(line) = presenter
             .modern_mut()
@@ -1233,8 +1239,7 @@ fn run() -> Result<(), String> {
             eprintln!("{line}");
         }
     }
-    // FFED3D's art for Modern graphics: its `texNNN` textures on the models' textured faces.
-    // Its cabin backdrops are not used (owner's choice): the cabins stay the export's.
+    // FFED3D's `texNNN` textures on the models' textured faces.
     if let Some(ffed3d) = &options.ffed3d {
         if !presenter.set_ffed3d_dir(ffed3d) {
             eprintln!(

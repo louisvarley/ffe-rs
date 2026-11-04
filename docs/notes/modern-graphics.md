@@ -486,22 +486,17 @@ exactly as it is.
 
 ## The owner's images: `assets/` and `assets.bin` (2026-11-04)
 
-Modern graphics read the owner's images from `assets.bin` (`ffe_content::art_pack`,
-`ffe_rs::art_source`), which `launcher.bat` and `play.bat` build after `cargo build`
-with `ffe-tools build-assets` from the ignored `assets/` folder (the former
-`img-export/`); without a pack the game reads the folder directly. The pack is a
-deterministic stored ZIP with a manifest (each file's size and SHA-256), checked on
-reading. It holds:
+Modern graphics read art at FFED3D's paths (`Textures/CABIN0.png`, `Textures/tex450.png`,
+`MODELS/<n>/...`; `ffe_rs::art_source`): first the owner's replacements in `assets.bin`
+(`ffe_content::art_pack`, format version 2), which `launcher.bat` and `play.bat` build after
+`cargo build` with `ffe-tools build-assets` from every file of the ignored `assets/` folder
+(laid out as an FFED3D install); without a pack, the folder itself; then FFED3D's install;
+then the original. The pack is a deterministic stored ZIP with a manifest (each file's path,
+size, SHA-256 and a PNG's size), checked on reading.
 
-- every file under `assets/Textures/` and `assets/MODELS/`, named as FFED3D names its
-  own (`Textures/tex450.png`, `Textures/CABIN0.png`): the owner's replacements of
-  FFED3D's art;
-- the image export's images whose size differs from the original's (`source_size` in
-  the export manifest), with their `indexed/` keys and the font atlas's `main.json`.
-
-What wins, for each picture: a model face's texture, the owner's `Textures/tex(400 +
-record)`, else the owner's upscale of its bitmap (recoloured per face as above), else
-FFED3D's `tex(400 + record)`, else the original; a cabin, `Textures/CABIN<n>.png`, else
-`images/cockpit/cabin<n>.png` (FFED3D's own cabins are not used); the console panel,
-`Textures/tex43.png`, else `images/sprite/primary-043.png`; the font atlas,
-`images/font/main.png`. Real fonts are still read from `assets/fonts`.
+So far: a model face's texture is the owner's `Textures/tex(400 + record)`, else FFED3D's,
+else the original; a cabin, the owner's `Textures/CABIN<n>.png`, else FFED3D's, else the
+original; the console panel, the owner's `Textures/tex43.png` (FFED3D's own `tex43` is the
+original 320x43). The former image export layout (`images/`, `indexed/`) is no longer packed;
+its upscales were moved aside (`assets-old/`, ignored) and the owner's cabins kept as
+`assets/Textures/CABIN<n>.png`. Real fonts are still read from `assets/fonts`.
