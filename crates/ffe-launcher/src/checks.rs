@@ -138,9 +138,45 @@ pub fn ffed3d_resources(folder: &Path) -> PathBuf {
     }
 }
 
+/// A child folder of `parent` named `name` in any letter case (an installed
+/// FFED3D has `MODELS` and `Textures`, the source tree `models` and
+/// `textures`).
+fn child_folder(parent: &Path, name: &str) -> Option<PathBuf> {
+    std::fs::read_dir(parent)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
+                && entry.path().is_dir()
+        })
+        .map(|entry| entry.path())
+}
+
+/// A file in `folder` named `name` in any letter case.
+fn has_file(folder: &Path, name: &str) -> bool {
+    std::fs::read_dir(folder)
+        .map(|entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(name)
+                    && entry.path().is_file()
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// FFED3D's replacement assets: its skybox and star textures, the `texNNN`
-/// HD textures, the `.X` models and its config. These are optional; the
-/// port's Classic graphics never need them.
+/// HD textures, the star, nebula, sphere and atmosphere models and the
+/// numbered replacement models (`MODELS/<n>/model.x`). Either an installed
+/// FFED3D or its source tree's `resources`, in any letter case. FFED3D's own
+/// configuration (`ffewin.cfg`, `ffed3daj.cfg`) is not needed: the port keeps
+/// its settings in `saves/config.cfg`. These are optional; the port's
+/// Classic graphics never need them.
 pub fn verify_ffed3d(folder: &Path) -> Report {
     let resources = ffed3d_resources(folder);
     if !resources.is_dir() {
@@ -154,18 +190,21 @@ pub fn verify_ffed3d(folder: &Path) -> Report {
         };
     }
     let mut lines = Vec::new();
-    let textures = resources.join("textures");
-    let models = resources.join("models");
-    if textures.is_dir() {
+    let textures = child_folder(&resources, "textures");
+    let models = child_folder(&resources, "models");
+    if let Some(textures) = textures {
         let skybox = (0..6)
-            .filter(|i| textures.join(format!("skybox{i}.tga")).is_file())
+            .filter(|i| {
+                has_file(&textures, &format!("skybox{i}.tga"))
+                    || has_file(&textures, &format!("skybox{i}.png"))
+            })
             .count();
         lines.push(if skybox == 6 {
             Line::good("Skybox: all six faces")
         } else {
             Line::warning(format!("Skybox: {skybox} of 6 faces"))
         });
-        lines.push(if textures.join("stars.tga").is_file() {
+        lines.push(if has_file(&textures, "stars.tga") {
             Line::good("Star texture")
         } else {
             Line::warning("stars.tga missing")
@@ -186,25 +225,37 @@ pub fn verify_ffed3d(folder: &Path) -> Report {
     } else {
         lines.push(Line::bad("No textures folder"));
     }
-    if models.is_dir() {
+    if let Some(models) = models {
         let wanted = ["stars.X", "nebula.X", "sphere.X", "atmo.X"];
-        let found = wanted
-            .iter()
-            .filter(|name| models.join(name).is_file())
-            .count();
+        let found = wanted.iter().filter(|name| has_file(&models, name)).count();
         lines.push(if found == wanted.len() {
             Line::good("Star, nebula, sphere and atmosphere models")
         } else {
             Line::warning(format!("{found} of {} core models", wanted.len()))
         });
+        let replacements = std::fs::read_dir(&models)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .filter(|entry| {
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        !name.is_empty()
+                            && name.chars().all(|c| c.is_ascii_digit())
+                            && has_file(&entry.path(), "model.x")
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+        lines.push(if replacements > 0 {
+            Line::good(format!(
+                "{replacements} replacement models (MODELS/<n>/model.x)"
+            ))
+        } else {
+            Line::warning("No numbered replacement models")
+        });
     } else {
         lines.push(Line::bad("No models folder"));
     }
-    lines.push(if resources.join("ffewin.cfg").is_file() {
-        Line::good("ffewin.cfg")
-    } else {
-        Line::warning("ffewin.cfg missing")
-    });
     Report::from_lines(
         "FFED3D resources found",
         "FFED3D resources incomplete",
@@ -259,11 +310,34 @@ mod tests {
         for name in ["stars.X", "nebula.X", "sphere.X", "atmo.X"] {
             std::fs::write(resources.join("models").join(name), b"x").unwrap();
         }
-        std::fs::write(resources.join("ffewin.cfg"), b"x").unwrap();
+        std::fs::create_dir_all(resources.join("models/14")).unwrap();
+        std::fs::write(resources.join("models/14/model.X"), b"x").unwrap();
         // Either the parent or `resources` itself.
         assert_eq!(verify_ffed3d(dir.path()).level, Level::Good);
         assert_eq!(verify_ffed3d(&resources).level, Level::Good);
         std::fs::remove_file(resources.join("textures/skybox3.tga")).unwrap();
         assert_eq!(verify_ffed3d(dir.path()).level, Level::Warning);
+    }
+
+    /// An installed FFED3D: `MODELS` and `Textures`, PNG skyboxes, no
+    /// `ffewin.cfg`.
+    #[test]
+    fn an_installed_ffed3d_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("Textures")).unwrap();
+        std::fs::create_dir_all(root.join("MODELS/112")).unwrap();
+        for i in 0..6 {
+            std::fs::write(root.join(format!("Textures/skybox{i}.png")), b"x").unwrap();
+        }
+        for name in ["stars.tga", "tex0.png"] {
+            std::fs::write(root.join("Textures").join(name), b"x").unwrap();
+        }
+        for name in ["stars.X", "nebula.X", "sphere.X", "atmo.X"] {
+            std::fs::write(root.join("MODELS").join(name), b"x").unwrap();
+        }
+        std::fs::write(root.join("MODELS/112/model.X"), b"x").unwrap();
+        let report = verify_ffed3d(root);
+        assert_eq!(report.level, Level::Good, "{:?}", report.lines);
     }
 }

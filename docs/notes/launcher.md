@@ -10,8 +10,13 @@ game, tools and launcher and opens it; the launcher itself is
   row runs `ffe_tools::inspect_game` (the English floppy 1.02 / CD 1.01
   fingerprints). There is no cache file: the game builds its content from
   the game folder at every start (`ffe_tools::cache::build_bytes`, about a
-  quarter of a second). The FFED3D row checks `resources/` for the skybox,
-  star texture, `texNNN` textures, the `.X` models and `ffewin.cfg`. LAUNCH
+  quarter of a second). The FFED3D row accepts an installed FFED3D (for
+  example FFED3D AJ's `MODELS/` and `Textures/`) or the source tree's
+  `resources/`, in any letter case, and checks the skybox (TGA or PNG), the
+  star texture, the `texNNN` textures, the star/nebula/sphere/atmosphere
+  `.X` models and the numbered replacement models (`MODELS/<n>/model.x`).
+  FFED3D's own configuration (`ffewin.cfg`, `ffed3daj.cfg`) is not needed:
+  the port's settings are `saves/config.cfg`. LAUNCH
   starts `ffe-rs --root <data folder> --game <game folder> --start N
   [--skip-intro] [--record recordings/<utc>.ffe-input]`. Clicking a status
   opens About.
