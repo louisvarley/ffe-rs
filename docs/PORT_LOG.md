@@ -3992,3 +3992,16 @@ and F1843, and the order queue (F1778, F1326). `--surface-draw` now prints the q
 102 completing cases without a word-8 parameter every word matches, and the 10 cases that fill
 the 50,000-word queue fill it in the port too. Next: F1877 (the haze and its queue entries) and
 the F1806/F1808 draw routines.
+
+## 2026-11-04: Modern graphics use FFED3D's assets (owner decision)
+
+The owner decided that Modern graphics draw with FFED3D's models, textures and
+shaders, as much of FFED3D's rendering as possible, through the port's own
+wgpu engine, and that Modern needs a full FFED3D install (Q11 superseded for
+Modern). The launcher's FFED3D check now accepts an installed FFED3D (AJ's
+`MODELS/`, `Textures/`) and no longer wants `ffewin.cfg`; its Engine row says
+Modern uses FFED3D's models, textures and shaders, LAUNCH refuses Modern
+without a complete FFED3D, and the game takes the folder as `--ffed3d`. The
+FFED3D source is cloned locally into `ffed3d-master/` from
+`github.com/corpsofengineers/ffed3d`. What FFED3D does and the staged plan:
+`docs/notes/ffed3d-modern.md`.

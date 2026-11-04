@@ -502,7 +502,7 @@ shortcut that counts as completing the Rust simulation.
 | Q8 | Support supplied CD/floppy releases and patch states after fingerprint/layout validation. Do not trust folder names or assume CD differs only by videos. |
 | Q9 | Match original visuals closely/exactly first; enhancement is optional and later. |
 | Q10 | Live Classic/Enhanced switching required. Classic first-run default is the implementation choice. |
-| Q11 | Images first; meshes later. |
+| Q11 | Images first; meshes later. Superseded for Modern on 2026-11-04: Modern graphics use FFED3D's models, textures and shaders from a full local FFED3D install, drawn by the port's own engine; see `docs/notes/ffed3d-modern.md`. |
 | Q12 | Owner handles upscaling. Export all eligible images with a contact sheet, manifest/CSV and explicit recommended 4K sizes. |
 | Q13 | Implementation chooses order: native resolution, HD images, filtering, MSAA, modest bloom, then evaluate shadows/atmosphere. |
 | Q14 | Legacy save import is desired; native saves need not load in the old game. |

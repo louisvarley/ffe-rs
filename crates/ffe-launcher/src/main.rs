@@ -287,9 +287,23 @@ impl App {
             ));
             return;
         };
+        // Modern graphics draw with FFED3D's models, textures and shaders.
+        if self.config.display.graphics == Graphics::Modern
+            && !ffed3d_ready(self.ffed3d_report.as_ref())
+        {
+            self.notice = Some((
+                Level::Bad,
+                "Modern graphics need a full FFED3D install: choose its folder on Play, or switch                  Settings > Display > Engine to Classic."
+                    .to_owned(),
+            ));
+            return;
+        }
         let mut command = Command::new(game);
         command.arg("--root").arg(&self.root);
         command.arg("--game").arg(&self.launcher.game);
+        if let Some(ffed3d) = &self.launcher.ffed3d {
+            command.arg("--ffed3d").arg(ffed3d);
+        }
         command.arg("--start").arg(self.launcher.start.to_string());
         if self.launcher.skip_intro {
             command.arg("--skip-intro");
@@ -970,7 +984,9 @@ impl App {
         option_row(
             ui,
             "Engine",
-            "Classic draws the original's pixels; Modern is the high-resolution engine.",
+            "Classic draws the original's pixels. Modern is the port's high-resolution engine and \
+             uses FFED3D's models, textures and shaders, so it needs a full FFED3D install \
+             (choose its folder on Play).",
             |ui| {
                 choice(
                     ui,
@@ -979,6 +995,15 @@ impl App {
                 );
             },
         );
+        if display.graphics == Graphics::Modern && !ffed3d_ready(self.ffed3d_report.as_ref()) {
+            ui.label(
+                RichText::new(
+                    "Modern needs FFED3D: choose a complete FFED3D folder on Play, or the game \
+                     will not start in Modern.",
+                )
+                .color(WARNING),
+            );
+        }
         option_row(
             ui,
             "Window size",
@@ -1176,9 +1201,9 @@ impl App {
                     report(ui, self.ffed3d_report.as_ref(), self.busy(Job::Ffed3d));
                 }
                 ui.label(RichText::new(
-                    "The game does not load FFED3D's files yet: the Classic graphics never need them, and \
-                     the Modern engine will use them for replacement textures and the skybox when that \
-                     support lands.",
+                    "Modern graphics use FFED3D's models, textures and shaders, drawn by the port's own \
+                     engine; they need a full FFED3D install. Classic graphics never use them. The game \
+                     receives the folder with --ffed3d; drawing with its assets is being built.",
                 ).italics().color(DIM));
                 section(ui, "Notes");
                 ui.label(RichText::new(
@@ -1244,6 +1269,12 @@ fn pill(label: &str, selected: bool) -> egui::Button<'static> {
             },
         ))
         .corner_radius(CornerRadius::same(4))
+}
+
+/// FFED3D is ready for Modern graphics: its folder was checked and every
+/// part was found.
+fn ffed3d_ready(report: Option<&Report>) -> bool {
+    report.is_some_and(|report| report.level == Level::Good)
 }
 
 fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) {

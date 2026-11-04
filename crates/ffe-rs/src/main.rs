@@ -143,6 +143,10 @@ struct Options {
     replay: Option<PathBuf>,
     /// `--replay-exit`: close the window when the recording ends.
     replay_exit: bool,
+    /// `--ffed3d DIR`: an installed FFED3D, whose models, textures and
+    /// shaders the Modern engine draws with (`ffed3d=` in the launcher's
+    /// settings when not given).
+    ffed3d: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -166,11 +170,16 @@ fn options() -> Result<Options, String> {
     let mut replay = None;
     let mut replay_exit = false;
     let mut game: Option<PathBuf> = None;
+    let mut ffed3d: Option<PathBuf> = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--game" && game.is_none() {
             game = Some(PathBuf::from(
                 args.next().ok_or("--game requires a directory")?,
+            ));
+        } else if arg == "--ffed3d" && ffed3d.is_none() {
+            ffed3d = Some(PathBuf::from(
+                args.next().ok_or("--ffed3d requires a directory")?,
             ));
         } else if arg == "--root" && root.is_none() {
             root = Some(PathBuf::from(
@@ -273,7 +282,7 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs [--game <game files folder>] [--root <data folder>] [--start 0..5|sol] [--skip-intro] [--dev] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR] [--record FILE] [--replay FILE [--replay-exit]]",arg.to_string_lossy()));
+            return Err(format!("Unknown argument {}. Usage: ffe-rs [--game <game files folder>] [--ffed3d <FFED3D folder>] [--root <data folder>] [--start 0..5|sol] [--skip-intro] [--dev] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR] [--record FILE] [--replay FILE [--replay-exit]]",arg.to_string_lossy()));
         }
     }
     let root = match root {
@@ -295,8 +304,9 @@ fn options() -> Result<Options, String> {
         }
     };
     let game = game
-        .or_else(|| configured_game(&root))
+        .or_else(|| configured(&root, "game"))
         .unwrap_or_else(|| root.join("game"));
+    let ffed3d = ffed3d.or_else(|| configured(&root, "ffed3d"));
     Ok(Options {
         root: root
             .canonicalize()
@@ -319,11 +329,13 @@ fn options() -> Result<Options, String> {
         record,
         replay,
         replay_exit,
+        ffed3d,
     })
 }
 
-/// The game folder the launcher saved (`game=` in `saves/launcher.cfg`).
-fn configured_game(root: &Path) -> Option<PathBuf> {
+/// A folder the launcher saved (`game=` or `ffed3d=` in `saves/launcher.cfg`).
+fn configured(root: &Path, key: &str) -> Option<PathBuf> {
+    let prefix = format!("{key}=");
     let path = root.join("saves").join("launcher.cfg");
     let meta = fs::symlink_metadata(&path).ok()?;
     if !meta.is_file() || meta.len() > 16 * 1024 {
@@ -332,7 +344,7 @@ fn configured_game(root: &Path) -> Option<PathBuf> {
     fs::read_to_string(path)
         .ok()?
         .lines()
-        .filter_map(|line| line.trim().strip_prefix("game="))
+        .filter_map(|line| line.trim().strip_prefix(prefix.as_str()))
         .map(str::trim)
         .find(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -1088,6 +1100,9 @@ const NEAR_WORLD_ACCELERATION: usize = 2;
 
 fn run() -> Result<(), String> {
     let options = options()?;
+    if let Some(ffed3d) = &options.ffed3d {
+        eprintln!("FFED3D assets for Modern graphics: {}", ffed3d.display());
+    }
     let cache = load_content(&options.game)?;
     let mut screen = Screen::new(&cache)?;
     // Diagnostic frames of the preference pages and of the space colour, for
