@@ -1221,6 +1221,16 @@ fn run() -> Result<(), String> {
     ) {
         eprintln!("{line}");
     }
+    // FFED3D's art for Modern graphics: its `texNNN` textures on the models' textured faces.
+    // Its cabin backdrops are not used (owner's choice): the cabins stay the export's.
+    if let Some(ffed3d) = &options.ffed3d {
+        if !presenter.set_ffed3d_dir(ffed3d) {
+            eprintln!(
+                "FFED3D: no texture folder in {}; Modern graphics use the original textures",
+                ffed3d.display()
+            );
+        }
+    }
     // The console panel (primary bitmap 43), when the export holds a larger one.
     if let Some(line) = presenter.modern_mut().load_panel(
         &options

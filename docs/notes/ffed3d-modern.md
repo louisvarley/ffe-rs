@@ -1,8 +1,8 @@
 # Modern graphics with FFED3D's assets
 
-Status (2026-11-04): **decided, being built.** The launcher requires a full
-FFED3D install for Modern and passes it to the game (`--ffed3d DIR`); the
-game does not draw with it yet.
+Status (2026-11-04): **stage 1 done.** The launcher requires a full FFED3D
+install for Modern and passes it to the game (`--ffed3d DIR`); the GPU view
+shows FFED3D's `texNNN` textures on the original models' textured faces.
 
 ## The owner's decision (2026-11-04)
 
@@ -88,9 +88,19 @@ game does not draw with it yet.
 Each stage keeps the original model as the fallback and never touches game
 state; Classic stays as it is.
 
-1. **Asset folder and textures**: read `--ffed3d` into the Modern engine;
-   `texNNN` on the original models' textured faces (FFED3D's numbering, full
-   colour, lit); the six `CABIN*.png` backdrops.
+1. **Asset folder and textures** (done 2026-11-04): `--ffed3d` reaches the
+   Modern engine (`ffe_rs::ffed3d::Textures`, `Gpu3d::set_ffed3d_dir`); a
+   model face's texture record (`material(face.material).texture`, carried in
+   `SolidTexture::record`) picks `tex(400 + record)`, drawn in its own colours
+   under the face's lighting through `ffe-render`'s full-colour texture array
+   (`ColourMap`, `FaceTexture::colour`; resampled to 512, premultiplied,
+   mipmapped), its image stretched corner to corner over the original
+   bitmap. A record FFED3D has no file for keeps the original texture. The
+   owner chose not to use FFED3D's cabin backdrops (`CABIN*.png`): the cabins
+   stay the port's own. Not yet: `textures.cfg`'s colouring of asteroid and
+   planet skins (stage 6), and textures FFED3D uses outside the models'
+   faces (sprites, the interface). Checked by `tests/modern_screens.rs
+   intro_frames_with_ffed3d_textures` (`FFED3D_DIR`).
 2. **`.X` reader** (`ffe-render` or a new crate): the text and binary token
    formats and MSZIP (`bzip0032`); frames, frame matrices, meshes, normals,
    texture coordinates, materials and animation sets; tests on synthetic

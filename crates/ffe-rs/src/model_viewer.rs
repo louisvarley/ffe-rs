@@ -138,6 +138,11 @@ pub struct SolidTexture {
     /// the stride, so the corner table stays inside it).
     pub width: u32,
     pub height: u32,
+    /// The bitmap's own width and height (FFED3D's art covers exactly these).
+    pub image: [u32; 2],
+    /// A model face's texture record (`material & 0xfff`, `DATA_007811`), which names
+    /// FFED3D's `tex(400 + record)`; `None` for other textured shapes.
+    pub record: Option<u32>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -819,6 +824,8 @@ impl ModelViewer {
             uv,
             width,
             height: (map.texels.len() as u32 / width).max(width),
+            image: [map.width, map.texels.len() as u32 / map.width.max(1)],
+            record: None,
         })
     }
 
@@ -2477,7 +2484,15 @@ impl ModelViewer {
                                 slots,
                             };
                             if let Some(solid) = solid.as_mut() {
-                                solid.texture = self.solid_texture(&textured, None);
+                                solid.texture =
+                                    self.solid_texture(&textured, None).map(|texture| {
+                                        SolidTexture {
+                                            record: Some(u32::from(
+                                                material(face.material).texture,
+                                            )),
+                                            ..texture
+                                        }
+                                    });
                             }
                             push!(Shape::Textured(textured), solid);
                             continue;

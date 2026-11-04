@@ -610,7 +610,9 @@ impl ModernRenderer {
     pub fn load_cabins(&mut self, dir: &Path, cabins: &[Vec<u32>]) -> Vec<String> {
         let mut report = Vec::new();
         for (index, original) in cabins.iter().enumerate() {
-            let path = dir.join(format!("cabin{index}.png"));
+            // Any letter case: FFED3D's are `CABIN0.png` and so on.
+            let name = format!("cabin{index}.png");
+            let path = crate::ffed3d::find(dir, &name).unwrap_or_else(|| dir.join(&name));
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
             };

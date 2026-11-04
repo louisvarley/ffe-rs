@@ -316,7 +316,13 @@ window.FFE_BURNDOWN = {
         { id: "enhanced-2", title: "Modest bloom", status: "done", version: "modern-4" },
         { id: "enhanced-3", title: "Planet atmosphere and shadows", status: "in-progress", version: "modern-3" },
         { id: "enhanced-4", title: "HDR output and temporal AA (deferred)", status: "todo" },
-        { id: "enhanced-5", title: "Frame and VRAM budgets measured", status: "todo" }
+        { id: "enhanced-5", title: "Frame and VRAM budgets measured", status: "todo" },
+        { id: "enhanced-6", title: "FFED3D textures (texNNN) on the models' textured faces in Modern", status: "done", version: "ffed3d-1" },
+        { id: "enhanced-7", title: "DirectX .X model reader (text, binary, MSZIP)", status: "todo" },
+        { id: "enhanced-8", title: "FFED3D replacement models: placement, tris.ini, skins, sub-models, landing gear", status: "todo" },
+        { id: "enhanced-9", title: "FFED3D ship, station and asteroid shaders ported to WGSL", status: "todo" },
+        { id: "enhanced-10", title: "FFED3D skybox, stars and nebula", status: "todo" },
+        { id: "enhanced-11", title: "FFED3D planets and atmospheres (geosphere, planet.fx, atmosphere.fx, textures.cfg)", status: "todo" }
       ]
     },
     {
@@ -1211,6 +1217,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-04",
       remaining: 91,
       note: "gameplay-41 progress: the ship library's issue page is the original's (ffe_rs::journal_page): F78's text (headline upper-cased and centred, the 0xa602 byline with the publication line, five-space indents, the last byte F78's count leaves out), F1398's in-place wrap at 300 pixels with DATA_007648, F80's masthead (primary 1..5) and arrows with 0xa601, F79's F1587/F1598 text clipped to 0x28..0x8c with the more-below flag, and F81's two-pixel scrolling by line (arrows, actions 5/6) and page (0xe/0xf)."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 96,
+      note: "Modern graphics use FFED3D's assets (owner decision): six items added to the Enhanced renderer for the FFED3D stages, the first done (enhanced-6). With --ffed3d, the GPU view shows FFED3D's tex(400 + record) in full colour on the original models' textured faces (a new full-colour texture array in ffe-render, premultiplied and mipmapped) while the cabins stay the port's own (owner's choice); the launcher requires a full FFED3D for Modern. Five added items remain open, so the remaining count rises by five."
     }
   ]
 };

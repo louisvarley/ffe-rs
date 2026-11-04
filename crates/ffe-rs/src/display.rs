@@ -537,7 +537,13 @@ impl Presenter {
         self.gpu.set_art_dir(dir);
     }
 
-    /// What went wrong reading upscaled textures since the last call.
+    /// Draw the GPU view's textured faces with the FFED3D installed at `root`. Returns
+    /// whether it has a texture folder.
+    pub fn set_ffed3d_dir(&mut self, root: &std::path::Path) -> bool {
+        self.gpu.set_ffed3d_dir(root)
+    }
+
+    /// What went wrong reading upscaled or FFED3D textures since the last call.
     pub fn take_art_problems(&mut self) -> Vec<String> {
         self.gpu.take_art_problems()
     }

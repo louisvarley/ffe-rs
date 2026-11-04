@@ -372,6 +372,9 @@ pub struct Gpu3d {
 pub struct MapCache {
     original: Vec<(u32, ffe_render::IndexMap)>,
     pub art: crate::modern_art::Art,
+    /// The player's FFED3D textures (`texNNN`), shown in full colour on the textured faces
+    /// whose record FFED3D replaces.
+    pub ffed3d: Option<crate::ffed3d::Textures>,
 }
 
 impl MapCache {
@@ -428,9 +431,22 @@ impl Gpu3d {
         self.maps.art.set_dir(dir);
     }
 
-    /// What went wrong reading upscaled textures since the last call.
+    /// Draw the textured faces with the `texNNN` textures of the FFED3D installed at `root`.
+    /// Returns whether it has a texture folder.
+    pub fn set_ffed3d_dir(&mut self, root: &std::path::Path) -> bool {
+        let textures = crate::ffed3d::Textures::new(root);
+        let found = textures.found();
+        self.maps.ffed3d = Some(textures);
+        found
+    }
+
+    /// What went wrong reading upscaled or FFED3D textures since the last call.
     pub fn take_art_problems(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.maps.art.problems)
+        let mut problems = std::mem::take(&mut self.maps.art.problems);
+        if let Some(ffed3d) = self.maps.ffed3d.as_mut() {
+            problems.append(&mut ffed3d.problems);
+        }
+        problems
     }
 
     fn renderer(&mut self) -> &mut Result<ffe_render::Renderer, String> {
@@ -1122,8 +1138,30 @@ pub fn scene(
     // indices past the slots are black, as the original's lookup gives them.
     let mut palettes: Vec<ffe_render::Palette> = Vec::new();
     let mut palette_of: Vec<(Vec<[u8; 3]>, bool, u32)> = Vec::new();
+    let mut colour_maps: Vec<ffe_render::ColourMap> = Vec::new();
+    let ffed3d = &mut cache.ffed3d;
     let mut texture_of = |solid: &Solid| {
         let texture = solid.texture.as_ref()?;
+        // FFED3D's `tex(400 + record)` in its own colours, its image stretched corner to
+        // corner over the original bitmap (`gfx.cpp` gives a quad 0..1).
+        if let (Some(record), Some(store)) = (texture.record, ffed3d.as_mut()) {
+            if let Some(map) = store.texture(crate::ffed3d::texture_number(record)) {
+                let index = match colour_maps.iter().position(|known| known.id == map.id) {
+                    Some(index) => index,
+                    None => {
+                        colour_maps.push(map);
+                        colour_maps.len() - 1
+                    }
+                };
+                let [width, height] = texture.image.map(|v| v.saturating_sub(1).max(1) as f32);
+                let uv: Vec<[f32; 2]> = texture
+                    .uv
+                    .iter()
+                    .map(|[u, v]| [f32::from(*u) / width, f32::from(*v) / height])
+                    .collect();
+                return (uv.len() == solid.views.len()).then_some((index as u32, 0, uv, true));
+            }
+        }
         let map = world
             .bitmaps
             .iter()
@@ -1161,7 +1199,7 @@ pub fn scene(
                 ]
             })
             .collect();
-        (uv.len() == solid.views.len()).then_some((map as u32, palette, uv))
+        (uv.len() == solid.views.len()).then_some((map as u32, palette, uv, false))
     };
     let mut batches: Vec<ffe_render::Batch> = world
         .batches
@@ -1288,11 +1326,12 @@ pub fn scene(
                         batch.triangles.push(ffe_render::Triangle {
                             positions: [point(*first), point(pair[0]), point(pair[1])],
                             colours: [corner(0), corner(k + 1), corner(k + 2)],
-                            texture: texture.as_ref().map(|(map, palette, uv)| {
+                            texture: texture.as_ref().map(|(map, palette, uv, colour)| {
                                 ffe_render::FaceTexture {
                                     map: *map,
                                     palette: *palette,
                                     uvs: [uv[0], uv[k + 1], uv[k + 2]],
+                                    colour: *colour,
                                 }
                             }),
                             fire: None,
@@ -1338,6 +1377,7 @@ pub fn scene(
         batches,
         maps,
         palettes,
+        colour_maps,
         bloom: BLOOM,
         time,
         sky: world.sky.as_ref().map(|sky| ffe_render::Sky {
@@ -1471,6 +1511,8 @@ mod tests {
                         uv: vec![[0, 0], [63, 0], [63, 63], [0, 63]],
                         width: 64,
                         height: 64,
+                        image: [64, 64],
+                        record: None,
                     }),
                 },
                 Solid {
@@ -1524,6 +1566,40 @@ mod tests {
                 map: 0,
                 palette: 0,
                 uvs: [[half, half], [1.0 - half, 1.0 - half], [half, 1.0 - half]],
+                colour: false,
+            })
+        );
+        // With FFED3D installed, a face whose texture record is 7 shows `tex407` in its own
+        // colours, stretched corner to corner over the original bitmap.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Textures")).unwrap();
+        let mut png_bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png_bytes, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&[0, 200, 0]).unwrap();
+        }
+        std::fs::write(dir.path().join("Textures/tex407.png"), png_bytes).unwrap();
+        let mut with_record = world.clone();
+        if let Some(texture) = with_record.batches[0][0].texture.as_mut() {
+            texture.record = Some(7);
+        }
+        let mut cache = MapCache {
+            ffed3d: Some(crate::ffed3d::Textures::new(dir.path())),
+            ..MapCache::default()
+        };
+        let coloured = super::scene(&with_record, 640, 316, &mut cache, 0.0);
+        assert_eq!(coloured.colour_maps.len(), 1);
+        assert_eq!(coloured.colour_maps[0].rgba[..], [0, 200, 0, 255]);
+        assert_eq!(
+            coloured.batches[0].triangles[1].texture,
+            Some(ffe_render::FaceTexture {
+                map: 0,
+                palette: 0,
+                uvs: [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                colour: true,
             })
         );
     }

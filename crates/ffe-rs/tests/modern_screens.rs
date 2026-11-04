@@ -164,3 +164,71 @@ fn the_tombstone_is_drawn_on_the_gpu() {
         }
     }
 }
+
+/// The intro's ships through Modern graphics with FFED3D's `texNNN` textures (`FFED3D_DIR`, an
+/// installed FFED3D) and without: the textured faces change, the rest of the picture stays.
+/// Saves `intro-<tics>-ffed3d.png` beside the plain Modern picture.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_INTRO_CACHE), FFED3D (FFED3D_DIR) and a GPU"]
+fn intro_frames_with_ffed3d_textures() {
+    let mut plain = Gpu3d::new();
+    if !plain.available() {
+        eprintln!("no GPU adapter; skipped");
+        return;
+    }
+    let path = std::env::var_os("FFE_INTRO_CACHE").expect("FFE_INTRO_CACHE");
+    let ffed3d = std::path::PathBuf::from(std::env::var_os("FFED3D_DIR").expect("FFED3D_DIR"));
+    let cache = ffe_content::read(&std::fs::read(path).unwrap()).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let mut screen = Screen::new(&cache).unwrap();
+    let out = std::env::var_os("FFE_SHOT_DIR").map(std::path::PathBuf::from);
+    let (width, height) = (1280, 960);
+    let mut modern = ModernRenderer::new();
+    let mut textured = Gpu3d::new();
+    assert!(
+        textured.set_ffed3d_dir(&ffed3d),
+        "no texture folder in FFED3D_DIR"
+    );
+    let mut changed = 0;
+    for tics in [0x10000u32, 0x40000, 0x7a000, 0x90000, 0x200000, 0x400000] {
+        screen.take_text();
+        screen.capture = true;
+        screen.draw_intro(Some(&viewer), tics, false).unwrap();
+        screen.capture = false;
+        let textures = screen.world().map_or(0, |world| {
+            world
+                .batches
+                .iter()
+                .flatten()
+                .filter(|solid| solid.texture.as_ref().is_some_and(|t| t.record.is_some()))
+                .count()
+        });
+        let before = modern_picture(&mut screen, &mut modern, &mut plain, width, height);
+        let after = modern_picture(&mut screen, &mut modern, &mut textured, width, height);
+        let differing = before.iter().zip(&after).filter(|(a, b)| a != b).count();
+        println!(
+            "{tics:06x}: {textures} model faces with a texture record, {differing} pixels changed"
+        );
+        if textures > 0 && differing > 0 {
+            changed += 1;
+        }
+        if let Some(dir) = &out {
+            write_png(
+                &dir.join(format!("intro-{tics:06x}-modern.png")),
+                &before,
+                width,
+                height,
+            );
+            write_png(
+                &dir.join(format!("intro-{tics:06x}-ffed3d.png")),
+                &after,
+                width,
+                height,
+            );
+        }
+    }
+    for line in textured.take_art_problems() {
+        println!("{line}");
+    }
+    assert!(changed > 0, "no intro frame showed an FFED3D texture");
+}

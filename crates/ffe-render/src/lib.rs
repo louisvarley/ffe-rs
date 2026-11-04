@@ -51,6 +51,16 @@ pub struct IndexMap {
     pub texels: std::sync::Arc<[u16]>,
 }
 
+/// A full-colour texture (FFED3D's `texNNN` art): RGBA bytes, row after row, resampled to a
+/// [`MAP_SIZE`] square layer like the index maps. Equal non-zero ids promise equal pixels.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ColourMap {
+    pub id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: std::sync::Arc<[u8]>,
+}
+
 /// The side of the GPU's map layers.
 pub const MAP_SIZE: u32 = 512;
 /// The maps kept on the GPU at once (about 45 MB with their mip levels).
@@ -73,12 +83,14 @@ pub struct Triangle {
 }
 
 /// Which of the scene's [`Scene::maps`] a triangle shows, in which of its
-/// [`Scene::palettes`], and the corners' coordinates in the map (0..1).
+/// [`Scene::palettes`], and the corners' coordinates in the map (0..1). With `colour` the map
+/// is one of [`Scene::colour_maps`] instead, shown in its own colours (no palette).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaceTexture {
     pub map: u32,
     pub palette: u32,
     pub uvs: [[f32; 2]; 3],
+    pub colour: bool,
 }
 
 /// A palette: [`PALETTE_SIZE`] colours (RGBA, 0..1; an alpha below a half is a hole).
@@ -236,6 +248,8 @@ pub struct Scene {
     pub supersample: f32,
     pub maps: Vec<IndexMap>,
     pub palettes: Vec<Palette>,
+    /// Full-colour textures, for [`FaceTexture::colour`] faces.
+    pub colour_maps: Vec<ColourMap>,
 }
 
 #[repr(C)]
@@ -248,7 +262,7 @@ struct Vertex {
     uv: [f32; 2],
     /// The map's layer, or -1 for the colour.
     texture: f32,
-    /// The palette's first colour in the palette buffer.
+    /// The palette's first colour in the palette buffer, or -1 for a full-colour map.
     palette: f32,
 }
 
@@ -372,7 +386,7 @@ struct Out {
     @location(0) colour: vec4<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) @interpolate(flat) texture: i32,
-    @location(3) @interpolate(flat) palette: u32,
+    @location(3) @interpolate(flat) palette: i32,
 };
 
 // Value noise and three octaves of it, for fire.
@@ -413,6 +427,7 @@ fn fire_colour(heat: f32) -> vec3<f32> {
 
 @group(0) @binding(3) var face_maps: texture_2d_array<f32>;
 @group(0) @binding(4) var<storage, read> palettes: array<vec4<f32>>;
+@group(0) @binding(5) var colour_maps: texture_2d_array<f32>;
 
 // One texel of a map at a mip level, through the face's palette, its brightness detail applied,
 // premultiplied by its alpha (so holes blend away cleanly).
@@ -454,7 +469,7 @@ fn vs_scene(
     out.colour = c;
     out.uv = uv;
     out.texture = i32(texture);
-    out.palette = u32(palette);
+    out.palette = i32(palette);
     return out;
 }
 
@@ -483,8 +498,20 @@ fn fs_scene(i: Out) -> @location(0) vec4<f32> {
     let top = f32(textureNumLevels(face_maps) - 1u);
     let lod = clamp(log2(max(spread, 1.0e-6)), 0.0, top);
     let level = i32(floor(lod));
-    let near = bilinear(i.uv, i.texture, level, i.palette);
-    let far = bilinear(i.uv, i.texture, min(level + 1, i32(top)), i.palette);
+    // A full-colour map (FFED3D's art): filtered by the sampler at the two nearest levels,
+    // shaded by the corners' colours, its transparent parts showing what lies behind.
+    if (i.palette < 0) {
+        let a = textureSampleLevel(colour_maps, back_sampler, i.uv, i.texture, f32(level));
+        let b = textureSampleLevel(colour_maps, back_sampler, i.uv, i.texture, f32(min(level + 1, i32(top))));
+        let c = mix(a, b, fract(lod));
+        if (c.a < 0.5) {
+            discard;
+        }
+        return vec4<f32>(min(c.rgb / c.a * i.colour.rgb, vec3<f32>(1.0)), 1.0);
+    }
+    let palette = u32(i.palette);
+    let near = bilinear(i.uv, i.texture, level, palette);
+    let far = bilinear(i.uv, i.texture, min(level + 1, i32(top)), palette);
     let texel = mix(near, far, fract(lod));
     // A hole in a masked texture shows what lies behind. The corners' colours shade the
     // texture (white leaves it as it is).
@@ -974,6 +1001,8 @@ pub struct Renderer {
     combine: wgpu::RenderPipeline,
     /// The GPU array the scenes' maps are kept in between frames.
     face_maps: Option<FaceMaps>,
+    /// The full-colour textures' GPU array (FFED3D's art), like `face_maps`.
+    colour_maps: Option<FaceMaps>,
     targets: Option<Targets>,
     /// The adapter's name, for the options page and the logs.
     pub adapter: String,
@@ -1047,6 +1076,16 @@ impl Renderer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -1404,6 +1443,7 @@ impl Renderer {
             shells,
             sampler,
             face_maps: None,
+            colour_maps: None,
             targets: None,
             adapter: name,
         })
@@ -1508,7 +1548,9 @@ impl Renderer {
         );
         self.targets(width, height, inner);
         let layers = self.upload_maps(&scene.maps);
+        let colour_layers = self.upload_colour_maps(&scene.colour_maps);
         let face_view = &self.face_maps.as_ref().unwrap().view;
+        let colour_view = &self.colour_maps.as_ref().unwrap().view;
         let device = &self.device;
         let targets = self.targets.as_ref().unwrap();
         let uniforms = Uniforms {
@@ -1604,6 +1646,10 @@ impl Renderer {
                     binding: 4,
                     resource: palette_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(colour_view),
+                },
             ],
         });
         // Every batch's triangles, then its lines, in one buffer.
@@ -1624,8 +1670,12 @@ impl Renderer {
                 let (texture, palette, uvs) = match (t.fire, t.texture) {
                     (Some(fire), _) => (-2.0, 0.0, fire),
                     (None, texture) => match texture {
+                        Some(face) if face.colour && (face.map as usize) < colour_layers.len() => {
+                            (colour_layers[face.map as usize] as f32, -1.0, face.uvs)
+                        }
                         Some(face)
-                            if (face.map as usize) < layers.len()
+                            if !face.colour
+                                && (face.map as usize) < layers.len()
                                 && (face.palette as usize) < scene.palettes.len() =>
                         {
                             (
@@ -2055,6 +2105,153 @@ impl Renderer {
     }
 }
 
+impl Renderer {
+    /// Put the scene's full-colour maps in their GPU array (RGBA, with mip levels), uploading
+    /// only those not already there; returns each one's layer, reused least recently used first.
+    fn upload_colour_maps(&mut self, maps: &[ColourMap]) -> Vec<u32> {
+        let device = &self.device;
+        let faces = self.colour_maps.get_or_insert_with(|| {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("colour maps"),
+                size: wgpu::Extent3d {
+                    width: MAP_SIZE,
+                    height: MAP_SIZE,
+                    depth_or_array_layers: MAP_LAYERS,
+                },
+                mip_level_count: MAP_SIZE.ilog2() + 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                ..Default::default()
+            });
+            FaceMaps {
+                texture,
+                view,
+                layers: vec![None; MAP_LAYERS as usize],
+                frame: 0,
+            }
+        });
+        faces.frame += 1;
+        let frame = faces.frame;
+        let mut out = Vec::with_capacity(maps.len());
+        for source in maps {
+            let known = (source.id != 0)
+                .then(|| {
+                    faces
+                        .layers
+                        .iter()
+                        .position(|layer| layer.is_some_and(|(id, _)| id == source.id))
+                })
+                .flatten();
+            let layer = match known {
+                Some(layer) => layer,
+                None => {
+                    let layer = (0..faces.layers.len())
+                        .min_by_key(|&k| faces.layers[k].map_or(0, |(_, used)| used))
+                        .unwrap_or(0);
+                    upload_colour(&self.queue, &faces.texture, layer as u32, source);
+                    layer
+                }
+            };
+            faces.layers[layer] = Some((source.id, frame));
+            out.push(layer as u32);
+        }
+        out
+    }
+}
+
+/// Upload one full-colour map into `layer`, resampled bilinearly to [`MAP_SIZE`], premultiplied
+/// by its alpha and with its mip levels (each the average of four).
+fn upload_colour(queue: &wgpu::Queue, texture: &wgpu::Texture, layer: u32, source: &ColourMap) {
+    let levels = MAP_SIZE.ilog2() + 1;
+    let mut level = resample_rgba(source, MAP_SIZE);
+    for mip in 0..levels {
+        let size = MAP_SIZE >> mip;
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: mip,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: layer,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &level,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size * 4),
+                rows_per_image: Some(size),
+            },
+            wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+        );
+        if size > 1 {
+            level = halve_rgba(&level, size);
+        }
+    }
+}
+
+/// A full-colour map at `size` by `size`, premultiplied by its alpha (so filtering next to a
+/// transparent texel does not darken) and sampled bilinearly at texel centres.
+pub fn resample_rgba(map: &ColourMap, size: u32) -> Vec<u8> {
+    let (width, height) = (map.width.max(1) as usize, map.height.max(1) as usize);
+    let pixel = |x: usize, y: usize, c: usize| -> f32 {
+        let at = (y * width + x) * 4;
+        let value = f32::from(map.rgba.get(at + c).copied().unwrap_or(0));
+        if c == 3 {
+            value
+        } else {
+            value * f32::from(map.rgba.get(at + 3).copied().unwrap_or(0)) / 255.0
+        }
+    };
+    let mut out = Vec::with_capacity((size * size * 4) as usize);
+    for y in 0..size as usize {
+        let fy = ((y as f32 + 0.5) * height as f32 / size as f32 - 0.5).max(0.0);
+        let (y0, ty) = (fy.floor() as usize, fy.fract());
+        let y1 = (y0 + 1).min(height - 1);
+        let y0 = y0.min(height - 1);
+        for x in 0..size as usize {
+            let fx = ((x as f32 + 0.5) * width as f32 / size as f32 - 0.5).max(0.0);
+            let (x0, tx) = (fx.floor() as usize, fx.fract());
+            let x1 = (x0 + 1).min(width - 1);
+            let x0 = x0.min(width - 1);
+            for c in 0..4 {
+                let top = pixel(x0, y0, c) * (1.0 - tx) + pixel(x1, y0, c) * tx;
+                let bottom = pixel(x0, y1, c) * (1.0 - tx) + pixel(x1, y1, c) * tx;
+                out.push((top * (1.0 - ty) + bottom * ty).round() as u8);
+            }
+        }
+    }
+    out
+}
+
+/// The next mip level of an RGBA square: each pixel the average of four.
+fn halve_rgba(level: &[u8], size: u32) -> Vec<u8> {
+    let (size, half) = (size as usize, (size / 2) as usize);
+    let mut out = Vec::with_capacity(half * half * 4);
+    for y in 0..half {
+        for x in 0..half {
+            for c in 0..4 {
+                let at = |dx: usize, dy: usize| {
+                    u32::from(level[((2 * y + dy) * size + 2 * x + dx) * 4 + c])
+                };
+                out.push(((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4) as u8);
+            }
+        }
+    }
+    out
+}
+
 /// The face maps' GPU array and which map each layer holds: `(id, frame last used)`.
 struct FaceMaps {
     texture: wgpu::Texture,
@@ -2216,6 +2413,7 @@ mod tests {
             }],
             maps: vec![],
             palettes: vec![],
+            colour_maps: vec![],
             bloom: 0.0,
             time: 0.0,
             sky: None,
@@ -2290,6 +2488,7 @@ mod tests {
             map: 0,
             palette: 0,
             uvs: [[0.0, 1.0], [1.0, 1.0], [0.5, 0.0]],
+            colour: false,
         });
         let textured = Scene {
             batches: vec![Batch {
@@ -2307,6 +2506,25 @@ mod tests {
         };
         let pixels = renderer.render(&textured).unwrap();
         assert_eq!(pixels[30 * 64 + 26], 0xff0000);
+        assert_eq!(pixels[30 * 64 + 38], 0x203040);
+        // A full-colour map (FFED3D's art): its left half green, its right half transparent,
+        // shown in its own colours under white corners.
+        let mut rgba = Vec::new();
+        for _ in 0..4 {
+            rgba.extend([0, 255, 0, 255, 0, 255, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0]);
+        }
+        let mut coloured = textured.clone();
+        if let Some(face) = coloured.batches[0].triangles[0].texture.as_mut() {
+            face.colour = true;
+        }
+        coloured.colour_maps = vec![ColourMap {
+            id: 7,
+            width: 4,
+            height: 4,
+            rgba: rgba.into(),
+        }];
+        let pixels = renderer.render(&coloured).unwrap();
+        assert_eq!(pixels[30 * 64 + 26], 0x00ff00);
         assert_eq!(pixels[30 * 64 + 38], 0x203040);
         // An atmosphere round a planet straight ahead, lit from behind the eye: the haze shows
         // just outside the planet's edge, not far away from it.
