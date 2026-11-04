@@ -7,12 +7,11 @@ and the viewer shows them.** On the real data a new game creates the five
 journals and 120 days of daily messages publish 20 issues
 (`tests/mission_scripts.rs`). The station's Journal screen lists the five
 journals (F81) above the port's contract log (`docs/notes/missions.md`);
-choosing one shows its current issue (F71/F79): each article's
-publication and headline, then its body, with F76's macros expanded using
-the article's slot words (F95; `scripts::issue`). The masthead bitmap and
-F79's smooth scrolling are not drawn: the issue is the screen's usual
-paragraph list (`tests/station_view.rs
-the_ship_library_shows_each_journals_first_issue`).
+choosing one shows its current issue as F80/F79 draw it (2026-11-04,
+`ffe_rs::journal_page`, below), with F76's macros expanded using the
+article's slot words (F95; `scripts::issue`; `tests/station_view.rs
+the_ship_library_shows_each_journals_first_issue` and
+`the_ship_library_draws_and_scrolls_an_issue`).
 
 ## Archive
 
@@ -36,12 +35,24 @@ After decoding, F78 copies the text into `DATA_002294`'s buffer:
 - `0x0e` becomes `0x83`, `&` becomes `+`, `\n` becomes `\r`, `0xd5` becomes
   `'`, and `0x7f` is skipped.
 - `[` runs F76, the macro expander (below).
-- At the first `\r` (the publication line) it upper-cases the line, centres
-  it (`(320 - width) / 4` into the buffer's third byte), inserts `0x1e` and a
-  second centring byte, appends message `0xa602` ("By:" style byline through
-  F84) and a space, copies the headline, and indents the next line with five
-  spaces.
-- The whole text is wrapped at 0x12c (300) pixels with F1398.
+- F78 first copies the publication line aside, untouched. The rest
+  (headline, then body) goes through the copy pass, and its count stops
+  four bytes before the article's block ends: the block is the text and
+  its NUL, so the text's last byte (every article's closing `\n`) is not
+  copied.
+- Each article starts `0x0d 0x1e x`. At the first `\r` (the end of the
+  headline) F78 upper-cases the headline, centres it (`(320 - width) / 4`
+  into `x`, F1597's advances, none below 0x20 or from 0xa0), then adds
+  `0x1e` with `((320 - width) / 2 + width - 40) / 2`, message `0xa602`
+  ("By:  ", through F84), a space, the publication line and `0x0d`. Five
+  spaces follow every `0x0d`.
+- F1398 wraps each article on its own at 0x12c (300) pixels with
+  `DATA_007648` (`base:text/char-widths`; a negative width, `0x0d` and
+  `0x1e`, restarts the line, so `0x1e`'s operand byte is counted as a
+  character). An overflow turns the last space before it into `0x0d`
+  (searching back to the article's start), else the first space after it;
+  beside a picture (`0x02`) the break is `0x03`. The archive has no `[Gr`,
+  so no picture is reached.
 
 ## F76's macros (`DATA_102307`)
 
@@ -82,16 +93,31 @@ Imperial").
 - F81 lists the journals (`DATA_002305`, "Please select one of the
   following journals:") under `DATA_002304`'s "SHIP LIBRARY ARCHIVES".
 - The journal records are `DATA_008570`, 56 bytes each (`+0` masthead
-  bitmap, `+4` read flag ...). F80 blits the masthead centred, the 0x2f
-  arrow while `DATA_008580 < 0x28`, and F79 writes the article text at
-  (10, 15) with F1585, clipped to 0x28..0x8c.
+  bitmap, primary 1..5 for the five journals; `+4` the last page's
+  "more below" flag). F80 draws F956's cabin, the masthead centred at
+  y 2, and while `DATA_008580 < 0x28` the up arrow (bitmap 0x2f at
+  (0x88, 0x92)) with `0xa601` ("More ...") at (0x9a, 0x92), unshadowed in
+  colour 0xf; then F79 writes the text with F1585 at (10, `DATA_008580`),
+  colour 0xf, clipped to 0x28..0x8c in 10-pixel lines, and when text is
+  below the page the down arrow (0x30 at (0x7c, 0x92)) with `0xa601`.
+  F1598 sets `DATA_009221` when a glyph reaches the bottom clip, and F1587
+  stops at the next new line; F80 keeps that flag in `+4`.
+- F81 opens a journal (actions 0x31..0x35) with `DATA_008580 = 0x28` and
+  hot areas 5 (up arrow) and 6 (down arrow). Each call while a scroll is
+  under way moves the text two pixels (up until y 0x28, down while `+4` is
+  set), counting `DATA_002286`/`DATA_002287` down by two, and the call's
+  action is lost; otherwise action 5/6 starts a line (`10 - y % 10`
+  pixels) and 0xe/0xf a page (`60 - y % 10`). The port runs F81 every
+  20 ms of real time, binds Up/Down to the arrows and Page Up/Down to the
+  page actions (the source does not establish the keys behind 0xe/0xf;
+  0xe is also the F1 console button), and takes clicks on the arrows.
 - `DATA_002301` ("The new issue of ... is now available. Get it from your
   local newsagent."), `DATA_002306` ("... issues remaining") and
   `DATA_002307` ("No subscription") are the subscription messages.
 
-To port: F81's journal list and subscription state, the issue schedule
-(which article each issue shows), F76's macros against the port's names,
-systems and ranks, and F79/F80's drawing.
+Ported: F78-F81's page (`ffe_rs::journal_page`). Still open: the
+subscription messages and F76's remaining macros (the journals' systems,
+ranks and alternatives).
 
 ## Who fills the journals: the mission-script engine
 

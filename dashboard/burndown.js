@@ -1206,6 +1206,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-04",
       remaining: 91,
       note: "gameplay-41 progress: the mission scripts' placement stand-ins replaced with the original's. F669's attackers start on F702's 2.3 AU orbit round the root and close with the ship physics; F702 places with F1507/F1508 and gives the ship F1507's velocity; F297's buildings stand on F879's terrain; F40's objects move and turn as F866 moves them; F770's hail stops the song and sets JJFFE's combat velocity (also on F750's path); F669 raises its event 0x17. F1657's distance class now adds 32 for the high dwords, so far ships no longer read as close."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 91,
+      note: "gameplay-41 progress: the ship library's issue page is the original's (ffe_rs::journal_page): F78's text (headline upper-cased and centred, the 0xa602 byline with the publication line, five-space indents, the last byte F78's count leaves out), F1398's in-place wrap at 300 pixels with DATA_007648, F80's masthead (primary 1..5) and arrows with 0xa601, F79's F1587/F1598 text clipped to 0x28..0x8c with the more-below flag, and F81's two-pixel scrolling by line (arrows, actions 5/6) and page (0xe/0xf)."
     }
   ]
 };

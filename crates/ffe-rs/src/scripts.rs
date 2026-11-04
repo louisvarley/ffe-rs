@@ -2207,6 +2207,9 @@ pub struct Article {
     pub publication: String,
     pub headline: String,
     pub body: String,
+    /// What F78 copies: the raw publication line and the rest through its
+    /// copy pass with the macros expanded inline.
+    pub source: crate::journal_page::Source,
 }
 
 /// The ship library's journals (F81's list): each journal's slot and name,
@@ -2264,7 +2267,7 @@ pub fn issue(
                 for (word, slot) in scripts.library.words.iter_mut().zip(slots) {
                     *word = slot;
                 }
-                let mut expand_text = |bytes: &[u8]| {
+                let mut expand_bytes = |bytes: &[u8]| {
                     let mut macros = GameMacros {
                         scripts: &mut *scripts,
                         hooks: &mut *hooks,
@@ -2272,13 +2275,28 @@ pub fn issue(
                         today,
                         depth: 0,
                     };
-                    let out = ffe_core::script::brackets::expand(bytes, &mut macros);
-                    out.into_iter().map(char::from).collect::<String>()
+                    ffe_core::script::brackets::expand(bytes, &mut macros)
+                };
+                let string = |bytes: Vec<u8>| bytes.into_iter().map(char::from).collect::<String>();
+                // F78: the publication line as it is; the rest through the
+                // copy pass, F76 expanding its macros as it goes.
+                let raw = usize::try_from(article)
+                    .ok()
+                    .and_then(|article| archive.raw(article))
+                    .unwrap_or(&[]);
+                let rest = raw
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .map_or(&[][..], |end| &raw[end + 1..]);
+                let source = crate::journal_page::Source {
+                    publication: text.publication.to_vec(),
+                    text: expand_bytes(&crate::journal_page::copy_pass(rest)),
                 };
                 let article = Article {
-                    publication: expand_text(text.publication),
-                    headline: expand_text(text.headline),
-                    body: expand_text(text.body),
+                    publication: string(expand_bytes(text.publication)),
+                    headline: string(expand_bytes(text.headline)),
+                    body: string(expand_bytes(text.body)),
+                    source,
                 };
                 for (word, value) in scripts.library.words.iter_mut().zip(saved) {
                     *word = value;

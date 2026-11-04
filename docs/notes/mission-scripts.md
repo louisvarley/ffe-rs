@@ -337,6 +337,6 @@ starport's bay until its departure), killing the target after it has left
 (F236's offence) and the $1500 reward at home.
 
 The stand-ins of the 2026-11-03 deviation were replaced on 2026-11-04 by
-the original's placements above. What remains of it: the journal viewer
-(see `journal.md`) and the order of F669's event 0x17 (raised once the run
-ends).
+the original's placements above, and the journal viewer is F80/F79's page
+(`journal.md`). What remains of it: the order of F669's event 0x17 (raised
+once the run ends).

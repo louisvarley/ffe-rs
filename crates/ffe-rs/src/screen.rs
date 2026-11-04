@@ -469,6 +469,16 @@ pub fn next_status_section(current: u8, sections: &[bool; 7]) -> u8 {
         .unwrap_or(0)
 }
 
+/// The ship library's issue page (F80/F79): the journal's masthead bitmap,
+/// F78's wrapped text, F81's `y` and `0xa601`'s "More ..." text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueView {
+    pub masthead: u32,
+    pub text: Vec<u8>,
+    pub y: i32,
+    pub more: String,
+}
+
 /// What every status page draws under its text: F956's cabin, F288's ship
 /// and, on the equipment and cargo pages, F310's cargo/cabins/cash block.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -597,6 +607,9 @@ pub struct Screen {
     pub market: Option<MarketView>,
     /// The docked services/shipyard/BBS screen of this frame.
     pub dock: Option<DockView>,
+    /// The ship library's issue page of this frame (F79/F80), drawn in
+    /// place of `dock`.
+    pub issue: Option<IssueView>,
     /// F343's services board on a starport pad (`0x30`): the same screen as the
     /// docked view, but drawn over the landed flight view. The console, scanner
     /// and message clock stay live; the flight HUD text is covered like the
@@ -693,6 +706,8 @@ pub struct Screen {
     /// The docked screen's row button and arrows: primary bitmaps 0x2e, 0x2f
     /// and 0x30 (F328/F330).
     dock_icons: [Option<IndexedImage>; 3],
+    /// The journals' masthead bitmaps (primary 0..5), F80's.
+    mastheads: Vec<Option<IndexedImage>>,
     /// The SysMenu's on/off icon bitmaps (primary 0x2c/0x2d), when cached.
     prefs_on: Option<IndexedImage>,
     prefs_off: Option<IndexedImage>,
@@ -853,6 +868,9 @@ impl Screen {
         };
         screen.marker = bitmap(crate::console::NAV_MARKER_BITMAP);
         screen.marker_lit = bitmap(crate::enhanced_combat::SELECTED_MARKER_BITMAP);
+        screen.mastheads = (0..6)
+            .map(|index| indexed_bitmap(cache, &format!("base:bitmap/primary/{index:03}")))
+            .collect();
         screen.dock_icons = std::array::from_fn(|k| {
             let asset_id = format!("base:bitmap/primary/{:03}", 0x2e + k);
             let record = cache.manifest().files.iter().find(|r| r.id == asset_id)?;
@@ -1147,6 +1165,8 @@ impl Screen {
             sun: None,
             market: None,
             dock: None,
+            issue: None,
+            mastheads: Vec::new(),
             pad_services: false,
             lift: None,
             station_view: false,
@@ -2670,7 +2690,10 @@ impl Screen {
         }
         if state.mode == Mode::Docked {
             self.frame[..320 * 158].copy_from_slice(&self.cabins[self.cabin_index]);
-            if let Some(dock) = self.dock.take() {
+            if let Some(issue) = self.issue.take() {
+                self.dock = None;
+                self.draw_issue(&issue);
+            } else if let Some(dock) = self.dock.take() {
                 self.draw_dock(&dock);
             } else if self.market.is_some() {
                 self.draw_market();
@@ -2681,7 +2704,10 @@ impl Screen {
             // above it stay live. The ship's mode is still `Flight`, so closing
             // the board with F1 (F1003) reveals the same landed view and model.
             self.frame[..320 * 158].copy_from_slice(&self.cabins[self.cabin_index]);
-            if let Some(dock) = self.dock.take() {
+            if let Some(issue) = self.issue.take() {
+                self.dock = None;
+                self.draw_issue(&issue);
+            } else if let Some(dock) = self.dock.take() {
                 self.draw_dock(&dock);
             } else if self.market.is_some() {
                 self.draw_market();
@@ -3812,6 +3838,47 @@ impl Screen {
 
     /// The docked services, shipyard and BBS screens (F327/F329/F330/F558).
     /// The layout constants and hot areas live in [`crate::station`].
+    /// A glyph's advance in the main font (F1598's `+9`), `None` without one.
+    pub fn glyph_advance(&self, code: u8) -> Option<i32> {
+        self.font.advance(code).map(|advance| advance as i32)
+    }
+
+    /// F80 and F79: F956's cabin (already drawn), the journal's masthead
+    /// centred at y 2, the up arrow and "More ..." while the text is
+    /// scrolled, F1585's text from (10, y) clipped to 0x28..0x8c, and the
+    /// down arrow and "More ..." while text is below the page.
+    fn draw_issue(&mut self, view: &IssueView) {
+        use crate::journal_page::{self, COLOUR, DOWN_ARROW, MORE, UP_ARROW};
+        let palette = self.palette;
+        if let Some(Some(masthead)) = self.mastheads.get(view.masthead as usize) {
+            let x = (320 - masthead.width() as i32) / 2;
+            masthead.blit_rgb(&mut self.frame, &palette, x, journal_page::MASTHEAD_Y);
+        }
+        if view.y < journal_page::TOP {
+            if let Some(Some(icon)) = self.dock_icons.get(1) {
+                icon.blit_rgb(&mut self.frame, &palette, UP_ARROW.1, UP_ARROW.2);
+            }
+            self.text(MORE.1 as usize, MORE.2 as usize, &view.more, COLOUR);
+        }
+        let page = journal_page::layout(&view.text, view.y, |code| self.glyph_advance(code));
+        for glyph in &page.glyphs {
+            self.text_bytes_rows(
+                glyph.x as usize,
+                glyph.y,
+                &[glyph.code],
+                COLOUR,
+                journal_page::TOP,
+                journal_page::BOTTOM,
+            );
+        }
+        if page.more_below {
+            if let Some(Some(icon)) = self.dock_icons.get(2) {
+                icon.blit_rgb(&mut self.frame, &palette, DOWN_ARROW.1, DOWN_ARROW.2);
+            }
+            self.text(MORE.1 as usize, MORE.2 as usize, &view.more, COLOUR);
+        }
+    }
+
     fn draw_dock(&mut self, view: &DockView) {
         let layout = station::layout(view.screen);
         self.text(4, 6, &view.title, 0x7d);

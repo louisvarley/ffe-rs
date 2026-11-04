@@ -219,11 +219,12 @@ placement stand-ins recorded here first were removed on 2026-11-04: F669's
 attackers start on F702's orbit round the root, F702 places with F1508 and
 gives F1507's velocity, F297's buildings stand on F879's terrain, F40's
 objects move and turn as F866 moves them, and F770's hail stops the song
-and sets the combat velocity. Two differences remain: F669 raises its
-event 0x17 once the script run ends rather than inside the statement
-(F48 runs its handlers at once), and the journal viewer draws an issue as
-the Journal screen's paragraph list, without F80's masthead or F79's
-scrolling.
+and sets the combat velocity. The journal viewer is F80/F79's page with
+F81's scrolling since 2026-11-04. One difference remains: F669 raises its
+event 0x17 once the script run ends rather than inside the statement (F48
+runs its handlers at once). The viewer's keys are the port's (Up/Down for
+the arrows' actions 5/6, Page Up/Down for 0xe/0xf, whose source keys are
+not established), and F81 runs every 20 ms of real time.
 
 ## 2026-10-25 — intro input carry-over (owner requested)
 

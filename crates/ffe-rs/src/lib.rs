@@ -20,6 +20,7 @@ pub mod hud;
 pub mod indexed;
 pub mod input;
 pub mod intro_text;
+pub mod journal_page;
 pub mod map_keys;
 pub mod messages;
 pub mod missile;

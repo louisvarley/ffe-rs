@@ -1324,9 +1324,14 @@ fn run() -> Result<(), String> {
     // values the game raises event 1 for (`scripts::WATCHED`) as they were.
     let mut script_clock: Option<f64> = None;
     let mut script_watched: Option<[i32; 5]> = None;
-    // The journal issue being read (its slot and rows), expanded once when
-    // it is opened: its macros draw from the shared pair.
-    let mut journal_issue: Option<(usize, Vec<String>)> = None;
+    // The journal issue being read (its slot and F78's wrapped text),
+    // expanded once when it is opened: its macros draw from the shared pair.
+    let mut journal_issue: Option<(usize, Vec<u8>)> = None;
+    // F81's scroll of the open issue, its pending action and its 20 ms
+    // cadence (real time).
+    let mut issue_scroll = ffe_rs::journal_page::Scroll::open();
+    let mut issue_action: Option<u8> = None;
+    let mut issue_clock = 0.0f64;
     // The scripts' menu rows and title as last expanded (key, rows, title).
     let mut script_text_cache: (String, Vec<String>, String) = Default::default();
 
@@ -4209,10 +4214,12 @@ fn run() -> Result<(), String> {
                         .as_ref()
                         .map(ffe_rs::scripts::journals)
                         .unwrap_or_default();
+                    // An open issue is F79's page, not a list.
                     let journal_rows = match dock.journal {
-                        Some(_) => journal_issue.as_ref().map_or(0, |(_, rows)| rows.len()),
+                        Some(_) => 0,
                         None => library.len() + state.missions.journal.len(),
                     };
+                    let reading = dock.screen == StationScreen::Journal && dock.journal.is_some();
                     let comms_rows = state.missions.pages.len();
                     let military_rows = if dock.screen == StationScreen::Military {
                         match nav
@@ -4260,7 +4267,38 @@ fn run() -> Result<(), String> {
                         message = station::hint(StationScreen::Comms, 0, 0).to_owned();
                     }
                     let step = i32::from(pressed(Key::Down)) - i32::from(pressed(Key::Up));
-                    if step != 0 {
+                    if reading {
+                        // F81's actions: the arrows (5 and 6) and the page
+                        // steps (0xe and 0xf); the keys are the port's.
+                        use ffe_rs::journal_page as page;
+                        for (key, action) in [
+                            (Key::Up, page::ACTION_LINE_UP),
+                            (Key::Down, page::ACTION_LINE_DOWN),
+                            (Key::PageUp, page::ACTION_PAGE_UP),
+                            (Key::PageDown, page::ACTION_PAGE_DOWN),
+                        ] {
+                            if pressed(key) {
+                                issue_action = Some(action);
+                            }
+                        }
+                        if let Some((x, y)) = dock_click {
+                            if let Some(action) = page::arrow_action(x, y, (10, 10)) {
+                                issue_action = Some(action);
+                            }
+                        }
+                        // F81 runs once per 20 ms frame of the original's.
+                        issue_clock += real_dt;
+                        while issue_clock >= 0.02 {
+                            issue_clock -= 0.02;
+                            let more = journal_issue.as_ref().is_some_and(|(_, text)| {
+                                ffe_rs::journal_page::layout(text, issue_scroll.y, |code| {
+                                    screen.glyph_advance(code)
+                                })
+                                .more_below
+                            });
+                            issue_scroll.tick(issue_action.take(), more);
+                        }
+                    } else if step != 0 {
                         dock.step(step, rows);
                     }
                     // F428's pending mounting choice takes the number keys
@@ -4359,6 +4397,8 @@ fn run() -> Result<(), String> {
                                 dock.selected = 0;
                                 dock.scroll = 0;
                                 journal_issue = None;
+                                issue_scroll = ffe_rs::journal_page::Scroll::open();
+                                issue_action = None;
                             }
                         } else if dock.screen == StationScreen::Comms {
                             dock_action = Some(StationAction::ReadPage { row: dock.selected });
@@ -4408,6 +4448,8 @@ fn run() -> Result<(), String> {
                                             dock.selected = 0;
                                             dock.scroll = 0;
                                             journal_issue = None;
+                                            issue_scroll = ffe_rs::journal_page::Scroll::open();
+                                            issue_action = None;
                                         }
                                     } else if let Some(entry) =
                                         station::menu_entry(dock.screen, index, 0)
@@ -7642,13 +7684,15 @@ fn run() -> Result<(), String> {
                                     .unwrap_or_default();
                                 match dock.journal {
                                     Some(slot) => {
+                                        // F81 opening a journal: F71/F78's text
+                                        // of its issue, then F80/F79's page.
                                         if journal_issue.as_ref().map(|(at, _)| *at) != Some(slot) {
-                                            let rows = match (
+                                            let text = match (
                                                 script_assets.as_ref(),
                                                 script_messages.as_ref(),
                                             ) {
                                                 (Some(assets), Some(messages)) => {
-                                                    issue_rows(&ffe_rs::scripts::issue(
+                                                    let articles = ffe_rs::scripts::issue(
                                                         &mut state,
                                                         nav,
                                                         &cache,
@@ -7657,23 +7701,44 @@ fn run() -> Result<(), String> {
                                                         messages,
                                                         &commander.name,
                                                         slot,
-                                                    ))
+                                                    );
+                                                    ffe_rs::journal_page::issue_text(
+                                                        &articles,
+                                                        messages,
+                                                        &cache,
+                                                        |code| screen.glyph_advance(code),
+                                                    )
                                                 }
                                                 _ => Vec::new(),
                                             };
-                                            journal_issue = Some((slot, rows));
+                                            journal_issue = Some((slot, text));
                                         }
                                         if let Some((_, name)) =
                                             library.iter().find(|(at, _)| *at == slot)
                                         {
                                             title = name.clone();
                                         }
-                                        journal_issue
+                                        let masthead = state
+                                            .scripts
                                             .as_ref()
-                                            .map(|(_, rows)| {
-                                                rows.iter().map(|row| (None, row.clone())).collect()
+                                            .and_then(|scripts| scripts.library.journals.get(slot))
+                                            .map_or(0, |journal| journal.masthead.max(0) as u32);
+                                        let more = script_messages
+                                            .as_ref()
+                                            .and_then(|messages| {
+                                                messages.text(ffe_rs::journal_page::MORE.0)
                                             })
-                                            .unwrap_or_default()
+                                            .unwrap_or_default();
+                                        screen.issue = Some(ffe_rs::screen::IssueView {
+                                            masthead,
+                                            text: journal_issue
+                                                .as_ref()
+                                                .map(|(_, text)| text.clone())
+                                                .unwrap_or_default(),
+                                            y: issue_scroll.y,
+                                            more,
+                                        });
+                                        Vec::new()
                                     }
                                     None => {
                                         library
@@ -8811,42 +8876,6 @@ fn mission_contracts(state: &Flight) -> Vec<ffe_rs::screen::ContractRow> {
             wide: false,
         })
         .collect()
-}
-
-/// The journal viewer's rows for an issue (F71's text): each article's
-/// publication and headline, then its body in paragraphs of at most three of
-/// the page's lines.
-fn issue_rows(articles: &[ffe_rs::scripts::Article]) -> Vec<String> {
-    const PARAGRAPH: usize = 150;
-    let mut rows = Vec::new();
-    for article in articles {
-        rows.push(
-            [article.publication.trim(), article.headline.trim()]
-                .into_iter()
-                .filter(|text| !text.is_empty())
-                .collect::<Vec<_>>()
-                .join(": "),
-        );
-        for paragraph in article.body.split(['\n', '\r']) {
-            let mut row = String::new();
-            for word in paragraph.split_whitespace() {
-                if !row.is_empty() && row.len() + 1 + word.len() > PARAGRAPH {
-                    rows.push(std::mem::take(&mut row));
-                }
-                if !row.is_empty() {
-                    row.push(' ');
-                }
-                row.push_str(word);
-            }
-            if !row.is_empty() {
-                rows.push(row);
-            }
-        }
-    }
-    if rows.is_empty() {
-        rows.push("No issue has been published yet.".to_owned());
-    }
-    rows
 }
 
 /// F316's rows for the scripts' own contracts: each record's row as the

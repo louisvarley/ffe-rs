@@ -1537,6 +1537,104 @@ fn the_ship_library_shows_each_journals_first_issue() {
     }
 }
 
+/// F80/F79's issue page for each journal of a new game: F78's text with its
+/// centred upper-case headline and "By:" line, every line inside F1398's
+/// 300 pixels, the masthead, and F81 scrolling to the end of the issue and
+/// back. Saves `journal-issue-<slot>.ppm` and the scrolled page.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_ship_library_draws_and_scrolls_an_issue() {
+    use ffe_rs::journal_page::{self as page, Scroll};
+    let cache = cache();
+    let assets = ffe_rs::scripts::Assets::load(&cache).expect("cache v33");
+    let messages =
+        ffe_core::message_strings::Messages::new(cache.asset("base:text/messages").unwrap())
+            .unwrap();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let station = nav.docked.expect("the new game starts docked");
+    let mut state = Flight {
+        mode: Mode::Docked,
+        ..Flight::default()
+    };
+    ffe_rs::scripts::with_all(&mut state, &mut nav, &cache, |scripts, hooks, _| {
+        *scripts = Some(ffe_rs::scripts::new_game(&assets, hooks, true).unwrap());
+    });
+    let mut screen = Screen::new(&cache).unwrap();
+    let journals = ffe_rs::scripts::journals(state.scripts.as_ref().unwrap());
+    for (slot, name) in &journals {
+        let articles = ffe_rs::scripts::issue(
+            &mut state, &mut nav, &cache, station, &assets, &messages, "Jameson", *slot,
+        );
+        let text = page::issue_text(&articles, &messages, &cache, |code| {
+            screen.glyph_advance(code)
+        });
+        assert!(!text.is_empty(), "{name}");
+        // F78: the headline upper-cased after its centring code, the byline
+        // and the publication line, the body indented.
+        let first = &articles[0];
+        let headline: Vec<u8> = first
+            .headline
+            .bytes()
+            .map(|byte| byte.to_ascii_uppercase())
+            .collect();
+        assert_eq!(&text[..2], &[0x0d, 0x1e]);
+        assert!(
+            text.windows(headline.len())
+                .any(|w| w == headline.as_slice()),
+            "{name}: {}",
+            first.headline
+        );
+        let byline: Vec<u8> = [b"By:   ".as_slice(), first.source.publication.as_slice()].concat();
+        assert!(
+            text.windows(byline.len()).any(|w| w == byline.as_slice()),
+            "{name}"
+        );
+        assert!(
+            text.windows(6).any(|w| w == b"\x0d     "),
+            "{name}: no indent"
+        );
+        // Every glyph inside the screen, the first line one line down.
+        let advance = |code| screen.glyph_advance(code);
+        let top = page::layout(&text, page::TOP, advance);
+        assert_eq!(top.glyphs[0].y, page::TOP + page::LINE);
+        assert!(top.glyphs.iter().all(|glyph| glyph.x < 0x13c));
+        // F81: page down to the end, then back to the top.
+        let mut scroll = Scroll::open();
+        let mut calls = 0;
+        loop {
+            let more = page::layout(&text, scroll.y, advance).more_below;
+            if !more && !scroll.busy() {
+                break;
+            }
+            scroll.tick((!scroll.busy()).then_some(page::ACTION_PAGE_DOWN), more);
+            calls += 1;
+            assert!(calls < 100_000, "{name} never ends");
+        }
+        let bottom = scroll.y;
+        assert!(bottom < page::TOP || !top.more_below, "{name}");
+        let issue = |y| ffe_rs::screen::IssueView {
+            masthead: state.scripts.as_ref().unwrap().library.journals[*slot].masthead as u32,
+            text: text.clone(),
+            y,
+            more: messages.text(page::MORE.0).unwrap(),
+        };
+        screen.issue = Some(issue(page::TOP));
+        draw(&mut screen, None, None, "");
+        save(&screen, &format!("journal-issue-{slot}.ppm"));
+        screen.issue = Some(issue(bottom));
+        draw(&mut screen, None, None, "");
+        save(&screen, &format!("journal-issue-{slot}-end.ppm"));
+        for _ in 0..100_000 {
+            if scroll.y == page::TOP && !scroll.busy() {
+                break;
+            }
+            scroll.tick((!scroll.busy()).then_some(page::ACTION_PAGE_UP), true);
+        }
+        assert_eq!(scroll.y, page::TOP, "{name}");
+        println!("{name}: {} bytes, scrolls to y {bottom}", text.len());
+    }
+}
+
 /// F326's board: the station's adverts are the menu's own entries and the
 /// scripts' go among them (F345 at the end, F346 at F921's place, moving the
 /// advert there to the end), so the board keeps every station advert once

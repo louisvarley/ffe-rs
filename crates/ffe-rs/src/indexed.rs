@@ -127,6 +127,11 @@ impl IndexedImage {
         })
     }
 
+    /// The bitmap's width in pixels.
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
     /// Blit a cached indexed bitmap straight into a 32-bit logical frame, as
     /// the docked screens' buttons and arrows are drawn after the palette pass.
     pub fn blit_rgb(&self, frame: &mut [u32], palette: &[u32; 128], x: i32, y: i32) {
