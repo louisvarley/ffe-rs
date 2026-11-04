@@ -613,15 +613,10 @@ impl Flight {
                 .break_equipment(&mut self.loadout.general, &mut self.rng)
                 .map(SystemEvent::EquipmentDamaged)
         } else if roll < 0x888 {
-            self.combat.drive = 0;
-            self.loadout.drive = 0;
-            self.combat.energy = 0;
+            self.destroy_drive();
             Some(SystemEvent::DriveDamaged)
         } else if roll < 0x1c71 {
-            if self.combat.drive != 0 {
-                self.combat.drive = 1;
-                self.loadout.drive = 1;
-            }
+            self.degrade_drive();
             Some(SystemEvent::DriveDamaged)
         } else if self.damage.break_thruster(usize::from(thruster)) {
             Some(SystemEvent::ThrusterDamaged(thruster))
@@ -632,6 +627,66 @@ impl Flight {
             self.damage.fuel_empty = false;
         }
         event
+    }
+
+    /// F946: `tonnes` of Rubbish into the hold (`DATA_008904`, a word added
+    /// with wrapping). The capacity (`DATA_008889`) and the tonnes used
+    /// (`DATA_008891`) rise by the same amount in the source; here capacity
+    /// follows the fitted drive's record (whose masses are `DATA_007210`'s) and
+    /// the tonnes used are the hold's sum.
+    fn add_rubbish(&mut self, tonnes: i32) {
+        let slot = ffe_core::hyperspace::RUBBISH;
+        self.hold.resize(self.hold.len().max(slot + 1), 0);
+        self.hold[slot] = self.hold[slot].wrapping_add(tonnes as u16);
+    }
+
+    /// F947 (and F934's drive branch): the drive is destroyed, its energy
+    /// gone, and its mass (`DATA_007210`) becomes Rubbish in the hold.
+    pub fn destroy_drive(&mut self) {
+        let class = usize::from(self.combat.drive);
+        self.combat.drive = 0;
+        self.loadout.drive = 0;
+        self.combat.energy = 0;
+        let mass = ffe_core::hyperspace::DRIVE_MASSES
+            .get(class)
+            .copied()
+            .unwrap_or(0);
+        self.add_rubbish(mass as i32);
+    }
+
+    /// F948: a fitted drive is reduced to class 1; its mass less class 1's
+    /// 4 t (`DATA_007210`) becomes Rubbish. No drive, no change.
+    pub fn degrade_drive(&mut self) {
+        let class = usize::from(self.combat.drive);
+        if class == 0 {
+            return;
+        }
+        self.combat.drive = 1;
+        self.loadout.drive = 1;
+        let mass = ffe_core::hyperspace::DRIVE_MASSES
+            .get(class)
+            .copied()
+            .unwrap_or(0);
+        self.add_rubbish(mass as i32 - 4);
+    }
+
+    /// F911: a mis-jump destroys the drive and leaves class 1 in its place; the
+    /// record's mass (`DATA_007188`) less 4 t becomes Rubbish when it is not
+    /// negative. (F911 stores that amount as the capacity with `mov`, where
+    /// F946 and F934 add it; the port keeps the capacity rule of the others,
+    /// see `docs/DEVIATIONS.md`.)
+    pub fn misjump_drive(&mut self) {
+        let class = usize::from(self.combat.drive);
+        let mass = ffe_core::hyperspace::DRIVE_RECORD_MASSES
+            .get(class)
+            .copied()
+            .unwrap_or(0) as i32
+            - 4;
+        if mass >= 0 {
+            self.add_rubbish(mass);
+        }
+        self.combat.drive = 1;
+        self.loadout.drive = 1;
     }
 
     /// F950's roll: two thirds break a fitted general item (F945/F933), then
@@ -790,9 +845,8 @@ impl Flight {
                         events.push(SystemEvent::EquipmentFailure(bit));
                     }
                 } else if self.combat.drive != 0 {
-                    self.combat.drive = 0;
-                    self.loadout.drive = 0;
-                    self.combat.energy = 0;
+                    // F934: as F947, with message 0x98cc.
+                    self.destroy_drive();
                     events.push(SystemEvent::DriveFailure);
                 }
             }
@@ -1051,5 +1105,134 @@ mod tests {
         assert_eq!(state.take_contact_damage(&contact(-1), 28), None);
         assert_eq!(state.hull, [112, 112]);
         assert!(!state.destroyed());
+    }
+
+    /// PAR-03: the drive byte (`+0xd0`) is the one drive state; destroying,
+    /// degrading, a failed service and a mis-jump each set it with the
+    /// equipment copy, and leave the drive's mass in the hold as Rubbish (F946,
+    /// F911), so the hold's free space stays what it was (F947/F948/F934).
+    fn with_drive(class: u8) -> Flight {
+        let mut state = Flight::default();
+        state.combat.drive = class;
+        state.loadout.drive = class;
+        state.combat.energy = 0x2000_0000;
+        state.hold = vec![0; 32];
+        state
+    }
+
+    /// The free hold as the market sees it: capacity from the fitted loadout
+    /// against a 100 t ship delivered with `delivered`'s drive, less the tonnes used.
+    fn free(state: &Flight, delivered: u8) -> i32 {
+        let base = ffe_core::equipment::Loadout {
+            drive: delivered,
+            ..ffe_core::equipment::Loadout::default()
+        };
+        let capacity = state.loadout.capacity(100, &base, &state.combat.lasers);
+        let used: i32 = state.hold.iter().map(|t| i32::from(*t)).sum();
+        capacity - used
+    }
+
+    #[test]
+    fn a_destroyed_drive_becomes_rubbish_and_burns_nothing() {
+        use ffe_core::hyperspace::{HYDROGEN, MILITARY_FUEL, RUBBISH};
+        for class in 1..=13u8 {
+            let mut state = with_drive(class);
+            let before = free(&state, class);
+            state.destroy_drive();
+            assert_eq!((state.combat.drive, state.loadout.drive), (0, 0));
+            assert_eq!(state.combat.energy, 0);
+            assert_eq!(
+                u32::from(state.hold[RUBBISH]),
+                ffe_core::hyperspace::DRIVE_MASSES[usize::from(class)],
+                "class {class}"
+            );
+            assert_eq!(
+                free(&state, class),
+                before,
+                "class {class}: F946 adds to both"
+            );
+            assert_eq!(state.fuel_slot(), HYDROGEN);
+            let _ = MILITARY_FUEL;
+        }
+    }
+
+    #[test]
+    fn a_degraded_drive_is_class_1_and_the_rest_rubbish() {
+        use ffe_core::hyperspace::{HYDROGEN, MILITARY_FUEL, RUBBISH};
+        let mut state = with_drive(12);
+        assert_eq!(state.fuel_slot(), MILITARY_FUEL);
+        let before = free(&state, 12);
+        state.degrade_drive();
+        assert_eq!((state.combat.drive, state.loadout.drive), (1, 1));
+        assert_eq!(state.hold[RUBBISH], 24 - 4);
+        assert_eq!(free(&state, 12), before);
+        assert_eq!(state.fuel_slot(), HYDROGEN, "class 1 burns hydrogen");
+        assert_eq!(state.combat.energy, 0x2000_0000, "F948 keeps the energy");
+        // No drive: F948 changes nothing.
+        let mut empty = with_drive(0);
+        empty.degrade_drive();
+        assert_eq!((empty.combat.drive, empty.hold[RUBBISH]), (0, 0));
+        // Through F950's roll: below 0x888 destroys, below 0x1c71 degrades.
+        let mut rolled = with_drive(3);
+        assert_eq!(
+            rolled.apply_subsystem_roll(0x887, 0),
+            Some(SystemEvent::DriveDamaged)
+        );
+        assert_eq!((rolled.combat.drive, rolled.hold[RUBBISH]), (0, 25));
+        let mut rolled = with_drive(3);
+        assert_eq!(
+            rolled.apply_subsystem_roll(0x1c70, 0),
+            Some(SystemEvent::DriveDamaged)
+        );
+        assert_eq!((rolled.combat.drive, rolled.hold[RUBBISH]), (1, 21));
+    }
+
+    #[test]
+    fn a_failed_service_destroys_the_drive() {
+        use ffe_core::hyperspace::RUBBISH;
+        let mut state = with_drive(4);
+        // The drive's counter at zero: every 0..255 draw but 0 beats it.
+        state.damage.service_counters = [u32::MAX, 0];
+        state.last_service_day = Some(0);
+        let mut failed = false;
+        for day in 1..=8 {
+            let events = state.service_day(day);
+            if events.contains(&SystemEvent::DriveFailure) {
+                failed = true;
+                break;
+            }
+        }
+        assert!(failed);
+        assert_eq!(
+            (state.combat.drive, state.loadout.drive, state.combat.energy),
+            (0, 0, 0)
+        );
+        assert_eq!(state.hold[RUBBISH], 45);
+    }
+
+    #[test]
+    fn a_misjump_leaves_class_1_and_the_records_mass_less_4() {
+        use ffe_core::hyperspace::RUBBISH;
+        // F911 reads DATA_007188's record: class 3 weighs 12 t there.
+        let mut state = with_drive(3);
+        state.misjump_drive();
+        assert_eq!((state.combat.drive, state.loadout.drive), (1, 1));
+        assert_eq!(state.hold[RUBBISH], 12 - 4);
+        assert_eq!(state.combat.energy, 0x2000_0000, "F911 keeps the energy");
+        // Class 1: nothing left over.
+        let mut small = with_drive(1);
+        small.misjump_drive();
+        assert_eq!((small.combat.drive, small.hold[RUBBISH]), (1, 0));
+    }
+
+    #[test]
+    fn the_drive_and_its_rubbish_survive_a_save() {
+        use ffe_core::hyperspace::RUBBISH;
+        let mut state = with_drive(5);
+        state.degrade_drive();
+        let json = serde_json::to_string(&state).unwrap();
+        let loaded: Flight = serde_json::from_str(&json).unwrap();
+        assert_eq!((loaded.combat.drive, loaded.loadout.drive), (1, 1));
+        assert_eq!(loaded.hold[RUBBISH], 80 - 4);
     }
 }

@@ -9087,8 +9087,7 @@ fn apply_misjump(
     }
     match misjump.effect {
         MisjumpEffect::DriveDestroyed => {
-            state.combat.drive = 1;
-            state.loadout.drive = 1;
+            state.misjump_drive();
             false
         }
         MisjumpEffect::ShipLost => {

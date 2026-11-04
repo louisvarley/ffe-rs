@@ -14,6 +14,19 @@ use crate::sector::Drive;
 pub const HYDROGEN: usize = 19;
 pub const MILITARY_FUEL: usize = 20;
 pub const RADIOACTIVES: usize = 29;
+/// Rubbish (`DATA_008904`): where a destroyed or degraded drive goes (F946, F911).
+pub const RUBBISH: usize = 30;
+
+/// `DATA_007210`, the hyperdrive masses by class (tonnes): what F947 (drive
+/// destroyed), F948 (degraded to class 1, less class 1's 4 t) and F934 (failed
+/// for lack of servicing) put back into the hold as Rubbish through F946.
+pub const DRIVE_MASSES: [u32; 15] = [0, 4, 10, 25, 45, 80, 150, 250, 400, 600, 6, 12, 24, 36, 0];
+
+/// The masses of `DATA_007188`'s 16-byte drive records by class (`+0`): what
+/// F911 (a mis-jump that destroys the drive) reads instead. Classes 2..4 differ
+/// from [`DRIVE_MASSES`] (6, 12 and 24 t against 10, 25 and 45 t).
+pub const DRIVE_RECORD_MASSES: [u32; 15] =
+    [0, 4, 6, 12, 24, 80, 150, 250, 400, 600, 6, 12, 24, 36, 0];
 
 /// The first class that burns military fuel.
 pub const MILITARY_CLASS: i32 = 10;

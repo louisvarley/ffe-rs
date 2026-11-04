@@ -50,7 +50,21 @@ Every item needs executed-original **end-to-end** evidence for its affected path
 
 ## PAR-03 — P0 — Use one authoritative fitted-drive and failure state
 
-**Status:** todo. **Evidence:** Confirmed runtime mismatch.
+**Status:** done (2026-11-04). **Evidence:** Confirmed runtime mismatch; fixed.
+The drive byte `+0xd0` (`combat.drive`) is authoritative and every path sets the
+equipment copy with it (26 October). On 4 November the missing half of F946 was
+added: a destroyed drive (F947, and F934's failed service) leaves its
+`DATA_007210` mass in the hold as Rubbish (`DATA_008904`, cargo slot 30), a
+degraded one (F948) its mass less class 1's 4 t, and a mis-jump (F911) its
+`DATA_007188` record mass less 4 t, so the tonnes used rise with the capacity
+and the free hold is unchanged (`Flight::destroy_drive`/`degrade_drive`/
+`misjump_drive`, tests `a_destroyed_drive_becomes_rubbish_and_burns_nothing`,
+`a_degraded_drive_is_class_1_and_the_rest_rubbish`,
+`a_failed_service_destroys_the_drive`,
+`a_misjump_leaves_class_1_and_the_records_mass_less_4`,
+`the_drive_and_its_rubbish_survive_a_save`). The port's drive record masses
+equal `DATA_007210` for every class, so capacity follows the fitted record.
+F911's `mov` to the capacity is kept as an add (`docs/DEVIATIONS.md`).
 
 **Finding:** Damage/service code changes combat.drive while drive_state prefers nonzero loadout.drive. Thus a damaged/destroyed drive can still supply the old hyperdrive class, and reserve fuel selection can disagree with the jump report.
 

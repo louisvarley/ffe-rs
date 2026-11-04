@@ -29,7 +29,7 @@
     "id": "PAR-03",
     "priority": "P0",
     "title": "Use one authoritative fitted-drive and failure state",
-    "status": "in_progress",
+    "status": "done",
     "certainty": "Confirmed runtime mismatch",
     "finding": "Damage/service code changes combat.drive while drive_state prefers nonzero loadout.drive. Thus a damaged/destroyed drive can still supply the old hyperdrive class, and reserve fuel selection can disagree with the jump report.",
     "source": "F947/F948/F934/F408/F410/F903",

@@ -312,3 +312,17 @@ PAR-17 shared random pair off the original's call order.
   gravestone is now scaled to the window with the Display settings like every
   other screen instead of as a fixed 640x480 buffer. See
   `docs/notes/modern-graphics.md`.
+
+## 2026-11-04 — F911's mis-jump capacity (verified bug fix)
+
+F911 (a mis-jump that destroys the drive, leaving class 1) adds its
+`DATA_007188` record mass less 4 t to Rubbish (`DATA_008904`) and to the tonnes
+used (`DATA_008891`), but stores the same amount into the hold capacity
+(`DATA_008889`) with `mov` where F946 and F934 add it. Taken literally the hold
+would shrink to that amount (for example 8 t after a class 3 drive), leaving
+less free space than the cargo already aboard. The port keeps the capacity rule
+of F946/F934: the capacity follows the fitted drive's record, so it rises by
+the old drive's `DATA_007210` mass less class 1's 4 t. The Rubbish and the
+drive class are the source's. Tested by
+`flight::tests::a_misjump_leaves_class_1_and_the_records_mass_less_4`.
+

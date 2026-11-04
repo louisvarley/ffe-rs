@@ -25,7 +25,7 @@ window.FFE_BURNDOWN = {
       tasks: [
         {"id": "parity-01", "title": "[P0] Repair F938/F929 event units for fuel, shields and hull repair", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-01"},
         {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
-        {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
+        {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "done", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
         {"id": "parity-04", "title": "[P0] Translate the complete F1013 takeoff handler and same-frame mode order", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-04"},
         {"id": "parity-05", "title": "[P0] Replace launch altitude substitution and collision grace with source frame/contact rules", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-05"},
         {"id": "parity-06", "title": "[P0] Verify original set-speed controls, input gates and speed persistence end to end", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-06"},
@@ -1235,6 +1235,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-04",
       remaining: 98,
       note: "Owner's Modern plan: look very like FFED3D on DirectX 12 with FFED3D's assets, keeping the port's stars; no .fx shader port. enhanced-9 becomes FFED3D's panel and HUD and enhanced-10 its space dust; three items added (DirectX 12 window, effects and lighting, side-by-side tuning). assets/ now mirrors an FFED3D install and every file is packed into assets.bin (format 2); the owner's cabins (assets/Textures/CABIN<n>.png) replace FFED3D's, which replace the original's. Remaining rises by three."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 97,
+      note: "PAR-03 done: a destroyed (F947), failed (F934), degraded (F948) or mis-jumped (F911) drive now leaves its mass in the hold as Rubbish (cargo slot 30, F946), so the tonnes used rise with the capacity; drive masses checked against DATA_007210/DATA_007188. F911's mov to the capacity is kept as an add (recorded deviation)."
     }
   ]
 };

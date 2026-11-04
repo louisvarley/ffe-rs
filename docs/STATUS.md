@@ -2,7 +2,7 @@
 
 ## Work list to finish the game — 2026-11-04 (handoff)
 
-The burndown (`dashboard/burndown.js`) has 98 items open, 121 of 219 done. This
+The burndown (`dashboard/burndown.js`) has 97 items open, 122 of 219 done. This
 is the order to work them in, by burndown id. Every item is ported from
 `jjffe-master/ffe.asm` and checked against the executed original where a
 reference tool can do so; nothing is guessed. Each change updates the burndown
@@ -14,7 +14,7 @@ depends on them.
 
 - **P0** `parity-01` fuel, shield and hull repair event units (F938/F929);
   `parity-02` reserve refuelling and cargo-fuel bookkeeping (F929/F903);
-  `parity-03` one authoritative fitted-drive and drive-failure state;
+  (`parity-03`, the drive state, is done: 4 November);
   `parity-04` the complete takeoff handler (F1013) and same-frame mode order;
   `parity-05` the original's frame and contact rules instead of the launch
   altitude stand-in and collision grace; `parity-06` set-speed controls, input
