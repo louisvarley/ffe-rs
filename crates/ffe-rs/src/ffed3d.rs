@@ -71,10 +71,13 @@ pub fn decode_png(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     Ok((width, height, rgba))
 }
 
-/// FFED3D's `texNNN` textures, read when first asked for and kept.
+/// `texNNN` textures, read when first asked for and kept: FFED3D's own
+/// (its `Textures` folder) or the owner's replacements of them
+/// (`Textures/texNNN.png` in [`crate::art_source::ArtSource`]).
 #[derive(Default)]
 pub struct Textures {
     dir: Option<PathBuf>,
+    owner: Option<crate::art_source::ArtSource>,
     loaded: HashMap<u32, Option<ffe_render::ColourMap>>,
     /// What could not be read, for the log.
     pub problems: Vec<String>,
@@ -89,9 +92,36 @@ impl Textures {
         }
     }
 
-    /// Whether the install has a texture folder.
+    /// The owner's replacements of FFED3D's textures.
+    pub fn from_source(source: crate::art_source::ArtSource) -> Self {
+        Self {
+            owner: Some(source),
+            ..Self::default()
+        }
+    }
+
+    /// Whether there is a texture folder (or the owner's images).
     pub fn found(&self) -> bool {
-        self.dir.is_some()
+        self.dir.is_some() || self.owner.is_some()
+    }
+
+    /// The file's bytes and its name for the log.
+    fn read(&mut self, number: u32) -> Option<(Vec<u8>, String)> {
+        let name = format!("tex{number}.png");
+        if let Some(owner) = &self.owner {
+            let path = format!("Textures/{name}");
+            return owner
+                .read(&path)
+                .map(|bytes| (bytes, owner.describe(&path)));
+        }
+        let path = find(self.dir.as_ref()?, &name)?;
+        match std::fs::read(&path) {
+            Ok(bytes) => Some((bytes, path.display().to_string())),
+            Err(error) => {
+                self.problems.push(format!("{}: {error}", path.display()));
+                None
+            }
+        }
     }
 
     /// `texN.png`, when the install has it.
@@ -99,15 +129,18 @@ impl Textures {
         if let Some(known) = self.loaded.get(&number) {
             return known.clone();
         }
-        let map = self.dir.as_ref().and_then(|dir| {
-            let path = find(dir, &format!("tex{number}.png"))?;
-            let bytes = std::fs::read(&path)
-                .map_err(|e| self.problems.push(format!("{}: {e}", path.display())))
-                .ok()?;
-            match decode_png(&bytes) {
+        // The owner's replacement and FFED3D's own are different pictures.
+        let base: u64 = if self.owner.is_some() {
+            3 << 40
+        } else {
+            2 << 40
+        };
+        let map = self
+            .read(number)
+            .and_then(|(bytes, name)| match decode_png(&bytes) {
                 Ok((width, height, rgba)) if width > 0 && height > 0 => {
                     Some(ffe_render::ColourMap {
-                        id: 2 << 40 | u64::from(number),
+                        id: base | u64::from(number),
                         width,
                         height,
                         rgba: rgba.into(),
@@ -115,11 +148,10 @@ impl Textures {
                 }
                 Ok(_) => None,
                 Err(error) => {
-                    self.problems.push(format!("{}: {error}", path.display()));
+                    self.problems.push(format!("{name}: {error}"));
                     None
                 }
-            }
-        });
+            });
         self.loaded.insert(number, map.clone());
         map
     }

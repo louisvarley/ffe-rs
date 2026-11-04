@@ -531,10 +531,9 @@ impl Presenter {
         &mut self.modern
     }
 
-    /// Read the GPU view's upscaled textures from the owner's image export (`img-export`),
-    /// again whenever a file there changes.
-    pub fn set_art_dir(&mut self, dir: std::path::PathBuf) {
-        self.gpu.set_art_dir(dir);
+    /// Read the GPU view's textures from the owner's images (`assets.bin` or `assets`).
+    pub fn set_art_source(&mut self, source: crate::art_source::ArtSource) {
+        self.gpu.set_art_source(source);
     }
 
     /// Draw the GPU view's textured faces with the FFED3D installed at `root`. Returns

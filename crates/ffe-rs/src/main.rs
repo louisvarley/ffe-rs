@@ -761,30 +761,28 @@ fn write_display_capture(
         display::compose(&logical, &settings, width, height, &mut target);
         write_png(&dir.join(name), &target, width, height)?;
     }
-    // A docked frame through Modern with any replacement cabins and font in `img-export`.
+    // A docked frame through Modern with the owner's cabins and font (`assets.bin`).
     let mut docked = Flight::free_flight();
     docked.mode = ffe_rs::flight::Mode::Docked;
     screen.take_text();
     screen.draw(&docked, ViewState::default(), scene.as_ref(), true, "");
     let mut modern = ffe_rs::modern::ModernRenderer::new();
-    for line in modern.load_cabins(
-        &root.join("img-export/images/cockpit"),
-        screen.cabin_pixels(),
-    ) {
-        eprintln!("{line}");
-    }
-    if let Some(line) = modern.load_panel(
-        &root.join("img-export/images/sprite/primary-043.png"),
-        screen.panel_pixels(),
-    ) {
-        eprintln!("{line}");
-    }
-    if let Some(line) = modern.load_font(&root.join("img-export/images/font/main.png")) {
-        eprintln!("{line}");
+    let (art, line) = ffe_rs::art_source::ArtSource::open(root);
+    eprintln!("Modern graphics: {line}");
+    if let Some(art) = &art {
+        for line in modern.load_cabins(art, screen.cabin_pixels()) {
+            eprintln!("{line}");
+        }
+        if let Some(line) = modern.load_panel(art, screen.panel_pixels()) {
+            eprintln!("{line}");
+        }
+        if let Some(line) = modern.load_font(art) {
+            eprintln!("{line}");
+        }
     }
     eprintln!(
         "{}",
-        modern.load_true_font(&root.join("img-export"), &screen.font_advances())
+        modern.load_true_font(&root.join("assets"), &screen.font_advances())
     );
     modern.set_text(screen.take_text());
     let (width, height) = (1920, 1080);
@@ -1211,15 +1209,29 @@ fn run() -> Result<(), String> {
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
     let mut presenter = Presenter::new();
-    // The GPU view's upscaled model and planet textures: the owner's export, read again as the
-    // files change.
-    presenter.set_art_dir(options.root.join("img-export"));
-    // Modern graphics' replacement cabins and font: for now the owner's upscaled export.
-    for line in presenter.modern_mut().load_cabins(
-        &options.root.join("img-export/images/cockpit"),
-        screen.cabin_pixels(),
-    ) {
-        eprintln!("{line}");
+    // Modern graphics' art, in order: the owner's own images (`assets.bin`, packed from the
+    // `assets` folder by the build; `Textures/...` named as FFED3D's files override them),
+    // then FFED3D's, then the original's.
+    let (art, line) = ffe_rs::art_source::ArtSource::open(&options.root);
+    eprintln!("Modern graphics: {line}");
+    if let Some(art) = &art {
+        presenter.set_art_source(art.clone());
+        for line in presenter
+            .modern_mut()
+            .load_cabins(art, screen.cabin_pixels())
+        {
+            eprintln!("{line}");
+        }
+        // The console panel (primary bitmap 43), when a larger one is given.
+        if let Some(line) = presenter
+            .modern_mut()
+            .load_panel(art, screen.panel_pixels())
+        {
+            eprintln!("{line}");
+        }
+        if let Some(line) = presenter.modern_mut().load_font(art) {
+            eprintln!("{line}");
+        }
     }
     // FFED3D's art for Modern graphics: its `texNNN` textures on the models' textured faces.
     // Its cabin backdrops are not used (owner's choice): the cabins stay the export's.
@@ -1231,27 +1243,12 @@ fn run() -> Result<(), String> {
             );
         }
     }
-    // The console panel (primary bitmap 43), when the export holds a larger one.
-    if let Some(line) = presenter.modern_mut().load_panel(
-        &options
-            .root
-            .join("img-export/images/sprite/primary-043.png"),
-        screen.panel_pixels(),
-    ) {
-        eprintln!("{line}");
-    }
-    if let Some(line) = presenter
-        .modern_mut()
-        .load_font(&options.root.join("img-export/images/font/main.png"))
-    {
-        eprintln!("{line}");
-    }
     let advances = screen.font_advances();
     eprintln!(
         "{}",
         presenter
             .modern_mut()
-            .load_true_font(&options.root.join("img-export"), &advances)
+            .load_true_font(&options.root.join("assets"), &advances)
     );
     // `FFE_TRACE=1`: print the flight state ten times a second and every click's
     // logical point to stderr (for diagnosing a replayed recording).

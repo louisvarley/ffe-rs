@@ -1,5 +1,6 @@
 //! Upscaled model and planet textures for the modern engine's GPU 3-D view, read from the
-//! owner's image export (`img-export/`) and read again whenever a file changes.
+//! owner's images (`assets.bin`, or the `assets` folder: [`crate::art_source`]) and, from the
+//! folder, read again whenever a file changes.
 //!
 //! The original colours a texture per face: its bitmap holds colour indices, and each face looks
 //! them up in its own slot colours (lighting, haze, material). The export writes every bitmap
@@ -16,9 +17,9 @@
 //! A picture still at the export's size is the original, so it is left out (the original map is
 //! used, enlarged by Scale2x). See `docs/notes/modern-graphics.md`.
 
+use crate::art_source::ArtSource;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 /// The export's categories that hold textures, searched in this order.
@@ -51,7 +52,7 @@ pub fn file_name(bitmap: u32) -> String {
 
 struct Entry {
     /// The upscaled picture and its indexed key, when both exist.
-    paths: Option<(PathBuf, PathBuf)>,
+    paths: Option<(String, String)>,
     /// Their modification times when last read.
     stamp: Option<(SystemTime, SystemTime)>,
     map: Option<ffe_render::IndexMap>,
@@ -60,7 +61,7 @@ struct Entry {
 /// The upscaled maps read so far, by bitmap id.
 #[derive(Default)]
 pub struct Art {
-    dir: Option<PathBuf>,
+    source: Option<ArtSource>,
     entries: HashMap<u32, Entry>,
     checked: Option<Instant>,
     next: u64,
@@ -69,16 +70,21 @@ pub struct Art {
 }
 
 impl Art {
-    /// Read upscaled textures from `dir` (the export's root, holding `images/` and `indexed/`).
-    pub fn set_dir(&mut self, dir: PathBuf) {
-        self.dir = Some(dir);
+    /// Read upscaled textures from `source` (the export's layout: `images/` and `indexed/`).
+    pub fn set_source(&mut self, source: ArtSource) {
+        self.source = Some(source);
         self.entries.clear();
+    }
+
+    /// Whether the owner's images hold an upscale of this bitmap (the map is then read).
+    pub fn has(&mut self, bitmap: &WorldBitmap) -> bool {
+        self.map(bitmap).is_some()
     }
 
     /// The upscaled map for a bitmap, if the export has one bigger than the original. Changed
     /// files are read again (checked once a second).
     pub fn map(&mut self, bitmap: &WorldBitmap) -> Option<ffe_render::IndexMap> {
-        let dir = self.dir.clone()?;
+        let source = self.source.clone()?;
         let now = Instant::now();
         if self
             .checked
@@ -87,22 +93,24 @@ impl Art {
             self.checked = Some(now);
             // Forget the entries whose files changed (or appeared), so they are read again.
             self.entries.retain(|id, entry| {
-                let paths = find(&dir, *id);
-                paths == entry.paths && stamps(paths.as_ref()) == entry.stamp
+                let paths = find(&source, *id);
+                paths == entry.paths && stamps(&source, paths.as_ref()) == entry.stamp
             });
         }
         if !self.entries.contains_key(&bitmap.bitmap) {
-            let paths = find(&dir, bitmap.bitmap);
-            let stamp = stamps(paths.as_ref());
+            let paths = find(&source, bitmap.bitmap);
+            let stamp = stamps(&source, paths.as_ref());
             let map = match &paths {
                 Some((picture, key)) => {
                     self.next += 1;
                     let id = 1 << 48 | self.next;
-                    match load(picture, key, bitmap, id) {
+                    match load(&source, picture, key, bitmap, id) {
                         Ok(map) => map,
                         Err(error) => {
-                            self.problems
-                                .push(format!("Modern graphics: {}: {error}", picture.display()));
+                            self.problems.push(format!(
+                                "Modern graphics: {}: {error}",
+                                source.describe(picture)
+                            ));
                             None
                         }
                     }
@@ -117,19 +125,21 @@ impl Art {
 }
 
 /// The upscaled picture and its indexed key for a bitmap, in the first category that has both.
-fn find(dir: &Path, bitmap: u32) -> Option<(PathBuf, PathBuf)> {
+fn find(source: &ArtSource, bitmap: u32) -> Option<(String, String)> {
     let name = format!("{}.png", file_name(bitmap));
     CATEGORIES.iter().find_map(|category| {
-        let picture = dir.join("images").join(category).join(&name);
-        let key = dir.join("indexed").join(category).join(&name);
-        (picture.is_file() && key.is_file()).then_some((picture, key))
+        let picture = format!("images/{category}/{name}");
+        let key = format!("indexed/{category}/{name}");
+        (source.exists(&picture) && source.exists(&key)).then_some((picture, key))
     })
 }
 
-fn stamps(paths: Option<&(PathBuf, PathBuf)>) -> Option<(SystemTime, SystemTime)> {
+fn stamps(
+    source: &ArtSource,
+    paths: Option<&(String, String)>,
+) -> Option<(SystemTime, SystemTime)> {
     let (picture, key) = paths?;
-    let time = |path: &Path| std::fs::metadata(path).and_then(|m| m.modified()).ok();
-    Some((time(picture)?, time(key)?))
+    Some((source.stamp(picture)?, source.stamp(key)?))
 }
 
 /// The export's indexed key: the original indices, their size and the record's colours.
@@ -211,12 +221,17 @@ fn read_rgba(bytes: &[u8]) -> Result<(Vec<[u8; 4]>, u32, u32), String> {
 /// The index map for an upscaled `picture` with its indexed `key`; `None` when the picture is
 /// still at the key's size (the original).
 fn load(
-    picture: &Path,
-    key: &Path,
+    source: &ArtSource,
+    picture: &str,
+    key: &str,
     bitmap: &WorldBitmap,
     id: u64,
 ) -> Result<Option<ffe_render::IndexMap>, String> {
-    let read = |path: &Path| std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()));
+    let read = |path: &str| {
+        source
+            .read(path)
+            .ok_or_else(|| format!("{path}: not readable"))
+    };
     let key = read_indexed(&read(key)?)?;
     let (pixels, width, height) = read_rgba(&read(picture)?)?;
     if (width, height) == (key.width, key.height) {
@@ -395,7 +410,7 @@ mod tests {
     #[test]
     fn files_are_found_read_and_read_again_when_they_change() {
         let dir = tempfile::tempdir().unwrap();
-        let write_indexed = |path: &Path| {
+        let write_indexed = |path: &std::path::Path| {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 2, 2);
             encoder.set_color(png::ColorType::Indexed);
@@ -404,7 +419,7 @@ mod tests {
             let mut writer = encoder.write_header().unwrap();
             writer.write_image_data(&[1, 2, 2, 1]).unwrap();
         };
-        let write_picture = |path: &Path, side: u32, rgb: [u8; 3]| {
+        let write_picture = |path: &std::path::Path, side: u32, rgb: [u8; 3]| {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), side, side);
             encoder.set_color(png::ColorType::Rgb);
@@ -418,7 +433,7 @@ mod tests {
         write_indexed(&key);
         write_picture(&picture, 2, [0, 200, 0]);
         let mut art = Art::default();
-        art.set_dir(dir.path().to_owned());
+        art.set_source(crate::art_source::ArtSource::Folder(dir.path().to_owned()));
         // Still the export's size: the original serves.
         assert!(art.map(&bitmap(false)).is_none());
         write_picture(&picture, 8, [0, 200, 0]);

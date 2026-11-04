@@ -391,10 +391,10 @@ It does not produce `data.bin` or `upscaled.bin`.
 ## Export every bitmap for upscaling
 
 ```powershell
-cargo run --locked --release -p ffe-tools -- export-images --game .\game --out .\img-export
+cargo run --locked --release -p ffe-tools -- export-images --game .\game --out .\assets
 ```
 
-Writes all 354 bitmaps the game draws to the ignored `img-export/`, at original
+Writes all 354 bitmaps the game draws to the ignored `assets/`, at original
 size: `images/<category>/` straight-alpha RGBA PNGs to upscale and
 `indexed/<category>/` the same pixels as indexed PNGs with the palette used.
 Categories: `cockpit` (6 cabins), `sprite` (218 screen bitmaps: newspaper
@@ -404,6 +404,23 @@ colours), `planet_texture` (land/sea), `texture_block` (the two raw 64x512
 blocks) and `font` (the main font as a glyph atlas, metrics in
 `images/font/main.json`). Index 0 of masked bitmaps is transparent; anchors are
 the original draw offsets.
+
+## Your own images for Modern graphics (`assets/` and `assets.bin`)
+
+Modern graphics draw with, in order: your own images, then FFED3D's art (the
+folder chosen in the launcher), then the original's. Your images live in the
+ignored `assets/` folder:
+
+- `assets/Textures/tex<N>.png` and `assets/Textures/CABIN<n>.png`, named exactly
+  as FFED3D names its files: copy one from FFED3D's `Textures` folder, change it,
+  and it replaces FFED3D's. `tex400`..`tex547` are the models' textures (record
+  N - 400), `tex43` the console panel, `CABIN0`..`CABIN5` the cabins.
+- The image export's upscales (`images/...`, below): any image whose size
+  differs from the original's is used.
+
+`launcher.bat` and `play.bat` pack the folder into `assets.bin` after building
+(`ffe-tools build-assets`), and the game reads that file; without one it reads
+the folder directly. Neither is ever committed.
 
 `sizes.csv` gives each image's recommended UHD size: 11x for screen art on the
 320x200 canvas, an **estimated** 8x for textures. `index.html` is the contact

@@ -300,8 +300,8 @@ window.FFE_BURNDOWN = {
       title: "Graphics-pack slice (phase 6)",
       status: "planned",
       tasks: [
-        { id: "packs-1", title: "Upscale export and pack commands", status: "todo" },
-        { id: "packs-2", title: "Pack registry, validation and fallback", status: "todo" },
+        { id: "packs-1", title: "Upscale export and pack commands", status: "done", version: "assets-1" },
+        { id: "packs-2", title: "Pack registry, validation and fallback", status: "in-progress", version: "assets-1" },
         { id: "packs-3", title: "Live Classic/Enhanced switching", status: "in-progress", version: "modern-1" },
         { id: "packs-4", title: "Pack changes never change gameplay traces", status: "todo" }
       ]
@@ -1222,6 +1222,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-04",
       remaining: 96,
       note: "Modern graphics use FFED3D's assets (owner decision): six items added to the Enhanced renderer for the FFED3D stages, the first done (enhanced-6). With --ffed3d, the GPU view shows FFED3D's tex(400 + record) in full colour on the original models' textured faces (a new full-colour texture array in ffe-render, premultiplied and mipmapped) while the cabins stay the port's own (owner's choice); the launcher requires a full FFED3D for Modern. Five added items remain open, so the remaining count rises by five."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 95,
+      note: "The owner's images are packed: launcher.bat/play.bat run ffe-tools build-assets after building, which packs the ignored assets/ folder (the former img-export/) into a checked, deterministic assets.bin: files named as FFED3D's (Textures/tex<N>.png, Textures/CABIN<n>.png) and the export's upscales (only images whose size differs from the original's). Modern reads it (else the folder) and the owner's images win over FFED3D's, which win over the original's. packs-1 done; packs-2 in progress (no game-version fingerprint yet)."
     }
   ]
 };

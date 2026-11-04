@@ -15,6 +15,11 @@ echo === Building the game and launcher - release ===
 cargo build --release --locked -p ffe-rs -p ffe-tools -p ffe-launcher
 if errorlevel 1 goto failed
 
+rem Pack your own images (the assets folder) into assets.bin for Modern graphics:
+rem they override FFED3D's art, which overrides the original's.
+target\release\ffe-tools.exe build-assets
+if errorlevel 1 goto failed
+
 start "" "target\release\ffe-launcher.exe"
 exit /b 0
 

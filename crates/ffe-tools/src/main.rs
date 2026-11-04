@@ -16,6 +16,7 @@ Usage:
   ffe-tools verify-reference --vectors <jsonl> --state <jsonl> [--json]
   ffe-tools model-census [--game <directory>] [--json]
   ffe-tools inspect-ffed3d --dir <ffed3d folder> [--json]
+  ffe-tools build-assets [--assets <folder>] [--out <file>]
   ffe-tools --help
   ffe-tools --version
 
@@ -38,6 +39,11 @@ verify-reference compares fixed legacy RNG/timer vectors and bounded new-game
 clock transitions against native Rust primitives. It is not full flight validation.
 inspect-ffed3d reads every replacement model in your own FFED3D download (read-only)
 and reports what the game's Modern graphics would use.
+build-assets packs your own images for Modern graphics (default folder `assets`,
+beside the working directory) into `assets.bin`: files named as FFED3D names its
+own under Textures/ and MODELS/ (they override FFED3D's), and the image export's
+upscales (only images whose size differs from the original's, with their keys).
+It replaces an earlier assets.bin, and removes one when the folder is gone.
 model-census reports, read-only, how far each of the 465 original models gets
 through native import, decoding and execution, and what blocks the rest.
 ";
@@ -225,6 +231,9 @@ fn run() -> Result<u8, String> {
             .map_err(|error| error.to_string())?;
         return Ok(0);
     }
+    if args.first().is_some_and(|arg| arg == "build-assets") {
+        return build_assets(&args[1..], &mut output);
+    }
     let options = parse_options(args)?;
     if options.command == Command::InspectFfed3d {
         let dir = options
@@ -368,6 +377,82 @@ Open index.html for previews and sizes.csv for UHD recommendations. No image res
     let report = inspect_game(&options.game)?;
     write_report(&mut output, &report, options.json)?;
     Ok(if report.inspection_passed { 0 } else { 1 })
+}
+
+/// `build-assets`: pack the export folder's high-definition images into
+/// `assets.bin` (written to a temporary file, then moved over the old one).
+fn build_assets(args: &[OsString], output: &mut impl Write) -> Result<u8, String> {
+    use ffe_content::art_pack::{build_pack, read_pack, FOLDER, PACK_FILE};
+    let mut folder = PathBuf::from(FOLDER);
+    let mut out = PathBuf::from(PACK_FILE);
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let value = || -> Result<PathBuf, String> {
+            Err(format!("{} requires a path.", arg.to_string_lossy()))
+        };
+        if arg == "--assets" {
+            folder = args.next().map(PathBuf::from).map_or_else(value, Ok)?;
+        } else if arg == "--out" {
+            out = args.next().map(PathBuf::from).map_or_else(value, Ok)?;
+        } else {
+            return Err(format!(
+                "Unknown build-assets option {}.",
+                arg.to_string_lossy()
+            ));
+        }
+    }
+    if !folder.is_dir() {
+        // No export: an assets.bin built from one that is gone would still override.
+        if std::fs::read(&out).is_ok_and(|bytes| read_pack(&bytes).is_ok()) {
+            std::fs::remove_file(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+            writeln!(
+                output,
+                "build-assets: no {} folder; removed {}",
+                folder.display(),
+                out.display()
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            writeln!(
+                output,
+                "build-assets: no {} folder; nothing to pack",
+                folder.display()
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        return Ok(0);
+    }
+    let (bytes, manifest) = build_pack(&folder)?;
+    if std::fs::read(&out).is_ok_and(|old| old == bytes) {
+        writeln!(
+            output,
+            "build-assets: {} is up to date ({} images)",
+            out.display(),
+            manifest.images.len()
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(0);
+    }
+    let temporary = out.with_extension("bin.tmp");
+    std::fs::write(&temporary, &bytes).map_err(|e| format!("{}: {e}", temporary.display()))?;
+    std::fs::rename(&temporary, &out).map_err(|e| format!("{}: {e}", out.display()))?;
+    writeln!(
+        output,
+        "build-assets: {} images ({} bytes) packed into {}",
+        manifest.images.len(),
+        bytes.len(),
+        out.display()
+    )
+    .map_err(|e| e.to_string())?;
+    for image in &manifest.images {
+        writeln!(
+            output,
+            "  {} {}x{} (original {}x{})",
+            image.image, image.size[0], image.size[1], image.source_size[0], image.source_size[1]
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(0)
 }
 
 fn main() -> ExitCode {

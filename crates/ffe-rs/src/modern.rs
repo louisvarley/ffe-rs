@@ -17,14 +17,14 @@
 //! correction smoothly instead of repeating every fifth row).
 //!
 //! Second technique: **replacement backdrops.** A higher-resolution image of a cabin backdrop
-//! (for now read from `img-export/images/cockpit/cabin<n>.png`, the owner's upscaled export)
+//! (the owner's `Textures/CABIN<n>.png` or upscaled `images/cockpit/cabin<n>.png`, from `assets.bin`)
 //! replaces that cabin wherever the finished frame still shows the original cabin's pixels.
 //! The engine recognises the cabin by comparing the frame with the original art, so text,
 //! menus, models and the console drawn over it stay on top and the game is not consulted.
 //!
 //! Third technique: **a replacement font.** The screen records each glyph it draws (code,
 //! position, colour, clip rows) and the pixels it overwrote ([`TextLayer`]). With a
-//! higher-resolution atlas of the main font (for now `img-export/images/font/main.png`, the
+//! higher-resolution atlas of the main font (`images/font/main.png` in `assets.bin`, the
 //! owner's upscale of the `export-images` atlas), the engine takes the original glyphs out of
 //! the frame before upscaling it and draws each glyph still on screen from the atlas instead,
 //! in its colour, at the window's resolution.
@@ -561,7 +561,7 @@ fn unit(code: u8) -> Option<char> {
 }
 
 /// Where the modern engine looks for a real font: the first TrueType or OpenType file in the
-/// owner's `img-export/fonts`, else Windows' Bahnschrift, else Segoe UI.
+/// owner's `assets/fonts`, else Windows' Bahnschrift, else Segoe UI.
 pub fn font_candidates(art: &Path) -> Vec<std::path::PathBuf> {
     let mut own: Vec<std::path::PathBuf> = std::fs::read_dir(art.join("fonts"))
         .into_iter()
@@ -607,25 +607,31 @@ impl ModernRenderer {
     /// Load `cabin<n>.png` replacements from `dir` for the game's original `cabins` (320x158
     /// each). Images still at the original size are skipped. Returns one line per file used
     /// or rejected.
-    pub fn load_cabins(&mut self, dir: &Path, cabins: &[Vec<u32>]) -> Vec<String> {
+    pub fn load_cabins(
+        &mut self,
+        source: &crate::art_source::ArtSource,
+        cabins: &[Vec<u32>],
+    ) -> Vec<String> {
         let mut report = Vec::new();
         for (index, original) in cabins.iter().enumerate() {
-            // Any letter case: FFED3D's are `CABIN0.png` and so on.
-            let name = format!("cabin{index}.png");
-            let path = crate::ffed3d::find(dir, &name).unwrap_or_else(|| dir.join(&name));
-            let Ok(bytes) = std::fs::read(&path) else {
+            // FFED3D's name first (`Textures/CABIN0.png`), then the image export's.
+            let named = format!("Textures/CABIN{index}.png");
+            let exported = format!("images/cockpit/cabin{index}.png");
+            let Some(path) = source.first(&[named.as_str(), exported.as_str()]) else {
                 continue;
             };
+            let Some(bytes) = source.read(path) else {
+                continue;
+            };
+            let path = source.describe(path);
             let name = format!("cabin{index}");
             match decode_art(&bytes) {
                 Ok((_, (320, 158))) => {}
                 Ok((art, size)) => match Backdrop::new(&name, 0, original.clone(), art, size) {
                     Some(backdrop) => {
                         report.push(format!(
-                            "Modern graphics: {name} replaced by {}x{} art from {}",
-                            size.0,
-                            size.1,
-                            path.display()
+                            "Modern graphics: {name} replaced by {}x{} art from {path}",
+                            size.0, size.1,
                         ));
                         self.backdrops.retain(|other| other.name != name);
                         self.backdrops.push(backdrop);
@@ -634,7 +640,7 @@ impl ModernRenderer {
                         "Modern graphics: {name}: the game's cabin is not 320x158"
                     )),
                 },
-                Err(error) => report.push(format!("Modern graphics: {}: {error}", path.display())),
+                Err(error) => report.push(format!("Modern graphics: {path}: {error}")),
             }
         }
         report
@@ -644,11 +650,18 @@ impl ModernRenderer {
     /// is the 320x42 of it the frame shows ([`crate::screen::Screen::panel_pixels`]). Art
     /// still at the original 320x43 is skipped; larger art covers the whole bitmap, so the
     /// part for its last row, below the frame, is cut off. Says what was used or rejected.
-    pub fn load_panel(&mut self, path: &Path, original: Vec<u32>) -> Option<String> {
-        let bytes = std::fs::read(path).ok()?;
+    pub fn load_panel(
+        &mut self,
+        source: &crate::art_source::ArtSource,
+        original: Vec<u32>,
+    ) -> Option<String> {
+        // FFED3D's name for bitmap 43 first, then the image export's.
+        let path = source.first(&["Textures/tex43.png", "images/sprite/primary-043.png"])?;
+        let bytes = source.read(path)?;
+        let path = source.describe(path);
         let (mut art, size) = match decode_art(&bytes) {
             Ok(decoded) => decoded,
-            Err(error) => return Some(format!("Modern graphics: {}: {error}", path.display())),
+            Err(error) => return Some(format!("Modern graphics: {path}: {error}")),
         };
         if size == (LOGICAL_WIDTH, PANEL_BITMAP_ROWS) {
             return None;
@@ -664,10 +677,8 @@ impl ModernRenderer {
         self.backdrops.retain(|other| other.name != name);
         self.backdrops.push(backdrop);
         Some(format!(
-            "Modern graphics: {name} replaced by {}x{} art from {}",
-            size.0,
-            size.1,
-            path.display()
+            "Modern graphics: {name} replaced by {}x{} art from {path}",
+            size.0, size.1,
         ))
     }
 
@@ -676,18 +687,18 @@ impl ModernRenderer {
     }
 
     /// Load the replacement font atlas from `path`, when it is larger than the original.
-    pub fn load_font(&mut self, path: &Path) -> Option<String> {
-        let bytes = std::fs::read(path).ok()?;
+    pub fn load_font(&mut self, source: &crate::art_source::ArtSource) -> Option<String> {
+        let path = "images/font/main.png";
+        let bytes = source.read(path)?;
+        let path = source.describe(path);
         let (atlas, size) = match decode_art(&bytes) {
             Ok(decoded) => decoded,
-            Err(error) => return Some(format!("Modern graphics: {}: {error}", path.display())),
+            Err(error) => return Some(format!("Modern graphics: {path}: {error}")),
         };
         self.font = Some(HdFont::new(atlas, size)?);
         Some(format!(
-            "Modern graphics: main font from {}x{} art at {}",
-            size.0,
-            size.1,
-            path.display()
+            "Modern graphics: main font from {}x{} art at {path}",
+            size.0, size.1,
         ))
     }
 

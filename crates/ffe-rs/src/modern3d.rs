@@ -375,6 +375,9 @@ pub struct MapCache {
     /// The player's FFED3D textures (`texNNN`), shown in full colour on the textured faces
     /// whose record FFED3D replaces.
     pub ffed3d: Option<crate::ffed3d::Textures>,
+    /// The owner's replacements of FFED3D's textures (`Textures/texNNN.png` in `assets`),
+    /// which win over FFED3D's.
+    pub owner: Option<crate::ffed3d::Textures>,
 }
 
 impl MapCache {
@@ -426,9 +429,11 @@ impl Gpu3d {
         }
     }
 
-    /// Read upscaled textures from the owner's image export at `dir` (`img-export`).
-    pub fn set_art_dir(&mut self, dir: std::path::PathBuf) {
-        self.maps.art.set_dir(dir);
+    /// Read the owner's images (`assets.bin` or the `assets` folder): their replacements of
+    /// FFED3D's textures and their upscales of the original bitmaps.
+    pub fn set_art_source(&mut self, source: crate::art_source::ArtSource) {
+        self.maps.art.set_source(source.clone());
+        self.maps.owner = Some(crate::ffed3d::Textures::from_source(source));
     }
 
     /// Draw the textured faces with the `texNNN` textures of the FFED3D installed at `root`.
@@ -445,6 +450,9 @@ impl Gpu3d {
         let mut problems = std::mem::take(&mut self.maps.art.problems);
         if let Some(ffed3d) = self.maps.ffed3d.as_mut() {
             problems.append(&mut ffed3d.problems);
+        }
+        if let Some(owner) = self.maps.owner.as_mut() {
+            problems.append(&mut owner.problems);
         }
         problems
     }
@@ -1139,13 +1147,34 @@ pub fn scene(
     let mut palettes: Vec<ffe_render::Palette> = Vec::new();
     let mut palette_of: Vec<(Vec<[u8; 3]>, bool, u32)> = Vec::new();
     let mut colour_maps: Vec<ffe_render::ColourMap> = Vec::new();
-    let ffed3d = &mut cache.ffed3d;
+    // The owner's upscales of the original bitmaps, which win over FFED3D's textures.
+    let owner_upscaled: Vec<u32> = world
+        .bitmaps
+        .iter()
+        .filter(|bitmap| cache.art.has(bitmap))
+        .map(|bitmap| bitmap.bitmap)
+        .collect();
+    let (ffed3d, owner) = (&mut cache.ffed3d, &mut cache.owner);
     let mut texture_of = |solid: &Solid| {
         let texture = solid.texture.as_ref()?;
-        // FFED3D's `tex(400 + record)` in its own colours, its image stretched corner to
-        // corner over the original bitmap (`gfx.cpp` gives a quad 0..1).
-        if let (Some(record), Some(store)) = (texture.record, ffed3d.as_mut()) {
-            if let Some(map) = store.texture(crate::ffed3d::texture_number(record)) {
+        // `tex(400 + record)` in its own colours, its image stretched corner to corner over
+        // the original bitmap (`gfx.cpp` gives a quad 0..1): the owner's replacement, else
+        // (unless the owner upscaled the bitmap itself) FFED3D's.
+        let record = texture.record;
+        let colour = record.and_then(|record| {
+            let number = crate::ffed3d::texture_number(record);
+            owner
+                .as_mut()
+                .and_then(|store| store.texture(number))
+                .or_else(|| {
+                    if owner_upscaled.contains(&(texture.bitmap & 0xfff)) {
+                        return None;
+                    }
+                    ffed3d.as_mut().and_then(|store| store.texture(number))
+                })
+        });
+        {
+            if let Some(map) = colour {
                 let index = match colour_maps.iter().position(|known| known.id == map.id) {
                     Some(index) => index,
                     None => {
@@ -1602,6 +1631,23 @@ mod tests {
                 colour: true,
             })
         );
+        // The owner's `assets/Textures/tex407.png` wins over FFED3D's.
+        let owner = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(owner.path().join("assets/Textures")).unwrap();
+        let mut red = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut red, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&[200, 0, 0]).unwrap();
+        }
+        std::fs::write(owner.path().join("assets/Textures/tex407.png"), red).unwrap();
+        let (source, _) = crate::art_source::ArtSource::open(owner.path());
+        cache.owner = Some(crate::ffed3d::Textures::from_source(source.unwrap()));
+        let overridden = super::scene(&with_record, 640, 316, &mut cache, 0.0);
+        assert_eq!(overridden.colour_maps.len(), 1);
+        assert_eq!(overridden.colour_maps[0].rgba[..], [200, 0, 0, 255]);
     }
 
     #[test]

@@ -28,6 +28,10 @@ legacy/ffed3d-master/
 /upscaled/
 /extracted/
 /img-export/
+# The owner's images for Modern graphics and the pack built from them (never committed).
+/assets/
+/assets.bin
+/assets.bin.tmp
 /saves/
 *upscaled/working/
 *.ffe-cache

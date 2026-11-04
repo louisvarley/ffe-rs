@@ -60,8 +60,8 @@ Classic unchanged and blocky, Modern smooth only on edges). The presentation evi
 ## Replacement screen art: cabins and the console panel
 
 Status (2026-10-29): implemented. At startup Modern reads the owner's larger versions of
-`img-export/images/cockpit/cabin<n>.png` (the six 320x158 cabins) and
-`img-export/images/sprite/primary-043.png` (the 320x43 console panel, of which the frame shows the
+`assets/images/cockpit/cabin<n>.png` (the six 320x158 cabins) and
+`assets/images/sprite/primary-043.png` (the 320x43 console panel, of which the frame shows the
 42 rows from row 158; the art's part for the last row is cut off). Files still at the export's
 original size are ignored. Each is a `modern::Backdrop` over a full-width band of the frame: the
 renderer recognises the original art in the finished frame (a quarter of its detail pixels
@@ -232,7 +232,7 @@ the index most of each four share). A planet needs three maps on the GPU instead
 coloured textures, and new colours cost nothing to upload.
 
 The maps come from the owner's image export when it has a bigger picture than the original
-(`modern_art`): `img-export/images/<category>/primary-NNN.png` or `secondary-NNN.png` (texture,
+(`modern_art`): `assets/images/<category>/primary-NNN.png` or `secondary-NNN.png` (texture,
 planet_texture, sprite or texture_block) with its `indexed/` twin. The upscaled picture has only one
 texture record's colours, so each of its pixels takes the index of the `indexed/` key whose palette
 colour is nearest, among the indices the original has round the same texel (two slots that share a
@@ -414,9 +414,9 @@ pixels it wrote; `modern::TextLayer`, `Screen::take_text`); the presenter takes 
 frame still shows back out before upscaling (and before the GPU pass), then draws each in the
 real font after.
 
-- **Which font:** the first `.ttf`/`.otf` in `img-export/fonts` (sorted by name), else Windows'
+- **Which font:** the first `.ttf`/`.otf` in `assets/fonts` (sorted by name), else Windows'
   Bahnschrift, else Segoe UI (`modern::font_candidates`; nothing is bundled). Without one, the
-  owner's upscaled atlas (`img-export/images/font/main.png`) is used; without that, the original.
+  owner's upscaled atlas (`assets/images/font/main.png`) is used; without that, the original.
 - **Same layout as the original:** each glyph stands on the original's baseline (row 7 of the
   glyph), with capitals 6.5 rows tall (the original's are 7; a little shorter keeps descenders
   and accents clear of the next line), condensed by one factor for the whole font so its letters
@@ -483,3 +483,25 @@ with their text layer, like the flight and station screens (deviation note in
 
 Each one is another technique inside `modern`, selected with the same switch, and Classic stays
 exactly as it is.
+
+## The owner's images: `assets/` and `assets.bin` (2026-11-04)
+
+Modern graphics read the owner's images from `assets.bin` (`ffe_content::art_pack`,
+`ffe_rs::art_source`), which `launcher.bat` and `play.bat` build after `cargo build`
+with `ffe-tools build-assets` from the ignored `assets/` folder (the former
+`img-export/`); without a pack the game reads the folder directly. The pack is a
+deterministic stored ZIP with a manifest (each file's size and SHA-256), checked on
+reading. It holds:
+
+- every file under `assets/Textures/` and `assets/MODELS/`, named as FFED3D names its
+  own (`Textures/tex450.png`, `Textures/CABIN0.png`): the owner's replacements of
+  FFED3D's art;
+- the image export's images whose size differs from the original's (`source_size` in
+  the export manifest), with their `indexed/` keys and the font atlas's `main.json`.
+
+What wins, for each picture: a model face's texture, the owner's `Textures/tex(400 +
+record)`, else the owner's upscale of its bitmap (recoloured per face as above), else
+FFED3D's `tex(400 + record)`, else the original; a cabin, `Textures/CABIN<n>.png`, else
+`images/cockpit/cabin<n>.png` (FFED3D's own cabins are not used); the console panel,
+`Textures/tex43.png`, else `images/sprite/primary-043.png`; the font atlas,
+`images/font/main.png`. Real fonts are still read from `assets/fonts`.

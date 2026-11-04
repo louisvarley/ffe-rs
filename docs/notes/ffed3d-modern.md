@@ -83,6 +83,14 @@ shows FFED3D's `texNNN` textures on the original models' textured faces.
   `sphere.x`/`atmo.x` for planets' atmospheres; planets drawn by
   `DrawGeosphere` on six subdivided cube faces with `planet.fx`.
 
+## The owner's overrides
+
+The owner's own images win over FFED3D's: `assets/Textures/tex<N>.png` and
+`assets/Textures/CABIN<n>.png` (FFED3D's names), packed with the export's upscales
+into `assets.bin` by the build (`docs/notes/modern-graphics.md`, "The owner's
+images"). A model face takes the owner's `tex(400 + record)`, else the owner's
+upscale of its bitmap, else FFED3D's, else the original.
+
 ## Plan
 
 Each stage keeps the original model as the fallback and never touches game
