@@ -231,21 +231,38 @@ prints every mission's listing.
   back its AI state and target.
 - **19 (F772)** makes a ship of F772's type list (F658/F635's model,
   `npc::model_for_type`), where the player is until **54 (F702)** places it:
-  F1530 advances the shared pair and F1507 (`objects::orbit_point`) puts it
-  on the orbit of the packed distance (`mantissa * 2^(exponent - 15)` mm)
-  round the parent's frame (0 the system's root), with the pair's words as
-  the longitude and the phase. **57** stops it. **60** puts
+  F1530 advances the shared pair and F1507 with F1508
+  (`objects::orbit_state`) puts it on the orbit of the packed distance
+  (`mantissa * 2^(exponent - 15)` mm) round the parent's frame (0 the
+  system's root), with the pair's words as the longitude and the phase.
+  F1507 leaves the step between two 0x10-unit orbit angles in `+0x8c`,
+  which for a ship is its velocity (about 320 km/s); F702 zeroes its yaw
+  rate and side thrust. **57** stops it. **60** puts
   it in AI state 0xb behind its leader at `DATA_001705`'s place
   (`npc::SCRIPT_FORMATIONS`, scaled by `npc::FORMATION_SCALE` as F695's
   escorts are). **39 (F664/F672)** makes a ship of a type named from its
   seed (F791 kind 0x12) waiting in a starport's bay until its departure
   time (F24/F23 of the script seconds); with no starport it starts far out
-  in transit. **41-43 (F669)** keep their attackers, now in AI state 9:
-  F770 flies them at their target and, within F1680's distance class 0xa
+  in transit. **41-43 (F669)** make their attackers in AI state 9 on
+  F702's orbit of 0x5000 at exponent 0x31 (about 2.3 AU) round the root
+  (`scripts::ATTACKER_ORBIT`), draw F1530 for the approach words
+  `+0x102..+0x106` and raise event 0x17 (after the run: the port's F48
+  raises outside the statement). F770 flies them at their target with the
+  ship physics (F597's guidance, F601) and, within F1680's distance class 0xa
   (about 8 km), puts them in state 1 with event 0x17 and hails the player
   with `0x98d0` ("You're going to regret dealing with ...!", the ship's
-  `+0xa0` word naming the employer; `scripts::approaches`). F773's F703
-  gives each F772 ship its `+0xa0` word from the shared pair.
+  `+0xa0` word naming the employer; `scripts::approaches`), stops the song
+  (F1903) and sets JJFFE's combat velocity (`FUNC_SetupCombatVelocity`,
+  also on F750's under-attack path: the player's velocity, or zero below
+  0x9c40 of altitude or in a frame of class bit 0x10). From 2.3 AU an
+  attacker reaches the player in about four game days at 100x or 1000x;
+  at 10000x the port's guidance overshoots in its 200 s steps and holds it
+  a few hundred km off until the acceleration drops, because F597's
+  time-accelerated branch (which reads the approach words) is not ported.
+  F773's F703 gives each F772 ship its `+0xa0` word from the shared pair.
+  F1657 (`dust::distance_class`) adds 32 when it reads the high dwords;
+  the port's version left that out, so every object beyond 2^32 mm read as
+  close (fixed 2026-11-04).
 - **F37's object targets.** 0x3e sets the AI state (`NpcShip::set_ai`,
   `npc::State::from_original`; 0x17, the scripts' parked state, holds the
   ship in place) and raises event 0x17; 0x41 the target; 0x24/0x3d the
@@ -275,11 +292,16 @@ prints every mission's listing.
   their ids back; a script canister is not lost to range and its removal
   (scooped, destroyed) reaches the scripts as event 0x16.
 - **Objects.** **48 (F297)** puts a building of a model on a planet's
-  surface at `DATA_007130/7131`'s latitude and longitude; **50 (F40)** puts
-  an object of a model on F1507's orbit round a body, with the `+0xc6`
-  longitude and the phase's `arg << 16`. Both are fixed, shootable objects
-  (`npc::script_object`, `ships::object_spec`) that `apply` holds to their
-  body each frame.
+  terrain at `DATA_007131/7130`'s latitude and longitude with F879, as the
+  starports are placed (`Placement::surface_object`,
+  `Navigator::surface_site`), in the planet's rotating frame with F879's
+  rows; **50 (F40)** puts an object of a model on an orbit round a body:
+  F1510's phase of its rate at the clock plus `arg << 16`, F1507/F1508's
+  place with the `+0xc6` longitude and F1675's rows from the spin and tilt,
+  then F866 moves and turns it as the clock runs (`objects::Orbiter`).
+  Both are shootable objects (`npc::script_object`, `ships::object_spec`)
+  that `apply` keeps at their body each frame; a save keeps the F879 place
+  and the orbiter (older saves keep their offset).
 - **Contracts.** **37/38 (F314/F315)** add and remove the scripts' own
   records in the contracts list (six at most with the removal jobs); the
   contracts page asks the scripts for each row (F316: global 8 the record,
@@ -314,10 +336,7 @@ and two attackers), arriving in the target system 0x6a45718 (its target waits in
 starport's bay until its departure), killing the target after it has left
 (F236's offence) and the $1500 reward at home.
 
-Still stand-ins (deviation 2026-11-03 in `docs/DEVIATIONS.md`): F669's
-attackers start 25 km from the player (F702's own orbit is 0x5000/0x31
-round the root); F1508's in-step interpolation and F1507's velocity are
-not applied; F879's surface point is the latitude/longitude direction at
-the planet's radius, not the terrain height; F40's orbit does not move
-(F1510's time term is left out). F770's hail does not stop the music
-(F1903) or set up the combat velocity.
+The stand-ins of the 2026-11-03 deviation were replaced on 2026-11-04 by
+the original's placements above. What remains of it: the journal viewer
+(see `journal.md`) and the order of F669's event 0x17 (raised once the run
+ends).

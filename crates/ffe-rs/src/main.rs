@@ -2028,7 +2028,20 @@ fn run() -> Result<(), String> {
                     // What the scripts asked for: their ships, canisters,
                     // placements, damage, names and contracts.
                     let at = ship_position(&original, &state);
-                    ffe_rs::scripts::apply(&mut state, nav, &cache, at);
+                    let made = ffe_rs::scripts::apply(&mut state, nav, &cache, at);
+                    // F669 raises event 0x17 for each attacker it makes.
+                    for id in made {
+                        if let Some((Err(error), _)) = ffe_rs::scripts::with_hooks(
+                            &mut state,
+                            nav,
+                            &cache,
+                            |scripts, hooks, today| {
+                                scripts.raise(&assets.image, hooks, today, 0x17, 0, id)
+                            },
+                        ) {
+                            eprintln!("mission scripts: {error}");
+                        }
+                    }
                     // F770: a script's attacker that has closed on its target
                     // attacks (event 0x17) and hails the player (0x98d0).
                     for (id, seed, hails) in ffe_rs::scripts::approaches(nav, at) {
@@ -2041,6 +2054,14 @@ fn run() -> Result<(), String> {
                             },
                         ) {
                             eprintln!("mission scripts: {error}");
+                        }
+                        if hails {
+                            // F1903 stops the song; JJFFE's combat velocity.
+                            sound.stop_song();
+                            let sheltered = sheltered_frame(nav);
+                            if let Some(model) = original.as_mut() {
+                                model.setup_combat_velocity(sheltered);
+                            }
                         }
                         if let (true, Some(messages)) = (hails, script_messages.as_ref()) {
                             let mut entry = ffe_core::script::menu::Entry {
@@ -6214,9 +6235,14 @@ fn run() -> Result<(), String> {
                         | ffe_rs::navigation::ShipEvent::AlertCleared
                         | ffe_rs::navigation::ShipEvent::Escaped { .. } => {}
                         ffe_rs::navigation::ShipEvent::UnderAttack { name: _ } => {
-                            // F750: F217 drops time to 1x; only when it was
+                            // F750: JJFFE's combat velocity, then F217 drops
+                            // time to 1x; only when it was
                             // accelerated does F349 post 0x98c3 and the siren
                             // and battle song (F1906 0x1e, song 14) start.
+                            let sheltered = sheltered_frame(nav);
+                            if let Some(model) = original.as_mut() {
+                                model.setup_combat_velocity(sheltered);
+                            }
                             if acceleration != 0 {
                                 acceleration = 0;
                                 held_acceleration = None;
@@ -8953,6 +8979,14 @@ fn pad_bodies(nav: &ffe_rs::navigation::Navigator) -> Option<PadBodies> {
 /// it is running, else the prototype state's (the sandbox and the pre-launch
 /// screens have no original model, and the old `[0; 3]` fallback put the ship at
 /// the system origin for every lock and range readout).
+/// `FUNC_SetupCombatVelocity`'s frame test: the player's frame (the root
+/// when none) has class bit 0x10 (`+0x14c`).
+fn sheltered_frame(nav: &Navigator) -> bool {
+    nav.bodies
+        .get(nav.frame().unwrap_or(0))
+        .is_some_and(|body| body.class & 0x10 != 0)
+}
+
 fn ship_position(original: &Option<OriginalFlight>, state: &Flight) -> [i64; 3] {
     original.as_ref().map_or_else(
         || {

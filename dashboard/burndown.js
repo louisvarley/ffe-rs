@@ -1201,6 +1201,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-03",
       remaining: 91,
       note: "gameplay-41 progress: the station's adverts are F326's own entries, so the scripts' adverts fall among them on the board as F346 places them; the scripts' attackers close on their target in AI state 9 and, within F1680's class 0xa, attack (event 0x17) and hail the player with 0x98d0 (F770); F773's F703 gives the scripts' ships their +0xa0 word from the shared pair. Left as stand-ins: the attackers' starting place, F1508's interpolation, F879's terrain height and F40's orbital motion."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 91,
+      note: "gameplay-41 progress: the mission scripts' placement stand-ins replaced with the original's. F669's attackers start on F702's 2.3 AU orbit round the root and close with the ship physics; F702 places with F1507/F1508 and gives the ship F1507's velocity; F297's buildings stand on F879's terrain; F40's objects move and turn as F866 moves them; F770's hail stops the song and sets JJFFE's combat velocity (also on F750's path); F669 raises its event 0x17. F1657's distance class now adds 32 for the high dwords, so far ships no longer read as close."
     }
   ]
 };

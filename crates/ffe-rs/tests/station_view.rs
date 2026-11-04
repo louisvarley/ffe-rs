@@ -1236,8 +1236,10 @@ fn script_advert_macros_ask_the_scripts() {
     assert!(found.iter().all(|text| !text.contains("[Mi")), "{found:?}");
 }
 
-/// F669 for a script: statement 41's attacker is made from F772's type list
-/// and placed near the player, hostile.
+/// F669 for a script: statement 41's attacker is made from F772's type list,
+/// hostile, and put on F702's orbit of 0x5000:0x31 (about 2.3 AU) round the
+/// system's root with F1507's velocity words; F669 then draws its approach
+/// words and reports the ship for event 0x17.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn a_script_attacker_joins_the_system() {
@@ -1256,19 +1258,47 @@ fn a_script_attacker_joins_the_system() {
             target: ffe_rs::scripts::PLAYER_ID,
             word: 0,
         });
-    ffe_rs::scripts::apply(&mut state, &mut nav, &cache, near);
+    let random = nav.random;
+    let made = ffe_rs::scripts::apply(&mut state, &mut nav, &cache, near);
+    assert_eq!(made, [id as i32 + ffe_rs::scripts::SHIP_IDS]);
     assert_eq!(nav.ships.len(), before + 1);
     let ship = nav.ships.last().unwrap();
     assert_eq!(ship.id, id);
     assert!(ship.hostile);
     assert_eq!(ship.ai_state(), 9);
     assert!(ffe_core::npc::SHIP_TYPES[0xc].contains(&ship.model));
-    let range: f64 = (0..3)
-        .map(|k| (ship.position[k] - near[k]) as f64)
-        .map(|d| d * d)
+    let range: f64 = ship
+        .position
+        .iter()
+        .map(|v| (*v as f64).powi(2))
         .sum::<f64>()
         .sqrt();
-    assert!((range - 25_000_000.0).abs() < 6_000_000.0, "{range}");
+    let orbit = ffe_rs::scripts::packed_distance(ffe_rs::scripts::ATTACKER_ORBIT);
+    assert!((range - orbit).abs() < orbit * 1e-4, "{range} {orbit}");
+    assert!((orbit / 1.495_978_707e14 - 2.35).abs() < 0.05, "{orbit}");
+    // F1507's `+0x8c` words: the step between two 0x10-unit orbit angles.
+    let step = 2.0 * std::f64::consts::PI * 16.0 / 65_536.0 * 2_147_483_648.0;
+    let speed = ship
+        .motion
+        .velocity
+        .iter()
+        .map(|v| f64::from(*v).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!((speed - step).abs() < step * 0.01, "{speed} {step}");
+    // F772's F703, F702's F1530 and F669's own F1530 for the approach words,
+    // after what the ship's set-up draws.
+    let mut check = random;
+    let _ = ffe_core::npc::script_attacker(
+        &ffe_rs::ships::npc_spec(&cache, ship.model).unwrap(),
+        id,
+        [0; 3],
+        &mut check,
+    );
+    for _ in 0..3 {
+        check.advance();
+    }
+    assert_eq!(nav.random, check);
     // F770: still far off, it keeps closing; within distance class 0xa it
     // attacks and hails the player.
     assert!(ffe_rs::scripts::approaches(&mut nav, near).is_empty());
@@ -1282,10 +1312,11 @@ fn a_script_attacker_joins_the_system() {
 }
 
 /// The mission ships' statements carried out in a real system: a ship made
-/// (19) and placed 8.4 km from the player (54), a second flying in its
-/// formation (60), a canister (52) and a building on a planet (48), then
-/// the script's damage destroying the first ship (21) and the objects
-/// leaving the game.
+/// (19) and placed 8.4 km from the player (54) with F1507's velocity, a
+/// second flying in its formation (60), a canister (52), a building on
+/// Hope's terrain (48, F879) and an object on an orbit round it (50, F40,
+/// moved by F866), then the script's damage destroying the first ship (21)
+/// and the objects leaving the game.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn mission_ships_are_made_placed_steered_and_destroyed() {
@@ -1299,11 +1330,15 @@ fn mission_ships_are_made_placed_steered_and_destroyed() {
     let planet = nav
         .bodies
         .iter()
-        .position(|body| body.kind == ffe_rs::navigation::Kind::Planet)
+        .position(|body| body.name == "Hope")
         .unwrap();
     let leader = first as i32 + SHIP_IDS;
     let wingman = leader + 1;
     let building = leader + 2;
+    let satellite = leader + 3;
+    // F40's orbit: 0x6000 at exponent 0x22 (about 12,900 km), at a rate
+    // that turns it 2048 of F1506's 65,536 angle units a day.
+    let orbit_radius = 0x0022_6000;
     state.script_actions = vec![
         Action::Create {
             ship: first,
@@ -1340,6 +1375,20 @@ fn mission_ships_are_made_placed_steered_and_destroyed() {
                 longitude: 0,
             },
         },
+        Action::Object {
+            ship: first + 3,
+            model: 0x66,
+            body: ffe_rs::scripts::BODY_IDS + planet as i32,
+            seed: 9,
+            place: Place::Orbit {
+                radius: orbit_radius,
+                offset: 0x10,
+                rate: 0x0100_0000,
+                longitude: 0x1000,
+                spin: 0,
+                tilt: 0,
+            },
+        },
     ];
     ffe_rs::scripts::apply(&mut state, &mut nav, &cache, player);
     let find = |nav: &Navigator, id: i32| {
@@ -1357,6 +1406,17 @@ fn mission_ships_are_made_placed_steered_and_destroyed() {
     // F1507's Q31 direction times the mantissa, to its rounding.
     let expected = ffe_rs::scripts::packed_distance(0x0017_7fff);
     assert!((range - expected).abs() < expected * 1e-4, "{range}");
+    // F1507's `+0x8c` words are the ship's velocity.
+    assert!(lead.motion.velocity.iter().any(|v| *v != 0));
+    let speed = lead.velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let words = lead
+        .motion
+        .velocity
+        .iter()
+        .map(|v| f64::from(*v).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!((speed - words * ffe_core::npc::MM_PER_VELOCITY_UNIT).abs() < 1.0);
     let wing = find(&nav, wingman).unwrap();
     assert_eq!(wing.state, ffe_core::npc::State::Escort);
     assert_eq!(wing.leader, Some(lead.id));
@@ -1371,18 +1431,36 @@ fn mission_ships_are_made_placed_steered_and_destroyed() {
         .map(|d| d * d)
         .sum::<f64>()
         .sqrt();
-    let surface = if body.inner_radius > 0 {
-        body.inner_radius
-    } else {
-        body.radius
-    } as f64;
-    // On the solid surface, to the rows' rounding.
+    // F879's terrain point, turned with the planet's rows: between the
+    // planet's solid and outer radii.
+    let (local, _) = nav.surface_site(&cache, planet, 0x66, 0x4000, 0).unwrap();
+    let terrain = local
+        .iter()
+        .map(|v| (*v as f64).powi(2))
+        .sum::<f64>()
+        .sqrt();
     assert!(
-        (height - surface).abs() < surface * 1e-6,
-        "{height} {surface}"
+        (height - terrain).abs() < terrain * 1e-6,
+        "{height} {terrain}"
     );
+    assert!(
+        (body.inner_radius as f64) < height && height < body.radius as f64,
+        "{height} {} {}",
+        body.inner_radius,
+        body.radius
+    );
+    // F40's object on its orbit round the planet, F1507/F1508's place.
+    let moon = find(&nav, satellite).expect("the orbiting object exists");
+    let orbit_at = |nav: &Navigator, ship: &ffe_core::npc::NpcShip| -> [i64; 3] {
+        let body = &nav.bodies[planet];
+        std::array::from_fn(|k| ship.position[k] - body.position[k])
+    };
+    let length = |v: [i64; 3]| v.iter().map(|c| (*c as f64).powi(2)).sum::<f64>().sqrt();
+    let wanted = ffe_rs::scripts::packed_distance(orbit_radius);
+    let first_place = orbit_at(&nav, &moon);
+    assert!((length(first_place) - wanted).abs() < wanted * 1e-4);
     let present = ffe_rs::scripts::present(&nav);
-    assert!([leader, wingman, building, TAG_IDS]
+    assert!([leader, wingman, building, satellite, TAG_IDS]
         .iter()
         .all(|id| present.contains(id)));
     // A save keeps them: the ships with the fields the scripts set, the
@@ -1393,12 +1471,21 @@ fn mission_ships_are_made_placed_steered_and_destroyed() {
     let wing = find(&nav, wingman).unwrap();
     assert_eq!((wing.ai_state(), wing.script_target), (0xb, leader));
     assert_eq!(find(&nav, building).unwrap().seed, 7);
-    assert_eq!(nav.script_sites.len(), 1);
+    assert_eq!(nav.script_sites.len(), 2);
     let random = nav.random;
     state.script_actions.clear();
     ffe_rs::scripts::apply(&mut state, &mut nav, &cache, player);
     assert_eq!(nav.random, random, "holding a site draws nothing");
     assert_eq!(find(&nav, building).unwrap().position, base.position);
+    assert_eq!(orbit_at(&nav, &find(&nav, satellite).unwrap()), first_place);
+    // F866: a day later the object has moved on round its orbit.
+    nav.transfer(&cache, 86_400.0);
+    state.script_actions.clear();
+    ffe_rs::scripts::apply(&mut state, &mut nav, &cache, player);
+    let later = orbit_at(&nav, &find(&nav, satellite).unwrap());
+    assert!((length(later) - wanted).abs() < wanted * 1e-4);
+    let moved = length(std::array::from_fn(|k| later[k] - first_place[k]));
+    assert!(moved > wanted * 0.01, "{moved}");
     // F953's most damage (statement 21's -1) destroys the leader, and the
     // canister goes with statement 51.
     state.script_actions = vec![

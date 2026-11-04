@@ -161,12 +161,16 @@ pub enum Action {
 pub enum Place {
     /// F879's latitude and longitude words on the planet's surface.
     Surface { latitude: u16, longitude: u16 },
-    /// F40's orbit: F1507 with the packed `distance`, `+0xc6`'s longitude
-    /// and `+0xbe`'s phase.
+    /// F40's orbit: the packed `radius` (`+0xb0`), the phase `offset` added
+    /// to F1510's high dword (`<< 16`), the `rate` (`+0xc2`), `+0xc6`'s
+    /// longitude, the `+0xc8` spin and `+0xcc` tilt.
     Orbit {
-        distance: i32,
-        longitude: i32,
-        phase: u32,
+        radius: i32,
+        offset: i32,
+        rate: u32,
+        longitude: i16,
+        spin: u8,
+        tilt: i16,
     },
 }
 
@@ -746,8 +750,8 @@ impl Host for Hooks<'_> {
                 });
                 0
             }
-            // F40(model, parent, seed, orbit distance, ...): an object on an
-            // orbit round the parent.
+            // F40(model, parent, seed, radius, phase, rate, longitude,
+            // spin, tilt): an object on an orbit round the parent.
             50 => {
                 let model = arg(0) as u32;
                 let ship = self.new_ship(model, 0x0e, 0, arg(2));
@@ -756,13 +760,13 @@ impl Host for Hooks<'_> {
                     model,
                     body: arg(1),
                     seed: arg(2),
-                    // F40: the phase is F1510's time term (not modelled:
-                    // the object does not move) plus `arg(4) << 16`; the
-                    // longitude is the `+0xc6` word.
                     place: Place::Orbit {
-                        distance: arg(3),
-                        longitude: i32::from(arg(6) as i16),
-                        phase: (arg(4) as u32) << 16,
+                        radius: arg(3),
+                        offset: arg(4),
+                        rate: arg(5) as u32,
+                        longitude: arg(6) as i16,
+                        spin: arg(7) as u8,
+                        tilt: arg(8) as i16,
                     },
                 });
                 ship as i32 + SHIP_IDS
@@ -1399,6 +1403,63 @@ fn random_direction(random: &mut Random) -> [f64; 3] {
     ]
 }
 
+/// F669's orbit for its attackers, `0x5000` at exponent `0x31` (about
+/// 2.3 AU) round the system's root.
+pub const ATTACKER_ORBIT: i32 = 0x0031_5000;
+
+/// F702: F1530 advances the shared pair and F1507/F1508 put `object` on the
+/// orbit of the packed `distance` round `origin`, with the pair's words as
+/// the longitude and the phase. A ship takes F1507's `+0x8c` words as its
+/// velocity and F702 zeroes its yaw rate and side thrust (`+0xb4..+0xb8`).
+fn place_on_orbit(
+    nav: &mut crate::navigation::Navigator,
+    sine: &ffe_core::model_math::SineTable,
+    object: i32,
+    origin: [i64; 3],
+    distance: i32,
+) {
+    nav.random.advance();
+    let (point, words) = ffe_core::objects::orbit_state(
+        sine,
+        packed_ffp(distance),
+        nav.random.a as i32,
+        nav.random.b,
+    );
+    let at: [i64; 3] = std::array::from_fn(|k| origin[k].wrapping_add(point[k]));
+    let velocity = words.map(|v| f64::from(v) * ffe_core::npc::MM_PER_VELOCITY_UNIT);
+    if let Some(ship) = ship_of_mut(nav, object) {
+        ship.position = at;
+        ship.anchor = at;
+        ship.velocity = velocity;
+        ship.speed = velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
+        ship.motion.velocity = words;
+        ship.motion.rate[2] = 0;
+        ship.motion.thrust[0] = 0;
+        ship.motion.thrust[1] = 0;
+    } else if let Some(effect) = nav.effects.iter_mut().find(|e| e.tag == Some(object)) {
+        effect.position = at;
+        effect.velocity = velocity;
+    }
+}
+
+/// The rows of an object as its forward and up axes.
+fn set_rows(ship: &mut ffe_core::npc::NpcShip, rows: &[i32; 9]) {
+    let axis = |row: usize| {
+        let v: [f64; 3] = std::array::from_fn(|k| f64::from(rows[3 * row + k]));
+        let length = v.iter().map(|c| c * c).sum::<f64>().sqrt();
+        if length > 0.0 {
+            v.map(|c| c / length)
+        } else {
+            v
+        }
+    };
+    let (up, forward) = (axis(1), axis(2));
+    if forward.iter().any(|c| *c != 0.0) && up.iter().any(|c| *c != 0.0) {
+        ship.forward = forward;
+        ship.up = up;
+    }
+}
+
 /// The ship spec for `model`, else another of F772's type list `kind`.
 fn spec_for(
     cache: &ffe_content::VerifiedCache,
@@ -1421,15 +1482,17 @@ fn spec_for(
 /// Carry out the actions the scripts queued, in order: create, place and
 /// steer their ships, damage and name objects, make their canisters and
 /// contracts. `player` is the player's position in the system frame.
+/// Returns the ids of the ships F669 made, for its event 0x17.
 pub fn apply(
     state: &mut crate::flight::Flight,
     nav: &mut crate::navigation::Navigator,
     cache: &ffe_content::VerifiedCache,
     player: [i64; 3],
-) {
+) -> Vec<i32> {
     use ffe_core::npc::{self, State};
     let actions = std::mem::take(&mut state.script_actions);
-    let sine = if actions.is_empty() {
+    let mut made_attackers = Vec::new();
+    let sine = if actions.is_empty() && nav.script_sites.iter().all(|site| site.orbit.is_none()) {
         None
     } else {
         cache
@@ -1456,17 +1519,23 @@ pub fn apply(
                 let Some(spec) = spec_for(cache, model, None) else {
                     continue;
                 };
-                // F669's F702: the port's stand-in places the attacker 25 km
-                // from the player.
-                let direction = random_direction(&mut nav.random);
-                let position = std::array::from_fn(|k| player[k] + (direction[k] * 25.0e6) as i64);
-                let mut made = npc::script_attacker(&spec, ship, position, &mut nav.random);
+                let mut made = npc::script_attacker(&spec, ship, [0; 3], &mut nav.random);
+                // F772's F703: F1530, then `+0xa0` is the pair's first word.
                 nav.random.advance();
                 made.seed = nav.random.a as i32;
                 made.script_target = target;
                 made.bounty = word.max(0) as u32;
                 made.set_ai(9, target_of(target));
                 nav.ships.push(made);
+                let id = ship as i32 + SHIP_IDS;
+                // F669: F702 puts it on its orbit round the root, then F1530
+                // gives the `+0x102..+0x106` approach words (read only by
+                // F597's accelerated branch, which is not ported).
+                if let Some(sine) = sine.as_ref() {
+                    place_on_orbit(nav, sine, id, [0; 3], ATTACKER_ORBIT);
+                }
+                nav.random.advance();
+                made_attackers.push(id);
             }
             Action::Departure {
                 ship,
@@ -1519,8 +1588,7 @@ pub fn apply(
                 parent,
                 distance,
             } => {
-                // F702: `+0x56` is the parent's frame (0 the root's), F1530
-                // advances the pair and F1507 puts the object on the orbit.
+                // F702: `+0x56` is the parent's frame (0 the root's).
                 let origin = if parent == 0 {
                     [0; 3]
                 } else {
@@ -1529,23 +1597,7 @@ pub fn apply(
                 let Some(sine) = sine.as_ref() else {
                     continue;
                 };
-                nav.random.advance();
-                let point = ffe_core::objects::orbit_point(
-                    sine,
-                    packed_ffp(distance),
-                    nav.random.a as i32,
-                    nav.random.b,
-                );
-                let at: [i64; 3] = std::array::from_fn(|k| origin[k].wrapping_add(point[k]));
-                if let Some(ship) = ship_of_mut(nav, object) {
-                    ship.position = at;
-                    ship.anchor = at;
-                    ship.velocity = [0.0; 3];
-                    ship.speed = 0.0;
-                } else if let Some(effect) = nav.effects.iter_mut().find(|e| e.tag == Some(object))
-                {
-                    effect.position = at;
-                }
+                place_on_orbit(nav, sine, object, origin, distance);
             }
             Action::Stop { object } => {
                 if let Some(ship) = ship_of_mut(nav, object) {
@@ -1696,69 +1748,72 @@ pub fn apply(
                 let index = usize::try_from(body - BODY_IDS)
                     .ok()
                     .filter(|index| *index < nav.bodies.len());
-                let (offset, surface) = match (place, index) {
-                    (
-                        Place::Surface {
-                            latitude,
-                            longitude,
-                        },
-                        Some(index),
-                    ) => {
-                        // F879's up row (the second row of its latitude and
-                        // longitude matrix) on the planet's solid surface.
-                        let angle = |word: u16| f64::from(word) * std::f64::consts::TAU / 65_536.0;
-                        let (lat, lon) = (angle(latitude), angle(longitude));
-                        let up = [lon.cos() * lat.cos(), lon.sin(), -lon.cos() * lat.sin()];
-                        let planet = &nav.bodies[index];
-                        let radius = if planet.inner_radius > 0 {
-                            planet.inner_radius
-                        } else {
-                            planet.radius
-                        };
-                        (up.map(|v| v * radius as f64), true)
-                    }
-                    (
-                        Place::Orbit {
-                            distance,
-                            longitude,
-                            phase,
-                        },
-                        _,
-                    ) => match sine.as_ref() {
-                        Some(sine) => (
-                            ffe_core::objects::orbit_point(
-                                sine,
-                                packed_ffp(distance),
-                                longitude,
-                                phase,
-                            )
-                            .map(|v| v as f64),
-                            false,
-                        ),
-                        None => continue,
-                    },
-                    (Place::Surface { .. }, None) => ([0.0; 3], false),
+                let clock = crate::navigation::clock_words(nav.clock);
+                let mut site = crate::navigation::ScriptSite {
+                    ship,
+                    system: nav.current_code(),
+                    body: index.unwrap_or(0),
+                    offset: [0.0; 3],
+                    surface: false,
+                    local: None,
+                    orbit: None,
                 };
+                match place {
+                    Place::Surface {
+                        latitude,
+                        longitude,
+                    } => {
+                        // F297's F879: on the planet's terrain, in its
+                        // rotating frame.
+                        let Some(index) = index else {
+                            continue;
+                        };
+                        let Some(placed) =
+                            nav.surface_site(cache, index, model, latitude, longitude)
+                        else {
+                            eprintln!("mission scripts: F879 cannot place model {model}");
+                            continue;
+                        };
+                        site.local = Some(placed);
+                        site.surface = true;
+                    }
+                    Place::Orbit {
+                        radius,
+                        offset,
+                        rate,
+                        longitude,
+                        spin,
+                        tilt,
+                    } => {
+                        let (Some(sine), Some(class)) =
+                            (sine.as_ref(), crate::ships::model_class(cache, model))
+                        else {
+                            continue;
+                        };
+                        site.orbit = Some(ffe_core::objects::Orbiter::new(
+                            sine,
+                            radius as u32,
+                            offset,
+                            rate,
+                            longitude,
+                            spin,
+                            tilt,
+                            class,
+                            clock,
+                        ));
+                    }
+                }
                 let mut made = npc::script_object(&spec, ship, player, &mut nav.random);
                 made.seed = seed;
                 nav.ships.push(made);
-                match index {
-                    Some(body) => {
-                        let system = nav.current_code();
-                        nav.script_sites.push(crate::navigation::ScriptSite {
-                            ship,
-                            system,
-                            body,
-                            offset,
-                            surface,
-                        });
-                    }
-                    None => {
-                        let at = std::array::from_fn(|k| player[k] + offset[k] as i64);
-                        if let Some(made) = nav.ships.last_mut() {
-                            made.position = at;
-                            made.anchor = at;
-                        }
+                if index.is_some() {
+                    nav.script_sites.push(site);
+                } else if let Some(orbit) = site.orbit {
+                    // F40 round the root.
+                    if let Some(made) = nav.ships.last_mut() {
+                        made.position = orbit.position;
+                        made.anchor = orbit.position;
+                        set_rows(made, &orbit.rows);
                     }
                 }
             }
@@ -1766,20 +1821,42 @@ pub fn apply(
                 // F297/F40's objects stay with their body.
                 let sites = std::mem::take(&mut nav.script_sites);
                 let system = nav.current_code();
+                let clock = crate::navigation::clock_words(nav.clock);
                 let mut kept = Vec::new();
-                for site in sites.into_iter().filter(|site| site.system == system) {
+                for mut site in sites.into_iter().filter(|site| site.system == system) {
                     let Some(body) = nav.bodies.get(site.body) else {
                         continue;
                     };
-                    let offset: [f64; 3] = if site.surface {
-                        let rows = body.orientation;
-                        std::array::from_fn(|k| {
-                            (0..3).map(|i| site.offset[i] * rows[i][k]).sum::<f64>()
-                        })
-                    } else {
-                        site.offset
-                    };
-                    let at: [i64; 3] = std::array::from_fn(|k| body.position[k] + offset[k] as i64);
+                    let (offset, rows): ([i64; 3], Option<[i32; 9]>) =
+                        if let (Some(orbit), Some(sine)) = (site.orbit.as_mut(), sine.as_ref()) {
+                            // F866 moves F40's object on its orbit.
+                            orbit.advance(sine, clock);
+                            (orbit.position, Some(orbit.rows))
+                        } else if let Some((local, rows)) = site.local {
+                            // F1677: the rotating frame's place turned by
+                            // the body's rows, as the starports are.
+                            let (vector, shift) = ffe_core::frames::truncate(local, 0x1c);
+                            (
+                                ffe_core::frames::shift_up(
+                                    ffe_core::frames::vec_mat_mul(
+                                        vector.map(|v| v as i32),
+                                        &body.rows,
+                                    ),
+                                    shift,
+                                ),
+                                Some(ffe_core::frames::mat_mat_mul(&rows, &body.rows)),
+                            )
+                        } else if site.surface {
+                            let turned = body.orientation;
+                            let offset: [f64; 3] = std::array::from_fn(|k| {
+                                (0..3).map(|i| site.offset[i] * turned[i][k]).sum::<f64>()
+                            });
+                            (offset.map(|v| v as i64), None)
+                        } else {
+                            (site.offset.map(|v| v as i64), None)
+                        };
+                    let at: [i64; 3] =
+                        std::array::from_fn(|k| body.position[k].wrapping_add(offset[k]));
                     let Some(ship) = nav
                         .ships
                         .iter_mut()
@@ -1789,6 +1866,9 @@ pub fn apply(
                     };
                     ship.position = at;
                     ship.anchor = at;
+                    if let Some(rows) = rows {
+                        set_rows(ship, &rows);
+                    }
                     kept.push(site);
                 }
                 nav.script_sites = kept;
@@ -1838,6 +1918,7 @@ pub fn apply(
             }
         }
     }
+    made_attackers
 }
 
 /// F57's new game for the scripts: start mission 0 and publish the

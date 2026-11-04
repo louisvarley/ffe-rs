@@ -214,16 +214,16 @@ These do not change the simulation or the Classic look, but are listed for trans
 ## 2026-11-03 — mission scripts' ships and objects
 
 Every object statement the real scripts use is wired
-(`docs/notes/mission-scripts.md`, "Mission ships and objects"), with these
-stand-ins until the system objects are ported: F669's attackers start 25 km
-from the player rather than on F702's orbit round the root (about 2.3 AU
-out, which the port's NPC flight could not close in play), then close and
-hail as F770 does; F702/F1507's
-placements leave out F1508's in-step interpolation and F1507's velocity;
-F297's buildings sit on the planet's radius at their latitude and
-longitude, not on F879's terrain height; F40's objects do not move on
-their orbit. The journal viewer draws an issue as the Journal screen's
-paragraph list, without F80's masthead or F79's scrolling.
+(`docs/notes/mission-scripts.md`, "Mission ships and objects"). The
+placement stand-ins recorded here first were removed on 2026-11-04: F669's
+attackers start on F702's orbit round the root, F702 places with F1508 and
+gives F1507's velocity, F297's buildings stand on F879's terrain, F40's
+objects move and turn as F866 moves them, and F770's hail stops the song
+and sets the combat velocity. Two differences remain: F669 raises its
+event 0x17 once the script run ends rather than inside the statement
+(F48 runs its handlers at once), and the journal viewer draws an issue as
+the Journal screen's paragraph list, without F80's masthead or F79's
+scrolling.
 
 ## 2026-10-25 — intro input carry-over (owner requested)
 

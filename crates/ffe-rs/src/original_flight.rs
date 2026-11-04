@@ -207,6 +207,23 @@ impl OriginalFlight {
         }
     }
 
+    /// JJFFE's `FUNC_SetupCombatVelocity` (F750's and F770's hails): the
+    /// combat reference velocity (`DATA_008839..8841`) is the player's own,
+    /// or zero below 0x9c40 of altitude (`DATA_008867`) or when the player's
+    /// frame has class bit 0x10 (`sheltered`).
+    pub fn setup_combat_velocity(&mut self, sheltered: bool) {
+        self.player.combat_velocity = if sheltered || self.player.altitude < 0x9c40 {
+            [0; 3]
+        } else {
+            self.player.motion.velocity
+        };
+    }
+
+    /// The combat reference velocity.
+    pub fn combat_velocity(&self) -> [i32; 3] {
+        self.player.combat_velocity
+    }
+
     /// The same model at a time acceleration step.
     pub fn gear_down(&self) -> bool {
         self.gear_down

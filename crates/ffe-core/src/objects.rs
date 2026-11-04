@@ -369,10 +369,9 @@ fn direction(table: &SineTable, longitude: i32, angle: i32) -> [i32; 3] {
     ]
 }
 
-/// F1507's position: the point at `radius` (an ffp distance) on the orbit
-/// given by `longitude` and `phase` (the phase's high word, cut to multiples
-/// of 0x10), relative to the parent. F1508's in-step interpolation is not
-/// included; it needs the object's own orbit words.
+/// F1507's position before F1508: the point at `radius` (an ffp distance) on
+/// the orbit given by `longitude` and `phase` (the phase's high word, cut to
+/// multiples of 0x10), relative to the parent. [`orbit_state`] adds F1508.
 pub fn orbit_point(table: &SineTable, radius: Ffp, longitude: i32, phase: u32) -> [i64; 3] {
     let angle = ((phase as i32) >> 16) & !0xf;
     let first = direction(table, longitude, angle);
@@ -382,6 +381,160 @@ pub fn orbit_point(table: &SineTable, radius: Ffp, longitude: i32, phase: u32) -
             i32::from(radius.exponent) - 0x2e,
         )
     })
+}
+
+/// F1508: `position` moved along F1507's velocity words by the phase's low 20
+/// bits (`fraction`), in two steps of the radius times its high and low words.
+fn interpolated(position: [i64; 3], velocity: [i32; 3], radius: Ffp, fraction: u32) -> [i64; 3] {
+    let mantissa = i64::from(radius.mantissa);
+    let exponent = i32::from(radius.exponent);
+    let steps = [
+        (
+            (mantissa * i64::from(fraction >> 16)) as i32,
+            exponent - 0x32,
+        ),
+        (
+            (mantissa * i64::from(fraction & 0xffff)) as i32,
+            exponent - 0x42,
+        ),
+    ];
+    let mut position = position;
+    for (factor, shift) in steps {
+        for (axis, v) in velocity.iter().enumerate() {
+            let delta = shift64(i64::from(*v) * i64::from(factor), shift);
+            position[axis] = position[axis].wrapping_add(delta);
+        }
+    }
+    position
+}
+
+/// F1507 with F1508: the point on the orbit of `radius`, `longitude` and the
+/// phase's high dword `phase`, relative to the parent, and the velocity words
+/// F1507 stores at `+0x8c` (the step between the orbit's 0x10-unit angles).
+pub fn orbit_state(
+    table: &SineTable,
+    radius: Ffp,
+    longitude: i32,
+    phase: u32,
+) -> ([i64; 3], [i32; 3]) {
+    let angle = ((phase as i32) >> 16) & !0xf;
+    let first = direction(table, longitude, angle);
+    let second = direction(table, longitude, angle + 0x10);
+    let velocity = std::array::from_fn(|axis| second[axis].wrapping_sub(first[axis]));
+    let position = interpolated(
+        orbit_point(table, radius, longitude, phase),
+        velocity,
+        radius,
+        phase & 0xfffff,
+    );
+    (position, velocity)
+}
+
+/// The physics class F1533 gives an object of a model (`+0x14c`): the
+/// model's flags' bits 4..6, with 0x80 for a complex shape.
+pub fn model_class(info: &ModelInfo) -> u8 {
+    let mut class = (info.flags >> 4) & 7;
+    if info.complex {
+        class |= 0x80;
+    }
+    class
+}
+
+/// F40's object on an orbit round its parent, moved as F866 moves the
+/// system's bodies: the radius (`+0xb0`, an ffp dword), longitude (`+0xc6`),
+/// rate (`+0xc2`), the 64-bit phase (`+0xba`), spin (`+0xc8`), tilt
+/// (`+0xcc`), the class (`+0x14c`), the clock it was last moved at
+/// (`+0xa8/+0xac`), and its position relative to the parent and rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Orbiter {
+    pub radius: u32,
+    pub longitude: i16,
+    pub rate: u32,
+    pub phase: u64,
+    pub spin: i8,
+    pub tilt: i16,
+    pub class: u8,
+    pub clock: [u32; 2],
+    pub position: [i64; 3],
+    pub velocity: [i32; 3],
+    pub rows: [i32; 9],
+}
+
+impl Orbiter {
+    /// F40: F1510's phase of `rate` at the clock plus `offset << 16` in the
+    /// high dword, F1507/F1508's place and F1675's rows from the clock's low
+    /// word shifted by the spin byte.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        table: &SineTable,
+        radius: u32,
+        offset: i32,
+        rate: u32,
+        longitude: i16,
+        spin: u8,
+        tilt: i16,
+        class: u8,
+        clock: [u32; 2],
+    ) -> Self {
+        let start = phase(rate, clock[0], clock[1]) as u64;
+        let high = ((start >> 32) as u32).wrapping_add((offset as u32).wrapping_shl(16));
+        let phase = (u64::from(high) << 32) | (start & 0xffff_ffff);
+        let (position, velocity) =
+            orbit_state(table, Ffp::from_dword(radius), i32::from(longitude), high);
+        let angle = clock[0].wrapping_shl(u32::from(spin) & 31);
+        Orbiter {
+            radius,
+            longitude,
+            rate,
+            phase,
+            spin: spin as i8,
+            tilt,
+            class,
+            clock,
+            position,
+            velocity,
+            rows: matrix_yzt(table, angle as i32, i32::from(tilt)),
+        }
+    }
+
+    /// F866 for this object: the phase advances by the time since the last
+    /// move times the rate (`<< 3`) and the object is placed again when its
+    /// high dword changes; a spinning object is turned again when its spin
+    /// angle passes a 2^20 step.
+    pub fn advance(&mut self, table: &SineTable, clock: [u32; 2]) {
+        let before = self.clock;
+        self.clock = clock;
+        if self.class & 0x20 != 0 {
+            return;
+        }
+        let time = |words: [u32; 2]| (u64::from(words[1]) << 32) | u64::from(words[0]);
+        let delta = time(clock).wrapping_sub(time(before));
+        let old = self.phase;
+        self.phase = old.wrapping_add(delta.wrapping_mul(u64::from(self.rate)).wrapping_shl(3));
+        if self.phase >> 32 != old >> 32 {
+            (self.position, self.velocity) = orbit_state(
+                table,
+                Ffp::from_dword(self.radius),
+                i32::from(self.longitude),
+                (self.phase >> 32) as u32,
+            );
+        }
+        if self.spin == 0 {
+            return;
+        }
+        let shift = (i32::from(self.spin) - 1).max(0) as u32;
+        let old_spin = before[0].wrapping_shl(shift);
+        let new_spin = clock[0].wrapping_shl(shift);
+        if old_spin >> 20 != new_spin >> 20 {
+            let tilt = i32::from(self.tilt);
+            let angle = (new_spin >> 16) as i32;
+            self.rows = if self.class & 0x10 != 0 {
+                matrix_yzt(table, angle, tilt)
+            } else {
+                matrix_yzt(table, tilt, angle)
+            };
+        }
+    }
 }
 
 /// F1509 and F1510: the orbital phase, `((hi:lo) * rate) << 3` over the clock
@@ -434,35 +587,8 @@ impl PhysList {
         }
     }
 
-    /// F1508: the sub-step interpolation of the position along the velocity.
-    fn interpolate(&mut self, object: usize, fraction: u32) {
-        let radius = i64::from(self.word(object, 0xb0) as i16);
-        let velocity = [
-            self.dword(object, 0x8c) as i32,
-            self.dword(object, 0x90) as i32,
-            self.dword(object, 0x94) as i32,
-        ];
-        let steps = [
-            (
-                (radius * i64::from(fraction >> 16)) as i32,
-                i32::from(self.word(object, 0xb2) as i16) - 0x32,
-            ),
-            (
-                (radius * i64::from(fraction & 0xffff)) as i32,
-                i32::from(self.word(object, 0xb2) as i16) - 0x42,
-            ),
-        ];
-        for (factor, shift) in steps {
-            for (axis, v) in velocity.iter().enumerate() {
-                let delta = shift64(i64::from(*v) * i64::from(factor), shift);
-                let at = 0x3e + 8 * axis;
-                let position = self.qword(object, at).wrapping_add(delta);
-                self.set_qword(object, at, position);
-            }
-        }
-    }
-
-    /// F1507: the position on the orbit from the radius, longitude and phase.
+    /// F1507 with F1508: the position on the orbit from the radius (F1508
+    /// reads the object's own `+0xb0` words), longitude and phase.
     fn place_on_orbit(
         &mut self,
         table: &SineTable,
@@ -471,19 +597,21 @@ impl PhysList {
         longitude: i32,
         phase: u32,
     ) {
+        let own = Ffp::from_dword(self.dword(object, 0xb0));
         let angle = ((phase as i32) >> 16) & !0xf;
         let first = direction(table, longitude, angle);
         let second = direction(table, longitude, angle + 0x10);
-        let position = orbit_point(table, radius, longitude, phase);
+        let velocity: [i32; 3] = std::array::from_fn(|axis| second[axis].wrapping_sub(first[axis]));
+        let position = interpolated(
+            orbit_point(table, radius, longitude, phase),
+            velocity,
+            own,
+            phase & 0xfffff,
+        );
         for axis in 0..3 {
-            self.set_dword(
-                object,
-                0x8c + 4 * axis,
-                second[axis].wrapping_sub(first[axis]) as u32,
-            );
+            self.set_dword(object, 0x8c + 4 * axis, velocity[axis] as u32);
             self.set_qword(object, 0x3e + 8 * axis, position[axis]);
         }
-        self.interpolate(object, phase & 0xfffff);
     }
 }
 
@@ -652,6 +780,36 @@ impl Placement<'_> {
             list.set_qword(object, 0x3e + 8 * axis, *value);
         }
         Some(())
+    }
+
+    /// F297's F879: an object of `model` (kind 0xe, `+0x57` set) put on the
+    /// surface of the planet in slot `parent` at a latitude and longitude.
+    /// Returns its position in the planet's rotating frame and its rows, or
+    /// `None` when F879 cannot place it. The slot is freed afterwards.
+    pub fn surface_object(
+        &self,
+        list: &mut PhysList,
+        parent: usize,
+        model: u32,
+        latitude: u16,
+        longitude: u16,
+    ) -> Option<([i64; 3], [i32; 9])> {
+        let object = list.allocate(self.tables, self.models, Template::Default, 0x0e, model)?;
+        list.set_word(object, 0xce, 0);
+        let class = list.byte(object, 0x14c) | 0x60;
+        list.set_byte(object, 0x14c, class);
+        list.set_byte(object, 0x87, 0x0e);
+        list.set_byte(object, 0x56, parent as u8);
+        list.set_byte(object, 0x57, 1);
+        list.set_byte(object, 0x58, 0);
+        let placed = self.starport(list, object, latitude, longitude).map(|()| {
+            (
+                std::array::from_fn(|axis| list.qword(object, 0x3e + 8 * axis)),
+                std::array::from_fn(|k| list.dword(object, 4 * k) as i32),
+            )
+        });
+        list.bytes[object] = 0;
+        placed
     }
 
     /// F880: create the physics objects of a generated system (`system` holds

@@ -121,9 +121,11 @@ pub struct Body {
 }
 
 /// A mission script's object kept at a body (F297 on a planet's surface, F40
-/// on an orbit): the ship's id, the system and body, and the offset, in the
-/// body's frame when `surface` (it turns with the body's rows), else in the
-/// system's. A site of another system is dropped.
+/// on an orbit): the ship's id, the system and body, and where it is. F879's
+/// `local` place and rows are in the body's rotating frame (they turn with
+/// the body's rows); F40's `orbit` moves round the body as F866 moves it.
+/// Saves before these fields keep the older `offset` (in the body's frame
+/// when `surface`, else the system's). A site of another system is dropped.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptSite {
     pub ship: u32,
@@ -131,6 +133,10 @@ pub struct ScriptSite {
     pub body: usize,
     pub offset: [f64; 3],
     pub surface: bool,
+    #[serde(default)]
+    pub local: Option<([i64; 3], [i32; 9])>,
+    #[serde(default)]
+    pub orbit: Option<ffe_core::objects::Orbiter>,
 }
 
 /// A mission script's canister in a save (statements 52 and 58): its id,
@@ -438,13 +444,16 @@ pub fn bodies(cache: &VerifiedCache, entry: &Entry, clock: [u32; 2]) -> Result<V
     bodies_since(cache, entry, clock, clock)
 }
 
-/// Source system creation followed by F866's elapsed-time evolution.
-pub fn bodies_since(
+/// Source system creation (F880) at `created` followed by F866's
+/// elapsed-time evolution to `clock`; `f` reads the physics list, the system
+/// list and its object count.
+fn with_system<R>(
     cache: &VerifiedCache,
     entry: &Entry,
     created: [u32; 2],
     clock: [u32; 2],
-) -> Result<Vec<Body>, String> {
+    f: impl FnOnce(&Placement, &mut PhysList, &[u8], usize) -> R,
+) -> Result<R, String> {
     let blob = cache
         .asset("base:world/system-tables")
         .ok_or("no system tables")?;
@@ -489,9 +498,47 @@ pub fn bodies_since(
     if clock != created {
         placement.advance(&mut list, clock);
     }
+    Ok(f(&placement, &mut list, &system, generator.count as usize))
+}
+
+/// F297's F879 for a mission script's building: an object of `model` on the
+/// surface of the body in physics slot `slot` at a latitude and longitude, as
+/// a position in that body's rotating frame and its rows there. `None` when
+/// the system cannot be built or F879 cannot place it.
+#[allow(clippy::too_many_arguments)]
+pub fn surface_site(
+    cache: &VerifiedCache,
+    entry: &Entry,
+    created: [u32; 2],
+    clock: [u32; 2],
+    slot: usize,
+    model: u32,
+    latitude: u16,
+    longitude: u16,
+) -> Option<([i64; 3], [i32; 9])> {
+    with_system(cache, entry, created, clock, |placement, list, _, _| {
+        placement.surface_object(list, slot, model, latitude, longitude)
+    })
+    .ok()
+    .flatten()
+}
+
+/// Source system creation followed by F866's elapsed-time evolution.
+pub fn bodies_since(
+    cache: &VerifiedCache,
+    entry: &Entry,
+    created: [u32; 2],
+    clock: [u32; 2],
+) -> Result<Vec<Body>, String> {
+    with_system(cache, entry, created, clock, |_, list, system, count| {
+        system_bodies(list, system, count)
+    })
+}
+
+/// The bodies of a created system list.
+fn system_bodies(list: &PhysList, system: &[u8], count: usize) -> Vec<Body> {
     let mut out: Vec<Body> = Vec::new();
     let mut offsets: Vec<[i64; 3]> = Vec::new();
-    let count = generator.count as usize;
     // The system list's parent words count its own objects, and the bodies
     // skip the kind-0 ones (a binary's barycentre), so a parent is looked up
     // through this map, up past any skipped object.
@@ -571,7 +618,7 @@ pub fn bodies_since(
             if let Some(body) = body_of[ancestor - 1] {
                 break Some(body);
             }
-            ancestor = system_parent(&system, ancestor - 1);
+            ancestor = system_parent(system, ancestor - 1);
         };
         body_of[index] = Some(out.len());
         out.push(Body {
@@ -602,7 +649,7 @@ pub fn bodies_since(
             size_word: list.word(slot, 0xa6) as i16,
         });
     }
-    Ok(out)
+    out
 }
 
 /// A station in low orbit around a planet or moon, so a launch from it puts that
@@ -5736,6 +5783,28 @@ impl Navigator {
     }
 
     /// The current system's code (`DATA_008885`), 0 with no system.
+    /// F297's F879 for a mission script's building on body `body` of the
+    /// current system: its place in the body's rotating frame and its rows.
+    pub fn surface_site(
+        &self,
+        cache: &VerifiedCache,
+        body: usize,
+        model: u32,
+        latitude: u16,
+        longitude: u16,
+    ) -> Option<([i64; 3], [i32; 9])> {
+        surface_site(
+            cache,
+            self.entries.get(self.current)?,
+            clock_words(self.world_epoch),
+            clock_words(self.clock),
+            self.bodies.get(body)?.slot,
+            model,
+            latitude,
+            longitude,
+        )
+    }
+
     pub fn current_code(&self) -> u32 {
         self.system_code(self.current).unwrap_or(0)
     }

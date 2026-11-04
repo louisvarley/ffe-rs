@@ -178,6 +178,16 @@ pub fn npc_spec(cache: &VerifiedCache, model: u32) -> Option<ffe_core::npc::Spec
     })
 }
 
+/// F1533's physics class (`+0x14c`) of an object of `model`.
+pub fn model_class(cache: &VerifiedCache, model: u32) -> Option<u8> {
+    let info = ffe_core::objects::ModelInfo::read(
+        cache.asset("base:model/records")?,
+        cache.asset("base:ship/stats")?,
+        model,
+    )?;
+    Some(ffe_core::objects::model_class(&info))
+}
+
 /// The NPC view of any model a mission script places (statements 48 and 50:
 /// F297's surface buildings and F40's objects): a ship's [`npc_spec`], else
 /// the model's radius with no drive or guns and a hull of `mass` tonnes.

@@ -206,19 +206,36 @@ pub struct Tick {
 }
 
 /// F1680: `max(0, msb(largest |coordinate|) - 0xd) - bias`, as a signed byte
-/// in the source. `F1657` ORs the absolute high dwords (or the low dwords when
-/// all highs are zero), so the result is the largest component's bit index.
+/// in the source. F1657 ORs the high dwords, each negated when negative, and
+/// adds 32 when any is neither 0 nor -1; otherwise it ORs the low dwords,
+/// each negated when its high dword is negative. The result is the largest
+/// component's bit index.
 pub fn distance_class(position: [i64; 3], player: [i64; 3], bias: i32) -> i32 {
-    let magnitude = (0..3).fold(0u64, |acc, axis| {
-        let value = position[axis].wrapping_sub(player[axis]).unsigned_abs();
-        let selected = if value >> 32 != 0 { value >> 32 } else { value };
-        acc | selected
-    });
+    let vector: [i64; 3] = std::array::from_fn(|axis| position[axis].wrapping_sub(player[axis]));
+    let high = |value: i64| (value >> 32) as i32;
+    let wide = vector.iter().any(|value| !matches!(high(*value), 0 | -1));
+    let (magnitude, base) = if wide {
+        let words = vector.iter().fold(0u32, |acc, value| {
+            let word = high(*value);
+            acc | (if word < 0 { word.wrapping_neg() } else { word }) as u32
+        });
+        (words, 32)
+    } else {
+        let words = vector.iter().fold(0u32, |acc, value| {
+            let word = *value as i32;
+            acc | (if high(*value) < 0 {
+                word.wrapping_neg()
+            } else {
+                word
+            }) as u32
+        });
+        (words, 0)
+    };
     let msb = if magnitude == 0 {
         0
     } else {
-        63 - magnitude.leading_zeros() as i32
-    };
+        31 - magnitude.leading_zeros() as i32
+    } + if magnitude == 0 { 0 } else { base };
     (msb - DISTANCE_BASE).max(0) - bias
 }
 
@@ -599,6 +616,11 @@ mod tests {
         assert_eq!(distance_class([1 << 24, 0, 0], [0; 3], -7), 18);
         assert_eq!(distance_class([1 << 26, 0, 0], [0; 3], -7), 20);
         assert_eq!(distance_class([1 << 27, 0, 0], [0; 3], -7), 21);
+        // F1657 adds 32 when it reads the high dwords.
+        assert_eq!(distance_class([1 << 40, 0, 0], [0; 3], 0), 40 - 0xd);
+        assert_eq!(distance_class([0, -(1 << 33), 0], [0; 3], 0), 33 - 0xd);
+        assert_eq!(distance_class([-5, 0, 0], [0; 3], 0), 0);
+        assert_eq!(distance_class([-(1 << 20), 0, 0], [0; 3], 0), 20 - 0xd);
         // A particle at the player survives; one far behind is removed. The
         // cull distance depends on the spawn bias (class 20 is about 2^28 mm
         // at bias -4), so use a delta far beyond every bias.
