@@ -321,16 +321,16 @@ pub fn apply_repair(
     state.credits -= cost;
     match row.action {
         RepairAction::Deluxe => {
-            state.reset_service(0, day);
-            state.reset_service(1, day);
+            state.reset_service(crate::flight::Service::Drive, day);
+            state.reset_service(crate::flight::Service::Equipment, day);
             Ok("Your deluxe service has been completed, and payment deducted.")
         }
         RepairAction::DriveService => {
-            state.reset_service(0, day);
+            state.reset_service(crate::flight::Service::Drive, day);
             Ok("Your service has been completed, and payment deducted.")
         }
         RepairAction::EquipmentService => {
-            state.reset_service(1, day);
+            state.reset_service(crate::flight::Service::Equipment, day);
             Ok("Your service has been completed, and payment deducted.")
         }
         RepairAction::HullQuarter => {

@@ -38,7 +38,28 @@ Every item needs executed-original **end-to-end** evidence for its affected path
 
 ## PAR-02 — P0 — Make reserve refuelling and cargo fuel bookkeeping match F929/F903
 
-**Status:** todo. **Evidence:** Confirmed bookkeeping mismatch; reserve initialisation is correct.
+**Status:** done (2026-11-04). **Evidence:** Confirmed bookkeeping mismatch; fixed.
+`Flight::charge_energy` is F929 for both callers (F938's thrust, F930's shot via
+`charge_shot`): a pool holding more than the cost pays it and restores the
+thrust limits; otherwise it empties, the cost is not carried, and with the Auto
+Refueller and fuel one tonne becomes `0x20000000` (hydrogen frees its tonne,
+military fuel leaves a tonne of waste) while the limits stay as they were;
+without either the engine fails and 0x9907 is posted once, latched by
+`DATA_008860` bit 0, which only F289's refuel from the hold and F408's drive
+fitting clear (the port had cleared it after a refuel and a damage roll, and
+posted nothing on the laser path). F903's mode-2 jump debit matches
+`navigation::burn_fuel` and runs once per jump. F408's drive-service stamp is
+applied on fitting, and the service slots were crossed: the counters are
+`[DATA_008923 equipment, DATA_008924 drive]` and the dates `[DATA_008926 drive,
+DATA_008925 equipment]`, so a drive service had reset the equipment's counter
+(`Flight::reset_service(Service, day)`). The 192 executed F938/F929 cases still
+match (`verify-recharge.py`, the same trace SHA-256). Tests: `tests/damage.rs`
+`f929_pays_or_empties_and_refills_without_carrying_the_cost`,
+`the_empty_tank_latch_holds_until_a_manual_refuel_or_a_drive_is_fitted`,
+`f450_to_f452_reset_the_service_counters_and_dates`. Open question, not
+changed: F929's paid branch restores all six limits from `DATA_008935`, which
+would also restore a thruster F949 zeroed; whether the original's damaged
+thrusters survive that needs an executed trace.
 
 **Finding:** The internal reserve is object +0x11e and correctly starts at 0x20000000. It is distinct from cargo fuel, although thrust and lasers use the same source reserve. Flight::burn_fuel removes military fuel without adding radioactive waste; the jump helper does add it. Do not invent separate rechargeable laser and engine pools.
 

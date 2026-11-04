@@ -97,9 +97,9 @@ third-column fitted predicates F397/F402/F407/F412/F417/F422/F427, ported by
   to remove.") and 0x98fb ("The drive is an integral part of your ship.") when
   the model's statistics word at `+0x14` is negative.
 - F408 also stamps `DATA_008924 = 0x1f4` and `DATA_008926 = DATA_008807`, the
-  drive-service clock the F444 "Drive Only service (last: ...)" row reads. The
-  port's `Flight::service_days[0]` is not yet written by `outfitting::fit`
-  (a reported gap: the fit function has no Flight handle).
+  drive-service clock the F444 "Drive Only service (last: ...)" row reads, and
+  clears F929's empty-tank latch (`DATA_008860` bit 0). The port applies both
+  when the Upgrades screen fits a drive (`Flight::drive_fitted`).
 - The class comes from the equipment record's `+0x12` (codes 1..9 civil, 0xa..0xd
   military). F903's `sector::Drive` table gives the range power (`+0`), fuel
   modifier (`+4`) and name code (`+0xc`); `hyperspace::plan` already uses them,

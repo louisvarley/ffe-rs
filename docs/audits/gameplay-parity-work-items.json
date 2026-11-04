@@ -16,7 +16,7 @@
     "id": "PAR-02",
     "priority": "P0",
     "title": "Make reserve refuelling and cargo fuel bookkeeping match F929/F903",
-    "status": "in_progress",
+    "status": "done",
     "certainty": "Confirmed bookkeeping mismatch; reserve initialisation is correct",
     "finding": "The internal reserve is object +0x11e and correctly starts at 0x20000000. It is distinct from cargo fuel, although thrust and lasers use the same source reserve. Flight::burn_fuel removes military fuel without adding radioactive waste; the jump helper does add it. Do not invent separate rechargeable laser and engine pools.",
     "source": "F929/F930/F903/F998",

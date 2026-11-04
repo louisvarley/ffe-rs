@@ -24,7 +24,7 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         {"id": "parity-01", "title": "[P0] Repair F938/F929 event units for fuel, shields and hull repair", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-01"},
-        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
+        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "done", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
         {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "done", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
         {"id": "parity-04", "title": "[P0] Translate the complete F1013 takeoff handler and same-frame mode order", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-04"},
         {"id": "parity-05", "title": "[P0] Replace launch altitude substitution and collision grace with source frame/contact rules", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-05"},
@@ -1240,6 +1240,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-04",
       remaining: 97,
       note: "PAR-03 done: a destroyed (F947), failed (F934), degraded (F948) or mis-jumped (F911) drive now leaves its mass in the hold as Rubbish (cargo slot 30, F946), so the tonnes used rise with the capacity; drive masses checked against DATA_007210/DATA_007188. F911's mov to the capacity is kept as an add (recorded deviation)."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 96,
+      note: "PAR-02 done: one F929 for thrust and laser shots (paid branch restores the limits; the empty branch refills from the hold without carrying the cost and keeps the limits; 0x9907 once, latched until F289's refuel or F408's drive fitting); F903's jump debit checked once per jump; F408's drive-service stamp on fitting; the drive and equipment service slots, which were crossed, now match DATA_008923..8926. The 192 executed F938/F929 cases still match."
     }
   ]
 };

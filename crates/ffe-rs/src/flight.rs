@@ -46,6 +46,14 @@ pub enum Refuel {
     Refuelled { full: bool },
 }
 
+/// The two services F444 sells: the drive's (`DATA_008924`/`DATA_008926`)
+/// and the equipment's (`DATA_008923`/`DATA_008925`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Service {
+    Drive,
+    Equipment,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Flight {
@@ -623,9 +631,8 @@ impl Flight {
         } else {
             None
         };
-        if event.is_some() {
-            self.damage.fuel_empty = false;
-        }
+        // F950/F944/F943 leave F929's empty-tank latch alone: only F289's
+        // refuel from the hold and F408's drive fitting clear it.
         event
     }
 
@@ -769,53 +776,61 @@ impl Flight {
         }
     }
 
-    /// F929's empty pool: with the Auto Refueller fitted and fuel in the hold,
-    /// burn one tonne and add `0x20000000` energy. Otherwise latch the empty
-    /// warning and F929's engine failure.
-    pub fn refuel_energy(&mut self) -> bool {
-        if !self.loadout.auto_refueller() || !self.burn_fuel() {
-            self.damage.fuel_empty = true;
-            self.damage.engine_failed = true;
-            return false;
-        }
-        self.combat.energy = self
-            .combat
-            .energy
-            .saturating_add(crate::damage::ENERGY_PER_TONNE);
-        self.damage.fuel_empty = false;
-        self.damage.engine_failed = false;
-        true
-    }
-
-    /// After F930's shot (F929): an emptied pool is refilled from fuel.
-    pub fn refuel_after_energy(&mut self) {
-        if self.combat.energy == 0 {
-            self.refuel_energy();
-        }
-    }
-
-    /// F938's thrust energy (`mass * sum |thrust words| >> 9 * seconds`) through
-    /// F929. Returns true when the engine failed (no energy and no fuel).
-    pub fn spend_thrust_energy(&mut self, seconds: u32, mass: u16, thrust_sum: i32) -> bool {
-        // F938 uses signed model mass and the low 32 bits of both IMULs.
-        let cost = (i32::from(mass as i16).wrapping_mul(thrust_sum) >> 9)
-            .wrapping_mul(seconds as i32) as u32;
-        if cost == 0 && self.combat.energy > 0 {
-            self.damage.engine_failed = false;
-            return false;
-        }
+    /// F929 for the player: charge `cost` to the energy pool (`+0x11e`).
+    /// While the pool holds more than the cost it is paid and the six thrust
+    /// limits are restored from their stored copy (`DATA_008935`: the engine
+    /// works again). Otherwise the pool is emptied and the cost is not carried
+    /// over: with the Auto Refueller (`+0xc8` bit 1) and fuel in the hold one
+    /// tonne becomes `0x20000000` energy (hydrogen frees its tonne; military
+    /// fuel leaves a tonne of waste), the limits staying as they were. Without
+    /// either, the engine fails (the limits are zeroed) and, unless the latch
+    /// (`DATA_008860` bit 0) is already set, the latch is set and the result
+    /// asks for the "Internal Fuel Tank Empty" warning (0x9907).
+    pub fn charge_energy(&mut self, cost: u32) -> bool {
         if self.combat.energy > cost {
             self.combat.energy -= cost;
             self.damage.engine_failed = false;
             return false;
         }
         self.combat.energy = 0;
-        if self.refuel_energy() {
-            false
-        } else {
-            self.damage.engine_failed = true;
-            true
+        if self.loadout.auto_refueller() && self.burn_fuel() {
+            self.combat.energy = self
+                .combat
+                .energy
+                .wrapping_add(crate::damage::ENERGY_PER_TONNE);
+            return false;
         }
+        self.damage.engine_failed = true;
+        if self.damage.fuel_empty {
+            return false;
+        }
+        self.damage.fuel_empty = true;
+        true
+    }
+
+    /// F930's shot through F929: the laser has already taken `cost` from a pool
+    /// that held `before` (`laser::fire` empties it when the cost is not less),
+    /// so this settles F929's two branches. Returns true for the warning.
+    pub fn charge_shot(&mut self, before: u32, cost: u32) -> bool {
+        self.combat.energy = before;
+        self.charge_energy(cost)
+    }
+
+    /// F938's thrust energy (`mass * sum |thrust words| >> 9 * seconds`) through
+    /// F929. Returns true when F929 asks for the empty-tank warning.
+    pub fn spend_thrust_energy(&mut self, seconds: u32, mass: u16, thrust_sum: i32) -> bool {
+        // F938 uses signed model mass and the low 32 bits of both IMULs.
+        let cost = (i32::from(mass as i16).wrapping_mul(thrust_sum) >> 9)
+            .wrapping_mul(seconds as i32) as u32;
+        self.charge_energy(cost)
+    }
+
+    /// F408's drive-service stamp when a drive is fitted: the drive's service
+    /// counter (`DATA_008924`) is 500 days, its service date (`DATA_008926`)
+    /// today, and F929's empty-tank latch is cleared.
+    pub fn drive_fitted(&mut self, day: u32) {
+        self.reset_service(Service::Drive, day);
+        self.damage.fuel_empty = false;
     }
 
     /// F933/F934's daily servicing: the counters fall by one a day; when a
@@ -854,14 +869,16 @@ impl Flight {
         events
     }
 
-    /// F449/F450/F451/F452: reset a service counter to 500 days.
-    pub fn reset_service(&mut self, index: usize, day: u32) {
-        if let Some(counter) = self.damage.service_counters.get_mut(index) {
-            *counter = crate::damage::SERVICE_DAYS;
-        }
-        if let Some(date) = self.service_days.get_mut(index) {
-            *date = day;
-        }
+    /// F449/F450/F451/F452: reset one service's counter to 500 days and date
+    /// it today. The counters are `[DATA_008923 equipment, DATA_008924 drive]`
+    /// and the dates `[DATA_008926 drive, DATA_008925 equipment]`.
+    pub fn reset_service(&mut self, service: Service, day: u32) {
+        let (counter, date) = match service {
+            Service::Equipment => (0, 1),
+            Service::Drive => (1, 0),
+        };
+        self.damage.service_counters[counter] = crate::damage::SERVICE_DAYS;
+        self.service_days[date] = day;
     }
 
     /// F446: repair one general-equipment bit (clear `+0xcc`, set `+0xc8`).

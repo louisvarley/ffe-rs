@@ -210,9 +210,11 @@ fn f450_to_f452_reset_the_service_counters_and_dates() {
         50,
     )
     .unwrap();
+    // The drive's date is `DATA_008926` (first) and its counter `DATA_008924`
+    // (second): the equipment's counter is untouched.
     assert_eq!(flight.service_days, [50, 0]);
-    assert_eq!(flight.damage.service_counters[0], 500);
-    assert_eq!(flight.damage.service_counters[1], 2);
+    assert_eq!(flight.damage.service_counters[1], 500);
+    assert_eq!(flight.damage.service_counters[0], 1);
 }
 
 #[test]
@@ -244,7 +246,7 @@ fn f929_burns_one_tonne_for_0x20000000_energy_and_warns_when_empty() {
     flight.hold = vec![0; ffe_core::market::NAMES];
     flight.hold[ffe_core::hyperspace::HYDROGEN] = 2;
     flight.combat.energy = 0;
-    assert!(flight.refuel_energy());
+    assert!(!flight.charge_energy(0), "refuelled: no warning");
     assert_eq!(flight.combat.energy, 0x2000_0000);
     assert_eq!(flight.hold[ffe_core::hyperspace::HYDROGEN], 1);
     assert!(!flight.damage.fuel_empty);
@@ -252,7 +254,7 @@ fn f929_burns_one_tonne_for_0x20000000_energy_and_warns_when_empty() {
     // With fuel gone the pool stays empty and F929's failure latches.
     flight.combat.energy = 0;
     flight.hold[ffe_core::hyperspace::HYDROGEN] = 0;
-    assert!(!flight.refuel_energy());
+    assert!(flight.charge_energy(0), "0x9907 the first time");
     assert!(flight.damage.fuel_empty);
     assert!(flight.damage.engine_failed);
     assert_eq!(flight.limits(Some(&stats())).axes, [[0, 0], [0, 0], [0, 0]]);
@@ -419,14 +421,100 @@ fn f929_military_internal_refuelling_preserves_cargo_mass_as_waste() {
     flight.hold = vec![0; ffe_core::market::NAMES];
     flight.hold[ffe_core::hyperspace::MILITARY_FUEL] = 2;
     flight.combat.energy = 0;
-    assert!(flight.refuel_energy());
+    assert!(!flight.charge_energy(0));
+    assert_eq!(flight.combat.energy, 0x2000_0000);
     assert_eq!(flight.hold[ffe_core::hyperspace::MILITARY_FUEL], 1);
     assert_eq!(flight.hold[ffe_core::hyperspace::RADIOACTIVES], 1);
     assert_eq!(flight.hold.iter().sum::<u16>(), 2);
     flight.combat.energy = 0;
-    assert!(flight.refuel_energy());
+    assert!(!flight.charge_energy(0));
     assert_eq!(flight.hold[ffe_core::hyperspace::RADIOACTIVES], 2);
     flight.combat.energy = 0;
-    assert!(!flight.refuel_energy());
+    assert!(flight.charge_energy(0));
+    assert!(flight.damage.engine_failed);
     assert_eq!(flight.hold[ffe_core::hyperspace::RADIOACTIVES], 2);
+}
+
+/// PAR-02: F929's two branches as the original runs them, through the
+/// thrust (F938) and laser (F930) callers.
+#[test]
+fn f929_pays_or_empties_and_refills_without_carrying_the_cost() {
+    use ffe_core::hyperspace::HYDROGEN;
+    let mut flight = self::flight();
+    flight.loadout.general |= ffe_core::equipment::AUTO_REFUELLER_BIT;
+    flight.hold = vec![0; ffe_core::market::NAMES];
+    flight.hold[HYDROGEN] = 3;
+    // More than the cost: paid.
+    flight.combat.energy = 101;
+    assert!(!flight.charge_energy(100));
+    assert_eq!(flight.combat.energy, 1);
+    // Exactly the cost is not more: the pool empties and a tonne refills it,
+    // the cost not carried over.
+    flight.combat.energy = 100;
+    assert!(!flight.charge_energy(100));
+    assert_eq!(flight.combat.energy, 0x2000_0000);
+    assert_eq!(flight.hold[HYDROGEN], 2);
+    // A zero-cost call on an empty pool refuels too.
+    flight.combat.energy = 0;
+    assert!(!flight.charge_energy(0));
+    assert_eq!(flight.hold[HYDROGEN], 1);
+    // F930's shot: the laser has emptied the pool when the cost was not less.
+    flight.combat.energy = 0;
+    assert!(!flight.charge_shot(50, 50));
+    assert_eq!(flight.combat.energy, 0x2000_0000);
+    assert_eq!(flight.hold[HYDROGEN], 0);
+    flight.combat.energy = 0x2000_0000 - 50;
+    assert!(!flight.charge_shot(0x2000_0000, 50));
+    assert_eq!(flight.combat.energy, 0x2000_0000 - 50);
+}
+
+#[test]
+fn the_empty_tank_latch_holds_until_a_manual_refuel_or_a_drive_is_fitted() {
+    use ffe_core::hyperspace::HYDROGEN;
+    let mut flight = self::flight();
+    flight.hold = vec![0; ffe_core::market::NAMES];
+    // No Auto Refueller: the engine fails and 0x9907 is posted once.
+    flight.combat.energy = 10;
+    assert!(flight.charge_energy(10));
+    assert!(flight.damage.engine_failed && flight.damage.fuel_empty);
+    assert!(
+        !flight.charge_energy(10),
+        "the latch keeps it to one warning"
+    );
+    // An Auto Refueller with fuel refills the pool but leaves the latch and
+    // the failed engine: F929's refill branch does not restore the limits.
+    flight.loadout.general |= ffe_core::equipment::AUTO_REFUELLER_BIT;
+    flight.hold[HYDROGEN] = 2;
+    assert!(!flight.charge_energy(10));
+    assert_eq!(flight.combat.energy, 0x2000_0000);
+    assert!(
+        flight.damage.engine_failed,
+        "limits stay zero until a paid call"
+    );
+    assert!(flight.damage.fuel_empty, "the latch stays");
+    // The next paid call restores the limits; the latch still holds.
+    assert!(!flight.charge_energy(10));
+    assert!(!flight.damage.engine_failed);
+    assert!(flight.damage.fuel_empty);
+    // F408: fitting a drive clears the latch and stamps the drive's service.
+    flight.damage.service_counters = [7, 8];
+    flight.service_days = [1, 2];
+    flight.drive_fitted(99);
+    assert!(!flight.damage.fuel_empty);
+    assert_eq!(flight.damage.service_counters, [7, 500]);
+    assert_eq!(flight.service_days, [99, 2]);
+    // F289's refuel from the hold clears it too.
+    flight.damage.fuel_empty = true;
+    flight.combat.energy = 0;
+    assert!(matches!(
+        flight.refuel_from_hold(),
+        ffe_rs::flight::Refuel::Refuelled { .. }
+    ));
+    assert!(!flight.damage.fuel_empty);
+    // The latch and the hold survive a save.
+    flight.damage.fuel_empty = true;
+    let json = serde_json::to_string(&flight).unwrap();
+    let loaded: ffe_rs::flight::Flight = serde_json::from_str(&json).unwrap();
+    assert!(loaded.damage.fuel_empty);
+    assert_eq!(loaded.hold, flight.hold);
 }

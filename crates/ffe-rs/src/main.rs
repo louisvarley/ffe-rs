@@ -6708,11 +6708,7 @@ fn run() -> Result<(), String> {
                 let sum = original
                     .as_ref()
                     .map_or(0, |model| state.thrust_sum(model.thrust_words()));
-                let warned = state.damage.fuel_empty;
-                if event_seconds != 0
-                    && state.spend_thrust_energy(event_seconds, stats.mass, sum)
-                    && !warned
-                {
+                if event_seconds != 0 && state.spend_thrust_energy(event_seconds, stats.mass, sum) {
                     pending_log.add(Source::Combat, "WARNING: Internal Fuel Tank Empty.");
                 }
             }
@@ -6849,6 +6845,7 @@ fn run() -> Result<(), String> {
                         ),
                         None => true,
                     };
+                let before = state.combat.energy;
                 let fired = if allowed {
                     state.combat.fire(mount, frame_tics)
                 } else {
@@ -6856,9 +6853,12 @@ fn run() -> Result<(), String> {
                 };
                 match fired {
                     Ok(shot) => {
-                        // F929: a shot that empties the pool refuels from the
-                        // hold when the Auto Refueller is fitted.
-                        state.refuel_after_energy();
+                        // F930's cost through F929: paid from the pool, or the
+                        // pool emptied and refilled from the hold when the Auto
+                        // Refueller is fitted; else the engine fails.
+                        if state.charge_shot(before, shot.energy) {
+                            pending_log.add(Source::Combat, "WARNING: Internal Fuel Tank Empty.");
+                        }
                         if let Some(nav) = nav.as_mut() {
                             if let Some(report) = nav.player_fired(ship_position(&original, &state))
                             {
@@ -9236,6 +9236,7 @@ fn fit_or_remove(
         dock.mounting = Some(choice);
         return choice.prompt();
     }
+    let had_drive = state.loadout.drive != 0;
     let result = if remove {
         outfitting::remove(
             entry.index,
@@ -9255,6 +9256,10 @@ fn fit_or_remove(
             limits,
         )
     };
+    // F408: a newly fitted drive's service stamp and the cleared empty-tank latch.
+    if result.is_ok() && !had_drive && state.loadout.drive != 0 {
+        state.drive_fitted(nav.day());
+    }
     result.unwrap_or_else(|why| why)
 }
 
