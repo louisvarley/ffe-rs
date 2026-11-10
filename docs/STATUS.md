@@ -43,8 +43,10 @@ depends on them.
   state, are done: 4 November);
   `parity-04` the complete takeoff handler (F1013) and same-frame mode order
   (10 November: a frame-by-frame replay of the original's takeoff matches every
-  mode change and set speed; the pad seat now matches; a 1% climb drift and a
-  2-frame-early clear remain, tied to the pad world's frame);
+  mode change and set speed; the pad seat now matches; F1014's atmospheric
+  drag and heating now run in flight, so free-flight speed tracks within 1.25%;
+  a 1% climb drift and a 2-frame-early clear remain, tied to the pad world's
+  frame);
   `parity-05` the original's frame and contact rules instead of the launch
   altitude stand-in and collision grace; `parity-06` set-speed controls, input
   gates and speed persistence end to end; `parity-07` the original Hope start

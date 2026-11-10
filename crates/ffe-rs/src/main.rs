@@ -6575,10 +6575,27 @@ fn run() -> Result<(), String> {
                 }
                 nav.random = state.rng;
             }
-            // F1033: a star contact heats the hull. (In flight below 20 km
-            // F1035 calls F1015 -> F1016 -> F1017, which is empty; F1014's
-            // speed heating runs only from the landed handlers F1011/F1012,
-            // where the ship is still.) Over 0xffff it burns up.
+            // F1014: the atmosphere heats the hull by speed below 20 km, in free
+            // flight (F1021) and under the autopilot (F1019), as the flight step
+            // reported; the same step applied F1014's drag. Over 0xffff it burns
+            // up, and crossing 0x8000 posts JJFFE's warning.
+            if let Some(speed) = original.as_mut().and_then(OriginalFlight::take_atmosphere) {
+                match ffe_rs::damage::atmosphere_heat(
+                    state.hull_heat,
+                    speed,
+                    frame_tics,
+                    state.heat_shielded(),
+                ) {
+                    ffe_rs::damage::Heat::Rose { heat, warn } => {
+                        state.hull_heat = heat;
+                        if warn {
+                            pending_log.add(Source::Combat, ffe_rs::damage::HEAT_WARNING);
+                        }
+                    }
+                    ffe_rs::damage::Heat::Burnt => state.burn_up(),
+                }
+            }
+            // F1033: a star contact heats the hull. Over 0xffff it burns up.
             if let Some(nav) = nav
                 .as_ref()
                 .filter(|nav| nav.sequence.is_none() && !nav.landed_view())

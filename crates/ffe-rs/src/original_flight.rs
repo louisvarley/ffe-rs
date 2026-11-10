@@ -75,6 +75,12 @@ pub struct OriginalFlight {
     /// moved half the frame's tics a frame toward the command. The models
     /// read it as animation global 1 and F575's landing test needs 0xffff.
     gear_word: u16,
+    /// F1099's speed word (`player+0xd8`) from the end of the last frame, which
+    /// F1014 reads.
+    speed_word: u32,
+    /// This frame's F1014 ran (F1021 in mode 0, F1019 in mode 2, after the
+    /// scan): the speed word its heat uses.
+    atmosphere: Option<u32>,
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -204,6 +210,8 @@ impl OriginalFlight {
             collision_radius: 0,
             gear_down: true,
             gear_word: 0xffff,
+            speed_word: 0,
+            atmosphere: None,
         }
     }
 
@@ -277,6 +285,16 @@ impl OriginalFlight {
     /// ordinary flight paths apply.
     pub fn set_mode(&mut self, mode: u8) {
         self.player.mode = mode;
+    }
+
+    /// Whether the last step ran F1014 (an atmosphere contact below 20 km in
+    /// mode 0 or 2), and the speed word its heat uses
+    /// ([`crate::damage::atmosphere_heat`]). Taken once, so a frame without a
+    /// step does not heat the hull again.
+    pub fn take_atmosphere(&mut self) -> Option<u32> {
+        self.atmosphere
+            .take()
+            .filter(|_| self.player.altitude <= ffe_core::player::ATMOSPHERE_ALTITUDE)
     }
 
     /// Current DATA_008870 after the flight handler's same-frame transitions.
@@ -491,13 +509,19 @@ impl OriginalFlight {
     /// The pad world stores the ship relative to the planet, so moving the
     /// world's origin here would also move the collision geometry.
     pub fn pin_pad_seat(&mut self, seat: [i64; 3], rows: [i32; 9], reverse: bool) {
-        let Some(world) = self.pad_world.as_mut() else { return };
+        let Some(world) = self.pad_world.as_mut() else {
+            return;
+        };
         self.player.motion.position =
             std::array::from_fn(|k| seat[k].wrapping_sub(world.body[2].position[k]));
         self.player.motion.orientation = std::array::from_fn(|r| {
             std::array::from_fn(|c| {
                 let value = rows[3 * r + c];
-                if reverse && r != 1 { value.saturating_neg() } else { value }
+                if reverse && r != 1 {
+                    value.saturating_neg()
+                } else {
+                    value
+                }
             })
         });
         world.stamp = world.stamp.wrapping_add(1);
@@ -1157,6 +1181,22 @@ impl OriginalFlight {
             &mut world,
             tools,
         );
+        // F1021 (mode 0) and F1019 (mode 2): F1014 after F1033's scan, on the
+        // velocity in the scan's frame. Mode 0 needs the contact free of the
+        // 0x20 region and the 0x40 touch; mode 2 only bit 0.
+        if let Ok(contact) = &contact {
+            let flags = contact.flags;
+            let runs = flags & 1 != 0
+                && match self.player.mode {
+                    0 => flags & 0x60 == 0,
+                    2 => true,
+                    _ => false,
+                };
+            if runs {
+                self.player.atmospheric_drag(self.speed_word);
+                self.atmosphere = Some(self.speed_word);
+            }
+        }
         // Undo the per-frame landing margin so it does not accumulate, and put
         // the player back in the system frame even when the scan fails (an
         // undecodable starport pad must not leave it parent-relative).
@@ -1191,6 +1231,10 @@ impl OriginalFlight {
     /// The key state F1037/F1038 and set speed for one frame; returns the input
     /// tics and the accelerated world tics.
     fn prepare(&mut self, elapsed: f64, keys: &Keys) -> (u32, u32) {
+        // F1099 left last frame's speed in `+0xd8`; F1014 reads it this frame.
+        self.speed_word =
+            ffe_core::model_math::length(self.player.motion.velocity).min(i32::MAX as u32);
+        self.atmosphere = None;
         // The input time is real time; the world time is that scaled by the
         // acceleration (`ms * acceleration / 20`, 994 per 20 ms at 1x).
         let tics = (elapsed.clamp(0.0, 0.1) * TICS_PER_SECOND) as u32;

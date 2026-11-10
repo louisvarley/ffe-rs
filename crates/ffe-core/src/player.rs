@@ -39,6 +39,13 @@ pub struct ThrusterKeys {
     pub left: bool,
 }
 
+/// F1014's altitude limit (`DATA_008867` at most `0x1312d00`, 20 km): above
+/// it F1014 does nothing.
+pub const ATMOSPHERE_ALTITUDE: i32 = 0x0131_2d00;
+/// F1014's drag applies from this speed word (`+0xd8`) up; below it F1014
+/// calls the empty F1017 instead.
+pub const DRAG_SPEED: u32 = 0xbb8;
+
 /// The player's state F1041 reads and writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Player {
@@ -412,6 +419,23 @@ impl Player {
         Ok(())
     }
 
+    /// F1014's atmospheric drag (JJFFE 2.8a7, `ffe.asm:75055`): at or below
+    /// [`ATMOSPHERE_ALTITUDE`] and at a speed word (`+0xd8`, F1099's length of
+    /// the velocity, from the frame before) of at least [`DRAG_SPEED`], each
+    /// velocity component loses `F1521(v, min(tics, 0xffff) << 11)`, about
+    /// `v * tics / 2^20`. F1021 (mode 0) and F1019 (mode 2) call F1014 after
+    /// F1033's scan when the contact's bit 0 is set; F1014's heat is the
+    /// caller's (`ffe_rs::damage::atmosphere_heat`).
+    pub fn atmospheric_drag(&mut self, speed: u32) {
+        if self.altitude > ATMOSPHERE_ALTITUDE || speed < DRAG_SPEED {
+            return;
+        }
+        let factor = (self.frame_tics.min(0xffff) << 11) as i32;
+        for v in &mut self.motion.velocity {
+            *v = v.wrapping_sub(crate::model::multiply(*v, factor));
+        }
+    }
+
     /// One whole tick in a world, as F1021 runs it: [`Player::step_in`], then
     /// the collision scan (F1033 calls F569): the player is copied into its
     /// body, [`Bodies::collide`] may switch it between the linear and rotating
@@ -493,6 +517,47 @@ impl Player {
 #[cfg(test)]
 mod launch_tests {
     use super::*;
+
+    #[test]
+    fn f1014_drag_takes_v_times_tics_over_2_20_below_20_km_and_from_0xbb8() {
+        let fresh = |altitude, tics| {
+            let mut player = Player {
+                altitude,
+                frame_tics: tics,
+                ..Player::default()
+            };
+            player.motion.velocity = [20_000, -3_000, 1_043];
+            player
+        };
+        // 1,043 tics (21 ms at 1x): F1521(v, 1043 << 11) = v * 2,136,064 >> 31.
+        let take = |v: i32| ((i64::from(v) * (1043 << 11)) >> 31) as i32;
+        assert_eq!(take(20_000), 19);
+        // F1521 floors: a negative component loses one more than its magnitude's share.
+        assert_eq!(take(-3_000), -3);
+        let mut player = fresh(ATMOSPHERE_ALTITUDE, 1043);
+        player.atmospheric_drag(DRAG_SPEED);
+        assert_eq!(
+            player.motion.velocity,
+            [
+                20_000 - take(20_000),
+                -3_000 - take(-3_000),
+                1_043 - take(1_043)
+            ]
+        );
+        // Above 20 km, or slower than 0xbb8, nothing.
+        for (altitude, speed) in [(ATMOSPHERE_ALTITUDE + 1, DRAG_SPEED), (0, DRAG_SPEED - 1)] {
+            let mut player = fresh(altitude, 1043);
+            player.atmospheric_drag(speed);
+            assert_eq!(player.motion.velocity, [20_000, -3_000, 1_043]);
+        }
+        // The frame's tics are capped at 0xffff before the shift.
+        let mut capped = fresh(0, 0x7_0000);
+        let mut at_cap = fresh(0, 0xffff);
+        capped.atmospheric_drag(DRAG_SPEED);
+        at_cap.atmospheric_drag(DRAG_SPEED);
+        assert_eq!(capped.motion.velocity, at_cap.motion.velocity);
+        assert_ne!(at_cap.motion.velocity, [20_000, -3_000, 1_043]);
+    }
 
     #[test]
     fn f1013_tests_prior_altitude_and_signed_set_speed_before_thrust() {

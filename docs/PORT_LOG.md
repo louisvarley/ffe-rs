@@ -1,5 +1,30 @@
 # Port log
 
+## 2026-11-10 — F1014 in flight: atmospheric drag and heating (PAR-04, PAR-14)
+
+The takeoff replay showed the port accelerating ever harder after F1031's
+clear, while the original's per-frame gain fell steadily with speed (47 units a
+frame at 7,000, 35 at 20,000). The source: F1021 (mode 0) and F1019 (mode 2,
+the autopilot) call F1014 after F1033's scan whenever the contact's bit 0 is
+set (F1021 only outside the `0x20` region and without the `0x40` touch).
+F1014, below 20 km (`DATA_008867 <= 0x1312d00`), adds JJFFE's speed heating
+(`speed * min(tics, 0xffff) >> 0x13`, or `0x16` with atmospheric shielding,
+capped at `0x1000`; past `0xffff` the ship burns up, crossing `0x8000` posts
+"You're going to die soon!") and, from a speed word (`+0xd8`, F1099's length
+of the velocity from the frame before) of `0xbb8`, JJFFE's drag:
+`F1521(v, min(tics, 0xffff) << 11)` off each velocity component, about
+`v * tics / 2^20`. F1016 and F1017 are empty. The port's notes had F1014 only
+in the landed handlers.
+
+`Player::atmospheric_drag` (core) is the drag; `OriginalFlight` applies it
+after the scan under F1021's and F1019's conditions and reports it, and the
+game loop applies `damage::atmosphere_heat` beside the star heating. With it
+the replay's per-frame speed gain matches the original's within one unit and
+the speed is within 1.25% to frame 899 (it had been 23% fast).
+
+Flying fast below 20 km in an atmosphere now heats the hull, as in the
+original; F1007's whole-second cooling still applies.
+
 ## 2026-11-10 — PAR-04: frame-by-frame takeoff replay; F650's seat in the port's own frame
 
 `tests/takeoff_replay.rs` (local-only) replays the executed original's

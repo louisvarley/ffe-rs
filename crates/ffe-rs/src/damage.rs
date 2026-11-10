@@ -215,9 +215,9 @@ impl SystemEvent {
 }
 
 /// The hull temperature (`DATA_008804+0x1ec`): F1033 heats it next to a
-/// star, F1014 by speed in the landed handlers (F1011/F1012; in flight below
-/// 20 km F1035 reaches only the empty F1017), and F1007's whole-second event
-/// cools it.
+/// star, F1014 by speed below 20 km (called from the landed handlers
+/// F1011/F1012, from F1021 in free flight and F1019 under the autopilot, when
+/// the contact's bit 0 is set), and F1007's whole-second event cools it.
 /// Above 0xffff the ship burns up (F953 with -1); crossing 0x8000 shows
 /// JJFFE's 0x99e6 warning.
 pub const HEAT_LIMIT: u32 = 0xffff;
