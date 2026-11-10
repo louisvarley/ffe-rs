@@ -1341,6 +1341,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-10",
       remaining: 82,
       note: "classic-split-2 done: the viewer no longer records the Modern engine's side data (Solid faces, atmosphere shells, plumes, sprites, surface view corners), and the core terrain returns to its pre-split code without the Modern detail, planet-frame and shoreline hooks. Classic captures are byte-identical."
+    },
+    {
+      date: "2026-11-10",
+      remaining: 82,
+      note: "Progress without closures: PAR-04 frame-by-frame takeoff replay and F650's pad seat; F1014 atmospheric drag and heating (PAR-04, PAR-14); PAR-06 keyboard timing for set speed (DATA_007690, right Shift only) replayed against the original; fixed the orbital-station launch blocked after an autopilot docking."
     }
   ]
 };
