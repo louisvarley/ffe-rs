@@ -24,7 +24,7 @@ and reference replays and Classic uses original frame comparisons.
 ## Work list to finish the game — 2026-11-04 (handoff)
 
 The burndown (`dashboard/burndown.js`) had 96 items open, 123 of 219 done, on
-4 November; after the Classic-only split (10 November) it has 83 open of 202. This
+4 November; after the Classic-only split and its cleanup (10 November) it has 82 open of 202. This
 is the order to work them in, by burndown id. Every item is ported from
 `jjffe-master/ffe.asm` and checked against the executed original where a
 reference tool can do so; nothing is guessed. Each change updates the burndown
@@ -131,11 +131,10 @@ transitions; `ui-11` far/near transitions, clipping and planet approach;
 
 ### 8. Classic split cleanup
 
-`classic-split-2`: the model executor and viewer still record side data that
-only the removed Modern engine read (`Solid` faces, atmosphere `Shell`s, plume
-and sprite records, surface view-space corners), and `ffe-core::terrain` keeps
-Modern-only radial-detail hooks. Classic output does not use them; remove them
-without changing a Classic frame.
+Done (`classic-split-2`, 10 November): the viewer no longer records the
+Modern engine's side data, and `ffe-core`'s terrain is back to its pre-split
+code. The executor still records view-space points for some primitives; F1714's
+near-plane outline uses them.
 
 ### 9. Release
 

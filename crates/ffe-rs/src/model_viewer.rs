@@ -74,100 +74,9 @@ pub struct Textured {
     pub slots: Vec<[u8; 3]>,
 }
 
-/// A drawn face's corners in the executor's view space (x right, y up, z ahead; the
-/// original projects them as `160 + 256x/z`, `79 - 256y/z`) and its flat colour, kept for
-/// the modern engine (`crate::modern`), which draws the face itself at the window's
-/// resolution. The classic shape beside it is unchanged.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Solid {
-    pub views: Vec<[i32; 3]>,
-    pub rgb: [u8; 3],
-    /// The original's texture for a textured face (F1643's path), else `None`.
-    pub texture: Option<SolidTexture>,
-    /// For a point of light (one view): its sizes, drawn as a round glow, else `None`.
-    pub sprite: Option<Sprite>,
-    /// The views are an open line through the points (a line or a curve), not a face.
-    pub path: bool,
-    /// A complex polygon's outline (opcode 5): the views are its loops one after another, these
-    /// their lengths, filled as polygons (not as fans).
-    pub outline: Option<Vec<usize>>,
-    /// An engine plume: the views are its two ends (A at the nozzle, B), drawn as a flame.
-    pub flame: Option<Plume>,
-}
-
-/// An engine plume as the modern engine draws it: its width at the nozzle and at its end (view
-/// units) and its hot and cool colours (the glow's own slots).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Plume {
-    pub widths: [i32; 2],
-    pub core: [u8; 3],
-    pub edge: [u8; 3],
-}
-
-/// A point of light (a dot, F1699 to F1801): the core's size in the original's pixels (F1611's
-/// particle diameter, 0 for one pixel) in [`Solid::rgb`], and the halo's size and colour when
-/// it has one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sprite {
-    pub size: i32,
-    pub halo: Option<(i32, [u8; 3])>,
-}
-
-/// A planet's atmosphere as F1877 has it (view space, the planet's own units): the centre,
-/// the surface radius, the ring's outer radius (`radius * (1 + word8 / 32768)`), the haze
-/// colour (the record's material through the palette) and the light vector (pointing the way
-/// the light travels, as F1878 reads it).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Shell {
-    /// The planet's model slot (FFED3D's `textures.cfg` section).
-    pub model: u32,
-    pub centre: [i32; 3],
-    pub radius: i64,
-    pub outer: i64,
-    pub rgb: [u8; 3],
-    pub light: [i32; 3],
-}
-
-/// A textured face's bitmap, its slot colours (as [`Textured`]) and each corner's texel
-/// coordinates in the bitmap (F1644/F1647's corner table, or the entry's own for the planet
-/// surface's F1806/F1808), in the face's vertex order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SolidTexture {
-    pub bitmap: u32,
-    pub slots: Vec<[u8; 3]>,
-    pub uv: Vec<[i16; 2]>,
-    /// The bitmap's row stride (64, or 128 for the others: F1643) and its rows (at least
-    /// the stride, so the corner table stays inside it).
-    pub width: u32,
-    pub height: u32,
-    /// The bitmap's own width and height (FFED3D's art covers exactly these).
-    pub image: [u32; 2],
-    /// A model face's texture record (`material & 0xfff`, `DATA_007811`), which names
-    /// FFED3D's `tex(400 + record)`; `None` for other textured shapes.
-    pub record: Option<u32>,
-}
-
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub shapes: Vec<Shape>,
-    /// For each shape that is a model face, its [`Solid`] (aligned with
-    /// [`Self::shapes`]; may be shorter, the rest are `None`).
-    pub solids: Vec<Option<Solid>>,
-    pub shape_owners: Vec<usize>,
-    /// Which ordered shapes came from a curved surface queue.
-    pub surface_faces: Vec<Option<usize>>,
-    /// The model and resolved coordinate frame of each curved surface.
-    pub surface_poses: Vec<SurfacePose>,
-    pub render_children: Vec<ffe_core::model_execute::RenderChild>,
-    pub animation_word: u16,
-    /// The planets' atmospheres, for the modern engine, which draws them in place of the
-    /// ring F1877 queues (those shapes carry an empty [`Solid`], so they are set aside).
-    pub atmospheres: Vec<Shell>,
-    /// The light the frame was drawn in: a view-space vector the way the light travels, 32768
-    /// long (F1876's `+0x134`), for the modern engine's smooth shading.
-    pub light: Option<[i32; 3]>,
-    /// Where the model's origin was drawn, in view space (the modern engine's eclipses).
-    pub origin: Option<[i32; 3]>,
     /// The F1777 depth key of each shape, aligned with [`Self::shapes`], in the
     /// original's far-to-near order. Curved-surface entries (F1840/F1841) are
     /// merged into this order, so a ship draws over a planet it is in front of.
@@ -263,24 +172,10 @@ const RATES: [u32; 4] = [1, 10, 100, 1000];
 /// the original 50,000-word limit.
 pub const SURFACE_QUEUE_WORDS: usize = 0x2_0000;
 
-/// A curved surface's coordinate frame in view space.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SurfacePose {
-    pub model: u32,
-    pub origin: [i32; 3],
-    pub axes: [[i32; 3]; 3],
-}
-
 /// The generated queue between registration and drawing.
 struct SurfaceBatch {
-    pose: SurfacePose,
-    /// The planet's atmosphere, when its record has one.
-    shell: Option<Shell>,
     words: Vec<u32>,
     order: Vec<(u32, usize)>,
-    /// Each entry's corners in view space (by the position of its words), for the
-    /// modern engine.
-    views: std::collections::HashMap<usize, Vec<[i32; 3]>>,
 }
 
 /// One textured surface entry before palette resolution: its screen points, the
@@ -300,167 +195,6 @@ fn ramp_word(w: &[u32], at: usize, band: u32, first: usize) -> u16 {
     let word = w[at + 2 + first + step / 2];
     let value = if step % 2 == 0 { word } else { word >> 16 };
     (value & 0xfff) as u16
-}
-
-/// A complex polygon's outline (screen entries) lifted onto its plane in view space: the plane
-/// through the vertices the outline resolved (`views`), each screen point taken back along its
-/// view ray to it (F1479 run backwards), curves stepped 16 times. The loops one after another and
-/// their lengths; `None` when the plane is edge-on or behind the eye, or there is no outline.
-fn outline_views(
-    entries: &[ffe_core::model_polygon::Entry],
-    views: &[[i32; 3]],
-) -> Option<(Vec<[i32; 3]>, Vec<usize>)> {
-    use ffe_core::model_polygon::Entry;
-    let points: Vec<[f64; 3]> = views.iter().map(|v| v.map(f64::from)).collect();
-    let first = *points.first()?;
-    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-    let cross = |a: [f64; 3], b: [f64; 3]| {
-        [
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0],
-        ]
-    };
-    let size = |a: [f64; 3]| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
-    // The plane's normal from the widest triangle of the resolved points.
-    let mut normal = [0.0; 3];
-    for (i, b) in points.iter().enumerate().skip(1) {
-        for c in &points[i + 1..] {
-            let n = cross(sub(*b, first), sub(*c, first));
-            if size(n) > size(normal) {
-                normal = n;
-            }
-        }
-    }
-    if size(normal) <= 0.0 {
-        return None;
-    }
-    let reach = normal[0] * first[0] + normal[1] * first[1] + normal[2] * first[2];
-    let lift = |[x, y]: [f64; 2]| -> Option<[i32; 3]> {
-        let ray = [(x - 160.0) / 256.0, (79.0 - y) / 256.0, 1.0];
-        let facing = normal[0] * ray[0] + normal[1] * ray[1] + normal[2] * ray[2];
-        let t = reach / facing;
-        (facing.abs() > 1.0e-9 && t > 0.0 && t.is_finite())
-            .then(|| ray.map(|c| (c * t).round() as i32))
-    };
-    let at = |p: [i16; 2]| [f64::from(p[0]), f64::from(p[1])];
-    let mut loops: Vec<Vec<[f64; 2]>> = Vec::new();
-    let start = |loops: &mut Vec<Vec<[f64; 2]>>, p: [f64; 2]| {
-        if loops.last().and_then(|l| l.last()) != Some(&p) {
-            loops.push(vec![p]);
-        }
-    };
-    for entry in entries {
-        match entry {
-            Entry::Edge([a, b]) => {
-                start(&mut loops, at(*a));
-                loops.last_mut()?.push(at(*b));
-            }
-            Entry::To(b) => loops.last_mut()?.push(at(*b)),
-            Entry::Curve([a, b, c, d]) => {
-                start(&mut loops, at(*a));
-                let [a, b, c, d] = [*a, *b, *c, *d].map(at);
-                for step in 1..=16 {
-                    let t = f64::from(step) / 16.0;
-                    let u = 1.0 - t;
-                    let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
-                    let point = std::array::from_fn(|k| {
-                        w[0] * a[k] + w[1] * b[k] + w[2] * c[k] + w[3] * d[k]
-                    });
-                    loops.last_mut()?.push(point);
-                }
-            }
-        }
-    }
-    let mut views = Vec::new();
-    let mut lengths = Vec::new();
-    for mut ring in loops {
-        ring.dedup();
-        if ring.len() > 1 && ring.first() == ring.last() {
-            ring.pop();
-        }
-        if ring.len() < 3 {
-            continue;
-        }
-        for point in &ring {
-            views.push(lift(*point)?);
-        }
-        lengths.push(ring.len());
-    }
-    (!lengths.is_empty()).then_some((views, lengths))
-}
-
-/// An engine plume for the modern engine from a thruster glow: the original's quad corners on the
-/// screen give its width at the nozzle (A); the shaft (bitmap 0x65) runs from A to B and narrows to
-/// a third, the core (0x123) is round at A. Its hot colour is the glow's brightest slot and its
-/// cool one the dimmest lit slot.
-fn plume(
-    points: &[[i16; 2]],
-    [a, b]: [[i32; 3]; 2],
-    bitmap: u32,
-    slots: &[[u8; 3]],
-) -> Option<(Vec<[i32; 3]>, Plume)> {
-    if a[2] <= 0 || points.len() < 3 {
-        return None;
-    }
-    let screen = |v: [i32; 3]| {
-        let z = f64::from(v[2].max(1));
-        [
-            160.0 + 256.0 * f64::from(v[0]) / z,
-            79.0 - 256.0 * f64::from(v[1]) / z,
-        ]
-    };
-    let (sa, sb) = (screen(a), screen(b));
-    let along = [sb[0] - sa[0], sb[1] - sa[1]];
-    let length = (along[0] * along[0] + along[1] * along[1]).sqrt();
-    // The quad's half width across the plume (or its half size, for the round core).
-    let half = points
-        .iter()
-        .map(|p| {
-            let (x, y) = (f64::from(p[0]) - sa[0], f64::from(p[1]) - sa[1]);
-            if length > 0.5 {
-                (x * along[1] - y * along[0]).abs() / length
-            } else {
-                (x * x + y * y).sqrt()
-            }
-        })
-        .fold(0.0, f64::max);
-    let width = (2.0 * half * f64::from(a[2]) / 256.0).max(1.0) as i32;
-    let lit: Vec<[u8; 3]> = slots
-        .iter()
-        .skip(1)
-        .copied()
-        .filter(|c| *c != [0; 3])
-        .collect();
-    let bright = |c: &[u8; 3]| u32::from(c[0]) + u32::from(c[1]) + u32::from(c[2]);
-    let core = *lit.iter().max_by_key(|c| bright(c))?;
-    let edge = *lit.iter().min_by_key(|c| bright(c))?;
-    let round = bitmap & 0xfff == 0x123;
-    let ends = if round { vec![a, a] } else { vec![a, b] };
-    let widths = if round {
-        [width, width]
-    } else {
-        [width, (width / 3).max(1)]
-    };
-    Some((ends, Plume { widths, core, edge }))
-}
-
-/// F1546's cubic curve through four points (entry order: the ends first and last) in view
-/// space, as 33 points for the modern engine: the same curve F1549's forward differences step
-/// along on the screen, but drawn finer and in perspective.
-fn bezier(points: [[i32; 3]; 4]) -> Vec<[i32; 3]> {
-    let [a, b, c, d] = points.map(|p| p.map(f64::from));
-    (0..=32)
-        .map(|step| {
-            let t = f64::from(step) / 32.0;
-            let u = 1.0 - t;
-            let weights = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
-            std::array::from_fn(|k| {
-                (weights[0] * a[k] + weights[1] * b[k] + weights[2] * c[k] + weights[3] * d[k])
-                    .round() as i32
-            })
-        })
-        .collect()
 }
 
 /// Every curved surface in this execution and its executed children, in the
@@ -828,42 +562,6 @@ impl ModelViewer {
     /// Texels without a slot colour (7 and above, never written by face entries;
     /// stale `DATA_009252` contents in the original) are drawn black, the zeroed
     /// start-up value. Returns false when the bitmap is missing.
-    /// A textured shape's [`SolidTexture`], with `uv` its own texel coordinates or, for
-    /// `None`, the corner table F1644/F1647 use. `None` when the bitmap is missing.
-    pub fn solid_texture(
-        &self,
-        textured: &Textured,
-        uv: Option<&[[i16; 2]]>,
-    ) -> Option<SolidTexture> {
-        let map = self.textures.map(textured.bitmap & 0xfff)?;
-        let width = if map.width == 64 { 64 } else { 128 };
-        let uv = match (uv, textured.points.len()) {
-            (Some(uv), _) => uv.to_vec(),
-            (None, 3) => triangle_uv(map.width).to_vec(),
-            (None, 4) => quad_uv(map.width, (textured.bitmap >> 12 & 7) as u8).to_vec(),
-            _ => return None,
-        };
-        Some(SolidTexture {
-            bitmap: textured.bitmap,
-            slots: textured.slots.clone(),
-            uv,
-            width,
-            height: (map.texels.len() as u32 / width).max(width),
-            image: [map.width, map.texels.len() as u32 / map.width.max(1)],
-            record: None,
-        })
-    }
-
-    /// A textured face's bitmap for the modern engine: its colour indices over its whole
-    /// stride and rows (index 0 where the bitmap has no texel), and whether it skips index 0.
-    pub fn bitmap_indices(&self, texture: &SolidTexture) -> Option<(Vec<u8>, bool)> {
-        let map = self.textures.map(texture.bitmap & 0xfff)?;
-        let indices = (0..(texture.width * texture.height) as usize)
-            .map(|at| map.texels.get(at).copied().unwrap_or(0))
-            .collect();
-        Some((indices, map.masked_zero))
-    }
-
     pub fn rasterise(&self, shape: &Textured, plot: impl FnMut(i32, i32, [u8; 3])) -> bool {
         self.rasterise_with(shape, None, plot)
     }
@@ -1718,8 +1416,6 @@ impl ModelViewer {
         self.register_execution_colours(&result);
         let mut frame = Frame {
             children_error,
-            render_children: result.render_children.clone(),
-            animation_word: inputs.globals[1],
             jitter: vertices.jitter(),
             texts: result.texts.iter().filter(|text| !text.culled).count(),
             ..Frame::default()
@@ -1753,8 +1449,6 @@ impl ModelViewer {
                 .max(1e-9);
             light_view.map(|v| (v / length * 32_768.0) as i32)
         };
-        frame.light = Some(view_light);
-        frame.origin = Some(position);
         let (surfaces, skipped, haze) = self.collect_surfaces(&result, view_light, model.index);
         frame.skipped += skipped;
         for batch in &surfaces {
@@ -1788,12 +1482,8 @@ impl ModelViewer {
         }
         // F1840/F1841 queue their entries into the same F1778 list as the model's
         // faces; merge them by key so the planet is not painted over a nearer ship.
-        frame.surface_poses = surfaces.iter().map(|batch| batch.pose.clone()).collect();
         let surface_shapes = self.surface_shapes(&surfaces);
         Self::merge_surface_shapes(&mut frame, surface_shapes);
-        frame
-            .atmospheres
-            .extend(surfaces.iter().filter_map(|batch| batch.shell.clone()));
         Ok(frame)
     }
 
@@ -1912,7 +1602,7 @@ impl ModelViewer {
         let mut haze = None;
         let mut emissions = Vec::new();
         all_surfaces(result, model, &mut emissions);
-        for (model, emission) in emissions {
+        for (_, emission) in emissions {
             let (Some((table, maps)), Some(origin), Some(vectors)) =
                 (&self.terrain, emission.origin, emission.axes)
             else {
@@ -1953,19 +1643,6 @@ impl ModelViewer {
             } else {
                 light
             };
-            let shell = || {
-                (i32::from(surface.parameters[1]).wrapping_shl(16) != 0).then(|| {
-                    let radius = self.surface_extent.get();
-                    Shell {
-                        model,
-                        centre: origin,
-                        radius: radius as i64,
-                        outer: (radius * (1.0 + f64::from(surface.parameters[1]) / 32768.0)) as i64,
-                        rgb: self.rgb(material),
-                        light,
-                    }
-                })
-            };
             let shading = Shading {
                 light,
                 shades: self.lighting.shades,
@@ -1975,7 +1652,6 @@ impl ModelViewer {
             };
             let mut terrain = Terrain::new(table, maps);
             let mut queue = Queue::with_limit(SURFACE_QUEUE_WORDS);
-            queue.views = Some(Vec::new());
             // An overflow of the original's arenas or queue ends the drawing early;
             // what was queued stands.
             let record = Haze {
@@ -2015,15 +1691,7 @@ impl ModelViewer {
             }
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
-            let shell = if outcome.is_ok() { shell() } else { None };
             batches.push(SurfaceBatch {
-                pose: SurfacePose {
-                    model,
-                    origin,
-                    axes: vectors,
-                },
-                shell,
-                views: queue.views.take().unwrap_or_default().into_iter().collect(),
                 words: queue.words,
                 order,
             });
@@ -2106,23 +1774,11 @@ impl ModelViewer {
     /// build. Flat entries are F1804 triangles; the rest are F1805/F1807
     /// descriptor textures or F1806/F1808 explicit-coordinate textures, drawn by
     /// F1644/F1647. F1877's haze ring entries keep the group's key.
-    fn surface_shapes(&self, batches: &[SurfaceBatch]) -> Vec<(u32, Shape, Option<Solid>, usize)> {
+    fn surface_shapes(&self, batches: &[SurfaceBatch]) -> Vec<(u32, Shape)> {
         let mut all = Vec::new();
-        for (surface, batch) in batches.iter().enumerate() {
+        for batch in batches {
             let mut shapes = Vec::new();
             let w = &batch.words;
-            // With an atmosphere the modern engine draws, the ring's shapes are set aside.
-            let ring = || {
-                batch.shell.as_ref().map(|_| Solid {
-                    views: Vec::new(),
-                    rgb: [0; 3],
-                    texture: None,
-                    path: false,
-                    outline: None,
-                    flame: None,
-                    sprite: None,
-                })
-            };
             for &(key, at) in &batch.order {
                 let handler = w[at + 2];
                 if handler == GROUP_OPEN {
@@ -2146,7 +1802,7 @@ impl ModelViewer {
                                 if let Some(texture) =
                                     self.terrain_texture(w, pos - 2, key, 4, false)
                                 {
-                                    shapes.push((key, self.texture_shape(&texture), ring()));
+                                    shapes.push((key, self.texture_shape(&texture)));
                                     pos += 13;
                                     continue;
                                 }
@@ -2161,7 +1817,6 @@ impl ModelViewer {
                                         vec![points[0], points[1], points[2]],
                                         vec![colours[0], colours[1], colours[2]],
                                     ),
-                                    ring(),
                                 ));
                                 shapes.push((
                                     key,
@@ -2169,13 +1824,12 @@ impl ModelViewer {
                                         vec![points[0], points[2], points[3]],
                                         vec![colours[0], colours[2], colours[3]],
                                     ),
-                                    ring(),
                                 ));
                                 pos += 13;
                             }
                             10 => {
                                 let points = vec![point(1), point(2), point(3), point(4)];
-                                shapes.push((key, Shape::Fill(points, colour(w[pos + 5])), ring()));
+                                shapes.push((key, Shape::Fill(points, colour(w[pos + 5]))));
                                 pos += 6;
                             }
                             _ => break,
@@ -2198,31 +1852,9 @@ impl ModelViewer {
                 // coordinates, the planet surface) draw the real bitmap when the
                 // cache carries it. Without it, the old flat/gouraud stand-in runs.
                 let explicit = matches!(handler & 0xff, 6 | 8);
-                // The entry's corners in view space, for the modern engine.
-                let views = batch.views.get(&(at + 2)).filter(|v| v.len() == corners);
                 if let Some(texture) = self.terrain_texture(w, at, key, corners, explicit) {
                     let shape = self.texture_shape(&texture);
-                    let solid = views.and_then(|views| {
-                        let (textured, uv) = match &shape {
-                            Shape::Textured(textured) => (textured, None),
-                            Shape::TexturedUv(textured, uv) => (textured, Some(&uv[..])),
-                            _ => return None,
-                        };
-                        Some(Solid {
-                            views: views.clone(),
-                            rgb: textured
-                                .slots
-                                .get(textured.slots.len() / 2)
-                                .copied()
-                                .unwrap_or_default(),
-                            texture: Some(self.solid_texture(textured, uv)?),
-                            path: false,
-                            outline: None,
-                            flame: None,
-                            sprite: None,
-                        })
-                    });
-                    shapes.push((texture.key, shape, solid));
+                    shapes.push((texture.key, shape));
                     continue;
                 }
                 // The detail entries (F1808, F1806) colour each corner from the 22-step
@@ -2230,15 +1862,6 @@ impl ModelViewer {
                 // ones (F1807, F1805) take the middle of their seven slots, the flat
                 // ones their colour.
                 let colour = |word: u16| self.textures.rgb(word);
-                let solid = |views: Vec<[i32; 3]>, rgb| Solid {
-                    views,
-                    rgb,
-                    texture: None,
-                    path: false,
-                    outline: None,
-                    flame: None,
-                    sprite: None,
-                };
                 match handler & 0xff {
                     8 => {
                         let colours = self
@@ -2246,8 +1869,7 @@ impl ModelViewer {
                             .into_iter()
                             .map(colour)
                             .collect::<Vec<_>>();
-                        let face = views.map(|v| solid(v.clone(), colours[0]));
-                        shapes.push((key, Shape::Gouraud(points, colours), face));
+                        shapes.push((key, Shape::Gouraud(points, colours)));
                     }
                     6 => {
                         let colours = self.surface_fallback_colours(w, at, 6);
@@ -2257,7 +1879,6 @@ impl ModelViewer {
                                 vec![points[0], points[1], points[2]],
                                 vec![colour(colours[0]), colour(colours[1]), colour(colours[2])],
                             ),
-                            views.map(|v| solid(vec![v[0], v[1], v[2]], colour(colours[0]))),
                         ));
                         shapes.push((
                             key,
@@ -2265,22 +1886,16 @@ impl ModelViewer {
                                 vec![points[0], points[2], points[3]],
                                 vec![colour(colours[0]), colour(colours[2]), colour(colours[3])],
                             ),
-                            views.map(|v| solid(vec![v[0], v[2], v[3]], colour(colours[0]))),
                         ));
                     }
                     other => {
                         let colours = self.surface_fallback_colours(w, at, other);
                         let rgb = self.textures.rgb(colours[0]);
-                        let solid = views.map(|v| solid(v.clone(), rgb));
-                        shapes.push((key, Shape::Fill(points, rgb), solid));
+                        shapes.push((key, Shape::Fill(points, rgb)));
                     }
                 }
             }
-            all.extend(
-                shapes
-                    .into_iter()
-                    .map(|(key, shape, solid)| (key, shape, solid, surface)),
-            );
+            all.extend(shapes);
         }
         all
     }
@@ -2291,14 +1906,11 @@ impl ModelViewer {
     /// own, so a near ship draws over a far planet as the original's one queue
     /// does. Equal keys keep the primitive before the surface, and surfaces in
     /// their queue order.
-    fn merge_surface_shapes(frame: &mut Frame, shapes: Vec<(u32, Shape, Option<Solid>, usize)>) {
+    fn merge_surface_shapes(frame: &mut Frame, shapes: Vec<(u32, Shape)>) {
         if shapes.is_empty() {
             return;
         }
         let original_len = frame.shapes.len();
-        frame.solids.resize(original_len, None);
-        frame.surface_faces.resize(original_len, None);
-        frame.shape_owners.resize(original_len, 0);
         if frame.keys.len() == original_len && frame.keys.windows(2).all(|k| k[0] >= k[1]) {
             let total = original_len + shapes.len();
             let mut surfaces = shapes;
@@ -2306,53 +1918,30 @@ impl ModelViewer {
             let mut surfaces = surfaces.into_iter().peekable();
             let original = std::mem::replace(&mut frame.keys, Vec::with_capacity(total))
                 .into_iter()
-                .zip(std::mem::replace(
-                    &mut frame.shapes,
-                    Vec::with_capacity(total),
-                ))
-                .zip(std::mem::replace(
-                    &mut frame.solids,
-                    Vec::with_capacity(total),
-                ))
-                .zip(std::mem::replace(
-                    &mut frame.surface_faces,
-                    Vec::with_capacity(total),
-                ))
-                .zip(std::mem::replace(
-                    &mut frame.shape_owners,
-                    Vec::with_capacity(total),
-                ));
-            let mut push = |key, shape, solid, surface, owner| {
+                .zip(std::mem::replace(&mut frame.shapes, Vec::with_capacity(total)));
+            for (key, shape) in original {
+                while surfaces.peek().is_some_and(|surface| surface.0 > key) {
+                    let (key, shape) = surfaces.next().unwrap();
+                    frame.keys.push(key);
+                    frame.shapes.push(shape);
+                }
                 frame.keys.push(key);
                 frame.shapes.push(shape);
-                frame.solids.push(solid);
-                frame.surface_faces.push(surface);
-                frame.shape_owners.push(owner);
-            };
-            for ((((key, shape), solid), surface), owner) in original {
-                while surfaces.peek().is_some_and(|surface| surface.0 > key) {
-                    let (key, shape, solid, surface) = surfaces.next().unwrap();
-                    push(key, shape, solid, Some(surface), 0);
-                }
-                push(key, shape, solid, surface, owner);
             }
-            for (key, shape, solid, surface) in surfaces {
-                push(key, shape, solid, Some(surface), 0);
+            for (key, shape) in surfaces {
+                frame.keys.push(key);
+                frame.shapes.push(shape);
             }
             return;
         }
-        for (key, shape, solid, surface) in shapes {
+        for (key, shape) in shapes {
             let at = frame
                 .keys
                 .iter()
                 .position(|value| *value < key)
                 .unwrap_or(frame.keys.len());
             frame.keys.insert(at, key);
-            frame.shape_owners.resize(frame.shapes.len(), 0);
-            frame.shape_owners.insert(at, 0);
-            frame.surface_faces.insert(at, Some(surface));
             frame.shapes.insert(at, shape);
-            frame.solids.insert(at, solid);
         }
     }
 
@@ -2511,17 +2100,8 @@ impl ModelViewer {
             // shift the alignment between `shapes` and `keys`.
             macro_rules! push {
                 ($shape:expr) => {{
-                    push!($shape, None)
-                }};
-                ($shape:expr, $solid:expr) => {{
-                    frame.solids.resize(frame.shapes.len(), None);
-                    frame.shape_owners.resize(frame.shapes.len(), 0);
-                    frame
-                        .shape_owners
-                        .push(result.ordered_instances.get(index).copied().unwrap_or(0));
                     frame.shapes.push($shape);
                     frame.keys.push(key);
-                    frame.solids.push($solid);
                 }};
             }
             match primitive {
@@ -2543,15 +2123,6 @@ impl ModelViewer {
                     if emission.screen.is_empty() || emission.screen.len() != count {
                         continue;
                     }
-                    let mut solid = (emission.views.len() == count && count >= 2).then(|| Solid {
-                        views: emission.views.clone(),
-                        rgb,
-                        texture: None,
-                        path: false,
-                        outline: None,
-                        flame: None,
-                        sprite: None,
-                    });
                     let behind = emission.screen.contains(&NEAR_SENTINEL);
                     let on_view = !behind
                         && emission.screen.iter().all(|[x, y]| {
@@ -2588,7 +2159,7 @@ impl ModelViewer {
                         let edges: Vec<[[i16; 2]; 2]> =
                             outline.windows(2).map(|pair| [pair[0], pair[1]]).collect();
                         if !edges.is_empty() {
-                            push!(Shape::Polygon(edges, rgb), solid);
+                            push!(Shape::Polygon(edges, rgb));
                         }
                         continue;
                     }
@@ -2611,18 +2182,7 @@ impl ModelViewer {
                                 bitmap: entry.bitmap,
                                 slots,
                             };
-                            if let Some(solid) = solid.as_mut() {
-                                solid.texture =
-                                    self.solid_texture(&textured, None).map(|texture| {
-                                        SolidTexture {
-                                            record: Some(u32::from(
-                                                material(face.material).texture,
-                                            )),
-                                            ..texture
-                                        }
-                                    });
-                            }
-                            push!(Shape::Textured(textured), solid);
+                            push!(Shape::Textured(textured));
                             continue;
                         }
                     }
@@ -2633,25 +2193,14 @@ impl ModelViewer {
                             Shape::Flat(points, rgb)
                         } else {
                             Shape::Fill(points, rgb)
-                        },
-                        solid
-                    );
+                        });
                 }
                 Primitive::Line(line) => {
                     let rgb = self.rgb(resolve_colour(line.material, line.context.colour, [0; 3]));
                     // F1803: F1704's clipped, stored end points, drawn by F1616.
                     if let Some([a, b]) = line.screen {
                         let point = |[x, y]: [i16; 2]| (i32::from(x), i32::from(y));
-                        let solid = line.views.map(|views| Solid {
-                            views: views.to_vec(),
-                            rgb,
-                            texture: None,
-                            path: true,
-                            outline: None,
-                            flame: None,
-                            sprite: None,
-                        });
-                        push!(Shape::Line(point(a), point(b), rgb), solid);
+                        push!(Shape::Line(point(a), point(b), rgb));
                     }
                 }
                 Primitive::Point(emitted) => {
@@ -2693,63 +2242,19 @@ impl ModelViewer {
                                     core,
                                 } => vec![(halo_size, halo), (core_size, core)],
                             };
-                            // For the modern engine, the dot as one light at its view
-                            // position; its other particle is set aside with it.
-                            let (core, halo) = match dot.shape {
-                                DotShape::One { size, colour } => ((size, colour), None),
-                                DotShape::Two {
-                                    halo_size,
-                                    halo,
-                                    core_size,
-                                    core,
-                                } => ((core_size, core), Some((halo_size, self.rgb(halo)))),
-                            };
-                            let mut light = emitted.view.map(|view| Solid {
-                                views: vec![view],
-                                rgb: self.rgb(core.1),
-                                texture: None,
-                                path: false,
-                                outline: None,
-                                flame: None,
-                                sprite: Some(Sprite { size: core.0, halo }),
-                            });
                             for (size, colour) in particles {
                                 let spans = ffe_core::model_dot::particle_clipped(x, y, size)
                                     .into_iter()
                                     .map(|s| [s.x, s.y, s.width])
                                     .collect();
-                                let solid = match light.take() {
-                                    Some(light) => Some(light),
-                                    None => emitted.view.map(|_| Solid {
-                                        views: Vec::new(),
-                                        rgb: [0; 3],
-                                        texture: None,
-                                        path: false,
-                                        outline: None,
-                                        flame: None,
-                                        sprite: None,
-                                    }),
-                                };
-                                push!(Shape::Spans(spans, self.rgb(colour)), solid);
+                                push!(Shape::Spans(spans, self.rgb(colour)));
                             }
                         }
                         // Off the view or too near: nothing.
                         Some(None) => {}
                         None => {
                             if let Some(p) = emitted.screen.and_then(point) {
-                                let light = emitted.view.map(|view| Solid {
-                                    views: vec![view],
-                                    rgb,
-                                    texture: None,
-                                    path: false,
-                                    outline: None,
-                                    flame: None,
-                                    sprite: Some(Sprite {
-                                        size: 0,
-                                        halo: None,
-                                    }),
-                                });
-                                push!(Shape::Point(p, rgb), light);
+                                push!(Shape::Point(p, rgb));
                             }
                         }
                     }
@@ -2758,16 +2263,7 @@ impl ModelViewer {
                     // F1811: the entry's four points, drawn by F1546.
                     if let Some(points) = spline.points {
                         let rgb = self.rgb(spline.colour);
-                        let solid = spline.views.map(|views| Solid {
-                            views: bezier(views),
-                            rgb,
-                            texture: None,
-                            path: true,
-                            outline: None,
-                            flame: None,
-                            sprite: None,
-                        });
-                        push!(Shape::Curve(points, rgb), solid);
+                        push!(Shape::Curve(points, rgb));
                     }
                 }
                 Primitive::Text(id) => {
@@ -2781,9 +2277,8 @@ impl ModelViewer {
                         let mut glyphs = Frame::default();
                         self.draw_primitives(run, &mut glyphs, &[])?;
                         frame.skipped += glyphs.skipped;
-                        glyphs.solids.resize(glyphs.shapes.len(), None);
-                        for (shape, solid) in glyphs.shapes.into_iter().zip(glyphs.solids) {
-                            push!(shape, solid);
+                        for shape in glyphs.shapes {
+                            push!(shape);
                         }
                     }
                 }
@@ -2793,25 +2288,12 @@ impl ModelViewer {
                     // `points`).
                     let rgb = resolve_colour(chain.chain.material, chain.context.colour, [0; 3]);
                     let colour = self.rgb(rgb);
-                    for (k, [x, y]) in chain.points.iter().enumerate() {
+                    for [x, y] in &chain.points {
                         let spans = particle_clipped(*x, *y, chain.size)
                             .into_iter()
                             .map(|s| [s.x, s.y, s.width])
                             .collect();
-                        // For the modern engine, the particle as a light at its view position.
-                        let light = chain.views.get(k).map(|view| Solid {
-                            views: vec![*view],
-                            rgb: colour,
-                            texture: None,
-                            path: false,
-                            outline: None,
-                            flame: None,
-                            sprite: Some(Sprite {
-                                size: chain.size,
-                                halo: None,
-                            }),
-                        });
-                        push!(Shape::Spans(spans, colour), light);
+                        push!(Shape::Spans(spans, colour));
                     }
                 }
                 Primitive::Beam(beam) => {
@@ -2833,19 +2315,7 @@ impl ModelViewer {
                     let edges = ffe_core::model_polygon::edges(&polygon.outline.entries)?;
                     if !edges.is_empty() {
                         let rgb = self.rgb(self.polygon_colour(polygon));
-                        // For the modern engine, the outline lifted onto the polygon's plane.
-                        let solid = outline_views(&polygon.outline.entries, &polygon.views).map(
-                            |(views, loops)| Solid {
-                                views,
-                                rgb,
-                                texture: None,
-                                path: false,
-                                outline: Some(loops),
-                                flame: None,
-                                sprite: None,
-                            },
-                        );
-                        push!(Shape::Polygon(edges, rgb), solid);
+                        push!(Shape::Polygon(edges, rgb));
                     }
                 }
                 Primitive::Thruster(entry) => match &entry.shape {
@@ -2868,21 +2338,7 @@ impl ModelViewer {
                             bitmap: *texture,
                             slots,
                         };
-                        // For the modern engine, a flame: from the nozzle (A) along the plume
-                        // for the shaft (0x65), or round the nozzle for the core (0x123), as
-                        // wide as the original's quad there, in the glow's own colours.
-                        let solid = plume(points, entry.views, *texture, &glow.slots).map(
-                            |(views, plume)| Solid {
-                                views,
-                                rgb: plume.core,
-                                texture: None,
-                                path: false,
-                                outline: None,
-                                flame: Some(plume),
-                                sprite: None,
-                            },
-                        );
-                        push!(Shape::Glow(glow), solid);
+                        push!(Shape::Glow(glow));
                     }
                     // F1803: the stored end points (x - 1 when positive) in the F1691
                     // colour; the line rasteriser (F1616) is the viewer's own.
@@ -2893,16 +2349,7 @@ impl ModelViewer {
                         };
                         let [a, b] = points.map(|[x, y]| (x, y));
                         let rgb = self.rgb(colour);
-                        let solid = Solid {
-                            views: entry.views.to_vec(),
-                            rgb,
-                            texture: None,
-                            path: true,
-                            outline: None,
-                            flame: None,
-                            sprite: None,
-                        };
-                        push!(Shape::Line(a, b, rgb), Some(solid));
+                        push!(Shape::Line(a, b, rgb));
                     }
                 },
                 // A star's system name (F1812 with the 0x84xx string), in the bitmap font.

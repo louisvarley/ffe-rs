@@ -1,7 +1,7 @@
 # Classic port burndown
 
 What is still to implement for a like-for-like Rust reimplementation of
-Frontier: First Encounters, as of 2026-11-10. This checkout is Classic only: the
+Frontier: First Encounters, as of 2026-11-10 (updated after PAR-01 progress and the split cleanup). This checkout is Classic only: the
 Modern GPU engine, the FFED3D integration, `assets.bin` art packs, the
 launcher and the Enhanced renderer and graphics-pack plans are out of scope and
 have been removed.
@@ -12,7 +12,7 @@ the dashboard first, then regenerate or edit this page to match.
 
 ## Summary
 
-**83 of 202 work items are open: 63 in progress, 20 not started.** The foundation,
+**82 of 202 work items are open: 63 in progress, 19 not started.** The foundation,
 model-engine, visible-slice and audio milestones are complete (45 items).
 
 | Area | Open | In progress | Not started | Done / total |
@@ -25,9 +25,9 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 | Original drawing: screens and effects | 5 | 5 | 0 | 19/24 |
 | Content import | 4 | 2 | 2 | 2/6 |
 | Saves | 2 | 0 | 2 | 3/5 |
-| Classic split cleanup | 1 | 0 | 1 | 1/2 |
+| Classic split cleanup | 0 | 0 | 0 | 2/2 |
 | Release and sign-off | 5 | 0 | 5 | 2/7 |
-| **Total** | **83** | **63** | **20** | **119 / 202** |
+| **Total** | **82** | **63** | **19** | **120 / 202** |
 
 ## Critical path
 
@@ -147,10 +147,6 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 
 - [ ] `persist-1` Legacy commander import (read-only)
 - [ ] `persist-4` Imported saves replayed against the reference
-
-### Classic split cleanup (1 open)
-
-- [ ] `classic-split-2` Strip the Modern-only side data the executor and viewer still record (Solid/Shell/plume/surface views, core terrain radial-detail hooks)
 
 ### Release and sign-off (5 open)
 

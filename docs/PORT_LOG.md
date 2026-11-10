@@ -1,5 +1,20 @@
 # Port log
 
+## 2026-11-10 — Classic split cleanup (classic-split-2)
+
+`model_viewer` no longer builds the data only the removed Modern engine read:
+`Solid` faces (views, textures, sprites, plumes, outlines, curves), atmosphere
+`Shell`s, surface poses and view corners, shape owners, render children and the
+frame's light/origin. `merge_surface_shapes` keeps its exact ordering on keys
+and shapes alone. `ffe-core`'s `terrain`, `terrain_draw` and `terrain_emit`
+are restored to their committed pre-split versions, which never had the
+Modern visual/radial detail, planet-frame rotation, shoreline capture or
+fade; those were all behind flags only the Modern engine set.
+
+Every scripted capture (intro 13, display 7, start 150, traffic 7, game-over
+35, planet 1) is byte-identical to the build before the split. 867 workspace
+tests pass (three Modern-terrain unit tests went with the code).
+
 ## 2026-11-10 — PAR-01: F152's whole-second events from the day fraction
 
 F938's events (shield recharge, hull repair, thrust energy, laser and hull

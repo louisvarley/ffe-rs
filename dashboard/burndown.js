@@ -298,10 +298,10 @@ window.FFE_BURNDOWN = {
     {
       id: "classic-split",
       title: "Classic-only port: Modern engine, FFED3D integration and launcher removed",
-      status: "in-progress",
+      status: "done",
       tasks: [
         { id: "classic-split-1", title: "Remove the Modern GPU engine, FFED3D art/models, assets.bin packs, the launcher and the Classic/Modern graphics switch", status: "done", version: "classic" },
-        { id: "classic-split-2", title: "Strip the Modern-only side data the executor and viewer still record (Solid/Shell/plume/surface views, core terrain radial-detail hooks)", status: "todo", version: "classic" }
+        { id: "classic-split-2", title: "Strip the Modern-only side data the executor and viewer still record (Solid/Shell/plume/surface views, core terrain radial-detail hooks)", status: "done", version: "classic" }
       ]
     },
     {
@@ -1336,6 +1336,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-10",
       remaining: 83,
       note: "Classic-only fork. The Modern engine, FFED3D integration, launcher and graphics packs are out of scope: the packs (3 open) and enhanced (14 open) milestones were removed. A classic-split milestone adds the removal (done) and one cleanup item (open)."
-}
+    },
+    {
+      date: "2026-11-10",
+      remaining: 82,
+      note: "classic-split-2 done: the viewer no longer records the Modern engine's side data (Solid faces, atmosphere shells, plumes, sprites, surface view corners), and the core terrain returns to its pre-split code without the Modern detail, planet-frame and shoreline hooks. Classic captures are byte-identical."
+    }
   ]
 };

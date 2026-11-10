@@ -78,14 +78,6 @@ impl Default for Node {
 }
 
 impl Node {
-    pub(crate) fn eye_distance(&self) -> f64 {
-        [self.x(), self.y(), self.z()]
-            .into_iter()
-            .map(|component| f64::from(component).powi(2))
-            .sum::<f64>()
-            .sqrt()
-    }
-
     pub fn dword(&self, at: usize) -> i32 {
         i32::from_le_bytes(self.bytes[at..at + 4].try_into().unwrap())
     }
@@ -140,12 +132,6 @@ pub struct Terrain<'a> {
     pub(crate) nodes: Vec<Node>,
     free_nodes: Vec<usize>,
     nodes_out: u32,
-    pub(crate) visual_detail: bool,
-    pub(crate) radial_detail: bool,
-    /// Modern only: the nodes' positions are in a frame fixed to the planet (with the
-    /// eye at its origin), and this rotation (rows) turns them into view space for the
-    /// tests and projections that depend on the view. `None`: positions are view space.
-    pub(crate) view: Option<[[f64; 3]; 3]>,
     pub(crate) edges: Vec<Edge>,
     free_edges: Vec<usize>,
     edges_out: u32,
@@ -156,8 +142,6 @@ pub struct Terrain<'a> {
     pub level_base: i32,
     /// `DATA_009260`: per layer and level, the maps of the feature at hand.
     pub layers: [[LayerEntry; 32]; 2],
-    surface_height: Option<f32>,
-    capture_surface_height: bool,
 }
 
 /// The functions behind `DATA_009280..9282` (F1833 installs them): F1831, F1832 and
@@ -370,93 +354,22 @@ impl<'a> Terrain<'a> {
             nodes: Vec::new(),
             free_nodes: Vec::new(),
             nodes_out: 0,
-            visual_detail: false,
-            radial_detail: false,
-            view: None,
             edges: Vec::new(),
             free_edges: Vec::new(),
             edges_out: 0,
             projection: Projection::Texture,
             level_base: 0,
             layers: [[[0; 2]; 32]; 2],
-            surface_height: None,
-            capture_surface_height: false,
         };
         terrain.reset();
         terrain
     }
 
-    /// Allow a denser presentation mesh. Simulation and reference draws retain
-    /// the original arena limits and screen-area cutoff.
-    pub fn enable_visual_detail(&mut self) {
-        self.visual_detail = true;
-    }
-
-    /// Start a presentation query for the original signed shoreline field.
-    /// This does not change the distance or the subdivisions used by physics.
-    pub fn capture_surface_height(&mut self) {
-        self.capture_surface_height = true;
-        self.surface_height = None;
-    }
-
-    /// Negative values are submerged. The unit is one feature-map height step.
-    pub fn surface_height(&self) -> Option<f32> {
-        self.surface_height
-    }
-
-    /// Refine the Modern mesh by distance and angular size, independent of heading.
-    pub fn enable_radial_detail(&mut self) {
-        self.enable_visual_detail();
-        self.radial_detail = true;
-    }
-
-    /// Modern only, with [`Self::enable_radial_detail`]: the positions handed in (the
-    /// scene's origin and axes) are in a frame that turns with the planet, not the camera,
-    /// and `rows` turns that frame into view space. The subdivision's integer arithmetic then
-    /// never sees the camera's rotation, so turning the view cannot re-round the ground; only
-    /// culling, depth keys, haze and screen positions are worked out in view space.
-    pub fn set_view_rotation(&mut self, rows: [[f64; 3]; 3]) {
-        self.view = Some(rows);
-    }
-
-    /// A position (planet frame with [`Self::set_view_rotation`], else view space) in view
-    /// space.
-    pub(crate) fn to_view(&self, p: [i32; 3]) -> [i32; 3] {
-        match &self.view {
-            None => p,
-            Some(rows) => rows.map(|row| {
-                (row[0] * f64::from(p[0]) + row[1] * f64::from(p[1]) + row[2] * f64::from(p[2]))
-                    .round() as i32
-            }),
-        }
-    }
-
-    /// A node's position in view space (see [`Self::to_view`]).
-    pub(crate) fn node_view(&self, node: &Node) -> [i32; 3] {
-        self.to_view([node.x(), node.y(), node.z()])
-    }
-
-    fn node_limit(&self) -> u32 {
-        if self.visual_detail {
-            NODE_LIMIT * 12
-        } else {
-            NODE_LIMIT
-        }
-    }
-
-    fn edge_limit(&self) -> u32 {
-        if self.visual_detail {
-            EDGE_LIMIT * 12
-        } else {
-            EDGE_LIMIT
-        }
-    }
-
     /// F1816: empty both arenas. The nodes keep no history (the original's keep
     /// their old bytes; nothing reads a field before writing it).
     pub fn reset(&mut self) {
-        self.nodes = vec![Node::default(); LOCAL_NODES + self.node_limit() as usize];
-        self.free_nodes = (0..self.node_limit() as usize)
+        self.nodes = vec![Node::default(); LOCAL_NODES + NODE_LIMIT as usize];
+        self.free_nodes = (0..NODE_LIMIT as usize)
             .rev()
             .map(|i| LOCAL_NODES + i)
             .collect();
@@ -468,16 +381,16 @@ impl<'a> Terrain<'a> {
                 mid: NIL,
                 second: NIL
             };
-            self.edge_limit() as usize
+            EDGE_LIMIT as usize
         ];
-        self.free_edges = (0..self.edge_limit() as usize).rev().collect();
+        self.free_edges = (0..EDGE_LIMIT as usize).rev().collect();
         self.edges_out = 0;
     }
 
     /// F1818: a node from the arena.
     pub fn alloc_node(&mut self) -> Result<usize, Abort> {
         self.nodes_out += 1;
-        if self.nodes_out >= self.node_limit() {
+        if self.nodes_out >= NODE_LIMIT {
             return Err(Abort(1));
         }
         Ok(self.free_nodes.pop().expect("arena counted"))
@@ -492,7 +405,7 @@ impl<'a> Terrain<'a> {
     /// F1820: an edge record with no links and no midpoint.
     pub fn alloc_edge(&mut self) -> Result<usize, Abort> {
         self.edges_out += 1;
-        if self.edges_out >= self.edge_limit() {
+        if self.edges_out >= EDGE_LIMIT {
             return Err(Abort(2));
         }
         let edge = self.free_edges.pop().expect("arena counted");
@@ -553,15 +466,9 @@ impl<'a> Terrain<'a> {
 
     /// F1829: the detail level a node's distance calls for.
     pub fn set_level(&mut self, node: usize) {
-        let node = &mut self.nodes[node];
-        let distance = if self.radial_detail {
-            node.eye_distance() as i32
-        } else {
-            node.z()
-        }
-        .max(0x400);
+        let distance = self.nodes[node].z().max(0x400);
         let level = self.level_base - msb(distance as u32);
-        node.set_dword(0x44, if level - 1 < 0 { 1 } else { level });
+        self.nodes[node].set_dword(0x44, if level - 1 < 0 { 1 } else { level });
     }
 
     /// The map byte a layer reads at a map coordinate.
@@ -605,19 +512,11 @@ impl<'a> Terrain<'a> {
             self.average_layers(node, a, b, level);
         }
         let (na, nb) = (self.nodes[a], self.nodes[b]);
-        let radial_detail = self.radial_detail;
-        let position_product = |a: i32, b: i32| {
-            if radial_detail {
-                ((i64::from(a) * i64::from(b) + (1 << 30)) >> 31) as i32
-            } else {
-                multiply(a, b)
-            }
-        };
         if variant.scaled {
             let factor = self.table_dword(tables::EDGE_SCALE + 4 * level as usize);
             for at in [0x28, 0x2c, 0x30] {
                 let sum = na.dword(at).wrapping_add(nb.dword(at));
-                self.nodes[node].set_dword(at, position_product(sum, factor));
+                self.nodes[node].set_dword(at, multiply(sum, factor));
             }
         } else {
             for at in [0x28, 0x2c, 0x30] {
@@ -631,16 +530,6 @@ impl<'a> Terrain<'a> {
                 level
             };
         let mean = |at: usize| na.dword(at).wrapping_add(nb.dword(at)) >> 1;
-        let position_mean = |at: usize| {
-            if radial_detail {
-                // Round half units towards the even midpoint so repeated
-                // subdivision cannot pull the mesh down a camera axis.
-                let sum = i64::from(na.dword(at)) + i64::from(nb.dword(at));
-                ((sum + ((sum >> 1) & 1)) >> 1) as i32
-            } else {
-                mean(at)
-            }
-        };
         let mut scale = if variant.scaled {
             self.table_dword(tables::SCALE + 4 * level as usize)
         } else {
@@ -662,9 +551,9 @@ impl<'a> Terrain<'a> {
                 self.nodes[node].set_dword(0x3c, mean(0x3c));
             }
             for at in [4, 8, 0xc] {
-                self.nodes[node].set_dword(at, position_mean(at));
+                self.nodes[node].set_dword(at, mean(at));
             }
-            if self.node_view(&na)[2] < 0x40 || self.node_view(&nb)[2] < 0x40 {
+            if na.z() < 0x40 || nb.z() < 0x40 {
                 self.project(node);
             } else {
                 self.coarse_coordinates(which, node, a, b, c);
@@ -694,57 +583,8 @@ impl<'a> Terrain<'a> {
                 }
             }
             for (at, from) in [(4, 0x28), (8, 0x2c), (0xc, 0x30)] {
-                let displacement = position_product(self.nodes[node].dword(from), scale);
-                self.nodes[node].set_dword(at, displacement.wrapping_add(position_mean(at)));
-            }
-            if self.visual_detail {
-                // Presentation only: the original turns this detail on in one step as the
-                // nearer end passes a power of two in depth, so the coast jumps. Fade it in
-                // over the next halving of the distance instead, from the ends' mean to the
-                // displaced midpoint, so the shape moves smoothly as the eye does.
-                let fade = if self.radial_detail {
-                    let nearest = na.eye_distance().min(nb.eye_distance()).max(1024.0);
-                    let real = f64::from(self.level_base) - nearest.log2();
-                    (real - f64::from(tested - 1)).clamp(0.0, 1.0)
-                } else {
-                    let nearest = na.z().min(nb.z()).max(0x400);
-                    let real = self.level_base as f32 - (nearest as f32).log2();
-                    f64::from((real - (tested - 1) as f32).clamp(0.0, 1.0))
-                };
-                if fade < 1.0 {
-                    let share = (fade * 65536.0) as i64;
-                    let blend = |coarse: i32, fine: i32| {
-                        (i64::from(coarse)
-                            + (((i64::from(fine) - i64::from(coarse)) * share) >> 16))
-                            as i32
-                    };
-                    if variant.height != Height::None {
-                        let (coarse_height, coarse_clamped) = if !variant.clamp {
-                            (mean(0x3c), 0)
-                        } else if na.clamped() != 0 || nb.clamped() != 0 {
-                            (mean(0x40), mean(0x40))
-                        } else {
-                            (mean(0x3c), 0)
-                        };
-                        let fine_height = self.nodes[node].dword(0x3c);
-                        let fine_clamped = self.nodes[node].dword(0x40);
-                        self.nodes[node].set_dword(0x3c, blend(coarse_height, fine_height));
-                        if variant.clamp {
-                            self.nodes[node].set_dword(0x40, blend(coarse_clamped, fine_clamped));
-                        }
-                    }
-                    for at in [4, 8, 0xc] {
-                        let fine = self.nodes[node].dword(at);
-                        let coarse = position_mean(at);
-                        let position = if radial_detail {
-                            let delta = i64::from(fine) - i64::from(coarse);
-                            coarse + ((delta * share + 32768) >> 16) as i32
-                        } else {
-                            blend(coarse, fine)
-                        };
-                        self.nodes[node].set_dword(at, position);
-                    }
-                }
+                let displacement = multiply(self.nodes[node].dword(from), scale);
+                self.nodes[node].set_dword(at, displacement.wrapping_add(mean(at)));
             }
             self.project(node);
         }
@@ -775,7 +615,7 @@ impl<'a> Terrain<'a> {
             let mean = (i32::from(na.word(at)) + i32::from(nb.word(at))) >> 1;
             self.nodes[node].set_word(at, mean as i16);
         }
-        if self.node_view(&nc)[2] > 0x40 {
+        if nc.z() > 0x40 {
             let shift_v = usize::from(na.word(2) > nb.word(2));
             let shift_u = usize::from(na.word(0) > nb.word(0));
             let first = i32::from(nc.word(0)) - i32::from(na.word(0));
@@ -794,20 +634,9 @@ impl<'a> Terrain<'a> {
     }
 
     /// `DATA_009282`: the node's quadrant or screen position and region words.
-    pub(crate) fn project(&mut self, node: usize) {
+    fn project(&mut self, node: usize) {
         match self.projection {
             Projection::Texture => quadrant_node(&mut self.nodes[node]),
-            Projection::Flat if self.view.is_some() => {
-                // Project the node's view-space position; keep its own (planet frame).
-                let mut seen = self.nodes[node];
-                for (at, v) in [4, 8, 0xc].into_iter().zip(self.node_view(&seen)) {
-                    seen.set_dword(at, v);
-                }
-                flat_node(&mut seen);
-                for at in [0, 2, 0x24, 0x26] {
-                    self.nodes[node].set_word(at, seen.word(at));
-                }
-            }
             Projection::Flat => flat_node(&mut self.nodes[node]),
         }
     }
@@ -1283,9 +1112,7 @@ impl Terrain<'_> {
                     .filter(|child| *child != NIL);
                 level += 1;
             }
-            let capture_height = self.capture_surface_height
-                && !matches!(self.type_dword(kind, 0), 2..=4);
-            return self.interpolate([a, b, c], capture_height).map(Some).map_err(Stop::Fault);
+            return self.interpolate([a, b, c]).map(Some).map_err(Stop::Fault);
         }
         Ok(None)
     }
@@ -1294,7 +1121,7 @@ impl Terrain<'_> {
 impl Terrain<'_> {
     /// The end of F1876: the height of the final triangle's plane at the query
     /// point, measured along z.
-    fn interpolate(&mut self, corners: [usize; 3], capture_height: bool) -> Result<i32, Fault> {
+    fn interpolate(&mut self, corners: [usize; 3]) -> Result<i32, Fault> {
         let mut points = corners.map(|n| [self.nodes[n].x(), self.nodes[n].y(), self.nodes[n].z()]);
         let all = points
             .iter()
@@ -1329,12 +1156,6 @@ impl Terrain<'_> {
         };
         let q1 = ratio(t7c, t74)?;
         let q2 = ratio(t78, t70)?;
-        if capture_height {
-            let [a, b, c] = corners.map(|n| f64::from(self.nodes[n].height()));
-            let u = f64::from(q1) / 32768.0;
-            let v = f64::from(q2) / 32768.0;
-            self.surface_height = Some(((a + (b - a) * u + (c - a) * v) / 2097152.0) as f32);
-        }
         let plane = a(m(d(z2, z1), q1), m(d(z3, z1), q2));
         let base = self.nodes[corners[0]].z();
         Ok(if shift < 15 {
