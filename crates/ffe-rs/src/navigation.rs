@@ -120,6 +120,12 @@ pub struct Body {
     /// word, which F246's mining assessment reads.
     pub temperature: i16,
     pub size_word: i16,
+    /// For a body in its parent's rotating frame (`+0x57`, a surface port): its
+    /// own rows there and the parent's rows. F650 turns the pads by the own
+    /// rows and F994 adds the ship's radius along them, in that frame; F1677
+    /// then turns the result by the parent's rows. [`Self::rows`] is the
+    /// product, already in the system frame.
+    pub parent_frame: Option<([i32; 9], [i32; 9])>,
 }
 
 /// A mission script's object kept at a body (F297 on a planet's surface, F40
@@ -586,6 +592,7 @@ fn system_bodies(list: &PhysList, system: &[u8], count: usize) -> Vec<Body> {
         // terrain point, while the planet is still rendered with its true spin.
         let mut position = [coordinate(0), coordinate(1), coordinate(2)];
         let mut rows: [i32; 9] = std::array::from_fn(|k| list.dword(slot, 4 * k) as i32);
+        let mut parent_frame = None;
         if list.byte(slot, 0x57) != 0 && parent != 0 {
             let parent_at = (parent - 1) * OBJECT_BYTES;
             let parent_slot = u32::from_le_bytes(
@@ -605,6 +612,7 @@ fn system_bodies(list: &PhysList, system: &[u8], count: usize) -> Vec<Body> {
                     shift,
                 )
             };
+            parent_frame = Some((rows, matrix));
             rows = ffe_core::frames::mat_mat_mul(&rows, &matrix);
         }
         if parent != 0 {
@@ -656,9 +664,43 @@ fn system_bodies(list: &PhysList, system: &[u8], count: usize) -> Vec<Body> {
             bays: list.word(slot, 0xce),
             temperature: list.word(slot, 0xe0) as i16,
             size_word: list.word(slot, 0xa6) as i16,
+            parent_frame,
         });
     }
     out
+}
+
+impl Body {
+    /// F650's pad offset for `bay` plus F994's `radius` product along the ship's
+    /// up row (the station's second row), from the station's position, in system
+    /// axes. Both are made in the station's own frame, as the original makes them
+    /// (with its rows there, rounding as F650/F1521 round) and only then turned
+    /// into the system frame (F1677). `quantise` keeps F650's offset to F745's
+    /// signed words (`>> 10` as `i16`, `<< 10`) before the radius is added.
+    pub fn pad_offset(
+        &self,
+        pads: &Pads,
+        bay: u16,
+        radius: i32,
+        quantise: bool,
+    ) -> Result<[i64; 3], String> {
+        let (rows, turn) = match &self.parent_frame {
+            Some((own, parent)) => (*own, Some(parent)),
+            None => (self.rows, None),
+        };
+        let mut offset = pads.position(self.model, bay, rows, self.open_air)?;
+        if quantise {
+            offset = offset.map(|v| i64::from((v >> 10) as i16) << 10);
+        }
+        for k in 0..3 {
+            offset[k] =
+                offset[k].wrapping_add(i64::from(ffe_core::model::multiply(radius, rows[3 + k])));
+        }
+        Ok(match turn {
+            Some(parent) => rotate_surface_offset(offset, parent),
+            None => offset,
+        })
+    }
 }
 
 fn rotate_surface_offset(offset: [i64; 3], rows: &[i32; 9]) -> [i64; 3] {
@@ -919,20 +961,9 @@ pub fn external_camera_is_clear(
                 .get(&index)
                 .and_then(|port| port.bay_of(PLAYER))
                 .unwrap_or(0);
-            let up = [body.rows[3], body.rows[4], body.rows[5]];
-            nav.pads
-                .as_ref()?
-                .seat(
-                    body.position,
-                    body.model,
-                    bay,
-                    body.rows,
-                    body.open_air,
-                    0,
-                    up,
-                )
-                .ok()
-                .map(|point| (point.map(|v| v as f64 / unit), body.orientation[1]))
+            let offset = body.pad_offset(nav.pads.as_ref()?, bay, 0, false).ok()?;
+            let point: [i64; 3] = std::array::from_fn(|k| body.position[k].wrapping_add(offset[k]));
+            Some((point.map(|v| v as f64 / unit), body.orientation[1]))
         });
     let probe = Hull {
         index: 255,
@@ -2622,17 +2653,9 @@ impl Navigator {
         let launch_axis = body.orientation[2];
         // F994 copies the station's orientation to the ship and puts it on the
         // pad: F650's offset plus the ship's collision radius along its up row.
-        let up = [body.rows[3], body.rows[4], body.rows[5]];
         let radius = models.info(ship).radii().1 as i32;
-        let seat = pads.seat(
-            body.position,
-            body.model,
-            bay.index,
-            body.rows,
-            body.open_air,
-            radius,
-            up,
-        )?;
+        let offset = body.pad_offset(&pads, bay.index, radius, false)?;
+        let seat: [i64; 3] = std::array::from_fn(|k| body.position[k].wrapping_add(offset[k]));
         let cargo = if default_arm {
             DEFAULT_CARGO
         } else {
@@ -3056,23 +3079,28 @@ impl Navigator {
         self.pad_point(index, bay)
     }
 
-    /// The same F650 pad, rotated in millimetres so it stays fixed on the port
-    /// throughout time acceleration.
+    /// The same F650 pad, made in the port's own frame and turned into the
+    /// system frame in millimetres ([`Body::pad_offset`]), so it stays fixed on
+    /// the port throughout time acceleration.
     pub fn precise_pad_point(&self, index: usize, bay: u16) -> Option<[i64; 3]> {
         let port = self.bodies.get(index).filter(|body| body.open_air)?;
-        let pad = self.pads.as_ref()?.pad(port.model, bay).ok()?;
-        let offset = rotate_surface_offset(pad.map(|v| i64::from(v) << 10), &port.rows);
+        let offset = port.pad_offset(self.pads.as_ref()?, bay, 0, false).ok()?;
         Some(std::array::from_fn(|axis| {
             port.position[axis].wrapping_add(offset[axis])
         }))
     }
 
+    /// F994's seat on the player's pad: F650's offset and F1521's `radius`
+    /// product along the port's up row, both in the port's own frame
+    /// ([`Body::pad_offset`]), as the new game places it.
     pub fn parked_pad_seat(&self, index: usize, radius: i64) -> Option<[i64; 3]> {
-        let port = self.bodies.get(index)?;
+        let port = self.bodies.get(index).filter(|body| body.open_air)?;
         let bay = self.traffic.get(&index)?.bay_of(PLAYER)?;
-        let pad = self.precise_pad_point(index, bay)?;
+        let offset = port
+            .pad_offset(self.pads.as_ref()?, bay, radius as i32, false)
+            .ok()?;
         Some(std::array::from_fn(|axis| {
-            pad[axis].wrapping_add((port.orientation[1][axis] * radius as f64).round() as i64)
+            port.position[axis].wrapping_add(offset[axis])
         }))
     }
 
@@ -4027,19 +4055,12 @@ impl Navigator {
     pub fn takeoff_seat(&self, index: usize, radius: i32) -> Option<[i64; 3]> {
         let body = self.bodies.get(index)?;
         let bay = self.traffic.get(&index)?.bay_of(PLAYER)?;
-        let up = [body.rows[3], body.rows[4], body.rows[5]];
-        self.pads
-            .as_ref()?
-            .seat(
-                body.position,
-                body.model,
-                bay,
-                body.rows,
-                body.open_air,
-                radius,
-                up,
-            )
-            .ok()
+        let offset = body
+            .pad_offset(self.pads.as_ref()?, bay, radius, false)
+            .ok()?;
+        Some(std::array::from_fn(|k| {
+            body.position[k].wrapping_add(offset[k])
+        }))
     }
 
     /// The traffic record of a station, made on first use with its bay count.
@@ -4938,11 +4959,7 @@ impl Navigator {
         if !body.open_air {
             return None;
         }
-        let offset = self
-            .pads
-            .as_ref()?
-            .position(body.model, bay, body.rows, true)
-            .ok()?;
+        let offset = body.pad_offset(self.pads.as_ref()?, bay, 0, false).ok()?;
         Some(std::array::from_fn(|axis| {
             body.position[axis].wrapping_add(offset[axis])
         }))
@@ -6668,14 +6685,8 @@ impl Navigator {
             // signed words; F671 adds the ship radius only after touchdown.
             // Using the launch seat here leaves the ship hovering one radius up.
             let bay = self.traffic.get(&index)?.bay_of(PLAYER)?;
-            let offset = self
-                .pads
-                .as_ref()?
-                .position(body.model, bay, body.rows, body.open_air)
-                .ok()?;
-            std::array::from_fn(|k| {
-                body.position[k].wrapping_add(i64::from((offset[k] >> 10) as i16) << 10)
-            })
+            let offset = body.pad_offset(self.pads.as_ref()?, bay, 0, true).ok()?;
+            std::array::from_fn(|k| body.position[k].wrapping_add(offset[k]))
         } else if body.kind == Kind::Starport {
             // F741 stores signed offset words, then F593 shifts them by ten.
             // Use the Q31 row, rather than a re-normalised floating point axis.
@@ -7348,6 +7359,7 @@ mod tests {
             bays: 0,
             temperature: 0,
             size_word: 0,
+            parent_frame: None,
         }
     }
 

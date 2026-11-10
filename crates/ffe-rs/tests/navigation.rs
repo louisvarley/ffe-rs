@@ -205,9 +205,6 @@ fn start_record_one_is_ross_154() {
     assert_eq!(body.slot, 110, "F994 places the ship at object 0x6e");
     assert!(body.open_air);
     let pads = Pads::from_bytes(cache.asset("base:gameplay/pads").unwrap()).unwrap();
-    let offset = pads
-        .position(body.model, state.bay, body.rows, true)
-        .unwrap();
     // F994: the pad offset, then the ship's collision radius along its up row
     // (the station's second row, copied to the ship first).
     let info = ffe_core::objects::ModelInfo::read(
@@ -225,39 +222,48 @@ fn start_record_one_is_ross_154() {
     // and the port keeps the port's rows in the system frame (F1677), so x
     // and z change sign.
     assert_eq!(up, [1_938_310_531, -909_597_145, -163_923_668]);
-    let expected = pads
-        .seat(
-            body.position,
-            body.model,
-            state.bay,
-            body.rows,
-            true,
-            radius,
-            up,
-        )
-        .unwrap();
-    assert_eq!(state.seat, expected);
+    // F650 and F994 work in the starport's own frame, Ross 154 A's rotating
+    // frame (+0x57), with the starport's rows there; F1677 then turns the
+    // result into the system frame. Made with the system-frame rows instead,
+    // F650's `<< 10` turned a one-unit rounding difference into 2,048 mm.
+    let (own, planet_rows) = body.parent_frame.expect("a surface port's own frame");
     assert_eq!(
-        [
-            state.seat[0] - body.position[0] - offset[0],
-            state.seat[1] - body.position[1] - offset[1],
-            state.seat[2] - body.position[2] - offset[2],
-        ],
-        // The original's (-4694, -2203, 396) in the planet's frame; the
-        // system-frame row gives the same product with x and z negated (F1521
-        // rounds the negated row one unit differently).
-        [4_693, -2_203, -397],
-        "F1521's radius product"
+        [own[3], own[4], own[5]],
+        [-1_938_310_550, -909_597_149, 163_923_668],
+        "the original's object 0x6e rows in Ross 154 A's frame"
     );
-    // F994's sentinel leaves bay 0, (250, 0, 250) on model 0x55. The executed
-    // original (`--state`) puts the player at (-91734, 229221, 263564) from
-    // object 0x6e in Ross 154 A's frame: less the radius product that is
-    // (-85, 226, 257) << 10, which the system-frame rows give as
-    // (83, 226, -259) << 10 (x and z negated, F1669 rounding the other rows).
+    assert_eq!(
+        state.seat,
+        std::array::from_fn(
+            |k| body.position[k] + body.pad_offset(&pads, state.bay, radius, false).unwrap()[k]
+        )
+    );
+    // The executed original (`--state`, `--geometry`) puts the player at
+    // (-91734, 229221, 263564) from object 0x6e in Ross 154 A's frame: F650's
+    // (-85, 226, 257) << 10 for bay 0 plus F1521's (-4694, -2203, 396).
     assert_eq!(state.bay, 0);
-    assert_eq!(offset, [84_992, 231_424, -265_216]);
+    assert_eq!(
+        pads.position(body.model, state.bay, own, true).unwrap(),
+        [-87_040, 231_424, 263_168]
+    );
+    let in_planet: [i64; 3] = std::array::from_fn(|k| {
+        (0..3)
+            .map(|axis| {
+                (state.seat[axis] - body.position[axis]) as f64
+                    * f64::from(planet_rows[3 * k + axis])
+                    / 2_147_483_648.0
+            })
+            .sum::<f64>()
+            .round() as i64
+    });
+    for (got, want) in in_planet.iter().zip([-91_734i64, 229_221, 263_564]) {
+        assert!(
+            (got - want).abs() <= 1,
+            "seat {in_planet:?} in the planet's frame"
+        );
+    }
     eprintln!(
-        "seat {:?} (bay {}, station at {:?}, offset {offset:?})",
+        "seat {:?} (bay {}, station at {:?}, in the planet's frame {in_planet:?})",
         state.seat, state.bay, body.position
     );
     // The calendar counts from 0x121cf7.5 days, not from the absolute clock.
@@ -2578,6 +2584,7 @@ fn the_place_list_is_stations_and_starports_in_system_order() {
         bays: 0,
         temperature: 0,
         size_word: 0,
+        parent_frame: None,
     };
     let list = [
         body("A", Kind::Star),

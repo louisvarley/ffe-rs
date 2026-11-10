@@ -1,5 +1,39 @@
 # Port log
 
+## 2026-11-10 — PAR-04: frame-by-frame takeoff replay; F650's seat in the port's own frame
+
+`tests/takeoff_replay.rs` (local-only) replays the executed original's
+`--flight takeoff 900` trace (Ross 154, Tab at frame 170, faster held from
+260, 21 ms frames) through `Navigator`/`OriginalFlight` with the game loop's
+own hand-off, and compares every frame's mode, F1033 altitude, set speed,
+position and velocity in the planet's rotating frame.
+
+- Mode `0x24` at 171, `0x26` at 261 (F1013's set-speed hand-off) and every
+  set-speed value match. Neither moves the ship on the frame the launch is
+  processed (the game loop builds the pad model after that frame's step).
+- Fixed: the pad seat. F650 multiplies the pad by the starport's rows in its
+  own frame (Ross 154 A's or Hope's rotating frame) and shifts the product
+  left by 10; F994 adds F1521's radius product there, and F1677 turns the
+  whole into the system frame. The port used the system-frame rows, so a one
+  unit rounding difference became 2,048 mm (Ross 154) or about 1.8 m (Hope).
+  `Body::parent_frame` keeps the port's own rows and its planet's rows, and
+  `Body::pad_offset` serves the new-game seat, the parked seat, the takeoff
+  seat, the pad points and the autopilot's final-leg pad (F745's words are
+  now taken in the port's frame too). Both starts' seats match the original's
+  `--geometry` within one unit; the time-warp test still holds the parked
+  seat to about 1 mm.
+- Open: the climb runs about 1% slow and F1031 clears two frames early (the
+  pad world keeps the planet's linear frame with fixed rows, PAR-05 and
+  `flight-1`); after clearing, the original's acceleration falls with speed
+  while the port's does not. F601/F607 have no drag term, so that is
+  free-flight physics, not F1013.
+
+The playable's default start now parks 1.8 m from where it did (the altitude
+readout on the pad goes from 19 m to 20 m). The scripted `--capture-start`
+frames change accordingly; on this machine that capture is not repeatable
+when its window loses focus (the port pauses without focus), so the replay and
+seat tests are the regression evidence.
+
 ## 2026-11-10 — Classic split cleanup (classic-split-2)
 
 `model_viewer` no longer builds the data only the removed Modern engine read:

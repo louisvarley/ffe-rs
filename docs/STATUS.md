@@ -41,7 +41,10 @@ depends on them.
   and a full reserve trace remain);
   (`parity-02`, refuelling and fuel bookkeeping, and `parity-03`, the drive
   state, are done: 4 November);
-  `parity-04` the complete takeoff handler (F1013) and same-frame mode order;
+  `parity-04` the complete takeoff handler (F1013) and same-frame mode order
+  (10 November: a frame-by-frame replay of the original's takeoff matches every
+  mode change and set speed; the pad seat now matches; a 1% climb drift and a
+  2-frame-early clear remain, tied to the pad world's frame);
   `parity-05` the original's frame and contact rules instead of the launch
   altitude stand-in and collision grace; `parity-06` set-speed controls, input
   gates and speed persistence end to end; `parity-07` the original Hope start
