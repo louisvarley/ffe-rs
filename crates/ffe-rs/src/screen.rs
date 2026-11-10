@@ -9,8 +9,7 @@ use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOG
 use crate::intro_text::IntroText;
 use crate::messages::MessageLog;
 use crate::model_lab::{LabView, ModelLab};
-use crate::model_viewer::{AnimationInputs, Frame, ModelViewer, Shape, Solid, THRUST_GLOBAL};
-use crate::modern3d::HudShape;
+use crate::model_viewer::{AnimationInputs, Frame, ModelViewer, Shape, THRUST_GLOBAL};
 use crate::prefs::{self, Mark, Prefs};
 use crate::scanner;
 use crate::station::{self, DockRow, DockView, Screen as StationScreen, Status};
@@ -30,74 +29,19 @@ const VIEW_HEIGHT: usize = 158;
 /// unit direction toward the light, and the palette indices (lit, dark).
 #[derive(Debug, Clone, Copy)]
 pub struct Disc {
+    /// Original system object type (record +0x0a), when available.
+    pub system_type: Option<u16>,
     pub centre: [f64; 3],
     pub radius: f64,
     pub light: [f64; 3],
     pub colours: (u8, u8),
     pub star: bool,
+    /// Stellar effective temperature from the generated object, when available.
+    pub temperature: Option<u16>,
     /// The body's model and surface seed, when it has a drawable surface.
     pub model: Option<(u32, u32)>,
     /// The object's rows in flight space.
     pub orientation: [[f64; 3]; 3],
-}
-
-/// The speed dust's closest spacing: ten flight units (97 m).
-const DUST_CELL: f64 = 10.0;
-/// How many times farther apart each layer of speed dust is than the one before.
-const DUST_SPREAD: f64 = 8.0;
-/// How many spacings the speed dust reaches each way from the ship.
-const DUST_REACH: u32 = 5;
-/// The share of the speed dust's places that hold a mote.
-const DUST_CHANCE: f64 = 0.8;
-
-/// A place of the speed dust, hashed (SplitMix64): the same place always holds the same mote.
-fn dust_hash(at: [i64; 3], layer: usize) -> u64 {
-    let mut z = (at[0] as u64)
-        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
-        .wrapping_add((at[1] as u64).wrapping_mul(0xc2b2_ae3d_27d4_eb4f))
-        .wrapping_add((at[2] as u64).wrapping_mul(0x1656_67b1_9e37_79f9))
-        .wrapping_add(layer as u64);
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    z ^ (z >> 31)
-}
-
-/// A star's glow when its colour is not known.
-const STAR_WHITE: [u8; 3] = [255, 244, 228];
-
-/// A star's colour from its drawn model: its most saturated colour (an orange or red star's
-/// rim), or for a white star its brightest; never a green-led one.
-fn star_hue(frame: &Frame) -> Option<[u8; 3]> {
-    let mut colours: Vec<[u8; 3]> = frame.solids.iter().flatten().map(|s| s.rgb).collect();
-    for shape in &frame.shapes {
-        match shape {
-            Shape::Fill(_, rgb)
-            | Shape::Flat(_, rgb)
-            | Shape::Polygon(_, rgb)
-            | Shape::Spans(_, rgb)
-            | Shape::Point(_, rgb) => colours.push(*rgb),
-            Shape::Gouraud(_, corners) => colours.extend(corners.iter().copied()),
-            _ => {}
-        }
-    }
-    let value = |c: &[u8; 3]| c.iter().map(|v| f32::from(*v)).fold(0.0, f32::max);
-    let saturation = |c: &[u8; 3]| {
-        let high = value(c);
-        let low = c.iter().map(|v| f32::from(*v)).fold(255.0, f32::min);
-        if high > 0.0 {
-            (high - low) / high
-        } else {
-            0.0
-        }
-    };
-    // No star is green: a green-led colour is never its own.
-    colours.retain(|[r, g, b]| g <= r || g <= b);
-    let vivid = colours
-        .iter()
-        .filter(|c| saturation(c) > 0.25 && value(c) > 64.0)
-        .max_by(|a, b| (saturation(a) * value(a)).total_cmp(&(saturation(b) * value(b))));
-    let rgb = vivid.or_else(|| colours.iter().max_by(|a, b| value(a).total_cmp(&value(b))))?;
-    Some(*rgb)
 }
 
 /// A station of the system in the flight view: its own model at its place in the
@@ -105,6 +49,8 @@ fn star_hue(frame: &Frame) -> Option<[u8; 3]> {
 /// frame).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SystemStation {
+    /// Surface port metadata from the gameplay snapshot.
+    pub surface: Option<SurfacePort>,
     pub model: u32,
     /// Centre in flight space.
     pub centre: [f64; 3],
@@ -123,9 +69,19 @@ pub struct SystemStation {
     pub seed: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SurfacePort {
+    /// F650 pad centres in system millimetres. Enclosed ports have no pads.
+    pub pads: [Option<[i64; 3]>; 8],
+}
+
 /// The farthest a station is drawn from (millimetres from the eye): the viewer's
 /// view space is 32-bit, and an orbital city is under a pixel beyond it.
 const STATION_DRAW_RANGE: f64 = 2.0e9;
+
+/// The farthest a dust cloud's view position may be before it is shifted down (with its
+/// scale) to fit the viewer's 32-bit view space, as F1680 does for every far object.
+const DUST_VIEW_LIMIT: f64 = 1.0e9;
 
 /// The lift scene of a docking or launching stage (`ffe_core::lift`), drawn in the
 /// front view after the outside world (or alone, inside the station).
@@ -518,75 +474,20 @@ pub struct Screen {
     /// frame's scene. The original clears the next upper view to it and leaves
     /// the stars out while it is set; `None` uses [`Screen::sky`].
     surface_sky: Option<u32>,
-    /// The glyphs drawn since the presenter last took them, for the modern
-    /// engine's replacement font ([`crate::modern::TextLayer`]).
-    text_layer: crate::modern::TextLayer,
     /// The original's "Background stars" option; off leaves the sky empty.
     pub stars_visible: bool,
     /// The original's "Lock external view to ship" option (camera offset axis).
     pub lock_external: bool,
-    /// Modern graphics with a GPU: the flight view's model faces are set aside for the modern
-    /// engine (`crate::modern3d`) instead of being drawn into the frame. Set by the caller each
-    /// frame; Classic leaves it off and the frame is the original's.
-    pub capture: bool,
-    /// The faces set aside so far this frame, one batch per object.
-    batches: Vec<Vec<Solid>>,
-    /// The planets' atmospheres so far this frame, by the batch they go over.
-    atmospheres: Vec<(usize, crate::model_viewer::Shell)>,
-    /// The light each object's batch was drawn in, by batch.
-    lights: Vec<(usize, [i32; 3])>,
-    /// How much of the star each object's batch sees past the planets (1 all), by batch.
-    eclipses: Vec<(usize, f32)>,
-    /// The batches of the bodies (star, planets, moons) this frame.
-    body_batches: Vec<usize>,
-    /// The system's bodies this frame for the eclipses: camera-space centre and radius in
-    /// flight units, and whether it is the star.
-    casters: Vec<([f64; 3], f64, bool)>,
-    /// The objects' view units per flight unit (`model_scale`), this frame.
-    object_scale: f64,
-    /// Drawing the bodies themselves (they cast the eclipses, and are not shaded by them).
-    in_discs: bool,
-    /// The star in view this frame, for the modern engine's glare and flare.
-    star: Option<crate::modern3d::Star>,
-    /// Each star's colour for its glow, glare and flare, by its model and seed: worked out once
-    /// from a fixed close render of its model (`star_colour`), so it is the same from any angle
-    /// or distance, and when the model is too far away to be drawn.
-    star_colours: std::collections::HashMap<(u32, u32), [u8; 3]>,
-    /// The Others page's "Space dust, clouds etc": with the modern engine, the speed dust
-    /// ([`Self::speed_dust`]) in place of the original's dust clouds.
+    /// The Others page's "Space dust, clouds etc": off leaves F1035's dust clouds out.
     pub dust_visible: bool,
-    /// For tests: the real seconds the next frame's speed dust takes instead of the clock's.
-    pub dust_step: Option<f64>,
-    /// How far the ship has gone in its own frame, for the speed dust (flight units), and when
-    /// the dust was last drawn.
-    dust_travel: [f64; 3],
-    dust_clock: Option<std::time::Instant>,
-    /// The speed dust this frame.
-    dust: Vec<crate::modern3d::DustStreak>,
-    /// The next object drawn gives off light (a beam, an explosion, a hit's sparks).
-    emissive: bool,
-    /// The batches that give off light, this frame.
-    glowing: Vec<usize>,
-    /// The next object drawn is on fire (an explosion).
-    on_fire: bool,
-    /// The batches on fire, this frame.
-    burning: Vec<usize>,
-    /// The generated sky for the modern engine, this frame.
-    sky_view: Option<crate::modern3d::SkyView>,
-    /// Their textures' bitmaps so far this frame, each once.
-    bitmaps: Vec<crate::modern3d::WorldBitmap>,
-    /// The bitmaps read so far, so they are not read again every frame.
-    bitmap_memory: Vec<crate::modern3d::WorldBitmap>,
-    /// Shapes an object draws after its first set-aside face (lights, glows, labels): in the
-    /// original's painter order they lie over its faces, so they are drawn after the world
-    /// phase, over the 3-D view.
-    deferred: Vec<Shape>,
-    /// The last flight view's set-aside faces and world-phase frame (`capture` only).
-    world: Option<crate::modern3d::World>,
+    /// Classic: the flight view's objects' shapes with their F1777 depth keys, in allocation
+    /// order, while the original's one queue is being filled (see [`Self::flush_object_queue`]).
+    object_queue: Option<Vec<(u32, Shape)>>,
     /// The system's bodies as discs (set by the caller each frame).
     pub discs: Vec<Disc>,
     /// The system's stations (set by the caller each frame, in system flight).
     pub stations: Vec<SystemStation>,
+    port_pads: Option<ffe_core::pads::Pads>,
     /// The system's NPC ships (set by the caller each frame).
     pub ships: Vec<SystemShip>,
     /// The system's short-lived visuals: F939 hit particles, F942 explosions
@@ -801,6 +702,9 @@ impl Screen {
             panel,
             palette_rgb6(asset("base:palette/low")?)?,
         )?;
+        screen.port_pads = cache
+            .asset("base:gameplay/pads")
+            .and_then(|bytes| ffe_core::pads::Pads::from_bytes(bytes).ok());
         for index in 1..6 {
             let cabin = cache
                 .asset(&format!("base:cockpit/cabin{index}"))
@@ -1127,36 +1031,13 @@ impl Screen {
             sky: prefs::space_colour_rgb(4),
             surface_detail: 1,
             surface_sky: None,
-            text_layer: Default::default(),
             stars_visible: true,
             lock_external: true,
-            capture: false,
-            batches: Vec::new(),
-            atmospheres: Vec::new(),
-            lights: Vec::new(),
-            eclipses: Vec::new(),
-            body_batches: Vec::new(),
-            casters: Vec::new(),
-            object_scale: 1.0,
-            in_discs: false,
-            star: None,
-            star_colours: std::collections::HashMap::new(),
             dust_visible: true,
-            dust_step: None,
-            dust_travel: [0.0; 3],
-            dust_clock: None,
-            dust: Vec::new(),
-            emissive: false,
-            glowing: Vec::new(),
-            on_fire: false,
-            burning: Vec::new(),
-            sky_view: None,
-            bitmaps: Vec::new(),
-            bitmap_memory: Vec::new(),
-            deferred: Vec::new(),
-            world: None,
+            object_queue: None,
             discs: Vec::new(),
             stations: Vec::new(),
+            port_pads: None,
             ships: Vec::new(),
             effects: Vec::new(),
             missiles: Vec::new(),
@@ -1271,10 +1152,7 @@ impl Screen {
             scene.render_scene_with(crate::combat::BEAM_MODEL, rows, origin, light, &inputs)
         {
             self.jitter.cursor = frame.jitter;
-            // The beam gives off light in the modern engine.
-            self.emissive = true;
             self.draw_frame(scene, &frame);
-            self.emissive = false;
         }
     }
 
@@ -1299,51 +1177,16 @@ impl Screen {
             return;
         }
         if let Some(Some(icon)) = self.icons.get(crate::combat::GUNSIGHT_BITMAP as usize) {
-            let before = self.crisp_start();
             icon.blit_colours(&mut self.frame, &self.palette, 129, 48);
             // The bitmap's colour 15 is its line; 9 and 12 only soften its edges.
-            let rgb = self.rgb(15);
-            self.crisp_end(before, || vec![HudShape::gunsight([129.0, 48.0], rgb)]);
         }
         self.draw_targeter_cursor(view);
         // F1111: the combat target (`DATA_007247`) draws F1114's circle at
         // (0x9f,0x4f) with F1612's radius word 0xc (halved to 6) in colour
         // 0x10, while F1113's blink is on (`ffe.asm:81967-81991`).
         if self.missile_lock && self.missile_blink {
-            let before = self.crisp_start();
             self.circle(0x9f, 0x4f, 0x0c, targeter::COMBAT_COLOUR);
-            let rgb = self.rgb(targeter::COMBAT_COLOUR);
-            self.crisp_end(before, || vec![HudShape::circle((0x9f, 0x4f), 6.0, rgb)]);
         }
-    }
-
-    /// A palette colour as red, green and blue.
-    fn rgb(&self, index: u8) -> [u8; 3] {
-        let value = self.palette[usize::from(index)];
-        [(value >> 16) as u8, (value >> 8) as u8, value as u8]
-    }
-
-    /// With the modern engine, the frame before a HUD shape that [`Self::crisp_end`] draws crisp.
-    fn crisp_start(&self) -> Option<Vec<u32>> {
-        (self.capture && self.world.is_some()).then(|| self.frame.clone())
-    }
-
-    /// With the modern engine, the HUD shape just drawn is drawn crisp over the 3-D view instead:
-    /// the pixels it put down let the 3-D view through (the world's `crisp`), and the
-    /// modern engine draws `shapes` over them at the output's resolution.
-    fn crisp_end(&mut self, before: Option<Vec<u32>>, shapes: impl FnOnce() -> Vec<HudShape>) {
-        let (Some(before), Some(world)) = (before, self.world.as_mut()) else {
-            return;
-        };
-        if world.crisp.is_empty() {
-            world.crisp = vec![None; self.frame.len()];
-        }
-        for ((now, was), crisp) in self.frame.iter().zip(&before).zip(&mut world.crisp) {
-            if now != was {
-                *crisp = Some(*now);
-            }
-        }
-        world.hud.extend(shapes());
     }
 
     /// F1111's auto-targetter cursor, drawn after the gunsight: `DATA_007246`'s
@@ -1356,7 +1199,6 @@ impl Screen {
         let Some(cursor) = self.targeter else {
             return;
         };
-        let before = self.crisp_start();
         match cursor {
             targeter::Cursor::Navigation => {
                 let value = self.palette[usize::from(targeter::NAVIGATION_COLOUR)];
@@ -1364,8 +1206,6 @@ impl Screen {
                 for (from, to) in targeter::box_edges(x, y, half) {
                     self.line_value(from, to, value);
                 }
-                let rgb = self.rgb(targeter::NAVIGATION_COLOUR);
-                self.crisp_end(before, || vec![HudShape::square((x, y), half, rgb)]);
             }
             targeter::Cursor::Combat => {
                 let value = self.palette[usize::from(targeter::COMBAT_COLOUR)];
@@ -1375,10 +1215,6 @@ impl Screen {
                         self.frame[py as usize * 320 + px as usize] = value;
                     }
                 }
-                let rgb = self.rgb(targeter::COMBAT_COLOUR);
-                self.crisp_end(before, || {
-                    vec![HudShape::circle((x, y), radius as f32, rgb)]
-                });
             }
         }
     }
@@ -1470,14 +1306,7 @@ impl Screen {
             .icons
             .get(crate::combat::VELOCITY_MARKER_BITMAP as usize)
         {
-            let before = self.crisp_start();
             icon.blit_colours(&mut self.frame, &self.palette, x - 19, y - 18);
-            // The bitmap's arcs are colour 15 and its spokes about 8; the rest soften edges.
-            let (ring, spoke) = (self.rgb(15), self.rgb(8));
-            let at = [(x - 19) as f32, (y - 18) as f32];
-            self.crisp_end(before, || {
-                HudShape::velocity_marker(at, ring, spoke).to_vec()
-            });
         }
     }
 
@@ -1621,43 +1450,7 @@ impl Screen {
             .collect();
         order.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (z, disc) in order {
-            // For the modern engine, a star's glow: a halo eight times its radius in its colour,
-            // drawn before the star itself, so the star's disc lies over the halo's centre.
-            if self.capture && disc.star && z > 0.0 {
-                let ahead = camera.point(disc.centre);
-                let length = ahead.iter().map(|c| c * c).sum::<f64>().sqrt().max(1.0);
-                let across = (disc.radius * 256.0 / ahead[2] * 8.0).clamp(16.0, 640.0) as i32;
-                // The star's own colour, not the flat stand-in disc's (palette 17, green).
-                let rgb = match (disc.model, viewer) {
-                    (Some((model, seed)), Some(viewer)) => self.star_colour(viewer, model, seed),
-                    _ => STAR_WHITE,
-                };
-                self.batches.push(vec![Solid {
-                    views: vec![ahead.map(|c| (c / length * 1.0e6) as i32)],
-                    rgb,
-                    texture: None,
-                    path: false,
-                    outline: None,
-                    flame: None,
-                    sprite: Some(crate::model_viewer::Sprite {
-                        size: 0,
-                        halo: Some((across, rgb)),
-                    }),
-                }]);
-                // How much of it the eye sees past the bodies, for the glare and the flare.
-                let bodies: Vec<([f64; 3], f64)> = self
-                    .casters
-                    .iter()
-                    .filter(|caster| !caster.2)
-                    .map(|caster| (caster.0, caster.1))
-                    .collect();
-                self.star = Some(crate::modern3d::Star {
-                    direction: ahead.map(|c| (c / length) as f32),
-                    radius: (disc.radius * 256.0 / ahead[2]) as f32,
-                    rgb,
-                    seen: crate::modern3d::sunlight([0.0; 3], &bodies, (ahead, disc.radius)),
-                });
-            }
+            let light = disc.light;
             // The real surface when the model fits the view space at this range.
             if let (Some((model, seed)), Some(viewer)) = (disc.model, viewer) {
                 // The planet's radius in the model's units is its surface axes' length;
@@ -1685,13 +1478,13 @@ impl Screen {
                         // F1750 subtracts from the ring child's scale. With 0 the child
                         // shifted by 31 and its geometry overflowed.
                         let key_scale = viewer.model_scale_offset(model).unwrap_or(0);
-                        let light = camera.direction(disc.light);
+                        let light = camera.direction(light);
                         // The view space is 32-bit: a distant planet is drawn through a
                         // matrix shrunk by a power of two (the position shrinks with it),
-                        // which leaves the picture as it was.
+                        // which leaves the picture as it was. The terrain's 32-bit
+                        // arithmetic keeps the planet's radius and distance well inside the
+                        // range the original runs it in (radii of 2^20 to 2^26).
                         let reach = position.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-                        // The terrain's 32-bit arithmetic keeps the planet's radius and distance well
-                        // inside the range the original runs it in (radii of 2^20 to 2^26).
                         let shrink = (reach / 1.0e9)
                             .max(radius / 16_777_216.0)
                             .max(1.0)
@@ -1712,12 +1505,12 @@ impl Screen {
                     }
                 }
             }
-            // The shaded disc is only a stand-in when the surface cannot be drawn;
-            // it has no answer for an eye at or inside the sphere.
+            // The Classic disc is an exterior view.
             if z <= 0.0 || z <= disc.radius.max(2.0) {
                 continue;
             }
-            let [cx, cy, _] = camera.point(disc.centre);
+            let ahead = camera.point(disc.centre);
+            let [cx, cy, _] = ahead;
             let scale = 256.0 / z;
             let radius = disc.radius * scale;
             if radius < 0.6 {
@@ -1728,7 +1521,7 @@ impl Screen {
                 );
                 continue;
             }
-            let light = camera.direction(disc.light);
+            let light = camera.direction(light);
             let (x0, y0) = (160.0 + cx * scale, 79.0 - cy * scale);
             let top = (y0 - radius).floor().max(0.0) as i32;
             let bottom = (y0 + radius).ceil().min(157.0) as i32;
@@ -1933,33 +1726,12 @@ impl Screen {
             }
             if let Some(glyph) = self.font.glyph(code) {
                 let value = self.palette[usize::from(colour)];
-                if self.text_layer.glyphs.len() >= crate::modern::TextLayer::LIMIT {
-                    self.text_layer = Default::default();
-                }
-                let first = self.text_layer.pixels.len();
                 for (col, row) in glyph.pixels() {
                     let px = cursor + col as i32;
                     let py = y + row as i32;
                     if (0..320).contains(&px) && (top..bottom).contains(&py) && py < 200 {
-                        let at = py as usize * 320 + px as usize;
-                        self.text_layer
-                            .pixels
-                            .push((at as u32, self.frame[at], value));
-                        self.frame[at] = value;
+                        self.frame[py as usize * 320 + px as usize] = value;
                     }
-                }
-                let last = self.text_layer.pixels.len();
-                if last > first {
-                    self.text_layer.glyphs.push(crate::modern::TextGlyph {
-                        code,
-                        x: cursor,
-                        y,
-                        advance: glyph.advance as u8,
-                        colour: value,
-                        top,
-                        bottom: bottom.min(200),
-                        pixels: first..last,
-                    });
                 }
                 cursor += glyph.advance as i32;
             }
@@ -1980,11 +1752,6 @@ impl Screen {
 
     pub fn logical_pixels(&self) -> &[u32] {
         &self.frame
-    }
-
-    /// The glyphs drawn since the last call, for the modern engine's replacement font.
-    pub fn take_text(&mut self) -> crate::modern::TextLayer {
-        std::mem::take(&mut self.text_layer)
     }
 
     /// The main font's advances by code from 32, for fitting a real font to it.
@@ -2458,9 +2225,6 @@ impl Screen {
         tics: u32,
         version: bool,
     ) -> Result<(), String> {
-        // With `capture` the model's faces go to the modern engine like the flight
-        // view's: the intro's model is drawn in the same 320x158 view.
-        self.begin_scene();
         use crate::front_end::{IntroTimeline, PRIMARY_BITMAP_Y, VERSION_LINE};
         let intro = IntroTimeline::at(tics);
         let background = pack(intro.background) & 0xfff;
@@ -2476,13 +2240,7 @@ impl Screen {
             // `DATA_008812` is 1 by the time the intro loop runs (the executed
             // boot's default Shape Detail); the scene was wrongly built at 2,
             // whose finer subdivision aliased the band textures into speckle.
-            // The modern engine draws the surface finer, as in flight.
-            let finer = if self.capture {
-                crate::modern3d::TERRAIN_DETAIL
-            } else {
-                0
-            };
-            viewer.set_surface_detail(self.surface_detail + finer);
+            viewer.set_surface_detail(self.surface_detail);
         }
         let model = match scene {
             Some(viewer) if intro.model != 0 => {
@@ -2499,10 +2257,11 @@ impl Screen {
                     0,
                     &viewer.shades(),
                 );
+                let origin = [0.0, 0.0, 0x14820 as f64];
                 let frame = viewer.render_scene_with(
                     intro.model,
                     rows,
-                    [0.0, 0.0, 0x14820 as f64],
+                    origin,
                     viewer.light_direction(),
                     &inputs,
                 )?;
@@ -2516,7 +2275,7 @@ impl Screen {
                         self.intro_error_reported = true;
                     }
                 }
-                Some(frame)
+                Some((frame, rows, origin))
             }
             Some(viewer) => {
                 // The loop point draws no model but F961 still clears to the
@@ -2532,12 +2291,8 @@ impl Screen {
             .map(|[r, g, b]| u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))
             .unwrap_or(self.palette[0]);
         self.frame[..LOGICAL_WIDTH * LOGICAL_HEIGHT].fill(clear);
-        if let (Some(viewer), Some(frame)) = (scene, model) {
-            self.draw_frame_layered(viewer, &frame);
-        }
-        // The world phase ends here: the bitmap and the credits lie over the model.
-        if let Some(viewer) = scene.filter(|_| self.capture) {
-            self.end_scene(viewer, false);
+        if let (Some(viewer), Some((frame, _, _))) = (scene, model) {
+            self.draw_shapes(viewer, &frame.shapes);
         }
         if intro.bitmap {
             let bitmap = self
@@ -2554,22 +2309,10 @@ impl Screen {
             .as_ref()
             .ok_or("Cache lacks the intro credits/widths (cache v27).")?;
         for line in &intro.lines {
-            text.draw(
-                line,
-                &self.font,
-                &self.palette,
-                &mut self.frame,
-                &mut self.text_layer,
-            )?;
+            text.draw(line, &self.font, &self.palette, &mut self.frame)?;
         }
         if version && tics >= crate::front_end::INTRO_INPUT_FROM {
-            text.draw(
-                &VERSION_LINE,
-                &self.font,
-                &self.palette,
-                &mut self.frame,
-                &mut self.text_layer,
-            )?;
+            text.draw(&VERSION_LINE, &self.font, &self.palette, &mut self.frame)?;
         }
         self.present();
         Ok(())
@@ -2592,19 +2335,6 @@ impl Screen {
             .is_some_and(|death| death.phase == crate::death::DeathPhase::Exploding);
         let mut views = views;
         views.lock_external = self.lock_external;
-        self.batches.clear();
-        self.atmospheres.clear();
-        self.lights.clear();
-        self.eclipses.clear();
-        self.body_batches.clear();
-        self.star = None;
-        self.dust.clear();
-        self.glowing.clear();
-        self.burning.clear();
-        self.sky_view = None;
-        self.bitmaps.clear();
-        self.deferred.clear();
-        self.world = None;
         let view = views.mode;
         // The original registers the effective background (space colour, or the
         // previous frame's haze) with F1326 before building the palette.
@@ -2617,13 +2347,7 @@ impl Screen {
                     ((background & 0xff) as u8) >> 4,
                 ]) & 0xfff,
             );
-            // The modern engine draws the planets' surfaces finer than the setting asks.
-            let finer = if self.capture {
-                crate::modern3d::TERRAIN_DETAIL
-            } else {
-                0
-            };
-            scene.set_surface_detail(self.surface_detail + finer);
+            scene.set_surface_detail(self.surface_detail);
         }
         let stats = scene.and_then(|scene| scene.ship_stats(state.ship));
         let turrets = stats.is_some_and(|stats| stats.gun_mounts > 2);
@@ -2680,8 +2404,7 @@ impl Screen {
             // F1052 clears with the background colour the previous frame's scene
             // left in `DATA_008814..8817`; a planet's haze overrides the space
             // colour until the eye is out of it again.
-            let background = self.surface_sky.unwrap_or(self.sky);
-            self.frame[..320 * VIEW_HEIGHT].fill(background);
+            self.frame[..320 * VIEW_HEIGHT].fill(self.surface_sky.unwrap_or(self.sky));
         }
         if let Some(map) = self.galaxy.take().filter(|_| scene.is_some()) {
             self.draw_galaxy(scene.unwrap(), &map);
@@ -2740,58 +2463,9 @@ impl Screen {
             ) {
                 self.draw_frame(viewer, &frame);
             }
-            // The tunnel is the whole world phase: what follows lies over it.
-            if self.capture {
-                self.world = Some(crate::modern3d::World {
-                    batches: std::mem::take(&mut self.batches),
-                    atmospheres: std::mem::take(&mut self.atmospheres),
-                    lights: std::mem::take(&mut self.lights),
-                    eclipses: std::mem::take(&mut self.eclipses),
-                    bodies: std::mem::take(&mut self.body_batches),
-                    star: self.star.take(),
-                    glowing: std::mem::take(&mut self.glowing),
-                    burning: std::mem::take(&mut self.burning),
-                    sky: self.sky_view.take(),
-                    bitmaps: std::mem::take(&mut self.bitmaps),
-                    snapshot: self.frame.clone(),
-                    dust: std::mem::take(&mut self.dust),
-                    hud: Vec::new(),
-                    crisp: Vec::new(),
-                    full_screen: false,
-                });
-                let deferred = std::mem::take(&mut self.deferred);
-                self.draw_shapes(viewer, &deferred);
-            }
         } else {
             let scale = scene.and_then(model_scale).unwrap_or(DEFAULT_MODEL_SCALE);
             let camera = Camera::new(state, &views, stats.as_ref(), scale);
-            // For the modern engine's generated sky: how the camera is turned in flight space
-            // (each flight axis in view space) and the space colour it shows through. Not inside
-            // a planet's haze, where the original's sky is the haze colour and has no stars.
-            let open = self.lift.as_ref().is_none_or(|lift| lift.world);
-            if self.capture && open && self.surface_sky.is_none() {
-                let axis = |k: usize| {
-                    let mut unit = [0.0; 3];
-                    unit[k] = 1.0;
-                    camera.direction(unit).map(|c| c as f32)
-                };
-                // No dust while the player dies (`docs/DEVIATIONS.md`, 2026-10-29).
-                if self.dust_visible && state.mode == Mode::Flight && state.death.is_none() {
-                    self.speed_dust(state, &views, &camera);
-                }
-                self.sky_view = Some(crate::modern3d::SkyView {
-                    rows: [axis(0), axis(1), axis(2)],
-                    key: self.sky,
-                    stars: self.stars_visible,
-                });
-            }
-            // For the modern engine's eclipses: the bodies where the camera sees them.
-            self.object_scale = scale;
-            self.casters = self
-                .discs
-                .iter()
-                .map(|disc| (camera.point(disc.centre), disc.radius, disc.star))
-                .collect();
             // A new flight step continues the stream where the last frame left it;
             // redrawing the same step replays it.
             if self.jitter.tick != Some(state.ticks) {
@@ -2807,8 +2481,7 @@ impl Screen {
             // nebula band renders; F1775's own 0x200 is a cached position this
             // renderer does not reproduce. The port's star points stay as well,
             // because the model's star field child is sparse here.
-            if world && self.stars_visible && self.surface_sky.is_none() && self.sky_view.is_none()
-            {
+            if world && self.stars_visible && self.surface_sky.is_none() {
                 if let Some(scene) = scene {
                     let rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
                         .map(|axis| camera.direction(axis));
@@ -2824,31 +2497,9 @@ impl Screen {
                     }
                 }
             }
-            // With `capture` the stars go to the modern engine as lights at their directions,
-            // in a batch of their own before everything else.
-            let mut stars = Vec::new();
             for index in 0..self.stars.len() {
                 if !world || !self.stars_visible || self.surface_sky.is_some() {
                     break;
-                }
-                if self.capture {
-                    let [x, y, z] = camera.direction(self.stars[index]);
-                    if z > 0.0 {
-                        let colour = self.palette[12];
-                        stars.push(Solid {
-                            views: vec![[x, y, z].map(|c| (c * 1.0e6) as i32)],
-                            rgb: [(colour >> 16) as u8, (colour >> 8) as u8, colour as u8],
-                            texture: None,
-                            path: false,
-                            outline: None,
-                            flame: None,
-                            sprite: Some(crate::model_viewer::Sprite {
-                                size: 0,
-                                halo: None,
-                            }),
-                        });
-                    }
-                    continue;
                 }
                 if let Some((x, y)) = camera.project(self.stars[index], false) {
                     if y < 158 {
@@ -2856,19 +2507,13 @@ impl Screen {
                     }
                 }
             }
-            // The generated sky has its own stars.
-            if !stars.is_empty() && self.sky_view.is_none() {
-                self.batches.push(stars);
-            }
             if world {
                 // F1052 sets `DATA_008814` to 0 before F1536 draws the objects;
                 // the scene's planets set it again when their haze holds the eye.
                 if let Some(scene) = scene {
                     scene.clear_haze_sky();
                 }
-                self.in_discs = true;
                 self.draw_discs(&camera, scene);
-                self.in_discs = false;
                 self.surface_sky = scene.and_then(|scene| scene.haze_sky()).map(|colour| {
                     u32::from(colour[0]) << 16 | u32::from(colour[1]) << 8 | u32::from(colour[2])
                 });
@@ -2957,30 +2602,6 @@ impl Screen {
             if let (Some(beam), Some(scene)) = (self.beam, scene) {
                 self.draw_beam(scene, state, &beam, &camera);
             }
-            // The world phase ends here: what is drawn from now on lies over the 3-D view.
-            if self.capture {
-                self.world = Some(crate::modern3d::World {
-                    batches: std::mem::take(&mut self.batches),
-                    atmospheres: std::mem::take(&mut self.atmospheres),
-                    lights: std::mem::take(&mut self.lights),
-                    eclipses: std::mem::take(&mut self.eclipses),
-                    bodies: std::mem::take(&mut self.body_batches),
-                    star: self.star.take(),
-                    glowing: std::mem::take(&mut self.glowing),
-                    burning: std::mem::take(&mut self.burning),
-                    sky: self.sky_view.take(),
-                    bitmaps: std::mem::take(&mut self.bitmaps),
-                    snapshot: self.frame.clone(),
-                    dust: std::mem::take(&mut self.dust),
-                    hud: Vec::new(),
-                    crisp: Vec::new(),
-                    full_screen: false,
-                });
-                if let Some(scene) = scene {
-                    let deferred = std::mem::take(&mut self.deferred);
-                    self.draw_shapes(scene, &deferred);
-                }
-            }
             // Text labels (`l`): the original's F989 walks the live objects and
             // F1108 draws each name at its screen position (colour 15).
             // F1099 draws the labels (F1108) only outside view 6, where F1109's
@@ -3067,8 +2688,6 @@ impl Screen {
     /// `0x2c`/`0x2d`, and every rectangle is `DATA_004903`..`DATA_004905`.
     /// A bullet marks the port's keyboard selection (the original is mouse-only).
     pub fn draw_prefs(&mut self, prefs: &Prefs) {
-        // A whole screen of its own: no 3-D view for the modern engine.
-        self.world = None;
         // The original only clears the upper view; the console below it stays
         // visible (`FUNC_000225` calls `FUNC_001618_ClearUpperBuf`).
         self.indexed.fill(0);
@@ -3194,8 +2813,6 @@ impl Screen {
     /// The navigation computer: a marker square and a name per body, nine rows in two
     /// columns; `rows` are (name, selected, locked on).
     pub fn draw_nav_list(&mut self, rows: &[(String, bool, bool)], detail: &str) {
-        // A whole screen of its own: no 3-D view for the modern engine.
-        self.world = None;
         self.rect(0, 0, 320, 158, 1);
         for (k, (name, selected, locked)) in rows.iter().enumerate() {
             let (x, y) = (if k < 9 { 10 } else { 230 }, 5 + 15 * (k % 9));
@@ -3248,8 +2865,6 @@ impl Screen {
         points: &[(f32, f32, crate::navigation::Kind, bool)],
         status: &str,
     ) {
-        // A whole screen of its own: no 3-D view for the modern engine.
-        self.world = None;
         use crate::navigation::Kind;
         self.rect(4, 4, 312, 152, 1);
         self.text(10, 8, title, 18);
@@ -3295,352 +2910,19 @@ impl Screen {
         self.present();
     }
 
-    /// The modern engine's speed dust (presentation only: its own hash, never the game's random
-    /// numbers). Motes are fixed in the ship's own frame all round it, in layers each
-    /// [`DUST_SPREAD`] times as far apart as the last, as many as any speed needs. The speed
-    /// sets a visual pace (log2 of spacings streaming past a second): the true pace up to 16
-    /// spacings a second, then rising more slowly to 256 (beyond which a frame would skip most
-    /// of the field), so each higher speed and time step looks faster than the last. The layers
-    /// nearest that pace are blended, their weights summing to one, so the field keeps its
-    /// density as they hand over; the closest layer fades in from about 50 m/s. Faster, the
-    /// streaks also grow longer and brighter. Each mote is a streak from where it is
-    /// to where it was two to three frames' travel ago (at most eight spacings), so at speed the motes
-    /// stretch into lines rushing out from the way the ship is going. Paused, nothing moves.
-    fn speed_dust(&mut self, state: &Flight, views: &ViewState, camera: &Camera) {
-        let now = std::time::Instant::now();
-        let clock = self
-            .dust_clock
-            .map_or(0.0, |then| now.duration_since(then).as_secs_f64());
-        let real = self.dust_step.take().unwrap_or(clock).clamp(0.0, 0.1);
-        self.dust_clock = Some(now);
-        let console = views.console;
-        let rate = if console.paused {
-            0.0
-        } else {
-            let table = crate::console::TIME_ACCELERATION;
-            f64::from(table[console.acceleration.min(4)]) / f64::from(table[0])
-        };
-        let moved = state.velocity.map(|v| v * real * rate);
-        for (travel, step) in self.dust_travel.iter_mut().zip(moved) {
-            *travel += step;
-        }
-        let length = |v: [f64; 3]| v.iter().map(|c| c * c).sum::<f64>().sqrt();
-        let speed = length(state.velocity) * rate;
-        let step = length(moved);
-        let smooth = |low: f64, high: f64, x: f64| {
-            let t = ((x - low) / (high - low)).clamp(0.0, 1.0);
-            t * t * (3.0 - 2.0 * t)
-        };
-        // The closest layer's pace (log2 of spacings a second), and the pace the dust shows.
-        let octaves = DUST_SPREAD.log2();
-        let pace0 = (speed / DUST_CELL).max(1.0e-9).log2();
-        let shown = if pace0 <= 4.0 {
-            pace0
-        } else {
-            (4.0 + (pace0 - 4.0) * 0.28).min(8.0)
-        };
-        // The layers nearest that pace, weighted by how near (summing to one).
-        let nearest = ((pace0 - shown) / octaves).round().max(0.0) as usize;
-        let layers: Vec<(usize, f64)> = (nearest.saturating_sub(1)..=nearest + 1)
-            .map(|layer| {
-                let off = (pace0 - octaves * layer as f64 - shown) / 1.4;
-                (layer, (-off * off).exp())
-            })
-            .collect();
-        let total: f64 = layers.iter().map(|(_, w)| w).sum();
-        let arrive = smooth(-1.0, 1.0, pace0);
-        // Faster dust glows more and trails farther.
-        let glow = 1.0 + 0.6 * smooth(5.0, 8.0, shown);
-        let frames = 2.0 + smooth(5.0, 8.0, shown);
-        for (layer, share) in layers {
-            let weight = arrive * share / total.max(1.0e-9);
-            if weight <= 0.02 {
-                continue;
-            }
-            let cell = DUST_CELL * DUST_SPREAD.powi(layer as i32);
-            let reach = f64::from(DUST_REACH) * cell;
-            // Each streak is drawn at its own scale (a projection does not change with one).
-            let scale = 1.0e5 / cell;
-            let trail = if step > 0.0 {
-                (frames * step).min(8.0 * cell) / step
-            } else {
-                0.0
-            };
-            let base = self.dust_travel.map(|c| (c / cell).floor() as i64);
-            let span = -i64::from(DUST_REACH)..=i64::from(DUST_REACH);
-            for dz in span.clone() {
-                for dy in span.clone() {
-                    for dx in span.clone() {
-                        let at = [base[0] + dx, base[1] + dy, base[2] + dz];
-                        let hash = dust_hash(at, layer);
-                        if (hash >> 56) as f64 >= DUST_CHANCE * 256.0 {
-                            continue;
-                        }
-                        let part = |shift: u32| ((hash >> shift) & 0xffff) as f64 / 65_536.0;
-                        let offset: [f64; 3] = std::array::from_fn(|k| {
-                            (at[k] as f64 + part(16 * k as u32)) * cell - self.dust_travel[k]
-                        });
-                        let away = length(offset) / reach;
-                        let alpha =
-                            weight * glow * (1.0 - smooth(0.6, 1.0, away)) * (0.5 + 0.5 * part(48));
-                        if alpha <= 0.01 {
-                            continue;
-                        }
-                        let head = camera.direction(offset);
-                        let tail =
-                            camera.direction(std::array::from_fn(|k| offset[k] + moved[k] * trail));
-                        if head[2] <= 0.0 && tail[2] <= 0.0 {
-                            continue;
-                        }
-                        self.dust.push(crate::modern3d::DustStreak {
-                            head: head.map(|c| (c * scale) as f32),
-                            tail: tail.map(|c| (c * scale) as f32),
-                            alpha: alpha as f32,
-                            near: (1.0 - away).clamp(0.0, 1.0) as f32,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    /// A star's colour, from its model drawn head-on close by in a fixed light, once per star
-    /// ([`star_hue`]); white when the model draws nothing.
-    fn star_colour(&mut self, viewer: &ModelViewer, model: u32, seed: u32) -> [u8; 3] {
-        if let Some(rgb) = self.star_colours.get(&(model, seed)) {
-            return *rgb;
-        }
-        let mut rgb = STAR_WHITE;
-        if viewer.find(model).is_some() {
-            viewer.surface_extent.set(0.0);
-            let unit = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-            let _ = viewer.render_scene(model, unit, [0.0, 0.0, 1.0e6], [0.0, 0.0, 1.0]);
-            let radius = viewer.surface_extent.get();
-            if radius > 0.0 {
-                // Four radii away, kept inside the 32-bit view space as the flight view keeps it.
-                let shrink = (radius * 4.0 / 1.0e9)
-                    .max(radius / 16_777_216.0)
-                    .max(1.0)
-                    .log2()
-                    .ceil()
-                    .min(16.0);
-                let shrunk = 0.5_f64.powf(shrink);
-                viewer.surface_seed.set(seed);
-                let mut inputs = AnimationInputs::test(0);
-                inputs.globals[2] = seed as u16;
-                inputs.globals[3] = (seed >> 16) as u16;
-                let rows = unit.map(|axis| axis.map(|v| v * shrunk));
-                if let Ok(frame) = viewer.render_scene_with(
-                    model,
-                    rows,
-                    [0.0, 0.0, radius * 4.0 * shrunk],
-                    [0.0; 3],
-                    &inputs,
-                ) {
-                    rgb = star_hue(&frame).unwrap_or(STAR_WHITE);
-                }
-            }
-        }
-        self.star_colours.insert((model, seed), rgb);
-        rgb
-    }
-
-    /// The last flight view's set-aside faces, for the modern engine; `None` unless
-    /// [`Self::capture`] was on and the frame showed the flight view.
-    pub fn world(&self) -> Option<&crate::modern3d::World> {
-        self.world.as_ref()
-    }
-
-    /// Start a whole screen drawn from one model (the intro, the tombstone): nothing set aside
-    /// for the modern engine yet.
-    fn begin_scene(&mut self) {
-        self.world = None;
-        self.batches.clear();
-        self.atmospheres.clear();
-        self.lights.clear();
-        self.eclipses.clear();
-        self.body_batches.clear();
-        self.casters.clear();
-        self.star = None;
-        self.dust.clear();
-        self.glowing.clear();
-        self.burning.clear();
-        self.sky_view = None;
-        self.bitmaps.clear();
-        self.deferred.clear();
-    }
-
-    /// End such a screen's world phase (`capture` only): what was set aside becomes the modern
-    /// engine's [`crate::modern3d::World`] (no sky, no dust), and the shapes the objects draw
-    /// over their faces are drawn over it.
-    fn end_scene(&mut self, viewer: &ModelViewer, full_screen: bool) {
-        self.world = Some(crate::modern3d::World {
-            batches: std::mem::take(&mut self.batches),
-            atmospheres: std::mem::take(&mut self.atmospheres),
-            lights: std::mem::take(&mut self.lights),
-            eclipses: std::mem::take(&mut self.eclipses),
-            bodies: std::mem::take(&mut self.body_batches),
-            star: self.star.take(),
-            glowing: std::mem::take(&mut self.glowing),
-            burning: std::mem::take(&mut self.burning),
-            sky: None,
-            bitmaps: std::mem::take(&mut self.bitmaps),
-            snapshot: self.frame.clone(),
-            dust: Vec::new(),
-            hud: Vec::new(),
-            crisp: Vec::new(),
-            full_screen,
-        });
-        let deferred = std::mem::take(&mut self.deferred);
-        self.draw_shapes(viewer, &deferred);
-    }
-
-    /// [`Self::draw_frame`] for a whole scene in one model (the intro's model 176 runs its
-    /// nebula, planet, asteroids and ship as children in one queue). The original layers those by
-    /// painter order alone: the nebula's quads come first but lie far nearer in view space than
-    /// the planet drawn over them. So with [`Self::capture`] a new batch (drawn over the last)
-    /// starts wherever a face lies clearly behind the faces already in the batch, where the GPU's
-    /// depth test would otherwise reverse the original's order. The planets' atmosphere rings
-    /// stay the original's pixels (the scene's shells are not where the GPU's haze expects
-    /// them); since they go into the frame behind every batch, the faces painted before the last
-    /// such shape are drawn into the frame too, in the original's order.
-    fn draw_frame_layered(&mut self, viewer: &ModelViewer, frame: &Frame) {
-        if !self.capture {
-            self.draw_shapes(viewer, &frame.shapes);
-            return;
-        }
-        // How much farther than the nearest face so far a face must be to start a new layer:
-        // well past the ordering slack within one object.
-        const BEHIND: i64 = 2;
-        let mut solids: Vec<Option<Solid>> = (0..frame.shapes.len())
-            .map(|index| {
-                frame
-                    .solids
-                    .get(index)
-                    .and_then(Option::as_ref)
-                    .filter(|solid| !solid.views.is_empty())
-                    .cloned()
-            })
-            .collect();
-        // The shapes `draw_frame` leaves in the frame, other than those it draws over the batches.
-        let background = (0..frame.shapes.len())
-            .rev()
-            .find(|&index| {
-                solids[index].is_none()
-                    && !matches!(
-                        frame.shapes[index],
-                        Shape::Point(..) | Shape::Spans(..) | Shape::Label(..) | Shape::Line(..)
-                    )
-            })
-            .map_or(0, |index| index + 1);
-        solids[..background].fill(None);
-        let mut start = 0;
-        let mut nearest: Option<i64> = None;
-        for index in 0..=frame.shapes.len() {
-            let near = solids
-                .get(index)
-                .and_then(Option::as_ref)
-                .and_then(|solid| solid.views.iter().map(|v| i64::from(v[2])).min());
-            let end = index == frame.shapes.len();
-            if end || matches!((near, nearest), (Some(z), Some(n)) if n > 0 && z > n * BEHIND) {
-                let layer = Frame {
-                    shapes: frame.shapes[start..index].to_vec(),
-                    solids: solids[start..index].to_vec(),
-                    light: frame.light,
-                    origin: frame.origin,
-                    ..Frame::default()
-                };
-                self.draw_frame(viewer, &layer);
-                start = index;
-                nearest = None;
-            }
-            if let Some(z) = near {
-                nearest = Some(nearest.map_or(z, |n| n.min(z)));
-            }
-        }
-    }
-
-    /// One object of the flight view: its shapes in order, except that with [`Self::capture`]
-    /// on its model faces are set aside as one batch for the modern engine.
+    /// One object of the flight view. The original's F1680 only queues an object's
+    /// primitives; F1789 sorts the whole frame's queue by depth key and draws it, so while
+    /// that queue is open the shapes go into it with their keys.
     fn draw_frame(&mut self, viewer: &ModelViewer, frame: &Frame) {
-        if !self.capture {
-            self.draw_shapes(viewer, &frame.shapes);
+        if let Some(queue) = self.object_queue.as_mut() {
+            let mut key = u32::MAX;
+            for (index, shape) in frame.shapes.iter().enumerate() {
+                key = frame.keys.get(index).copied().unwrap_or(key);
+                queue.push((key, shape.clone()));
+            }
             return;
         }
-        let mut batch = Vec::new();
-        for (index, shape) in frame.shapes.iter().enumerate() {
-            match frame.solids.get(index).and_then(Option::as_ref) {
-                Some(solid) => {
-                    if let Some(texture) = &solid.texture {
-                        let id = texture.bitmap & 0xfff;
-                        if !self.bitmaps.iter().any(|known| known.bitmap == id) {
-                            let remembered = self.bitmap_memory.iter().find(|b| b.bitmap == id);
-                            let made = match remembered {
-                                Some(known) => Some(known.clone()),
-                                None => viewer.bitmap_indices(texture).map(|(indices, masked)| {
-                                    let made = crate::modern3d::WorldBitmap {
-                                        bitmap: id,
-                                        width: texture.width,
-                                        height: texture.height,
-                                        indices: indices.into(),
-                                        masked,
-                                    };
-                                    self.bitmap_memory.push(made.clone());
-                                    made
-                                }),
-                            };
-                            self.bitmaps.extend(made);
-                        }
-                    }
-                    batch.push(solid.clone());
-                }
-                // Lights, particles and labels an object draws after its faces lie over
-                // them; its other shapes (a planet's atmosphere ring) stay behind.
-                None if !batch.is_empty()
-                    && matches!(
-                        shape,
-                        Shape::Point(..) | Shape::Spans(..) | Shape::Label(..) | Shape::Line(..)
-                    ) =>
-                {
-                    self.deferred.push(shape.clone())
-                }
-                None => self.draw_shapes(viewer, std::slice::from_ref(shape)),
-            }
-        }
-        if !batch.is_empty() || !frame.atmospheres.is_empty() {
-            let index = self.batches.len();
-            self.batches.push(batch);
-            self.atmospheres
-                .extend(frame.atmospheres.iter().map(|shell| (index, shell.clone())));
-            self.lights.extend(frame.light.map(|light| (index, light)));
-            if std::mem::take(&mut self.emissive) {
-                self.glowing.push(index);
-            }
-            if std::mem::take(&mut self.on_fire) {
-                self.burning.push(index);
-            }
-            if self.in_discs {
-                self.body_batches.push(index);
-            }
-            // An object (not a body) in a body's shadow: how much of the star it still sees.
-            if let (false, Some(origin), Some(star)) = (
-                self.in_discs,
-                frame.origin,
-                self.casters.iter().find(|caster| caster.2),
-            ) {
-                let place = origin.map(|v| f64::from(v) / self.object_scale);
-                let bodies: Vec<([f64; 3], f64)> = self
-                    .casters
-                    .iter()
-                    .filter(|caster| !caster.2)
-                    .map(|caster| (caster.0, caster.1))
-                    .collect();
-                let seen = crate::modern3d::sunlight(place, &bodies, (star.0, star.1));
-                if seen < 1.0 {
-                    self.eclipses.push((index, seen));
-                }
-            }
-        }
+        self.draw_shapes(viewer, &frame.shapes);
     }
 
     /// F6: every imported model executed by the verified port, in original order.
@@ -4067,18 +3349,13 @@ impl Screen {
         let light = camera.direction(scene.light_direction());
         for object in objects {
             let position = ffe_core::lift::view_position(&object, eye).map(f64::from);
+            let rows = scene.lift_rows(object.angle);
             let mut inputs = AnimationInputs::original(lift.tics, object.word, &scene.shades());
             inputs.jitter = self.jitter.cursor;
             inputs.globals[2] = lift.seed as u16;
             inputs.globals[3] = (lift.seed >> 16) as u16;
             inputs.globals[4] = u16::from(!lift.starport);
-            let r = scene.render_scene_with(
-                object.model,
-                scene.lift_rows(object.angle),
-                position,
-                light,
-                &inputs,
-            );
+            let r = scene.render_scene_with(object.model, rows, position, light, &inputs);
             if let Ok(frame) = r {
                 self.jitter.cursor = frame.jitter;
                 self.draw_frame(scene, &frame);
@@ -4089,6 +3366,31 @@ impl Screen {
     /// The system's stations, the farthest first, with the player's own ship (when
     /// it shows) in painter's order among them.
     fn draw_system_stations(
+        &mut self,
+        scene: &ModelViewer,
+        state: &Flight,
+        camera: &Camera,
+        own_ship: bool,
+    ) {
+        // Classic draws the objects as the original does: each only queues its primitives,
+        // and one sort by depth key draws them, so a ship hides the dust behind it and a
+        // station hides the ships behind it, whichever class is drawn first.
+        self.object_queue = Some(Vec::new());
+        self.queue_system_objects(scene, state, camera, own_ship);
+        self.flush_object_queue(scene);
+    }
+
+    /// F1789: draw the queued shapes farthest first. The sort is F1788's: descending unsigned
+    /// key, equal keys in allocation order (a stable sort of the queue).
+    fn flush_object_queue(&mut self, viewer: &ModelViewer) {
+        if let Some(mut queue) = self.object_queue.take() {
+            queue.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+            let shapes: Vec<Shape> = queue.into_iter().map(|(_, shape)| shape).collect();
+            self.draw_shapes(viewer, &shapes);
+        }
+    }
+
+    fn queue_system_objects(
         &mut self,
         scene: &ModelViewer,
         state: &Flight,
@@ -4181,7 +3483,7 @@ impl Screen {
         let mut order = self.effects.clone();
         // F1035's dust motes are not drawn from the player's death through the
         // explosion and the death camera (`docs/DEVIATIONS.md`, 2026-10-29).
-        if state.death.is_some() {
+        if state.death.is_some() || !self.dust_visible {
             order.retain(|effect| effect.model != ffe_core::dust::MODEL);
         }
         order.sort_by(|a, b| {
@@ -4189,17 +3491,32 @@ impl Screen {
         });
         let light = self.scene_light(scene, camera);
         for effect in order {
-            // The modern engine draws its own speed dust instead of the original's clouds,
-            // which all start on the line of flight and spread from one point.
-            if self.capture && effect.model == ffe_core::dust::MODEL {
-                continue;
+            let mut origin = camera.point(effect.centre).map(|v| v * scale);
+            let mut effect_scale = effect.scale;
+            // F1680's shift, which F1777's depth key puts back (`+0x130`).
+            let mut key_scale = 0;
+            // F1680 shifts a far object's view position right and takes the same shift off
+            // its scale, so any distance fits the 32-bit view space. Dust needs it: under
+            // time acceleration F1517 leads the cloud `2^shift` times as far ahead (10^9..10^10
+            // mm at 1000x and 10000x), which the plain range test below dropped, so the dust
+            // vanished at those steps.
+            if effect.model == ffe_core::dust::MODEL {
+                let reach = origin.iter().fold(0.0f64, |far, v| far.max(v.abs()));
+                if reach > DUST_VIEW_LIMIT {
+                    let k = (reach / DUST_VIEW_LIMIT).log2().ceil() as u32;
+                    origin = origin.map(|v| v / f64::from(1u32 << k.min(31)));
+                    effect_scale = effect_scale.map(|s| s.saturating_sub(k));
+                    key_scale = k as i32;
+                }
             }
-            let origin = camera.point(effect.centre).map(|v| v * scale);
             if origin.iter().any(|value| value.abs() > STATION_DRAW_RANGE) {
                 continue;
             }
             let rows = effect.axes.map(|axis| camera.direction(axis));
             let mut inputs = AnimationInputs::original(flight_tics(state), 0, &scene.shades());
+            // Model 0x6d's chains are detail tiers chosen by F1751 from the cloud's depth: a
+            // far cloud draws only its first dots, a near one all of them.
+            inputs.depth_detail = effect.model == ffe_core::dust::MODEL;
             inputs.globals[ffe_core::effects::EXPLOSION_MASS_GLOBAL] = effect.timer;
             // F942 writes `+0x9e = 0xffff` (global 1) on the explosion: model
             // 155 scales its fragments by it (`global1 >> 7`), so a zero word
@@ -4208,9 +3525,10 @@ impl Screen {
                 inputs.globals[1] = effect.size;
             }
             inputs.jitter = self.jitter.cursor;
-            if let Ok(frame) = scene.render_scene_with_scale(
+            if let Ok(frame) = scene.render_scene_with_scale_key(
                 effect.model,
-                effect.scale,
+                effect_scale,
+                key_scale,
                 rows,
                 origin,
                 light,
@@ -4218,16 +3536,7 @@ impl Screen {
             ) {
                 if !frame.shapes.is_empty() {
                     self.jitter.cursor = frame.jitter;
-                    // Explosions and a hit's sparks give off light in the modern engine.
-                    self.emissive = matches!(
-                        effect.model,
-                        ffe_core::effects::EXPLOSION_MODEL | ffe_core::effects::HIT_MODEL
-                    );
-                    // And an explosion burns.
-                    self.on_fire = effect.model == ffe_core::effects::EXPLOSION_MODEL;
                     self.draw_frame(scene, &frame);
-                    self.emissive = false;
-                    self.on_fire = false;
                 }
             }
         }
@@ -4305,9 +3614,9 @@ impl Screen {
         self.frame[..320 * VIEW_HEIGHT]
             .copy_from_slice(&self.cabins[self.cabin_index][..320 * VIEW_HEIGHT]);
         self.draw_shapes(viewer, &map.shapes);
-        let shadowed = |screen: &mut Self, x: usize, y: usize, text: &str| {
-            screen.text(x + 1, y + 1, text, 0);
-            screen.text(x, y, text, 15);
+        let shadowed = |screen: &mut Self, x: usize, y: usize, value: &str| {
+            screen.text(x + 1, y + 1, value, 0);
+            screen.text(x, y, value, 15);
         };
         shadowed(self, 6, 147, &map.sector);
         if let Some(fuel) = &map.fuel {
@@ -4359,8 +3668,6 @@ impl Screen {
         model: u32,
         remaining: i64,
     ) -> Result<(), String> {
-        // With `capture` the tombstone's faces go to the modern engine's full-screen view.
-        self.begin_scene();
         self.frame[..320 * LOGICAL_HEIGHT].fill(0x00_00_00_00);
         // F917 draws on the full 320x200 logical screen, not the 320x158 flight
         // view: the tombstone's lower text would otherwise be clipped.
@@ -4376,71 +3683,12 @@ impl Screen {
             [0.0, 0.0, distance],
             crate::gameover::TOMBSTONE_LIGHT,
         )?;
-        if self.capture {
-            // F917 queues the whole tombstone under one depth key, so the original paints its
-            // faces in program order: the slab, then the lettering, the date and the flowers on
-            // it, not quite in the slab's plane (the depth test would hide them). A new batch,
-            // drawn over the last, starts at each face that overlaps one already in the batch on
-            // the screen; faces that do not overlap give the same picture in any order.
-            let bounds = |index: usize| {
-                let solid = frame.solids.get(index).and_then(Option::as_ref)?;
-                let mut low = [f64::MAX; 2];
-                let mut high = [f64::MIN; 2];
-                for &[x, y, z] in &solid.views {
-                    // F1479; a corner behind the eye covers everything.
-                    let z = f64::from(z);
-                    let point = if z < 64.0 {
-                        return Some([[f64::MIN; 2], [f64::MAX; 2]]);
-                    } else {
-                        [
-                            160.0 + 256.0 * f64::from(x) / z,
-                            79.0 - 256.0 * f64::from(y) / z,
-                        ]
-                    };
-                    for k in 0..2 {
-                        low[k] = low[k].min(point[k]);
-                        high[k] = high[k].max(point[k]);
-                    }
-                }
-                Some([low, high])
-            };
-            let overlap = |a: [[f64; 2]; 2], b: [[f64; 2]; 2]| {
-                (0..2).all(|k| a[0][k] <= b[1][k] && b[0][k] <= a[1][k])
-            };
-            let mut start = 0;
-            let mut seen: Vec<[[f64; 2]; 2]> = Vec::new();
-            for index in 0..=frame.shapes.len() {
-                let area = (index < frame.shapes.len())
-                    .then(|| bounds(index))
-                    .flatten();
-                let end = index == frame.shapes.len();
-                if end || area.is_some_and(|area| seen.iter().any(|&b| overlap(area, b))) {
-                    let solids =
-                        &frame.solids[start.min(frame.solids.len())..index.min(frame.solids.len())];
-                    let part = Frame {
-                        shapes: frame.shapes[start..index].to_vec(),
-                        solids: solids.to_vec(),
-                        light: frame.light,
-                        origin: frame.origin,
-                        ..Frame::default()
-                    };
-                    self.draw_frame(viewer, &part);
-                    start = index;
-                    seen.clear();
-                }
-                seen.extend(area);
-            }
-            self.end_scene(viewer, true);
-        } else {
-            self.draw_shapes_full(viewer, &frame.shapes);
-        }
+        self.draw_shapes_full(viewer, &frame.shapes);
         self.present();
         Ok(())
     }
 
     pub fn draw_model_viewer(&mut self, viewer: &ModelViewer) {
-        // A whole screen of its own: no 3-D view for the modern engine.
-        self.world = None;
         // Dark blue backdrop so black (unlit) faces stay visible as silhouettes.
         self.frame[..320 * VIEW_HEIGHT].fill(0x00_00_10_28);
         let model = viewer.model();
@@ -4507,8 +3755,6 @@ impl Screen {
     }
 
     pub fn draw_model_lab(&mut self, lab: &ModelLab) -> Result<(), String> {
-        // A whole screen of its own: no 3-D view for the modern engine.
-        self.world = None;
         self.rect(0, 0, 320, 158, 0);
         self.text(3, 1, "STATION MODEL LAB - GAME PAUSED", 18);
         let model = lab.model();

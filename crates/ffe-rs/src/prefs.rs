@@ -29,7 +29,6 @@
 //! change (the page footer says so).
 
 use crate::display::{DisplaySettings, Filter, FitMode, PixelAspect, MAX_SCALE, MIN_SCALE};
-use crate::modern::Graphics;
 
 /// Pages, in the original's order, plus the port-only options pages.
 pub const MAIN: usize = 0;
@@ -171,8 +170,6 @@ pub enum Action {
     Map(usize),
     Sound(usize),
     Modern(bool),
-    /// Port-only: the engine that shows the frame (`modern::Graphics`).
-    Graphics(crate::modern::Graphics),
     /// Port-only docking approach choices (indices into the tables above).
     StationApproach(usize),
     StarportApproach(usize),
@@ -564,22 +561,6 @@ impl Prefs {
                     true,
                     15,
                 ));
-                // Port addition: Classic shows the original's pixels; Modern hands the same
-                // frame to the separate modern engine. Presentation only, switchable at once.
-                for (index, graphics) in [Graphics::Classic, Graphics::Modern]
-                    .into_iter()
-                    .enumerate()
-                {
-                    rows.push(row(
-                        176,
-                        38 + 10 * index as i32,
-                        if index == 0 { "Classic" } else { "Modern" },
-                        Action::Graphics(graphics),
-                        Mark::Radio(self.display.graphics == graphics),
-                        true,
-                        15,
-                    ));
-                }
                 // Port addition: the presentation page. The original has no
                 // resolution option; this row and page are port extensions.
                 rows.push(row(
@@ -901,12 +882,6 @@ impl Prefs {
                     text: "Controls:",
                     colour: 15,
                 });
-                texts.push(Text {
-                    x: 176,
-                    y: 28,
-                    text: "Graphics (Ctrl+G):",
-                    colour: 15,
-                });
             }
             WORLD => {
                 texts.push(Text {
@@ -1053,10 +1028,6 @@ impl Prefs {
             }
             Action::Modern(modern) => {
                 self.modern = modern;
-                Activate::None
-            }
-            Action::Graphics(graphics) => {
-                self.display.graphics = graphics;
                 Activate::None
             }
             Action::StationApproach(index) if index < STATION_APPROACH_KM.len() => {

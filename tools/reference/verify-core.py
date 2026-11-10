@@ -52,6 +52,21 @@ def main() -> None:
             if report[f"{name}_sha256"] != hashlib.sha256(traces[name].read_bytes()).hexdigest():
                 raise RuntimeError(f"{name}: Rust report hash differs")
         report["repeat_traces_match"] = True
+        # F152's whole-second marker (DATA_008808) on every in-game clock frame.
+        if report["second_event_transitions"] != report["game_clock_transitions"]:
+            raise RuntimeError("state: F152 marker missing from the reference trace")
+        # A marker moved by one event must fail.
+        state_bytes = traces["state"].read_bytes()
+        rows = state_bytes.splitlines()
+        tampered = json.loads(rows[300])
+        tampered["second_marker"] = (tampered["second_marker"] + 0xC22E) & 0xFFFFFFFF
+        rows[300] = json.dumps(tampered, separators=(",", ":")).encode()
+        traces["state"].write_bytes(b"\n".join(rows) + b"\n")
+        rejected = subprocess.run(arguments, cwd=directory, capture_output=True, timeout=30)
+        if rejected.returncode != 2 or b"F152" not in rejected.stderr or rejected.stdout:
+            raise RuntimeError("incorrect F152 marker was not explicitly rejected")
+        report["modified_second_marker_rejected"] = True
+        traces["state"].write_bytes(state_bytes)
         # A changed return value must fail, even with valid JSON and all rows present.
         lines = traces["vectors"].read_bytes().splitlines()
         altered = json.loads(lines[0])

@@ -168,7 +168,8 @@ fn a_60hz_pulse_sequence_aims_fires_and_damages_an_npc() {
     let mut outcomes = Vec::new();
     let mut ray_changed = 0;
     for frame in 0..80 {
-        combat.tick(tics, dt);
+        let events = combat.second_events(tics);
+        combat.tick(tics, events);
         let Ok(shot) = combat.fire(0, tics) else {
             continue;
         };

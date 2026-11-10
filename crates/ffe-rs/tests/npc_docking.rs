@@ -92,6 +92,7 @@ fn frame(
             )
         })
         .map(|(index, body)| ffe_rs::screen::SystemStation {
+            surface: None,
             model: body.model,
             centre: body.position.map(|v| v as f64 / unit),
             orientation: body.orientation,

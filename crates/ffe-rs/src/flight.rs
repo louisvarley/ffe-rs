@@ -294,7 +294,6 @@ impl Flight {
             || self.hull[0] > self.hull[1]
             || !self.loadout.validate()
             || self.combat.drive > 0x0e
-            || !(self.combat.cool_carry.is_finite() && (0.0..1.0).contains(&self.combat.cool_carry))
             || self
                 .combat
                 .lasers

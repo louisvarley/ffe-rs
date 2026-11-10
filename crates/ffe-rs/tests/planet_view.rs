@@ -103,11 +103,13 @@ fn boot_station_has_a_planet_in_view() {
     // Just the world the station orbits: the draw path for the others is the
     // same and is covered by `flight_view_shows_planet_surfaces`.
     screen.discs = vec![Disc {
+        system_type: None,
         centre,
         radius,
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
+        temperature: None,
         model: Some((body.model, body.seed)),
         orientation: body.orientation,
     }];
@@ -233,11 +235,13 @@ fn flight_view_shows_planet_surfaces() {
         // Three radii out along -z of the body, looking at it (forward is +z).
         state.position = [centre[0], centre[1], centre[2] - 8.0 * radius];
         screen.discs = vec![Disc {
+            system_type: None,
             centre,
             radius,
             light: [1.0, 0.0, 0.0],
             colours: (12, 4),
             star: false,
+            temperature: None,
             model: Some((body.model, body.seed)),
             orientation: body.orientation,
         }];
@@ -529,11 +533,13 @@ fn flight_view_shows_stars() {
             let centre = body.position.map(|v| v as f64 / UNIT);
             state.position = [centre[0], centre[1], centre[2] - 8.0 * radius];
             screen.discs = vec![Disc {
+                system_type: None,
                 centre,
                 radius,
                 light: [1.0, 0.0, 0.0],
                 colours: (17, 17),
                 star: true,
+                temperature: None,
                 model: Some((body.model, body.seed)),
                 orientation: body.orientation,
             }];
@@ -587,11 +593,13 @@ fn planet_approach_fills_the_disc() {
         state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
         state.position = [centre[0], centre[1], centre[2] - d * radius];
         screen.discs = vec![Disc {
+            system_type: None,
             centre,
             radius,
             light: [1.0, 0.0, 0.0],
             colours: (12, 4),
             star: false,
+            temperature: None,
             model: Some((body.model, body.seed)),
             orientation: body.orientation,
         }];
@@ -677,11 +685,13 @@ fn landed_surface_pixels_are_stable_across_frames() {
         ..Flight::default()
     };
     let disc = Disc {
+        system_type: None,
         centre: moon.position.map(|v| v as f64 / UNIT),
         radius: moon.inner_radius as f64 / UNIT,
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
+        temperature: None,
         model: Some((moon.model, moon.seed)),
         orientation: moon.orientation,
     };
@@ -778,11 +788,13 @@ fn planet_is_drawn_at_and_inside_one_radius() {
         state.axes = Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
         state.position = [centre[0], centre[1] + k * radius, centre[2]];
         screen.discs = vec![Disc {
+            system_type: None,
             centre,
             radius,
             light: [1.0, 0.0, 0.0],
             colours: (12, 4),
             star: false,
+            temperature: None,
             model: Some((earth.model, earth.seed)),
             orientation: earth.orientation,
         }];
@@ -863,11 +875,13 @@ fn surface_frame_shows_a_starport() {
     };
     state.axes = Some([right, up_cam, forward]);
     let disc = Disc {
+        system_type: None,
         centre: planet.position.map(|v| v as f64 / UNIT),
         radius: ffe_rs::navigation::surface_radius(planet, false),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
+        temperature: None,
         model: Some((planet.model, planet.seed)),
         orientation: planet.orientation,
     };
@@ -882,6 +896,7 @@ fn surface_frame_shows_a_starport() {
         screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
         let without = screen.logical_pixels().to_vec();
         screen.stations = vec![SystemStation {
+            surface: None,
             model: port.model,
             centre: port.position.map(|v| v as f64 / UNIT),
             orientation: port.orientation,
@@ -1137,15 +1152,18 @@ fn level_flight_near_the_surface_shows_the_horizon() {
     };
     state.axes = Some([right, up_cam, forward]);
     screen.discs = vec![Disc {
+        system_type: None,
         centre: planet.position.map(|v| v as f64 / UNIT),
         radius: ffe_rs::navigation::surface_radius(planet, false),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
+        temperature: None,
         model: Some((planet.model, planet.seed)),
         orientation: planet.orientation,
     }];
     screen.stations = vec![SystemStation {
+        surface: None,
         model: port.model,
         centre: port.position.map(|v| v as f64 / UNIT),
         orientation: port.orientation,
@@ -1281,11 +1299,13 @@ fn landing_reaches_the_surface_state_and_launches_again() {
     let viewer = ModelViewer::new(&cache).unwrap();
     let mut screen = Screen::new(&cache).unwrap();
     screen.discs = vec![Disc {
+        system_type: None,
         centre: planet.position.map(|v| v as f64 / UNIT),
         radius: ffe_rs::navigation::surface_radius(&planet, true),
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
+        temperature: None,
         model: Some((planet.model, planet.seed)),
         orientation: planet.orientation,
     }];
@@ -1299,6 +1319,7 @@ fn landing_reaches_the_surface_state_and_launches_again() {
             )
         })
         .map(|b| SystemStation {
+            surface: None,
             model: b.model,
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,
@@ -1454,11 +1475,13 @@ fn new_game_landed_surface_view() {
         .map(|b| {
             let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
             Disc {
+                system_type: None,
                 centre: b.position.map(|v| v as f64 / UNIT),
                 radius: ffe_rs::navigation::surface_radius(b, true),
                 light: b.position.map(|v| -(v as f64) / length.sqrt().max(1.0)),
                 colours: (12, 4),
                 star: b.kind == Kind::Star,
+                temperature: None,
                 model: Some((b.model, b.seed)),
                 orientation: b.orientation,
             }
@@ -1470,6 +1493,7 @@ fn new_game_landed_surface_view() {
         .iter()
         .filter(|b| matches!(b.kind, Kind::Station | Kind::Starport))
         .map(|b| SystemStation {
+            surface: None,
             model: b.model,
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,
@@ -1573,6 +1597,7 @@ fn new_game_hope_landed_surface_view() {
         .map(|b| {
             let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
             Disc {
+                system_type: None,
                 centre: b.position.map(|v| v as f64 / UNIT),
                 radius: if b.kind == Kind::Star {
                     b.radius as f64 / UNIT
@@ -1582,6 +1607,7 @@ fn new_game_hope_landed_surface_view() {
                 light: b.position.map(|v| -(v as f64) / length.sqrt().max(1.0)),
                 colours: (12, 4),
                 star: b.kind == Kind::Star,
+                temperature: None,
                 model: Some((b.model, b.seed)),
                 orientation: b.orientation,
             }
@@ -1593,6 +1619,7 @@ fn new_game_hope_landed_surface_view() {
         .iter()
         .filter(|b| matches!(b.kind, Kind::Station | Kind::Starport))
         .map(|b| SystemStation {
+            surface: None,
             model: b.model,
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,
@@ -1752,25 +1779,33 @@ fn hope_start_and_launch_keep_the_physical_ground_visible() {
         }
         model.apply(&mut state);
         let current_height = height(model.absolute_position(), &nav.bodies[index]);
-        eprintln!("frame {frame}: height {current_height}, initial {initial_height}, velocity {:?}, thrust {:?}", model.player().motion.velocity, model.player().motion.thrust);
+        eprintln!(
+            "frame {frame}: height {current_height}, initial {initial_height}, velocity {:?}, thrust {:?}",
+            model.player().motion.velocity,
+            model.player().motion.thrust
+        );
         if frame == 150 {
             assert!(
                 current_height > initial_height + 1000.0,
                 "takeoff must rise from the pad"
             );
         }
-        assert!(current_height >= initial_height - 1000.0,
-            "frame {frame}: ship fell below its pad: initial {initial_height}, now {current_height} mm");
+        assert!(
+            current_height >= initial_height - 1000.0,
+            "frame {frame}: ship fell below its pad: initial {initial_height}, now {current_height} mm"
+        );
         screen.discs = nav
             .bodies
             .iter()
             .filter(|b| matches!(b.kind, Kind::Star | Kind::Planet | Kind::Moon))
             .map(|b| Disc {
+                system_type: None,
                 centre: b.position.map(|v| v as f64 / UNIT),
                 radius: b.radius as f64 / UNIT,
                 light: [0.0, -1.0, 0.0],
                 colours: (12, 4),
                 star: b.kind == Kind::Star,
+                temperature: None,
                 model: Some((b.model, b.seed)),
                 orientation: b.orientation,
             })

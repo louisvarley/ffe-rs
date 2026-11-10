@@ -132,6 +132,16 @@ impl IndexedImage {
         self.width
     }
 
+    /// Placement metadata for replacement art, without exposing indexed bitmap pixels.
+    pub fn bounds(&self, x: i32, y: i32) -> [i32; 4] {
+        [
+            x + i32::from(self.offset[0]),
+            y + i32::from(self.offset[1]),
+            self.width as i32,
+            self.height as i32,
+        ]
+    }
+
     /// Blit a cached indexed bitmap straight into a 32-bit logical frame, as
     /// the docked screens' buttons and arrows are drawn after the palette pass.
     pub fn blit_rgb(&self, frame: &mut [u32], palette: &[u32; 128], x: i32, y: i32) {

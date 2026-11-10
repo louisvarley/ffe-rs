@@ -103,6 +103,56 @@ fn the_new_game_pad_is_not_attacked() {
 
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn capital_ships_keep_clear_of_hope_and_follow_orbital_stations() {
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    nav.apply_world_options(
+        &cache,
+        ffe_rs::prefs::TRAFFIC_EXTRA[3],
+        false,
+        true,
+        true,
+        true,
+    );
+    let port = nav.docked.unwrap();
+    assert_eq!(nav.bodies[port].kind, Kind::Starport);
+    let mut holding = Vec::new();
+    for (index, ship) in nav
+        .ships
+        .iter()
+        .enumerate()
+        .filter(|(_, ship)| ship.role == Role::Shuttle)
+    {
+        assert!(matches!(ship.state, State::Hold | State::Transit));
+        assert!(ship.station.is_none() && ship.bay.is_none());
+        for body in nav.bodies.iter().filter(|body| body.kind == Kind::Starport) {
+            assert!(distance(ship.position, body.position) > (body.radius + ship.radius) as f64);
+        }
+        let anchor = nav
+            .bodies
+            .iter()
+            .position(|body| body.kind == Kind::Station && body.position == ship.anchor)
+            .expect("capital traffic uses an orbital station");
+        if ship.state == State::Hold {
+            let offset = std::array::from_fn::<_, 3, _>(|k| ship.position[k] - ship.anchor[k]);
+            holding.push((index, anchor, offset));
+        }
+    }
+    assert!(!holding.is_empty(), "Gateway has orbital capital traffic");
+
+    nav.advance(&cache, 1.1);
+    for (index, anchor, offset) in holding {
+        let position = nav.bodies[anchor].position;
+        assert_eq!(nav.ships[index].anchor, position);
+        assert_eq!(
+            nav.ships[index].position,
+            std::array::from_fn(|k| position[k] + offset[k])
+        );
+    }
+}
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn a_landed_ship_is_not_a_target() {
     let cache = cache();
     let mut nav = Navigator::new_game(&cache, 0).unwrap();
@@ -197,6 +247,7 @@ fn boot_frame_and_log_stay_clean() {
         .map(|b| {
             let length = b.position.iter().map(|v| (*v as f64).powi(2)).sum::<f64>();
             Disc {
+                system_type: None,
                 centre: b.position.map(|v| v as f64 / UNIT),
                 radius: if b.kind == Kind::Star {
                     b.radius as f64 / UNIT
@@ -206,6 +257,7 @@ fn boot_frame_and_log_stay_clean() {
                 light: b.position.map(|v| -(v as f64) / length.sqrt().max(1.0)),
                 colours: (12, 4),
                 star: b.kind == Kind::Star,
+                temperature: None,
                 model: Some((b.model, b.seed)),
                 orientation: b.orientation,
             }
@@ -217,6 +269,7 @@ fn boot_frame_and_log_stay_clean() {
         .iter()
         .filter(|b| matches!(b.kind, Kind::Station | Kind::Starport))
         .map(|b| SystemStation {
+            surface: None,
             model: b.model,
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,

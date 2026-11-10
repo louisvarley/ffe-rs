@@ -132,9 +132,6 @@ the yaw keys/axis and the pitch keys/axis, and flips the mouse x and y.
 
 ## Display (port extension)
 
-- **Ctrl+G** switches between Classic and Modern graphics at once (also on
-  Escape, Advanced Options). Presentation only: the game, its clock and its saves
-  are unchanged; see `docs/notes/modern-graphics.md`.
 - **Alt+Enter** toggles a borderless full-screen window. The same toggle is the
   `Fullscreen` row on `Escape` -> `Advanced Options` -> `Display Options`.
 - The display page also sets window scale 1x-6x, pixel-perfect or fill-window

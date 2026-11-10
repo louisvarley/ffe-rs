@@ -367,6 +367,7 @@ impl OriginalFlight {
         let vector: [i64; 3] =
             std::array::from_fn(|k| motion.position[k].wrapping_sub(planet_position[k]));
         let (outer_radius, inner_radius) = player_model.radii();
+        self.collision_radius = inner_radius;
         let mut world = Bodies {
             stamp: 1,
             frame_tics: self.player.frame_tics,
@@ -484,6 +485,22 @@ impl OriginalFlight {
                 (world.body[2].orientation, world.body[3].orientation)
             });
         self.move_pad_bodies(planet_position, planet_rows, station_position, station_rows);
+    }
+
+    /// Keep a parked ship at F994's current seat after the clock moves the port.
+    /// The pad world stores the ship relative to the planet, so moving the
+    /// world's origin here would also move the collision geometry.
+    pub fn pin_pad_seat(&mut self, seat: [i64; 3], rows: [i32; 9], reverse: bool) {
+        let Some(world) = self.pad_world.as_mut() else { return };
+        self.player.motion.position =
+            std::array::from_fn(|k| seat[k].wrapping_sub(world.body[2].position[k]));
+        self.player.motion.orientation = std::array::from_fn(|r| {
+            std::array::from_fn(|c| {
+                let value = rows[3 * r + c];
+                if reverse && r != 1 { value.saturating_neg() } else { value }
+            })
+        });
+        world.stamp = world.stamp.wrapping_add(1);
     }
 
     /// Move the pad world's planet and starport to their current navigator

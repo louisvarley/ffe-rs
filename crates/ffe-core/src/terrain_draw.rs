@@ -111,6 +111,112 @@ fn normal(a: [i32; 3], b: [i32; 3], c: [i32; 3]) -> Result<[i32; 3], Fault> {
     Ok(out)
 }
 
+// Modern triangles are clipped by the GPU. Use their actual 3-D coordinates
+// for rejection, including triangles that straddle the near plane.
+fn visual_face_visible(points: [Position; 3]) -> bool {
+    let points = points.map(|point| point.map(f64::from));
+    if points.iter().all(|p| p[2] < 64.0) {
+        return false;
+    }
+    for (axis, bound) in [(0, 160.0 / 256.0), (1, 79.0 / 256.0)] {
+        if [-1.0, 1.0]
+            .into_iter()
+            .any(|sign| points.iter().all(|p| sign * p[axis] > bound * p[2]))
+        {
+            return false;
+        }
+    }
+    let [a, b, c] = points;
+    let u: [f64; 3] = std::array::from_fn(|i| b[i] - a[i]);
+    let v: [f64; 3] = std::array::from_fn(|i| c[i] - a[i]);
+    let cross = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    cross.into_iter().zip(a).map(|(n, p)| n * p).sum::<f64>() > 0.0
+}
+
+/// The longest edge, in pixels of a 1280-wide picture, a shore triangle may have in the
+/// presentation mesh. Halving it roughly doubles the shore's triangles and the draw's cost.
+const SHORE_EDGE: i32 = 8;
+
+// Measure size by the rays from the eye, so yaw and pitch change visibility
+// without changing the subdivision or displaced heights of visible ground.
+fn visual_detail_ready(nodes: [Node; 3], level: i32, shore: bool) -> bool {
+    if level > if shore { 16 } else { 14 } {
+        return true;
+    }
+    let lv = level - i32::from(shore);
+    let levels_ready = nodes.iter().all(|node| lv > node.level());
+    if !shore && (levels_ready || lv <= 8) {
+        return levels_ready;
+    }
+    let [a, b, c] = nodes.map(|node| {
+        let length = node.eye_distance().max(64.0);
+        position(node).map(|v| f64::from(v) / length)
+    });
+    let u: [f64; 3] = std::array::from_fn(|k| b[k] - a[k]);
+    let v: [f64; 3] = std::array::from_fn(|k| c[k] - a[k]);
+    if shore {
+        let longest = [u, v, std::array::from_fn(|k| c[k] - b[k])]
+            .iter()
+            .map(|edge| edge.iter().map(|d| d * d).sum::<f64>())
+            .fold(0.0, f64::max);
+        if longest > (f64::from(SHORE_EDGE) / 1024.0).powi(2) {
+            return false;
+        }
+    }
+    let area = (a[0] * (u[1] * v[2] - u[2] * v[1])
+        + a[1] * (u[2] * v[0] - u[0] * v[2])
+        + a[2] * (u[0] * v[1] - u[1] * v[0]))
+        .abs()
+        * 1024.0_f64.powi(2);
+    levels_ready || (lv > 8 && area < if shore { 80.0 } else { 448.0 })
+}
+
+type Position = [i32; 3];
+
+fn position(node: Node) -> Position {
+    [node.x(), node.y(), node.z()]
+}
+
+fn edge_key(a: Node, b: Node) -> [Position; 2] {
+    let mut edge = [position(a), position(b)];
+    edge.sort_unstable();
+    edge
+}
+
+/// Modern keeps the adaptive mesh until both sides of each edge have been
+/// visited. A coarse face can then follow any finer edge on its neighbour.
+#[derive(Default)]
+struct VisualMesh {
+    faces: Vec<([Node; 3], Emission)>,
+    midpoints: std::collections::HashMap<[Position; 2], Node>,
+}
+
+impl VisualMesh {
+    fn stitch(
+        &self,
+        nodes: [Node; 3],
+        depth: u8,
+        emit: &mut impl FnMut([Node; 3]) -> Result<(), Fault>,
+    ) -> Result<(), Fault> {
+        if depth < 24 {
+            for i in 0..3 {
+                let [a, b, c] = [nodes[i], nodes[(i + 1) % 3], nodes[(i + 2) % 3]];
+                if let Some(&mid) = self.midpoints.get(&edge_key(a, b)) {
+                    if !nodes.iter().any(|&node| position(node) == position(mid)) {
+                        self.stitch([a, mid, c], depth + 1, emit)?;
+                        return self.stitch([mid, b, c], depth + 1, emit);
+                    }
+                }
+            }
+        }
+        emit(nodes)
+    }
+}
+
 /// What the recursion keeps beyond the terrain itself.
 struct Pass<'t, 'e> {
     tree: &'t Tree,
@@ -123,6 +229,7 @@ struct Pass<'t, 'e> {
     coarse: usize,
     fine: usize,
     emit: &'e mut dyn FnMut(&Terrain<'_>, Emission) -> Result<(), Fault>,
+    visual: Option<&'e mut VisualMesh>,
 }
 
 impl Terrain<'_> {
@@ -146,7 +253,8 @@ impl Terrain<'_> {
         let bound = multiply(longest, 0x5400_0000).wrapping_mul(2);
         // DATA_007837: the detail, one more for each step the view is away.
         let distance = row_length(scene.origin) as u32;
-        let mut adjust = scene.detail - 1;
+        let near_surface = distance < longest.saturating_add(longest / 12) as u32;
+        let mut adjust = scene.detail - 1 + i32::from(self.visual_detail && near_surface);
         if (longest.wrapping_add(longest >> 4) as u32) < distance {
             adjust += 1;
             if (longest.wrapping_add(longest >> 3) as u32) < distance {
@@ -166,13 +274,22 @@ impl Terrain<'_> {
             ];
             let mut node = Node::default();
             for axis in 0..3 {
-                let position = (0..3).fold(0i32, |sum, row| {
-                    sum.wrapping_add(multiply(direction[row], scene.axes[3 * row + axis]))
-                });
+                let position = if self.radial_detail {
+                    let sum = (0..3)
+                        .map(|row| {
+                            i64::from(direction[row]) * i64::from(scene.axes[3 * row + axis])
+                        })
+                        .sum::<i64>();
+                    ((sum + (1 << 30)) >> 31) as i32
+                } else {
+                    (0..3).fold(0i32, |sum, row| {
+                        sum.wrapping_add(multiply(direction[row], scene.axes[3 * row + axis]))
+                    })
+                };
                 node.set_dword(0x28 + 4 * axis, position);
                 node.set_dword(4 + 4 * axis, position.wrapping_add(scene.origin[axis]));
             }
-            if let Some([x, y]) = project([node.x(), node.y(), node.z()]) {
+            if let Some([x, y]) = project(self.to_view([node.x(), node.y(), node.z()])) {
                 node.set_word(0, x);
                 node.set_word(2, y);
             }
@@ -187,15 +304,41 @@ impl Terrain<'_> {
             );
             self.nodes[corner] = node;
         }
-        let far = scene.origin[2] > longest.wrapping_mul(2);
+        let far = if self.radial_detail {
+            distance > (longest as u32).saturating_mul(2)
+        } else {
+            scene.origin[2] > longest.wrapping_mul(2)
+        };
         let span = self.type_dword(scene.kind, 8) as usize;
         let slack = 0x1dcd_6500_i32 >> (scene.zoom & 31);
         let mut aborted = None;
-        let result = self.draw_faces(scene, &tree, far, span, bound, slack, emit);
+        let mut visual = self.visual_detail.then(VisualMesh::default);
+        let result = self.draw_faces(scene, &tree, far, span, bound, slack, emit, visual.as_mut());
         if let Err(stop) = result {
             match stop {
                 Stop::Abort(Abort(code)) => aborted = Some(code),
                 Stop::Fault(fault) => return Err(fault),
+            }
+        }
+        if let Some(mut mesh) = visual {
+            // The traversal is finished. Its first three nodes are scratch
+            // slots for the existing material emitter, including sea clipping.
+            for (nodes, face) in std::mem::take(&mut mesh.faces) {
+                mesh.stitch(nodes, 0, &mut |triangle| {
+                    if !visual_face_visible(triangle.map(|node| self.node_view(&node))) {
+                        return Ok(());
+                    }
+                    self.nodes[..3].copy_from_slice(&triangle);
+                    emit(
+                        self,
+                        Emission {
+                            nodes: [0, 1, 2],
+                            normal: face.normal,
+                            key: face.key,
+                            level: face.level,
+                        },
+                    )
+                })?;
             }
         }
         Ok(Drawn { consumed, aborted })
@@ -211,6 +354,7 @@ impl Terrain<'_> {
         bound: i32,
         slack: i32,
         emit: &mut dyn FnMut(&Terrain<'_>, Emission) -> Result<(), Fault>,
+        mut visual: Option<&mut VisualMesh>,
     ) -> Result<(), Stop> {
         let mut edges = [NIL; 30];
         for (k, edge) in edges.iter_mut().enumerate() {
@@ -242,6 +386,7 @@ impl Terrain<'_> {
                 coarse,
                 fine,
                 emit,
+                visual: visual.as_deref_mut(),
             };
             self.descend(&mut pass, corners, sides, 0, bound, face_tree)?;
         }
@@ -282,65 +427,140 @@ impl Terrain<'_> {
                 .wrapping_add(na.dword(0x30).wrapping_abs());
             multiply(sum, high.wrapping_sub(low) >> 3).wrapping_add(bound)
         };
-        let limit = na.z().wrapping_add(slack);
-        if limit < 0x40
-            || na.x().wrapping_abs().wrapping_sub(slack) > limit
-            || na.y().wrapping_abs().wrapping_sub(slack) > limit
-        {
-            return Ok(());
-        }
-        // The sea level moves the detail one level coarser for triangles across it.
-        let lv = if pass.sea {
-            let below = [na, nb, nc].iter().filter(|n| n.height() <= 0).count();
-            if below == 0 || below == 3 {
-                level
-            } else {
-                level - 1
+        if self.radial_detail {
+            // Keep a guard band while subdividing so a turn does not prune
+            // the neighbours of visible faces before edges are stitched.
+            let points = [na, nb, nc].map(|node| self.node_view(&node).map(f64::from));
+            let margin = f64::from(slack.max(bound).max(0));
+            if points.iter().all(|p| p[2] + margin < 64.0)
+                || (0..2).any(|axis| {
+                    [-1.0, 1.0]
+                        .into_iter()
+                        .any(|sign| points.iter().all(|p| sign * p[axis] > p[2] + margin * 2.0))
+                })
+            {
+                return Ok(());
             }
         } else {
-            level
+            let limit = na.z().wrapping_add(slack);
+            if limit < 0x40
+                || na.x().wrapping_abs().wrapping_sub(slack) > limit
+                || na.y().wrapping_abs().wrapping_sub(slack) > limit
+            {
+                return Ok(());
+            }
+        }
+        let across = pass.sea && {
+            let below = [na, nb, nc].iter().filter(|n| n.height() <= 0).count();
+            below == 1 || below == 2
         };
-        let in_front = na.z() >= 0x40 && nb.z() >= 0x40 && nc.z() >= 0x40;
-        if in_front {
-            let screen = |n: &Node| (i32::from(n.word(0)), i32::from(n.word(2)));
-            let ((ax, ay), (bx, by), (cx, cy)) = (screen(&na), screen(&nb), screen(&nc));
-            let area = (cx - ax)
-                .wrapping_mul(by - ay)
-                .wrapping_sub((cy - ay).wrapping_mul(bx - ax));
-            let fine_enough = level > 13
-                || (lv > na.level() && lv > nb.level() && lv > nc.level())
-                || ((0..0x96).contains(&area) && lv > 8);
-            if fine_enough {
-                // Emit unless outside the view or facing away.
-                let outside = |at: usize| {
-                    let code = na.word(at) | nb.word(at) | nc.word(at);
-                    self.table_dword(tables::OUTCODES + 4 * (code as usize & 0xf)) != 0
-                };
-                if outside(0x24) || outside(0x26) {
-                    return Ok(());
-                }
-                let across = pass.sea && {
-                    let below = [na, nb, nc].iter().filter(|n| n.height() <= 0).count();
-                    below == 1 || below == 2
-                };
-                if !across && area <= 0 {
-                    return Ok(());
-                }
-                let key =
-                    model_depth::key([na.x(), na.y(), na.z().wrapping_add(pass.slack)], pass.zoom);
-                let vector =
-                    normal(pos(self, a), pos(self, b), pos(self, c)).map_err(Stop::Fault)?;
-                (pass.emit)(
-                    self,
+        let lv = if across { level - 1 } else { level };
+        // With the planet-fixed frame, the view's own depths.
+        let [va, vb, vc] = [na, nb, nc].map(|node| self.node_view(&node));
+        let in_front = va[2] >= 0x40 && vb[2] >= 0x40 && vc[2] >= 0x40;
+        let max_level = if self.visual_detail && across {
+            16
+        } else if self.visual_detail {
+            14
+        } else {
+            13
+        };
+        let nodes = [na, nb, nc];
+        let visual_ready = if self.radial_detail {
+            visual_detail_ready(nodes, level, across)
+        } else {
+            self.visual_detail
+                && level > max_level
+                && !in_front
+                && visual_face_visible([va, vb, vc])
+        };
+        if visual_ready {
+            let key = model_depth::key([va[0], va[1], va[2].wrapping_add(pass.slack)], pass.zoom);
+            let vector = normal(pos(self, a), pos(self, b), pos(self, c)).map_err(Stop::Fault)?;
+            if let Some(mesh) = pass.visual.as_deref_mut() {
+                mesh.faces.push((
+                    nodes,
                     Emission {
                         nodes: [a, b, c],
                         normal: vector,
                         key,
                         level,
                     },
-                )
-                .map_err(Stop::Fault)?;
-                return Ok(());
+                ));
+            }
+            return Ok(());
+        }
+        if self.visual_detail && level > max_level && !in_front {
+            return Ok(());
+        }
+        if in_front {
+            if !self.radial_detail {
+                let screen = |n: &Node| {
+                    if self.visual_detail {
+                        (
+                            (f64::from(n.x()) * 1024.0 / f64::from(n.z())).clamp(-4.0e6, 4.0e6)
+                                as i32,
+                            (-f64::from(n.y()) * 1024.0 / f64::from(n.z())).clamp(-4.0e6, 4.0e6)
+                                as i32,
+                        )
+                    } else {
+                        (i32::from(n.word(0)), i32::from(n.word(2)))
+                    }
+                };
+                let ((ax, ay), (bx, by), (cx, cy)) = (screen(&na), screen(&nb), screen(&nc));
+                let area = (i64::from(cx) - i64::from(ax)) * (i64::from(by) - i64::from(ay))
+                    - (i64::from(cy) - i64::from(ay)) * (i64::from(bx) - i64::from(ax));
+                let pixel_area = if self.visual_detail && across {
+                    5 * 16
+                } else if self.visual_detail {
+                    28 * 16
+                } else {
+                    0x96
+                };
+                let edge = (ax - bx)
+                    .abs()
+                    .max((ax - cx).abs())
+                    .max((bx - cx).abs())
+                    .max((ay - by).abs())
+                    .max((ay - cy).abs())
+                    .max((by - cy).abs());
+                let shoreline_ready = !self.visual_detail || !across || edge <= SHORE_EDGE;
+                let fine_enough = level > max_level
+                    || (shoreline_ready && lv > na.level() && lv > nb.level() && lv > nc.level())
+                    || (shoreline_ready
+                        && (0..pixel_area).contains(&if self.visual_detail {
+                            area
+                        } else {
+                            i64::from(area as i32)
+                        })
+                        && lv > 8);
+                if fine_enough {
+                    let outside = |at: usize| {
+                        let code = na.word(at) | nb.word(at) | nc.word(at);
+                        self.table_dword(tables::OUTCODES + 4 * (code as usize & 0xf)) != 0
+                    };
+                    if !self.visual_detail
+                        && (outside(0x24) || outside(0x26) || (!across && area as i32 <= 0))
+                    {
+                        return Ok(());
+                    }
+                    let key =
+                        model_depth::key([va[0], va[1], va[2].wrapping_add(pass.slack)], pass.zoom);
+                    let vector =
+                        normal(pos(self, a), pos(self, b), pos(self, c)).map_err(Stop::Fault)?;
+                    let face = Emission {
+                        nodes: [a, b, c],
+                        normal: vector,
+                        key,
+                        level,
+                    };
+                    if let Some(mesh) = pass.visual.as_deref_mut() {
+                        mesh.faces.push((nodes, face));
+                    } else {
+                        (pass.emit)(self, face).map_err(Stop::Fault)?;
+                    }
+                    return Ok(());
+                }
             }
             if level < 2 {
                 // F1868/F1869: a triangle wholly beyond the horizon is not drawn.
@@ -362,7 +582,7 @@ impl Terrain<'_> {
                     return Ok(());
                 }
             }
-        } else {
+        } else if !self.radial_detail {
             if bound < 0x1f4 {
                 return Ok(());
             }
@@ -435,6 +655,12 @@ impl Terrain<'_> {
         let n_c = self.alloc_edge()?;
         self.edges[n_c].head = self.edges[e3].mid;
         let (m3, m4, m5) = (self.edges[e3].mid, self.edges[e4].mid, self.edges[e5].mid);
+        if let Some(mesh) = pass.visual.as_deref_mut() {
+            for (a, b, m) in [(a, b, m3), (b, c, m4), (c, a, m5)] {
+                mesh.midpoints
+                    .insert(edge_key(self.nodes[a], self.nodes[b]), self.nodes[m]);
+            }
+        }
         let half = |t: &Self, e: usize, end: usize| {
             if t.edges[e].head == end {
                 t.edges[e].first
@@ -491,5 +717,76 @@ impl Terrain<'_> {
             self.free_edge(edge);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(point: Position, height: i32) -> Node {
+        let mut node = Node::default();
+        for (k, value) in point.into_iter().enumerate() {
+            node.set_dword(4 + 4 * k, value);
+        }
+        node.set_dword(0x3c, height);
+        node
+    }
+
+    #[test]
+    fn modern_terrain_keeps_faces_that_cross_the_near_plane() {
+        let a = [-10, -10, 32];
+        let b = [10, -10, 100];
+        let c = [0, 10, 100];
+        assert!(visual_face_visible([a, b, c]));
+        assert!(!visual_face_visible([a, c, b]));
+        assert!(!visual_face_visible([
+            [100, -10, 100],
+            [120, -10, 100],
+            [110, 10, 100]
+        ]));
+    }
+
+    #[test]
+    fn planet_frame_positions_are_tested_and_projected_in_view_space() {
+        // A quarter turn about y: the planet frame's +x is the view's -z (behind the eye).
+        let table = vec![0u8; 4];
+        let mut terrain = Terrain::new(&table, &[]);
+        let ahead = node([0, 0, 4000], 0);
+        assert_eq!(terrain.node_view(&ahead), [0, 0, 4000]);
+        terrain.set_view_rotation([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]);
+        let turned = node([4000, 0, 0], 0);
+        assert_eq!(terrain.node_view(&turned), [0, 0, -4000]);
+        assert_eq!(terrain.node_view(&node([0, 0, 4000], 0)), [4000, 0, 0]);
+        // Projection reads the view position and leaves the node's own position alone.
+        terrain.projection = Projection::Flat;
+        terrain.nodes[0] = node([0, 25, 4000], 0);
+        terrain.project(0);
+        let projected = terrain.nodes[0];
+        assert_eq!([projected.x(), projected.y(), projected.z()], [0, 25, 4000]);
+        // In the view it lies 4000 to the right at no depth (code 8, too near), where its
+        // own position, 4000 ahead, would have put it on the screen (code 2).
+        assert_eq!([projected.word(0x24), projected.word(0x26)], [8, 8]);
+    }
+
+    #[test]
+    fn coarse_terrain_follows_its_neighbours_shoreline_vertices() {
+        let a = node([0, 0, 4000], 10);
+        let b = node([40, 0, 4000], -10);
+        let c = node([0, 40, 4000], 10);
+        // Both fine vertices rise away from the original straight edge. The
+        // second also shifts the sea crossing because it carries its own height.
+        let mid = node([20, 3, 4000], 8);
+        let quarter = node([30, 2, 4000], -2);
+        let mut mesh = VisualMesh::default();
+        mesh.midpoints.insert(edge_key(b, a), mid);
+        mesh.midpoints.insert(edge_key(mid, b), quarter);
+        let mut stitched = Vec::new();
+        mesh.stitch([a, b, c], 0, &mut |face| {
+            stitched.push(face);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(stitched, [[a, mid, c], [mid, quarter, c], [quarter, b, c]]);
     }
 }

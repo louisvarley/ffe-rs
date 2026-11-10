@@ -218,8 +218,7 @@ fn f1098s_capsule_escape_frame() {
 }
 
 /// Port deviation (`docs/DEVIATIONS.md`, 2026-10-29): from the player's death
-/// through the explosion and the death camera neither F1035's dust motes nor
-/// Modern's speed dust are drawn.
+/// through the explosion and the death camera F1035's dust motes are not drawn.
 #[test]
 #[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
 fn no_dust_is_drawn_while_the_player_dies() {
@@ -249,18 +248,16 @@ fn no_dust_is_drawn_while_the_player_dies() {
             scale,
         })
         .collect();
-    let frame = |state: &Flight, dust: bool, capture: bool| {
+    let frame = |state: &Flight, dust: bool| {
         let mut screen = Screen::new(&cache).unwrap();
-        screen.capture = capture;
         if dust {
             screen.effects = motes.clone();
         }
         screen.draw(state, views, Some(&viewer), true, "");
-        let world = screen.world().cloned();
-        (screen.logical_pixels().to_vec(), world)
+        screen.logical_pixels().to_vec()
     };
-    let (alive, _) = frame(&state, true, false);
-    let (clear, _) = frame(&state, false, false);
+    let alive = frame(&state, true);
+    let clear = frame(&state, false);
     assert!(
         changed(&clear, &alive) > 0,
         "the test's motes are not visible"
@@ -269,13 +266,11 @@ fn no_dust_is_drawn_while_the_player_dies() {
     for seconds in [0.0, 1.0, death::GAME_OVER_SECONDS - 0.1] {
         let mut dying = state.clone();
         dying.death.as_mut().unwrap().tick(seconds);
-        let (with, without) = (frame(&dying, true, false).0, frame(&dying, false, false).0);
+        let (with, without) = (frame(&dying, true), frame(&dying, false));
         assert_eq!(
             changed(&with, &without),
             0,
             "dust drawn {seconds} s into the death"
         );
-        let (_, world) = frame(&dying, true, true);
-        assert!(world.is_some_and(|world| world.dust.is_empty()));
     }
 }

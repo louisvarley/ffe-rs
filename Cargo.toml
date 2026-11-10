@@ -6,8 +6,6 @@ members = [
     "crates/ffe-convert",
     "crates/ffe-tools",
     "crates/ffe-audio",
-    "crates/ffe-render",
-    "crates/ffe-launcher",
 ]
 resolver = "2"
 

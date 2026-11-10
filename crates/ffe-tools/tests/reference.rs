@@ -83,6 +83,56 @@ fn jsonl(rows: &[Value]) -> Vec<u8> {
     bytes
 }
 
+/// `states()` with F152's marker (`DATA_008808`) as the original moves it: the
+/// new-game burst of 43,200 events already made at frame 161, then one more
+/// marker step of 0xc22e each time the fraction has advanced that far.
+fn states_with_marker() -> Vec<Value> {
+    let mut rows = states();
+    let mut marker = 0u32;
+    for row in rows.iter_mut() {
+        if row["start_type"] == 1 {
+            let fraction = row["game_tics"].as_u64().unwrap() as u32;
+            while fraction.wrapping_sub(marker) >= 0xc22e {
+                marker = marker.wrapping_add(0xc22e);
+            }
+            row["second_marker"] = json!(marker);
+        } else {
+            row["second_marker"] = json!(0);
+        }
+    }
+    rows
+}
+
+#[test]
+fn f152_marker_follows_whole_0xc22e_events_and_tampering_fails() {
+    let rows = states_with_marker();
+    assert_eq!(rows[161]["second_marker"], json!(43_200u32 * 0xc22e));
+    let report = verify_trace_bytes(&jsonl(&vectors()), &jsonl(&rows)).unwrap();
+    assert_eq!(report.second_event_transitions, 238);
+    // A trace without the field still verifies the clock alone.
+    let report = verify_trace_bytes(&jsonl(&vectors()), &jsonl(&states())).unwrap();
+    assert_eq!(report.second_event_transitions, 0);
+    // One marker moved early, late or by a partial event is rejected.
+    for (frame, delta) in [
+        (200usize, 0xc22eu32),
+        (250, 1),
+        (399, 0u32.wrapping_sub(0xc22e)),
+    ] {
+        let mut tampered = states_with_marker();
+        let marker = tampered[frame]["second_marker"].as_u64().unwrap() as u32;
+        tampered[frame]["second_marker"] = json!(marker.wrapping_add(delta));
+        let error = verify_trace_bytes(&jsonl(&vectors()), &jsonl(&tampered)).unwrap_err();
+        assert!(error.contains("F152"), "{frame}: {error}");
+    }
+    // A new-game marker that is neither 0 nor the 43,200-event dispatch fails.
+    let mut wrong_start = states_with_marker();
+    for row in wrong_start.iter_mut().skip(161) {
+        let marker = row["second_marker"].as_u64().unwrap() as u32;
+        row["second_marker"] = json!(marker.wrapping_sub(0xc22e));
+    }
+    assert!(verify_trace_bytes(&jsonl(&vectors()), &jsonl(&wrong_start)).is_err());
+}
+
 #[test]
 fn complete_synthetic_scenarios_report_exact_coverage() {
     let report = verify_trace_bytes(&jsonl(&vectors()), &jsonl(&states())).unwrap();

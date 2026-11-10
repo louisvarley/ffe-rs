@@ -80,6 +80,7 @@ fn the_lift_scenes_draw() {
                 .iter()
                 .filter(|b| b.kind == Kind::Station)
                 .map(|b| SystemStation {
+                    surface: None,
                     model: b.model,
                     centre: b.position.map(|v| v as f64 / UNIT),
                     orientation: b.orientation,
@@ -152,6 +153,7 @@ fn the_lift_scenes_draw() {
         .iter()
         .filter(|b| b.kind == Kind::Station)
         .map(|b| SystemStation {
+            surface: None,
             model: b.model,
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,
@@ -193,6 +195,7 @@ fn stations(nav: &Navigator, tics: u32) -> Vec<SystemStation> {
         .enumerate()
         .filter(|(_, b)| b.kind == Kind::Station)
         .map(|(index, b)| SystemStation {
+            surface: None,
             model: b.model,
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,

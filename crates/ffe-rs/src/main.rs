@@ -35,7 +35,7 @@ use ffe_rs::ships::ShipList;
 use ffe_rs::sound::{Cue, GameAudio};
 use ffe_rs::station::{self, Action as StationAction, DockState, Screen as StationScreen};
 use ffe_rs::trade;
-use minifb::{Key, KeyRepeat, Window};
+use minifb::{Key, KeyRepeat};
 use minifb::{MouseButton, MouseMode};
 
 /// The window title, shared by every reopen.
@@ -46,6 +46,7 @@ const WINDOW_TITLE: &str = "FFE-RS 0.9 - Depth-order helpers, experimental fligh
 const BEAM_HOLD_SECONDS: f64 = 1.0 / 18.0;
 /// F1088's set speed for a ship leaving a station's slot (`player+0x1b8`).
 const STATION_LAUNCH_SET_SPEED: i32 = 0xb5d;
+const LAUNCH_LIFT_HINT: &str = "Launch permission granted: moving into the lift.";
 /// What the open-air launch tells the player: F1013/F1031 need thrust to climb
 /// out of the starport's effect region.
 const TAKEOFF_HINT: &str =
@@ -143,10 +144,6 @@ struct Options {
     replay: Option<PathBuf>,
     /// `--replay-exit`: close the window when the recording ends.
     replay_exit: bool,
-    /// `--ffed3d DIR`: an installed FFED3D, whose models, textures and
-    /// shaders the Modern engine draws with (`ffed3d=` in the launcher's
-    /// settings when not given).
-    ffed3d: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -170,16 +167,11 @@ fn options() -> Result<Options, String> {
     let mut replay = None;
     let mut replay_exit = false;
     let mut game: Option<PathBuf> = None;
-    let mut ffed3d: Option<PathBuf> = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--game" && game.is_none() {
             game = Some(PathBuf::from(
                 args.next().ok_or("--game requires a directory")?,
-            ));
-        } else if arg == "--ffed3d" && ffed3d.is_none() {
-            ffed3d = Some(PathBuf::from(
-                args.next().ok_or("--ffed3d requires a directory")?,
             ));
         } else if arg == "--root" && root.is_none() {
             root = Some(PathBuf::from(
@@ -282,13 +274,16 @@ fn options() -> Result<Options, String> {
             }
             smoke_frames = Some(frames);
         } else {
-            return Err(format!("Unknown argument {}. Usage: ffe-rs [--game <game files folder>] [--ffed3d <FFED3D folder>] [--root <data folder>] [--start 0..5|sol] [--skip-intro] [--dev] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR] [--record FILE] [--replay FILE [--replay-exit]]",arg.to_string_lossy()));
+            return Err(format!(
+                "Unknown argument {}. Usage: ffe-rs [--game <game files folder>] [--root <data folder>] [--start 0..5|sol] [--skip-intro] [--dev] [--load SAVE.json] [--smoke-frames 1..300] [--capture DIR] [--capture-planet DIR] [--capture-traffic DIR] [--capture-start DIR] [--capture-prefs DIR] [--capture-intro DIR] [--capture-display DIR] [--capture-gameover DIR] [--capture-save DIR] [--record FILE] [--replay FILE [--replay-exit]]",
+                arg.to_string_lossy()
+            ));
         }
     }
     let root = match root {
         Some(root) => root,
         // Beside the executable, else the nearest of up to four parent folders
-        // with saved launcher settings or a `game` folder (so
+        // with a `game` folder (so
         // target\release\ffe-rs.exe finds the checkout).
         None => {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -296,17 +291,11 @@ fn options() -> Result<Options, String> {
             beside
                 .ancestors()
                 .take(5)
-                .find(|dir| {
-                    dir.join("saves").join("launcher.cfg").is_file()
-                        || dir.join("game").join("FIRSTENC.EXE").is_file()
-                })
+                .find(|dir| dir.join("game").join("FIRSTENC.EXE").is_file())
                 .map_or(beside.clone(), Path::to_path_buf)
         }
     };
-    let game = game
-        .or_else(|| configured(&root, "game"))
-        .unwrap_or_else(|| root.join("game"));
-    let ffed3d = ffed3d.or_else(|| configured(&root, "ffed3d"));
+    let game = game.unwrap_or_else(|| root.join("game"));
     Ok(Options {
         root: root
             .canonicalize()
@@ -329,25 +318,7 @@ fn options() -> Result<Options, String> {
         record,
         replay,
         replay_exit,
-        ffed3d,
     })
-}
-
-/// A folder the launcher saved (`game=` or `ffed3d=` in `saves/launcher.cfg`).
-fn configured(root: &Path, key: &str) -> Option<PathBuf> {
-    let prefix = format!("{key}=");
-    let path = root.join("saves").join("launcher.cfg");
-    let meta = fs::symlink_metadata(&path).ok()?;
-    if !meta.is_file() || meta.len() > 16 * 1024 {
-        return None;
-    }
-    fs::read_to_string(path)
-        .ok()?
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix(prefix.as_str()))
-        .map(str::trim)
-        .find(|value| !value.is_empty())
-        .map(PathBuf::from)
 }
 
 /// Build the content from the original game files in memory (the same
@@ -357,8 +328,8 @@ fn load_content(game: &Path) -> Result<ffe_content::VerifiedCache, String> {
     if !game.join("FIRSTENC.EXE").is_file() {
         return Err(format!(
             "The Frontier: First Encounters game files were not found in {}.\n\
-             Choose your game folder in the launcher (launcher.bat), or start the game \
-             with --game <folder containing FIRSTENC.EXE>.",
+             Put the game files in a `game` folder beside the checkout (play.bat), or start \
+             the game with --game <folder containing FIRSTENC.EXE>.",
             game.display()
         ));
     }
@@ -621,76 +592,7 @@ fn write_png(path: &Path, pixels: &[u32], width: usize, height: usize) -> Result
 /// The presentation evidence: the same 320x200 frame through the real display
 /// scaler at the supported sizes. `display.cfg` and the window's live size do
 /// not affect these images, and no capture (`--capture*`) is touched.
-/// The screen's last frame through Modern graphics at 1920x1440: the upscaled frame and, when
-/// the flight view set faces aside, the GPU 3-D view.
-fn write_modern_png(
-    path: &Path,
-    screen: &Screen,
-    gpu: &mut ffe_rs::modern3d::Gpu3d,
-) -> Result<(), String> {
-    let (width, height) = (1920, 1440);
-    let settings = DisplaySettings {
-        graphics: ffe_rs::modern::Graphics::Modern,
-        ..DisplaySettings::default()
-    };
-    let rect = settings.rect((width, height));
-    let mut target = vec![0; width * height];
-    ffe_rs::modern::ModernRenderer::new().render(screen.logical_pixels(), &mut target, width, rect);
-    if let Some(world) = screen.world() {
-        gpu.render(screen.logical_pixels(), world, &mut target, width, rect)?;
-    }
-    write_png(path, &target, width, height)
-}
-
-/// The flight frame through Modern graphics' GPU 3-D view (`modern3d`) at 1920x1440, with the
-/// models set aside; skipped with a note on a machine without a GPU.
-fn write_modern_3d_capture(
-    dir: &Path,
-    screen: &mut Screen,
-    state: &Flight,
-    scene: Option<&ModelViewer>,
-) -> Result<(), String> {
-    let mut gpu = ffe_rs::modern3d::Gpu3d::new();
-    if !gpu.available() {
-        eprintln!("Modern 3-D capture skipped: {}", gpu.describe());
-        return Ok(());
-    }
-    screen.capture = true;
-    screen.draw(state, ViewState::default(), scene, true, "");
-    screen.capture = false;
-    let world = screen
-        .world()
-        .cloned()
-        .ok_or("The flight view set nothing aside for the 3-D view")?;
-    let (width, height) = (1920, 1440);
-    let settings = DisplaySettings {
-        graphics: ffe_rs::modern::Graphics::Modern,
-        ..DisplaySettings::default()
-    };
-    let rect = settings.rect((width, height));
-    let mut target = vec![0; width * height];
-    ffe_rs::modern::ModernRenderer::new().render(screen.logical_pixels(), &mut target, width, rect);
-    gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)?;
-    // The cost of a frame, after the first (which opens the pipelines and uploads textures).
-    let start = std::time::Instant::now();
-    for _ in 0..10 {
-        gpu.render(screen.logical_pixels(), &world, &mut target, width, rect)?;
-    }
-    eprintln!(
-        "Modern 3-D capture on {}: {} objects, {} faces, {:.1} ms a frame",
-        gpu.describe(),
-        world.batches.len(),
-        world.batches.iter().map(Vec::len).sum::<usize>(),
-        start.elapsed().as_secs_f64() * 100.0
-    );
-    write_png(&dir.join("display-modern-3d.png"), &target, width, height)
-}
-
-fn write_display_capture(
-    dir: &Path,
-    root: &Path,
-    cache: &ffe_content::VerifiedCache,
-) -> Result<(), String> {
+fn write_display_capture(dir: &Path, cache: &ffe_content::VerifiedCache) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|error| format!("Cannot create {}: {error}", dir.display()))?;
     let mut screen = Screen::new(cache)?;
     let scene = ModelViewer::new(cache).ok();
@@ -704,20 +606,10 @@ fn write_display_capture(
         "DISPLAY EVIDENCE: THE 320x200 FRAME IS UNCHANGED",
     );
     let logical = screen.logical_pixels().to_vec();
-    write_modern_3d_capture(dir, &mut screen, &state, scene.as_ref())?;
     let default = DisplaySettings::default();
     let mut target = Vec::new();
     for (name, width, height, settings) in [
         ("display-default-4x.png", 1280, 960, default),
-        (
-            "display-modern-4x.png",
-            1280,
-            960,
-            DisplaySettings {
-                graphics: ffe_rs::modern::Graphics::Modern,
-                ..default
-            },
-        ),
         (
             "display-2x.png",
             640,
@@ -761,67 +653,13 @@ fn write_display_capture(
         display::compose(&logical, &settings, width, height, &mut target);
         write_png(&dir.join(name), &target, width, height)?;
     }
-    // A docked frame through Modern with the owner's cabins and font (`assets.bin`).
-    let mut docked = Flight::free_flight();
-    docked.mode = ffe_rs::flight::Mode::Docked;
-    screen.take_text();
-    screen.draw(&docked, ViewState::default(), scene.as_ref(), true, "");
-    let mut modern = ffe_rs::modern::ModernRenderer::new();
-    let (art, line) = ffe_rs::art_source::ArtSource::open(root);
-    eprintln!("Modern graphics: {line}");
-    if let Some(art) = &art {
-        for line in modern.load_cabins(&[art], screen.cabin_pixels()) {
-            eprintln!("{line}");
-        }
-        if let Some(line) = modern.load_panel(art, screen.panel_pixels()) {
-            eprintln!("{line}");
-        }
-        if let Some(line) = modern.load_font(art) {
-            eprintln!("{line}");
-        }
-    }
-    eprintln!(
-        "{}",
-        modern.load_true_font(&root.join("assets"), &screen.font_advances())
-    );
-    modern.set_text(screen.take_text());
-    let (width, height) = (1920, 1080);
-    target.clear();
-    target.resize(width * height, 0);
-    let settings = DisplaySettings {
-        graphics: ffe_rs::modern::Graphics::Modern,
-        fit: ffe_rs::display::FitMode::FillWindow,
-        ..default
-    };
-    let rect = settings.rect((width, height));
-    modern.render(screen.logical_pixels(), &mut target, width, rect);
-    modern.finish(&mut target, width, rect);
-    write_png(
-        &dir.join("display-modern-docked-1080p.png"),
-        &target,
-        width,
-        height,
-    )?;
     // The port-only page itself, at 2x.
     let shown = Prefs {
         open: true,
         page: ffe_rs::prefs::DISPLAY,
         ..Default::default()
     };
-    screen.take_text();
     screen.draw_prefs(&shown);
-    // The same page through Modern, with the replacement font when there is one.
-    modern.set_text(screen.take_text());
-    target.clear();
-    target.resize(width * height, 0);
-    modern.render(screen.logical_pixels(), &mut target, width, rect);
-    modern.finish(&mut target, width, rect);
-    write_png(
-        &dir.join("display-modern-options-1080p.png"),
-        &target,
-        width,
-        height,
-    )?;
     display::compose(
         screen.logical_pixels(),
         &DisplaySettings {
@@ -843,6 +681,10 @@ fn write_intro_capture(
     dir: &Path,
 ) -> Result<(), String> {
     for tics in [
+        0x10000,
+        180 << 10,
+        248 << 10,
+        328 << 10,
         front_end::BOOT_TICS,
         0x795cc,
         0x795cd,
@@ -899,16 +741,19 @@ enum IntroExit {
 /// 68419-68428 and 68484).
 #[allow(clippy::too_many_arguments)]
 fn run_intro(
-    window: &mut Window,
+    window: &mut display::GameWindow,
     presenter: &mut Presenter,
     display: &DisplaySettings,
     screen: &mut Screen,
-    scene: Option<&ModelViewer>,
+    mut scene: Option<&mut ModelViewer>,
     sound: &mut GameAudio,
     save_dir: &Path,
     session: &mut Session,
 ) -> Result<IntroExit, String> {
     let intro = Intro::new();
+    if let Some(viewer) = scene.as_deref_mut() {
+        viewer.begin_intro();
+    }
     let mut tics = front_end::BOOT_TICS;
     let mut version = false;
     let mut last = Instant::now();
@@ -918,14 +763,8 @@ fn run_intro(
             sound.leave_front_end();
             return Ok(IntroExit::Start(1));
         }
-        // Modern graphics draw the intro's model on the GPU, as in flight.
-        screen.capture =
-            display.graphics == ffe_rs::modern::Graphics::Modern && presenter.gpu_available();
-        let drawn = screen.draw_intro(scene, tics, version);
-        screen.capture = false;
-        drawn?;
-        presenter.modern_mut().set_text(screen.take_text());
-        presenter.present(window, screen.logical_pixels(), screen.world(), display)?;
+        screen.draw_intro(scene.as_deref(), tics, version)?;
+        presenter.present(window, screen.logical_pixels(), display)?;
         let real = last.elapsed().as_secs_f64().min(0.1);
         last = Instant::now();
         let inp = session.frame(window, real);
@@ -1098,10 +937,7 @@ const NEAR_WORLD_ACCELERATION: usize = 2;
 
 fn run() -> Result<(), String> {
     let options = options()?;
-    if let Some(ffed3d) = &options.ffed3d {
-        eprintln!("FFED3D assets for Modern graphics: {}", ffed3d.display());
-    }
-    let cache = load_content(&options.game)?;
+    let cache = std::sync::Arc::new(load_content(&options.game)?);
     let mut screen = Screen::new(&cache)?;
     // Diagnostic frames of the preference pages and of the space colour, for
     // the port's screenshot comparisons. No window is opened.
@@ -1148,7 +984,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     if let Some(dir) = &options.capture_display {
-        write_display_capture(dir, &options.root, &cache)?;
+        write_display_capture(dir, &cache)?;
         return Ok(());
     }
     if let Some(dir) = &options.capture_save {
@@ -1209,52 +1045,6 @@ fn run() -> Result<(), String> {
     let mut request = display::window_request(&prefs.display, prefs.fullscreen);
     let mut window = display::open_window(WINDOW_TITLE, request)?;
     let mut presenter = Presenter::new();
-    // Modern graphics' art, at FFED3D's paths, in order: the owner's replacements
-    // (`assets.bin`, packed from the `assets` folder by the build), then FFED3D's, then the
-    // original's.
-    let (art, line) = ffe_rs::art_source::ArtSource::open(&options.root);
-    eprintln!("Modern graphics: {line}");
-    let ffed3d_art = options
-        .ffed3d
-        .clone()
-        .map(ffe_rs::art_source::ArtSource::Folder);
-    let cabin_sources: Vec<&ffe_rs::art_source::ArtSource> =
-        art.iter().chain(ffed3d_art.iter()).collect();
-    for line in presenter
-        .modern_mut()
-        .load_cabins(&cabin_sources, screen.cabin_pixels())
-    {
-        eprintln!("{line}");
-    }
-    if let Some(art) = &art {
-        presenter.set_art_source(art.clone());
-        // The console panel (primary bitmap 43), when a larger one is given.
-        if let Some(line) = presenter
-            .modern_mut()
-            .load_panel(art, screen.panel_pixels())
-        {
-            eprintln!("{line}");
-        }
-        if let Some(line) = presenter.modern_mut().load_font(art) {
-            eprintln!("{line}");
-        }
-    }
-    // FFED3D's `texNNN` textures on the models' textured faces.
-    if let Some(ffed3d) = &options.ffed3d {
-        if !presenter.set_ffed3d_dir(ffed3d) {
-            eprintln!(
-                "FFED3D: no texture folder in {}; Modern graphics use the original textures",
-                ffed3d.display()
-            );
-        }
-    }
-    let advances = screen.font_advances();
-    eprintln!(
-        "{}",
-        presenter
-            .modern_mut()
-            .load_true_font(&options.root.join("assets"), &advances)
-    );
     // `FFE_TRACE=1`: print the flight state ten times a second and every click's
     // logical point to stderr (for diagnosing a replayed recording).
     let trace_flight = std::env::var_os("FFE_TRACE").is_some();
@@ -1397,7 +1187,7 @@ fn run() -> Result<(), String> {
             return Err(format!(
                 "The game's models could not be read from the game files ({error}). \
                  Check the game files in the launcher."
-            ))
+            ));
         }
     };
     if let Some(dir) = &options.capture_gameover {
@@ -1429,7 +1219,7 @@ fn run() -> Result<(), String> {
             &mut presenter,
             &prefs.display,
             &mut screen,
-            scene.as_ref(),
+            scene.as_mut(),
             &mut sound,
             &save_dir,
             &mut session,
@@ -1533,9 +1323,6 @@ fn run() -> Result<(), String> {
     // few radii out on the same side as the starting station, flying the same
     // autopilot and original flight model the playable uses.
     let mut captured_planet: Option<String> = None;
-    let mut capture_modern = (options.capture_planet.is_some()
-        && std::env::var_os("FFE_CAPTURE_MODERN").is_some())
-    .then(ffe_rs::modern3d::Gpu3d::new);
     let mut capture_port = false;
     if let Some(dir) = &options.capture_planet {
         fs::create_dir_all(dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
@@ -1545,11 +1332,18 @@ fn run() -> Result<(), String> {
                 .docked
                 .and_then(|index| nav.bodies.get(index))
                 .map_or([0; 3], |station| station.position);
+            let capture_target = std::env::var("FFE_CAPTURE_PLANET_BODY").ok();
             let nearest = nav
                 .bodies
                 .iter()
                 .enumerate()
-                .filter(|(_, body)| body.kind == NavKind::Planet)
+                .filter(|(_, body)| {
+                    (body.kind == NavKind::Planet
+                        || (capture_target.is_some() && body.kind == NavKind::Moon))
+                        && capture_target
+                            .as_ref()
+                            .is_none_or(|name| body.name.eq_ignore_ascii_case(name))
+                })
                 .min_by(|a, b| {
                     distance(from, a.1.position).total_cmp(&distance(from, b.1.position))
                 })
@@ -1674,6 +1468,11 @@ fn run() -> Result<(), String> {
     let mut start_clear_at: Option<usize> = None;
     let mut held_controls = input::HeldControls::default();
     // Consume the intro/start key until it has been released.
+    let trace_replay_state =
+        session.replaying() && std::env::var_os("FFE_TRACE_REPLAY_STATE").is_some();
+    let replay_start_port = nav
+        .as_ref()
+        .and_then(|nav| Some((nav.current_system_code(), nav.docked?, nav.new_game?.bay)));
     held_controls.disarm(&window.get_keys());
     while window.is_open() && !session.should_exit() {
         let real_now = Instant::now();
@@ -1722,7 +1521,7 @@ fn run() -> Result<(), String> {
                         &mut presenter,
                         &prefs.display,
                         &mut screen,
-                        scene.as_ref(),
+                        scene.as_mut(),
                         &mut sound,
                         &save_dir,
                         &mut session,
@@ -1801,14 +1600,7 @@ fn run() -> Result<(), String> {
                 }
             } else {
                 if let Some(viewer) = gameover_viewer.as_mut() {
-                    // Modern graphics draw the tombstone on the GPU (full-screen view); the
-                    // scripted capture keeps the original's frame.
-                    screen.capture = prefs.display.graphics == ffe_rs::modern::Graphics::Modern
-                        && options.capture_gameover.is_none()
-                        && presenter.gpu_available();
-                    let drawn = game.draw(&mut screen, viewer);
-                    screen.capture = false;
-                    drawn?;
+                    game.draw(&mut screen, viewer)?;
                 }
                 if let Some(dir) = &options.capture_gameover {
                     if frames % 20 == 0 {
@@ -1817,14 +1609,7 @@ fn run() -> Result<(), String> {
                 }
                 gameover = Some(game);
             }
-            // Through the presenter like every other screen, so Modern graphics apply.
-            presenter.modern_mut().set_text(screen.take_text());
-            presenter.present(
-                &mut window,
-                screen.logical_pixels(),
-                screen.world(),
-                &prefs.display,
-            )?;
+            presenter.present(&mut window, screen.logical_pixels(), &prefs.display)?;
             frames += 1;
             if options.smoke_frames.is_some_and(|limit| frames >= limit)
                 || (options.capture_gameover.is_some() && frames >= 700)
@@ -1913,13 +1698,6 @@ fn run() -> Result<(), String> {
             }
         }
         let pressed = |key| inp.is_key_pressed(key, KeyRepeat::No);
-        // Ctrl+G flips between the Classic and the Modern graphics engine at once. It is
-        // presentation only (`modern`): the game's frame, state and clock are untouched.
-        let graphics_chord = inp.is_key_down(Key::LeftCtrl) || inp.is_key_down(Key::RightCtrl);
-        if active && graphics_chord && pressed(Key::G) {
-            prefs.display.graphics = prefs.display.graphics.flipped();
-            message = format!("{} (Ctrl+G).", prefs.display.graphics.label());
-        }
         // F1104's death sequence: the external-view hold, then F917's spinning
         // tombstone. Flight controls and traffic stay held throughout; F1107's
         // timeout starts the screen. There are no game-over options here: the
@@ -1935,16 +1713,20 @@ fn run() -> Result<(), String> {
             && (session.total * 2.0).floor() != ((session.total - elapsed) * 2.0).floor()
         {
             eprintln!(
-                "trace state t={:.1} mode={:?} dead={} hull={:?} docked={:?} landed={:?} sequence={} dust={} locked={:?} log={:?}",
+                "trace state t={:.1} mode={:?} dead={} hull={:?} docked={:?} landed={:?} sequence={} dust={} alt={} locked={:?} log={:?}",
                 session.total,
                 state.mode,
                 death_control,
                 state.hull,
-                nav.as_ref().and_then(|nav| nav.docked).and_then(|i| nav.as_ref().map(|n| n.bodies[i].name.clone())),
+                nav.as_ref()
+                    .and_then(|nav| nav.docked)
+                    .and_then(|i| nav.as_ref().map(|n| n.bodies[i].name.clone())),
                 nav.as_ref().and_then(|nav| nav.landed_state()),
                 nav.as_ref().is_some_and(|nav| nav.sequence.is_some()),
                 nav.as_ref().map_or(0, |nav| nav.dust.particles().len()),
-                nav.as_ref().map(|nav| (nav.locked, nav.locked_ship().map(|ship| ship.id))),
+                nav.as_ref().map_or(-1, |nav| nav.altitude),
+                nav.as_ref()
+                    .map(|nav| (nav.locked, nav.locked_ship().map(|ship| ship.id))),
                 message,
             );
         }
@@ -1955,6 +1737,11 @@ fn run() -> Result<(), String> {
         // model to tick. Time acceleration scales it; pause, the preference
         // pages, focus loss and the death/game-over hold stop it.
         let mut transit_over = false;
+        // F152's whole-second events this frame (event 6: F1007/F938). The day
+        // fraction advances by the frame's accelerated tics, or in hyperspace by
+        // the transit's clock step; the marker follows it in every module, and
+        // the flight step below applies the events.
+        let mut event_seconds = 0;
         if clock_runs(
             active,
             paused,
@@ -1963,6 +1750,7 @@ fn run() -> Result<(), String> {
             model_lab.is_some(),
             model_viewer.is_some(),
         ) {
+            let clock_before = nav.as_ref().map(|nav| nav.clock);
             if let Some(nav) = nav.as_mut() {
                 // Docking Options: the approach distances, for both autopilot
                 // paths (index 0 keeps F741's own offset words).
@@ -1980,7 +1768,12 @@ fn run() -> Result<(), String> {
                     // F908's mode 4: the clock runs at the hyperspace rate until
                     // the arrival time, which ends the transit (F1066/F1094).
                     transit_over = nav.transit_step(&cache, elapsed);
+                    let step = clock_before.map_or(0.0, |before| nav.clock - before);
+                    event_seconds = state
+                        .combat
+                        .second_events(ffe_rs::navigation::clock_fraction_units(step));
                 } else {
+                    event_seconds = state.combat.second_events(frame.tics);
                     nav.advance(&cache, frame.seconds());
                     // F688: a system's traffic exists from the moment the
                     // player is in it (the reference's new game already has
@@ -2178,9 +1971,18 @@ fn run() -> Result<(), String> {
         // the navigator even while the services board is open (the flight step is
         // paused there), so F1 returns to the same pad instead of snapping the
         // ship across the body's orbital motion.
-        if let Some(model) = original.as_mut().filter(|model| model.on_pad()) {
-            if let Some(pad) = nav.as_ref().and_then(pad_bodies) {
+        if let (Some(model), Some(nav)) = (
+            original.as_mut().filter(|model| model.on_pad()),
+            nav.as_ref(),
+        ) {
+            if let Some(pad) = pad_bodies(nav) {
                 model.move_pad_bodies(pad.planet, pad.planet_rows, pad.station, pad.station_rows);
+                if let Some(index) = nav.docked.filter(|_| nav.on_pad()) {
+                    if let Some(seat) = nav.parked_pad_seat(index, model.collision_radius()) {
+                        let reverse = nav.new_game.is_some_and(|start| start.start_type == 0);
+                        model.pin_pad_seat(seat, nav.bodies[index].rows, reverse);
+                    }
+                }
             }
         }
         if state
@@ -2304,8 +2106,7 @@ fn run() -> Result<(), String> {
                     write_shot(dir, &format!("start-{frames:04}.ppm"), &screen);
                 }
             }
-            presenter.modern_mut().set_text(screen.take_text());
-            presenter.present(&mut window, screen.logical_pixels(), None, &prefs.display)?;
+            presenter.present(&mut window, screen.logical_pixels(), &prefs.display)?;
             frames += 1;
             last = Instant::now();
             continue;
@@ -2374,16 +2175,24 @@ fn run() -> Result<(), String> {
             Some(Click::Acceleration(step)) => Some(step),
             _ => digit_step,
         };
-        if let Some(step) = chosen_step {
+        let surface_takeoff = nav.as_ref().is_some_and(|nav| nav.takeoff.is_some());
+        if let Some(requested) = chosen_step {
             // A time step resumes a paused game, as the pause button and P do.
             if paused {
                 paused = false;
                 held_controls.disarm(&keys_down);
             }
+            let step = if surface_takeoff { 0 } else { requested };
             acceleration = step;
+            // F208: a 10x..10000x selection pulls F152's marker back one event.
+            state.combat.select_acceleration(step);
             if let Some(model) = original.as_mut() {
                 model.set_time_acceleration(step);
-                message = format!("Time acceleration {}.", ACCELERATION_NAMES[step]);
+                message = if step != requested {
+                    "Time acceleration held at 1X during surface takeoff.".to_owned()
+                } else {
+                    format!("Time acceleration {}.", ACCELERATION_NAMES[step])
+                };
             } else {
                 message = format!(
                     "Time acceleration {} (applies to the original flight model).",
@@ -2396,7 +2205,7 @@ fn run() -> Result<(), String> {
         // is nearly three minutes of world time, and thrust fixed for that long
         // beside the ground of a 2 g world flies the ship into it.
         // The chosen step comes back once the ship is clear of the world.
-        if chosen_step.is_some() {
+        if chosen_step.is_some() || surface_takeoff {
             held_acceleration = None;
         }
         if let (Some(model), Some(nav)) = (original.as_mut(), nav.as_ref()) {
@@ -2448,11 +2257,11 @@ fn run() -> Result<(), String> {
         let mut status_left = false;
         if active
             && state.mode == ffe_rs::flight::Mode::Flight
-            && !pad_board
             && model_lab.is_none()
             && model_viewer.is_none()
             && (pressed(Key::F2) || console_click == Some(Click::Screen(2)))
         {
+            pad_board = false;
             // F285 opens the screen on F308's next page (`+0x4a39`, the
             // equipment page in a new game); while it is up each press shows
             // the next page that has something to show. F1 leaves it.
@@ -2787,7 +2596,7 @@ fn run() -> Result<(), String> {
                 }
                 if [Key::F3, Key::G]
                     .into_iter()
-                    .any(|key| input::galaxy_map_key(key) && pressed(key) && !graphics_chord)
+                    .any(|key| input::galaxy_map_key(key) && pressed(key))
                     || console_click == Some(Click::Screen(3))
                 {
                     toggle(nav, NavView::Galaxy);
@@ -3988,7 +3797,39 @@ fn run() -> Result<(), String> {
                         .as_ref()
                         .and_then(|scene| scene.camera_minimum(state.ship))
                         .unwrap_or(0);
-                    views.external.step(keys, elapsed_ms, minimum);
+                    if let (Some(nav), Some(tools)) = (nav.as_ref(), landing_tools.as_ref()) {
+                        let template = views;
+                        let stats = scene
+                            .as_ref()
+                            .and_then(|scene| scene.ship_stats(state.ship));
+                        let scale = scene
+                            .as_ref()
+                            .and_then(ffe_rs::screen::model_scale)
+                            .unwrap_or(ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
+                        views
+                            .external
+                            .step_checked(keys, elapsed_ms, minimum, |external| {
+                                let candidate = ViewState {
+                                    external: *external,
+                                    lock_external: prefs.others[2],
+                                    ..template
+                                };
+                                let camera = ffe_rs::camera::Camera::new(
+                                    &state,
+                                    &candidate,
+                                    stats.as_ref(),
+                                    scale,
+                                );
+                                ffe_rs::navigation::external_camera_is_clear(
+                                    camera,
+                                    state.position,
+                                    nav,
+                                    tools,
+                                )
+                            });
+                    } else {
+                        views.external.step(keys, elapsed_ms, minimum);
+                    }
                 }
                 let mut dock_action: Option<StationAction> = None;
                 let dock_before = dock;
@@ -4016,6 +3857,7 @@ fn run() -> Result<(), String> {
                 }
                 if (state.mode == ffe_rs::flight::Mode::Docked || pad_board)
                     && !station_eye
+                    && nav.as_ref().is_none_or(|nav| nav.sequence.is_none())
                     && model_lab.is_none()
                     && model_viewer.is_none()
                 {
@@ -4443,14 +4285,15 @@ fn run() -> Result<(), String> {
                         dock_action = Some(StationAction::Back);
                     }
                     if let Some((x, y)) = dock_click {
-                        if let Some(hot) = station::click_with_fitted(
+                        let hot = station::click_with_fitted(
                             dock.screen,
                             dock.scroll,
                             rows,
                             Some(&upgrade_fitted),
                             x,
                             y,
-                        ) {
+                        );
+                        if let Some(hot) = hot {
                             match hot {
                                 station::Hot::Row(index) => {
                                     if dock.screen == StationScreen::Repairs {
@@ -4668,10 +4511,8 @@ fn run() -> Result<(), String> {
                                         // sample comes at the end of the lift
                                         // sequence (`Traffic::LaunchDone`).
                                         sound.stop_for_sequence();
-                                        pending_log.add(
-                                            Source::Launch,
-                                            "Launch permission granted: moving into the lift.",
-                                        );
+                                        message = LAUNCH_LIFT_HINT.to_owned();
+                                        pending_log.add(Source::Launch, LAUNCH_LIFT_HINT);
                                     }
                                     Err(error) => message = error,
                                 }
@@ -5023,10 +4864,8 @@ fn run() -> Result<(), String> {
                                 Ok(()) => {
                                     acceleration = 0;
                                     sound.stop_for_sequence();
-                                    pending_log.add(
-                                        Source::Launch,
-                                        "Launch permission granted: moving into the lift.",
-                                    );
+                                    message = LAUNCH_LIFT_HINT.to_owned();
+                                    pending_log.add(Source::Launch, LAUNCH_LIFT_HINT);
                                     None
                                 }
                                 Err(error) => Some(Err(error)),
@@ -5445,7 +5284,10 @@ fn run() -> Result<(), String> {
                                     state.ship,
                                 )
                                 .map_or(0, |info| info.radii().1 as i32);
-                                if let Some(seat) = nav.takeoff_seat(index, radius) {
+                                if let Some(seat) = nav
+                                    .parked_pad_seat(index, i64::from(radius))
+                                    .or_else(|| nav.takeoff_seat(index, radius))
+                                {
                                     model.place(seat, body.rows);
                                 }
                             }
@@ -5771,8 +5613,20 @@ fn run() -> Result<(), String> {
                                     nav.as_ref().and_then(|nav| {
                                         nav.bodies
                                             .iter()
-                                            .filter(|b| matches!(b.kind, NavKind::Station | NavKind::Starport))
-                                            .map(|b| (b.name.as_str(), (ffe_rs::navigation::distance(at, b.position) / 1000.0) as i64))
+                                            .filter(|b| {
+                                                matches!(
+                                                    b.kind,
+                                                    NavKind::Station | NavKind::Starport
+                                                )
+                                            })
+                                            .map(|b| {
+                                                (
+                                                    b.name.as_str(),
+                                                    (ffe_rs::navigation::distance(at, b.position)
+                                                        / 1000.0)
+                                                        as i64,
+                                                )
+                                            })
                                             .min_by_key(|(_, m)| *m)
                                     }),
                                     at,
@@ -6025,17 +5879,13 @@ fn run() -> Result<(), String> {
                             // F863's progress line uses F271's replace flag, so
                             // the stages update one entry instead of filling the
                             // ring with near-identical dates.
-                            pending_log.replace(
-                                Source::Docking,
-                                format!(
-                                    "{}: {text}.",
-                                    if nav.sequence.is_some_and(|s| s.launching) {
-                                        "Launching"
-                                    } else {
-                                        "Docking"
-                                    }
-                                ),
-                            );
+                            let launching = nav.sequence.is_some_and(|s| s.launching);
+                            let phase = if launching { "Launching" } else { "Docking" };
+                            let progress = format!("{phase}: {text}.");
+                            if launching {
+                                message.clone_from(&progress);
+                            }
+                            pending_log.replace(Source::Docking, progress);
                             // F1026/F1029's airlock `0x12`/`0x13` on the door
                             // stages (the other stages have no cue).
                             if text.contains("door") {
@@ -6059,10 +5909,8 @@ fn run() -> Result<(), String> {
                             // F1088 sets the station's door opening; the ship is
                             // still in the lift until it is open (LaunchDone). Keep
                             // the docked/inside view, not the flight view.
-                            pending_log.add(
-                                Source::Launch,
-                                format!("Launching: leaving {}.", nav.bodies[index].name),
-                            );
+                            message = format!("Launching: leaving {}.", nav.bodies[index].name);
+                            pending_log.add(Source::Launch, message.clone());
                             sound.play(Cue::Door);
                         }
                         Traffic::LaunchDone(index) => {
@@ -6428,6 +6276,7 @@ fn run() -> Result<(), String> {
             let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
             Some(MissileCamera {
                 position: missile.position.map(|value| value as f64 / unit),
+                velocity: missile.velocity.map(|value| value / unit),
                 axes: missile.axes,
                 eye: stats.map_or([0, 0], |stats| stats.eye),
             })
@@ -6548,7 +6397,8 @@ fn run() -> Result<(), String> {
                             planet.model,
                         )?;
                         Some((
-                            nav.takeoff_seat(index, radius)?,
+                            nav.parked_pad_seat(index, i64::from(radius))
+                                .or_else(|| nav.takeoff_seat(index, radius))?,
                             body.orientation,
                             body.clone(),
                             station_info,
@@ -6695,11 +6545,16 @@ fn run() -> Result<(), String> {
         if active && !death_control && !paused && state.mode == ffe_rs::flight::Mode::Flight {
             // F938 reads `ship+0xc8 & 1` (the laser cooling booster) directly.
             state.combat.cooling_booster = state.loadout.cooling_booster();
-            let event_seconds = state.combat.tick(frame_tics, frame.seconds());
+            // F1007: F938 runs on each event except in mode 2 (the autopilot).
+            let f938 = ffe_rs::combat::f938_events(
+                event_seconds,
+                original.as_ref().map_or(0, |model| model.player().mode),
+            );
+            state.combat.tick(frame_tics, f938);
             if let Some(stats) = player_stats {
                 state.ensure_thrusters(&stats);
                 // F938: shield recharge and the Hull Auto-Repair System.
-                state.recharge(event_seconds, stats.mass.saturating_mul(4));
+                state.recharge(f938, stats.mass.saturating_mul(4));
                 // F1007: the hull cools on each whole-second event.
                 state.hull_heat =
                     ffe_rs::damage::cool(state.hull_heat, event_seconds, state.heat_shielded());
@@ -6708,7 +6563,7 @@ fn run() -> Result<(), String> {
                 let sum = original
                     .as_ref()
                     .map_or(0, |model| state.thrust_sum(model.thrust_words()));
-                if event_seconds != 0 && state.spend_thrust_energy(event_seconds, stats.mass, sum) {
+                if f938 != 0 && state.spend_thrust_energy(f938, stats.mass, sum) {
                     pending_log.add(Source::Combat, "WARNING: Internal Fuel Tank Empty.");
                 }
             }
@@ -7113,6 +6968,7 @@ fn run() -> Result<(), String> {
                     // the observer (`scene_light`); the star is at the origin.
                     let light = b.position.map(|v| (v as f64) / length.sqrt().max(1.0));
                     ffe_rs::screen::Disc {
+                        system_type: Some(b.system_type),
                         centre: b.position.map(|v| v as f64 / unit),
                         // The approach draws the base sphere (inner); a settled
                         // ship draws the outer radius the landing contact uses,
@@ -7125,6 +6981,9 @@ fn run() -> Result<(), String> {
                             _ => (10, 3),
                         },
                         star: b.kind == NavKind::Star,
+                        temperature: u16::try_from(b.temperature)
+                            .ok()
+                            .filter(|t| *t > 0 && (b.kind != NavKind::Star || *t >= 1000)),
                         model: Some((b.model, b.seed)),
                         orientation: b.orientation,
                     }
@@ -7151,6 +7010,15 @@ fn run() -> Result<(), String> {
                         door: nav.door(index),
                         tics,
                         seed: b.seed,
+                        surface: (b.kind == NavKind::Starport).then(|| {
+                            ffe_rs::screen::SurfacePort {
+                                pads: std::array::from_fn(|bay| {
+                                    (bay as u16 <= b.bays)
+                                        .then(|| nav.precise_pad_point(index, bay as u16))
+                                        .flatten()
+                                }),
+                            }
+                        }),
                     })
                     .collect()
             }
@@ -7362,9 +7230,7 @@ fn run() -> Result<(), String> {
                 objects,
                 seed: station.map_or(0, |body| body.seed),
                 starport: station.is_some_and(|body| body.kind == NavKind::Starport),
-                // The stage view functions (F1069-F1087, F1092) only queue the
-                // lift's objects through F1070; none runs F1054's scene, so the
-                // lift is drawn alone, docking and launching alike.
+                // F1070's lift-only view.
                 world: false,
                 tics: ffe_core::model_animation::START_TICS.wrapping_add(
                     (nav.as_ref().map_or(0.0, |nav| nav.clock) * 49_700.0) as u64 as u32,
@@ -8052,7 +7918,27 @@ fn run() -> Result<(), String> {
         // option (the original's DATA_008815..817 / DATA_009019).
         screen.sky = prefs::space_colour_rgb(prefs.space_colour);
         screen.stars_visible = prefs.others[1];
-        screen.dust_visible = prefs.others[0];
+        screen.dust_visible = prefs.others[0]
+            && nav.as_ref().is_none_or(|nav| {
+                const DUST_CLEARANCE_MM: f64 = 75_000_000.0;
+                if nav.landed_body().is_some()
+                    || nav.takeoff.is_some()
+                    || (0..DUST_CLEARANCE_MM as i32).contains(&nav.altitude)
+                {
+                    return false;
+                }
+                let eye = state
+                    .position
+                    .map(|v| v * ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT);
+                !nav.bodies.iter().any(|body| {
+                    matches!(body.kind, NavKind::Planet | NavKind::Moon)
+                        && body.radius > 0
+                        && (0..3)
+                            .map(|k| (eye[k] - body.position[k] as f64).powi(2))
+                            .sum::<f64>()
+                            <= (body.radius as f64 + DUST_CLEARANCE_MM).powi(2)
+                })
+            });
         screen.lock_external = prefs.others[2];
         // The Graphic Detail page's "Level of Shape Detail" row is stored one
         // less than the original's `DATA_008812` (High, the default, is 1);
@@ -8474,12 +8360,6 @@ fn run() -> Result<(), String> {
                 screen.scroll_messages(older);
             }
         }
-        // Modern graphics draw the flight view's models on the GPU (`modern3d`) when it opened;
-        // otherwise the frame keeps them and the modern engine only upscales it.
-        // `FFE_CAPTURE_MODERN=1` with `--capture-planet` also saves each shot through it.
-        let modern_3d = (prefs.display.graphics == ffe_rs::modern::Graphics::Modern
-            || capture_modern.is_some())
-            && presenter.gpu_available();
         if launching_scene {
             // Inside the station, from the cockpit: the flight view with only the lift in it.
             let mut inside = state.clone();
@@ -8502,13 +8382,7 @@ fn run() -> Result<(), String> {
                 .and_then(|nav| nav.docked.and_then(|index| nav.port(index)))
             {
                 let forward = port.axis;
-                let up = [0.0, 1.0, 0.0];
-                let right = [
-                    up[1] * forward[2] - up[2] * forward[1],
-                    up[2] * forward[0] - up[0] * forward[2],
-                    up[0] * forward[1] - up[1] * forward[0],
-                ];
-                inside.axes = Some([right, up, forward]);
+                inside.axes = Some([[forward[2], 0.0, -forward[0]], [0.0, 1.0, 0.0], forward]);
             } else if let Some(body) = nav
                 .as_ref()
                 .and_then(|nav| nav.docked.and_then(|index| nav.bodies.get(index)))
@@ -8527,14 +8401,12 @@ fn run() -> Result<(), String> {
                     inside.pitch = (to[1] / length).asin();
                 }
             }
-            screen.capture = modern_3d;
             screen.draw(&inside, views, scene.as_ref(), prefs.modern, &message);
         } else {
             screen.hyperspace = nav
                 .as_ref()
                 .and_then(|nav| nav.transit)
                 .map(|t| t.animation());
-            screen.capture = modern_3d;
             screen.draw(&state, views, scene.as_ref(), prefs.modern, &message);
         }
         if let Some(dir) = &options.capture {
@@ -8546,10 +8418,6 @@ fn run() -> Result<(), String> {
             // the approach, plus the first frame.
             if frames % 100 == 0 {
                 write_shot(dir, &format!("planet-{frames:04}.ppm"), &screen);
-                if let Some(gpu) = capture_modern.as_mut() {
-                    let path = dir.join(format!("planet-{frames:04}-modern.png"));
-                    write_modern_png(&path, &screen, gpu)?;
-                }
             }
         } else if let Some(dir) = &options.capture_traffic {
             if matches!(frames, 0 | 10 | 11 | 20 | 21 | 40 | 79) {
@@ -8627,18 +8495,47 @@ fn run() -> Result<(), String> {
                 );
             }
         }
-        presenter.modern_mut().set_text(screen.take_text());
-        presenter.present(
-            &mut window,
-            screen.logical_pixels(),
-            screen.world(),
-            &prefs.display,
-        )?;
-        for line in presenter.take_art_problems() {
-            eprintln!("{line}");
+        presenter.present(&mut window, screen.logical_pixels(), &prefs.display)?;
+        if trace_replay_state {
+            let port = nav.as_ref().and_then(|nav| {
+                let (system, index, bay) = replay_start_port?;
+                if nav.current_system_code() != system {
+                    return None;
+                }
+                let body = nav.bodies.get(index)?;
+                Some((
+                    body.name.as_str(),
+                    nav.starport_pad_point(index, bay)?,
+                    body.rows,
+                ))
+            });
+            eprintln!(
+                "REPLAY_STATE {}",
+                serde_json::json!({
+                    "frame": frames,
+                    "state": {
+                        "time": nav.as_ref().map(|nav| nav.clock),
+                        "ship": state.ship,
+                        "position": ship_position(&original, &state),
+                        "velocity": state.velocity,
+                        "axes": ship_axes(&state),
+                        "view": format!("{:?}", views.mode),
+                        "source_mode": original.as_ref().map(|flight| flight.player().mode),
+                        "set_speed": original.as_ref().map(OriginalFlight::set_speed_units),
+                        "gear_down": original.as_ref().map(OriginalFlight::gear_down),
+                        "hull": state.hull,
+                        "altitude": nav.as_ref().map(|nav| nav.altitude),
+                        "docked": nav.as_ref().and_then(|nav| nav.docked),
+                        "on_pad": nav.as_ref().is_some_and(Navigator::on_pad),
+                        "takeoff": nav.as_ref().and_then(Navigator::takeoff_state),
+                        "port": port,
+                    },
+                })
+            );
         }
         frames += 1;
         let arrived = options.capture_planet.is_some()
+            && options.smoke_frames.is_none()
             && nav.as_ref().is_some_and(|nav| !nav.autopilot_engaged());
         if options.smoke_frames.is_some_and(|limit| frames >= limit)
             || (options.capture.is_some() && frames >= 1000)
@@ -9173,7 +9070,11 @@ fn axes_looking_at(from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
         v.map(|x| x / length)
     };
     let forward = unit(std::array::from_fn(|i| to[i] - from[i]));
-    let right = unit([forward[2], 0.0, -forward[0]]);
+    let right = if forward[1].abs() > 0.99 {
+        unit([0.0, -forward[2], forward[1]])
+    } else {
+        unit([forward[2], 0.0, -forward[0]])
+    };
     let up = [
         forward[1] * right[2] - forward[2] * right[1],
         forward[2] * right[0] - forward[0] * right[2],

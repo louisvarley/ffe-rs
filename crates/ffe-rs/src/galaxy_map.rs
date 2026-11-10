@@ -6,7 +6,7 @@
 //! range sphere (`0xaa`, scaled by the drive's range) and the selection marker (`0xa9`). The
 //! camera is a matrix built from two accumulators and a zoom depth; the star nearest the centre
 //! (within a quarter of a sector) is the selection.
-use crate::model_viewer::{AnimationInputs, ModelViewer, Shape};
+use crate::model_viewer::{AnimationInputs, Frame, ModelViewer, Shape};
 use ffe_core::frames::vec_mat_mul;
 use ffe_core::model_execute::child_culled;
 use ffe_core::sector::{self, position, Tables as SectorTables};
@@ -191,6 +191,17 @@ impl GalaxyMap {
         viewer: &ModelViewer,
         tables: &SectorTables,
     ) -> Result<Vec<Shape>, String> {
+        let mut shapes = Vec::new();
+        self.visit_frames(viewer, tables, |_, _, frame| shapes.extend(frame.shapes))?;
+        Ok(shapes)
+    }
+
+    fn visit_frames(
+        &self,
+        viewer: &ModelViewer,
+        tables: &SectorTables,
+        mut visit: impl FnMut(u32, [i32; 3], Frame),
+    ) -> Result<(), String> {
         let matrix = self.matrix(viewer);
         let rows: [[f64; 3]; 3] = std::array::from_fn(|k| {
             std::array::from_fn(|j| f64::from(matrix[3 * k + j]) / 2_147_483_648.0)
@@ -213,7 +224,6 @@ impl GalaxyMap {
             })
         };
         let light = viewer.light_direction();
-        let mut shapes = Vec::new();
         let mut draw = |index: u32,
                         position: [i32; 3],
                         inputs: &AnimationInputs,
@@ -230,7 +240,7 @@ impl GalaxyMap {
             }
             let frame =
                 viewer.render_matrix(model, matrix, rows, position, light, inputs, 0, stars)?;
-            shapes.extend(frame.shapes);
+            visit(index, position, frame);
             Ok(())
         };
         let inputs = |count: u16, code: u32, word: u16| {
@@ -300,7 +310,7 @@ impl GalaxyMap {
                 draw(MARKER_MODEL, position, &inputs(0, 0, 0), None)?;
             }
         }
-        Ok(shapes)
+        Ok(())
     }
 
     /// The sector the centre is in, relative to Sol's, as the map's corner text shows it.

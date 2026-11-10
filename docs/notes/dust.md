@@ -217,8 +217,57 @@ at 1000x they are drawn and spread across the view (before the shift was
 passed, none were). At 1x and high speed the clouds gather round the middle of
 the view: each starts on the line of flight about 1.3 s ahead, as in the source.
 
-## The modern engine's speed dust (2026-10-28)
+## Classic: the cloud's detail tiers follow its depth (2026-11-06)
 
+Model 0x6d is chains behind opcode-12 branches: the first chain (8 dots) always draws,
+the later, denser ones only when F1751 says the cloud is near. F1751 compares
+`operand << (+0x148 + DATA_008813)` with the object's own view depth `+0xc`
+(`ffe.asm:109225`-style `cmp edx,[esi+0xc]`). The viewer's root render hard-wires depth 1
+and scale 0 ("full detail"), so every dust cloud, however far, drew its densest tier and
+the far clouds clumped into dense dot balls round the line of flight. Dust now sets
+`AnimationInputs::depth_detail`, which passes the real depth and the model's scale (the
+detail word is 0 at the boot): a far cloud draws 8 dots, a near one all of them
+(`effects_view::dust_clouds_drop_dots_with_distance`). Only dust opts in; ships,
+stations and sparks keep the viewer's full detail, which is a separate fidelity question.
+Child models already ran F1751 with their real depth. At 5 km/s the frame's dust pixels
+fell from 214 to 107 and the clump thinned. Not compared against an original capture.
+
+## Classic: dust vanished at 1000x and 10000x (2026-11-06)
+
+Owner report: the dust cleared as speed and time acceleration rose and was gone at full
+speed. F1517 leads each cloud `velocity << (7 + shift)` mm ahead, so at a 3 km/s cruise the
+lead is 4 km at 1x but 4e9 mm at 1000x (shift 10) and 1.6e10 mm at 10000x (shift 12).
+`draw_system_effects` dropped anything beyond `STATION_DRAW_RANGE` (2e9) and the viewer
+refuses a position past 1.5e9, so only the few clouds in the last frames before the ship
+reached them were drawn at 1000x, and none at 10000x. F1680 never drops such an object: it
+shifts the view position right and takes the same shift off the scale (`sar` by
+`scale + +0x7e - class`, `ffe.asm:102010`-`102030`). Dust now does the same
+(`DUST_VIEW_LIMIT` 1e9: position divided by `2^k`, scale less `k`, so F1751's depth/scale
+test and F1766's size/depth ratio are unchanged). `effects_view::dust_stays_on_screen_at_every_time_step`
+(3 km/s at all five steps) fails without it: 0 of 40 frames at 10000x, 36 of 40 at 1000x.
+Other effects keep the plain range test. The cloud starting as a clump at the middle of the
+view is the source's own: every cloud is placed on the line of flight, 1.3 s ahead, and
+only its dots spread as the ship closes (not changed).
+
+## Classic: one depth-sorted queue for the frame's objects (2026-11-06)
+
+The original's F1537 walks the object slots (0x72 down to 1) and runs F1680 on each object
+with flag `0x8` (the dust has `0x2a`); F1680 only queues the object's primitives, each with
+its F1777 depth key, and F1789 then sorts the whole frame's list with F1788 (descending
+unsigned key, equal keys in allocation order) and draws it (`ffe.asm:91362`, `111929`,
+`68105`-`68128`). Classic used to draw by class: stations and the player's ship, then NPC
+ships and missiles, then effects, so the dust was always on top, even of a ship in front of
+it. With `capture` off the stations, the player's own ship, NPC ships, missiles and effects
+(dust included) now queue their shapes with `Frame::keys` (`Screen::object_queue`) and
+`flush_object_queue` draws them in one stable sort by key. A far dust cloud keeps its F1680
+shift as the key scale (`render_scene_with_scale_key`, `+0x130`), so it sorts at its true
+depth. `effects_view::a_ship_hides_the_dust_behind_it` fails with the old order (33 dust
+pixels over the ship) and passes now. Not changed: the planets, the nebula and the star
+points are still drawn first (a planet's key is always the farthest in any real scene); the
+lift, the muzzle beam and the labels still draw after the queue; ties use the port's draw
+order, not the original's slot order; Modern keeps its own GPU ordering.
+
+## The modern engine's speed dust (2026-10-28)
 With the modern engine (a GPU) the original's clouds, which all start on the
 line of flight and spread out from one point, are replaced by speed dust drawn
 by the GPU (`Screen::speed_dust`, `modern3d::dust`). Presentation only: its own
@@ -254,3 +303,16 @@ about the dust reaches the simulation. Classic keeps the original's clouds.
   `speed_dust_streams_out_from_the_way_ahead`, checks the streaks point back to
   the way ahead at 300 m/s, 5 km/s, 5 km/s at 1000x and 50,000 km/s at 10000x,
   and that paused motes are points.
+
+## FFED3D AJ's space dust (2026-11-04)
+
+With FFED3D's assets on (Modern, `--ffed3d`), the original's F1035 particles are
+drawn as FFED3D AJ does: a grey `tex704` billboard at each particle, at least
+four original pixels across (`spaceDustSize` 4 of 1..10 at `spaceDustScale`
+100 %), sized by the cloud's `+0x7e` word, and not drawn inside a planet's haze
+or while dying. `Screen::dust_particles` is filled from `Navigator::dust` each
+frame; `Screen::ffed3d_dust` projects the centres and `modern3d::dust_billboards`
+adds the quads, with `tex704` loaded from the owner's assets first and FFED3D's
+next (a grey square without it). Classic keeps the model 0x6d objects, and the
+analytic speed dust remains the fallback when no particles are supplied (a
+capture without the game's field, or an install without `tex704`).

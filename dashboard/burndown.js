@@ -16,7 +16,7 @@
 window.FFE_BURNDOWN = {
   project: "ffe-rs",
   unit: "work items",
-  updated: "2026-10-26",
+  updated: "2026-11-10",
   milestones: [
     {
       id: "parity-audit",
@@ -24,7 +24,7 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         {"id": "parity-01", "title": "[P0] Repair F938/F929 event units for fuel, shields and hull repair", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-01"},
-        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "done", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
+        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
         {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "done", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
         {"id": "parity-04", "title": "[P0] Translate the complete F1013 takeoff handler and same-frame mode order", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-04"},
         {"id": "parity-05", "title": "[P0] Replace launch altitude substitution and collision grace with source frame/contact rules", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-05"},
@@ -296,36 +296,12 @@ window.FFE_BURNDOWN = {
       ]
     },
     {
-      id: "packs",
-      title: "Graphics-pack slice (phase 6)",
-      status: "planned",
+      id: "classic-split",
+      title: "Classic-only port: Modern engine, FFED3D integration and launcher removed",
+      status: "in-progress",
       tasks: [
-        { id: "packs-1", title: "Upscale export and pack commands", status: "done", version: "assets-1" },
-        { id: "packs-2", title: "Pack registry, validation and fallback", status: "in-progress", version: "assets-1" },
-        { id: "packs-3", title: "Live Classic/Enhanced switching", status: "in-progress", version: "modern-1" },
-        { id: "packs-4", title: "Pack changes never change gameplay traces", status: "todo" }
-      ]
-    },
-    {
-      id: "enhanced",
-      title: "Enhanced renderer (phase 7)",
-      status: "planned",
-      tasks: [
-        { id: "enhanced-0", title: "Separate modern engine, the Classic/Modern switch and a first technique (edge-directed upscaling)", status: "done", version: "modern-1" },
-        { id: "enhanced-1", title: "Native resolution, filtering and MSAA", status: "in-progress", version: "modern-2" },
-        { id: "enhanced-2", title: "Modest bloom", status: "done", version: "modern-4" },
-        { id: "enhanced-3", title: "Planet atmosphere and shadows", status: "in-progress", version: "modern-3" },
-        { id: "enhanced-4", title: "HDR output and temporal AA (deferred)", status: "todo" },
-        { id: "enhanced-5", title: "Frame and VRAM budgets measured", status: "todo" },
-        { id: "enhanced-6", title: "FFED3D textures (texNNN) and cabins in Modern, the owner's overrides first", status: "done", version: "ffed3d-1" },
-        { id: "enhanced-7", title: "DirectX .X model reader (text, binary, MSZIP)", status: "todo" },
-        { id: "enhanced-8", title: "FFED3D replacement models: placement, tris.ini, skins, sub-models, landing gear", status: "todo" },
-        { id: "enhanced-9", title: "FFED3D panel (panel.X, panelicons) and HUD (FRONR font)", status: "todo" },
-        { id: "enhanced-10", title: "FFED3D space dust (tex704 billboards, AJ sizes)", status: "todo" },
-        { id: "enhanced-11", title: "FFED3D planets and atmospheres (geosphere, textures.cfg skins, fog, glow)", status: "todo" },
-        { id: "enhanced-12", title: "DirectX 12 window: wgpu DX12 swapchain at the window's resolution (no GPU readback)", status: "todo" },
-        { id: "enhanced-13", title: "FFED3D effects and lighting (star, lasers, explosions, engine glow)", status: "todo" },
-        { id: "enhanced-14", title: "Modern side by side with FFED3D: captured scenes tuned to match", status: "todo" }
+        { id: "classic-split-1", title: "Remove the Modern GPU engine, FFED3D art/models, assets.bin packs, the launcher and the Classic/Modern graphics switch", status: "done", version: "classic" },
+        { id: "classic-split-2", title: "Strip the Modern-only side data the executor and viewer still record (Solid/Shell/plume/surface views, core terrain radial-detail hooks)", status: "todo", version: "classic" }
       ]
     },
     {
@@ -1238,13 +1214,128 @@ window.FFE_BURNDOWN = {
     },
     {
       date: "2026-11-04",
+      remaining: 98,
+      note: "FFED3D panel and HUD begun (enhanced-9 in progress): Modern's real-font path now prefers FFED3D's HUD font (FRONR___.TTF, found case-insensitively at the install's root or its Textures/Fonts folders) after the owner's assets/fonts and before the system fonts, so the original's HUD text draws in FFED3D's font when a full install is present and falls back gracefully without one. The 3-D console (MODELS/panel.X with Textures/panelicons/) remains. Remaining count unchanged."
+    },
+    {
+      date: "2026-11-04",
       remaining: 97,
       note: "PAR-03 done: a destroyed (F947), failed (F934), degraded (F948) or mis-jumped (F911) drive now leaves its mass in the hold as Rubbish (cargo slot 30, F946), so the tonnes used rise with the capacity; drive masses checked against DATA_007210/DATA_007188. F911's mov to the capacity is kept as an add (recorded deviation)."
     },
     {
       date: "2026-11-04",
       remaining: 96,
-      note: "PAR-02 done: one F929 for thrust and laser shots (paid branch restores the limits; the empty branch refills from the hold without carrying the cost and keeps the limits; 0x9907 once, latched until F289's refuel or F408's drive fitting); F903's jump debit checked once per jump; F408's drive-service stamp on fitting; the drive and equipment service slots, which were crossed, now match DATA_008923..8926. The 192 executed F938/F929 cases still match."
-    }
+      note: "FFED3D panel and HUD done (enhanced-9): the 3-D console reads MODELS/panel.X (the .X reader) and Textures/panelicons/panel.png, places it in FFED3D's view (scale(1.4,1,1) then translate(-0.35,-1.085,3.95), one .X unit 10000 of the original's) and draws it as one full-colour, depth-tested batch behind the models in the flight view when the player is not dying, alongside the FRONR font for the HUD. PreparePanel's runtime button-icon compositing and the battle/navigate pages are deferred; side-by-side placement tuning stays with enhanced-14. Remaining falls by one."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 95,
+      note: "FFED3D space dust done (enhanced-10): Modern draws the original's F1035 particles as grey tex704 billboards (the owner's assets first, FFED3D's next, a grey square without it), at least four original pixels across (spaceDustSize 4 at 100 %) and following the cloud's +0x7e size, in place of the analytic speed dust; Classic keeps the model 0x6d objects, and no dust is drawn while dying or inside a haze. Remaining falls by one."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "The .X reader is complete (enhanced-7): animation sets and their keys are parsed too (frame references, key type 0/1/2/4, times and values), alongside the text, binary and MSZIP encodings and the flattened frame hierarchy the models already used. Applying the keys to the replacement models' sub-frames belongs to enhanced-8. Remaining falls by one."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "FFED3D replacement models, first slice (enhanced-8 in progress): Modern draws MODELS/<n>/model.x for the player's ship, NPC ships, stations and the lift in place of the original faces, at the object's view-space rows and origin (one .X unit = 10,000 model units) with skin.png; models without a file keep the original. Still open: tris.ini scale/offset/skip, AJ skin numbers, sub-models, landing gear and owner overrides. Remaining count unchanged."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "FFED3D replacement models: tris.ini's [MODEL] scale, scale_x/y/z, offset_x/y/z and skip are read and applied before the .X-to-model-unit conversion. Remaining: skins.ini and the skin number from the object id, cullmode/notdrawtext/notdrawsubmodels, sub-models, landing gear and owner overrides. Count unchanged."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "FFED3D effects, first slice (enhanced-13 in progress): the star's disc is FFED3D's sun (tex701, the owner's replacement first) as a billboard in modern3d::core, tinted by the star's own colour and dimmed by the planets' share, with the port's procedural hot-core glow kept under it for the bloom. The laser (tex705), flash/strike (tex706) and a light's outer glow (tex603) keep the port's beams and sprites for now. Count unchanged."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "FFED3D planets, first slice (enhanced-11 in progress): ffe_rs::ffed3d::parse_textures_cfg reads the install's textures.cfg into per-slot Skins (the surface texture, a living planet's nine terrain bands, the atmosphere ratio/opacity/texture and the fog/glow RGBA and ratios). Drawing FFED3D's geosphere with these skins, the clouds and the fog/glow remains. Count unchanged."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "HUD font: Modern now draws its text in Agency FB by default (a launcher choice over the common Windows fonts in Settings > Display > HUD text, stored as font= in config.cfg), with the owner's assets/fonts winning over it; FFED3D's FRONR font and Arial are no longer used (the owner disliked both). Count unchanged."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "DirectX 12 window, first slice (enhanced-12 in progress): ffe_render::Renderer::new requests the Direct3D 12 backend first and falls back to the default backends (Vulkan, GL) where DX12 is missing, and reports the backend in the adapter name. Presenting to a swapchain (minifb 0.28 exposes the window's HasWindowHandle, so a wgpu surface is available) remains. Count unchanged."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "Replacement-model orientation fixed: modern3d::replacement_triangles applied the object's rotation transposed (R instead of R^T), so a ship rotated the wrong way (and counter-spun in the external view, and flipped across Classic/Modern). A local vertex now maps to the weighted sum of the object's axes, matching the original's frame; checked by a_replacement_rotates_by_the_objects_axes. The ship library/status model still shows the original model (replacement models are wired into the flight view only). Count unchanged."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "Modern dashboard buttons implemented: the panel keeps its original proportions and replaces all classic dashboard pixels, with icons0..3 composited by console page, equipment-dependent blanks, green selected states and mesh-UV picking routed to existing actions. Systems/time controls, scanner, gauges and messages are redrawn from semantic state; no old instrument artwork or framebuffer crops remain. Missing assets use a plain modern console. Owner icon overrides win file by file. Unit tests, local flight/status captures at three window sizes, and a poisoned-frame check that no classic pixels leak through. Battle/navigation inset artwork remains deferred. Count unchanged."
+    },
+    {
+      date: "2026-11-04",
+      remaining: 94,
+      note: "Cockpit corrected against the owner's FFED3D screenshot: use doPerspectiveNear's 35-degree full-viewport projection (centre 160,100), preserve the mesh's grey material and normals, and apply the source's green button point lights and specular highlights. Removed the added rectangular systems menu, lever labels, cyan grid, horizontal bars and log window. Scanner, lever, lamps and gauges use FFED3D texNNN replacements with original placement metadata; readouts and clock/log overlay directly. Classic pixels still cannot leak into Modern. Configured HUD font preserved. Projection/material/light regressions and captures at three sizes pass. Count unchanged."
+    },
+    {
+      date: "2026-11-05",
+      remaining: 94,
+      note: "External-camera ground clipping fixed for Classic and Modern: input components that would enter original terrain/station geometry or the F650/F994 pad plane are rejected. Original orbit position and axes remain unchanged; automatic lifting/retargeting has been removed. Holding at the boundary, immediate reversal, independent controls, unchanged clear movement and the actual Hope pad regression pass. Count unchanged."
+    },
+    {
+      date: "2026-11-05",
+      remaining: 94,
+      note: "Imported FFED3D art resolves loose owner files, packed files and the FFED3D install independently per file. Panel and model meshes, skins and placement metadata now share the resolver. Native-resolution navigation/battle and icon/void sheets preserve original normalized source rectangles at arbitrary upscale factors. Actual owner upscales captured; fallback, pack, source-rectangle and control regressions pass. Count unchanged."
+    },
+    {
+      date: "2026-11-08",
+      remaining: 99,
+      note: "Modern worlds audit tracks five additional work items for planet and facility scene submission, climate and hydrology, weather, and renderer handoff and cleanup. Indexed terrain and visual weather are present. The Hope departure replay matches 393 frames across Classic, Modern and Ctrl+G. Remaining rises by five."
+    },
+    {
+      date: "2026-11-08",
+      remaining: 99,
+      note: "Modern suppresses the inside of Hope's fallback globe, uses one packed tree mesh per planted cell across distance bands, and reads the shared world profile for live weather. The planet and climate work items remain in progress."
+    },
+    {
+      date: "2026-11-08",
+      remaining: 99,
+      note: "Modern eases the atmosphere into space and keeps sampled terrain across the former 1.2-radius globe cutoff. The planet and atmosphere work items remain in progress."
+    },
+    {
+      date: "2026-11-08",
+      remaining: 99,
+      note: "Modern ring geometry has filtered radial bands, gaps, translucency and shadows. The original model still supplies ring presence and plane, so the planet scene split remains in progress."
+    },
+    {
+      date: "2026-11-08",
+      remaining: 99,
+      note: "Modern submits orbital exteriors 74, 77 and 78 directly from game placement, spin and door state with complete FFED3D art. Missing parts and other facilities retain the compatibility path."
+    },
+    {
+      date: "2026-11-08",
+      remaining: 99,
+      note: "Modern submits live orbital stations, lift stages and starports directly, using procedural geometry for missing meshes and F650 pad anchors. Layout fidelity and the orbital handoff replay remain in progress."
+    },
+    {
+      date: "2026-11-08",
+      remaining: 99,
+      note: "Restored separately placed FFED3D buildings at the Hope and Merlin ports. Flat city tiles no longer suppress procedural building fallback."
+    },
+    {
+      date: "2026-11-08",
+      remaining: 99,
+      note: "Modern reads the original seeded surface-port layouts for all slots, uses installed FFED3D meshes, and places procedural substitutes at the original building footprints."
+    },
+    {
+      date: "2026-11-10",
+      remaining: 83,
+      note: "Classic-only fork. The Modern engine, FFED3D integration, launcher and graphics packs are out of scope: the packs (3 open) and enhanced (14 open) milestones were removed. A classic-split milestone adds the removal (done) and one cleanup item (open)."
+}
   ]
 };

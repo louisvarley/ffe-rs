@@ -230,6 +230,7 @@ fn ecm_destroys_a_missile_and_the_targeter_and_missile_view_draw() {
     launch(&mut nav, &mut state);
     let missile = nav.viewed_missile().copied().expect("the second missile");
     let missile_camera = MissileCamera {
+        velocity: [0.0; 3],
         position: missile.position.map(|v| v as f64 / unit),
         axes: missile.axes,
         eye: viewer

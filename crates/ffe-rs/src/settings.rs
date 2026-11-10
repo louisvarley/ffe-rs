@@ -180,6 +180,9 @@ impl Config {
                 "police" => config.police = parse_on_off(value)?,
                 "pirates" => config.pirates = parse_on_off(value)?,
                 "advanced_traffic" => config.advanced_traffic = parse_on_off(value)?,
+                // Older builds stored a Modern-graphics font and launcher backend; ignored.
+                "font" => {}
+                "backend" => {}
                 // The earlier single choice sets both.
                 "police_pirates" => {
                     let on = parse_on_off(value)?;
@@ -384,7 +387,7 @@ fn save_text(path: &Path, text: &str) -> Result<(), String> {
                 return Err(format!(
                     "{}: cannot create a temporary file: {error}",
                     temp.display()
-                ))
+                ));
             }
         }
     }
@@ -444,6 +447,12 @@ mod tests {
         // The earlier single police-and-pirates choice sets both.
         let old = Config::from_config("version=2\npolice_pirates=off\n").unwrap();
         assert_eq!((old.police, old.pirates), (false, false));
+    }
+
+    #[test]
+    fn old_backend_settings_load_and_are_retired() {
+        let config = Config::from_config("version=2\nbackend=dx12\n").unwrap();
+        assert!(!config.to_config().contains("backend="));
     }
 
     #[test]
@@ -533,7 +542,6 @@ mod tests {
             fit: FitMode::FillWindow,
             filter: Filter::Linear,
             aspect: PixelAspect::Square,
-            graphics: crate::modern::Graphics::Modern,
         };
         save_display(&path, settings).unwrap();
         assert_eq!(load_display(&path), Some(settings));

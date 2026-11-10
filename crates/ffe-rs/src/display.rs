@@ -27,8 +27,6 @@
 //! `docs/ARCHITECTURE.md` §2.2).
 
 use crate::indexed::{LOGICAL_HEIGHT, LOGICAL_WIDTH};
-use crate::modern::{Graphics, ModernRenderer};
-use crate::modern3d::{Gpu3d, World};
 use minifb::{Scale, ScaleMode, Window, WindowOptions};
 
 /// The smallest window scale the Display Options page offers.
@@ -131,8 +129,6 @@ pub struct DisplaySettings {
     pub fit: FitMode,
     pub filter: Filter,
     pub aspect: PixelAspect,
-    /// Which engine shows the frame (`modern`); Classic by default.
-    pub graphics: Graphics,
 }
 
 impl Default for DisplaySettings {
@@ -144,7 +140,6 @@ impl Default for DisplaySettings {
             fit: FitMode::PixelPerfect,
             filter: Filter::Nearest,
             aspect: PixelAspect::Dos43,
-            graphics: Graphics::Classic,
         }
     }
 }
@@ -171,12 +166,11 @@ impl DisplaySettings {
     /// The persistable form (`saves/display.cfg`).
     pub fn to_config(self) -> String {
         format!(
-            "scale={}\nfit={}\nfilter={}\naspect={}\ngraphics={}\n",
+            "scale={}\nfit={}\nfilter={}\naspect={}\n",
             self.scale.clamp(MIN_SCALE, MAX_SCALE),
             self.fit.key(),
             self.filter.key(),
-            self.aspect.key(),
-            self.graphics.key()
+            self.aspect.key()
         )
     }
 
@@ -203,7 +197,6 @@ impl DisplaySettings {
                 "fit" => settings.fit = FitMode::from_key(value)?,
                 "filter" => settings.filter = Filter::from_key(value)?,
                 "aspect" => settings.aspect = PixelAspect::from_key(value)?,
-                "graphics" => settings.graphics = Graphics::from_key(value)?,
                 _ => {}
             }
         }
@@ -313,45 +306,7 @@ pub fn compose(
         return;
     }
     let rect = settings.rect((width, height));
-    match settings.graphics {
-        Graphics::Classic => blit(logical, target, width, rect, settings.filter),
-        Graphics::Modern => {
-            let mut modern = ModernRenderer::new();
-            modern.render(logical, target, width, rect);
-            modern.finish(target, width, rect);
-        }
-    }
-}
-
-/// Bilinear resampling of a `source_width` by `source_height` image into `rect` of `target` (a
-/// `width`-pixel-wide buffer): the modern engine's last step.
-pub fn resample_linear(
-    source: &[u32],
-    source_width: usize,
-    source_height: usize,
-    target: &mut [u32],
-    width: usize,
-    rect: Rect,
-) {
-    if rect.width == 0 || rect.height == 0 || width == 0 || source_width == 0 {
-        return;
-    }
-    let columns: Vec<(usize, usize, u32)> = (0..rect.width)
-        .map(|dx| linear_row(dx, rect.width, source_width))
-        .collect();
-    for dy in 0..rect.height {
-        let row = (rect.y + dy) * width + rect.x;
-        let Some(destination) = target.get_mut(row..row + rect.width) else {
-            continue;
-        };
-        let (y0, y1, fy) = linear_row(dy, rect.height, source_height);
-        let (upper, lower) = (&source[y0 * source_width..], &source[y1 * source_width..]);
-        for (pixel, (x0, x1, fx)) in destination.iter_mut().zip(&columns) {
-            let top = mix(upper[*x0], upper[*x1], *fx);
-            let bottom = mix(lower[*x0], lower[*x1], *fx);
-            *pixel = mix(top, bottom, fy);
-        }
-    }
+    blit(logical, target, width, rect, settings.filter);
 }
 
 /// Copy the logical frame into `rect` of `target`, sampling with `filter`.
@@ -394,7 +349,7 @@ fn blit(logical: &[u32], target: &mut [u32], width: usize, rect: Rect, filter: F
 }
 
 /// The two source indices and the 0..=65535 weight for one destination index.
-pub(crate) fn linear_row(index: usize, destination: usize, source: usize) -> (usize, usize, u32) {
+fn linear_row(index: usize, destination: usize, source: usize) -> (usize, usize, u32) {
     // u = (index + 0.5) * source / destination - 0.5, in 16.16 fixed point.
     let value = ((2 * index + 1) as i64 * source as i64 * 65536) / (2 * destination as i64) - 32768;
     let value = value.clamp(0, (source.saturating_sub(1) as i64) * 65536) as u64;
@@ -404,7 +359,7 @@ pub(crate) fn linear_row(index: usize, destination: usize, source: usize) -> (us
 }
 
 /// Blend two packed colours by `weight` (0 = `a`, 65536 = `b`).
-pub(crate) fn mix(a: u32, b: u32, weight: u32) -> u32 {
+fn mix(a: u32, b: u32, weight: u32) -> u32 {
     let channel = |shift: u32| {
         let first = (a >> shift) & 0xff;
         let second = (b >> shift) & 0xff;
@@ -437,9 +392,32 @@ pub fn window_request(settings: &DisplaySettings, fullscreen: bool) -> WindowReq
     }
 }
 
+/// The game window. A thin wrapper so the presenter and the input session share
+/// one type; it dereferences to the `minifb` window.
+pub struct GameWindow {
+    window: Window,
+}
+
+impl std::ops::Deref for GameWindow {
+    type Target = Window;
+    fn deref(&self) -> &Window {
+        &self.window
+    }
+}
+
+impl GameWindow {
+    pub fn is_open(&self) -> bool {
+        self.window.is_open()
+    }
+
+    pub fn is_active(&mut self) -> bool {
+        self.window.is_active()
+    }
+}
+
 /// Open the game window. `minifb`'s scale is left at 1x and its stretch mode is
 /// only a safety net: [`Presenter`] passes a client-sized buffer every frame.
-pub fn open_window(title: &str, request: WindowRequest) -> Result<Window, String> {
+pub fn open_window(title: &str, request: WindowRequest) -> Result<GameWindow, String> {
     let mut window = Window::new(
         title,
         request.width,
@@ -459,7 +437,7 @@ pub fn open_window(title: &str, request: WindowRequest) -> Result<Window, String
     if request.fullscreen {
         window.set_position(0, 0);
     }
-    Ok(window)
+    Ok(GameWindow { window })
 }
 
 /// The desktop size for borderless full-screen. Windows only; the port's
@@ -513,9 +491,6 @@ pub fn alt_held() -> bool {
 #[derive(Default)]
 pub struct Presenter {
     buffer: Vec<u32>,
-    modern: ModernRenderer,
-    /// The modern engine's GPU 3-D view (`modern3d`).
-    gpu: Gpu3d,
     size: (usize, usize),
     rect: Rect,
     valid: bool,
@@ -524,38 +499,6 @@ pub struct Presenter {
 impl Presenter {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// The modern engine, to give it replacement art.
-    pub fn modern_mut(&mut self) -> &mut ModernRenderer {
-        &mut self.modern
-    }
-
-    /// Read the GPU view's textures from the owner's images (`assets.bin` or `assets`).
-    pub fn set_art_source(&mut self, source: crate::art_source::ArtSource) {
-        self.gpu.set_art_source(source);
-    }
-
-    /// Draw the GPU view's textured faces with the FFED3D installed at `root`. Returns
-    /// whether it has a texture folder.
-    pub fn set_ffed3d_dir(&mut self, root: &std::path::Path) -> bool {
-        self.gpu.set_ffed3d_dir(root)
-    }
-
-    /// What went wrong reading upscaled or FFED3D textures since the last call.
-    pub fn take_art_problems(&mut self) -> Vec<String> {
-        self.gpu.take_art_problems()
-    }
-
-    /// Whether Modern graphics can draw the 3-D view on the GPU (opening it on first use). The
-    /// game sets its model faces aside for the GPU only when this holds.
-    pub fn gpu_available(&mut self) -> bool {
-        self.gpu.available()
-    }
-
-    /// The GPU adapter's name, or why there is none.
-    pub fn gpu_description(&mut self) -> String {
-        self.gpu.describe()
     }
 
     /// Forget the cached buffer (after the window is reopened).
@@ -567,14 +510,13 @@ impl Presenter {
     /// when the window size or the fit rectangle changes.
     pub fn present(
         &mut self,
-        window: &mut Window,
+        window: &mut GameWindow,
         logical: &[u32],
-        world: Option<&World>,
         settings: &DisplaySettings,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let size = window.get_size();
         if size.0 == 0 || size.1 == 0 {
-            return Ok(());
+            return Ok(false);
         }
         let rect = settings.rect(size);
         if !self.valid || self.size != size || self.rect != rect {
@@ -584,62 +526,18 @@ impl Presenter {
             self.rect = rect;
             self.valid = true;
         }
-        match settings.graphics {
-            Graphics::Classic => blit(logical, &mut self.buffer, size.0, rect, settings.filter),
-            Graphics::Modern => {
-                self.modern.render(logical, &mut self.buffer, size.0, rect);
-                if let Some(world) = world {
-                    let frame = self.modern.frame(logical);
-                    self.gpu
-                        .render(frame, world, &mut self.buffer, size.0, rect)?;
-                }
-                self.modern.finish(&mut self.buffer, size.0, rect);
-            }
-        }
+        blit(logical, &mut self.buffer, size.0, rect, settings.filter);
         window
+            .window
             .update_with_buffer(&self.buffer, size.0, size.1)
-            .map_err(|error| format!("Window update: {error}"))
+            .map_err(|error| format!("Window update: {error}"))?;
+        Ok(true)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_engines_share_the_frame_and_only_modern_smooths_it() {
-        // A frame with a diagonal staircase: the two engines show the same logical pixels,
-        // the frame itself is never written, and a flat area stays the same colour.
-        let mut logical = vec![0x0c0c4cu32; LOGICAL_WIDTH * LOGICAL_HEIGHT];
-        for step in 0..100 {
-            for x in 0..=step {
-                logical[step * LOGICAL_WIDTH + x + 100] = 0xffffff;
-            }
-        }
-        let before = logical.clone();
-        let classic = DisplaySettings::default();
-        let modern = DisplaySettings {
-            graphics: Graphics::Modern,
-            ..classic
-        };
-        let (mut a, mut b) = (Vec::new(), Vec::new());
-        compose(&logical, &classic, 1280, 960, &mut a);
-        compose(&logical, &modern, 1280, 960, &mut b);
-        assert_eq!(logical, before);
-        assert_ne!(a, b);
-        // Far from the staircase the two agree exactly.
-        assert_eq!(a[900 * 1280 + 40], b[900 * 1280 + 40]);
-        // Classic is the original's blocky nearest scaling; Modern adds in-between shades on
-        // the edge only.
-        let shades = |image: &[u32]| {
-            let mut seen: Vec<u32> = image.to_vec();
-            seen.sort_unstable();
-            seen.dedup();
-            seen.len()
-        };
-        assert_eq!(shades(&a), 2);
-        assert!(shades(&b) > 2);
-    }
 
     #[test]
     fn the_defaults_are_the_ports_existing_1280x960_4_3_window() {
@@ -840,7 +738,6 @@ mod tests {
             fit: FitMode::FillWindow,
             filter: Filter::Linear,
             aspect: PixelAspect::Square,
-            graphics: crate::modern::Graphics::Modern,
         };
         assert_eq!(
             DisplaySettings::from_config(&settings.to_config()),

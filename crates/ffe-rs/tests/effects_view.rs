@@ -360,6 +360,213 @@ fn dust_is_drawn_ahead_at_speed() {
     assert!(dots > 50, "only {dots} dust pixels");
 }
 
+/// Model 0x6d's chains are detail tiers (opcodes 11/12 through F1751): the original compares
+/// each against the cloud's own view depth and scale, so a far cloud draws only its first
+/// dots and a near one all of them. The viewer's default (nearest depth, full detail) drew
+/// every cloud's densest tier, which clumped the far clouds' dots.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn dust_clouds_drop_dots_with_distance() {
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let model = viewer.find(ffe_core::dust::MODEL).unwrap();
+    let scale = model.scale.saturating_sub(5);
+    let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let dots = |z: f64, depth_detail: bool| {
+        let mut inputs = AnimationInputs::original(0, 0, &viewer.shades());
+        inputs.depth_detail = depth_detail;
+        viewer
+            .render_scene_with_scale(
+                ffe_core::dust::MODEL,
+                Some(scale),
+                identity,
+                [0.0, 0.0, z],
+                [0.0, 0.0, 1.0],
+                &inputs,
+            )
+            .unwrap()
+            .shapes
+            .len()
+    };
+    // A far cloud keeps only its first chain (8 dots); the viewer default draws every tier.
+    let (full, far) = (dots(1.0e9, false), dots(1.0e9, true));
+    assert_eq!(far, 8);
+    assert!(full > far, "full {full}, far {far}");
+}
+
+/// At cruising speed the dust must stay on screen at every time step. F1517 leads each cloud
+/// `2^shift` times farther ahead, which at 1000x and 10000x is beyond the viewer's 32-bit view
+/// space; the original shifts such an object's view position and scale down together (F1680).
+/// Dropping those clouds left no dust at the top steps.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn dust_stays_on_screen_at_every_time_step() {
+    let cache = cache();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let sine = ffe_core::model_math::SineTable::from_bytes(cache.asset("base:math/sine").unwrap())
+        .unwrap();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let speed_mm = 3_000_000.0;
+    let velocity = (speed_mm / ffe_rs::original_flight::MM_PER_SECOND) as i64;
+    for step in 0..5 {
+        let mut nav = Navigator::new_game(&cache, 1).unwrap();
+        let mut screen = Screen::new(&cache).unwrap();
+        let mut position = [7.0e15f64, 3.0e15, 1.0e15];
+        let (mut lit, mut frames) = (0, 0);
+        for frame in 0..400 {
+            // The ship goes 1, 10, 100, 1000 and 10000 times as far each frame.
+            position[2] += speed_mm * [1.0, 10.0, 100.0, 1000.0, 10000.0][step] * 0.02;
+            let mut spawn = ffe_core::dust::Spawn::deep_space(
+                position.map(|v| v as i64),
+                [0, 0, velocity],
+                true,
+            );
+            spawn.speed = ffe_core::dust::ACCELERATION_SHIFT[step];
+            nav.tick_dust(0.02, &spawn);
+            if frame < 200 || frame % 5 != 0 {
+                continue;
+            }
+            let state = Flight {
+                mode: Mode::Flight,
+                position: position.map(|v| v / unit),
+                system_flight: true,
+                ship: NEW_GAME_SHIP,
+                axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+                ..Flight::default()
+            };
+            let views = ViewState::default();
+            screen.effects.clear();
+            screen.draw(&state, views, Some(&viewer), true, "");
+            let empty = screen.logical_pixels().to_vec();
+            screen.effects = nav
+                .dust
+                .particles()
+                .iter()
+                .map(|particle| {
+                    let rows = particle.orientation(&sine);
+                    ffe_rs::screen::SystemEffect {
+                        model: particle.model,
+                        centre: particle.position.map(|v| v as f64 / unit),
+                        axes: std::array::from_fn(|r| {
+                            std::array::from_fn(|c| f64::from(rows[3 * r + c]) / 2_147_483_648.0)
+                        }),
+                        timer: 0,
+                        size: 0,
+                        scale: viewer.find(particle.model).map(|model| {
+                            (model.scale as i32 + particle.distance_bias).max(0) as u32
+                        }),
+                    }
+                })
+                .collect();
+            screen.draw(&state, views, Some(&viewer), true, "");
+            if changed(&empty, screen.logical_pixels()) > 5 {
+                lit += 1;
+            }
+            frames += 1;
+        }
+        eprintln!("step {step}: dust on screen in {lit} of {frames} frames");
+        assert!(
+            lit * 2 > frames,
+            "step {step}: dust in only {lit} of {frames} frames"
+        );
+    }
+}
+
+/// The original queues every object's primitives and sorts the whole frame's queue by depth
+/// key (F1680, F1789), so a ship in front of a dust cloud hides the dots behind it. Classic
+/// once drew the effects in a pass after the ships and put the dust over them.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn a_ship_hides_the_dust_behind_it() {
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 1).unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let sine = ffe_core::model_math::SineTable::from_bytes(cache.asset("base:math/sine").unwrap())
+        .unwrap();
+    let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    // A cruise at 3 km/s: the clouds sit about 4 km ahead, all behind the ship below.
+    let speed_mm = 3_000_000.0;
+    let velocity = (speed_mm / ffe_rs::original_flight::MM_PER_SECOND) as i64;
+    let mut position = [7.0e15f64, 3.0e15, 1.0e15];
+    for _ in 0..100 {
+        position[2] += speed_mm * 0.02;
+        nav.tick_dust(
+            0.02,
+            &ffe_core::dust::Spawn::deep_space(position.map(|v| v as i64), [0, 0, velocity], true),
+        );
+    }
+    let state = Flight {
+        mode: Mode::Flight,
+        position: position.map(|v| v / unit),
+        system_flight: true,
+        ship: NEW_GAME_SHIP,
+        axes: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+        ..Flight::default()
+    };
+    // A ship 40 m dead ahead (mm / 9700 per flight unit), filling the middle of the view.
+    let mut ahead = position.map(|v| v / unit);
+    ahead[2] += 40_000.0 / unit;
+    let views = ViewState::default();
+    let mut screen = Screen::new(&cache).unwrap();
+    screen.ships = vec![SystemShip {
+        model: NEW_GAME_SHIP,
+        centre: ahead,
+        axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        flash: false,
+        dead: false,
+    }];
+    screen.draw(&state, views, Some(&viewer), true, "");
+    let ship_only = screen.logical_pixels().to_vec();
+    screen.ships.clear();
+    screen.draw(&state, views, Some(&viewer), true, "");
+    let empty = screen.logical_pixels().to_vec();
+    let covered: Vec<usize> = (0..320 * 158)
+        .filter(|&i| ship_only[i] != empty[i])
+        .collect();
+    assert!(
+        covered.len() > 500,
+        "the ship covers only {} pixels",
+        covered.len()
+    );
+    screen.ships = vec![SystemShip {
+        model: NEW_GAME_SHIP,
+        centre: ahead,
+        axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        flash: false,
+        dead: false,
+    }];
+    screen.effects = nav
+        .dust
+        .particles()
+        .iter()
+        .map(|particle| {
+            let rows = particle.orientation(&sine);
+            ffe_rs::screen::SystemEffect {
+                model: particle.model,
+                centre: particle.position.map(|v| v as f64 / unit),
+                axes: std::array::from_fn(|r| {
+                    std::array::from_fn(|c| f64::from(rows[3 * r + c]) / 2_147_483_648.0)
+                }),
+                timer: 0,
+                size: 0,
+                scale: viewer
+                    .find(particle.model)
+                    .map(|model| (model.scale as i32 + particle.distance_bias).max(0) as u32),
+            }
+        })
+        .collect();
+    screen.draw(&state, views, Some(&viewer), true, "");
+    let both = screen.logical_pixels().to_vec();
+    save(&screen, "ship-and-dust.ppm");
+    let dust_pixels = changed(&ship_only, &both);
+    assert!(dust_pixels > 5, "no dust is drawn at all");
+    let over_ship = covered.iter().filter(|&&i| ship_only[i] != both[i]).count();
+    assert_eq!(
+        over_ship, 0,
+        "{over_ship} dust pixels were drawn over the ship"
+    );
+}
+
 /// Under time acceleration `DATA_009123` is the step's shift: the dust is led the same real
 /// time ahead and its clouds grow with it, so at 1000x it is still drawn, spread across the
 /// view. With the shift left at 0 (the port's old input) every cloud was culled as too far.

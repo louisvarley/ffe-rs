@@ -137,6 +137,7 @@ fn the_missile_view_rides_the_missile_objects_eye_and_axes() {
     // F1054's JUMP_004340: the camera is the missile object, offset by its own
     // model descriptor's eye words along its forward and up axes.
     let missile = MissileCamera {
+        velocity: [0.0; 3],
         position: [100.0, 200.0, 300.0],
         axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         eye: [4096, -4096],
@@ -354,6 +355,170 @@ fn object_labels_follow_f989_bounds_and_f1108_position() {
         body_label_positions(&[label("EDGE", [608.0, 0.0, 1024.0])], &camera),
         vec![("EDGE".to_owned(), 316, 75)]
     );
+}
+
+#[test]
+fn camera_inputs_stop_at_the_floor_without_repositioning_or_accumulating_pitch() {
+    let state = Flight {
+        position: [0.0, 4.0, 0.0],
+        ..Flight::free_flight()
+    };
+    let mut orbit = ExternalCamera {
+        yaw: 0,
+        pitch: 0x200,
+        distance: -256 * 100 * 50,
+    };
+    let clear = |orbit: &ExternalCamera| {
+        Camera::new(&state, &views(ViewMode::External, *orbit), None, 100.0).position[1] >= 0.0
+    };
+    let down = ExternalKeys {
+        down: Some(70),
+        ..ExternalKeys::default()
+    };
+    let mut original = orbit;
+    original.step(down, 20, 0);
+    assert!(clear(&original));
+    orbit.step_checked(down, 20, 0, clear);
+    assert_eq!(
+        orbit, original,
+        "clear movement must be the original movement exactly"
+    );
+    let stopped = orbit;
+    let stopped_camera = Camera::new(&state, &views(ViewMode::External, stopped), None, 100.0);
+    for _ in 0..120 {
+        orbit.step_checked(down, 20, 0, clear);
+    }
+    assert_eq!(
+        orbit, stopped,
+        "blocked pitch must not accumulate behind a corrected render position"
+    );
+    assert_eq!(
+        Camera::new(&state, &views(ViewMode::External, orbit), None, 100.0),
+        stopped_camera
+    );
+    // A blocked down key must not block an otherwise valid horizontal orbit.
+    orbit.step_checked(
+        ExternalKeys {
+            left: Some(70),
+            ..down
+        },
+        20,
+        0,
+        clear,
+    );
+    assert_ne!(orbit.yaw, stopped.yaw);
+    assert_eq!(orbit.pitch, stopped.pitch);
+    assert_eq!(orbit.distance, stopped.distance);
+    // Reversing direction responds immediately through the original orbit math.
+    let up = ExternalKeys {
+        up: Some(70),
+        ..ExternalKeys::default()
+    };
+    let mut expected = orbit;
+    expected.step(up, 20, 0);
+    orbit.step_checked(up, 20, 0, clear);
+    assert_eq!(orbit, expected);
+    assert_eq!(state.position, [0.0, 4.0, 0.0]);
+}
+
+#[test]
+fn unobstructed_camera_controls_are_identical_to_the_previous_camera() {
+    for keys in [
+        ExternalKeys {
+            left: Some(12),
+            up: Some(30),
+            zoom_out: Some(5),
+            ..ExternalKeys::default()
+        },
+        ExternalKeys {
+            right: Some(70),
+            down: Some(70),
+            zoom_in: Some(70),
+            ..ExternalKeys::default()
+        },
+        ExternalKeys {
+            left: Some(1),
+            right: Some(1),
+            up: Some(1),
+            down: Some(1),
+            zoom_in: Some(1),
+            zoom_out: Some(1),
+        },
+    ] {
+        let mut expected = ExternalCamera::default();
+        let mut guarded = expected;
+        expected.step(keys, 20, 100);
+        guarded.step_checked(keys, 20, 100, |_| true);
+        assert_eq!(guarded, expected);
+    }
+}
+
+#[test]
+#[ignore = "Local-only: requires FFE_WORLD_CACHE"]
+fn external_camera_input_stops_before_hopes_actual_pad() {
+    use ffe_rs::navigation::{external_camera_is_clear, Library, Navigator};
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let nav = Navigator::new_game(&cache, 0).unwrap();
+    let port = nav.docked.unwrap();
+    let floor = nav
+        .takeoff_seat(port, 0)
+        .expect("the Hope pad")
+        .map(|v| v as f64 / UNITS_PER_FLIGHT_UNIT);
+    let up = nav.bodies[port].orientation[1];
+    let forward = nav.bodies[port].orientation[2];
+    let target = std::array::from_fn(|i| floor[i] + up[i] * 8.0);
+    let library = Library(&cache);
+    let tools = ffe_core::surface::SurfaceTools {
+        shapes: &library,
+        terrain_table: cache.asset("base:terrain/tables").unwrap(),
+        terrain_maps: cache.asset("base:terrain/maps").unwrap(),
+        detail: ffe_core::surface::DEFAULT_DETAIL,
+    };
+    let below = Camera {
+        position: std::array::from_fn(|i| floor[i] - up[i] * 10.0 - forward[i] * 50.0),
+        axes: nav.bodies[port].orientation,
+    };
+    assert!(!external_camera_is_clear(below, target, &nav, &tools));
+    let state = Flight {
+        position: target,
+        axes: Some(nav.bodies[port].orientation),
+        ..Flight::free_flight()
+    };
+    let mut orbit = ExternalCamera {
+        yaw: 0,
+        pitch: 0x200,
+        distance: -256 * 100 * 50,
+    };
+    let clear = |orbit: &ExternalCamera| {
+        external_camera_is_clear(
+            Camera::new(&state, &views(ViewMode::External, *orbit), None, 100.0),
+            target,
+            &nav,
+            &tools,
+        )
+    };
+    assert!(clear(&orbit));
+    let down = ExternalKeys {
+        down: Some(70),
+        ..ExternalKeys::default()
+    };
+    let mut stopped = false;
+    for _ in 0..20 {
+        let before = orbit;
+        orbit.step_checked(down, 20, 0, clear);
+        assert!(clear(&orbit));
+        if before == orbit {
+            stopped = true;
+            break;
+        }
+    }
+    assert!(stopped, "the orbit should stop at the pad boundary");
+    let before = orbit;
+    orbit.step_checked(down, 20, 0, clear);
+    assert_eq!(orbit, before);
 }
 
 #[test]

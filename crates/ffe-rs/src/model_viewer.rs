@@ -119,6 +119,8 @@ pub struct Sprite {
 /// the light travels, as F1878 reads it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shell {
+    /// The planet's model slot (FFED3D's `textures.cfg` section).
+    pub model: u32,
     pub centre: [i32; 3],
     pub radius: i64,
     pub outer: i64,
@@ -151,6 +153,13 @@ pub struct Frame {
     /// For each shape that is a model face, its [`Solid`] (aligned with
     /// [`Self::shapes`]; may be shorter, the rest are `None`).
     pub solids: Vec<Option<Solid>>,
+    pub shape_owners: Vec<usize>,
+    /// Which ordered shapes came from a curved surface queue.
+    pub surface_faces: Vec<Option<usize>>,
+    /// The model and resolved coordinate frame of each curved surface.
+    pub surface_poses: Vec<SurfacePose>,
+    pub render_children: Vec<ffe_core::model_execute::RenderChild>,
+    pub animation_word: u16,
     /// The planets' atmospheres, for the modern engine, which draws them in place of the
     /// ring F1877 queues (those shapes carry an empty [`Solid`], so they are set aside).
     pub atmospheres: Vec<Shell>,
@@ -200,6 +209,11 @@ pub struct AnimationInputs {
     /// flickering far end of a thruster plume. The original keeps one stream
     /// running across frames; pass the previous [`Frame::jitter`] to animate.
     pub jitter: [u32; 2],
+    /// Run the root model's detail branches (F1751, opcodes 11/12) against the object's real
+    /// view depth and scale, as the original does for every object, instead of the viewer's
+    /// nearest-depth full detail. Off by default; space dust turns it on, because its clouds
+    /// drop dots with distance.
+    pub depth_detail: bool,
 }
 
 impl AnimationInputs {
@@ -216,6 +230,7 @@ impl AnimationInputs {
             globals,
             locals: top_level_locals(shades).0,
             jitter: JITTER_SEED,
+            depth_detail: false,
         }
     }
 
@@ -228,6 +243,7 @@ impl AnimationInputs {
             globals,
             locals: [i32::from(value); 64],
             jitter: JITTER_SEED,
+            depth_detail: false,
         }
     }
 }
@@ -247,9 +263,17 @@ const RATES: [u32; 4] = [1, 10, 100, 1000];
 /// the original 50,000-word limit.
 pub const SURFACE_QUEUE_WORDS: usize = 0x2_0000;
 
-/// A generated surface queue held between registration and drawing: the words
-/// F1876/F1840 queued and their far-to-near order.
+/// A curved surface's coordinate frame in view space.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfacePose {
+    pub model: u32,
+    pub origin: [i32; 3],
+    pub axes: [[i32; 3]; 3],
+}
+
+/// The generated queue between registration and drawing.
 struct SurfaceBatch {
+    pose: SurfacePose,
     /// The planet's atmosphere, when its record has one.
     shell: Option<Shell>,
     words: Vec<u32>,
@@ -445,12 +469,13 @@ fn bezier(points: [[i32; 3]; 4]) -> Vec<[i32; 3]> {
 /// model-176 scene is one (model 449).
 fn all_surfaces<'a>(
     result: &'a Execution,
-    out: &mut Vec<&'a ffe_core::model_execute::SurfaceEmission>,
+    model: u32,
+    out: &mut Vec<(u32, &'a ffe_core::model_execute::SurfaceEmission)>,
 ) {
-    out.extend(result.surfaces.iter());
+    out.extend(result.surfaces.iter().map(|surface| (model, surface)));
     for run in &result.children {
         if let ChildOutcome::Executed(child) = &run.outcome {
-            all_surfaces(child, out);
+            all_surfaces(child, u32::from(run.model), out);
         }
     }
 }
@@ -463,7 +488,7 @@ fn child_error(runs: &[ChildRun]) -> Option<String> {
                 return Some(format!(
                     "Child model {} at {:#x}: {error}",
                     run.model, run.offset
-                ))
+                ));
             }
             ffe_core::model_execute::ChildOutcome::Executed(child) => {
                 if let Some(error) = child_error(&child.children) {
@@ -1083,6 +1108,12 @@ impl ModelViewer {
             .unwrap_or(self.default_shades);
     }
 
+    /// F960 initialises the front end independently of the last system's light.
+    pub fn begin_intro(&mut self) {
+        self.set_star_class(None);
+        self.set_sky([0; 3]);
+    }
+
     /// Set `DATA_008812`, the "Level of Shape Detail" F1876 reads. The original
     /// stores the chosen row less one: the executed boot's default "High" is 1,
     /// and the game clamps a negative value to 0 (`F917`). The viewer starts at
@@ -1255,6 +1286,23 @@ impl ModelViewer {
         light_view: [f64; 3],
         inputs: &AnimationInputs,
     ) -> Result<Frame, String> {
+        self.render_scene_with_scale_key(index, scale, 0, rows, position, light_view, inputs)
+    }
+
+    /// [`Self::render_scene_with_scale`] for an object whose view position F1680 has shifted
+    /// right by `key_scale` (its `+0x130`): F1777's depth keys put the shift back, so the
+    /// object sorts at its true depth among the others.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_scene_with_scale_key(
+        &self,
+        index: u32,
+        scale: Option<u32>,
+        key_scale: i32,
+        rows: [[f64; 3]; 3],
+        position: [f64; 3],
+        light_view: [f64; 3],
+        inputs: &AnimationInputs,
+    ) -> Result<Frame, String> {
         let model = self
             .find(index)
             .ok_or_else(|| format!("Model {index} is not in the cache."))?;
@@ -1275,7 +1323,7 @@ impl ModelViewer {
             position.map(|v| v as i32),
             light_view,
             inputs,
-            0,
+            key_scale,
         )
     }
 
@@ -1601,10 +1649,16 @@ impl ModelViewer {
             operand_scale: model.scale as i32,
             textures: true,
         };
-        // Detail branches see the nearest depth: the viewer wants full detail.
+        // Detail branches see the nearest depth (the viewer wants full detail), unless the
+        // caller asks for F1751's real inputs: the object's view depth (`+0xc`) and scale
+        // (`+0x148`). The detail word (DATA_008813) is 0 at the boot.
         let visibility = VisibilityContext {
-            depth: 1,
-            scale: 0,
+            depth: if inputs.depth_detail { position[2] } else { 1 },
+            scale: if inputs.depth_detail {
+                model.scale as i32
+            } else {
+                0
+            },
             detail: [0, 0],
             normals: &normals,
         };
@@ -1664,6 +1718,8 @@ impl ModelViewer {
         self.register_execution_colours(&result);
         let mut frame = Frame {
             children_error,
+            render_children: result.render_children.clone(),
+            animation_word: inputs.globals[1],
             jitter: vertices.jitter(),
             texts: result.texts.iter().filter(|text| !text.culled).count(),
             ..Frame::default()
@@ -1699,7 +1755,7 @@ impl ModelViewer {
         };
         frame.light = Some(view_light);
         frame.origin = Some(position);
-        let (surfaces, skipped, haze) = self.collect_surfaces(&result, view_light);
+        let (surfaces, skipped, haze) = self.collect_surfaces(&result, view_light, model.index);
         frame.skipped += skipped;
         for batch in &surfaces {
             self.register_surface_colours(batch);
@@ -1732,6 +1788,7 @@ impl ModelViewer {
         }
         // F1840/F1841 queue their entries into the same F1778 list as the model's
         // faces; merge them by key so the planet is not painted over a nearer ship.
+        frame.surface_poses = surfaces.iter().map(|batch| batch.pose.clone()).collect();
         let surface_shapes = self.surface_shapes(&surfaces);
         Self::merge_surface_shapes(&mut frame, surface_shapes);
         frame
@@ -1844,6 +1901,7 @@ impl ModelViewer {
         &self,
         result: &Execution,
         light: [i32; 3],
+        model: u32,
     ) -> (Vec<SurfaceBatch>, usize, Option<u16>) {
         use ffe_core::terrain::Terrain;
         use ffe_core::terrain_draw::Scene;
@@ -1853,8 +1911,8 @@ impl ModelViewer {
         let mut skipped = 0usize;
         let mut haze = None;
         let mut emissions = Vec::new();
-        all_surfaces(result, &mut emissions);
-        for emission in emissions {
+        all_surfaces(result, model, &mut emissions);
+        for (model, emission) in emissions {
             let (Some((table, maps)), Some(origin), Some(vectors)) =
                 (&self.terrain, emission.origin, emission.axes)
             else {
@@ -1868,6 +1926,12 @@ impl ModelViewer {
                     .map(|v| v.iter().map(|c| f64::from(*c).powi(2)).sum::<f64>().sqrt())
                     .fold(0.0, f64::max),
             );
+            let word0 = i32::from(surface.word);
+            let material = [
+                ((word0 >> 8) & 15) as u8,
+                ((word0 >> 4) & 15) as u8,
+                (word0 & 15) as u8,
+            ];
             let mut stream: Vec<u8> = surface.entries.iter().flatten().copied().collect();
             stream.extend([0, 0]);
             let scene = Scene {
@@ -1889,6 +1953,19 @@ impl ModelViewer {
             } else {
                 light
             };
+            let shell = || {
+                (i32::from(surface.parameters[1]).wrapping_shl(16) != 0).then(|| {
+                    let radius = self.surface_extent.get();
+                    Shell {
+                        model,
+                        centre: origin,
+                        radius: radius as i64,
+                        outer: (radius * (1.0 + f64::from(surface.parameters[1]) / 32768.0)) as i64,
+                        rgb: self.rgb(material),
+                        light,
+                    }
+                })
+            };
             let shading = Shading {
                 light,
                 shades: self.lighting.shades,
@@ -1901,12 +1978,6 @@ impl ModelViewer {
             queue.views = Some(Vec::new());
             // An overflow of the original's arenas or queue ends the drawing early;
             // what was queued stands.
-            let word0 = i32::from(surface.word);
-            let material = [
-                ((word0 >> 8) & 15) as u8,
-                ((word0 >> 4) & 15) as u8,
-                (word0 & 15) as u8,
-            ];
             let record = Haze {
                 origin,
                 axes: scene.axes,
@@ -1944,17 +2015,13 @@ impl ModelViewer {
             }
             let mut order = queue.headers();
             order.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
-            let shell = (record.strength != 0 && outcome.is_ok()).then(|| {
-                let radius = self.surface_extent.get();
-                Shell {
-                    centre: origin,
-                    radius: radius as i64,
-                    outer: (radius * (1.0 + f64::from(surface.parameters[1]) / 32768.0)) as i64,
-                    rgb: self.rgb(material),
-                    light,
-                }
-            });
+            let shell = if outcome.is_ok() { shell() } else { None };
             batches.push(SurfaceBatch {
+                pose: SurfacePose {
+                    model,
+                    origin,
+                    axes: vectors,
+                },
                 shell,
                 views: queue.views.take().unwrap_or_default().into_iter().collect(),
                 words: queue.words,
@@ -2039,9 +2106,10 @@ impl ModelViewer {
     /// build. Flat entries are F1804 triangles; the rest are F1805/F1807
     /// descriptor textures or F1806/F1808 explicit-coordinate textures, drawn by
     /// F1644/F1647. F1877's haze ring entries keep the group's key.
-    fn surface_shapes(&self, batches: &[SurfaceBatch]) -> Vec<(u32, Shape, Option<Solid>)> {
-        let mut shapes = Vec::new();
-        for batch in batches {
+    fn surface_shapes(&self, batches: &[SurfaceBatch]) -> Vec<(u32, Shape, Option<Solid>, usize)> {
+        let mut all = Vec::new();
+        for (surface, batch) in batches.iter().enumerate() {
+            let mut shapes = Vec::new();
             let w = &batch.words;
             // With an atmosphere the modern engine draws, the ring's shapes are set aside.
             let ring = || {
@@ -2162,6 +2230,15 @@ impl ModelViewer {
                 // ones (F1807, F1805) take the middle of their seven slots, the flat
                 // ones their colour.
                 let colour = |word: u16| self.textures.rgb(word);
+                let solid = |views: Vec<[i32; 3]>, rgb| Solid {
+                    views,
+                    rgb,
+                    texture: None,
+                    path: false,
+                    outline: None,
+                    flame: None,
+                    sprite: None,
+                };
                 match handler & 0xff {
                     8 => {
                         let colours = self
@@ -2169,7 +2246,8 @@ impl ModelViewer {
                             .into_iter()
                             .map(colour)
                             .collect::<Vec<_>>();
-                        shapes.push((key, Shape::Gouraud(points, colours), None));
+                        let face = views.map(|v| solid(v.clone(), colours[0]));
+                        shapes.push((key, Shape::Gouraud(points, colours), face));
                     }
                     6 => {
                         let colours = self.surface_fallback_colours(w, at, 6);
@@ -2179,7 +2257,7 @@ impl ModelViewer {
                                 vec![points[0], points[1], points[2]],
                                 vec![colour(colours[0]), colour(colours[1]), colour(colours[2])],
                             ),
-                            None,
+                            views.map(|v| solid(vec![v[0], v[1], v[2]], colour(colours[0]))),
                         ));
                         shapes.push((
                             key,
@@ -2187,27 +2265,24 @@ impl ModelViewer {
                                 vec![points[0], points[2], points[3]],
                                 vec![colour(colours[0]), colour(colours[2]), colour(colours[3])],
                             ),
-                            None,
+                            views.map(|v| solid(vec![v[0], v[2], v[3]], colour(colours[0]))),
                         ));
                     }
                     other => {
                         let colours = self.surface_fallback_colours(w, at, other);
                         let rgb = self.textures.rgb(colours[0]);
-                        let solid = views.map(|views| Solid {
-                            views: views.clone(),
-                            rgb,
-                            texture: None,
-                            path: false,
-                            outline: None,
-                            flame: None,
-                            sprite: None,
-                        });
+                        let solid = views.map(|v| solid(v.clone(), rgb));
                         shapes.push((key, Shape::Fill(points, rgb), solid));
                     }
                 }
             }
+            all.extend(
+                shapes
+                    .into_iter()
+                    .map(|(key, shape, solid)| (key, shape, solid, surface)),
+            );
         }
-        shapes
+        all
     }
 
     /// Insert curved-surface shapes into a frame's far-to-near order (F1788's
@@ -2216,17 +2291,66 @@ impl ModelViewer {
     /// own, so a near ship draws over a far planet as the original's one queue
     /// does. Equal keys keep the primitive before the surface, and surfaces in
     /// their queue order.
-    fn merge_surface_shapes(frame: &mut Frame, shapes: Vec<(u32, Shape, Option<Solid>)>) {
-        if !shapes.is_empty() {
-            frame.solids.resize(frame.shapes.len(), None);
+    fn merge_surface_shapes(frame: &mut Frame, shapes: Vec<(u32, Shape, Option<Solid>, usize)>) {
+        if shapes.is_empty() {
+            return;
         }
-        for (key, shape, solid) in shapes {
+        let original_len = frame.shapes.len();
+        frame.solids.resize(original_len, None);
+        frame.surface_faces.resize(original_len, None);
+        frame.shape_owners.resize(original_len, 0);
+        if frame.keys.len() == original_len && frame.keys.windows(2).all(|k| k[0] >= k[1]) {
+            let total = original_len + shapes.len();
+            let mut surfaces = shapes;
+            surfaces.sort_by_key(|shape| std::cmp::Reverse(shape.0));
+            let mut surfaces = surfaces.into_iter().peekable();
+            let original = std::mem::replace(&mut frame.keys, Vec::with_capacity(total))
+                .into_iter()
+                .zip(std::mem::replace(
+                    &mut frame.shapes,
+                    Vec::with_capacity(total),
+                ))
+                .zip(std::mem::replace(
+                    &mut frame.solids,
+                    Vec::with_capacity(total),
+                ))
+                .zip(std::mem::replace(
+                    &mut frame.surface_faces,
+                    Vec::with_capacity(total),
+                ))
+                .zip(std::mem::replace(
+                    &mut frame.shape_owners,
+                    Vec::with_capacity(total),
+                ));
+            let mut push = |key, shape, solid, surface, owner| {
+                frame.keys.push(key);
+                frame.shapes.push(shape);
+                frame.solids.push(solid);
+                frame.surface_faces.push(surface);
+                frame.shape_owners.push(owner);
+            };
+            for ((((key, shape), solid), surface), owner) in original {
+                while surfaces.peek().is_some_and(|surface| surface.0 > key) {
+                    let (key, shape, solid, surface) = surfaces.next().unwrap();
+                    push(key, shape, solid, Some(surface), 0);
+                }
+                push(key, shape, solid, surface, owner);
+            }
+            for (key, shape, solid, surface) in surfaces {
+                push(key, shape, solid, Some(surface), 0);
+            }
+            return;
+        }
+        for (key, shape, solid, surface) in shapes {
             let at = frame
                 .keys
                 .iter()
                 .position(|value| *value < key)
                 .unwrap_or(frame.keys.len());
             frame.keys.insert(at, key);
+            frame.shape_owners.resize(frame.shapes.len(), 0);
+            frame.shape_owners.insert(at, 0);
+            frame.surface_faces.insert(at, Some(surface));
             frame.shapes.insert(at, shape);
             frame.solids.insert(at, solid);
         }
@@ -2391,6 +2515,10 @@ impl ModelViewer {
                 }};
                 ($shape:expr, $solid:expr) => {{
                     frame.solids.resize(frame.shapes.len(), None);
+                    frame.shape_owners.resize(frame.shapes.len(), 0);
+                    frame
+                        .shape_owners
+                        .push(result.ordered_instances.get(index).copied().unwrap_or(0));
                     frame.shapes.push($shape);
                     frame.keys.push(key);
                     frame.solids.push($solid);

@@ -1,9 +1,11 @@
 # ffe-rs
 
 A native Rust reimplementation of **Frontier: First Encounters** (Elite 3),
-using **JJFFE 2.8a7** as the gameplay reference and FFED3D as rendering research.
-The goal is original-style graphics by default with optional Enhanced graphics;
-the current experimental example is not that faithful renderer.
+using **JJFFE 2.8a7** as the gameplay reference. This checkout is **Classic only**:
+the aim is a like-for-like reimplementation of the original game, drawn the
+original's way. The Modern GPU engine, the FFED3D integration, art packs and the
+launcher have been removed. What is left to implement is in
+[docs/BURNDOWN.md](docs/BURNDOWN.md).
 
 > **Status: experimental Windows x64 playable, plus verified asset, core and reference tools.**
 > The playable generates a real system: the original flight model, stations and
@@ -20,7 +22,7 @@ the current experimental example is not that faithful renderer.
 > Still unfinished: curved surfaces (F1876) and therefore a planet in the flight
 > scene, the runtime upper palette, combat, missions, starport services, planet
 > surfaces and landing, local-star lighting, legacy save import, continuous
-> engine/station/wind beds and graphics packs. `dashboard/` tracks the whole port
+> engine/station/wind beds. `dashboard/` tracks the whole port
 > to completion.
 > [CLAUDE.MD](CLAUDE.MD) records the owner's answers and current plan.
 
@@ -34,12 +36,7 @@ The Windows executable is built in this checkout. From the repository root:
 .\target\release\ffe-rs.exe --root .
 ```
 
-**The launcher:** double-click `launcher.bat`. It builds the game, tools and
-launcher, then opens a window where you browse to and verify your game files
-(and, optionally, FFED3D's resources), change the port and game settings and
-press LAUNCH. See `docs/notes/launcher.md`.
-
-**Without the launcher:** double-click `play.bat`. It builds the release game
+**To play:** double-click `play.bat`. It builds the release game
 and launches it on your files in `.\game`; on any error the window stays open with the message. Every run also records
 your keyboard and mouse to `recordings\<date-time>.ffe-input`; `replay.bat recordings\FILE`
 (or `ffe-rs --replay FILE [--replay-exit]`) plays a recording back exactly, so a problem can
@@ -48,10 +45,9 @@ be reproduced from the file; a recording also stores the display and control pre
 **The game reads its content straight from your game files** at every start
 (the same fingerprint checks and conversion as `ffe-tools build-data`, about a
 quarter of a second); there is no cache file to build or keep up to date. The
-folder is `--game <folder>`, else the one chosen in the launcher
-(`saves\launcher.cfg`), else `.\game` beside the data folder. The data folder
+folder is `--game <folder>`, else `.\game` beside the data folder. The data folder
 (`--root`, holding `saves` and `recordings`) defaults to the nearest of the
-executable's folder and four parents with launcher settings or a `game` folder,
+executable's folder and four parents with a `game` folder,
 so `target\release\ffe-rs.exe` finds the checkout. If startup fails, the
 console waits for Enter so the error can be read. No original assets,
 reference source or x86 executable are linked into the native game binary. Do
@@ -413,32 +409,6 @@ stills/AVIs inside the disc image. Twenty images carry review notes in the
 manifest and CSV: run-time colours shown as grey ramps, texture slots the game
 never fills, alternative colourings of shared textures, and the font. It never
 overwrites an existing destination and is not a graphics pack.
-
-`tools/redraw-swarmui.ps1` redraws the export through a **local** SwarmUI
-server (img2img plus a refiner upscale), at each image's `sizes.csv` size, into
-`upscaled/images/<category>/` with the same filenames. Run `-ListModels` to see
-model names, try `-Filter 'cockpit/*' -Limit 2` first, and see the script's
-help (`Get-Help .\tools\redraw-swarmui.ps1 -Full`) for the options. It skips
-the font and raw texture blocks and only resizes images under 16 pixels. For
-Z-Image Turbo use `-Steps 8 -CfgScale 1`; leave `-ModelTiling` off with it.
-
-## Modern graphics: FFED3D's art and your own (`assets/`, `assets.bin`)
-
-Modern graphics draw with FFED3D's art from the FFED3D folder chosen in the
-launcher (required for Modern), and your own files replace FFED3D's. The
-ignored `assets/` folder mirrors an FFED3D install: a file at the same path as
-one of FFED3D's replaces it. Copy a file from FFED3D (for example
-`Textures/tex450.png`), change it, and put it at the same path under `assets/`.
-
-- `assets/Textures/CABIN0.png` .. `CABIN5.png`: the six cabins.
-- `assets/Textures/tex400.png` .. `tex547.png`: the models' textures (record N - 400).
-- `assets/MODELS/<n>/...`: models and skins, once replacement models are drawn.
-
-`launcher.bat` and `play.bat` pack everything in `assets/` into `assets.bin`
-after building (`ffe-tools build-assets`), and the game reads that file; without
-one it reads the folder directly. For each picture the order is: your file, then
-FFED3D's, then the original's. Neither `assets/` nor `assets.bin` is ever
-committed.
 
 ## Build and verify the partial content cache (developers)
 
@@ -823,12 +793,10 @@ proposals. Technical approval does not resolve source or derived-art rights.
 ## What this is
 
 - **Windows x64 first:** the first playable slice is launch, fly, dock, trade and save/reload.
-- **Classic by default:** target the original 320×200 indexed look, 4:3 presentation, palette, bitmap font, affine textures, original cockpit and nearest-neighbour scaling.
+- **Classic only:** the original 320×200 indexed look, 4:3 presentation, palette, bitmap font, affine textures, original cockpit and nearest-neighbour scaling. There is no Modern or Enhanced renderer in this checkout.
 - **JJFFE gameplay, documented fixes:** verified bugs may be fixed with regression tests and deviation records; FFED3D's Anisotropic changes are not the default.
-- **Live Enhanced switching:** native resolution, HD images, filtering and MSAA first; modest bloom next, advanced effects later. Prepare resources before switching; no game restart.
-- **Gameplay-affecting options are separate** (extended FOV, input smoothing, aim assist, fill-widescreen). They are never touched by the master button and are listed in `docs/DEVIATIONS.md`.
-- **Graphics packs only for v1:** images first; replacement meshes, gameplay mods and scripts are deferred.
-- **Classic and Modern controls:** selectable independently of graphics. Import legacy saves; exporting new saves back to the old game is not required.
+- **Gameplay-affecting options are separate** (extended FOV, input smoothing, aim assist, fill-widescreen) and are listed in `docs/DEVIATIONS.md`.
+- **Classic and Modern control presets:** input only (the original's keys, or W/S and arrows). Import legacy saves; exporting new saves back to the old game is not required.
 - **No game data in the repository or release.** The player supplies an installed copy in `game/`; `data.bin` and optional `upscaled.bin` are generated locally.
 
 ## Documentation
@@ -839,7 +807,8 @@ proposals. Technical approval does not resolve source or derived-art rights.
 | `docs/PHASE0_SUMMARY.md` | Historical FFED3D study; superseded decisions are marked. |
 | `docs/INVENTORY.md` | Complete source/game inventory, global state, file formats, content audit, numeric model, timing, build report. |
 | `docs/FFED3D_RENDERING_NOTES.md` | How the original software renderer and the FFED3D D3D9 path work, and what Classic must reproduce. |
-| `docs/RENDERING_DESIGN.md` | Proposed Enhanced feature list/order, dependencies, master button, performance budgets, quirk checklist, test tolerances. |
+| [Burndown](docs/BURNDOWN.md) | What is still to implement, by area, with the critical path. |
+| `docs/RENDERING_DESIGN.md` | Historical Phase 0 rendering proposal; its Enhanced and pack sections are out of scope for this Classic checkout. |
 | `docs/ARCHITECTURE.md` | Proposed Rust workspace, `data.bin`/`upscaled.bin` contracts, version detection, startup auto-conversion, mod layering. |
 | `docs/FORMATS.md` | Why RON/TOML/JSON, exact schemas, determinism rules, upscaling exclusion/resize rules. |
 | `docs/GAME_FILES.md` | The oracle copy: every file, size and SHA-256, version detection and floppy/CD notes. |
@@ -848,7 +817,7 @@ proposals. Technical approval does not resolve source or derived-art rights.
 | `docs/CONTROLS.md` | The Modern and Classic flight bindings, the Classic right-button mouse scheme and the per-preset routing audit. |
 | `docs/DEVIATIONS.md` | Every intentional deviation, including the gameplay-affecting group. |
 | `docs/PORT_LOG.md` | Decisions, discrepancies, open questions. |
-| `docs/STATUS.md` | Current milestone status, trace hashes, and handoff entry point. |
+| [Port status](docs/STATUS.md#two-workstreams) | Game and Classic Engine workstreams, with task status and handoff references. |
 | `docs/MODEL_EXECUTION_PLAN.md` | Design record for the implemented v0.11–v0.13 depth/point/line work and its follow-ups. |
 | `docs/MODEL_COMMANDS.md` | Full F1772 opcode map and current Rust coverage; probe-first notes for point/line/text/submodel. |
 | `docs/REFERENCE_HARNESS.md` | How to add a differential test against the executed JJFFE reference. |

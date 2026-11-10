@@ -397,6 +397,19 @@ pub struct Execution {
     pub ordered: Vec<Primitive>,
     /// Effective group/standalone keys aligned with [`Self::ordered`].
     pub ordered_keys: Vec<u32>,
+    /// Model instance owning each ordered primitive. Zero is the top-level model.
+    pub ordered_instances: Vec<usize>,
+    pub render_children: Vec<RenderChild>,
+}
+
+/// View-space placement of an executed child, in the same order as its owner ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderChild {
+    pub model: u16,
+    pub animation_word: u16,
+    pub scale_delta: i32,
+    pub position: [i32; 3],
+    pub matrix: [i32; 9],
 }
 
 /// The descriptor of a model a child call names (F1538 table entry): its three blocks
@@ -547,6 +560,7 @@ pub fn execute(
         None,
         context,
         None,
+        false,
     )
 }
 
@@ -576,6 +590,7 @@ pub fn execute_live(
         Some(vertices),
         context,
         None,
+        false,
     )
 }
 
@@ -609,7 +624,42 @@ pub fn execute_scene(
         Some(vertices),
         context,
         Some(children),
+        false,
     )
+}
+
+/// Read the child placements encoded in a model program. This uses the asset's
+/// full-detail layout with no view frustum, primitive execution or depth queue.
+pub fn model_placements(
+    bytes: &[u8],
+    vertices: &mut Vertices<'_>,
+    context: &mut VertexContext,
+    table: &SineTable,
+    instance: InstanceContext,
+    children: &ChildEnvironment<'_>,
+) -> Result<Vec<RenderChild>, String> {
+    let vertex_count = u32::try_from(vertices.vertex_count())
+        .map_err(|_| "Live vertex count exceeds u32.".to_owned())?;
+    let result = execute_inner(
+        InnerInput {
+            bytes,
+            vertex_count,
+            visibility: &VisibilityContext {
+                depth: 1,
+                scale: 0,
+                detail: [0; 2],
+                normals: &[],
+            },
+            table: Some(table),
+            instance,
+            budget: 65_536,
+        },
+        Some(vertices),
+        context,
+        Some(children),
+        true,
+    )?;
+    Ok(result.render_children)
 }
 
 fn view_point(
@@ -753,7 +803,7 @@ fn emit_point(
         let mut emission = emission;
         emission.screen = crate::model_instance::project(resolved.view);
         emission.view = Some(resolved.view);
-        queue.push(key, Primitive::Point(emission))?;
+        queue.push(key, (Primitive::Point(emission), shared.render_owner))?;
         shared.queue.push(QueueEvent::Point(key));
     }
     Ok(())
@@ -810,7 +860,7 @@ fn emit_line(
             .and_then(|other| crate::model_thruster::line(&vertex, &other).ok())
             .flatten()
             .map(|points| points.map(|[x, y]| [x as i16, y as i16]));
-        queue.push(key, Primitive::Line(emission))?;
+        queue.push(key, (Primitive::Line(emission), shared.render_owner))?;
         shared.queue.push(QueueEvent::Line(key));
     }
     Ok(())
@@ -906,7 +956,13 @@ fn light_points(
                 screen: resolved.screen,
             };
             if let (Some(key), Some(queue)) = (key, shared.order.as_mut()) {
-                queue.push(key, Primitive::SystemLabel(emission.clone()))?;
+                queue.push(
+                    key,
+                    (
+                        Primitive::SystemLabel(emission.clone()),
+                        shared.render_owner,
+                    ),
+                )?;
                 shared.queue.push(QueueEvent::Label(key));
             }
             result.system_labels.push(emission);
@@ -999,7 +1055,10 @@ struct Frame<'a, 'v> {
 }
 
 struct Shared<'e> {
-    order: Option<Order<Primitive>>,
+    placements_only: bool,
+    order: Option<Order<(Primitive, usize)>>,
+    render_children: Vec<RenderChild>,
+    render_owner: usize,
     queue: Vec<QueueEvent>,
     remaining: usize,
     budget: usize,
@@ -1015,6 +1074,7 @@ fn execute_inner(
     vertices: Option<&mut Vertices<'_>>,
     context: &mut VertexContext,
     children: Option<&ChildEnvironment<'_>>,
+    placements_only: bool,
 ) -> Result<Execution, String> {
     let InnerInput {
         bytes,
@@ -1024,7 +1084,7 @@ fn execute_inner(
         instance,
         budget,
     } = input;
-    if !(1..=4096).contains(&budget) {
+    if !placements_only && !(1..=4096).contains(&budget) {
         return Err("Model execution budget must be 1..=4096 commands.".to_owned());
     }
     let mut working = context.clone();
@@ -1038,7 +1098,7 @@ fn execute_inner(
         None => None,
     };
     // The command budget bounds execution; the order queue keeps its own 1..=4096 guard.
-    let order = if working_vertices.is_some() {
+    let order = if working_vertices.is_some() && !placements_only {
         Some(Order::new(4096)?)
     } else {
         None
@@ -1049,7 +1109,10 @@ fn execute_inner(
         }
     }
     let mut shared = Shared {
+        placements_only,
         order,
+        render_children: Vec::new(),
+        render_owner: 0,
         queue: Vec::new(),
         remaining: budget,
         budget,
@@ -1072,19 +1135,21 @@ fn execute_inner(
     // Finalize before committing. Like the top-level object-draw callers (F1683/F1684
     // call F1780(0,0) after the model returns), close a group the program left open;
     // child runs (F1774) do not close it, so their groups stay open in the parent.
-    let (ordered, ordered_keys) = match shared.order.take() {
+    let (ordered, ordered_keys, ordered_instances) = match shared.order.take() {
         Some(mut order) => {
             order.group(None)?;
             let pairs = order.finish_with_keys()?;
             let mut ordered = Vec::with_capacity(pairs.len());
             let mut ordered_keys = Vec::with_capacity(pairs.len());
-            for (key, primitive) in pairs {
+            let mut owners = Vec::with_capacity(pairs.len());
+            for (key, (primitive, owner)) in pairs {
+                owners.push(owner);
                 ordered.push(primitive);
                 ordered_keys.push(key);
             }
-            (ordered, ordered_keys)
+            (ordered, ordered_keys, owners)
         }
-        None => (Vec::new(), Vec::new()),
+        None => (Vec::new(), Vec::new(), Vec::new()),
     };
     *context = working;
     if let (Some(source), Some(destination)) = (working_vertices, vertices) {
@@ -1093,6 +1158,8 @@ fn execute_inner(
     result.queue = shared.queue;
     result.ordered = ordered;
     result.ordered_keys = ordered_keys;
+    result.ordered_instances = ordered_instances;
+    result.render_children = shared.render_children;
     Ok(result)
 }
 
@@ -1131,19 +1198,33 @@ fn run(
         queue: Vec::new(),
         ordered: Vec::new(),
         ordered_keys: Vec::new(),
+        ordered_instances: Vec::new(),
+        render_children: Vec::new(),
     };
+    if shared.placements_only && program.submodels.is_empty() {
+        return Ok(result);
+    }
     let mut offset = 0usize;
     let mut returned = false;
     while shared.remaining > 0 {
-        shared.remaining -= 1;
         let index = program
             .commands
             .binary_search_by_key(&offset, |c| c.offset)
             .map_err(|_| format!("Execution left a command boundary at {offset:#x}."))?;
         let command = &program.commands[index];
-        result.commands.push(offset);
         let code = command.word;
         let payload = &bytes[offset + 2..offset + command.size];
+        // Placement needs branches, variable updates, frames and child calls.
+        // Skip drawing commands before they can resolve any screen vertices.
+        if shared.placements_only
+            && !matches!(code & 31, 0 | 11..=14 | 19 | 20 | 25 | 27..=29)
+            && !(code & 31 == 30 && code & 0x8000 != 0 && code != 0x801e)
+        {
+            offset += command.size;
+            continue;
+        }
+        shared.remaining -= 1;
+        result.commands.push(offset);
         let relative = match code & 31 {
             0 => {
                 returned = true;
@@ -1204,7 +1285,7 @@ fn run(
                         {
                             emission.screen = screen;
                             emission.views = views;
-                            queue.push(key, Primitive::Face(emission))?;
+                            queue.push(key, (Primitive::Face(emission), shared.render_owner))?;
                             shared.queue.push(QueueEvent::Face(key));
                         }
                     }
@@ -1282,7 +1363,7 @@ fn run(
                     let key = emission.key;
                     result.polygons.push(emission.clone());
                     if let (Some(key), Some(queue)) = (key, shared.order.as_mut()) {
-                        queue.push(key, Primitive::Polygon(emission))?;
+                        queue.push(key, (Primitive::Polygon(emission), shared.render_owner))?;
                         shared.queue.push(QueueEvent::Polygon(key));
                     }
                 }
@@ -1326,7 +1407,10 @@ fn run(
                         screen: vertex.screen,
                     };
                     if let (Some(key), Some(queue)) = (key, shared.order.as_mut()) {
-                        queue.push(key, Primitive::Label(emission.clone()))?;
+                        queue.push(
+                            key,
+                            (Primitive::Label(emission.clone()), shared.render_owner),
+                        )?;
                         shared.queue.push(QueueEvent::Label(key));
                     }
                     result.labels.push(emission);
@@ -1377,7 +1461,10 @@ fn run(
                             emission.points = Some([b4.screen, b2.screen, b5.screen, b3.screen]);
                             emission.views = Some([b4.view, b2.view, b5.view, b3.view]);
                             if let Some(queue) = shared.order.as_mut() {
-                                queue.push(key, Primitive::Spline(emission.clone()))?;
+                                queue.push(
+                                    key,
+                                    (Primitive::Spline(emission.clone()), shared.render_owner),
+                                )?;
                                 shared.queue.push(QueueEvent::Spline(key));
                             }
                         }
@@ -1428,7 +1515,10 @@ fn run(
                         entries = queued.entries;
                         if let Some(queue) = shared.order.as_mut() {
                             for entry in &entries {
-                                queue.push(entry.key, Primitive::Thruster(entry.clone()))?;
+                                queue.push(
+                                    entry.key,
+                                    (Primitive::Thruster(entry.clone()), shared.render_owner),
+                                )?;
                                 shared.queue.push(match entry.shape {
                                     crate::model_thruster::Shape::Line { .. } => {
                                         QueueEvent::ThrusterLine(entry.key)
@@ -1504,11 +1594,14 @@ fn run(
                             let key = outline.key;
                             queue.push(
                                 key,
-                                Primitive::Beam(BeamEmission {
-                                    beam: beam.clone(),
-                                    context: working.clone(),
-                                    outline,
-                                }),
+                                (
+                                    Primitive::Beam(BeamEmission {
+                                        beam: beam.clone(),
+                                        context: working.clone(),
+                                        outline,
+                                    }),
+                                    shared.render_owner,
+                                ),
                             )?;
                             shared.queue.push(QueueEvent::Beam(key));
                         }
@@ -1576,7 +1669,10 @@ fn run(
                             }
                             emission.size = size;
                             if let Some(queue) = shared.order.as_mut() {
-                                queue.push(key, Primitive::Chain(emission.clone()))?;
+                                queue.push(
+                                    key,
+                                    (Primitive::Chain(emission.clone()), shared.render_owner),
+                                )?;
                                 shared.queue.push(QueueEvent::Chain(key));
                             }
                         }
@@ -1604,7 +1700,7 @@ fn run(
                         _ => {
                             return Err(format!(
                                 "Direction alignment at {offset:#x} uses undefined axis 3."
-                            ))
+                            ));
                         }
                     };
                     // F1771: F1467's root of the 32-bit `a*a + b*b`; a zero root
@@ -1724,7 +1820,7 @@ fn run(
                             shared.texts += 1;
                             queue.push(
                                 model_depth::key(anchor.view, instance.key_scale),
-                                Primitive::Text(id),
+                                (Primitive::Text(id), shared.render_owner),
                             )?;
                             queued = Some(id);
                         }
@@ -1748,7 +1844,7 @@ fn run(
                             working,
                             frame.instance.position,
                             frame.instance.generation,
-                            true,
+                            !shared.placements_only,
                         )?);
                     }
                     result.submodels.push(SubmodelEmission {
@@ -1872,11 +1968,12 @@ fn run(
                 branch
             }
             11 | 12 => {
-                let branch = visibility_branch(
-                    code,
-                    i16::from_le_bytes([payload[0], payload[1]]),
-                    visibility,
-                )?;
+                let operand = i16::from_le_bytes([payload[0], payload[1]]);
+                let branch = if shared.placements_only {
+                    crate::model_commands::placement_branch(code, operand)
+                } else {
+                    visibility_branch(code, operand, visibility)?
+                };
                 if branch.is_none() {
                     returned = true;
                 }
@@ -1920,7 +2017,7 @@ fn run(
             _ => {
                 return Err(format!(
                     "Unsupported executed command {code:#06x} at {offset:#x}."
-                ))
+                ));
             }
         };
         let Some(relative) = relative else {
@@ -2005,7 +2102,7 @@ fn call_child(
         outcome: ChildOutcome::Culled,
         setup: None,
     };
-    if child_culled(main.view, radius) {
+    if !shared.placements_only && child_culled(main.view, radius) {
         return Ok(record);
     }
     // Extra vertices: +4 always, then +2, +3, +5 up to the first 0x7f, each through
@@ -2028,7 +2125,7 @@ fn call_child(
                 parent,
                 frame.instance.position,
                 frame.instance.generation,
-                true,
+                !shared.placements_only,
             )?;
             sources[k + 1] = Some(ExternalSource {
                 view: vertex.view,
@@ -2110,6 +2207,7 @@ fn call_child(
         observer = Some((observer_scale as u32, point));
     }
     let normals = match observer {
+        _ if shared.placements_only => Vec::new(),
         Some((observer_scale, point)) => crate::model_normals::evaluate(
             model.normals,
             model.normal_count,
@@ -2195,7 +2293,17 @@ fn call_child(
     };
     shared.arena += size;
     shared.depth += 1;
+    let previous_owner = shared.render_owner;
+    shared.render_children.push(RenderChild {
+        model: submodel.model,
+        animation_word: context.globals[1],
+        scale_delta: scale - model.scale,
+        position,
+        matrix,
+    });
+    shared.render_owner = shared.render_children.len();
     let execution = run(&child, Some(&mut vertices), &mut context, shared);
+    shared.render_owner = previous_owner;
     shared.depth -= 1;
     shared.arena -= size;
     let execution = execution

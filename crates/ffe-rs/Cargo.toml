@@ -10,17 +10,21 @@ description = "Experimental playable native Rust First Encounters development sl
 ffe-core = { path = "../ffe-core" }
 ffe-content = { path = "../ffe-content" }
 ffe-audio = { path = "../ffe-audio" }
-ffe-render = { path = "../ffe-render" }
+ffe-convert = { path = "../ffe-convert" }
 ffe-tools = { path = "../ffe-tools" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 minifb = { version = "0.28", default-features = false, features = ["x11"] }
 png = "0.17"
 fontdue = "0.9"
+ttf-parser = "0.25"
+epaint_default_fonts = "0.31"
 
 [target.'cfg(windows)'.dependencies]
 gilrs = "0.11"
+bytemuck = "1"
+raw-window-handle = "0.6"
+winapi = { version = "0.3", features = ["commctrl", "winuser"] }
 
 [dev-dependencies]
-ffe-convert = { path = "../ffe-convert" }
 tempfile = "3"

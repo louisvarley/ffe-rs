@@ -3,6 +3,14 @@
 Read from `jjffe-master/ffe.asm`. The map is a 3D scene drawn by the ordinary model machinery: the
 camera is a matrix built from the GUI's rotation accumulators, and the scene is a few model runs.
 
+Modern sends the original map models' view-space paths, faces, and star points to the GPU.
+It draws them on a dark map viewport with the replacement outline font for system labels,
+sector coordinates, fuel, and system details. Labels nearest the reticle take priority when
+space is tight. The footer keeps the selected system's details and fuel estimate clear of
+the plotted stars. Modern draws a crosshair around the selected star with GPU lines. It
+keeps a fixed screen size as the map zooms. Both modes use the same camera, sector tables,
+and selection logic.
+
 ## The scene (F840)
 
 - **Camera**: `F1675` builds the matrix from the accumulators (`F1445`), swapped into the

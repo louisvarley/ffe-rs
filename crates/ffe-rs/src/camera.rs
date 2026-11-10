@@ -161,6 +161,37 @@ pub struct ExternalKeys {
 }
 
 impl ExternalCamera {
+    /// Keep the original orbit exactly, rejecting only input changes that enter geometry.
+    /// Testing each control separately lets yaw/zoom continue when pitch hits the floor.
+    pub fn step_checked(
+        &mut self,
+        keys: ExternalKeys,
+        elapsed_ms: u32,
+        minimum: i32,
+        mut clear: impl FnMut(&Self) -> bool,
+    ) {
+        let mut proposed = *self;
+        proposed.step(keys, elapsed_ms, minimum);
+        if proposed == *self {
+            return;
+        }
+        if clear(&proposed) {
+            *self = proposed;
+            return;
+        }
+        for axis in 0..3 {
+            let mut candidate = *self;
+            match axis {
+                0 => candidate.yaw = proposed.yaw,
+                1 => candidate.pitch = proposed.pitch,
+                _ => candidate.distance = proposed.distance,
+            }
+            if candidate != *self && clear(&candidate) {
+                *self = candidate;
+            }
+        }
+    }
+
     /// FUNC_001056's external-view keys for one frame of `elapsed_ms`.
     /// `minimum` is the closest the camera may come: the ship model's descriptor
     /// radius word shifted by its scale + 8 (FUNC_001110).
@@ -205,6 +236,8 @@ impl ExternalCamera {
 pub struct MissileCamera {
     /// The missile object's position in flight units.
     pub position: [f64; 3],
+    /// The missile velocity in flight units per second.
+    pub velocity: [f64; 3],
     /// The missile's right, up and forward axes.
     pub axes: [[f64; 3]; 3],
     /// The missile model's eye words (descriptor `+0x18`/`+0x1a`).

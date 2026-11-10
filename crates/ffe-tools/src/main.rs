@@ -15,8 +15,6 @@ Usage:
   ffe-tools inspect-data --data <file> [--json]
   ffe-tools verify-reference --vectors <jsonl> --state <jsonl> [--json]
   ffe-tools model-census [--game <directory>] [--json]
-  ffe-tools inspect-ffed3d --dir <ffed3d folder> [--json]
-  ffe-tools build-assets [--assets <folder>] [--out <file>]
   ffe-tools --help
   ffe-tools --version
 
@@ -37,12 +35,6 @@ inspect-data verifies every entry. Bounded native command execution is not yet
 complete station rendering. Submodels, gameplay tables, the other 16 songs and full conversion remain absent.
 verify-reference compares fixed legacy RNG/timer vectors and bounded new-game
 clock transitions against native Rust primitives. It is not full flight validation.
-inspect-ffed3d reads every replacement model in your own FFED3D download (read-only)
-and reports what the game's Modern graphics would use.
-build-assets packs your replacements of FFED3D's art (default folder `assets`,
-beside the working directory, laid out as an FFED3D install: Textures/CABIN0.png,
-Textures/tex450.png, MODELS/<n>/...) into `assets.bin` for Modern graphics.
-It replaces an earlier assets.bin, and removes one when the folder is gone.
 model-census reports, read-only, how far each of the 465 original models gets
 through native import, decoding and execution, and what blocks the rest.
 ";
@@ -56,7 +48,6 @@ enum Command {
     InspectData,
     VerifyReference,
     ModelCensus,
-    InspectFfed3d,
 }
 
 struct Options {
@@ -94,8 +85,6 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
         Command::VerifyReference
     } else if command == "model-census" {
         Command::ModelCensus
-    } else if command == "inspect-ffed3d" {
-        Command::InspectFfed3d
     } else {
         return Err("Unknown command. Use --help for usage.".to_owned());
     };
@@ -148,9 +137,6 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
             } else {
                 state = Some(PathBuf::from(value));
             }
-        } else if arg == "--dir" && command == Command::InspectFfed3d && data.is_none() {
-            let value = args.next().ok_or("--dir requires a folder.")?;
-            data = Some(PathBuf::from(value));
         } else if arg == "--json" && !json {
             json = true;
         } else {
@@ -230,50 +216,7 @@ fn run() -> Result<u8, String> {
             .map_err(|error| error.to_string())?;
         return Ok(0);
     }
-    if args.first().is_some_and(|arg| arg == "build-assets") {
-        return build_assets(&args[1..], &mut output);
-    }
     let options = parse_options(args)?;
-    if options.command == Command::InspectFfed3d {
-        let dir = options
-            .data
-            .as_deref()
-            .ok_or("inspect-ffed3d requires --dir <folder>.")?;
-        let report = ffe_tools::ffed3d::inspect_ffed3d(dir)?;
-        if options.json {
-            serde_json::to_writer_pretty(&mut output, &report)
-                .map_err(|error| error.to_string())?;
-            writeln!(output).map_err(|error| error.to_string())?;
-        } else {
-            writeln!(
-                output,
-                "{}: {} of {} model folders readable",
-                report.models_dir,
-                report.readable,
-                report.models.len()
-            )
-            .map_err(|error| error.to_string())?;
-            for row in &report.models {
-                let status = match &row.error {
-                    Some(error) => format!("ERROR {error}"),
-                    None => format!(
-                        "{} triangles, {} materials, {} skins{}",
-                        row.triangles,
-                        row.materials,
-                        row.skins,
-                        if row.missing_skins.is_empty() {
-                            String::new()
-                        } else {
-                            format!(", missing {}", row.missing_skins.join(" "))
-                        }
-                    ),
-                };
-                writeln!(output, "  {:>4}  {status}", row.slot)
-                    .map_err(|error| error.to_string())?;
-            }
-        }
-        return Ok(0);
-    }
     if options.command == Command::ModelCensus {
         let census = ffe_tools::census::model_census(&options.game)?;
         if options.json {
@@ -376,81 +319,6 @@ Open index.html for previews and sizes.csv for UHD recommendations. No image res
     let report = inspect_game(&options.game)?;
     write_report(&mut output, &report, options.json)?;
     Ok(if report.inspection_passed { 0 } else { 1 })
-}
-
-/// `build-assets`: pack the export folder's high-definition images into
-/// `assets.bin` (written to a temporary file, then moved over the old one).
-fn build_assets(args: &[OsString], output: &mut impl Write) -> Result<u8, String> {
-    use ffe_content::art_pack::{build_pack, read_pack, FOLDER, PACK_FILE};
-    let mut folder = PathBuf::from(FOLDER);
-    let mut out = PathBuf::from(PACK_FILE);
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        let value = || -> Result<PathBuf, String> {
-            Err(format!("{} requires a path.", arg.to_string_lossy()))
-        };
-        if arg == "--assets" {
-            folder = args.next().map(PathBuf::from).map_or_else(value, Ok)?;
-        } else if arg == "--out" {
-            out = args.next().map(PathBuf::from).map_or_else(value, Ok)?;
-        } else {
-            return Err(format!(
-                "Unknown build-assets option {}.",
-                arg.to_string_lossy()
-            ));
-        }
-    }
-    if !folder.is_dir() {
-        // No export: an assets.bin built from one that is gone would still override.
-        if std::fs::read(&out).is_ok_and(|bytes| read_pack(&bytes).is_ok()) {
-            std::fs::remove_file(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-            writeln!(
-                output,
-                "build-assets: no {} folder; removed {}",
-                folder.display(),
-                out.display()
-            )
-            .map_err(|e| e.to_string())?;
-        } else {
-            writeln!(
-                output,
-                "build-assets: no {} folder; nothing to pack",
-                folder.display()
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        return Ok(0);
-    }
-    let (bytes, manifest) = build_pack(&folder)?;
-    if std::fs::read(&out).is_ok_and(|old| old == bytes) {
-        writeln!(
-            output,
-            "build-assets: {} is up to date ({} files)",
-            out.display(),
-            manifest.files.len()
-        )
-        .map_err(|e| e.to_string())?;
-        return Ok(0);
-    }
-    let temporary = out.with_extension("bin.tmp");
-    std::fs::write(&temporary, &bytes).map_err(|e| format!("{}: {e}", temporary.display()))?;
-    std::fs::rename(&temporary, &out).map_err(|e| format!("{}: {e}", out.display()))?;
-    writeln!(
-        output,
-        "build-assets: {} files ({} bytes) packed into {}",
-        manifest.files.len(),
-        bytes.len(),
-        out.display()
-    )
-    .map_err(|e| e.to_string())?;
-    for file in &manifest.files {
-        match file.image {
-            Some([width, height]) => writeln!(output, "  {} {width}x{height}", file.path),
-            None => writeln!(output, "  {}", file.path),
-        }
-        .map_err(|e| e.to_string())?;
-    }
-    Ok(0)
 }
 
 fn main() -> ExitCode {

@@ -54,6 +54,22 @@ v1 sin a): rot(C, A, yaw), then rot(B, C, pitch); with "Lock external view to
 ship" on, the camera is at ship + C' * dist / 256 with the rotated axes. (Lock
 off uses the unrotated C for the offset; its default is not established.)
 
+## External ground clearance (owner fix, 2026-11-05)
+
+Both graphics modes retain the original camera position, axes and orbit math.
+Before accepting an external-view input step, the proposed eye is tested
+against F576 terrain/station geometry and F650/F994's pad plane. A quarter
+metre margin covers collision quantisation at the visible floor.
+
+A blocked input component is rejected at the last valid yaw, pitch or zoom.
+Other valid components can still move, and reversing direction responds
+immediately: blocked pitch does not accumulate. There is no automatic lift,
+retargeting, orbital correction or render-time camera override. Clear input
+is identical to the previous camera. Ship physics and RNG are unchanged.
+Tests cover repeated blocked input, immediate reversal, yaw while pitch is
+blocked, unchanged clear movement, and Hope's actual pad (`FFE_WORLD_CACHE`).
+The boundary algorithm is not claimed as an executed-reference trace.
+
 ## Rear, turrets, overlay
 
 Rear negates A and C (a half turn about B) and mirrors the front eye offset
@@ -65,7 +81,7 @@ drawn in views 4 and 6, the velocity marker only in the front view.
 ## In ffe-rs
 
 Front, rear, turret, external and **missile** views, F1 cycle, F6-F10 and the
-console icons/hot areas are ported as above (external camera exact; "lock to
+console icons/hot areas are ported as above (external orbit math as above; "lock to
 ship" on). F10's missile view needs the fitted Missile Viewer and
 `player+0xef` (`DATA_008877`); the camera is the missile object itself
 (`ViewMode::Missile` + `ViewState::missile`, F1054's `JUMP_004340`), and F1102

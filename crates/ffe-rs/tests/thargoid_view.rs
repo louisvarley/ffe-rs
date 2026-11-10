@@ -198,7 +198,8 @@ fn a_thargoid_spawns_from_f690_and_dies_to_the_players_laser() {
     let mut shield_hit = false;
     let mut hull_hit = false;
     for frame in 0..1600 {
-        combat.tick(tics, dt);
+        let events = combat.second_events(tics);
+        combat.tick(tics, events);
         let Ok(shot) = combat.fire(0, tics) else {
             continue;
         };

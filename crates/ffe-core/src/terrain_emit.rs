@@ -271,7 +271,7 @@ fn pairs(queue: &mut Queue, at: usize, blend: &Blend, table: &[u32], count: usiz
 /// F1837: the screen position (a dword of two words) where the edge from `x` to
 /// `y` crosses sea level.
 fn crossing(t: &Terrain<'_>, x: usize, y: usize) -> u32 {
-    match project(crossing_point(t, x, y)) {
+    match project(t.to_view(crossing_point(t, x, y))) {
         Some([a, b]) => u32::from(a as u16) | u32::from(b as u16) << 16,
         None => 0,
     }
@@ -478,13 +478,8 @@ fn surface(
     let [a, b, c] = nodes;
     let mut mix = 0i32;
     if let Some(haze) = shading.atmosphere {
-        let node = t.node(a);
-        let mut distance = (node
-            .x()
-            .wrapping_abs()
-            .wrapping_add(node.y().wrapping_abs())
-            >> 3)
-            .wrapping_add(node.z());
+        let [x, y, z] = t.node_view(t.node(a));
+        let mut distance = (x.wrapping_abs().wrapping_add(y.wrapping_abs()) >> 3).wrapping_add(z);
         distance = if haze.offset != 0 {
             distance.wrapping_sub(haze.offset)
         } else {
@@ -501,9 +496,13 @@ fn surface(
         colour: shading.atmosphere.map_or(0, |haze| haze.colour),
     };
     let below = nodes.iter().filter(|n| height(**n) <= 0).count();
-    let flat = shading.detail < 0
-        || (key > 0x1fff_ffff && below == 3)
-        || (key > 0x7fff_ffff && height(a).wrapping_sub(height(c)) < 0x1fff_ffff);
+    // Preserve the sea material at every distance in Modern. The flat
+    // fallback carries only a lit palette colour, which is ambiguous on ice.
+    let explicit_sea = t.visual_detail && below > 0;
+    let flat = !explicit_sea
+        && (shading.detail < 0
+            || (key > 0x1fff_ffff && below == 3)
+            || (key > 0x7fff_ffff && height(a).wrapping_sub(height(c)) < 0x1fff_ffff));
     let (sa, sb, sc) = (screen(t, a), screen(t, b), screen(t, c));
     let (va, vb, vc) = (view(t, a), view(t, b), view(t, c));
     if flat {

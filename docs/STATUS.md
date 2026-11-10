@@ -1,8 +1,30 @@
 # Status and handoff
 
+## Two workstreams
+
+This checkout is **Classic only** (owner decision, 2026-11-10): a like-for-like
+reimplementation drawn the original's way. The Modern GPU engine, the FFED3D
+integration, `assets.bin` art packs, the launcher and the Enhanced/graphics-pack
+milestones were removed. [BURNDOWN.md](BURNDOWN.md) summarises what is left.
+
+| Workstream | Owns | Next work |
+|---|---|---|
+| **Game** | Shared simulation, controls, world data, collision, traffic, economy, missions and saves. | Verify the normal start, takeoff, flight, approach and docking loop against the original. Follow with autopilot and time acceleration, hyperspace, and save/resume. The parity audit below also tracks remaining economy, mission, combat and NPC behaviour. |
+| **Classic Engine** | Original software drawing, model fidelity, palette, cockpit and screen presentation. | Close the remaining terrain and clipping, model and effect, and whole-frame comparison gaps in [Original drawing](#7-original-drawing-classic). |
+
+Use the [burndown](../dashboard/burndown.js) for individual task status. The work
+list below is the November 4 handoff, with the Modern section dropped. Verify
+reopened tasks against current replay evidence before marking them complete.
+
+Classify a bug by what changed. A ship occupying a pad it cannot dock at is a
+Game bug if the simulation put it there; if the simulation has it in the right
+place and Classic draws it wrongly, fix the drawing. The Game track uses state
+and reference replays and Classic uses original frame comparisons.
+
 ## Work list to finish the game — 2026-11-04 (handoff)
 
-The burndown (`dashboard/burndown.js`) has 96 items open, 123 of 219 done. This
+The burndown (`dashboard/burndown.js`) had 96 items open, 123 of 219 done, on
+4 November; after the Classic-only split (10 November) it has 83 open of 202. This
 is the order to work them in, by burndown id. Every item is ported from
 `jjffe-master/ffe.asm` and checked against the executed original where a
 reference tool can do so; nothing is guessed. Each change updates the burndown
@@ -12,7 +34,11 @@ depends on them.
 
 ### 1. Parity blockers (the 2026-10-26 audit; P0 first)
 
-- **P0** `parity-01` fuel, shield and hull repair event units (F938/F929);
+- **P0** `parity-01` fuel, shield and hull repair event units (F938/F929;
+  F152's whole-second events now come from the day fraction and its marker,
+  checked against the executed original's `DATA_008808` on 10 November, and
+  no F938 while the autopilot flies (F1007's mode 2); the `+0x10e` countdown
+  and a full reserve trace remain);
   (`parity-02`, refuelling and fuel bookkeeping, and `parity-03`, the drive
   state, are done: 4 November);
   `parity-04` the complete takeoff handler (F1013) and same-frame mode order;
@@ -103,19 +129,13 @@ original; `v0.48-16` sprites, particles and circles; `v0.48-17` the last 17 of
 transitions; `ui-11` far/near transitions, clipping and planet approach;
 `ui-12` hit particles, explosions and debris.
 
-### 8. Modern graphics (FFED3D)
+### 8. Classic split cleanup
 
-The staged plan is `docs/notes/ffed3d-modern.md`: `enhanced-12` the DirectX 12
-window presented by the GPU (no read-back); `enhanced-10` FFED3D's space dust;
-`enhanced-7` the `.X` reader (start from `crates/ffe-convert/src/xfile.rs`);
-`enhanced-8` FFED3D's replacement models (placement, skins, sub-models, landing
-gear); `enhanced-9` FFED3D's panel and HUD; `enhanced-11` planets and
-atmospheres; `enhanced-13` effects and lighting; `enhanced-14` tuning side by
-side with FFED3D. Also open: `enhanced-1` native resolution, filtering and
-MSAA; `enhanced-3` atmosphere and shadows; `enhanced-4` HDR and temporal AA
-(deferred); `enhanced-5` frame and VRAM budgets; `packs-2` tying `assets.bin` to
-a game version; `packs-3` live Classic/Modern switching; `packs-4` proof that
-changing the art never changes gameplay.
+`classic-split-2`: the model executor and viewer still record side data that
+only the removed Modern engine read (`Solid` faces, atmosphere `Shell`s, plume
+and sprite records, surface view-space corners), and `ffe-core::terrain` keeps
+Modern-only radial-detail hooks. Classic output does not use them; remove them
+without changing a Classic frame.
 
 ### 9. Release
 

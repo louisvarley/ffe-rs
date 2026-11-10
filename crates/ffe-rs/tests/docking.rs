@@ -5,6 +5,7 @@ use ffe_rs::navigation::{Body, Kind};
 /// from the system origin.
 fn station() -> Body {
     Body {
+        system_type: 0,
         name: "Test Station".to_owned(),
         kind: Kind::Station,
         position: [2_000_000, 0, 0],

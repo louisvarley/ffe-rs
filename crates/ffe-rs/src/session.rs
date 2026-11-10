@@ -10,7 +10,8 @@
 //! `dt|width,height|active|down|pressed|repeated|mouse|buttons`, with keys by name
 //! (`Enter`, `A`, `LeftShift`), the mouse as `x,y` (or `-`) and the buttons as `L`/`R`.
 
-use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window};
+use crate::display::GameWindow;
+use minifb::{Key, KeyRepeat, MouseButton, MouseMode};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
@@ -75,7 +76,7 @@ pub struct Frame {
 
 impl Frame {
     /// The live window's input.
-    pub fn capture(window: &mut Window, dt: f64) -> Self {
+    pub fn capture(window: &mut GameWindow, dt: f64) -> Self {
         Frame {
             dt,
             size: window.get_size(),
@@ -339,7 +340,7 @@ impl Session {
     }
 
     /// This frame's input: the next recorded frame when replaying, else the window's.
-    pub fn frame(&mut self, window: &mut Window, dt: f64) -> Frame {
+    pub fn frame(&mut self, window: &mut GameWindow, dt: f64) -> Frame {
         self.frame_with(window, dt, |_| {})
     }
 
@@ -347,7 +348,7 @@ impl Session {
     /// recorded (the game controller's keys), so a replay sees them too.
     pub fn frame_with(
         &mut self,
-        window: &mut Window,
+        window: &mut GameWindow,
         dt: f64,
         live: impl FnOnce(&mut Frame),
     ) -> Frame {

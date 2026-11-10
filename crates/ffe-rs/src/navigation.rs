@@ -80,6 +80,8 @@ impl Kind {
 pub struct Body {
     pub name: String,
     pub kind: Kind,
+    /// Original system object type (record +0x0a).
+    pub system_type: u16,
     /// Position in the system frame (millimetres).
     pub position: [i64; 3],
     /// F595/F594 native velocity words in the parent frame.
@@ -592,11 +594,17 @@ fn system_bodies(list: &PhysList, system: &[u8], count: usize) -> Vec<Body> {
                     .unwrap(),
             ) as usize;
             let matrix = std::array::from_fn(|k| list.dword(parent_slot, 4 * k) as i32);
-            let (vector, shift) = ffe_core::frames::truncate(position, 0x1c);
-            position = ffe_core::frames::shift_up(
-                ffe_core::frames::vec_mat_mul(vector.map(|v| v as i32), &matrix),
-                shift,
-            );
+            position = if kind == Kind::Starport {
+                // A fixed surface site must not step around the terrain as
+                // the planet turns. Rotate its full offset before rounding.
+                rotate_surface_offset(position, &matrix)
+            } else {
+                let (vector, shift) = ffe_core::frames::truncate(position, 0x1c);
+                ffe_core::frames::shift_up(
+                    ffe_core::frames::vec_mat_mul(vector.map(|v| v as i32), &matrix),
+                    shift,
+                )
+            };
             rows = ffe_core::frames::mat_mat_mul(&rows, &matrix);
         }
         if parent != 0 {
@@ -624,6 +632,7 @@ fn system_bodies(list: &PhysList, system: &[u8], count: usize) -> Vec<Body> {
         out.push(Body {
             name: String::from_utf8_lossy(text).into_owned(),
             kind,
+            system_type: kind_code,
             position,
             velocity: std::array::from_fn(|k| list.dword(slot, 0x8c + 4 * k) as i32),
             radius,
@@ -650,6 +659,15 @@ fn system_bodies(list: &PhysList, system: &[u8], count: usize) -> Vec<Body> {
         });
     }
     out
+}
+
+fn rotate_surface_offset(offset: [i64; 3], rows: &[i32; 9]) -> [i64; 3] {
+    std::array::from_fn(|axis| {
+        (0..3)
+            .map(|k| offset[k] as f64 * (f64::from(rows[3 * k + axis]) / 2_147_483_648.0))
+            .sum::<f64>()
+            .round() as i64
+    })
 }
 
 /// A station in low orbit around a planet or moon, so a launch from it puts that
@@ -838,6 +856,140 @@ pub fn surface_radius(body: &Body, landed: bool) -> f64 {
         body.inner_radius
     };
     radius as f64 / UNITS_PER_FLIGHT_UNIT
+}
+
+/// Keep an external eye out of terrain and starport floors using F576's existing
+/// collision streams. This never edits a physics object, the orbit controls or game RNG.
+pub fn external_camera_is_clear(
+    camera: crate::camera::Camera,
+    target: [f64; 3],
+    nav: &Navigator,
+    tools: &SurfaceTools<'_>,
+) -> bool {
+    use ffe_core::surface::{Hull, Registers, Scene};
+    let bodies = &nav.bodies;
+    let unit = UNITS_PER_FLIGHT_UNIT;
+    // A quarter-metre rounding margin stops at the floor without raising the orbit.
+    let clearance = 250;
+    let target_mm = target.map(|v| (v * unit).round() as i64);
+    let orbit = camera
+        .position
+        .iter()
+        .zip(target)
+        .map(|(a, b)| (a - b).powi(2))
+        .sum::<f64>()
+        .sqrt()
+        * unit;
+    let candidates: Vec<_> = bodies
+        .iter()
+        .filter(|body| {
+            matches!(
+                body.kind,
+                Kind::Planet | Kind::Moon | Kind::Starport | Kind::Station
+            ) && distance(target_mm, body.position) <= body.radius as f64 + orbit + clearance as f64
+        })
+        .filter_map(|body| {
+            let model = tools.shapes.model(body.model)?;
+            Some((
+                body,
+                Hull::from_body(&landing_body(body, &model)),
+                tools.shapes.shape(body.model)?,
+            ))
+        })
+        .collect();
+    if candidates.is_empty() {
+        return true;
+    }
+    // A starport pad is a raised platform, not necessarily the terrain below it.
+    // Use F650/F994's pad placement as well as the collision stream, whose
+    // quantised/region faces can leave the camera just below the visible deck.
+    let pad = bodies
+        .iter()
+        .enumerate()
+        .filter(|(_, body)| {
+            body.kind == Kind::Starport
+                && distance(target_mm, body.position) <= body.radius as f64 + orbit
+        })
+        .min_by(|a, b| {
+            distance(target_mm, a.1.position).total_cmp(&distance(target_mm, b.1.position))
+        })
+        .and_then(|(index, body)| {
+            let bay = nav
+                .traffic
+                .get(&index)
+                .and_then(|port| port.bay_of(PLAYER))
+                .unwrap_or(0);
+            let up = [body.rows[3], body.rows[4], body.rows[5]];
+            nav.pads
+                .as_ref()?
+                .seat(
+                    body.position,
+                    body.model,
+                    bay,
+                    body.rows,
+                    body.open_air,
+                    0,
+                    up,
+                )
+                .ok()
+                .map(|point| (point.map(|v| v as f64 / unit), body.orientation[1]))
+        });
+    let probe = Hull {
+        index: 255,
+        parent: 0,
+        rotating: 0,
+        complex: false,
+        orientation: [i32::MAX, 0, 0, 0, i32::MAX, 0, 0, 0, i32::MAX],
+        outer: clearance,
+        inner: clearance,
+        seed: 0,
+        words: Vec::new(),
+    };
+    let probe_shape = Shape {
+        mesh: Mesh {
+            vertices: &[],
+            normals: &[],
+            scale: 0,
+            offset: 0,
+        },
+        stream: &[],
+        back: &[],
+    };
+    let mut terrain = ffe_core::terrain::Terrain::new(tools.terrain_table, tools.terrain_maps);
+    let position = camera.position;
+    if let Some((point, normal)) = pad {
+        let height: f64 = (0..3).map(|i| (position[i] - point[i]) * normal[i]).sum();
+        if height < clearance as f64 / unit {
+            return false;
+        }
+    }
+    let position = position.map(|v| (v * unit).round() as i64);
+    for (body, hull, shape) in &candidates {
+        if distance(position, body.position) > body.radius as f64 + clearance as f64 {
+            continue;
+        }
+        let mut scene = Scene {
+            terrain: &mut terrain,
+            shapes: tools.shapes,
+            detail: tools.detail,
+        };
+        let relative = std::array::from_fn(|i| position[i] - body.position[i]);
+        if scene
+            .hit(
+                &mut Registers::default(),
+                &probe,
+                &probe_shape,
+                hull,
+                shape,
+                relative,
+            )
+            .ok()
+            == Some(0)
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// F1100's target range text: the km form below its exponent threshold and the
@@ -1887,6 +2039,12 @@ fn dust_seed(code: u32) -> (u32, u32) {
     (code ^ 0x6d5f_1b00, code.rotate_left(13) ^ 0x00d0_5700)
 }
 
+/// Seconds of game time in day-fraction units (2^32 a day), as the clock's low
+/// word advances; at most a day's worth.
+pub fn clock_fraction_units(seconds: f64) -> u32 {
+    (seconds.clamp(0.0, 86_400.0) / 86_400.0 * 4_294_967_295.0) as u32
+}
+
 /// World seconds to the original's low/high clock words: fractional day first,
 /// then whole days (F880/F1509/F1510; one day is 2^32 low-word ticks).
 pub fn clock_words(seconds: f64) -> [u32; 2] {
@@ -2896,6 +3054,26 @@ impl Navigator {
     /// port's frame (`Pads::position`).
     pub fn starport_pad_point(&self, index: usize, bay: u16) -> Option<[i64; 3]> {
         self.pad_point(index, bay)
+    }
+
+    /// The same F650 pad, rotated in millimetres so it stays fixed on the port
+    /// throughout time acceleration.
+    pub fn precise_pad_point(&self, index: usize, bay: u16) -> Option<[i64; 3]> {
+        let port = self.bodies.get(index).filter(|body| body.open_air)?;
+        let pad = self.pads.as_ref()?.pad(port.model, bay).ok()?;
+        let offset = rotate_surface_offset(pad.map(|v| i64::from(v) << 10), &port.rows);
+        Some(std::array::from_fn(|axis| {
+            port.position[axis].wrapping_add(offset[axis])
+        }))
+    }
+
+    pub fn parked_pad_seat(&self, index: usize, radius: i64) -> Option<[i64; 3]> {
+        let port = self.bodies.get(index)?;
+        let bay = self.traffic.get(&index)?.bay_of(PLAYER)?;
+        let pad = self.precise_pad_point(index, bay)?;
+        Some(std::array::from_fn(|axis| {
+            pad[axis].wrapping_add((port.orientation[1][axis] * radius as f64).round() as i64)
+        }))
     }
 
     /// The nearest station or open-air starport within clearance range of
@@ -4316,6 +4494,7 @@ impl Navigator {
                 position: body.position,
                 radius: body.radius,
                 station: Some(index),
+                orbital_station: body.kind == Kind::Station,
             })
             .collect();
         // F688 draws from the shared pair (PAR-17).
@@ -5720,6 +5899,49 @@ impl Navigator {
                         self.drift[k] += list[t].position[k] - self.bodies[t].position[k];
                     }
                 }
+                let convoys: std::collections::HashSet<_> = self
+                    .ships
+                    .iter()
+                    .filter(|ship| {
+                        ship.role == npc::Role::Shuttle && ship.state == npc::State::Transit
+                    })
+                    .map(|ship| ship.id)
+                    .collect();
+                for ship in &mut self.ships {
+                    let parked = ship.role == npc::Role::Shuttle && ship.state == npc::State::Hold;
+                    let convoy = convoys.contains(&ship.id)
+                        || ship.leader.is_some_and(|leader| convoys.contains(&leader));
+                    if !parked && !convoy {
+                        continue;
+                    }
+                    let anchor = self.bodies.iter().position(|body| {
+                        body.kind == Kind::Station && body.position == ship.anchor
+                    });
+                    // F699's parked shuttles hold in their station's frame
+                    // (+0x56). The optional convoys leave a port in its local
+                    // frame while aiming at a different destination.
+                    let frame = if parked {
+                        anchor
+                    } else {
+                        self.bodies
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, body)| body.kind == Kind::Station)
+                            .map(|(index, body)| (index, distance(ship.position, body.position)))
+                            .filter(|(_, range)| *range <= STATION_FRAME)
+                            .min_by(|a, b| a.1.total_cmp(&b.1))
+                            .map(|(index, _)| index)
+                    };
+                    if let Some(index) = frame {
+                        for k in 0..3 {
+                            ship.position[k] +=
+                                list[index].position[k] - self.bodies[index].position[k];
+                        }
+                    }
+                    if let Some(index) = anchor {
+                        ship.anchor = list[index].position;
+                    }
+                }
                 self.bodies = list;
             }
         }
@@ -6977,6 +7199,61 @@ impl Navigator {
 
 #[cfg(test)]
 mod tests {
+    /// The inverse of a 3 by 3 matrix (rows), `None` when it is (nearly) singular.
+    fn invert(m: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
+        let cofactor = |r: usize, c: usize| {
+            let (r1, r2) = ((r + 1) % 3, (r + 2) % 3);
+            let (c1, c2) = ((c + 1) % 3, (c + 2) % 3);
+            m[r1][c1] * m[r2][c2] - m[r1][c2] * m[r2][c1]
+        };
+        let determinant = (0..3).map(|c| m[0][c] * cofactor(0, c)).sum::<f64>();
+        if determinant.is_nan() || determinant.abs() <= 1e-12 {
+            return None;
+        }
+        Some(std::array::from_fn(|r| {
+            std::array::from_fn(|c| cofactor(c, r) / determinant)
+        }))
+    }
+
+    #[test]
+    #[ignore = "Local-only: needs FFE_WORLD_CACHE"]
+    fn time_warp_keeps_the_parked_seat_fixed_to_the_ground() {
+        let bytes = std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap();
+        let cache = ffe_content::read(&bytes).unwrap();
+        for start in [0, 1] {
+            let mut nav = super::Navigator::new_game(&cache, start).unwrap();
+            let port = nav.docked.unwrap();
+            let planet = nav.bodies[port].parent.unwrap();
+            let eye = |nav: &super::Navigator| {
+                let body = &nav.bodies[planet];
+                let seat = nav.parked_pad_seat(port, 8000).unwrap();
+                let delta: [f64; 3] = std::array::from_fn(|k| (seat[k] - body.position[k]) as f64);
+                let inverse = invert(body.orientation).unwrap();
+                std::array::from_fn::<_, 3, _>(|k| {
+                    (0..3)
+                        .map(|axis| delta[axis] * inverse[axis][k])
+                        .sum::<f64>()
+                })
+            };
+            let initial = eye(&nav);
+            let mut drift = 0.0_f64;
+            for _ in 0..180 {
+                nav.advance(&cache, 200.0);
+                for (before, after) in initial.into_iter().zip(eye(&nav)) {
+                    drift = drift.max((before - after).abs());
+                }
+            }
+            eprintln!(
+                "{} maximum parked drift: {drift:.2} mm",
+                nav.bodies[planet].name
+            );
+            assert!(
+                drift < 5.0,
+                "parked eye moved {drift:.2} mm in the terrain frame"
+            );
+        }
+    }
+
     use super::*;
 
     /// F829/F832's default record (Gateway [-1,4], star 6, extra 8) gives the
@@ -7053,6 +7330,7 @@ mod tests {
         Body {
             name: format!("{kind:?}"),
             kind,
+            system_type: 0,
             position,
             velocity: [0; 3],
             radius: 1_000_000,

@@ -58,7 +58,7 @@ fn the_pulse_refire_heat_and_energy_gates_match_f931() {
     assert!(combat.fire(0, 994).is_ok());
     assert_eq!(combat.fire(0, 994), Err(ffe_core::laser::FireError::Refire));
     // F730 subtracts the frame time.
-    combat.tick(ffe_core::laser::PULSE_REFIRE as u32, 0.02);
+    combat.tick(ffe_core::laser::PULSE_REFIRE as u32, 0);
     assert!(combat.fire(0, 994).is_ok());
     // Heat above 0xf000 blocks; cooling brings it back.
     combat.refire = 0;
@@ -67,7 +67,8 @@ fn the_pulse_refire_heat_and_energy_gates_match_f931() {
         combat.fire(0, 994),
         Err(ffe_core::laser::FireError::Overheated)
     );
-    combat.tick(0, 100.0);
+    // 100 of F152's whole-second events of F938 cooling.
+    combat.tick(0, 100);
     assert_eq!(combat.heat, 0);
     // No energy blocks.
     combat.energy = 0;

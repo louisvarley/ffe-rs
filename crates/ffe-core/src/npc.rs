@@ -720,6 +720,8 @@ pub struct Anchor {
     /// `+0x100` destination in `Navigator::bodies` order), so a trader can ask
     /// for a bay there. `None` for a star or a plain orbit.
     pub station: Option<usize>,
+    /// Capital traffic uses orbital stations as landmarks.
+    pub orbital_station: bool,
 }
 
 /// The radius of the orbit a trader or shuttle holds around its anchor. The
@@ -1809,6 +1811,10 @@ impl NpcShip {
                 self.phase += (self.max_speed * 0.35 / self.orbit_radius.max(1.0)) * dt;
                 offset(self.anchor, self.phase, self.orbit_radius)
             }
+            State::Transit if self.role == Role::Shuttle && station.is_none() => {
+                let outward = away(self.position, self.anchor);
+                add(self.anchor, outward.map(|v| (v * self.orbit_radius) as i64))
+            }
             State::Transit => station.map_or(self.anchor, Station::bay_point),
             State::Approach => station.map_or(self.anchor, |station| {
                 station
@@ -2069,9 +2075,15 @@ impl NpcShip {
             // trader flying to, docked at or leaving a station, and a hostile
             // hunting the player. The original keeps every object until F927
             // needs its slot; the port only recycles idle ships far away.
-            // Police patrols stay too: they are the force a wanted player
-            // calls in.
-            _ if self.station.is_some() || self.hostile || self.role == Role::Police => false,
+            // Keep police patrols and capital convoys available across the
+            // system, including when the player starts on a surface pad.
+            _ if self.station.is_some()
+                || self.hostile
+                || matches!(self.role, Role::Police | Role::Shuttle)
+                || (self.role == Role::Military && self.leader.is_some()) =>
+            {
+                false
+            }
             _ => distance_between(self.position, player) > DESPAWN_RANGE,
         }
     }
@@ -3236,6 +3248,13 @@ pub fn spawn(
             position: player,
             radius: 1_000_000,
             station: None,
+            orbital_station: false,
+        });
+    let orbital_station = anchors
+        .iter()
+        .filter(|place| place.orbital_station)
+        .min_by(|a, b| {
+            distance_between(a.position, player).total_cmp(&distance_between(b.position, player))
         });
     let rolled = counts;
     if options.guarantee {
@@ -3329,19 +3348,19 @@ pub fn spawn(
         Some(ship)
     };
 
-    let spread = |rng: &mut Random, angle: f64, radius: f64| {
+    let spread = |centre: [i64; 3], rng: &mut Random, angle: f64, radius: f64| {
         let mut a = angle;
         a += (rng.bounded(16_384) as f64 / 16_384.0 - 0.5) * 0.8;
         let lift = (rng.bounded(1_000_000) as f64) / 1_000_000.0 * 0.4e6;
         [
-            anchor.position[0] + (a.cos() * radius) as i64,
-            anchor.position[1] + lift as i64,
-            anchor.position[2] + (a.sin() * radius) as i64,
+            centre[0] + (a.cos() * radius) as i64,
+            centre[1] + lift as i64,
+            centre[2] + (a.sin() * radius) as i64,
         ]
     };
 
     for i in 0..counts.traders {
-        let position = spread(rng, i as f64 * 2.1, orbit);
+        let position = spread(anchor.position, rng, i as f64 * 2.1, orbit);
         if let Some(mut ship) = add(Role::Trader, 1, position, anchor.position, rng) {
             // F689: a trader appears with `+0x100` set to a station and flies to
             // it; the port starts it on that station's docking cycle instead of
@@ -3411,24 +3430,32 @@ pub fn spawn(
         }
     }
     // Port addition (Advanced traffic): a convoy. A bulk carrier (F699's
-    // Lynx/LRC list) flies from the nearest place to another and holds
-    // there; two military escorts keep station in its frame.
-    if let Some(destination) = options
-        .advanced
-        .and_then(|_| {
-            all_places
-                .iter()
-                .find(|place| place.position != anchor.position)
-        })
-        .copied()
-    {
-        let toward = normalise(sub(destination.position, anchor.position));
-        let start = (anchor.radius as f64 + LANE_FAR).max(ANCHOR_ORBIT * 4.0);
-        let position = self::add(anchor.position, toward.map(|value| (value * start) as i64));
-        if let Some(mut carrier) = add(Role::Shuttle, 0xf, position, destination.position, rng) {
+    // Lynx/LRC list) flies between orbital stations and holds well clear of
+    // the destination. Two military escorts keep formation with the carrier.
+    let capital_orbit = |place: &Anchor, ship: &NpcShip| {
+        place.radius as f64 + LANE_FAR.max(2.0 * ship.radius as f64)
+    };
+    let convoy_route = options.advanced.and(orbital_station).and_then(|origin| {
+        all_places
+            .iter()
+            .find(|place| place.orbital_station && place.position != origin.position)
+            .map(|destination| (origin, destination))
+    });
+    if let Some((origin, destination)) = convoy_route {
+        let toward = normalise(sub(destination.position, origin.position));
+        if let Some(mut carrier) = add(
+            Role::Shuttle,
+            0xf,
+            origin.position,
+            destination.position,
+            rng,
+        ) {
+            let start = capital_orbit(origin, &carrier);
+            let position = self::add(origin.position, toward.map(|value| (value * start) as i64));
+            carrier.position = position;
             carrier.state = State::Transit;
             carrier.forward = toward;
-            carrier.orbit_radius = (destination.radius as f64 * 1.2).max(ANCHOR_ORBIT);
+            carrier.orbit_radius = capital_orbit(destination, &carrier);
             let leader = carrier.id;
             ships.push(carrier);
             for formation in [[600_000, 0, -500_000], [-600_000, 0, -500_000]] {
@@ -3447,7 +3474,7 @@ pub fn spawn(
     // the same anchor/orbit placement and departure timer, then calls script
     // event 0x17; the port starts them hostile (see `Role::hostile`).
     for i in 0..counts.thargoids {
-        let position = spread(rng, 1.0 + i as f64 * 2.1, orbit);
+        let position = spread(anchor.position, rng, 1.0 + i as f64 * 2.1, orbit);
         if let Some(ship) = add(Role::Thargoid, 0x11, position, anchor.position, rng) {
             ships.push(ship);
         }
@@ -3490,14 +3517,18 @@ pub fn spawn(
     // F699: F701 requires a station, F772(0xf) creates the aux trader, F702 puts
     // it on the 0x5000/0x18 orbit and state 0x0d is a hold row (no control or
     // movement routine). The source gives it no station target or dock request.
-    for i in 0..counts.aux_traders {
-        let position = spread(rng, 1.0 + i as f64 * 2.1, orbit * 0.8);
-        if let Some(ship) = add(Role::Shuttle, 0xf, position, anchor.position, rng) {
-            ships.push(ship);
+    if let Some(place) = orbital_station {
+        for i in 0..counts.aux_traders {
+            if let Some(mut ship) = add(Role::Shuttle, 0xf, place.position, place.position, rng) {
+                ship.orbit_radius = capital_orbit(place, &ship);
+                ship.position =
+                    spread(place.position, rng, 1.0 + i as f64 * 2.1, ship.orbit_radius);
+                ships.push(ship);
+            }
         }
     }
     for i in 0..counts.police {
-        let position = spread(rng, 2.6 + i as f64 * 2.1, orbit);
+        let position = spread(anchor.position, rng, 2.6 + i as f64 * 2.1, orbit);
         if let Some(ship) = add(Role::Police, 0xe, position, anchor.position, rng) {
             ships.push(ship);
         }
@@ -3527,7 +3558,12 @@ pub fn spawn(
             // The group lurks well outside the port's orbit, so a commander
             // on the pad is not beside it (the executed original's start pad
             // has no attacker); it comes for the player in flight.
-            spread(rng, 3.6 + i as f64 * 2.1, orbit + PIRATE_LURK)
+            spread(
+                anchor.position,
+                rng,
+                3.6 + i as f64 * 2.1,
+                orbit + PIRATE_LURK,
+            )
         };
         let holder = if options.near_player {
             player
@@ -3969,6 +4005,7 @@ mod tests {
                 position: [0, 0, 0],
                 radius: 2_000_000,
                 station: None,
+                orbital_station: false,
             }],
             &system(0),
             0,
@@ -4034,6 +4071,7 @@ mod tests {
                 position: [1_000_000, 0, 0],
                 radius: 4_500_000,
                 station: None,
+                orbital_station: false,
             }],
             &system(0),
             2,
@@ -4079,6 +4117,7 @@ mod tests {
                 position: [1_000_000, 0, 0],
                 radius: 4_500_000,
                 station: None,
+                orbital_station: false,
             }],
             &empty,
             0,
@@ -4096,6 +4135,7 @@ mod tests {
                 position: [1_000_000, 0, 0],
                 radius: 4_500_000,
                 station: None,
+                orbital_station: false,
             }],
             &empty,
             0,
@@ -4162,6 +4202,7 @@ mod tests {
             position: [1_000_000 + place as i64 * 2_000_000, 0, 0],
             radius: 4_500_000,
             station: Some(place),
+            orbital_station: true,
         }
     }
 
@@ -4416,6 +4457,7 @@ mod tests {
             position: [0, 0, 0],
             radius: 2_000_000,
             station: None,
+            orbital_station: false,
         };
         // The only source of the count is F35(0x16): zero spawns none.
         let mut rng = Random::new(0x2345_6789, 0x3456_789a);
@@ -4631,6 +4673,7 @@ mod tests {
                 position: [0, 0, 0],
                 radius: 2_000_000,
                 station: None,
+                orbital_station: false,
             }],
             &system(0),
             0,

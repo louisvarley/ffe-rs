@@ -1,7 +1,32 @@
 # Planetary rings: findings and hand-over (2026-10-28)
 
-Status: **fixed for rendered planets (2026-10-28); no frame capture yet.**
-Saturn's ring now draws. This note records the cause, the fix and what remains.
+## Modern GPU rings (2026-11-08)
+
+The game still selects ring child 314 and supplies its plane. Modern
+uses that placement to draw a thin disc with radial colour and opacity.
+The globe occludes the far side of the rings. The near side transmits the
+background according to viewing angle. The planet shadows the rings and the
+rings attenuate sunlight on the planet. The radial profile filters
+subpixel bands as the view zooms out.
+
+The icy profile follows Saturn's main ring boundaries and gap positions in
+planet radii. The finer strands are procedural, the F ring is widened for
+visibility, and the diffuse E ring is outside this profile. Other systems
+use dusty, narrow or icy presets selected from the original model and seed.
+The narrow profile is an approximation. [NASA Saturn ring fact sheet](https://nssdc.gsfc.nasa.gov/planetary/factsheet/satringfact.html)
+
+The cache-backed Saturn GPU test checks the radial contrast, both shadow
+directions and the original seed gate. Set `FFE_SHOT_DIR` to capture
+`saturn-rings.png` when running it.
+
+## Denser rings and planet tint (2026-11-09)
+
+The Ross 154 giant's dense, finely banded rings reach the outer ringlets at
+2.83 planetary radii, with divisions preserved between the bands. Modern
+tints the ring material with the giant's colour and the local star's light.
+The same radial opacity profile drives transmission and shadows. Its blue
+gas-giant model uses a greyscale FFED3D cloud map. Modern scales the tint
+channels together when the configured gain would otherwise clip them to white.
 
 ## How the original decides a ring
 

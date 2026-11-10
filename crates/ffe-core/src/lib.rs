@@ -3,6 +3,7 @@
 pub mod autopilot;
 pub mod bulletin;
 pub mod calendar;
+pub mod second_events;
 pub mod collision;
 pub mod dust;
 pub mod effects;

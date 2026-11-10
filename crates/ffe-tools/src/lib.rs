@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 pub mod cache;
 pub mod census;
 pub mod external;
-pub mod ffed3d;
 pub mod images;
 pub mod reference;
 

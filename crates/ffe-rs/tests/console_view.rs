@@ -326,11 +326,13 @@ fn the_gateway_places_frame_over_a_landing_view() {
     // Stand on the surface and look along the horizon, as a landing does.
     state.position = [centre[0], centre[1] + 1.01 * radius, centre[2]];
     screen.discs = vec![Disc {
+        system_type: None,
         centre,
         radius,
         light: [1.0, 0.0, 0.0],
         colours: (12, 4),
         star: false,
+        temperature: None,
         model: Some((planet.model, planet.seed)),
         orientation: planet.orientation,
     }];

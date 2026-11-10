@@ -9,6 +9,7 @@
 //! or save equipment in this port, so the new-game loadout is kept when the
 //! development ship list changes the hull.
 use ffe_core::laser::{self, FireError, LaserSpec, State};
+use ffe_core::second_events::SecondEvents;
 use serde::{Deserialize, Serialize};
 
 use crate::camera::{self, ViewMode};
@@ -43,9 +44,12 @@ pub struct Combat {
     /// modelled; always false in the port for now).
     #[serde(default)]
     pub cooling_booster: bool,
-    /// F938 applies whole seconds; the fraction is carried for the next frame.
+    /// F152's undispatched day-fraction advance (`DATA_008804 - DATA_008808`,
+    /// [`ffe_core::second_events`]): F938's whole-second events come from it.
+    /// It is part of the player block the original saves; saves from before it
+    /// load with nothing pending.
     #[serde(default)]
-    pub cool_carry: f64,
+    pub pending_events: u32,
 }
 
 impl Combat {
@@ -64,7 +68,7 @@ impl Combat {
             refire: 0,
             drive: 2,
             cooling_booster: false,
-            cool_carry: 0.0,
+            pending_events: ffe_core::second_events::NEW_GAME_PENDING,
         }
     }
 
@@ -119,26 +123,53 @@ impl Combat {
         result
     }
 
-    /// F730 and F938 for one frame: the refire countdown and the heat cooling.
-    /// `seconds` is accelerated world time; F938 takes whole seconds, so the
-    /// fraction is carried until it makes one. Returns the whole-second event
-    /// delta shared by F938 thrust consumption, shields and hull repair.
-    pub fn tick(&mut self, frame_tics: u32, seconds: f64) -> u32 {
+    /// F152 for one frame in which the game clock advanced by `tics`: the
+    /// whole-second events now due (event 6, F1007/F938). Call it once for
+    /// every frame the clock runs, whatever the ship is doing.
+    pub fn second_events(&mut self, tics: u32) -> u32 {
+        let mut events = SecondEvents::with_pending(self.pending_events);
+        let count = events.advance(tics);
+        self.pending_events = events.pending();
+        count
+    }
+
+    /// F208 selecting acceleration step `step`: a 10x..10000x step brings one
+    /// whole-second event forward.
+    pub fn select_acceleration(&mut self, step: usize) {
+        let mut events = SecondEvents::with_pending(self.pending_events);
+        events.select_acceleration(step);
+        self.pending_events = events.pending();
+    }
+
+    /// F730 and F938's laser part for one frame: the refire countdown over the
+    /// frame's `frame_tics` and the heat cooling for the `events` whole-second
+    /// events F152 dispatched this frame ([`Self::second_events`]).
+    pub fn tick(&mut self, frame_tics: u32, events: u32) {
         let mut state = self.state();
         laser::tick_refire(&mut state, frame_tics);
-        self.cool_carry += seconds.max(0.0);
-        let whole = self.cool_carry.floor();
-        if whole >= 1.0 {
-            laser::cool(&mut state, whole, self.cooling_booster);
-            self.cool_carry -= whole;
+        if events != 0 {
+            laser::cool(&mut state, f64::from(events), self.cooling_booster);
         }
         self.store(state);
-        whole as u32
     }
 
     /// F270's first gauge value.
     pub fn energy_gauge(&self) -> u32 {
         laser::energy_gauge(self.energy, self.drive)
+    }
+}
+
+/// F1007's share of F152's `events` for the player in mode `player_mode`
+/// (`+0xe8`): the events F938 applies (shield recharge, hull repair, laser
+/// cooling and F929's thrust energy). In mode 2, which F1020 sets when the
+/// autopilot engages, F1007 runs the autopilot's per-second arrival checks
+/// instead of F938 (`ffe.asm:74576`), so none are applied. The hull
+/// temperature (`+0x1ec`) cools before that test, in every mode.
+pub fn f938_events(events: u32, player_mode: u8) -> u32 {
+    if player_mode == ffe_core::traffic::state::AUTOPILOT {
+        0
+    } else {
+        events
     }
 }
 
@@ -358,7 +389,7 @@ mod tests {
         assert!(combat.fire(0, tics).is_ok());
         let mut frames = 0;
         while combat.refire != 0 {
-            combat.tick(tics, 1.0 / 60.0);
+            combat.tick(tics, 0);
             frames += 1;
             assert!(frames <= 39, "the refire word did not clear");
         }
@@ -371,11 +402,18 @@ mod tests {
         combat.refire = ffe_core::laser::PULSE_REFIRE;
         let mut frames = 0;
         while combat.refire != 0 {
-            combat.tick(tics, 10.0 / 60.0);
+            combat.tick(tics, 0);
             frames += 1;
             assert!(frames < 10);
         }
         assert_eq!(frames, 4);
+    }
+
+    #[test]
+    fn the_autopilot_mode_skips_f938() {
+        assert_eq!(f938_events(7, 0), 7);
+        assert_eq!(f938_events(7, ffe_core::traffic::state::AUTOPILOT), 0);
+        assert_eq!(f938_events(7, 0x26), 7);
     }
 
     #[test]
@@ -417,7 +455,7 @@ mod tests {
                 Err(ffe_core::laser::FireError::NoLaser)
             );
         }
-        combat.tick(laser::PULSE_REFIRE as u32, 0.02);
+        combat.tick(laser::PULSE_REFIRE as u32, 0);
         assert_eq!(combat.refire, 0);
         assert!(combat.fire(0, 994).is_ok());
     }

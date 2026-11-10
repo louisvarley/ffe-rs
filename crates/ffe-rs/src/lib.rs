@@ -1,6 +1,5 @@
 //! Experimental mechanics, plus the original flight model (`original_flight`), which
 //! runs the verified free-flight physics from `ffe-core`.
-pub mod art_source;
 pub mod audio;
 pub mod camera;
 pub mod combat;
@@ -12,7 +11,6 @@ pub mod death;
 pub mod display;
 pub mod docking;
 pub mod enhanced_combat;
-pub mod ffed3d;
 pub mod flight;
 pub mod front_end;
 pub mod galaxy_map;
@@ -28,9 +26,6 @@ pub mod messages;
 pub mod missile;
 pub mod model_lab;
 pub mod model_viewer;
-pub mod modern;
-pub mod modern3d;
-pub mod modern_art;
 pub mod navigation;
 pub mod original_flight;
 pub mod outfitting;

@@ -1,4 +1,5 @@
 use crate::read_bounded;
+use ffe_core::second_events::{SecondEvents, TICS_PER_EVENT};
 use ffe_core::{timer_delta, GameClock, RandomState, TimerCounters};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -57,6 +58,10 @@ struct StateRow {
     time_accel: u32,
     system_counter: u32,
     accel_counter: u32,
+    /// F152's marker `DATA_008808` (state +8); absent in traces from adapters
+    /// built before it was recorded.
+    #[serde(default)]
+    second_marker: Option<u32>,
     pixels_fnv1a64: String,
     palette_fnv1a64: String,
 }
@@ -70,6 +75,9 @@ pub struct ReferenceReport {
     pub timer_vectors: usize,
     pub state_frames: usize,
     pub game_clock_transitions: usize,
+    /// In-game frames whose F152 whole-second marker matched
+    /// [`ffe_core::second_events::SecondEvents`] (0 for a trace without it).
+    pub second_event_transitions: usize,
     pub new_game_frame: usize,
     pub vectors_sha256: String,
     pub state_sha256: String,
@@ -157,7 +165,7 @@ fn hash16(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn verify_state(bytes: &[u8]) -> Result<(usize, usize), String> {
+fn verify_state(bytes: &[u8]) -> Result<(usize, usize, usize), String> {
     let rows: Vec<StateRow> = parse_rows(bytes, STATE_FRAMES)?;
     let first = &rows[0];
     if first.game_tics != 0 || first.game_days != 0 || first.start_type != 0 {
@@ -165,6 +173,8 @@ fn verify_state(bytes: &[u8]) -> Result<(usize, usize), String> {
     }
     let mut new_game_frame = None;
     let mut checked = 0;
+    let mut second_checked = 0;
+    let mut second_dispatched = false;
     for (index, row) in rows.iter().enumerate() {
         if row.frame != index || !hash16(&row.pixels_fnv1a64) || !hash16(&row.palette_fnv1a64) {
             return Err(format!("state row {index}: invalid frame/hash"));
@@ -213,6 +223,20 @@ fn verify_state(bytes: &[u8]) -> Result<(usize, usize), String> {
                     return Err(format!("Rust game-clock mismatch at frame {index}"));
                 }
                 checked += 1;
+                // F152: the fraction's advance since DATA_008808 in whole 0xc22e
+                // events, the marker moving by exactly those events.
+                if let (Some(before), Some(after)) = (previous.second_marker, row.second_marker) {
+                    let mut events =
+                        SecondEvents::with_pending(previous.game_tics.wrapping_sub(before));
+                    let due = events.advance(row.game_tics.wrapping_sub(previous.game_tics));
+                    if events.pending() != row.game_tics.wrapping_sub(after)
+                        || after != before.wrapping_add(due.wrapping_mul(TICS_PER_EVENT))
+                    {
+                        return Err(format!("Rust F152 second-event mismatch at frame {index}"));
+                    }
+                    second_dispatched |= due != 0;
+                    second_checked += 1;
+                }
             }
         }
     }
@@ -226,19 +250,30 @@ fn verify_state(bytes: &[u8]) -> Result<(usize, usize), String> {
         return Err("state trace has no framebuffer/random-state activity".to_owned());
     }
     let new_game_frame = new_game_frame.ok_or("trace never entered the new game")?;
+    if second_checked != 0 {
+        // The new-game set-up leaves the marker at 0 against a fraction of
+        // 0x80000000: the 43,200-event dispatch is due or already made.
+        let marker = rows[new_game_frame].second_marker.unwrap_or(0);
+        if !(marker == 0 || marker == 43_200 * TICS_PER_EVENT)
+            || second_checked != checked
+            || !second_dispatched
+        {
+            return Err("F152's new-game marker does not match bounded-new-game-v1".to_owned());
+        }
+    }
     if checked != 238 {
         return Err(format!(
             "expected 238 in-game clock transitions, found {checked}"
         ));
     }
-    Ok((new_game_frame, checked))
+    Ok((new_game_frame, checked, second_checked))
 }
 
 /// Verifies the fixed scenarios; this cannot authenticate that an arbitrary
 /// supplied trace really came from the legacy executable.
 pub fn verify_trace_bytes(vectors: &[u8], state: &[u8]) -> Result<ReferenceReport, String> {
     verify_vectors(vectors)?;
-    let (new_game_frame, game_clock_transitions) = verify_state(state)?;
+    let (new_game_frame, game_clock_transitions, second_event_transitions) = verify_state(state)?;
     Ok(ReferenceReport {
         reference: "jjffe-2.8a7",
         numeric_adapter: "rng-timer-v1",
@@ -247,6 +282,7 @@ pub fn verify_trace_bytes(vectors: &[u8], state: &[u8]) -> Result<ReferenceRepor
         timer_vectors: 60,
         state_frames: STATE_FRAMES,
         game_clock_transitions,
+        second_event_transitions,
         new_game_frame,
         vectors_sha256: format!("{:x}", Sha256::digest(vectors)),
         state_sha256: format!("{:x}", Sha256::digest(state)),

@@ -892,6 +892,12 @@ fn branch_offset(code: u16, take: bool) -> Option<i32> {
     )
 }
 
+/// Resolve a visibility branch for a full-detail, view-independent layout.
+/// All normals are visible and the positive detail thresholds are in range.
+pub(crate) fn placement_branch(code: u16, operand: i16) -> Option<i32> {
+    branch_offset(code, (operand == 0) == (code & 31 == 11))
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct VisibilityContext<'a> {
     pub depth: i32,

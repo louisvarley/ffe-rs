@@ -7,6 +7,15 @@ on `main`; the earlier `claude/code-commit-capabilities-k4hm9l` history was
 fast-forwarded into it.
 Status: Rust inspection, embedded import, partial base cache and external export
 implemented; local JJFFE startup/new-game state and numeric traces verified.
+**Classic-only checkout (owner, 2026-11-10).** This repository is a copy whose
+aim is a like-for-like Rust reimplementation of the original game. The Modern GPU
+engine, the FFED3D integration, `assets.bin` art packs, the `ffe-launcher` and
+`ffe-render` crates and the Classic/Modern graphics switch were removed. The
+Enhanced renderer, graphics packs and modern-art sections below (sections 4-5,
+phases 6-7, Q9-Q13) are kept as the original project's history and are **out of
+scope** here; do not reintroduce them. The Classic/Modern *control* presets are
+input only and stay. What is left is in [docs/BURNDOWN.md](docs/BURNDOWN.md).
+
 **For the current state, the verified figures and the next tasks, read
 [docs/STATUS.md](docs/STATUS.md) first**: it is the handoff document and
 supersedes the status narrative below where they disagree. The rest of this
@@ -217,7 +226,7 @@ Keep source-data version independent from the JJFFE simulation baseline.
 The repository already contains a substantial Phase 0 proposal. Reuse
 [ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [RENDERING_DESIGN.md](docs/RENDERING_DESIGN.md),
-[FORMATS.md](docs/FORMATS.md), and [MODDING.md](docs/MODDING.md) as design inputs,
+[FORMATS.md](docs/FORMATS.md) and the (removed) modding design as design inputs,
 not proof that their features exist or were approved.
 
 [PHASE0_SUMMARY.md](docs/PHASE0_SUMMARY.md) reports a historical FFED3D study
@@ -502,7 +511,7 @@ shortcut that counts as completing the Rust simulation.
 | Q8 | Support supplied CD/floppy releases and patch states after fingerprint/layout validation. Do not trust folder names or assume CD differs only by videos. |
 | Q9 | Match original visuals closely/exactly first; enhancement is optional and later. |
 | Q10 | Live Classic/Enhanced switching required. Classic first-run default is the implementation choice. |
-| Q11 | Images first; meshes later. Superseded for Modern on 2026-11-04: Modern graphics use FFED3D's models, textures and shaders from a full local FFED3D install, drawn by the port's own engine; see `docs/notes/ffed3d-modern.md`. |
+| Q11 | Images first; meshes later. The 2026-11-04 Modern/FFED3D direction was removed with the Classic-only split on 2026-11-10. |
 | Q12 | Owner handles upscaling. Export all eligible images with a contact sheet, manifest/CSV and explicit recommended 4K sizes. |
 | Q13 | Implementation chooses order: native resolution, HD images, filtering, MSAA, modest bloom, then evaluate shadows/atmosphere. |
 | Q14 | Legacy save import is desired; native saves need not load in the old game. |

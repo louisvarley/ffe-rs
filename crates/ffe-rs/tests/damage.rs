@@ -378,25 +378,34 @@ fn recharge_does_not_revive_a_destroyed_ship_or_erase_damage() {
 
 #[test]
 fn f938_runtime_events_do_not_spend_physics_tics_as_seconds() {
-    // F152/F1007 deliver whole seconds; F938's Saker upward load is
-    // (28 * 3270) >> 9 = 178 per second. Physics still uses ~49700 tics/s.
-    for (fps, acceleration) in [(50, 1.0), (64, 1.0), (50, 10.0), (64, 10000.0)] {
+    // F152/F1007 deliver whole seconds (0xc22e day-fraction units each);
+    // F938's Saker upward load is (28 * 3270) >> 9 = 178 per second. The clock
+    // advances by F1418's accelerated tics: 994 per 20 ms at 1x (so a real
+    // minute is 59 events), and 10x..10000x are exact multiples of 0xc22e a
+    // second (`0x26d6` = 9,942 per 20 ms).
+    for (fps, step, expected) in [(50, 0, 59), (64, 0, 59), (50, 1, 600), (64, 4, 600_000)] {
         let mut flight = self::flight();
         flight.combat = ffe_rs::combat::Combat::new_game();
+        flight.combat.pending_events = 0;
         let start = flight.combat.energy;
+        let mut timer = ffe_core::FrameTimer::default();
         let mut seconds = 0;
+        let mut total_tics = 0u64;
         for _ in 0..fps * 60 {
-            let elapsed = 1.0 / f64::from(fps);
-            let event = flight.combat.tick(
-                ffe_rs::combat::frame_tics(elapsed, acceleration),
-                elapsed * acceleration,
+            let frame = timer.advance(
+                1.0 / f64::from(fps),
+                ffe_rs::console::TIME_ACCELERATION[step],
             );
+            total_tics += u64::from(frame.tics);
+            let event = flight.combat.second_events(frame.tics);
+            flight.combat.tick(frame.tics, event);
             seconds += event;
             if event != 0 {
                 assert!(!flight.spend_thrust_energy(event, 28, 3270));
             }
         }
-        assert!((f64::from(seconds) - 60.0 * acceleration).abs() <= 1.0);
+        assert_eq!(u64::from(seconds), total_tics / 0xc22e);
+        assert_eq!(seconds, expected, "{fps} fps, step {step}");
         assert_eq!(flight.combat.energy, start - 178 * seconds);
         assert!(!flight.damage.fuel_empty);
         assert!(!flight.damage.engine_failed);

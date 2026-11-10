@@ -1,5 +1,128 @@
 # Port log
 
+## 2026-11-10 — PAR-01: F152's whole-second events from the day fraction
+
+F938's events (shield recharge, hull repair, thrust energy, laser and hull
+cooling, through F151's event 6 and F1007) were counted from a floating
+carry of accelerated seconds at 49,700 tics each. The source's F152
+(`ffe.asm:15176`) divides the day fraction's advance since its marker,
+`DATA_008804 - DATA_008808`, by `0xc22e` and moves the marker by whole
+events. `ffe_core::second_events::SecondEvents` ports that arithmetic, and
+`Combat::pending_events` keeps the undispatched advance (saved with the ship
+state, as the marker is part of the player block F166/F167 write).
+
+- The marker follows the clock in every module (pad, stations, services,
+  hyperspace's clock step), not only in flight. The flight step applies the
+  events; elsewhere they are consumed, as before.
+- At 1x a real minute is now 59 events (2,982,000 units), not 60. The
+  10x..10000x words are exact multiples of `0xc22e` per second.
+- The new-game set-up leaves fraction `0x80000000` against marker 0, so the
+  first F152 dispatches 43,200 events at once, as the original does.
+- F208's 10x..10000x selection pulls the marker back by one event.
+- Old saves load with nothing pending.
+
+Evidence: unit tests for the arithmetic; `damage.rs` runs F1418's frame
+timer at 50/64 fps and 1x/10x/10000x and requires `total / 0xc22e` events.
+The `--state` adapter now prints `second_marker` (state `+8`) and
+`verify-reference` checks it against `SecondEvents` on every in-game frame,
+with tamper tests. Classic captures (start 150, traffic 7, game-over 35)
+are byte-identical to the previous build.
+
+F1007's mode-2 branch (`ffe.asm:74576`) is ported too: F1020 sets the
+player's `+0xe8` to 2 when the autopilot engages, and in that mode the
+per-second event runs the autopilot's arrival checks instead of F938. While
+the autopilot flies there is no shield recharge, hull repair, laser cooling or
+thrust-energy charge; the hull temperature still cools
+(`combat::f938_events`).
+
+The executed original confirms the marker: at the new-game frame it is 0
+against fraction `0x80000000`, on the next frame `0x7fffd280` (43,200 events),
+and all 238 in-game frames match `SecondEvents`. The full oracle suite gives 55
+passed, 1 skipped and 1 failed; the failure (`child-models` at depth
+`0x50000`, models 273 and 287) reproduces on the pre-split build.
+
+Open (recorded on PAR-01): F1007's `+0x10e` countdown and its mode-2 arrival
+checks (PAR-11); NPC event-6 handling (PAR-15); a full reserve trace from
+boot through climb, thrust, firing and 1x..10000x.
+
+## 2026-11-10 — Classic-only split
+
+Owner decision: this checkout is a like-for-like Classic reimplementation. The
+Modern GPU engine (`modern*.rs`, `modern3d`, `ffe-render`/wgpu), the FFED3D
+art, model and panel integration (`ffed3d.rs`, `art_source`, `ffe-convert`'s
+`.X` reader, `ffe-tools inspect-ffed3d`/`build-assets`, `ffe-content::art_pack`),
+the `ffe-launcher` crate and `launcher.bat` were removed, with the Graphics
+Classic/Modern row and the Home/Ctrl+G switch. `--ffed3d` and
+`saves/launcher.cfg` are no longer read; an old `graphics=` or `font=` line in
+`config.cfg` is ignored. The Classic/Modern control presets are input only and
+remain.
+
+Classic output is unchanged: the pre-split and post-split release builds wrote
+byte-identical frames for `--capture-intro` (13), `--capture-display` (7),
+`--capture-start` (150), `--capture-traffic` (7), `--capture-gameover` (35) and
+`--capture-planet` (1); `--capture-prefs` differs only on the Port Options page,
+which lost the Graphics row. 863 workspace tests pass; the two ignored
+`missile_view`/`scanner_view` failures reproduce on the pre-split build.
+The burndown dropped the packs and enhanced milestones (17 open items) and
+added `classic-split` (83 open of 202). See [BURNDOWN.md](BURNDOWN.md).
+
+
+## 2026-11-08 — Modern world rendering audit
+
+The [Modern worlds roadmap](MODERN_WORLDS.md) separates original game data
+and collision queries from Classic draw execution. Modern already streams
+indexed ground but still obtains shells and rings from model execution.
+FFED3D facility replacements also depend on executed root and child models.
+The plan moves both through a shared scene snapshot, then consolidates
+climate, biome, water and weather systems and removes the obsolete adapters.
+The locked release build and Hope departure replay passed. The replay
+compared 393 frames across Classic, Modern and four Ctrl+G switches.
+
+## 2026-11-05 — external-camera floor clearance in both engines
+
+The shared external-camera input step now rejects yaw, pitch or zoom changes
+that would put the eye into terrain or a pad floor. The original orbit,
+position and axes are used directly; the automatic lift/retarget correction
+was removed at the owner's request. Valid components can still move while
+another component is blocked. Tests cover unchanged clear movement, holding
+at the boundary without accumulating pitch, immediate reversal, and Hope's
+actual pad. Both renderers receive the same unmodified orbit camera.
+
+## 2026-11-04 — match the FFED3D cockpit reference
+
+Corrected the cockpit projection to the full viewport, 35-degree vertical
+field of view and aspect 2 from `doPerspectiveNear`/`ViewPort(false)`. The
+flight view's centre (160,79) had placed it too high; the cockpit uses
+(160,100). Removed the added rectangular control menu, cyan scanner,
+lever labels, horizontal gauges and message window. The scanner, indicator
+lamps, lever and gauges now draw FFED3D replacement PNGs using original
+placement metadata only. Clock/log text overlays the panel directly.
+Panel material colours and normals are retained, with selected-button
+green point lights using the source's positions, range and specular power.
+The configured HUD font stays selected. Classic rendering is unchanged.
+Regression coverage checks projection, material retention, light range and
+normals, UI picking at three sizes, and absence of classic framebuffer pixels.
+
+## 2026-11-04 — interactive modern dashboard
+
+The owner requested the modern console's buttons after the decorative mesh was
+disabled for overlapping the original dashboard. Modern now replaces rows
+158..199 with the FFED3D panel mesh and composites its four icon pages,
+equipment-dependent blanks and green selected states. Drawing and picking
+share a cached perspective-correct UV map. Actions still use the existing
+console dispatcher, with scanner/log regions blocked from hidden old row hits.
+The first layout compressed the panel and reused classic instrument pixels;
+the owner rejected it. The revised panel retains its original projection and
+proportions, with semantic modern systems/time controls, gauges, scanner and
+log. No classic dashboard bitmap, widget or framebuffer crop is drawn by
+the modern console pass. A poisoned-frame test checks that changing every
+old console pixel cannot change the modern result.
+Classic retains its original frame and input coordinates. Missing panel assets
+use a plain modern console, never the classic dashboard. No simulation or keyboard mappings change.
+The battle/navigation inset artwork remains deferred. Unit coverage exercises
+page/state changes, unavailable equipment, ghost hits and relocated ship/time
+actions; local asset-backed captures check flight/status at three window sizes.
+
 ## 2026-10-26 — F938 fuel timing correction (PAR-01/02 in progress)
 
 Live thrust/recharge now consume whole-second events shared with laser cooling,
@@ -4005,3 +4128,7 @@ without a complete FFED3D, and the game takes the folder as `--ffed3d`. The
 FFED3D source is cloned locally into `ffed3d-master/` from
 `github.com/corpsofengineers/ffed3d`. What FFED3D does and the staged plan:
 `docs/notes/ffed3d-modern.md`.
+
+## 2026-11-05: owner overrides and upscaled cockpit sheets
+
+Imported FFED3D art now resolves loose owner files, then packed owner files, then FFED3D, independently for each file. Panel/model meshes, skins and placement metadata share that resolver. Navigation/battle sheets and icon/void sheets sample native resolution with original normalized rectangles. Regressions cover stale packs, per-file fallback, imported mesh/skin/placement/panel overrides, non-integer upscales and source rectangles; actual owner navigation and battle sheets were captured in the dashboard harness.

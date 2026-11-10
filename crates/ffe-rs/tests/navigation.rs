@@ -1127,11 +1127,13 @@ fn planet_discs_are_drawn() {
     let radius = 6.371e9 / UNIT; // Earth, in flight units (mm / 9,700)
     let range = 4.0e10 / UNIT;
     screen.discs = vec![Disc {
+        system_type: None,
         centre: [0.0, 0.0, range],
         radius,
         light: [1.0, 0.0, 0.0],
         colours: (100, 101),
         star: false,
+        temperature: None,
         model: None,
         orientation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
     }];
@@ -1975,8 +1977,7 @@ fn autopilot_docks_at_stations_from_every_bearing() {
                 if docked {
                     eprintln!(
                         "{name} / {} / {label}: docked after {steps} steps ({pushes} pushes, clock {:.0})",
-                        nav.bodies[index].name,
-                        nav.clock
+                        nav.bodies[index].name, nav.clock
                     );
                 }
                 assert!(
@@ -2106,6 +2107,7 @@ fn shot(
         .iter()
         .filter(|b| matches!(b.kind, Kind::Station | Kind::Starport))
         .map(|b| ffe_rs::screen::SystemStation {
+            surface: None,
             model: b.model,
             centre: b.position.map(|v| v as f64 / UNIT),
             orientation: b.orientation,
@@ -2556,6 +2558,7 @@ fn locking_and_engaging_a_target() {
 #[test]
 fn the_place_list_is_stations_and_starports_in_system_order() {
     let body = |name: &str, kind: Kind| Body {
+        system_type: 0,
         name: name.to_owned(),
         kind,
         position: [0; 3],

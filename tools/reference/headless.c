@@ -1163,10 +1163,10 @@ void TimerFrameUpdate(void)
                 }
             }
         }
-        printf("{\"frame\":%lu,\"clock_ms\":%lu,\"game_tics\":%lu,\"game_days\":%lu,\"rng_a\":%lu,\"rng_b\":%lu,\"player_state\":%u,\"player_index\":%lu,\"cash\":%lu,\"start_type\":%lu,\"time_accel\":%lu,\"system_counter\":%lu,\"accel_counter\":%lu,\"pixels_fnv1a64\":\"%016llx\",\"palette_fnv1a64\":\"%016llx\"}\n",
+        printf("{\"frame\":%lu,\"clock_ms\":%lu,\"game_tics\":%lu,\"game_days\":%lu,\"rng_a\":%lu,\"rng_b\":%lu,\"player_state\":%u,\"player_index\":%lu,\"cash\":%lu,\"start_type\":%lu,\"time_accel\":%lu,\"system_counter\":%lu,\"accel_counter\":%lu,\"second_marker\":%lu,\"pixels_fnv1a64\":\"%016llx\",\"palette_fnv1a64\":\"%016llx\"}\n",
             frames, milliseconds, state_u32(0), state_u32(4), state_u32(0x24), state_u32(0x28),
             (unsigned)ref_state[0xe8], state_u32(0xc0), state_u32(0x114), state_u32(0xfa),
-            ref_time_accel, ref_system_counter, ref_accel_counter,
+            ref_time_accel, ref_system_counter, ref_accel_counter, state_u32(8),
             (unsigned long long)fingerprint(pixels, sizeof(pixels)),
             (unsigned long long)fingerprint(palette, sizeof(palette)));
     } else {

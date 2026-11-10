@@ -28,11 +28,23 @@ legacy/ffed3d-master/
 /upscaled/
 /extracted/
 /img-export/
-# The owner's images for Modern graphics and the pack built from them (never committed).
-/assets/
+# The owner's images and the local asset pack. Only the CC0 project materials are tracked.
+/assets/*
+!/assets/Materials/
+/assets/Materials/*
+!/assets/Materials/README.md
+!/assets/Materials/lift-metal-*.png
+!/assets/Materials/pad-concrete-*.png
+!/assets/Materials/forest-floor-*.png
+!/assets/Materials/beach-sand-*.png
+!/assets/Materials/snow-*.png
+!/assets/Materials/rock-*.png
+!/assets/Materials/port-grass-*.png
+!/assets/Materials/port-pavers-*.png
 /assets.bin
 /assets.bin.tmp
 /assets-old/
+/found_assets/
 /assets-old/
 /saves/
 *upscaled/working/

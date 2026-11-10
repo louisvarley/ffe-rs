@@ -309,7 +309,8 @@ pub fn board(state: &mut Flight, craft: EscapeCraft, stats: Option<&ShipStats>) 
         refire: 0,
         drive: craft.drive(stats, old_drive),
         cooling_booster: false,
-        cool_carry: 0.0,
+        // F152's marker belongs to the clock, not the ship.
+        pending_events: state.combat.pending_events,
     };
     state.loadout.drive = state.combat.drive;
     // F1533 clears both shield words; the new hull is model mass * 4.

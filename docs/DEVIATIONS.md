@@ -125,6 +125,11 @@ The following are intended corrections of FFED3D-only presentation back to DOS:
 
 ## 3. Presentation — Enhanced (opt-in, off by default)
 
+> **Removed in this Classic-only checkout (2026-11-10).** The Modern engine that
+> implemented the rows below, its Classic/Modern switch (ENH-021) and the
+> `assets.bin`/FFED3D art paths were deleted. The rows are kept as the original
+> project's record; none of them is present or planned here.
+
 All rows are **presentation-only**, off by default, switchable at runtime, and never feed the simulation. They are **not** deviations when off; they are documented here because they intentionally change the look when on. The master button covers all of these except where noted.
 
 | ID | Feature | Status | Dependencies / notes |
@@ -150,6 +155,11 @@ All rows are **presentation-only**, off by default, switchable at runtime, and n
 | ENH-018 | Frame interpolation | proposed | Continuous transforms only; no event interpolation. |
 | ENH-019 | Master button (all presentation-only on/off) | proposed | Never touches §4. |
 | ENH-020 | Reset to Classic | proposed | Master off + selection cleared. |
+| ENH-022 | Animated water and inland drainage | Modern water implemented, inland drainage in preview | The GPU renders waves, surf, tides, and sun and moon glints. Streamed Modern terrain draws cached regional river ribbons. Lake fill is a preview on the Classic-derived terrain path. See the [Modern worlds roadmap](MODERN_WORLDS.md). |
+| ENH-023 | Procedural woodland, shrubs, succulents and rock scatter | Modern presentation implemented | Planet-fixed woodland patches select and place generated props on the rendered terrain. Mesh detail and density fall with distance. These props are visual scenery. |
+| ENH-024 | Procedural building lights | Modern presentation implemented | Outdoor starport models get facade windows that fade in around sunset and red warning beacons on tall roofs. Authored emission maps take precedence over procedural windows. |
+| ENH-025 | Banded planetary rings | Modern presentation implemented | The original ring selection and plane drive a translucent radial profile with mutual shadows between the rings and the globe. See the [ring implementation notes](notes/rings.md). |
+| ENH-026 | Direct facility rendering | Modern presentation implemented | Live station, lift and starport views use FFED3D parts and procedural fallbacks positioned from original gameplay data. Missing hulls and settlements use approximate silhouettes. See the [facility coverage](notes/modern-stations.md). |
 
 Every implemented ENH row must have an “off equals Classic” test and an explicit
 capability/error path. None may change the simulation. Live switching and
@@ -326,3 +336,14 @@ the old drive's `DATA_007210` mass less class 1's 4 t. The Rubbish and the
 drive class are the source's. Tested by
 `flight::tests::a_misjump_leaves_class_1_and_the_records_mass_less_4`.
 
+
+## 2026-11-05 — external-camera ground boundary (owner requested, implemented)
+
+Both graphics modes reject external-camera input components that would put
+the eye into terrain or a pad floor, using the existing collision streams
+and pad placement data. A quarter metre margin covers quantisation. Clear
+movement retains the previous orbit exactly; there is no automatic camera
+lift, retargeting or corrected render position. Ship physics and RNG are
+unchanged. The owner requested the original's no-floor-clipping behaviour;
+the boundary guard is regression-tested but not claimed as an executed
+reference camera routine.
