@@ -24,15 +24,15 @@ window.FFE_BURNDOWN = {
       status: "planned",
       tasks: [
         {"id": "parity-01", "title": "[P0] Repair F938/F929 event units for fuel, shields and hull repair", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-01"},
-        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
+        {"id": "parity-02", "title": "[P0] Make reserve refuelling and cargo fuel bookkeeping match F929/F903", "status": "done", "version": "source-audit", "priority": "P0", "auditId": "PAR-02"},
         {"id": "parity-03", "title": "[P0] Use one authoritative fitted-drive and failure state", "status": "done", "version": "source-audit", "priority": "P0", "auditId": "PAR-03"},
         {"id": "parity-04", "title": "[P0] Translate the complete F1013 takeoff handler and same-frame mode order", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-04"},
         {"id": "parity-05", "title": "[P0] Replace launch altitude substitution and collision grace with source frame/contact rules", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-05"},
-        {"id": "parity-06", "title": "[P0] Verify original set-speed controls, input gates and speed persistence end to end", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-06"},
+        {"id": "parity-06", "title": "[P0] Verify original set-speed controls, input gates and speed persistence end to end", "status": "done", "version": "source-audit", "priority": "P0", "auditId": "PAR-06"},
         {"id": "parity-07", "title": "[P0] Match the original Hope starting state and cockpit view to the supplied image", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-07"},
         {"id": "parity-08", "title": "[P0] Restore the complete third-person player explosion before GAME OVER", "status": "in-progress", "version": "source-audit", "priority": "P0", "auditId": "PAR-08"},
-        {"id": "parity-09", "title": "[P1] Replace orbital docking corridor tests and harmless pushes with source contacts", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-09"},
-        {"id": "parity-10", "title": "[P1] Use original indoor departure placement and moving lift/door state", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-10"},
+        {"id": "parity-09", "title": "[P1] Replace orbital docking corridor tests and harmless pushes with source contacts", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-09"},
+        {"id": "parity-10", "title": "[P1] Use original indoor departure placement and moving lift/door state", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-10"},
         {"id": "parity-11", "title": "[P1] Complete source autopilot world and target adapters", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-11"},
         {"id": "parity-12", "title": "[P1] Unify source event clocks, time acceleration and physical integration", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-12"},
         {"id": "parity-13", "title": "[P1] Complete hyperjump initiation, transit, misjump and source arrival", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-13"},
@@ -1346,6 +1346,16 @@ window.FFE_BURNDOWN = {
       date: "2026-11-10",
       remaining: 82,
       note: "Progress without closures: PAR-04 frame-by-frame takeoff replay and F650's pad seat; F1014 atmospheric drag and heating (PAR-04, PAR-14); PAR-06 keyboard timing for set speed (DATA_007690, right Shift only) replayed against the original; fixed the orbital-station launch blocked after an autopilot docking."
+    },
+    {
+      date: "2026-11-10",
+      remaining: 81,
+      note: "parity-06 done: F1037 runs only while the flight module shows (not under the F2 status screen or the map), and a recorded-input chain test covers the release gate, fresh and held keys, right Shift's stop at zero, reverse, engines off and save/reload, alongside the executed keyboard and takeoff replays."
+    },
+    {
+      date: "2026-11-10",
+      remaining: 80,
+      note: "Reconciled with docs/audits/gameplay-parity-work-items.json: parity-02 (refuelling and fuel bookkeeping) was finished on 2026-11-04 but still listed in progress; parity-09 (station docking contacts) and parity-10 (indoor departure placement) have had source work since 2026-11-02 and move from todo to in progress."
     }
   ]
 };

@@ -990,6 +990,15 @@ impl OriginalFlight {
         )
     }
 
+    /// Whether the flight module is the one showing (`DATA_008630 < 0`: F1003
+    /// sets 0xff, F1006 sets 0x7f when another module such as the map or the
+    /// status screen takes over). While it is not, F1037 runs neither the
+    /// set-speed keys nor F1038's steering; the keyboard accumulators keep
+    /// counting, as the original's input read and `Timer50Hz` do.
+    pub fn set_flight_view(&mut self, active: bool) {
+        self.player.active = active;
+    }
+
     /// One frame of `elapsed` seconds with `keys` held: F1037/F1038 then F1041,
     /// F601/F602 and F1512 over the elapsed time in the original's units.
     pub fn step(&mut self, elapsed: f64, keys: &Keys) -> Result<(), String> {
@@ -1441,6 +1450,102 @@ mod tests {
             * MM_PER_SECOND
             / 1000.0;
         assert!(speed < start * 0.2, "{speed} m/s after halt from {start}");
+    }
+
+    /// F1037 with the engines off (`+0xe9` bit 0, F1056's action 9): the
+    /// set-speed keys are skipped (`jnz JUMP_004289`) but F1038 still steers.
+    #[test]
+    fn engines_off_skips_the_set_speed_keys_but_still_steers() {
+        let state = Flight {
+            mode: Mode::Flight,
+            set_speed: Some(500_000),
+            ..Flight::default()
+        };
+        let mut flight = OriginalFlight::from_flight(&state, None);
+        flight.set_engines_on(false);
+        let orientation = flight.player().motion.orientation;
+        for keys in [
+            Keys {
+                faster: true,
+                pitch_up: true,
+                scancodes: [0x1cu8, 0x1e].into_iter().collect(),
+                ..Keys::default()
+            },
+            Keys {
+                slower: true,
+                pitch_up: true,
+                scancodes: [0x36u8, 0x1e].into_iter().collect(),
+                ..Keys::default()
+            },
+        ] {
+            for _ in 0..50 {
+                flight.step(0.02, &keys).unwrap();
+            }
+            assert_eq!(flight.set_speed_units(), 500_000);
+        }
+        assert_ne!(
+            flight.player().motion.orientation,
+            orientation,
+            "F1038 steered"
+        );
+        flight.set_engines_on(true);
+        let faster = Keys {
+            faster: true,
+            scancodes: [0x1cu8].into_iter().collect(),
+            ..Keys::default()
+        };
+        flight.step(0.02, &faster).unwrap();
+        assert!(flight.set_speed_units() > 500_000);
+    }
+
+    /// F1037 returns at once while `DATA_008630 >= 0` (F1006: another module
+    /// is showing): Return, right Shift and the steering keys change nothing,
+    /// and the slow-down latch (`+0xe9` bit 7) is not cleared as a frame with
+    /// right Shift up would clear it. Back in the flight view the keys work.
+    #[test]
+    fn another_module_showing_stops_the_set_speed_and_steering_keys() {
+        let state = Flight {
+            mode: Mode::Flight,
+            set_speed: Some(1_000_000),
+            ..Flight::default()
+        };
+        let mut flight = OriginalFlight::from_flight(&state, None);
+        // Right Shift held down to zero sets the latch.
+        let slower = Keys {
+            slower: true,
+            scancodes: [0x36u8].into_iter().collect(),
+            ..Keys::default()
+        };
+        for _ in 0..400 {
+            flight.step(0.02, &slower).unwrap();
+            if flight.set_speed_units() == 0 {
+                break;
+            }
+        }
+        assert_eq!(flight.set_speed_units(), 0);
+        assert_ne!(flight.player().flags & 0x80, 0, "latched at zero");
+        let orientation = flight.player().motion.orientation;
+        flight.set_flight_view(false);
+        let busy = Keys {
+            faster: true,
+            pitch_up: true,
+            left: true,
+            scancodes: [0x1cu8, 0x1e, 0x33].into_iter().collect(),
+            ..Keys::default()
+        };
+        for _ in 0..50 {
+            flight.step(0.02, &busy).unwrap();
+        }
+        assert_eq!(flight.set_speed_units(), 0, "no set-speed change");
+        assert_ne!(flight.player().flags & 0x80, 0, "latch untouched");
+        assert_eq!(
+            flight.player().motion.orientation,
+            orientation,
+            "no steering"
+        );
+        flight.set_flight_view(true);
+        flight.step(0.02, &busy).unwrap();
+        assert!(flight.set_speed_units() > 0, "Return works again");
     }
 }
 

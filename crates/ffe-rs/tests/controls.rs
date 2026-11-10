@@ -141,3 +141,141 @@ fn screen() -> Screen {
     }
     Screen::from_assets(&bytes, &font, panel, palette).unwrap()
 }
+
+/// PAR-06's key chain, from recorded input lines (`--record`'s format) to the
+/// ship's speed, the way the game loop runs it each frame: the release gate
+/// (`HeldControls`, EXP-003), the Classic preset's mapping, F1006's module
+/// gate (`input::flight_module_active`), F1037/F1121's set speed and the
+/// thrust it gives. A key held through the intro, or through the F2 status
+/// screen, must be released and pressed again; while the status screen shows
+/// F1037 does not run; right Shift stops at zero until it is pressed again;
+/// the selected speed survives a save and reload.
+#[test]
+fn a_recorded_classic_session_drives_the_set_speed_through_every_gate() {
+    use ffe_rs::navigation::View as Map;
+    use ffe_rs::original_flight::OriginalFlight;
+    use ffe_rs::session::Frame;
+
+    struct Game {
+        held: input::HeldControls,
+        status: bool,
+        model: OriginalFlight,
+    }
+    impl Game {
+        fn frame(&mut self, down: &[Key], pressed: &[Key]) {
+            let names = |keys: &[Key]| {
+                if keys.is_empty() {
+                    "-".to_owned()
+                } else {
+                    keys.iter()
+                        .map(|key| format!("{key:?}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                }
+            };
+            let line = format!(
+                "0.020000|1280,960|1|{}|{}|-|-|-",
+                names(down),
+                names(pressed)
+            );
+            let frame = Frame::parse(&line).unwrap();
+            self.held.update(&frame.down, &frame.pressed, true);
+            // F2 opens the status screen (module 0x0e) and disarms; F1 closes it.
+            if frame.pressed.contains(&Key::F2) {
+                self.status = true;
+                self.held.disarm(&frame.down);
+            } else if frame.pressed.contains(&Key::F1) {
+                self.status = false;
+            }
+            self.model
+                .set_flight_view(input::flight_module_active(self.status, Map::Closed));
+            let keys = input::original_keys(
+                Preset::Classic,
+                View::Ship,
+                self.held.keys(),
+                input::MouseAccumulator::default(),
+                false,
+                [false; 2],
+            );
+            self.model.step(frame.dt, &keys).unwrap();
+        }
+        fn hold(&mut self, keys: &[Key], frames: usize) {
+            for index in 0..frames {
+                let pressed: &[Key] = if index == 0 { keys } else { &[] };
+                self.frame(keys, pressed);
+            }
+        }
+        fn speed(&self) -> i32 {
+            self.model.set_speed_units()
+        }
+    }
+
+    let state = Flight {
+        mode: ffe_rs::flight::Mode::Flight,
+        set_speed: Some(0),
+        ..Flight::default()
+    };
+    let mut game = Game {
+        held: input::HeldControls::default(),
+        status: false,
+        model: OriginalFlight::from_flight(&state, None),
+    };
+    // Return held from the intro: the loop disarms the keys down at entry.
+    game.held.disarm(&[Key::Enter]);
+    for _ in 0..25 {
+        game.frame(&[Key::Enter], &[]);
+    }
+    assert_eq!(game.speed(), 0, "a key held through the intro does nothing");
+    game.hold(&[], 5);
+    // A fresh Return raises the set speed; F1121's held-key scale speeds it up.
+    game.hold(&[Key::Enter], 100);
+    let raised = game.speed();
+    assert!(raised > 0, "{raised}");
+    let velocity = game.model.player().motion.velocity;
+    assert!(velocity.iter().any(|v| *v != 0), "thrust moved the ship");
+    // F2 with Return still down: the status screen, no F1037.
+    game.frame(&[Key::Enter, Key::F2], &[Key::F2]);
+    game.hold(&[Key::Enter], 50);
+    assert_eq!(game.speed(), raised, "no set speed under the status screen");
+    // A fresh Return there is armed by the gate but F1037 does not run.
+    game.hold(&[], 5);
+    game.hold(&[Key::Enter], 50);
+    assert_eq!(
+        game.speed(),
+        raised,
+        "F1006: the flight module is not showing"
+    );
+    game.hold(&[Key::Enter], 1);
+    // F1 back to the flight view: Return works again at once.
+    game.frame(&[Key::Enter, Key::F1], &[Key::F1]);
+    game.hold(&[Key::Enter], 2);
+    assert!(
+        game.speed() > raised,
+        "the flight module reads Return again"
+    );
+    game.hold(&[], 10);
+    // Right Shift lowers it to zero and stops there (`+0xe9` bit 7)...
+    game.hold(&[Key::RightShift], 400);
+    assert_eq!(game.speed(), 0, "stopped at zero");
+    // ...left Shift does nothing...
+    game.hold(&[], 5);
+    game.hold(&[Key::LeftShift], 50);
+    assert_eq!(game.speed(), 0, "left Shift is not the slow-down key");
+    // ...and a new right Shift press goes below zero (reverse).
+    game.hold(&[], 5);
+    game.hold(&[Key::RightShift], 50);
+    let reverse = game.speed();
+    assert!(reverse < 0, "{reverse}");
+    // A save and reload keep the selected speed.
+    let mut saved = Flight {
+        mode: ffe_rs::flight::Mode::Flight,
+        ..Flight::default()
+    };
+    game.model.apply(&mut saved);
+    let bytes = ffe_rs::saves::encode_game(&ffe_rs::saves::SaveGame::from_flight(&saved)).unwrap();
+    let loaded = ffe_rs::saves::decode_game(&bytes).unwrap().state;
+    assert_eq!(
+        OriginalFlight::from_flight(&loaded, None).set_speed_units(),
+        reverse
+    );
+}

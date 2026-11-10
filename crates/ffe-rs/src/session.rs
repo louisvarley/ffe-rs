@@ -192,7 +192,8 @@ impl Frame {
         )
     }
 
-    fn parse(line: &str) -> Result<Self, String> {
+    /// One recorded frame line (the format [`Session`] writes).
+    pub fn parse(line: &str) -> Result<Self, String> {
         let parts: Vec<&str> = line.split('|').collect();
         if parts.len() != 8 {
             return Err(format!("expected 8 fields, found {}", parts.len()));

@@ -1,5 +1,31 @@
 # Port log
 
+## 2026-11-10 — PAR-06 done: F1037's module gate and the recorded key chain
+
+F1037 starts `cmp byte [DATA_008630],0x0; jnl` and returns: the set-speed keys
+and F1038's steering run only while the flight module is active. F1003 sets
+`DATA_008630` to 0xff; F1006 (the flight module's leave entry in
+`DATA_007254`) sets 0x7f when another module takes over: the map (module 2),
+the F2 status screen (module 0x0e), comms. The port fed flight keys under the
+F2 status screen and the map pages, so Return or Shift changed the set speed
+there and an up-key frame cleared the slow-down latch.
+
+- `OriginalFlight::set_flight_view` sets `Player::active`; the game loop sets
+  it each frame from `input::flight_module_active(status_page, map view)`. The
+  navigation computer (`n`) and the F5 engines page are drawn by the flight
+  module and keep it active. The keyboard accumulators keep counting either
+  way, as the original's input read and `Timer50Hz` do.
+- `tests/controls.rs` replays recorded input lines (`session::Frame::parse`,
+  now public) through `HeldControls` (EXP-003), the Classic mapping, the gate,
+  F1037/F1121 and the thrust: intro-held and F2-held keys need a fresh press,
+  a fresh Return under F2 does nothing, right Shift stops at zero and a new
+  press reverses, left Shift does nothing, and the speed survives save/reload.
+- Engines off (`+0xe9` bit 0) skips the set-speed keys but still steers: unit
+  test. With the 2026-11-02 autopilot cancel and the executed takeoff and
+  keyboard replays, PAR-06's acceptance list is covered.
+- Burndown reconciled with the audit file: parity-02 done (2026-11-04),
+  parity-09 and parity-10 in progress. 80 of 202 open.
+
 ## 2026-11-10 — Launch after an autopilot docking at an orbital station
 
 Owner report: the station's Launch Request did nothing. A replay of the

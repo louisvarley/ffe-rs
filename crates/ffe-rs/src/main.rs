@@ -5165,6 +5165,12 @@ fn run() -> Result<(), String> {
                             .as_ref(),
                     ),
                 );
+                // F1006: another module (the F2 status screen, the map) has
+                // replaced the flight view, so F1037 reads no flight keys.
+                model.set_flight_view(input::flight_module_active(
+                    status_page,
+                    nav.as_ref().map_or(NavView::Closed, |nav| nav.view),
+                ));
                 let mut keys = input::original_keys(
                     preset,
                     input::View::of(views.mode),

@@ -207,6 +207,17 @@ impl MouseAccumulator {
     }
 }
 
+/// Whether the original's flight module (module 3) would be the active one, so
+/// F1037 reads the set-speed and steering keys (`DATA_008630 < 0`). The F2
+/// status screen (module 0x0e) and the map (module 2: the galaxy page, and the
+/// port's system map that stands in for its system page) replace it. The
+/// navigation computer (`n`) and the F5 engines page are drawn by the flight
+/// module itself and leave it active.
+pub fn flight_module_active(status_page: bool, map: crate::navigation::View) -> bool {
+    use crate::navigation::View as Map;
+    !status_page && matches!(map, Map::Closed | Map::Places)
+}
+
 fn down(held: &[Key], key: Key) -> bool {
     held.contains(&key)
 }
@@ -486,6 +497,17 @@ pub fn turret_mouse(preset: Preset, mouse: MouseSteer) -> (i32, i32) {
 mod tests {
     use super::*;
     use crate::prefs::Prefs;
+
+    #[test]
+    fn the_flight_keys_run_only_while_the_flight_module_shows() {
+        use crate::navigation::View as Map;
+        assert!(flight_module_active(false, Map::Closed));
+        // The navigation computer is part of the flight module.
+        assert!(flight_module_active(false, Map::Places));
+        assert!(!flight_module_active(false, Map::Galaxy));
+        assert!(!flight_module_active(false, Map::System));
+        assert!(!flight_module_active(true, Map::Closed));
+    }
 
     const MODERN: [Key; 4] = [Key::W, Key::Left, Key::Up, Key::E];
     const CLASSIC: [Key; 9] = [

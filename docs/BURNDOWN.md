@@ -1,7 +1,7 @@
 # Classic port burndown
 
 What is still to implement for a like-for-like Rust reimplementation of
-Frontier: First Encounters, as of 2026-11-10 (updated after PAR-01, PAR-04, PAR-06 and PAR-14 progress and the split cleanup). This checkout is Classic only: the
+Frontier: First Encounters, as of 2026-11-10 (updated after PAR-01, PAR-04 and PAR-14 progress, PAR-06 done and a reconciliation with the parity audit and the split cleanup). This checkout is Classic only: the
 Modern GPU engine, the FFED3D integration, `assets.bin` art packs, the
 launcher and the Enhanced renderer and graphics-pack plans are out of scope and
 have been removed.
@@ -12,12 +12,12 @@ the dashboard first, then regenerate or edit this page to match.
 
 ## Summary
 
-**82 of 202 work items are open: 63 in progress, 19 not started.** The foundation,
+**80 of 202 work items are open: 63 in progress, 17 not started.** The foundation,
 model-engine, visible-slice and audio milestones are complete (45 items).
 
 | Area | Open | In progress | Not started | Done / total |
 |---|---:|---:|---:|---:|
-| Parity blockers (2026-10-26 audit) | 22 | 18 | 4 | 2/24 |
+| Parity blockers (2026-10-26 audit) | 20 | 18 | 2 | 4/24 |
 | Flight core | 11 | 10 | 1 | 3/14 |
 | Galaxy and systems | 7 | 7 | 0 | 6/13 |
 | Gameplay systems | 21 | 20 | 1 | 22/43 |
@@ -27,12 +27,12 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 | Saves | 2 | 0 | 2 | 3/5 |
 | Classic split cleanup | 0 | 0 | 0 | 2/2 |
 | Release and sign-off | 5 | 0 | 5 | 2/7 |
-| **Total** | **82** | **63** | **19** | **120 / 202** |
+| **Total** | **80** | **63** | **17** | **122 / 202** |
 
 ## Critical path
 
 1. **Parity blockers**: the P0 items first (event units, takeoff handler,
-   contact rules, set-speed, Hope start, player explosion), then the P1 items.
+   contact rules, Hope start, player explosion), then the P1 items.
    Most of the flight, world and gameplay work depends on them.
 2. **`flight-1`, the object system and agent records** (`cstruct`/`gmstruct`).
    Not started, and much of the remaining flight and gameplay work builds on it.
@@ -47,17 +47,15 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 
 `[~]` is in progress and `[ ]` is not started.
 
-### Parity blockers (2026-10-26 audit) (22 open)
+### Parity blockers (2026-10-26 audit) (20 open)
 
 - [~] `parity-01` **P0** Repair F938/F929 event units for fuel, shields and hull repair
-- [~] `parity-02` **P0** Make reserve refuelling and cargo fuel bookkeeping match F929/F903
 - [~] `parity-04` **P0** Translate the complete F1013 takeoff handler and same-frame mode order
 - [~] `parity-05` **P0** Replace launch altitude substitution and collision grace with source frame/contact rules
-- [~] `parity-06` **P0** Verify original set-speed controls, input gates and speed persistence end to end
 - [~] `parity-07` **P0** Match the original Hope starting state and cockpit view to the supplied image
 - [~] `parity-08` **P0** Restore the complete third-person player explosion before GAME OVER
-- [ ] `parity-09` **P1** Replace orbital docking corridor tests and harmless pushes with source contacts
-- [ ] `parity-10` **P1** Use original indoor departure placement and moving lift/door state
+- [~] `parity-09` **P1** Replace orbital docking corridor tests and harmless pushes with source contacts
+- [~] `parity-10` **P1** Use original indoor departure placement and moving lift/door state
 - [ ] `parity-11` **P1** Complete source autopilot world and target adapters
 - [~] `parity-12` **P1** Unify source event clocks, time acceleration and physical integration
 - [~] `parity-13` **P1** Complete hyperjump initiation, transit, misjump and source arrival

@@ -21,7 +21,10 @@ unit-tested, so a preset cannot silently pick up the other preset's keys.
   50 Hz count of how long the last key pressed has been held (it restarts when
   any other key is pressed or repeats, and clears when that key is released):
   `ffe_core::keyboard` keeps it, and the per-key steering counts, from every held
-  key's original scancode (`input::scancode`).
+  key's original scancode (`input::scancode`). F1037 runs only while the flight
+  view's module is showing (`DATA_008630`): under the F2 status screen or the
+  map the set-speed and steering keys do nothing (`input::flight_module_active`);
+  the navigation computer and the F5 engines page leave them working.
 - **Steering:** F1038, ported as `Player::steer`. It reads the mouse accumulator
   `DATA_009188` (x in the low word, y in the high word), subtracts the previous
   value, shifts each delta left six and negates it when the corresponding
