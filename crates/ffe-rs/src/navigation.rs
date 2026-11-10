@@ -2006,6 +2006,10 @@ pub enum RegionTouch {
     Climb(Option<String>),
     /// F1024: a pad other than the allocated bay; F1022 warns once.
     WrongPad(Option<String>),
+    /// A docking or launch sequence is running: its stage handlers
+    /// (F1025-F1030) replace the flight frame, so F1019/F1021/F1024 do not
+    /// run and the touch changes nothing.
+    Ignored,
 }
 
 /// Why traffic control said no: the executable's 0x98b7..0x98b9 messages
@@ -4164,6 +4168,18 @@ impl Navigator {
         let Some(index) = index else {
             return Err("No station to launch from.".to_owned());
         };
+        // Docked in an orbital station is mode 0x2a: no F1013 climb can be
+        // under way there. A takeoff record is stale (an older build's
+        // region touch during the docking stages left one, and saves carry
+        // it), so drop it rather than refuse every launch.
+        if self.sequence.is_none()
+            && self
+                .bodies
+                .get(index)
+                .is_some_and(|body| body.kind == Kind::Station)
+        {
+            self.takeoff = None;
+        }
         if self.sequence.is_some() || self.takeoff.is_some() {
             return Err("Already launching.".to_owned());
         }
@@ -4258,6 +4274,13 @@ impl Navigator {
     /// else F1021, whose touch is no landing but F1013's `0x24` climb again.
     /// `pad` is F1033's pad byte (one more than the pad, zero off the pads).
     pub fn region_touch(&mut self, index: usize, pad: u8) -> RegionTouch {
+        // The autopilot's accelerated arrival starts the docking stages from
+        // inside the flight step; the stages' first step (F653) resets the
+        // port's record, so a touch reported after that would otherwise look
+        // uncleared and set F1013's climb under the docking ship.
+        if self.sequence.is_some() {
+            return RegionTouch::Ignored;
+        }
         if self.target.is_some() {
             return RegionTouch::Land;
         }
@@ -5815,6 +5838,8 @@ impl Navigator {
     /// The ship has docked at `index`: the autopilot ends.
     pub fn dock(&mut self, index: usize) {
         self.docked = Some(index);
+        // F1025's mode 0x2a replaces any F1013 climb state.
+        self.takeoff = None;
         self.target = None;
         // F1007 (landed, AI state 0x20) and F1025 (docked) clear the
         // navigation and combat targets (`+0xec`, `+0xed`).

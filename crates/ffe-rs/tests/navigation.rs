@@ -2773,6 +2773,61 @@ fn a_touch_in_a_starport_region_lands_only_with_the_autopilot_or_clearance() {
     assert!(other.is_some(), "some pad is not the allocated bay");
 }
 
+/// The owner's 2026-11-10 report: after an autopilot docking at an orbital
+/// station the Launch Request answered "Already launching." for good. The
+/// autopilot's arrival starts the docking stages inside the flight step; their
+/// first step (F653) resets the port's record, and the station-region touch the
+/// flight model still reported looked uncleared, so F1021's climb (0x24) was set
+/// under the docking ship and survived the dock. A touch during the stages is
+/// now ignored, docking (0x2a) drops any takeoff, and a stale one restored from
+/// a save no longer blocks the launch.
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn a_station_docked_by_the_autopilot_can_launch_again() {
+    use ffe_rs::navigation::{Kind as NavKind, Navigator, RegionTouch, Traffic};
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    nav.takeoff = None;
+    nav.new_game = None;
+    nav.docked = None;
+    let station = (0..nav.bodies.len())
+        .find(|index| nav.bodies[*index].kind == NavKind::Station)
+        .expect("an orbital station in the start system");
+    let at = nav.bodies[station].position;
+    let (cleared, _) = nav.request_clearance(at).unwrap();
+    assert_eq!(cleared, station);
+    // F746's accelerated arrival: F652 accepts and the stages start.
+    assert!(nav.begin_docking(station));
+    // The touch's stage ends at once (F653 resets the record).
+    let mut docked = false;
+    let mut touched = false;
+    for _ in 0..20_000 {
+        for event in nav.tick_traffic(994, 0.02) {
+            docked |= matches!(event, Traffic::Docked(index) if index == station);
+        }
+        if !touched && !nav.cleared(station) {
+            touched = true;
+            // The flight model's region contact on the next frame.
+            assert_eq!(nav.region_touch(station, 0), RegionTouch::Ignored);
+            assert_eq!(nav.takeoff_state(), None, "no climb under a docking ship");
+        }
+        if docked {
+            break;
+        }
+    }
+    assert!(touched && docked, "touched {touched} docked {docked}");
+    assert_eq!(nav.docked, Some(station));
+    assert_eq!(nav.takeoff_state(), None);
+    // A save from an older build may carry the stale climb: the launch still
+    // goes ahead, through the lift stages.
+    nav.takeoff = Some(ffe_core::traffic::Takeoff {
+        state: ffe_core::traffic::state::TAKEOFF,
+    });
+    nav.begin_launch().expect("the launch request is granted");
+    assert!(nav.sequence.is_some_and(|sequence| sequence.launching));
+    assert_eq!(nav.takeoff_state(), None);
+}
+
 /// F909/F910's mis-jumps, as the executed original does them
 /// (`jjffe-smoke --misjump`): a random one (`F1530() > 0xfe00`) goes nowhere
 /// and leaves the ship in deep space with no bodies; Left Alt held forces one

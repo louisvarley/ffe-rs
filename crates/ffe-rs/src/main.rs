@@ -5705,6 +5705,7 @@ fn run() -> Result<(), String> {
                                         pending_log.add(Source::Docking, warning);
                                     }
                                 }
+                                ffe_rs::navigation::RegionTouch::Ignored => {}
                             }
                         }
                         // F1021's rough landing (`0x32`) then F1047's view frame

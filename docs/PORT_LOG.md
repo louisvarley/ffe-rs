@@ -1,5 +1,25 @@
 # Port log
 
+## 2026-11-10 — Launch after an autopilot docking at an orbital station
+
+Owner report: the station's Launch Request did nothing. A replay of the
+owner's recording showed every request answering "Already launching." after
+the autopilot had docked at Wicca Town. F746's accelerated arrival starts the
+docking stages from inside the flight step; the stages' first step (F653)
+resets the port's record, and the station-region touch the flight model
+reported on the next frame then looked uncleared, so `region_touch` set
+F1021's `0x24` climb under the docking ship (with a spurious F1022 warning).
+That takeoff record survived the dock and blocked `begin_launch`.
+
+- `Navigator::region_touch` returns `RegionTouch::Ignored` while a docking or
+  launch sequence runs: the stage handlers (F1025-F1030) replace the flight
+  frame, so F1019/F1021/F1024 do not run.
+- `Navigator::dock` clears the takeoff record (F1025's mode `0x2a`).
+- `begin_launch` from an orbital station drops a stale takeoff record, so a
+  save made in an affected session launches again.
+- Regression test `a_station_docked_by_the_autopilot_can_launch_again`
+  (local, content cache); it fails without the guard. Owner-tested in the game.
+
 ## 2026-11-10 — PAR-06: F1121's held-key scale and the right Shift key
 
 F1121 scales the set-speed step by `DATA_007690 / 16` once that dword's low
