@@ -1918,7 +1918,10 @@ impl ModelViewer {
             let mut surfaces = surfaces.into_iter().peekable();
             let original = std::mem::replace(&mut frame.keys, Vec::with_capacity(total))
                 .into_iter()
-                .zip(std::mem::replace(&mut frame.shapes, Vec::with_capacity(total)));
+                .zip(std::mem::replace(
+                    &mut frame.shapes,
+                    Vec::with_capacity(total),
+                ));
             for (key, shape) in original {
                 while surfaces.peek().is_some_and(|surface| surface.0 > key) {
                     let (key, shape) = surfaces.next().unwrap();
@@ -2186,14 +2189,13 @@ impl ModelViewer {
                             continue;
                         }
                     }
-                    push!(
-                        if points.len() == 2 {
-                            Shape::Line(points[0], points[1], rgb)
-                        } else if on_view && matches!(points.len(), 3 | 4) {
-                            Shape::Flat(points, rgb)
-                        } else {
-                            Shape::Fill(points, rgb)
-                        });
+                    push!(if points.len() == 2 {
+                        Shape::Line(points[0], points[1], rgb)
+                    } else if on_view && matches!(points.len(), 3 | 4) {
+                        Shape::Flat(points, rgb)
+                    } else {
+                        Shape::Fill(points, rgb)
+                    });
                 }
                 Primitive::Line(line) => {
                     let rgb = self.rgb(resolve_colour(line.material, line.context.colour, [0; 3]));

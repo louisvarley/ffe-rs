@@ -39,7 +39,11 @@ struct State {
 }
 
 fn reference() -> Vec<Row> {
-    let path = std::env::var_os("FFE_TAKEOFF_TRACE").expect("FFE_TAKEOFF_TRACE");
+    trace("FFE_TAKEOFF_TRACE")
+}
+
+fn trace(variable: &str) -> Vec<Row> {
+    let path = std::env::var_os(variable).unwrap_or_else(|| panic!("{variable}"));
     std::fs::read_to_string(path)
         .unwrap()
         .lines()
@@ -48,8 +52,59 @@ fn reference() -> Vec<Row> {
         .collect()
 }
 
+/// The `keyboard` scenario's per-frame input clock and `DATA_007690`.
+#[derive(Deserialize)]
+struct KeyboardRow {
+    keyboard: u64,
+    timer_last: u32,
+    timer_next: u32,
+}
+
+/// The keys the takeoff scenario holds for the port's frame `frame`: the
+/// original's frame reads them at the end of the frame before (Return from
+/// the read at frame 260 on). Its reference never reports a last key, so no
+/// scancodes are held.
+fn takeoff_keys(frame: u64) -> OriginalKeys {
+    OriginalKeys {
+        faster: frame > FASTER_FROM,
+        ..OriginalKeys::default()
+    }
+}
+
+/// `keyboard_down()`'s schedule in `tools/reference/headless.c`, read at the
+/// end of the previous frame: Return (0x1c), right Shift (0x36) and A (0x1e,
+/// the Classic pitch-up key), with their scancodes for the last-key counter.
+fn keyboard_keys(frame: u64) -> OriginalKeys {
+    let f = frame - 1;
+    let ret = (260..400).contains(&f) || (700..800).contains(&f);
+    let shift = (450..600).contains(&f) || (620..690).contains(&f);
+    let a = (740..746).contains(&f);
+    let scancodes = [(ret, 0x1c), (shift, 0x36), (a, 0x1e)]
+        .into_iter()
+        .filter(|(down, _)| *down)
+        .map(|(_, code)| code)
+        .collect();
+    OriginalKeys {
+        faster: ret,
+        slower: shift,
+        pitch_up: a,
+        scancodes,
+        ..OriginalKeys::default()
+    }
+}
+
 /// The port's frames from the launch action on, keyed by the trace's frame number.
 fn replay(last: u64) -> Vec<(u64, State)> {
+    replay_with(last, takeoff_keys, None)
+}
+
+/// The same with `keys_for(frame)` held and, when given, the input clock set
+/// to the original's `(tmLastTime, tmNext50Hz)` before the first stepped frame.
+fn replay_with(
+    last: u64,
+    keys_for: fn(u64) -> OriginalKeys,
+    clock: Option<(u32, u32)>,
+) -> Vec<(u64, State)> {
     use ffe_core::traffic::{state as traffic_state, TakeoffStep};
     let cache = ffe_content::read(
         &std::fs::read(std::env::var_os("FFE_WORLD_CACHE").expect("FFE_WORLD_CACHE")).unwrap(),
@@ -143,13 +198,13 @@ fn replay(last: u64) -> Vec<(u64, State)> {
     nav.begin_launch().unwrap();
     model.begin_takeoff();
     rows.push((LAUNCH_FRAME + 1, state(&model, model.mode(), 0)));
+    if let Some((now, next_tick)) = clock {
+        model.set_input_clock(now, next_tick);
+    }
     let mut mode;
     let mut altitude;
     for frame in LAUNCH_FRAME + 2..=last {
-        let keys = OriginalKeys {
-            faster: frame > FASTER_FROM,
-            ..OriginalKeys::default()
-        };
+        let keys = keys_for(frame);
         let contact = if model.on_pad() {
             model.step_pad(FRAME_SECONDS, &keys, tools.as_ref())
         } else {
@@ -298,6 +353,59 @@ fn port_takeoff_replays_the_original_frame_by_frame() {
     // The climb's drift and F1014's drag in free flight keep the speed within 2%
     // (without F1014 the port was 23% fast by frame 899).
     assert!(worst_speed < 0.02, "speed {:.2}% off", worst_speed * 100.0);
+}
+
+/// F1037/F1121 against the executed original's `--flight keyboard 900`: the
+/// takeoff, then Return held (F1121's step grows with `DATA_007690` once that
+/// passes 0x10), right Shift held down through zero (flag 0x80 stops it there),
+/// released and held again (the speed falls below zero by the input time over
+/// 256), Return again (a negative speed snaps to zero first), and A pressed and
+/// released inside that hold. The last-key counter follows the platform layer's
+/// initial presses and repeats. Run with `FFE_WORLD_CACHE` and
+/// `FFE_KEYBOARD_TRACE`.
+#[test]
+#[ignore = "Local-only: needs FFE_WORLD_CACHE and FFE_KEYBOARD_TRACE"]
+fn port_set_speed_follows_the_original_keyboard() {
+    let reference = trace("FFE_KEYBOARD_TRACE");
+    let path = std::env::var_os("FFE_KEYBOARD_TRACE").unwrap();
+    let clocks: Vec<KeyboardRow> = std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|line| line.starts_with("{\"keyboard\""))
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    // The port's first stepped frame is LAUNCH_FRAME + 2; it reads the keys and
+    // advances from the clock the original's previous row shows.
+    let start = clocks
+        .iter()
+        .find(|row| row.keyboard == LAUNCH_FRAME + 1)
+        .expect("keyboard row for the launch frame");
+    let last = reference.last().unwrap().frame;
+    // The modes are the takeoff replay's to check (F1031's clear may come up to
+    // two frames early here too, PAR-05); F1037 runs the same in 0x26 and 0.
+    let port = replay_with(
+        last,
+        keyboard_keys,
+        Some((start.timer_last, start.timer_next)),
+    );
+    let mut compared = 0;
+    let mut lowest = i64::MAX;
+    let mut highest = i64::MIN;
+    for (frame, ours) in &port {
+        let Some(row) = reference.iter().find(|row| row.frame == *frame) else {
+            continue;
+        };
+        let theirs = row.set_speed as u32 as i32 as i64;
+        assert_eq!(
+            ours.set_speed as u32 as i32 as i64, theirs,
+            "set speed at frame {frame}"
+        );
+        lowest = lowest.min(theirs);
+        highest = highest.max(theirs);
+        compared += 1;
+    }
+    eprintln!("{compared} frames; set speed {lowest}..={highest}");
+    assert!(compared > 700 && lowest < 0 && highest > 150_000);
 }
 
 /// The default start's seat (type 0, Hope) in Hope's frame against the executed

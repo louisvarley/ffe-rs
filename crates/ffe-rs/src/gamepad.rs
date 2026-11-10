@@ -7,7 +7,7 @@
 //! |---|---|---|---|
 //! | left stick up / down | pitch down / up | Up / Down | Z / A |
 //! | left stick left / right | yaw | Left / Right | `,` / `.` |
-//! | right trigger / left trigger | faster / slower | W / S | Enter / Shift |
+//! | right trigger / left trigger | faster / slower | W / S | Enter / right Shift |
 //! | right / left bumper | roll right / left | E / Q | `]` / `[` |
 //! | south (A) | fire | Space | Space |
 //! | east (B) | launch a missile | M | M |
@@ -75,7 +75,7 @@ pub fn keys(pad: &Pad, preset: Preset) -> Vec<Key> {
             Key::Comma,
             Key::Period,
             Key::Enter,
-            Key::LeftShift,
+            Key::RightShift,
             Key::LeftBracket,
             Key::RightBracket,
         )

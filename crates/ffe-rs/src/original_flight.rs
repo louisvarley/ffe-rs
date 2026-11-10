@@ -9,6 +9,7 @@ use crate::flight::Flight;
 use crate::ships::ShipStats;
 use ffe_core::collision::Contact;
 use ffe_core::frames::{Bodies, Body, Words};
+use ffe_core::keyboard::{Keyboard, ScanSet};
 use ffe_core::objects::ModelInfo;
 use ffe_core::physics::Motion;
 use ffe_core::player::{Controls, Player, SteerKeys, ThrusterKeys};
@@ -47,13 +48,24 @@ pub struct Keys {
     pub mouse_enabled: bool,
     /// Invert the mouse x and y axes (the original's Reverse controls options).
     pub mouse_flip: [bool; 2],
+    /// Every key held, by the original's scancode ([`crate::input::scancode`]):
+    /// the input read's last-key report and `DATA_007690`, which scales
+    /// F1121's set-speed step, follow all keys, not only the flight ones.
+    pub scancodes: ffe_core::keyboard::ScanSet,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OriginalFlight {
     player: Player,
-    /// Seconds each steering key has been held, in `SteerKeys` order.
-    held: [f64; 6],
+    /// The keyboard's accumulators by scancode: `DATA_007690` for F1121.
+    keyboard: Keyboard,
+    /// The same accumulators for the six steering actions, in `SteerKeys`
+    /// order (whichever key the preset gives each): F1038's
+    /// `DATA_KeyAccumTable` entries.
+    steering: Keyboard,
+    /// The real-time clock in microseconds, so whole milliseconds carry from
+    /// frame to frame as `TimerGetTimeStamp`'s do.
+    clock_us: u64,
     forward_limit: i16,
     /// The time acceleration (`DATA_009012`, per 20 ms): 0x3e2 is real time.
     acceleration: u32,
@@ -202,7 +214,9 @@ impl OriginalFlight {
         player.scanner.player = 0;
         Self {
             player,
-            held: [0.0; 6],
+            keyboard: Keyboard::new(),
+            steering: Keyboard::new(),
+            clock_us: 0,
             forward_limit: limits.axes[2][0],
             acceleration: crate::console::TIME_ACCELERATION[0],
             pad_world: None,
@@ -458,6 +472,8 @@ impl OriginalFlight {
     /// No gravity, thrust integration or collision movement runs until launch.
     pub fn step_landed(&mut self, elapsed: f64, keys: &Keys, mode: u8) {
         self.player.mode = mode;
+        // The input read still sees every key (the original reads the
+        // keyboard whatever the mode); only the turret views steer.
         let turret_keys = if matches!(self.player.view, 2 | 3) {
             Keys {
                 faster: false,
@@ -465,7 +481,10 @@ impl OriginalFlight {
                 ..*keys
             }
         } else {
-            Keys::default()
+            Keys {
+                scancodes: keys.scancodes,
+                ..Keys::default()
+            }
         };
         self.prepare(elapsed, &turret_keys);
         self.player.altitude = 0;
@@ -1228,6 +1247,22 @@ impl OriginalFlight {
         contact
     }
 
+    /// Align the input clock with an executed trace: `now` is the original's
+    /// `tmLastTime` and `next_tick` its `tmNext50Hz`, in milliseconds.
+    pub fn set_input_clock(&mut self, now: u32, next_tick: u32) {
+        self.clock_us = u64::from(now) * 1000;
+        self.keyboard.set_clock(now, next_tick);
+        self.steering.set_clock(now, next_tick);
+    }
+
+    /// The whole milliseconds of real time this frame adds to the clock, with
+    /// the frame clamped to 100 ms.
+    fn frame_ms(&mut self, elapsed: f64) -> u32 {
+        let before = self.clock_us / 1000;
+        self.clock_us += (elapsed.clamp(0.0, 0.1) * 1e6).round() as u64;
+        (self.clock_us / 1000 - before) as u32
+    }
+
     /// The key state F1037/F1038 and set speed for one frame; returns the input
     /// tics and the accelerated world tics.
     fn prepare(&mut self, elapsed: f64, keys: &Keys) -> (u32, u32) {
@@ -1235,16 +1270,16 @@ impl OriginalFlight {
         self.speed_word =
             ffe_core::model_math::length(self.player.motion.velocity).min(i32::MAX as u32);
         self.atmosphere = None;
-        // The input time is real time; the world time is that scaled by the
-        // acceleration (`ms * acceleration / 20`, 994 per 20 ms at 1x).
-        let tics = (elapsed.clamp(0.0, 0.1) * TICS_PER_SECOND) as u32;
-        let world_tics = (elapsed.clamp(0.0, 0.1) * 50.0 * f64::from(self.acceleration)) as u32;
-        if self.guidance.is_some() {
-            self.player.input_time = tics;
-            self.player.frame_tics = world_tics;
-            return (tics, world_tics);
-        }
-        let down = [
+        // TimerAdvance: whole milliseconds of real time this frame (at most
+        // 100). The input time is `ms * 0x3e2 / 20` (994 per 20 ms) and the
+        // world time `ms * acceleration / 20`, each truncated per frame.
+        let ms = self.frame_ms(elapsed);
+        let tics = ms * 0x3e2 / 20;
+        let world_tics = (u64::from(ms) * u64::from(self.acceleration) / 20) as u32;
+        // The input read at the end of the previous frame (the port polls the
+        // keys at the start of this one, the same moment), then this frame's
+        // 50 Hz ticks: F1037 and F1038 see the accumulators after both.
+        let steering = [
             keys.pitch_down,
             keys.pitch_up,
             keys.left,
@@ -1252,19 +1287,20 @@ impl OriginalFlight {
             keys.roll_left,
             keys.roll_right,
         ];
-        let mut ticks = [0u32; 6];
-        for (index, is_down) in down.into_iter().enumerate() {
-            if is_down {
-                self.held[index] += elapsed;
-                // 50 Hz ticks held, at least one while the key is down.
-                ticks[index] = (self.held[index] * 50.0) as u32 + 1;
-            } else {
-                self.held[index] = 0.0;
-            }
+        let roles: ScanSet = (0u8..6)
+            .filter(|role| steering[usize::from(*role)])
+            .collect();
+        self.keyboard.read(&keys.scancodes);
+        self.steering.read(&roles);
+        self.keyboard.advance(ms);
+        self.steering.advance(ms);
+        self.player.speed_boost = self.keyboard.last_key_count();
+        if self.guidance.is_some() {
+            self.player.input_time = tics;
+            self.player.frame_tics = world_tics;
+            return (tics, world_tics);
         }
-        // The mouse is the Classic preset's right-button hold. With it up the
-        // accumulator is cleared rather than merely ignored, so pressing the
-        // button again starts from a zero delta instead of snapping the ship.
+        let ticks: [u32; 6] = std::array::from_fn(|role| self.steering.held(role as u8));
         let (mouse, mouse_flip) = if keys.mouse_enabled {
             (keys.mouse, keys.mouse_flip)
         } else {

@@ -49,7 +49,11 @@ depends on them.
   frame);
   `parity-05` the original's frame and contact rules instead of the launch
   altitude stand-in and collision grace; `parity-06` set-speed controls, input
-  gates and speed persistence end to end; `parity-07` the original Hope start
+  gates and speed persistence end to end (10 November: F1121's held-key scale
+  `DATA_007690` and the 50 Hz key accumulators are ported, the Classic
+  slow-down key is right Shift only as in F1037, and a keyboard replay of the
+  original matches the set speed on every frame; menu, reload and
+  autopilot-cancel key paths remain); `parity-07` the original Hope start
   and cockpit view; `parity-08` the full third-person explosion before GAME OVER.
 - **P1** `parity-09` the original's docking contacts instead of the corridor
   tests and pushes; `parity-10` the indoor departure placement and moving

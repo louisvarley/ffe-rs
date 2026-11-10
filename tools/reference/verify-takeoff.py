@@ -12,9 +12,16 @@ transition itself is checked two ways here:
   and constants, so a future edit that changes the port's constants without the
   original is caught.
 
+With `--reference jjffe-smoke.exe` it also captures the executed
+`--flight takeoff 900` and `--flight keyboard 900` traces and replays them
+frame by frame (`tests/takeoff_replay.rs`): modes, set speed and speed for the
+takeoff; F1121's set speed on every frame for the keyboard scenario (Return,
+right Shift, the held-key scale `DATA_007690`). Altered traces must fail.
+
 Run:
 
-    python tools/reference/verify-takeoff.py --cache data.bin --sources jjffe-master
+    python tools/reference/verify-takeoff.py --cache data.bin --sources jjffe-master \\
+        --reference .cache/jjffe-reference/jjffe-smoke.exe
 """
 
 import argparse
@@ -24,6 +31,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 
 
 def routine(asm: str, label: str) -> str:
@@ -99,11 +107,70 @@ def services_and_keys(ffe: str, data: str) -> int:
     return checks
 
 
+def replay(reference: Path, root: Path, cargo: str, env: dict) -> dict:
+    """Capture `--flight takeoff 900` and `--flight keyboard 900` and replay them.
+
+    The keyboard scenario's F1121 set speed must match on every frame; an
+    altered set speed in either trace must be rejected.
+    """
+    reference = reference.resolve(strict=True)
+    with tempfile.TemporaryDirectory(prefix="ffe-takeoff-") as directory:
+        traces = {}
+        for scenario in ("takeoff", "keyboard"):
+            result = subprocess.run([str(reference), "--flight", scenario, "900"],
+                                    cwd=directory, capture_output=True, timeout=180)
+            if result.returncode or b"JJFFE flight-v1" not in result.stderr:
+                raise RuntimeError(f"--flight {scenario} failed: "
+                                   + result.stderr.decode(errors="replace")[-2000:])
+            path = Path(directory) / f"{scenario}.jsonl"
+            path.write_bytes(result.stdout)
+            traces[scenario] = path
+        env = dict(env, FFE_TAKEOFF_TRACE=str(traces["takeoff"]),
+                   FFE_KEYBOARD_TRACE=str(traces["keyboard"]))
+
+        def run(name: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [cargo, "test", "--locked", "-p", "ffe-rs", "--test", "takeoff_replay", name,
+                 "--", "--ignored", "--exact", "--nocapture"],
+                cwd=root, env=env, capture_output=True, timeout=900)
+
+        tests = ("port_takeoff_replays_the_original_frame_by_frame",
+                 "port_set_speed_follows_the_original_keyboard")
+        summary = {}
+        for name in tests:
+            result = run(name)
+            output = (result.stdout + result.stderr).decode(errors="replace")
+            if result.returncode:
+                raise RuntimeError(f"{name} failed:\n{output[-3000:]}")
+            summary[name] = [line for line in output.splitlines()
+                             if line.startswith(("modes:", "largest"))
+                             or " frames; set speed " in line]
+        # One altered set speed in each trace must fail its replay.
+        for scenario, name in zip(("takeoff", "keyboard"), tests):
+            path = traces[scenario]
+            original = path.read_text()
+            lines = original.splitlines()
+            for index, line in enumerate(lines):
+                row = json.loads(line) if line.startswith('{"scenario"') else None
+                if row and row["frame"] == 300:
+                    row["set_speed"] += 1
+                    lines[index] = json.dumps(row, separators=(",", ":"))
+                    break
+            path.write_text("\n".join(lines) + "\n")
+            if run(name).returncode == 0:
+                raise RuntimeError(f"altered {scenario} set speed accepted")
+            path.write_text(original)
+        return summary
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cache", required=True, type=Path, help="data.bin")
     parser.add_argument("--sources", required=True, type=Path, help="jjffe-master")
+    parser.add_argument("--reference", type=Path,
+                        help="jjffe-smoke.exe: also replay the executed --flight takeoff and "
+                             "--flight keyboard traces frame by frame (tests/takeoff_replay.rs)")
     args = parser.parse_args()
     cache = args.cache.resolve(strict=True)
     asm = (args.sources.resolve(strict=True) / "ffe.asm").read_text(
@@ -152,8 +219,10 @@ def main() -> int:
         raise RuntimeError(f"default-start takeoff test failed:\n{output[-3000:]}")
     if "start 0 modes [36, 38]" not in output or "cleared true" not in output:
         raise RuntimeError("the default start did not take off from Hope:\n" + output[-2000:])
+    replayed = replay(args.reference, root, cargo, env) if args.reference else None
     print(json.dumps({
         "scenario": "ffe-takeoff-v1",
+        "frame_replays": replayed,
         "f1013_guard": "altitude > 0x30d40 or DATA_008918 != 0 sets DATA_008870 = 0x26",
         "f1031_handoff": "F1033 result 0x20/station 0x14c bit 0x20: 0x24; cleared: 0x00",
         "observed_modes": [36, 38],

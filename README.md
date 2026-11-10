@@ -113,12 +113,12 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 | External view: turn camera; zoom out / in (both of a pair resets) | arrows; + / - |
 | Change ship (the original's named craft) | Page Up / Page Down |
 | Original flight model on / off (set speed, original steering and physics) | automatic in flight; O is developer-only |
-| Original flight: raise / lower the set speed | Enter / Shift |
+| Original flight: raise / lower the set speed | Enter / right Shift |
 | Original flight: pitch, yaw, roll | Z A, `,` `.`, `[` `]` |
 | Time acceleration 1x / 10x / 100x / 1000x / 10000x (original model) | 6 7 8 9 0, or click the meter at the lower left |
 | Pause mark on the meter | click it (or P) |
 | Launch / request or cancel docking | L / D |
-| Classic thrust / reverse; yaw; pitch; roll | Enter / Shift; `.` `,`; A / Z; `]` `[` |
+| Classic thrust / reverse; yaw; pitch; roll | Enter / right Shift; `.` `,`; A / Z; `]` `[` |
 | Classic steering by mouse | hold the right button and move the mouse |
 | Modern thrust / reverse; yaw; pitch; roll | W / S; Right / Left; Up / Down; E / Q |
 | Brake (port addition) / pause | B / P |
@@ -128,7 +128,7 @@ V3 retains its existing points-only lab; v4 adds drawing records and face views.
 
 Modern input (W/S and arrows) is the initial preset. F3 switches to Classic,
 which follows the original's scheme: hold the **right mouse button** and move the
-mouse to steer, Enter raises the set speed and Shift lowers it, and the keyboard
+mouse to steer, Enter raises the set speed and right Shift lowers it, and the keyboard
 steering is `,` `.` yaw, A/Z pitch, `[`/`]` roll. Escape → `Advanced Options` exposes
 the same choice. The preset takes effect immediately, disarms held keys, and is
 persisted in the versioned `saves/config.cfg` (`docs/CONTROLS.md` has the full

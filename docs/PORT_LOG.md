@@ -1,5 +1,42 @@
 # Port log
 
+## 2026-11-10 — PAR-06: F1121's held-key scale and the right Shift key
+
+F1121 scales the set-speed step by `DATA_007690 / 16` once that dword's low
+byte passes 0x10. `DATA_007690` is the last-key counter: `GuiReadAllInput`
+starts it at 1 when the platform reports a key other than the one it tracks
+(`DATA_009181`), `Timer50Hz` adds one every 20 ms, and it clears when that key
+is released. The platform layer (`win32/w32input.cpp`) reports a key on its
+initial press and on auto-repeat (300 ms delay, 30 ms rate in `ffewin.cfg`),
+the highest scancode winning a read. The port never set it, so holding Return
+or Shift for more than about a third of a second changed the set speed more
+slowly than the original. The existing takeoff reference could not show this:
+the adapter never reported Return as a last key.
+
+- `ffe_core::keyboard::Keyboard` ports the three pieces: the 50 Hz ticks on
+  20 ms boundaries, the last-key counter and the per-key accumulators, and the
+  platform's press/repeat report. `OriginalFlight` reads every held key by its
+  original scancode (`input::scancode`, the `pKeybConvTable` order), advances
+  the clock by the frame's whole milliseconds, sets `speed_boost` and takes
+  F1038's steering counts from the same accumulators (it had used wall-clock
+  seconds times 50 plus one). Input and world time are now `ms * 0x3e2 / 20`
+  and `ms * acceleration / 20`, truncated per frame as `TimerAdvance` does.
+- The Classic slow-down key is **right Shift only**: F1037 reads
+  `DATA_007694`, the state of scancode 0x36; left Shift (`DATA_007693`) only
+  selects the shifted half of the action table. The port accepted either Shift.
+- `jjffe-smoke --flight keyboard 900` (new) is the takeoff with Return held
+  260-399, right Shift 450-599 (down through zero, where flag 0x80 holds it),
+  right Shift again 620-689 (below zero by the input time over 256 a frame),
+  Return 700-799 (a negative speed snaps to zero first) and A pressed 740-745,
+  reported through an emulation of the platform layer read at `tmLastTime`.
+  It also prints each frame's `tmLastTime`, `tmNext50Hz` and `DATA_007690`.
+  `port_set_speed_follows_the_original_keyboard` aligns the port's input clock
+  with the trace and matches the set speed on all 730 frames; with the scale
+  removed it fails at frame 290. The plain takeoff replay is unchanged.
+
+Remaining for PAR-06: the menu, reload and autopilot-cancel key paths and the
+port's release-to-rearm gate in a recorded input replay.
+
 ## 2026-11-10 — F1014 in flight: atmospheric drag and heating (PAR-04, PAR-14)
 
 The takeoff replay showed the port accelerating ever harder after F1031's

@@ -88,7 +88,8 @@ notes: steering is key driven through `FUNC_CalcKeyInput` as well as the mouse.
 - **F1037**: nothing unless the ship module is active (`DATA_008630` negative).
   With the engines on (`DATA_008871` bit 0 clear): Return held raises the set
   speed (`DATA_008918`) by F1121 (to 0x7fffffff on overflow), but a negative set
-  speed is only reset to zero and then just the heading is updated; Shift held
+  speed is only reset to zero and then just the heading is updated; right Shift
+  (`DATA_007694`, scancode 0x36; left Shift is `DATA_007693` and is not read) held
   lowers it: a positive speed by F1121's step (flag 0x80 set, floored at zero), a
   non-positive one by `input time >> 8` per tick unless flag 0x80 is already set
   (and it cannot pass 0x80000000); Shift released clears flag 0x80. Then F1038.
@@ -119,7 +120,7 @@ playable, opt-in so saves, docking and the safety reset keep working:
   second (the original's `ms * 0x3e2 / 20`); velocity units are 49,700 / 512 =
   97.07 mm/s each (F1511). The set speed in metres per second is shown while
   Enter or Shift is held.
-- **Controls.** The original's keys: Enter / Shift raise / lower the set speed
+- **Controls.** The original's keys: Enter / right Shift raise / lower the set speed
   (F1037), Z / A pitch, `,` / `.` yaw, `[` / `]` roll (F1038). The mouse is not
   wired (it drives the console). Arrow keys keep their external-camera job.
 - **State.** `from_flight` starts from the current position, velocity and

@@ -5,7 +5,7 @@ The port has two flight presets, chosen on the Escape pages' `Advanced Options` 
 
 - **Modern** (default): the port's own WASD/arrow scheme.
 - **Classic**: the original's scheme. **Hold the right mouse button and move the
-  mouse to steer**; **Enter raises the set speed** and Shift lowers it; the
+  mouse to steer**; **Enter raises the set speed** and right Shift lowers it; the
   keyboard steering is `,`/`.` yaw, A/Z pitch and `[`/`]` roll.
 
 The routing lives in `ffe_rs::input` (`flight_controls`, `original_keys`,
@@ -14,15 +14,20 @@ unit-tested, so a preset cannot silently pick up the other preset's keys.
 
 ## Where the bindings come from
 
-- **Set speed:** F1037 (`DATA_007692` Return raises it, `DATA_007694` Shift
-  lowers it), ported as `Player::update_set_speed`
-  (`crates/ffe-core/src/player.rs`).
+- **Set speed:** F1037 (`DATA_007692` Return raises it, `DATA_007694` right
+  Shift, scancode 0x36, lowers it; left Shift, `DATA_007693`, only selects the
+  shifted action table), ported as `Player::update_set_speed`
+  (`crates/ffe-core/src/player.rs`). F1121's step grows with `DATA_007690`, the
+  50 Hz count of how long the last key pressed has been held (it restarts when
+  any other key is pressed or repeats, and clears when that key is released):
+  `ffe_core::keyboard` keeps it, and the per-key steering counts, from every held
+  key's original scancode (`input::scancode`).
 - **Steering:** F1038, ported as `Player::steer`. It reads the mouse accumulator
   `DATA_009188` (x in the low word, y in the high word), subtracts the previous
   value, shifts each delta left six and negates it when the corresponding
   Reverse option is on. The held keys are `0x2c`/`0x1e` pitch, `0x33`/`0x34`
   yaw and `0x1a`/`0x1b` roll (`docs/notes/player.md`).
-- **Original key names:** Z/A pitch, comma/period yaw, `[`/`]` roll, Enter/Shift
+- **Original key names:** Z/A pitch, comma/period yaw, `[`/`]` roll, Enter/right Shift
   set speed (`docs/notes/player.md`, `docs/NAVIGATION.md`, README).
 - **Fire, missiles, targets, autopilot, views, maps:** the port's existing
   bindings, unchanged by the preset (see the shared table below).
@@ -36,7 +41,7 @@ right button is the steering hold. The left button remains the console pointer
 | Action | Classic binding |
 |---|---|
 | Steer the ship (pitch and yaw) | Hold the **right mouse button** and move the mouse |
-| Raise / lower the set speed | **Enter** / **Shift** (left or right) |
+| Raise / lower the set speed | **Enter** / **right Shift** (left Shift does not change it, as in the original) |
 | Pitch up / down | **A** / **Z** |
 | Yaw left / right | **,** / **.** |
 | Roll left / right (original flight model) | **[** / **]** |
@@ -146,7 +151,7 @@ the yaw keys/axis and the pitch keys/axis, and flips the mouse x and y.
 | Action | Before | Now |
 |---|---|---|
 | Right-button steering | Not wired at all: the right button did nothing in flight and the original mouse word was always zero | Classic only; F1038 accumulator in original flight, deflection in the prototype; right button held |
-| Classic thrust | Enter/Left Shift (right Shift missed in the prototype) | Enter / either Shift |
+| Classic thrust | Enter/Left Shift (right Shift missed in the prototype) | Enter / either Shift; from 2026-11-10 Enter / right Shift only, as F1037 reads |
 | Classic yaw/pitch/roll | Comma/period, A/Z, brackets | Same (unchanged, now routed explicitly) |
 | Modern thrust/steer | W/S, arrows, Q/E in original flight **plus** all the Classic keys (`both`) | W/S, arrows, Q/E only; Classic keys do nothing |
 | Modern mouse | n/a | Right button does not steer |

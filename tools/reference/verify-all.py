@@ -104,7 +104,8 @@ ORACLES = [
     ("ship-types", "verify-ship-types.py", ["--sources", "{sources}"]),
     ("npc", "verify-npc.py", ["--cache", "{cache}"]),
     ("dashboard", "verify-dashboard.py", ["--cache", "{cache}"]),
-    ("takeoff", "verify-takeoff.py", ["--cache", "{cache}", "--sources", "{sources}"]),
+    ("takeoff", "verify-takeoff.py", ["--cache", "{cache}", "--sources", "{sources}",
+                                      "--reference", "{smoke}"]),
     ("flight", "verify-flight.py", ["--reference", "{smoke}", "--cache", "{cache}"]),
     ("prefs", "verify-prefs.py", ["--sources", "{sources}"]),
 ]

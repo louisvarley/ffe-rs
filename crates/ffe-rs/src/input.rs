@@ -215,8 +215,11 @@ fn axis(held: &[Key], positive: Key, negative: Key) -> f64 {
     f64::from(u8::from(down(held, positive))) - f64::from(u8::from(down(held, negative)))
 }
 
-fn any_shift(held: &[Key]) -> bool {
-    down(held, Key::LeftShift) || down(held, Key::RightShift)
+/// The original's slow-down key: F1037 reads `DATA_007694`, the key state of
+/// scancode 0x36, right Shift. Left Shift (0x2a, `DATA_007693`) only selects
+/// the shifted half of the action table.
+fn slow_down(held: &[Key]) -> bool {
+    down(held, Key::RightShift)
 }
 
 /// A held-key axis as -1, 0 or 1, and a mouse deflection in the same range.
@@ -264,7 +267,7 @@ pub fn flight_controls(
             },
         ),
         Preset::Classic => (
-            f64::from(u8::from(down(held, Key::Enter))) - f64::from(u8::from(any_shift(held))),
+            f64::from(u8::from(down(held, Key::Enter))) - f64::from(u8::from(slow_down(held))),
             if steering {
                 axis_with_mouse(held, Key::Period, Key::Comma, mouse.dx)
             } else {
@@ -296,6 +299,7 @@ pub fn original_keys(
     mouse_held: bool,
     reverse: [bool; 2],
 ) -> OriginalKeys {
+    let scancodes = held.iter().filter_map(|key| scancode(*key)).collect();
     let mut keys = match preset {
         Preset::Modern => OriginalKeys {
             faster: down(held, Key::W),
@@ -306,11 +310,12 @@ pub fn original_keys(
             right: down(held, Key::Right),
             roll_left: down(held, Key::Q),
             roll_right: down(held, Key::E),
+            scancodes,
             ..OriginalKeys::default()
         },
         Preset::Classic => OriginalKeys {
             faster: down(held, Key::Enter),
-            slower: any_shift(held),
+            slower: slow_down(held),
             pitch_down: down(held, Key::Z),
             pitch_up: down(held, Key::A),
             left: down(held, Key::Comma),
@@ -320,6 +325,7 @@ pub fn original_keys(
             mouse: mouse.packed(),
             mouse_enabled: mouse_held,
             mouse_flip: reverse,
+            scancodes,
         },
     };
     if reverse[0] {
@@ -339,6 +345,120 @@ pub fn original_keys(
         keys.roll_right = false;
     }
     keys
+}
+
+/// The original's scancode for a key: the index JJFFE's platform layer gives
+/// it (`pKeybConvTable` in `win32/w32input.cpp`, the DOS set-1 code, with the
+/// extended keys at their DirectInput codes). The flight code's key
+/// accumulators ([`ffe_core::keyboard`]) track keys by it. Keys the original's
+/// table leaves out (Pause, F13-F15) have none.
+pub fn scancode(key: Key) -> Option<u8> {
+    use Key::*;
+    Some(match key {
+        Escape => 0x01,
+        Key1 => 0x02,
+        Key2 => 0x03,
+        Key3 => 0x04,
+        Key4 => 0x05,
+        Key5 => 0x06,
+        Key6 => 0x07,
+        Key7 => 0x08,
+        Key8 => 0x09,
+        Key9 => 0x0a,
+        Key0 => 0x0b,
+        Minus => 0x0c,
+        Equal => 0x0d,
+        Backspace => 0x0e,
+        Tab => 0x0f,
+        Q => 0x10,
+        W => 0x11,
+        E => 0x12,
+        R => 0x13,
+        T => 0x14,
+        Y => 0x15,
+        U => 0x16,
+        I => 0x17,
+        O => 0x18,
+        P => 0x19,
+        LeftBracket => 0x1a,
+        RightBracket => 0x1b,
+        Enter => 0x1c,
+        LeftCtrl => 0x1d,
+        A => 0x1e,
+        S => 0x1f,
+        D => 0x20,
+        F => 0x21,
+        G => 0x22,
+        H => 0x23,
+        J => 0x24,
+        K => 0x25,
+        L => 0x26,
+        Semicolon => 0x27,
+        Apostrophe => 0x28,
+        Backquote => 0x29,
+        LeftShift => 0x2a,
+        Backslash => 0x2b,
+        Z => 0x2c,
+        X => 0x2d,
+        C => 0x2e,
+        V => 0x2f,
+        B => 0x30,
+        N => 0x31,
+        M => 0x32,
+        Comma => 0x33,
+        Period => 0x34,
+        Slash => 0x35,
+        RightShift => 0x36,
+        NumPadAsterisk => 0x37,
+        LeftAlt => 0x38,
+        Space => 0x39,
+        CapsLock => 0x3a,
+        F1 => 0x3b,
+        F2 => 0x3c,
+        F3 => 0x3d,
+        F4 => 0x3e,
+        F5 => 0x3f,
+        F6 => 0x40,
+        F7 => 0x41,
+        F8 => 0x42,
+        F9 => 0x43,
+        F10 => 0x44,
+        NumLock => 0x45,
+        ScrollLock => 0x46,
+        NumPad7 => 0x47,
+        NumPad8 => 0x48,
+        NumPad9 => 0x49,
+        NumPadMinus => 0x4a,
+        NumPad4 => 0x4b,
+        NumPad5 => 0x4c,
+        NumPad6 => 0x4d,
+        NumPadPlus => 0x4e,
+        NumPad1 => 0x4f,
+        NumPad2 => 0x50,
+        NumPad3 => 0x51,
+        NumPad0 => 0x52,
+        NumPadDot => 0x53,
+        F11 => 0x57,
+        F12 => 0x58,
+        NumPadEnter => 0x9c,
+        RightCtrl => 0x9d,
+        NumPadSlash => 0xb5,
+        RightAlt => 0xb8,
+        Home => 0xc7,
+        Up => 0xc8,
+        PageUp => 0xc9,
+        Left => 0xcb,
+        Right => 0xcd,
+        End => 0xcf,
+        Down => 0xd0,
+        PageDown => 0xd1,
+        Insert => 0xd2,
+        Delete => 0xd3,
+        LeftSuper => 0xdb,
+        RightSuper => 0xdc,
+        Menu => 0xdd,
+        _ => return None,
+    })
 }
 
 /// The prototype turret's steering keys, in `(pitch up, pitch down, yaw left,
@@ -483,10 +603,21 @@ mod tests {
     fn classic_enter_shift_and_the_original_keys_do_not_leak_into_modern() {
         let thrust = controls(Preset::Classic, &[Key::Enter]);
         assert_eq!(thrust.thrust, 1.0);
-        let reverse = controls(Preset::Classic, &[Key::LeftShift]);
-        assert_eq!(reverse.thrust, -1.0);
-        // Right Shift lowers the set speed as the original does.
+        // Right Shift lowers the set speed; left Shift does not (F1037 reads
+        // only scancode 0x36).
         assert_eq!(controls(Preset::Classic, &[Key::RightShift]).thrust, -1.0);
+        assert_eq!(controls(Preset::Classic, &[Key::LeftShift]).thrust, 0.0);
+        let held = [Key::LeftShift];
+        let keys = original_keys(
+            Preset::Classic,
+            View::Ship,
+            &held,
+            MouseAccumulator::default(),
+            false,
+            [false; 2],
+        );
+        assert!(!keys.slower);
+        assert!(keys.scancodes.contains(0x2a));
         for key in CLASSIC {
             let classic = controls(Preset::Classic, &[key]);
             let modern = controls(Preset::Modern, &[key]);
@@ -495,7 +626,7 @@ mod tests {
                 FlightControls::default(),
                 "{key:?} must do nothing in Modern"
             );
-            if key == Key::Enter || key == Key::LeftShift {
+            if key == Key::Enter || key == Key::RightShift {
                 assert_ne!(classic.thrust, 0.0, "{key:?} thrusts in Classic");
             }
         }

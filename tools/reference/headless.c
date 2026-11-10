@@ -25,6 +25,7 @@ extern char *ref_expand_string(char *dest, long ffcode, void *vars);
 extern unsigned char ref_pl_mode;
 extern unsigned long ref_system_counter, ref_accel_counter, ref_time_accel;
 extern unsigned long ref_timer_last, ref_timer_next, ref_timer_min;
+extern unsigned long ref_st_boost;
 extern unsigned short ref_illegal_fire;
 extern unsigned char ref_wanted, ref_alert;
 extern unsigned long ref_fines[6], ref_starport, ref_danger, ref_cash;
@@ -556,13 +557,13 @@ static void (*death_text_original)(void);
    the planet +0x56 through free flight). */
 static int flight_mode;
 static int geometry_mode;
-static int flight_scenario; /* 0 idle, 1 takeoff, 2 planet */
+static int flight_scenario; /* 0 idle, 1 takeoff, 2 planet, 3 hover, 4 keyboard */
 static int flight_launch_sent;
 static unsigned long flight_launch_frame = 170, flight_thrust_frame = 260;
 static uint64_t flight_previous_hash;
 static const char *flight_scenario_name(void)
 {
-    return flight_scenario == 1 ? "takeoff" : flight_scenario == 2 ? "planet" : flight_scenario == 3 ? "hover" : "idle";
+    return flight_scenario == 1 ? "takeoff" : flight_scenario == 2 ? "planet" : flight_scenario == 3 ? "hover" : flight_scenario == 4 ? "keyboard" : "idle";
 }
 
 static uint64_t flight_hash_value(uint64_t hash, uint64_t value)
@@ -802,9 +803,55 @@ void InputMouseReadMickeys(long *x, long *y) { *x = 0; *y = 0; }
 void InputMouseReadPos(long *x, long *y) { *x = 160; *y = 100; }
 void InputJoyReadPos(long *x, long *y) { *x = 0; *y = 0; }
 long InputJoyReadButtons(void) { return 0; }
+/* The `keyboard` scenario: the takeoff launch, then Return and Shift on the
+   schedule below (Shift is right Shift, 0x36: F1037 reads DATA_007694), reported as JJFFE's own platform layer reports keys
+   (win32/w32input.cpp InputKeybReadStates): an initial press or an
+   auto-repeat (ffewin.cfg: 300 ms delay, 30 ms rate) becomes the last key,
+   the highest scancode winning. GuiReadAllInput turns that into DATA_007690,
+   which scales F1121's set-speed step; the plain takeoff scenario never
+   reports a last key for Return, so it cannot show this. The platform's
+   clock is read as tmLastTime (the frame's TimerAdvance time) rather than
+   TimerGetTimeStamp, which would move the synthetic clock. */
+static unsigned char keyboard_platform[256];
+static unsigned long keyboard_repeat_at[256];
+static long keyboard_last_key = 0xff;
+static int keyboard_down(int code)
+{
+    unsigned long f = frames;
+    if (code == 0x1c) return (f >= 260 && f < 400) || (f >= 700 && f < 800);
+    if (code == 0x36) return (f >= 450 && f < 600) || (f >= 620 && f < 690);
+    /* A (pitch up) pressed and released inside the second Return hold: a new
+       last key restarts DATA_007690, and its release clears it. */
+    if (code == 0x1e) return f >= 740 && f < 746;
+    return 0;
+}
+static void keyboard_read(UCHAR *keys)
+{
+    int i;
+    unsigned long now = ref_timer_last;
+    for (i = 0; i < 256; ++i) {
+        if (!keyboard_down(i)) { keyboard_platform[i] = 0x80; continue; }
+        if (keyboard_platform[i] == 0x80) {
+            keyboard_last_key = i;
+            keyboard_platform[i] = 0;
+            keyboard_repeat_at[i] = now + 300;
+        } else if (keyboard_platform[i] == 0 && keyboard_repeat_at[i] < now) {
+            keyboard_platform[i] = 0xff;
+        }
+        if (keyboard_platform[i] == 0xff && keyboard_repeat_at[i] < now) {
+            keyboard_last_key = i;
+            keyboard_repeat_at[i] += 30;
+        }
+    }
+    for (i = 0; i < 256; ++i) keys[i] = keyboard_platform[i] == 0x80 ? 0x80 : 0;
+}
 void InputKeybReadStates(UCHAR *keys)
 {
     memset(keys, 0x80, 256);
+    if (flight_mode && flight_scenario == 4) {
+        keyboard_read(keys);
+        return;
+    }
     /* F1037 reads Return (0x1c) to raise the set speed; F1043 reads numpad 8
        (0x48) for forward thrust. Both are raw scancodes. */
     if (((flight_mode && flight_scenario != 0) || (misjump_mode && !misjump_frame)) &&
@@ -830,12 +877,13 @@ long InputKeybGetLastKey(void)
         flight_launch_sent = 1;
         return 0x0f;
     }
+    if (flight_mode && flight_scenario == 4 && flight_launch_sent) return keyboard_last_key;
     if (game_frame_mode && game_key_next < game_key_count && frames >= game_key_frame) {
         game_key_frame = frames + 40;
         return (long)game_keys[game_key_next++];
     }
     return 0xff;
-}void InputKeybSetLastKey(long key) { (void)key; }
+}void InputKeybSetLastKey(long key) { if (flight_mode && flight_scenario == 4) keyboard_last_key = key; }
 ULONG TimerGetTimeStamp(void)
 {
     if (++clock_reads > 1000000) fail("clock-read bound exceeded");
@@ -1136,6 +1184,9 @@ void TimerFrameUpdate(void)
            Frames before 140 are still covered by `--state`; this trace starts
            where the intro first has a stable mode. */
         if (frames >= 140) flight_trace_row();
+        if (frames >= 140 && flight_scenario == 4)
+            printf("{\"keyboard\":%lu,\"timer_last\":%lu,\"timer_next\":%lu,\"last_key_count\":%lu}\n",
+                   frames, ref_timer_last, ref_timer_next, ref_st_boost);
         fflush(stdout);
         if (frames + 1 >= limit) exit(0);
     } else if (state_mode) {
@@ -6383,7 +6434,10 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[2], "planet")) flight_scenario = 2;
         /* hover: the takeoff launch with no keys afterwards (F1013's own hand-off). */
         else if (!strcmp(argv[2], "hover")) { flight_scenario = 3; flight_thrust_frame = ~0UL; }
-        else fail("unknown --flight scenario (idle, takeoff, planet, hover)");
+        /* keyboard: the takeoff launch with Return/Shift on keyboard_down()'s
+           schedule, reported through an emulation of the platform layer. */
+        else if (!strcmp(argv[2], "keyboard")) { flight_scenario = 4; flight_thrust_frame = ~0UL; }
+        else fail("unknown --flight scenario (idle, takeoff, planet, hover, keyboard)");
         flight_mode = 1;
         limit = strtoul(argv[3], &end, 10);
         if (*end || limit < 200 || limit > 2000) fail("invalid --flight frame count");
