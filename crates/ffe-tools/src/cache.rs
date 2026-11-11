@@ -782,18 +782,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
                 });
             }
             if let Some(tables_rva) = system_layout(profile.id) {
-                let table = decode_system_tables(&bytes, tables_rva).map_err(|error| {
-                    if profile.id == "ffe-shareware-1.06-en" {
-                        format!(
-                            "{error} Elite Club shareware 1.06 lists 339 star systems (its \
-                             1.06 patch added ten to the 329 of floppy 1.02, CD 1.01 and \
-                             JJFFE 2.8a7); the port's system tables hold 329, so this \
-                             release cannot be loaded yet."
-                        )
-                    } else {
-                        error
-                    }
-                })?;
+                let table = decode_system_tables(&bytes, tables_rva)?;
                 assets.push(Asset {
                     id: "base:world/system-tables".to_owned(),
                     path: "world/system-tables.bin".to_owned(),

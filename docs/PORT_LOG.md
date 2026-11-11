@@ -1,5 +1,22 @@
 # Port log
 
+## 2026-11-11 — Shareware 1.06 loads: variable galaxy table
+
+Elite Club shareware 1.06 ("English Release 1.1 (Remastered Version)") has
+339 galaxy records. Its system block is floppy 1.02's with ten records
+appended; everything after the table is the same once moved down 540 bytes,
+apart from relocated pointers the port does not read. `galaxy::Tables` now
+counts the records up to the zero code and maps every offset from the
+special codes on past the longer table; `decode_system_tables` reads the
+block to that length. The shareware imports and plays, and its Hope start
+frame matches the floppy's.
+
+JJFFE 2.8a7's `DATA_007110` also has 339 records and the same version and
+model-name strings, so the gameplay reference's data is this 1.1/1.06 data,
+not floppy 1.02's. 1.06 also differs from 1.02 in 35 models, the ship
+statistics and the mission scripts. Galaxy oracles (world, market, sectors,
+hyperspace, system names, map stars, galaxy map, takeoff) pass unchanged.
+
 ## 2026-11-11 — CD 1.01 imports; shareware assessed; CD videos load
 
 **CD 1.01 said "no system tables".** The importer had CD locations only for

@@ -4,18 +4,26 @@
 //! `SystemTables` asset) and read here through a borrowed view.
 //! Verified against the executed original (`docs/notes/galaxy.md`).
 
-/// Bytes of the imported block: from `DATA_007106` to the end of `DATA_007138`.
+/// Bytes of the imported block: from `DATA_007106` to the end of `DATA_007138`,
+/// with floppy 1.02's 329 galaxy records. A release with more records (Elite
+/// Club shareware 1.06 has 339) has a block longer by [`RECORD_BYTES`] each;
+/// everything after the table moves down with it ([`Tables::new`]).
 pub const TABLES_BYTES: usize = 20_984;
+/// The most galaxy records a block may hold.
+pub const MAX_RECORDS: usize = 1_024;
 /// Offset of the galaxy table (`DATA_007110`) in the block.
 pub const GALAXY_OFFSET: usize = 432;
 /// Bytes per galaxy record.
 pub const RECORD_BYTES: usize = 54;
-/// Records in the table; a zero code (a 330th, blank record) follows them.
+/// Records in floppy 1.02's table; a zero code (a 330th, blank record) follows
+/// them.
 pub const RECORDS: usize = 329;
-/// Offset of the four special system codes (`DATA_007116`).
+/// Offset of the four special system codes (`DATA_007116`) after 329 records.
 pub const SPECIAL_OFFSET: usize = 18_252;
 
-/// Table offsets in the block of the system generator's data (`DATA_007119..7138`).
+/// Table offsets in the block of the system generator's data (`DATA_007119..7138`),
+/// for 329 records: [`Tables::dword`] and [`Tables::bytes`] move any offset
+/// from [`SPECIAL_OFFSET`] on past a longer galaxy table.
 pub mod tables {
     pub const TYPE: usize = 18_492; // 7119, 23 dwords
     pub const MODEL: usize = 18_584; // 7120
@@ -38,6 +46,8 @@ pub mod tables {
 #[derive(Debug, Clone, Copy)]
 pub struct Tables<'a> {
     bytes: &'a [u8],
+    /// The galaxy records before the zero code.
+    records: usize,
 }
 
 /// What F869 reports about a system (`DATA_007106 + 0x1b0 + 54 * index + ...`).
@@ -91,24 +101,59 @@ pub struct Control {
 
 impl<'a> Tables<'a> {
     pub fn new(bytes: &'a [u8]) -> Result<Self, String> {
-        if bytes.len() != TABLES_BYTES {
+        let records = Self::count(bytes)
+            .ok_or("The galaxy table has no terminating zero code.".to_owned())?;
+        if records < RECORDS {
+            return Err(format!(
+                "The galaxy table has {records} records, fewer than the original's {RECORDS}."
+            ));
+        }
+        if bytes.len() != Self::block_bytes(records) {
             return Err("The system tables block has the wrong size.".to_owned());
         }
-        let tables = Tables { bytes };
-        if tables.code(RECORDS) != 0 || (0..RECORDS).any(|i| tables.code(i) == 0) {
-            return Err("The galaxy table is not 329 records and a terminator.".to_owned());
+        Ok(Tables { bytes, records })
+    }
+
+    /// The galaxy records before the first zero code in `bytes`, if one is
+    /// there within [`MAX_RECORDS`].
+    pub fn count(bytes: &[u8]) -> Option<usize> {
+        (0..=MAX_RECORDS).find_map(|index| {
+            let at = GALAXY_OFFSET + index * RECORD_BYTES;
+            let code = bytes.get(at..at + 4)?;
+            (code == [0; 4]).then_some(index)
+        })
+    }
+
+    /// The block's size with `records` galaxy records.
+    pub fn block_bytes(records: usize) -> usize {
+        TABLES_BYTES + (records - RECORDS) * RECORD_BYTES
+    }
+
+    /// The galaxy records (329 in floppy 1.02 and CD 1.01).
+    pub fn records(&self) -> usize {
+        self.records
+    }
+
+    /// Where a 329-record offset is in this block: offsets from the special
+    /// codes on follow the longer table.
+    fn at(&self, offset: usize) -> usize {
+        if offset >= SPECIAL_OFFSET {
+            offset + (self.records - RECORDS) * RECORD_BYTES
+        } else {
+            offset
         }
-        Ok(tables)
     }
 
-    /// A slice of the block.
+    /// A slice of the block, at a 329-record offset.
     pub fn bytes(&self, offset: usize, length: usize) -> &[u8] {
-        &self.bytes[offset..offset + length]
+        let at = self.at(offset);
+        &self.bytes[at..at + length]
     }
 
-    /// A dword of the block.
+    /// A dword of the block, at a 329-record offset.
     pub fn dword(&self, offset: usize) -> u32 {
-        u32::from_le_bytes(self.bytes[offset..offset + 4].try_into().unwrap())
+        let at = self.at(offset);
+        u32::from_le_bytes(self.bytes[at..at + 4].try_into().unwrap())
     }
 
     /// The 54 bytes at `index` records from `DATA_007110`. The classes -2 to -8
@@ -122,14 +167,15 @@ impl<'a> Tables<'a> {
 
     /// A record's system code (`+0`); the table ends with a zero code.
     pub fn code(&self, index: usize) -> u32 {
-        self.dword(GALAXY_OFFSET + index * RECORD_BYTES)
+        let at = GALAXY_OFFSET + index * RECORD_BYTES;
+        u32::from_le_bytes(self.bytes[at..at + 4].try_into().unwrap())
     }
 
     /// F868: the index of a system in the table, or a negative class for a
     /// system that is not in it: -1 for one of the four special codes, otherwise
     /// -2 to -8 by the squared distance from the galactic centre.
     pub fn index(&self, code: u32) -> i32 {
-        if let Some(index) = (0..RECORDS).find(|i| self.code(*i) == code) {
+        if let Some(index) = (0..self.records).find(|i| self.code(*i) == code) {
             return index as i32;
         }
         let masked = code & 0x03ff_ffff;
@@ -206,5 +252,49 @@ impl<'a> Tables<'a> {
             minor_rank,
             major_rank,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A block with `records` galaxy records (codes 1..), the special codes and
+    /// a marker dword at the generator tables' `SEED`.
+    fn block(records: usize) -> Vec<u8> {
+        let mut bytes = vec![0u8; Tables::block_bytes(records)];
+        for index in 0..records {
+            let at = GALAXY_OFFSET + index * RECORD_BYTES;
+            bytes[at..at + 4].copy_from_slice(&(index as u32 + 1).to_le_bytes());
+        }
+        let shift = (records - RECORDS) * RECORD_BYTES;
+        bytes[SPECIAL_OFFSET + shift..SPECIAL_OFFSET + shift + 4]
+            .copy_from_slice(&0x0123_4567u32.to_le_bytes());
+        bytes[tables::SEED + shift..tables::SEED + shift + 4]
+            .copy_from_slice(&0xdead_beefu32.to_le_bytes());
+        bytes
+    }
+
+    /// Elite Club shareware 1.06 (and JJFFE 2.8a7's data) has 339 records:
+    /// the generator tables follow the longer galaxy table, and the records
+    /// after the 329th are found.
+    #[test]
+    fn a_longer_galaxy_table_moves_the_tables_after_it() {
+        for records in [RECORDS, 339] {
+            let bytes = block(records);
+            let tables = Tables::new(&bytes).unwrap();
+            assert_eq!(tables.records(), records);
+            assert_eq!(tables.dword(tables::SEED), 0xdead_beef, "{records}");
+            assert_eq!(tables.dword(SPECIAL_OFFSET), 0x0123_4567, "{records}");
+            assert_eq!(tables.index(records as u32), records as i32 - 1);
+        }
+        // A wrong length for the record count, or too few records, is refused.
+        let mut long = block(339);
+        long.pop();
+        assert!(Tables::new(&long).is_err());
+        let mut short = block(RECORDS);
+        let at = GALAXY_OFFSET + 10 * RECORD_BYTES;
+        short[at..at + 4].fill(0);
+        assert!(Tables::new(&short).is_err());
     }
 }

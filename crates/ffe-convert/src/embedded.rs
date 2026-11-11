@@ -958,12 +958,26 @@ pub fn decode_star_shades(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, Strin
     })
 }
 
-/// The galaxy table and system-generation tables (`DATA_007106..7138`, 20,984 bytes).
+/// The galaxy table and system-generation tables (`DATA_007106..7138`): 20,984
+/// bytes with floppy 1.02's 329 galaxy records, 54 more for each further record
+/// (Elite Club shareware 1.06 has 339). The table's zero code sets the length.
 pub fn decode_system_tables(bytes: &[u8], rva: u32) -> Result<EmbeddedTable, String> {
-    use ffe_core::galaxy::{Tables, TABLES_BYTES};
+    use ffe_core::galaxy::{Tables, GALAXY_OFFSET, MAX_RECORDS, RECORD_BYTES};
     let section = DataSection::parse(bytes)?;
-    let source_offset = section.offset(rva, TABLES_BYTES)?;
-    let table = range(bytes, source_offset, TABLES_BYTES)?;
+    // The galaxy table as far as it can reach, to find its zero code.
+    let reach = GALAXY_OFFSET + (MAX_RECORDS + 1) * RECORD_BYTES;
+    let start = section.offset(rva, 1)?;
+    let available = (section.raw + section.size)
+        .saturating_sub(start)
+        .min(reach);
+    let records = Tables::count(range(bytes, start, available)?)
+        .ok_or("The galaxy table has no terminating zero code.")?;
+    if records < ffe_core::galaxy::RECORDS {
+        return Err(format!("The galaxy table has only {records} records."));
+    }
+    let length = Tables::block_bytes(records);
+    let source_offset = section.offset(rva, length)?;
+    let table = range(bytes, source_offset, length)?;
     Tables::new(table)?;
     Ok(EmbeddedTable {
         source_offset,
