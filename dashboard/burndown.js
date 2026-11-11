@@ -1382,6 +1382,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-11",
       remaining: 78,
       note: "PAR-16 started (no new closure): the new game's F688 pass spawns no police (the executed original's default start holds none) and the port's per-kind traffic caps are lifted so F688's rolls stand within F691's 25 and a 40-ship budget. The draw ledger still differs (port 0 traders, 13 bay ships, 0 aux; original 1, 6, 1), which needs PAR-17 and an F922 trace in the reference."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 78,
+      note: "PAR-17/20/16 progress (no closure): the bulletin board is now the original's F621/F636-F646/F857/F623-F632 generators, and F622's 1,711 draws before F688 match the executed original (reference trace via FFE_RNG_TRACE; caveat: JJFFE's galaxy table has ten more empty systems). The new game enters F688 in the original's RNG state a3e751f9/1df3aaed. Next: F688's spawn bodies (F689/F691/F698/F699/F702/F772/F775), where the port diverges at draw 1712."
     }
   ]
 };

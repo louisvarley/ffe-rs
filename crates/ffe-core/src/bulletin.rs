@@ -557,6 +557,65 @@ fn charity(rng: &mut Random, world: &World<'_>, day: u32) -> Post {
     )
 }
 
+/// A board entry the original's generators wrote (`bbs::Raw`, F646's six
+/// dwords) as the advertisement the screen shows. `commodity` names the good of
+/// F641's notice (`0x8e00 + index`).
+pub fn post_from_raw(
+    raw: &crate::bbs::Raw,
+    day: u32,
+    world: &World<'_>,
+    commodity: &dyn Fn(usize) -> String,
+) -> Post {
+    let [a2, a3, a4, a5, a6] = raw.args;
+    let code = raw.code as u16;
+    let string = |id: u32| Var::Text(text(embedded(id as u16).unwrap_or(b"")));
+    let system = Var::System(if a3 == 0 { world.code } else { a3 });
+    let vars = match code {
+        0x981a | 0x981b => [
+            Var::Int(i64::from(a5)),
+            string(a2),
+            Var::System(a3),
+            Var::Seed(a6),
+            Var::Int(i64::from(a4)),
+        ],
+        0x981d | 0x981e => [
+            Var::Int(i64::from(a5)),
+            Var::Int(i64::from(a2)),
+            Var::System(a3),
+            Var::Seed(a6),
+            Var::Int(i64::from(a4)),
+        ],
+        0x981f..=0x9822 => [
+            Var::Int(i64::from(a5)),
+            Var::Int(i64::from(a2)),
+            Var::System(a3),
+            Var::Seed(a6),
+            string(a4),
+        ],
+        0x982a => [
+            Var::Int(0),
+            Var::Text(commodity(a2.wrapping_sub(0x8e00) as usize)),
+            Var::Int(i64::from(a3 as i32)),
+            Var::Seed(a6),
+            Var::Int(0),
+        ],
+        0x982c => {
+            let name = text(embedded(a2 as u16).unwrap_or(b"a charity")).replace("???", world.name);
+            [
+                Var::Int(0),
+                Var::Text(name),
+                system,
+                Var::Seed(0),
+                Var::Int(0),
+            ]
+        }
+        _ => [Var::Int(0), Var::Int(0), system, Var::Seed(a6), Var::Int(0)],
+    };
+    let mut post = post(code, day, vars, world);
+    post.fake = code == 0x9829 && a2 == u32::MAX;
+    post
+}
+
 /// Run one `DATA_006170` slot. `None` is F621's "no entry this time".
 pub fn generate_one(
     generator: Generator,
@@ -591,12 +650,15 @@ pub fn generate(rng: &mut Random, world: &World<'_>, day: u32) -> Vec<Post> {
     let attempts = world.population.saturating_mul(4).saturating_add(1);
     let mut posts = Vec::new();
     for _ in 0..attempts {
-        if posts.len() >= MAX_POSTS {
-            break;
-        }
+        // Every attempt draws, a full board included: the executed original
+        // makes all `population * 4 + 1` F621 calls (12 places x 29 at the
+        // default start) and F646 refuses the 19th entry after its generator
+        // has drawn.
         let generator = GENERATORS[rng.bounded(32) as usize];
         if let Some(post) = generate_one(generator, rng, world, day) {
-            posts.push(post);
+            if posts.len() < MAX_POSTS {
+                posts.push(post);
+            }
         }
     }
     posts

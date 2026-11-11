@@ -243,6 +243,31 @@ Every scripted capture (intro 13, display 7, start 150, traffic 7, game-over
 35, planet 1) is byte-identical to the build before the split. 867 workspace
 tests pass (three Modern-terrain unit tests went with the code).
 
+## 2026-11-11 — PAR-17/20: F622's draws before F688 match the original
+
+With NASM installed the reference traces every F922 draw (`FFE_RNG_TRACE`).
+The executed original's default start makes 1,711 draws before F688, from the
+F147 seed `12345678/456789ab`: for each of the 12 places 99 F1530 steps (the
+market over 33 goods), `population * 4 + 1` board attempts (F621) and the F634
+ship queue, then F623's news rounds (`maximum control * 8 + 8`). `ffe_core::bbs`
+now ports F621, F636-F646, F857 (the destination picker: `RND(12)` twice, then
+`RND(stars)`), F634/F635 and F623-F632 draw for draw, and
+`Navigator::generate_boards` runs it from the shared pair on entering a system.
+All 1,711 draws and the final state `a3e751f9/1df3aaed` match.
+
+- Differences from the earlier generator: the board keeps drawing after 18
+  entries; F639/F640/F636/F637/F641 exist (the port had left three out);
+  F645's notice is always `0x982c`; F644/F645 take F1530 words, not F922 draws;
+  the starport's ship queue is the shipyard's hull stock.
+- Data caveat: JJFFE's galaxy table has ten more (empty) systems than the
+  floppy's 329, so the comparison sets `FFE_REFERENCE_GALAXY=1`
+  (`bbs::REFERENCE_EMPTY`). The game itself uses the player's table.
+- Regression test: `crates/ffe-rs/tests/bbs_reference.rs` (ignored; needs
+  `FFE_WORLD_CACHE`) checks the state entering F688.
+- Open: F688's spawn bodies (F689/F691/F698/F699/F702/F772/F775, about 14 draws
+  per ship); the port diverges at draw 1712. F633's daily half and the player's
+  ranks for the news gate are not ported.
+
 ## 2026-11-11 — PAR-16: the new game's traffic follows F688 (started)
 
 The executed original's default start (`--npc-trace 260 0x39`, frame 200) holds

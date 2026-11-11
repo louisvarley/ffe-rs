@@ -1558,6 +1558,18 @@ pub struct Navigator {
     saved_markets: HashMap<(u32, usize), SavedMarket>,
     /// The BBS advertisements and hull stock of each visited starport (F622).
     offers: HashMap<(u32, usize), StationOffers>,
+    /// The boards F622 drew from the shared pair when the system was entered,
+    /// until [`Self::station_offers`] turns each into its starport's offers.
+    boards: HashMap<(u32, usize), ffe_core::bbs::Board>,
+    /// `DATA_009006..9`: the destinations F638 remembers for F636.
+    bbs_remembered: ffe_core::bbs::Remembered,
+    /// `DATA_009004`: the news and job list F623's rounds fill (F624).
+    pub bbs_jobs: Vec<ffe_core::bbs::Job>,
+    /// The system whose boards F622 has drawn (once per entry, not per spawn).
+    boards_entered: Option<usize>,
+    /// The shared pair as F688 last began (after F622's draws); the oracle test
+    /// compares it with the executed original's.
+    pub f688_entry: Option<npc::Random>,
     /// The day marker for the once-a-day updates (F152's `DATA_008808`).
     calendar: Calendar,
     /// The days [`Self::tick_days`] crossed since [`Self::take_crossed_days`].
@@ -2542,6 +2554,11 @@ impl Navigator {
             markets: HashMap::new(),
             saved_markets: HashMap::new(),
             offers: HashMap::new(),
+            boards: HashMap::new(),
+            bbs_remembered: ffe_core::bbs::Remembered::default(),
+            bbs_jobs: Vec::new(),
+            boards_entered: None,
+            f688_entry: None,
             calendar: Calendar::at(0),
             crossed: Vec::new(),
             deadlines: Vec::new(),
@@ -3549,15 +3566,41 @@ impl Navigator {
                 code ^ 0x4253_5342,
                 (index as u32 + 1).wrapping_mul(0x9e37_79b9),
             );
-            let posts = bulletin::generate(&mut rng, &world, day);
-            let hulls = shipyard::stock(
-                &mut rng,
-                (details.allegiance >> 6) as u16,
-                market.population,
-                details.bytes[1],
-                details.bytes[3],
-                starports,
-            );
+            let (posts, hulls) = if let Some(board) = self.boards.remove(&key) {
+                // F622's draw from the shared pair, made when the system was
+                // entered: the board's entries and F634's ship queue.
+                let absolute = day + 0x0012_1cf7;
+                let market_tables = MarketTables::new(&self.market_tables).ok();
+                let commodity = |good: usize| {
+                    market_tables
+                        .as_ref()
+                        .and_then(|tables| tables.name(good))
+                        .unwrap_or("goods")
+                        .to_owned()
+                };
+                let posts = board
+                    .entries
+                    .iter()
+                    .map(|raw| bulletin::post_from_raw(raw, absolute, &world, &commodity))
+                    .collect();
+                let hulls = board
+                    .ships
+                    .iter()
+                    .map(|(word, model)| (*model, *word))
+                    .collect();
+                (posts, hulls)
+            } else {
+                let posts = bulletin::generate(&mut rng, &world, day);
+                let hulls = shipyard::stock(
+                    &mut rng,
+                    (details.allegiance >> 6) as u16,
+                    market.population,
+                    details.bytes[1],
+                    details.bytes[3],
+                    starports,
+                );
+                (posts, hulls)
+            };
             slot.insert(StationOffers {
                 posts,
                 hulls,
@@ -4404,8 +4447,13 @@ impl Navigator {
                 orbital_station: body.kind == Kind::Station,
             })
             .collect();
+        if self.boards_entered != Some(self.current) {
+            self.generate_boards(cache);
+            self.boards_entered = Some(self.current);
+        }
         // F688 draws from the shared pair (PAR-17).
         let mut rng = self.random;
+        self.f688_entry = Some(rng);
         let mut ships = npc::restore(&self.persisted, player, 0);
         self.persisted.clear();
         let base = ships.len() as u32;
@@ -4451,6 +4499,104 @@ impl Navigator {
         self.spawned = Some(self.current);
         self.contract_spawned.clear();
         !self.ships.is_empty()
+    }
+
+    /// F622 on entering a system: for each place in order, the market's draws
+    /// (99 steps of F1530 over the 33 goods), the board's `population * 4 + 1`
+    /// attempts and the ship queue, all from the shared pair; then the news
+    /// rounds. The executed original's 1,711 draws before F688 at the default
+    /// start match this call for call. Markets themselves are still made from
+    /// their own seeds (the draws are consumed, not read).
+    fn generate_boards(&mut self, cache: &VerifiedCache) {
+        use ffe_core::bbs;
+        let Some(blob) = cache.asset("base:world/system-tables") else {
+            return;
+        };
+        let (Ok(galaxy), Some(sector_blob)) =
+            (Tables::new(blob), cache.asset("base:world/galaxy-tables"))
+        else {
+            return;
+        };
+        let Ok(sectors) = ffe_core::sector::Tables::new(sector_blob) else {
+            return;
+        };
+        let code = self.entries[self.current].params.code;
+        let market = galaxy.market(code);
+        let details = galaxy.details(code);
+        let places: Vec<usize> = self
+            .bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, body)| body.kind.is_place())
+            .map(|(index, _)| index)
+            .collect();
+        // Oracle comparisons run JJFFE's own galaxy table, which has ten more
+        // (empty) systems than the floppy's: FFE_REFERENCE_GALAXY=1 adds them.
+        let reference_empty: &[u32] = if std::env::var_os("FFE_REFERENCE_GALAXY").is_some() {
+            &bbs::REFERENCE_EMPTY
+        } else {
+            &[]
+        };
+        let day = self.day() + 0x0012_1cf7;
+        let mut rng = self.random;
+        let mut remembered = self.bbs_remembered;
+        self.boards.retain(|key, _| key.0 != code);
+        for &index in &places {
+            for _ in 0..99 {
+                rng.advance();
+            }
+            let Ok(entries) = self
+                .market(cache, index)
+                .map(|station| station.market.entries)
+            else {
+                continue;
+            };
+            let ctx = bbs::Context {
+                code,
+                population: market.population,
+                danger: market.danger as i32,
+                allegiance: details.allegiance >> 6,
+                stock: &market.stock,
+                market: &entries,
+                day,
+                object_seed: self.bodies[index].seed,
+                places: places.len() as u32,
+                patrol: details.bytes[1],
+                trade: details.bytes[3],
+                empty: reference_empty,
+                galaxy: &galaxy,
+                sectors: &sectors,
+            };
+            let board = bbs::generate_place(&ctx, &mut remembered, &mut rng);
+            self.boards.insert((code, index), board);
+        }
+        // F871's control of the system and the player's two ranks (zero until
+        // the player has any) give the news rounds' count and rank gate.
+        let control = galaxy.control(code, [0, 0]);
+        let ctx = bbs::Context {
+            code,
+            population: market.population,
+            danger: market.danger as i32,
+            allegiance: details.allegiance >> 6,
+            stock: &market.stock,
+            market: &[ffe_core::market::Entry::default(); ffe_core::market::GOODS],
+            day,
+            object_seed: 0,
+            places: places.len() as u32,
+            patrol: details.bytes[1],
+            trade: details.bytes[3],
+            empty: reference_empty,
+            galaxy: &galaxy,
+            sectors: &sectors,
+        };
+        self.bbs_jobs = bbs::news(
+            &ctx,
+            &mut rng,
+            control.maximum,
+            control.major_rank.saturating_sub(control.minor_rank),
+        );
+        self.bbs_remembered = remembered;
+        self.random = rng;
     }
 
     /// F691/F650: give every initial station-bay ship its bay and start F747's
@@ -6052,6 +6198,9 @@ impl Navigator {
         self.markets.clear();
         self.saved_markets.clear();
         self.offers.clear();
+        self.boards.clear();
+        self.bbs_jobs.clear();
+        self.boards_entered = None;
         self.sequence = None;
         self.takeoff = None;
         self.landed = None;
