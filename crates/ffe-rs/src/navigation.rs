@@ -2260,6 +2260,11 @@ pub struct NewGameState {
     /// The bay F650 allocated and the pad position it gives (system frame, mm).
     pub bay: u16,
     pub seat: [i64; 3],
+    /// The player has since bought another hull (F442): the record stays for
+    /// the pad (state `0x30`, the bay and seat), but the hold and the delivered
+    /// equipment are the new hull's own, not F998's.
+    #[serde(default)]
+    pub bought: bool,
 }
 
 /// The navigator's serialisable state: where the commander is, what system,
@@ -2696,6 +2701,7 @@ impl Navigator {
             acceleration: NEW_GAME_ACCELERATION,
             bay: bay.index,
             seat,
+            bought: false,
         });
         // F687/F686's start entry: the new game's system has its F688 traffic,
         // but no capture guarantee and no pirate placed at the pad.
@@ -3912,7 +3918,25 @@ impl Navigator {
     /// started one, else the ship model's cargo statistic.
     pub fn hold(&self, cache: &VerifiedCache, ship: u32) -> i32 {
         self.new_game
+            .filter(|state| !state.bought)
             .map_or_else(|| self.cargo_space(cache, ship), |state| state.cargo)
+    }
+
+    /// The drive a hull is delivered with: F1533 sets `ship+0xd0` from the low
+    /// byte of the statistics' `+0x14` word, and F441 does the same for a
+    /// bought hull whose word is not negative. The flag is true for a negative
+    /// word, an integral drive: the cargo statistic is already net of it
+    /// (`cargo_space`) and F410/F411 will not remove it. Zero class: no drive.
+    pub fn hull_drive(&self, cache: &VerifiedCache, ship: u32) -> (u8, bool) {
+        let Some(stats) = cache.asset("base:ship/stats") else {
+            return (0, false);
+        };
+        let at = 48 * ship as usize;
+        let Some(record) = stats.get(at..at + 48) else {
+            return (0, false);
+        };
+        let word = i16::from_le_bytes([record[0x14], record[0x15]]);
+        (word as u8, word < 0)
     }
 
     /// The hold of a ship model, tonnes (`ffe_core::objects::Models::cargo_space`).

@@ -1387,6 +1387,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-11",
       remaining: 78,
       note: "PAR-17/20/16 progress (no closure): the bulletin board is now the original's F621/F636-F646/F857/F623-F632 generators, and F622's 1,711 draws before F688 match the executed original (reference trace via FFE_RNG_TRACE; caveat: JJFFE's galaxy table has ten more empty systems). The new game enters F688 in the original's RNG state a3e751f9/1df3aaed. Next: F688's spawn bodies (F689/F691/F698/F699/F702/F772/F775), where the port diverges at draw 1712."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 78,
+      note: "Play-through fixes (gameplay-2, gameplay-3; no closure): a bought hull carries its own stock drive and a hold net of it (F1533/F441), the start pad is kept after a ship purchase so F4 services work, and time acceleration is held lower near stations and starports (EXP-021) after a 10000x autopilot arrival destroyed the ship."
     }
   ]
 };

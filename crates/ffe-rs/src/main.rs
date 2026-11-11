@@ -918,6 +918,48 @@ const HYPERSPACE_EXIT_SPEED: i32 = 0x71b7;
 /// The highest time acceleration step (100x) within a world's terrain sphere.
 const NEAR_WORLD_ACCELERATION: usize = 2;
 
+/// Port rule (see DEVIATIONS EXP-021): the highest time step the ship may run
+/// at near a station or starport, with the station's name. `moved` is the
+/// distance the ship covered in one frame at 1x. The step may not carry it more
+/// than an eighth of the way to the nearest one in a frame, and is held to 100x
+/// within 2000 station radii, 10x within 200 and 1x within 20. `None` when no
+/// step needs holding.
+fn station_acceleration_cap(
+    bodies: &[ffe_rs::navigation::Body],
+    at: [i64; 3],
+    moved: f64,
+) -> Option<(usize, String)> {
+    let (name, gap, radius) = bodies
+        .iter()
+        .filter(|body| matches!(body.kind, NavKind::Station | NavKind::Starport))
+        .map(|body| {
+            let gap =
+                (ffe_rs::navigation::distance(at, body.position) - body.radius as f64).max(0.0);
+            (body.name.clone(), gap, body.radius.max(1) as f64)
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))?;
+    let mut cap = ffe_rs::console::TIME_ACCELERATION.len() - 1;
+    let floor = if gap < 20.0 * radius {
+        0
+    } else if gap < 200.0 * radius {
+        1
+    } else if gap < 2000.0 * radius {
+        2
+    } else {
+        cap
+    };
+    cap = cap.min(floor);
+    while cap > 0 {
+        let factor = f64::from(ffe_rs::console::TIME_ACCELERATION[cap])
+            / f64::from(ffe_rs::console::TIME_ACCELERATION[0]);
+        if moved * factor * 8.0 <= gap {
+            break;
+        }
+        cap -= 1;
+    }
+    (cap < ffe_rs::console::TIME_ACCELERATION.len() - 1).then_some((cap, name))
+}
+
 fn run() -> Result<(), String> {
     let options = options()?;
     let cache = std::sync::Arc::new(load_content(&options.game)?);
@@ -1106,6 +1148,9 @@ fn run() -> Result<(), String> {
     let mut in_transit: Option<ffe_rs::navigation::Jumped> = None;
     // The step the near-world hold lowered, restored once clear of the world.
     let mut held_acceleration: Option<usize> = None;
+    // Where the ship was last frame and the time step it moved at (the station
+    // rule's speed estimate).
+    let mut ship_moved: Option<([i64; 3], usize)> = None;
     // F2's status/equipment page (`F1120`, `DATA_008871 & 8`).
     let mut status_page = false;
     // F5's console icon (action 0xf5): the parked ship's engines/equipment page. Off by
@@ -1695,10 +1740,13 @@ fn run() -> Result<(), String> {
             && (session.total * 2.0).floor() != ((session.total - elapsed) * 2.0).floor()
         {
             eprintln!(
-                "trace state t={:.1} mode={:?} dead={} hull={:?} docked={:?} landed={:?} sequence={} dust={} alt={} locked={:?} log={:?}",
+                "trace state t={:.1} mode={:?} dead={} ship={} drive={}/{} hull={:?} docked={:?} landed={:?} sequence={} dust={} alt={} locked={:?} log={:?}",
                 session.total,
                 state.mode,
                 death_control,
+                state.ship,
+                state.loadout.drive,
+                state.combat.drive,
                 state.hull,
                 nav.as_ref()
                     .and_then(|nav| nav.docked)
@@ -2190,6 +2238,9 @@ fn run() -> Result<(), String> {
         }
         if let (Some(model), Some(nav)) = (original.as_mut(), nav.as_ref()) {
             let at = model.absolute_position();
+            let flying = state.mode == ffe_rs::flight::Mode::Flight
+                && !model.on_pad()
+                && nav.landed_state().is_none();
             let world = nav
                 .bodies
                 .iter()
@@ -2197,31 +2248,59 @@ fn run() -> Result<(), String> {
                     matches!(body.kind, NavKind::Planet | NavKind::Moon)
                         && ffe_rs::navigation::distance(at, body.position) <= body.radius as f64
                 })
-                .filter(|_| {
-                    state.mode == ffe_rs::flight::Mode::Flight
-                        && !model.on_pad()
-                        && nav.landed_state().is_none()
-                });
-            match world {
-                Some(world) if acceleration > NEAR_WORLD_ACCELERATION => {
-                    held_acceleration = Some(acceleration);
-                    acceleration = NEAR_WORLD_ACCELERATION;
-                    model.set_time_acceleration(acceleration);
-                    message = format!(
-                        "Time acceleration held at {} near {}.",
-                        ACCELERATION_NAMES[acceleration], world.name
-                    );
+                .filter(|_| flying);
+            // Port rule: how far the ship went last frame, at 1x. A station is
+            // a small target, so the step may not carry the ship more than an
+            // eighth of the way to it in one frame (and is held lower still
+            // close in). The chosen step comes back once the way is clear.
+            let moved =
+                ship_moved
+                    .filter(|_| flying)
+                    .map_or(0.0, |(before, step): ([i64; 3], usize)| {
+                        ffe_rs::navigation::distance(before, at)
+                            / f64::from(ffe_rs::console::TIME_ACCELERATION[step])
+                            * f64::from(ffe_rs::console::TIME_ACCELERATION[0])
+                    });
+            ship_moved = Some((at, acceleration));
+            let station = flying
+                .then(|| station_acceleration_cap(&nav.bodies, at, moved))
+                .flatten();
+            let cap = [
+                world.map(|_| NEAR_WORLD_ACCELERATION),
+                station.as_ref().map(|(step, _)| *step),
+            ]
+            .into_iter()
+            .flatten()
+            .min();
+            let wanted = held_acceleration.unwrap_or(acceleration);
+            match cap {
+                Some(cap) if wanted > cap => {
+                    held_acceleration = Some(wanted);
+                    if acceleration != cap {
+                        acceleration = cap;
+                        model.set_time_acceleration(acceleration);
+                        let near = station
+                            .filter(|(step, _)| *step == cap)
+                            .map(|(_, name)| name)
+                            .or_else(|| world.map(|world| world.name.clone()))
+                            .unwrap_or_default();
+                        message = format!(
+                            "Time acceleration held at {} near {}.",
+                            ACCELERATION_NAMES[acceleration], near
+                        );
+                    }
                 }
-                None => {
+                _ => {
                     if let Some(step) = held_acceleration.take() {
-                        if acceleration == NEAR_WORLD_ACCELERATION {
+                        if cap.is_none_or(|cap| step <= cap) {
                             acceleration = step;
                             model.set_time_acceleration(acceleration);
                             message = format!("Time acceleration {}.", ACCELERATION_NAMES[step]);
+                        } else {
+                            held_acceleration = Some(step);
                         }
                     }
                 }
-                Some(_) => {}
             }
         }
         if console_click == Some(Click::Pause) {
@@ -9256,11 +9335,26 @@ fn buy_ship(
         Ok(purchase) => {
             state.credits = u32::try_from(purchase.cash_tenths).unwrap_or(0);
             state.ship = purchase.model;
-            state.loadout = ffe_core::equipment::Loadout::default();
+            // F1533/F441: the hull comes with the drive its statistics name, and
+            // the hold is the cargo statistic less that drive's mass.
+            let (drive, _) = nav.hull_drive(cache, purchase.model);
+            state.loadout = ffe_core::equipment::Loadout {
+                drive,
+                ..ffe_core::equipment::Loadout::default()
+            };
             // The new hull's hold is no longer F998's new-game hold: F441 clears
             // the equipment and F2 quotes the new model's cargo statistic.
-            nav.new_game = None;
+            // The start pad's record stays (state 0x30, the bay and the seat:
+            // F4 still opens the services); only the hold and the delivered
+            // equipment become the new hull's own.
+            if let Some(start) = nav.new_game.as_mut() {
+                start.bought = true;
+            }
             state.combat = Combat::default();
+            state.combat.drive = drive;
+            if drive != 0 {
+                state.drive_fitted(nav.day());
+            }
             state.hull = [0, 0];
             state.shields = [0, 0];
             "Congratulations on your purchase. Call our upgrade department for the latest in additional equipment.".to_owned()

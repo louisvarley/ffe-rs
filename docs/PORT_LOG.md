@@ -243,6 +243,34 @@ Every scripted capture (intro 13, display 7, start 150, traffic 7, game-over
 35, planet 1) is byte-identical to the build before the split. 867 workspace
 tests pass (three Modern-terrain unit tests went with the code).
 
+## 2026-11-11 — Play-through bugs: ship change, drives and station time
+
+Found by replaying the owner's recording (`--replay` with `FFE_TRACE=1`).
+
+- **Exploded on docking after a ship change.** Not the new hull: the autopilot
+  reached Wicca Town at 10000x time acceleration (one frame is about 167 s), the
+  ship ended inside the station and took crash damage until the hull went from
+  5088 to 0. The port held time at 100x only near planets and moons. It now also
+  holds it near stations and starports (EXP-021), by distance and by last
+  frame's travel.
+- **No hyperdrive after selling the ship or the drive.** F1533 and F441 give a
+  bought hull the drive its statistics word names (`ship+0xd0`, the low byte),
+  and the hold is the cargo statistic less that drive's mass (an integral drive,
+  a negative word, is already out of `cargo_space`). `buy_ship` cleared the
+  loadout and fitted nothing, so a small hull had no room for any drive and the
+  fit rows (stepped through one by one) bought the Interplanetary drive, which
+  then blocked every hyperdrive. A bought hull now carries its stock drive
+  (`Navigator::hull_drive`, `trade::capacity`), selling it frees its tonnes and
+  the Class 1 fits again.
+- **Services wanted to launch after a ship change.** `buy_ship` cleared
+  `nav.new_game`, which `on_pad()` needs, so the start pad was forgotten and F4
+  said "No station services here." (four times in the recording). The record now
+  stays with a `bought` flag (`NewGameState::bought`) that switches only the hold
+  and the delivered equipment to the new hull's own.
+- Tests: `crates/ffe-rs/tests/ship_change.rs` (ignored, needs
+  `FFE_WORLD_CACHE`). Not played by hand; the replay no longer explodes and no
+  longer prints "No station services here.".
+
 ## 2026-11-11 — PAR-17/20: F622's draws before F688 match the original
 
 With NASM installed the reference traces every F922 draw (`FFE_RNG_TRACE`).

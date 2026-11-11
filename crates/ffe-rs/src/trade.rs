@@ -31,10 +31,16 @@ pub fn credits(value: i32) -> String {
 /// all of the fitted mass.
 pub fn capacity(nav: &Navigator, cache: &VerifiedCache, state: &Flight) -> i32 {
     let base = nav.hold(cache, state.ship);
-    let delivered = if nav.new_game.is_some() {
+    let delivered = if nav.new_game.is_some_and(|state| !state.bought) {
         ffe_core::equipment::Loadout::new_game()
     } else {
-        ffe_core::equipment::Loadout::default()
+        // A bought hull's integral drive is already out of the cargo statistic;
+        // a removable one is charged to the hold like any fitted drive.
+        let (class, integral) = nav.hull_drive(cache, state.ship);
+        ffe_core::equipment::Loadout {
+            drive: if integral { class } else { 0 },
+            ..ffe_core::equipment::Loadout::default()
+        }
     };
     state
         .loadout
