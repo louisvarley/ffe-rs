@@ -160,8 +160,18 @@ pub struct Player {
     name: String,
     video: Video,
     seconds: f64,
-    /// The palette as the screen's `0x00RRGGBB` words.
-    colours: Vec<u32>,
+    /// The palette as the screen's `0x00RRGGBB` words, `None` for a colour
+    /// F121 leaves transparent.
+    colours: Vec<Option<u32>>,
+}
+
+/// Whether F121 draws a clip colour. F115 cuts each palette entry to four bits
+/// a channel (`>> 4`) and maps the 12-bit colour through `DATA_007770` (the
+/// fixed colour map) to a game palette index; F121 skips any pixel whose
+/// index is 0. In the fixed map only colour 0x000 is index 0, so a colour is
+/// transparent when all three channels are below 16.
+pub fn transparent([r, g, b]: [u8; 3]) -> bool {
+    r >> 4 == 0 && g >> 4 == 0 && b >> 4 == 0
 }
 
 impl Player {
@@ -169,7 +179,10 @@ impl Player {
         let colours = video
             .palette
             .iter()
-            .map(|[r, g, b]| u32::from(*r) << 16 | u32::from(*g) << 8 | u32::from(*b))
+            .map(|&rgb| {
+                let [r, g, b] = rgb;
+                (!transparent(rgb)).then_some(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))
+            })
             .collect();
         Player {
             name: name.to_owned(),
@@ -217,7 +230,8 @@ impl Player {
     }
 
     /// Draw the current frame into a `width`-wide screen of `0x00RRGGBB`
-    /// words with its top-left at [`ORIGIN`], clipped to the screen.
+    /// words with its top-left at [`ORIGIN`], clipped to the screen. The
+    /// [`transparent`] colours leave the screen beneath.
     pub fn draw(&self, screen: &mut [u32], width: usize) {
         let frame = &self.video.frames[self.frame_index()];
         let (w, h) = (self.video.width as usize, self.video.height as usize);
@@ -229,7 +243,9 @@ impl Player {
             }
             for column in 0..w.min(width.saturating_sub(ORIGIN.0)) {
                 let index = frame[row * w + column];
-                screen[y * width + ORIGIN.0 + column] = self.colours[usize::from(index)];
+                if let Some(colour) = self.colours[usize::from(index)] {
+                    screen[y * width + ORIGIN.0 + column] = colour;
+                }
             }
         }
     }
@@ -322,5 +338,25 @@ mod tests {
         assert_eq!(at(1, 17), 2 << 16 | 253);
         assert_eq!(at(2, 18), 2 << 16 | 253);
         assert_eq!((at(0, 17), at(3, 17), at(1, 16), at(1, 19)), (0, 0, 0, 0));
+    }
+
+    /// F121 leaves pixels whose colour is black at four bits a channel, so
+    /// the station screen shows through the clip's background.
+    #[test]
+    fn a_clips_black_background_is_transparent() {
+        assert!(transparent([0, 0, 0]));
+        assert!(transparent([15, 15, 15]));
+        assert!(!transparent([16, 0, 0]));
+        assert!(!transparent([0, 0, 16]));
+        let mut video = clip(1);
+        video.palette[0] = [8, 3, 15];
+        video.palette[1] = [200, 100, 50];
+        video.frames = vec![vec![0, 1, 0, 1]];
+        let player = Player::new("BB1", video);
+        let mut screen = vec![0x00ab_cdefu32; 320 * 200];
+        player.draw(&mut screen, 320);
+        let at = |x: usize, y: usize| screen[y * 320 + x];
+        assert_eq!(at(1, 17), 0x00ab_cdef, "background shows through");
+        assert_eq!(at(2, 17), 200 << 16 | 100 << 8 | 50);
     }
 }
