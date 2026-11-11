@@ -1,0 +1,19 @@
+{
+  "agent": {
+    "architect": {
+      "description": "Hard problems: doc consolidation, cross-module changes, escalated bugs, diff review of shared core code",
+      "mode": "subagent",
+      "model": "opencode/claude-fable-5-2"
+    },
+    "worker": {
+      "description": "Standard implementation and bug fixes from a written brief",
+      "mode": "subagent",
+      "model": "opencode/claude-sonnet-5-5"
+    },
+    "grunt": {
+      "description": "Mechanical changes only: removing menu entries/text, tables, parsers, boilerplate, tests",
+      "mode": "subagent",
+      "model": "opencode/deepseek-v4.1-flash"
+    }
+  }
+}

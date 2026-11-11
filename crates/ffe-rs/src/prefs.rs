@@ -85,7 +85,7 @@ pub const MAP_LABELS: [&str; 5] = ["Stalks", "Grid", "Trade routes", "Names text
 /// and no resolution choice; these are presentation extensions.
 pub const WINDOW_SCALE_LABELS: [&str; 6] = ["1x", "2x", "3x", "4x", "5x", "6x"];
 pub const FIT_LABELS: [&str; 2] = ["Pixel-perfect", "Fill window"];
-pub const FILTER_LABELS: [&str; 2] = ["Nearest", "Linear"];
+pub const FILTER_LABELS: [&str; 5] = ["Nearest", "Linear", "xBRZ 2x", "xBRZ 3x", "Scale2x"];
 pub const ASPECT_LABELS: [&str; 2] = ["4:3 (DOS)", "Square"];
 
 /// The original's "Sound Effects" rows (`DATA_004965`).
@@ -170,6 +170,10 @@ pub enum Action {
     DisplayAspect(PixelAspect),
     /// `Alt+Enter`'s borderless full-screen toggle (session-only).
     Fullscreen,
+    /// CRT scanline effect toggle.
+    Scanlines,
+    /// Scanline intensity adjustment.
+    ScanlineIntensity,
     /// "Return to Game": close the pages.
     Close,
     /// The port's Quit (the original's "Quit to DOS").
@@ -611,10 +615,13 @@ impl Prefs {
                     ));
                 }
                 for (index, label) in FILTER_LABELS.iter().enumerate() {
-                    let filter = if index == 0 {
-                        Filter::Nearest
-                    } else {
-                        Filter::Linear
+                    let filter = match index {
+                        0 => Filter::Nearest,
+                        1 => Filter::Linear,
+                        2 => Filter::XbrzX2,
+                        3 => Filter::XbrzX3,
+                        4 => Filter::Scale2x,
+                        _ => Filter::Nearest,
                     };
                     rows.push(row(
                         176,
@@ -622,22 +629,6 @@ impl Prefs {
                         label,
                         Action::DisplayFilter(filter),
                         Mark::Radio(self.display.filter == filter),
-                        true,
-                        15,
-                    ));
-                }
-                for (index, label) in ASPECT_LABELS.iter().enumerate() {
-                    let aspect = if index == 0 {
-                        PixelAspect::Dos43
-                    } else {
-                        PixelAspect::Square
-                    };
-                    rows.push(row(
-                        176,
-                        104 + 10 * index as i32,
-                        label,
-                        Action::DisplayAspect(aspect),
-                        Mark::Radio(self.display.aspect == aspect),
                         true,
                         15,
                     ));
@@ -651,7 +642,44 @@ impl Prefs {
                     true,
                     15,
                 ));
-                rows.push(main_menu(32, 136));
+                for (index, label) in ASPECT_LABELS.iter().enumerate() {
+                    let aspect = if index == 0 {
+                        PixelAspect::Dos43
+                    } else {
+                        PixelAspect::Square
+                    };
+                    rows.push(row(
+                        176,
+                        124 + 10 * index as i32,
+                        label,
+                        Action::DisplayAspect(aspect),
+                        Mark::Radio(self.display.aspect == aspect),
+                        true,
+                        15,
+                    ));
+                }
+                rows.push(row(
+                    32,
+                    124,
+                    "Scanlines",
+                    Action::Scanlines,
+                    Mark::Toggle(self.display.scanlines),
+                    true,
+                    15,
+                ));
+                // Show intensity slider when scanlines are enabled
+                if self.display.scanlines {
+                    rows.push(row(
+                        176,
+                        124,
+                        "Intensity",
+                        Action::ScanlineIntensity,
+                        Mark::Action,
+                        true,
+                        15,
+                    ));
+                }
+                rows.push(main_menu(32, 156));
             }
             _ => {}
         }
@@ -836,15 +864,32 @@ impl Prefs {
                     text: "Pixels:",
                     colour: 16,
                 });
+                // Show scanline intensity percentage if scanlines enabled
+                if self.display.scanlines {
+                    let intensity_pct = (self.display.scanline_intensity * 100.0) as i32;
+                    texts.push(Text {
+                        x: 220,
+                        y: 124,
+                        text: match intensity_pct {
+                            20 => "20%",
+                            30 => "30%",
+                            50 => "50%",
+                            70 => "70%",
+                            90 => "90%",
+                            _ => "?%",
+                        },
+                        colour: 16,
+                    });
+                }
                 texts.push(Text {
                     x: 32,
-                    y: 122,
+                    y: 142,
                     text: "Alt+Enter: fullscreen. Choices apply at once.",
                     colour: 15,
                 });
                 texts.push(Text {
                     x: 32,
-                    y: 146,
+                    y: 166,
                     text: "Port extension; the 320x200 game screen is unchanged.",
                     colour: 18,
                 });
@@ -908,6 +953,21 @@ impl Prefs {
             }
             Action::Fullscreen => {
                 self.fullscreen = !self.fullscreen;
+                Activate::None
+            }
+            Action::Scanlines => {
+                self.display.scanlines = !self.display.scanlines;
+                Activate::None
+            }
+            Action::ScanlineIntensity => {
+                // Cycle through intensities: 0.2, 0.3, 0.5, 0.7, 0.9
+                self.display.scanline_intensity = match (self.display.scanline_intensity * 10.0) as i32 {
+                    2 => 0.3,
+                    3 => 0.5,
+                    5 => 0.7,
+                    7 => 0.9,
+                    _ => 0.2,
+                };
                 Activate::None
             }
             Action::Close => {
@@ -1108,7 +1168,7 @@ mod tests {
         assert_eq!(prefs.display.fit, FitMode::FillWindow);
         prefs.click(178, 80);
         assert_eq!(prefs.display.filter, Filter::Linear);
-        prefs.click(178, 114);
+        prefs.click(178, 134);
         assert_eq!(prefs.display.aspect, PixelAspect::Square);
         // Fullscreen is a session-only toggle.
         prefs.click(34, 104);
@@ -1121,7 +1181,7 @@ mod tests {
         assert_eq!(prefs.click(34, 104), Activate::None);
         assert_eq!(prefs.page, DISPLAY);
         // The Main Menu row returns.
-        prefs.click(34, 136);
+        prefs.click(34, 156);
         assert_eq!(prefs.page, MAIN);
     }
 }

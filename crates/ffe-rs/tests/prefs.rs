@@ -188,7 +188,7 @@ fn display_page_sets_the_port_only_presentation_options() {
     prefs.click(34, 56);
     prefs.click(178, 46);
     prefs.click(178, 80);
-    prefs.click(178, 114);
+    prefs.click(178, 134);
     assert_eq!(
         prefs.display,
         DisplaySettings {
@@ -196,13 +196,15 @@ fn display_page_sets_the_port_only_presentation_options() {
             fit: FitMode::FillWindow,
             filter: Filter::Linear,
             aspect: PixelAspect::Square,
+            scanlines: false,
+            scanline_intensity: 0.3,
         }
     );
     // Out-of-range scale rows do nothing.
     assert_eq!(prefs.apply(prefs::Action::WindowScale(0)), Activate::None);
     assert_eq!(prefs.display.scale, 3);
     // The Main Menu row returns to the original page list.
-    assert_eq!(prefs.click(34, 136), Activate::None);
+    assert_eq!(prefs.click(34, 156), Activate::None);
     assert_eq!(prefs.page, MAIN);
     // Port Options opens the display page from its port-only row at y 104.
     prefs.page = PORT;

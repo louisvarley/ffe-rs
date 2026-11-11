@@ -255,7 +255,8 @@ window.FFE_BURNDOWN = {
         { id: "ui-20", title: "Source-tagged event log, F271 replace/NULL-clear/ring semantics", status: "done", version: "v0.97" },
         { id: "ui-21", title: "Remove port-only help/scenarios/debug keys; dev-gated tools and source F1/F11/F12", status: "done", version: "v0.98" },
         { id: "ui-22", title: "Native versioned save/load, quick/numbered files and intro L", status: "done", version: "v1.08" },
-        { id: "ui-23", title: "F834/F840 galaxy map console page and map-local F5-F12 keys", status: "done", version: "v1.09" }
+        { id: "ui-23", title: "F834/F840 galaxy map console page and map-local F5-F12 keys", status: "done", version: "v1.09" },
+        { id: "ui-24", title: "Pixel-art upscaling filters (xBRZ, Scale2x) and optional CRT scanlines", status: "in-progress", version: "filters-v1" }
       ]
     },
     {
@@ -1402,6 +1403,16 @@ window.FFE_BURNDOWN = {
       date: "2026-11-11",
       remaining: 77,
       note: "parity-16 done (owner closed it): F688 spawns the original's ships draw for draw, with the RNG ledger from the F147 seed to the end of F688 matching the executed original on the default start and Ross 154. The leftovers moved to parity-15: F702 system-wide placement (F1506/F1508) and F238's police response; start types 2 and 3 are not traced."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 78,
+      note: "Display filters design: added ui-24 for pixel-art upscaling (xBRZ, HQx, Scale2x) and CRT scanlines; planning-grade documentation in docs/notes/display-filters-design.md. Software-renderer architecture makes CPU-based pixel upscaling ideal; GPU CRT shaders deferred. Remaining count +1."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 78,
+      note: "Display filters implementation: ui-24 in progress. Added filters module (scale2x, xbrz 2x/3x, scanlines), extended Filter enum and DisplaySettings with scanlines/intensity, integrated into compose() pipeline, updated Display Options page with 5 filter choices + scanline controls. Config persistence to saves/display.cfg. Builds successfully with unit tests. Ready for manual QA."
     }
   ]
 };

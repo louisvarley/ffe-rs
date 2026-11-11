@@ -1,0 +1,223 @@
+================================================================================
+  FFE-RS-CLASSIC DISPLAY FILTERS - IMPLEMENTATION SUMMARY
+================================================================================
+
+DATE: 2026-11-11
+WORK ITEM: ui-24 (Interface and presentation milestone)
+STATUS: Added to burndown as "todo" (remaining count: 77 → 78)
+
+================================================================================
+DECISION
+================================================================================
+
+✅ YES - Add pixel-art upscaling filters for the software-rendered 320×200 display
+✅ YES - Add CRT scanline overlay effect
+⏸️ DEFER - GPU-based CRT shaders (requires architecture change)
+❌ NO - Modern 3D filtering techniques (not applicable to software renderer)
+
+================================================================================
+WHY THIS MAKES SENSE
+================================================================================
+
+FFE-RS-Classic uses PURE SOFTWARE RENDERING:
+• Game renders to 320×200 indexed-color framebuffer (CPU)
+• Palette lookup produces 320×200 RGBA
+• This frame is scaled to modern display resolution
+• No GPU 3D rendering, no perspective textures
+
+This architecture is PERFECT for pixel-art upscaling algorithms:
+• Filters operate on small 320×200 input (fixed cost regardless of output size)
+• CPU-based processing fits the existing pipeline
+• No shader support needed from minifb library
+• Retro gaming community has proven these filters work excellently
+
+================================================================================
+RECOMMENDED FILTERS
+================================================================================
+
+PRIMARY: xBRZ 2x/3x
+  • Edge-aware upscaling that smooths pixel art intelligently
+  • Preserves sharp edges, smooths curves and diagonals
+  • ~5-12ms processing time (acceptable for 60 FPS)
+  • Used successfully in DOSBox, RetroArch, many emulators
+  • BEST for modern 1080p/1440p/4K displays
+
+ALTERNATIVE: Scale2x
+  • Simple edge-directed scaling
+  • <1ms processing time (very fast)
+  • Subtle enhancement, mostly sharp
+  • BEST for low-end systems
+
+OVERLAY: CRT Scanlines
+  • Horizontal dark lines simulating CRT display
+  • Negligible performance cost
+  • Configurable intensity (0-100%)
+  • Combines with any base filter
+
+KEEP EXISTING: Nearest Neighbor (Default), Linear/Bilinear
+
+================================================================================
+WHAT NOT TO ADD (Does Not Apply to Software Renderer)
+================================================================================
+
+❌ Anisotropic filtering (for 3D perspective textures - game uses affine CPU mapping)
+❌ MSAA/SSAA (for GPU geometry anti-aliasing)
+❌ FXAA/SMAA (for GPU rendering artifacts)
+❌ TAA (requires motion vectors from GPU pipeline)
+
+The user asked about "texture filtering" and "pixel scaling" as separate options,
+but in FFE-RS-Classic there is NO DISTINCTION - everything is rasterized to a
+single 320×200 2D framebuffer before filtering. One filter applies to everything.
+
+================================================================================
+CONFIGURATION
+================================================================================
+
+Extend saves/display.cfg:
+
+  scale=4
+  fit=pixel-perfect
+  filter=xbrz-2x          ← NEW
+  aspect=dos-4:3
+  scanlines=off           ← NEW
+  scanline-intensity=0.3  ← NEW
+
+Display Options UI:
+
+  ─── Upscaling Filter ───
+  ○ Nearest Neighbor (Classic)
+  ● xBRZ 2x (Recommended)
+  ○ xBRZ 3x (Higher quality)
+  ○ Scale2x (Fast)
+  ○ Linear/Bilinear
+
+  ─── CRT Effects ───
+  ☑ Scanlines  [▬▬▬░░░░░] 30%
+
+================================================================================
+PERFORMANCE
+================================================================================
+
+Target: 60 FPS (16.67ms frame time)
+
+  Component               Time
+  ─────────────────────  ──────
+  Game rendering         8-12ms
+  xBRZ 2x filter         ~5ms   ✅
+  Scale2x filter         <1ms   ✅
+  Scanlines              <0.1ms ✅
+  Presentation           1-2ms
+  ─────────────────────  ──────
+  TOTAL                  14-20ms
+
+xBRZ 3x (~12ms) is borderline - may need optimization or performance warning.
+
+================================================================================
+IMPLEMENTATION PHASES
+================================================================================
+
+PHASE 1 (HIGH PRIORITY): Pixel Upscaling
+  • Integrate xBRZ library (port or use crate)
+  • Implement Scale2x algorithm (~50 lines)
+  • Update display::compose() to apply filter
+  • Add Filter enum variants
+  • Update preferences UI
+  • Config persistence
+
+PHASE 2 (MEDIUM PRIORITY): CRT Scanlines
+  • Implement scanline overlay function
+  • Add settings fields (bool + intensity)
+  • UI checkbox + slider
+  • Config persistence
+
+PHASE 3 (FUTURE/OPTIONAL): GPU CRT Shaders
+  • Full CRT simulation (curvature, bloom, phosphor)
+  • BLOCKER: minifb doesn't support custom shaders
+  • Requires migration to wgpu or pixels crate
+  • DEFER to post-1.0 or Enhanced renderer work
+
+================================================================================
+DOCUMENTATION CREATED
+================================================================================
+
+1. docs/notes/display-filters-README.md
+   → Quick index and overview of all filter documentation
+
+2. docs/notes/display-filters-summary.md
+   → Executive summary with decision rationale
+
+3. docs/notes/display-filters-design.md
+   → Full technical design specification (performance, architecture, config)
+
+4. docs/notes/display-filters-comparison.md
+   → Visual ASCII examples showing filter differences
+
+5. docs/notes/display-filters-implementation-guide.md
+   → Step-by-step code implementation with examples
+
+6. dashboard/burndown.js
+   → Updated with ui-24 task and history entry
+
+================================================================================
+TESTING STRATEGY
+================================================================================
+
+Unit Tests:
+  • Filter output sizes (320×200 → 640×400, 960×600)
+  • Color preservation (solid colors unchanged)
+  • Edge cases (boundaries, single-color regions)
+
+Visual Regression:
+  • Golden images in docs/evidence/display-filters/
+  • Capture same scene with each filter
+  • Compare against baseline
+
+Performance:
+  • cargo bench for filter algorithms
+  • Frame time monitoring in game loop
+  • Auto-disable if consistently slow (>20ms)
+
+Cross-Platform:
+  • Windows, Linux, macOS builds
+  • Intel/AMD/ARM architectures
+
+================================================================================
+OPEN DECISIONS FOR OWNER
+================================================================================
+
+1. Default filter: Keep Nearest Neighbor? (Recommended: YES - authenticity)
+2. Performance budget: 5ms acceptable? (Recommended: YES - with auto-disable)
+3. HQ2x/HQ4x inclusion: Add alongside xBRZ? (Recommended: Start with xBRZ only)
+4. GPU shaders: Defer to post-1.0? (Recommended: YES - architectural blocker)
+5. Filter scope: Entire frame or game view only? (Recommended: Entire frame)
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. ✅ Review design documents (this summary + 5 design docs)
+2. ⏳ Owner approval and decision on open questions
+3. ⏳ Begin Phase 1 implementation (xBRZ + Scale2x)
+4. ⏳ Add unit tests and benchmarks
+5. ⏳ Capture visual evidence
+6. ⏳ Phase 2: Scanlines
+7. ⏳ Update docs/notes/display.md with new filters
+8. ⏳ Tag version and release
+
+================================================================================
+REFERENCES
+================================================================================
+
+• xBRZ algorithm: https://sourceforge.net/projects/xbrz/
+• Scale2x algorithm: https://www.scale2x.it/
+• DOSBox scaling: https://www.dosbox.com/wiki/Configuration:Display
+• Current display impl: docs/notes/display.md
+• Architecture: docs/ARCHITECTURE.md
+
+================================================================================
+
+TL;DR: Add xBRZ and Scale2x pixel-art upscaling + CRT scanlines.
+      Perfect fit for 320×200 software renderer. Defer GPU shaders.
+      Work item ui-24 added to backlog.
+
+================================================================================

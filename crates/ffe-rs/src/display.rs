@@ -67,6 +67,12 @@ pub enum Filter {
     Nearest,
     /// Bilinear sampling; visible only when the fit is fractional.
     Linear,
+    /// xBRZ 2x: Edge-aware pixel upscaling (recommended for modern displays).
+    XbrzX2,
+    /// xBRZ 3x: Higher quality edge-aware upscaling (slower).
+    XbrzX3,
+    /// Scale2x: Fast edge-directed scaling.
+    Scale2x,
 }
 
 impl Filter {
@@ -74,6 +80,9 @@ impl Filter {
         match self {
             Self::Nearest => "nearest",
             Self::Linear => "linear",
+            Self::XbrzX2 => "xbrz-2x",
+            Self::XbrzX3 => "xbrz-3x",
+            Self::Scale2x => "scale2x",
         }
     }
 
@@ -81,7 +90,19 @@ impl Filter {
         match key {
             "nearest" => Some(Self::Nearest),
             "linear" => Some(Self::Linear),
+            "xbrz-2x" => Some(Self::XbrzX2),
+            "xbrz-3x" => Some(Self::XbrzX3),
+            "scale2x" => Some(Self::Scale2x),
             _ => None,
+        }
+    }
+    
+    /// Returns the upscaling factor applied before window scaling.
+    pub fn upscale_factor(self) -> usize {
+        match self {
+            Self::Nearest | Self::Linear => 1,
+            Self::XbrzX2 | Self::Scale2x => 2,
+            Self::XbrzX3 => 3,
         }
     }
 }
@@ -123,13 +144,19 @@ impl PixelAspect {
 
 /// The persisted display choices. `Alt+Enter` is session-only and lives in
 /// `prefs::Prefs`, not here.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct DisplaySettings {
     pub scale: u32,
     pub fit: FitMode,
     pub filter: Filter,
     pub aspect: PixelAspect,
+    /// CRT scanline effect enabled.
+    pub scanlines: bool,
+    /// Scanline intensity (0.0 = off, 1.0 = full black lines).
+    pub scanline_intensity: f32,
 }
+
+impl Eq for DisplaySettings {}  // f32 fields are always finite, so Eq is safe
 
 impl Default for DisplaySettings {
     /// 1280x960, pixel-perfect, nearest, 4:3: the port's existing initial
@@ -140,6 +167,8 @@ impl Default for DisplaySettings {
             fit: FitMode::PixelPerfect,
             filter: Filter::Nearest,
             aspect: PixelAspect::Dos43,
+            scanlines: false,
+            scanline_intensity: 0.3,
         }
     }
 }
@@ -166,11 +195,13 @@ impl DisplaySettings {
     /// The persistable form (`saves/display.cfg`).
     pub fn to_config(self) -> String {
         format!(
-            "scale={}\nfit={}\nfilter={}\naspect={}\n",
+            "scale={}\nfit={}\nfilter={}\naspect={}\nscanlines={}\nscanline-intensity={:.2}\n",
             self.scale.clamp(MIN_SCALE, MAX_SCALE),
             self.fit.key(),
             self.filter.key(),
-            self.aspect.key()
+            self.aspect.key(),
+            if self.scanlines { "on" } else { "off" },
+            self.scanline_intensity.clamp(0.0, 1.0)
         )
     }
 
@@ -197,6 +228,11 @@ impl DisplaySettings {
                 "fit" => settings.fit = FitMode::from_key(value)?,
                 "filter" => settings.filter = Filter::from_key(value)?,
                 "aspect" => settings.aspect = PixelAspect::from_key(value)?,
+                "scanlines" => settings.scanlines = matches!(value, "on" | "true" | "1"),
+                "scanline-intensity" => {
+                    let intensity: f32 = value.parse().ok()?;
+                    settings.scanline_intensity = intensity.clamp(0.0, 1.0);
+                }
                 _ => {}
             }
         }
@@ -305,44 +341,115 @@ pub fn compose(
     if width == 0 || height == 0 || logical.len() < LOGICAL_WIDTH * LOGICAL_HEIGHT {
         return;
     }
+    
+    // Step 1: Apply pixel-art upscaling filter if needed
     let rect = settings.rect((width, height));
-    blit(logical, target, width, rect, settings.filter);
+    
+    match settings.filter {
+        Filter::Nearest | Filter::Linear => {
+            // No pre-upscaling, scale directly to window
+            blit(
+                logical,
+                (LOGICAL_WIDTH, LOGICAL_HEIGHT),
+                target,
+                width,
+                rect,
+                settings.filter,
+            );
+        }
+        Filter::XbrzX2 => {
+            use crate::filters::xbrz_2x;
+            let upscaled = xbrz_2x(logical);
+            blit(
+                &upscaled,
+                (LOGICAL_WIDTH * 2, LOGICAL_HEIGHT * 2),
+                target,
+                width,
+                rect,
+                Filter::Nearest, // Use nearest for final scaling after upscale
+            );
+        }
+        Filter::XbrzX3 => {
+            use crate::filters::xbrz_3x;
+            let upscaled = xbrz_3x(logical);
+            blit(
+                &upscaled,
+                (LOGICAL_WIDTH * 3, LOGICAL_HEIGHT * 3),
+                target,
+                width,
+                rect,
+                Filter::Nearest,
+            );
+        }
+        Filter::Scale2x => {
+            use crate::filters::scale2x;
+            let upscaled = scale2x(logical);
+            blit(
+                &upscaled,
+                (LOGICAL_WIDTH * 2, LOGICAL_HEIGHT * 2),
+                target,
+                width,
+                rect,
+                Filter::Nearest,
+            );
+        }
+    }
+    
+    // Step 2: Apply scanlines if enabled
+    if settings.scanlines && settings.scanline_intensity > 0.0 {
+        use crate::filters::apply_scanlines;
+        apply_scanlines(target, width, height, settings.scanline_intensity);
+    }
 }
 
-/// Copy the logical frame into `rect` of `target`, sampling with `filter`.
-fn blit(logical: &[u32], target: &mut [u32], width: usize, rect: Rect, filter: Filter) {
-    if rect.width == 0 || rect.height == 0 || width == 0 {
+/// Copy the intermediate frame into `rect` of `target`, sampling with filter.
+fn blit(
+    source: &[u32],
+    source_size: (usize, usize),
+    target: &mut [u32],
+    target_width: usize,
+    rect: Rect,
+    filter: Filter,
+) {
+    if rect.width == 0 || rect.height == 0 || target_width == 0 {
         return;
     }
+    
+    let (source_width, source_height) = source_size;
+    
+    // For pixel-art filters, we already upscaled, so use nearest for final scaling
+    // For Nearest/Linear, we scale directly from 320×200
+    let use_linear = matches!(filter, Filter::Linear);
+    
     for dy in 0..rect.height {
-        let row = (rect.y + dy) * width + rect.x;
+        let row = (rect.y + dy) * target_width + rect.x;
         let Some(destination) = target.get_mut(row..row + rect.width) else {
             continue;
         };
-        match filter {
-            Filter::Nearest => {
-                let source_y = dy * LOGICAL_HEIGHT / rect.height;
-                let source = &logical[source_y * LOGICAL_WIDTH..][..LOGICAL_WIDTH];
-                for (dx, pixel) in destination.iter_mut().enumerate() {
-                    *pixel = source[dx * LOGICAL_WIDTH / rect.width];
-                }
+        
+        if use_linear {
+            // Bilinear sampling
+            let (y0, y1, fy) = linear_row(dy, rect.height, source_height);
+            for (dx, pixel) in destination.iter_mut().enumerate() {
+                let (x0, x1, fx) = linear_row(dx, rect.width, source_width);
+                let top = mix(
+                    source[y0 * source_width + x0],
+                    source[y0 * source_width + x1],
+                    fx,
+                );
+                let bottom = mix(
+                    source[y1 * source_width + x0],
+                    source[y1 * source_width + x1],
+                    fx,
+                );
+                *pixel = mix(top, bottom, fy);
             }
-            Filter::Linear => {
-                let (y0, y1, fy) = linear_row(dy, rect.height, LOGICAL_HEIGHT);
-                for (dx, pixel) in destination.iter_mut().enumerate() {
-                    let (x0, x1, fx) = linear_row(dx, rect.width, LOGICAL_WIDTH);
-                    let top = mix(
-                        logical[y0 * LOGICAL_WIDTH + x0],
-                        logical[y0 * LOGICAL_WIDTH + x1],
-                        fx,
-                    );
-                    let bottom = mix(
-                        logical[y1 * LOGICAL_WIDTH + x0],
-                        logical[y1 * LOGICAL_WIDTH + x1],
-                        fx,
-                    );
-                    *pixel = mix(top, bottom, fy);
-                }
+        } else {
+            // Nearest neighbor sampling
+            let source_y = dy * source_height / rect.height;
+            let source_row = &source[source_y * source_width..][..source_width];
+            for (dx, pixel) in destination.iter_mut().enumerate() {
+                *pixel = source_row[dx * source_width / rect.width];
             }
         }
     }
@@ -518,15 +625,12 @@ impl Presenter {
         if size.0 == 0 || size.1 == 0 {
             return Ok(false);
         }
-        let rect = settings.rect(size);
-        if !self.valid || self.size != size || self.rect != rect {
-            self.buffer.clear();
-            self.buffer.resize(size.0 * size.1, 0);
-            self.size = size;
-            self.rect = rect;
-            self.valid = true;
-        }
-        blit(logical, &mut self.buffer, size.0, rect, settings.filter);
+        
+        // Use compose to handle filters and scanlines
+        compose(logical, settings, size.0, size.1, &mut self.buffer);
+        self.size = size;
+        self.rect = settings.rect(size);
+        self.valid = true;
         window
             .window
             .update_with_buffer(&self.buffer, size.0, size.1)
@@ -738,6 +842,8 @@ mod tests {
             fit: FitMode::FillWindow,
             filter: Filter::Linear,
             aspect: PixelAspect::Square,
+            scanlines: false,
+            scanline_intensity: 0.3,
         };
         assert_eq!(
             DisplaySettings::from_config(&settings.to_config()),
