@@ -1487,6 +1487,7 @@ fn run() -> Result<(), String> {
         message = format!("Capture: autopilot to {name} from three radii.");
     }
     let mut last = Instant::now();
+    let mut audio_last = last;
     let mut accumulator = 0.0;
     let mut frame_timer = ffe_core::FrameTimer::default();
     let mut frames = 0;
@@ -1515,6 +1516,11 @@ fn run() -> Result<(), String> {
         let real_now = Instant::now();
         let real_dt = real_now.duration_since(last).as_secs_f64().min(0.1);
         last = real_now;
+        // Music and effects follow the wall clock. `last` is reset by the pause
+        // and preference-page paths (so the game does not catch up), which would
+        // leave the song with a near-zero step per frame and freeze it.
+        let audio_dt = real_now.duration_since(audio_last).as_secs_f64().min(0.5);
+        audio_last = real_now;
         // This frame's input and time: live, or the next recorded frame.
         // A game controller's keys join the live frame before it is recorded.
         let preset = input::Preset::from_modern(prefs.modern);
@@ -1647,7 +1653,15 @@ fn run() -> Result<(), String> {
         }
         // F1904/F232/F919: advance the song and restart the front-end theme or
         // the continuous-music selection when the current song is done.
-        sound.tick(std::time::Duration::from_secs_f64(elapsed));
+        let scripted = options.capture_planet.is_some()
+            || options.capture_gameover.is_some()
+            || options.capture_start.is_some()
+            || session.replaying();
+        sound.tick(std::time::Duration::from_secs_f64(if scripted {
+            elapsed
+        } else {
+            audio_dt
+        }));
         // Port extension: a display change (a page row, a saved value or
         // Alt+Enter) reopens the window because minifb 0.28 has no live resize
         // or full-screen call. The old window is dropped only after the new one
