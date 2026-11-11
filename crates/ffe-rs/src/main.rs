@@ -921,18 +921,24 @@ const NEAR_WORLD_ACCELERATION: usize = 2;
 fn run() -> Result<(), String> {
     let options = options()?;
     let cache = std::sync::Arc::new(load_content(&options.game)?);
-    // The CD release's videos, when the launcher has copied them to FMVs. They
-    // are indexed and checked here; no game event plays one yet (content-7:
-    // the CD executable's clip selection is not in the JJFFE source).
-    match ffe_rs::fmv::Library::find(&options.root, &cache.manifest().source_profile) {
-        Ok(Some(library)) => eprintln!(
-            "CD videos: {} clips in {} (playback is not wired to game events yet).",
-            library.len(),
-            library.dir().display()
-        ),
-        Ok(None) => {}
-        Err(error) => eprintln!("CD videos not used: {error}"),
-    }
+    // The CD release's videos, when the launcher has copied them to FMVs: the
+    // station screens show them as JJFFE's F120 does (`ffe_rs::fmv`).
+    let fmv_library =
+        match ffe_rs::fmv::Library::find(&options.root, &cache.manifest().source_profile) {
+            Ok(Some(library)) => {
+                eprintln!(
+                    "CD videos: {} clips in {}.",
+                    library.len(),
+                    library.dir().display()
+                );
+                Some(library)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                eprintln!("CD videos not used: {error}");
+                None
+            }
+        };
     let mut screen = Screen::new(&cache)?;
     // Diagnostic frames of the preference pages and of the space colour, for
     // the port's screenshot comparisons. No window is opened.
@@ -1446,6 +1452,13 @@ fn run() -> Result<(), String> {
     // The default-start capture stops a moment after F1031 clears the pad.
     let mut start_clear_at: Option<usize> = None;
     let mut held_controls = input::HeldControls::default();
+    // The CD video being shown, and what decides the next one: F320/F1031's
+    // arrival flag (`DATA_005315`, initially set), whether the ship was at a
+    // port last frame, and the station screen showing last frame.
+    let mut fmv_player: Option<ffe_rs::fmv::Player> = None;
+    let mut fmv_arrival = true;
+    let mut fmv_was_docked = false;
+    let mut fmv_screen: Option<StationScreen> = None;
     // Consume the intro/start key until it has been released.
     let trace_replay_state =
         session.replaying() && std::env::var_os("FFE_TRACE_REPLAY_STATE").is_some();
@@ -1711,9 +1724,10 @@ fn run() -> Result<(), String> {
         // the transit's clock step; the marker follows it in every module, and
         // the flight step below applies the events.
         let mut event_seconds = 0;
+        // F120 holds the game clock while a CD video plays (`DATA_007706 = 0`).
         if clock_runs(
             active,
-            paused,
+            paused || fmv_player.is_some(),
             prefs.open,
             death_control,
             model_lab.is_some(),
@@ -2120,6 +2134,9 @@ fn run() -> Result<(), String> {
         } else {
             None
         };
+        // F120 ends a video on any key or click (and hands it on).
+        let fmv_input =
+            !inp.get_keys_pressed(KeyRepeat::No).is_empty() || (mouse_down && !mouse_was_down);
         mouse_was_down = mouse_down;
         // The acceleration meter and the screen buttons: the 6 7 8 9 0 keys give the
         // meter's steps as the original's FUNC_000208 maps them.
@@ -4501,7 +4518,22 @@ fn run() -> Result<(), String> {
                         }
                         StationAction::BuyShip { row } => {
                             if let Some(nav) = nav.as_mut() {
+                                let before = state.ship;
                                 message = buy_ship(nav, &cache, &mut state, row);
+                                // F442 after the purchase: its clip list.
+                                if state.ship != before {
+                                    let list = ffe_core::fmv_select::ship_bought();
+                                    if let Some(library) = fmv_library.as_ref() {
+                                        let name = list.pick(&mut nav.random);
+                                        if let Ok(video) = library.load(name) {
+                                            let player = ffe_rs::fmv::Player::new(name, video);
+                                            if let Some(pcm) = player.sound() {
+                                                sound.audio_mut().play_stream(pcm, 63);
+                                            }
+                                            fmv_player = Some(player);
+                                        }
+                                    }
+                                }
                             }
                         }
                         StationAction::ViewShip { row } => {
@@ -6467,6 +6499,84 @@ fn run() -> Result<(), String> {
             pending_log.clear(Source::Autopilot);
         }
         last_mode = state.mode;
+        // The CD videos (JJFFE F120 with F333/F382/F384's choices). A station
+        // screen newly shown chooses its clip list from the shared stream
+        // whether or not videos are there, as the original does; with the CD's
+        // FMVs the clip plays at (1, 17) until it ends, any key or click, or
+        // the screen changes.
+        {
+            let docked_now = nav.as_ref().is_some_and(|nav| nav.docked.is_some());
+            if docked_now && !fmv_was_docked {
+                fmv_arrival = true;
+            }
+            fmv_was_docked = docked_now;
+            let board_open =
+                (state.mode == ffe_rs::flight::Mode::Docked && !station_eye) || pad_board;
+            let shown = board_open.then_some(dock.screen);
+            let ended = fmv_player
+                .as_mut()
+                .is_some_and(|player| fmv_input || !player.advance(real_dt));
+            if ended || (fmv_player.is_some() && shown != fmv_screen) {
+                fmv_player = None;
+                sound.audio_mut().stop_stream();
+            }
+            if shown != fmv_screen {
+                if let Some(nav) = nav.as_mut() {
+                    let (allegiance, tech_level) =
+                        ffe_rs::navigation::allegiance_and_tech(&cache, nav.current_system_code());
+                    let [hull, full] = state.hull;
+                    let hull_percent = if full == 0 {
+                        100
+                    } else {
+                        i32::from(hull) * 100 / i32::from(full)
+                    };
+                    use ffe_core::fmv_select;
+                    let list = match shown {
+                        Some(StationScreen::Services) if fmv_arrival => {
+                            fmv_arrival = false;
+                            let arrival = fmv_select::Arrival {
+                                allegiance,
+                                hull_percent,
+                                fine: nav
+                                    .legal
+                                    .fines
+                                    .get(usize::from(allegiance))
+                                    .copied()
+                                    .unwrap_or(0),
+                                tech_level,
+                                // The port keeps one military points count
+                                // (`player+0x1a0`/`+0x1a4` in the original).
+                                points: [state.missions.military_points; 2],
+                                station_model: nav
+                                    .docked
+                                    .and_then(|index| nav.bodies.get(index))
+                                    .map_or(0, |body| body.model),
+                            };
+                            fmv_select::services_root(&arrival, &mut nav.random)
+                        }
+                        Some(StationScreen::Shipyard) => {
+                            fmv_select::shipyard(allegiance, hull_percent, &mut nav.random)
+                        }
+                        Some(StationScreen::Upgrades) => Some(fmv_select::upgrades()),
+                        _ => None,
+                    };
+                    if let (Some(list), Some(library)) = (list, fmv_library.as_ref()) {
+                        let name = list.pick(&mut nav.random);
+                        match library.load(name) {
+                            Ok(video) => {
+                                let player = ffe_rs::fmv::Player::new(name, video);
+                                if let Some(pcm) = player.sound() {
+                                    sound.audio_mut().play_stream(pcm, 63);
+                                }
+                                fmv_player = Some(player);
+                            }
+                            Err(error) => eprintln!("CD video {name}: {error}"),
+                        }
+                    }
+                }
+            }
+            fmv_screen = shown;
+        }
         // Lasers (F1040/F931): Space holds the fire input, the current view picks
         // the mount, and F931's refire/heat/energy gates decide whether a shot
         // happens this frame. The beam is F1776's model 0x9c at the gun.
@@ -8299,6 +8409,10 @@ fn run() -> Result<(), String> {
                 .and_then(|nav| nav.transit)
                 .map(|t| t.animation());
             screen.draw(&state, views, scene.as_ref(), prefs.modern, &message);
+        }
+        if let Some(player) = &fmv_player {
+            player.draw(screen.logical_pixels_mut(), ffe_rs::indexed::LOGICAL_WIDTH);
+            screen.recompose();
         }
         if let Some(dir) = &options.capture {
             if frames % 10 == 0 {

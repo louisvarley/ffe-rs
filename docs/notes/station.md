@@ -256,7 +256,7 @@ owner wants it, the next step is to follow the F2 console action
 
 | source | what it is | port |
 |---|---|---|
-| `ffedat.asm:6118` `DATA_005268..5272` | the arrays of ship-name-list pointers F382 selects (`sh1`.., `fsh1`.., `ish1`..); **not prices** | `station::SHIPYARD`, F634's lists (price comes from the statistics block) |
+| `ffedat.asm:6118` `DATA_005268..5272` | the CD video clip lists F382 chooses for F120 (`sh1`.., `fsh1`.., `ish1`.., `isy21`..); **not ship names or prices** | `ffe_core::fmv_select`; prices come from the statistics block |
 | `ffedat.asm:9622` `DATA_006199/6200` | the 19 `{count, pointer}` ship-type lists (`DATA_006184..6198`) | `ffe_core::npc::SHIP_TYPES` |
 | `ffe.asm:30441` F437 | the list rows: cost, trade-in, capacity, name | `ffe_core::shipyard::{row, trade_in}` |
 | `ffe.asm:30561` F438 | Buy (bit 0x10 clear) or View (set) | `station::Hot::Ship`, `main::buy_ship/view_ship` |
@@ -287,8 +287,8 @@ owner wants it, the next step is to follow the F2 console action
 2. **Shipyard ships**. `F445` reads the station's generated entries
    (`+0x2e6`, up to 13 `{model, index}` words from `F634/F635` and
    `DATA_006199..6200`) and the ship statistics. `DATA_005268..5272` is not a
-   price table: it is the array of ship-name-list pointers (`sh1`.., `fsh1`..,
-   `ish1`..) F382 selects. The price is F437's `word[+0xa] * 1000` and the
+   price table: it holds the CD video clip lists (`sh1`.., `fsh1`..,
+   `ish1`..) F382 chooses for F120 (`docs/notes/cd-media.md`). The price is F437's `word[+0xa] * 1000` and the
    trade-in is its `DATA_005300` formula; both are now in
    `ffe-core::shipyard`/`shipyard_table.rs`. Ported: the stock, rows, buy and
    part exchange, and a console View summary. Remaining: F439's full View page

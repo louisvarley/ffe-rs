@@ -292,7 +292,7 @@ window.FFE_BURNDOWN = {
         { id: "content-3", title: "Music data (HMP) cached losslessly (17 songs, cache v29)", status: "done", version: "v0.86" },
         { id: "content-4", title: "Optional CD media inventory and lossless packaging (videos and stills)", status: "done", version: "cd-media" },
         { id: "content-5", title: "Import verification on CD 1.01 as well as floppy 1.02", status: "done" },
-        { id: "content-7", title: "Wire original CD FMVs into game events: AVI decoding, audio sync, timing, skip and still/floppy fallback", status: "in-progress" },
+        { id: "content-7", title: "Wire original CD FMVs into game events: AVI decoding, audio sync, timing, skip and still/floppy fallback", status: "done" },
         { id: "content-6", title: "Statistics +0xe name codes resolved through DATA_004682 (58 hulls, LAST_SHIP)", status: "done", version: "v1.00" }
       ]
     },
@@ -1367,6 +1367,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-11",
       remaining: 79,
       note: "content-5 done: every floppy table location was found in CD 1.01 by content (tools/reference/map-layouts.py) and decodes; 1,816 of 1,820 assets match the floppy cache byte for byte, the other four differ only in the version string and code addresses the port does not read, and the CD start frame is identical. The CD version reported no system tables before. content-7 in progress: an 8-bit DIB/PCM AVI decoder and the runtime FMV library (CD profile plus FMVs folder) decode all 323 clips; the clip-to-event mapping is in CD-only code. Elite Club shareware 1.06 also maps but lists 339 star systems against 329, so it is refused with that reason."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 78,
+      note: "content-7 done: the CD videos play as JJFFE does. F333/F382/F384/F442's clip choices are ported with their F922 draws (ffe_core::fmv_select); the player shows the 120x120 picture at (1,17) at 15 fps with its sound on a new mixer stream voice, holds the clock, and ends on any key or click. 135 of 323 clips are reachable; JJFFE never selects the bulletin-board, p and st clips."
     }
   ]
 };

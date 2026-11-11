@@ -9,6 +9,7 @@ pub mod effects;
 pub mod equipment;
 mod equipment_table;
 pub mod ffp;
+pub mod fmv_select;
 pub mod frames;
 pub mod galaxy;
 pub mod handcoded;

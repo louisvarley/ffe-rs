@@ -94,6 +94,13 @@ pub trait Audio {
 
     fn sound_flags(&self) -> SoundFlags;
     fn set_sound_flags(&mut self, flags: SoundFlags);
+
+    /// Play a CD video's soundtrack: mono PCM at the mixing rate, at the
+    /// effects level `volume` (`0..=63`). The default ignores it.
+    fn play_stream(&mut self, _pcm: std::sync::Arc<Vec<i16>>, _volume: u8) {}
+
+    /// Stop a video's soundtrack.
+    fn stop_stream(&mut self) {}
 }
 
 /// The concrete player. It owns a [`MusicLibrary`], a MIDI sink, an effects sink,
@@ -290,6 +297,18 @@ impl Audio for AudioEngine {
         }
         self.samples
             .play_sample(code, self.settings.effect_level(volume), pitch);
+    }
+
+    fn play_stream(&mut self, pcm: std::sync::Arc<Vec<i16>>, volume: u8) {
+        if !self.settings.effects_on {
+            return;
+        }
+        self.samples
+            .play_stream(pcm, self.settings.effect_level(volume));
+    }
+
+    fn stop_stream(&mut self) {
+        self.samples.stop_stream();
     }
 
     fn tick(&mut self, elapsed: Duration) {

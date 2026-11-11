@@ -522,11 +522,20 @@ struct Voice {
     loops_remaining: u8,
 }
 
-/// The 16-voice software mixer.
+/// A stream at the mixing rate: the CD videos' 22,050 Hz mono soundtrack.
+#[derive(Debug)]
+struct Stream {
+    pcm: Arc<Vec<i16>>,
+    position: usize,
+    gain: f64,
+}
+
+/// The 16-voice software mixer, plus one stream voice for a video's sound.
 #[derive(Debug)]
 pub struct Mixer {
     effects: Arc<EffectLibrary>,
     voices: [Option<Voice>; VOICE_COUNT],
+    stream: Option<Stream>,
 }
 
 impl Mixer {
@@ -534,7 +543,28 @@ impl Mixer {
         Self {
             effects: Arc::new(effects),
             voices: std::array::from_fn(|_| None),
+            stream: None,
         }
+    }
+
+    /// Play `pcm` (mono, [`SAMPLE_RATE`]) from its start at linear level
+    /// `volume` (as [`Mixer::play`]), replacing any stream already playing.
+    pub fn play_stream(&mut self, pcm: Arc<Vec<i16>>, volume: u8) {
+        let gain = level_gain(volume);
+        self.stream = (gain > 0.0 && !pcm.is_empty()).then_some(Stream {
+            pcm,
+            position: 0,
+            gain,
+        });
+    }
+
+    pub fn stop_stream(&mut self) {
+        self.stream = None;
+    }
+
+    /// Whether a stream is still playing.
+    pub fn stream_active(&self) -> bool {
+        self.stream.is_some()
     }
 
     pub fn set_effects(&mut self, effects: Arc<EffectLibrary>) {
@@ -615,6 +645,7 @@ impl Mixer {
 
     pub fn stop_all(&mut self) {
         self.voices = std::array::from_fn(|_| None);
+        self.stream = None;
     }
 
     pub fn active_voices(&self) -> usize {
@@ -665,6 +696,13 @@ impl Mixer {
                     }
                     voice.position -= length as f64;
                     voice.loops_remaining -= 1;
+                }
+            }
+            if let Some(stream) = self.stream.as_mut() {
+                sum += f64::from(stream.pcm[stream.position]) * stream.gain;
+                stream.position += 1;
+                if stream.position >= stream.pcm.len() {
+                    self.stream = None;
                 }
             }
             *slot = sum.clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16;
@@ -736,6 +774,32 @@ mod tests {
             );
         }
         library
+    }
+
+    /// A video's sound plays once at the mixing rate beside the effects and
+    /// ends by itself; a new stream replaces it.
+    #[test]
+    fn a_stream_plays_once_and_can_be_replaced_or_stopped() {
+        let mut mixer = Mixer::new(EffectLibrary::new());
+        mixer.play_stream(Arc::new(vec![100, 200, 300]), 63);
+        assert!(mixer.stream_active());
+        let gain = level_gain(63);
+        let out = mixer.render(5);
+        assert_eq!(
+            out[..3],
+            [
+                (100.0 * gain) as i16,
+                (200.0 * gain) as i16,
+                (300.0 * gain) as i16
+            ]
+        );
+        assert_eq!(out[3..], [0, 0]);
+        assert!(!mixer.stream_active());
+        mixer.play_stream(Arc::new(vec![1000; 10]), 63);
+        mixer.play_stream(Arc::new(vec![7; 10]), 63);
+        assert_eq!(mixer.render(1)[0], (7.0 * gain) as i16);
+        mixer.stop_stream();
+        assert_eq!(mixer.render(1)[0], 0);
     }
 
     #[test]

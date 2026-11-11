@@ -1,5 +1,23 @@
 # Port log
 
+## 2026-11-11 — CD videos play at the station screens (content-7)
+
+The clip selection is in JJFFE 2.8a7 after all: F333 (services root, once
+per arrival), F382 (Shipyard), F384 (Upgrades) and F442 (a ship bought) set
+the clip list, and F120 plays one name from it at (1, 17).
+`ffe_core::fmv_select` ports the four choices with their F922 draws in the
+original's order (made whether or not videos exist); `ffe_rs::fmv::Player`
+shows the 120 x 120 picture at 15 frames a second with its sound through a
+new stream voice in the mixer, holds the game clock while it plays, and ends
+on any key or click (the input still acts) or when the screen changes. Only
+CD 1.01 content with the `FMVs` folder plays them. 135 of the 323 clips are
+reachable; JJFFE never selects the bulletin-board adverts, `p` or `st`.
+`DATA_005268..5272` were documented as ship-name lists; they are these clip
+lists (`ship-names.md`, `station.md` corrected). A floppy start capture now
+differs after the launch because F333's draws advance the shared stream, as
+in the original. The other session's blocking `play` API, which slept
+between frames, was replaced by the frame-driven player.
+
 ## 2026-11-11 — Shareware 1.06 loads: variable galaxy table
 
 Elite Club shareware 1.06 ("English Release 1.1 (Remastered Version)") has

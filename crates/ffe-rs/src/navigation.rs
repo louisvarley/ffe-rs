@@ -2047,6 +2047,19 @@ const STATION_FRAME: f64 = 2.0e8;
 /// Within this many radii of a planet or moon, its motion carries the ship.
 const WORLD_FRAME_RADII: f64 = 50.0;
 
+/// F869's `DATA_008996` (the system's allegiance, `player+0x43c`) and
+/// `DATA_008995` (the starport tech level, `player+0x43a`) for the current
+/// system, as F333 and F382 read them when they choose a CD video.
+pub fn allegiance_and_tech(cache: &VerifiedCache, code: u32) -> (u16, u16) {
+    cache
+        .asset("base:world/system-tables")
+        .and_then(|bytes| Tables::new(bytes).ok())
+        .map_or((0, 0), |tables| {
+            let details = tables.details(code);
+            ((details.allegiance >> 6) as u16, details.tech_level())
+        })
+}
+
 /// F869's `DATA_008996`: the system word's `>> 6` allegiance, the six-record
 /// ledger and criminal-record slot. A cache without system tables reads slot 0.
 fn jurisdiction_of(cache: &VerifiedCache, code: u32) -> usize {

@@ -1629,6 +1629,17 @@ impl Screen {
         &self.frame
     }
 
+    /// The 320x200 frame to draw over after [`Screen::draw`] (a CD video);
+    /// [`Screen::recompose`] then refreshes the presented copy.
+    pub fn logical_pixels_mut(&mut self) -> &mut [u32] {
+        &mut self.frame
+    }
+
+    /// Recompose the presented 640x480 copy from the logical frame.
+    pub fn recompose(&mut self) {
+        self.present();
+    }
+
     /// The main font's advances by code from 32, for fitting a real font to it.
     pub fn font_advances(&self) -> Vec<u8> {
         (32..=u8::MAX)

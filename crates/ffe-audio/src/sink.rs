@@ -21,6 +21,10 @@ pub trait SampleSink: Send {
     /// Swap the decoded effect set. The device/mixer sinks implement this; the
     /// recording and null sinks can ignore it.
     fn set_effects(&mut self, _effects: Arc<EffectLibrary>) {}
+    /// Play a mono PCM stream at the mixing rate (a CD video's sound),
+    /// replacing any stream playing. Sinks without a mixer ignore it.
+    fn play_stream(&mut self, _pcm: Arc<Vec<i16>>, _volume: u8) {}
+    fn stop_stream(&mut self) {}
 }
 
 /// A recorded effect call, for tests and for the diagnostics pane.
@@ -195,6 +199,14 @@ impl SampleSink for MixerSampleSink {
 
     fn set_effects(&mut self, effects: Arc<EffectLibrary>) {
         lock(&self.mixer).set_effects(effects);
+    }
+
+    fn play_stream(&mut self, pcm: Arc<Vec<i16>>, volume: u8) {
+        lock(&self.mixer).play_stream(pcm, volume);
+    }
+
+    fn stop_stream(&mut self) {
+        lock(&self.mixer).stop_stream();
     }
 }
 

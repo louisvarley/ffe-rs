@@ -16,4 +16,15 @@ The game loads the videos when its content was built from CD 1.01 (`ffe-cd-1.01-
 
 Every supplied clip has the same form: RIFF AVI, an uncompressed bottom-up 8-bit DIB stream of 120 x 120 at 15 frames a second (66,666 us) with its 256-colour palette in the format block, and 22,050 Hz 16-bit mono PCM interleaved in `rec ` lists. The decoder accepts only that form and checks every chunk. All 323 clips decode (1,983 seconds; `tests/fmv.rs`, local-only with `FFE_FMV_ROOT`).
 
-**Not played yet.** Which game event shows which clip is decided by CD-only code: the CD executable builds each path from `%c:`, `\DATA` and a name with the `AVI` extension, and the names (`BB`, `C`, `F`, `FR`, `FSH`, `G`, `I`, `ISH`, `ISY`, `M`, `P`, `R`, `SH`, `ST` with numbers) are chosen in routines that JJFFE 2.8a7, built from the floppy release, does not contain. Wiring them needs that selection code (a disassembly of the CD executable's video routines), which the project rules leave to the owner to supply; no mapping is guessed. The 120 x 120 area, audio timing, skip and the matching BMP stills follow once it is known.
+**Which clip plays, and when (2026-11-11).** The selection is in the JJFFE 2.8a7 source, ported in `ffe_core::fmv_select`. Four routines set the current clip list (`DATA_002321`, count `DATA_002322`); F120 then plays `list[F922(count)]` when videos are enabled (`DATA_009027`) and forgets the list:
+
+| routine | when | lists (`ffedat.asm`) |
+|---|---|---|
+| F333 | the services root, once per arrival (`DATA_005315`, set by F320/F1031 and at start) | by allegiance (`player+0x43c`): independent `c1`..`c8`, or on a coin flip `c14`.. (hull below 75%), `c25`.. (fine over 50), `fr2`.. (tech level below 180); Imperial `i1`..`i9` or `i10`.. (`+0x1a0` points from 10,000); Federal `f1`..`f7` or `f31`.. (`+0x1a4` points), `f25`..`f28` (hull below 75%); otherwise `g1`..; then a 3-in-20 chance of `g1`... None at a Thargoid system or station. |
+| F382 | the Shipyard opens | `sh1`.. (independent), `ish1`.. (Imperial), `fsh1`.. (Federal); 3-in-20 `sh1`..; `isy21`..`isy24` on a coin flip below 75% hull |
+| F384 | Upgrades opens | `isy1`..`isy20` (18) |
+| F442 | a ship bought | `isy25`..`isy30` |
+
+The routines draw from the shared F922 stream whether or not videos are present, as the original does; only F120's pick needs them. 135 of the 323 clips are reachable through these lists; JJFFE never selects the bulletin-board adverts (`bb1`..`bb44`), `p`, `st`, `f8`..`f23` or the names beyond each list's count.
+
+**Playback.** `ffe_rs::fmv::Player` shows the picture at (1, 17) of the 320 x 200 screen at the clip's 15 frames a second, its sound through the mixer's stream voice (`ffe_audio`), and holds the game clock while it plays (JJFFE's `DATA_007706 = 0` during F120). Any key or click ends it and still acts, as F120 hands the input on; leaving the screen or the station ends it too. The port keeps one military points count where the original has two (`+0x1a0`, `+0x1a4`), and draws no "Connecting video..." line (F565, `0x98d9`).

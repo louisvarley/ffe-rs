@@ -15,14 +15,15 @@ cross-check run.
 | statistics `+0xe` | ship-name ffcode (`0x4000 \| index`) | `ShipStats::name_code`, F437/F439/F282 |
 | `DATA_004682` | 219 pointers to NUL-terminated strings; entry n is the string of code `0x4000 \| n` (**not** slot n) | `base:text/model-names` (cache v11/v13) |
 | F1345/F1348 | expand a code: `DATA_004682[code & 0x3fff]`, then nested FF codes | `ffe_rs::ships::name_at`, `ModelViewer::model_string` |
-| `DATA_005268..5272` | the arrays of pointers to the ship-name lists (`sh1`.., `fsh1`.., `ish1`..) that F382 selects | `station::SHIPYARD`; **not** names or prices |
+| `DATA_005268..5272` | the CD video clip lists (`sh1`.., `fsh1`.., `ish1`.., `isy..`) F382 and F384 choose for F120 (`ffe_core::fmv_select`) | **not** ship names or prices |
 | statistics `+0xc` | shield-strength word (Cobra Mk III = 150) | `ShipStats::shield_strength`, shipyard View |
 | statistics `+0xe` | name code, as above | `ShipStats::name_code` |
 | statistics `+0xa` | F437's Cost word (`word * 1000`) | `model.price_mass` / `shipyard_table` |
 
 `DATA_005268..5272` is often mistaken for a price or name table. It is neither:
-it holds the eight `sh1`/`fsh1`/`ish1` list pointers F382 uses to choose the
-shipyard's type lists. The name always comes from the statistics `+0xe` code.
+its entries point at CD video names (`sh1`, `fsh1`, `ish1`, `isy21`..), the clip
+lists F382 chooses for F120 when the shipyard opens (corrected 2026-11-11; see
+`docs/notes/cd-media.md`). The name always comes from the statistics `+0xe` code.
 
 ## Root cause
 

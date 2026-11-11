@@ -12,7 +12,7 @@ the dashboard first, then regenerate or edit this page to match.
 
 ## Summary
 
-**79 of 203 work items are open: 64 in progress, 15 not started.** The foundation,
+**78 of 203 work items are open: 63 in progress, 15 not started.** The foundation,
 model-engine, visible-slice and audio milestones are complete (45 items).
 
 | Area | Open | In progress | Not started | Done / total |
@@ -23,11 +23,11 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 | Gameplay systems | 21 | 20 | 1 | 22/43 |
 | Original drawing: models | 5 | 1 | 4 | 14/19 |
 | Original drawing: screens and effects | 5 | 5 | 0 | 19/24 |
-| Content import | 3 | 3 | 0 | 4/7 |
+| Content import | 2 | 2 | 0 | 5/7 |
 | Saves | 2 | 0 | 2 | 3/5 |
 | Classic split cleanup | 0 | 0 | 0 | 2/2 |
 | Release and sign-off | 5 | 0 | 5 | 2/7 |
-| **Total** | **79** | **64** | **15** | **124 / 203** |
+| **Total** | **78** | **63** | **15** | **125 / 203** |
 
 ## Critical path
 
@@ -134,12 +134,11 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 - [~] `ui-11` Far and near transitions, clipping and planet approach fidelity
 - [~] `ui-12` Hit particles, explosions and debris (F939/F942/F926)
 
-### Content import (3 open)
+### Content import (2 open)
 
 - [~] `content-1` Gameplay tables (ships, equipment, economy)
 - [~] `content-2` Message strings, journal and remaining fonts
 - [x] `content-4` Optional CD media inventory and lossless packaging (videos and stills) — 323 AVI + 323 BMP, verified FMVs manifest; see [CD media](notes/cd-media.md)
-- [~] `content-7` Wire original CD FMVs into game events: AVI decoding, audio sync, timing, skip and matching-still/floppy fallback
 
 ### Saves (2 open)
 
