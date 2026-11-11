@@ -540,15 +540,7 @@ impl Prefs {
                     true,
                     18,
                 ));
-                rows.push(row(
-                    32,
-                    114,
-                    "Docking Options",
-                    Action::Page(DOCKING),
-                    Mark::Action,
-                    true,
-                    18,
-                ));
+
                 rows.push(main_menu(32, 136));
             }
             DOCKING => {
