@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <intrin.h>
 #include <stdio.h>
 #include <math.h>
 #include <setjmp.h>
@@ -512,6 +513,20 @@ static int missile_probe_mode;
    the mode, clock rate and messages are printed every 25 frames. */
 extern void ref_hyper_arrive(unsigned long code, unsigned long real);
 extern unsigned long (*ref_random_func)(void);
+extern unsigned long (*ref_rnd_func)(unsigned long);
+/* FFE_RNG_TRACE=<file>: every F922 draw (the bounded RNG) as one text row
+   "frame seq before_a before_b limit result caller", written to <file>. */
+static unsigned long (*rng_original)(unsigned long);
+static FILE *rng_log;
+static unsigned long rng_seq;
+static unsigned long rng_hook(unsigned long bound)
+{
+    unsigned long before_a = ref_jitter_a, before_b = ref_jitter_b;
+    unsigned long result = rng_original(bound);
+    fprintf(rng_log, "%lu %lu %08lx %08lx %lu %lu %p\n", frames, rng_seq++, before_a, before_b,
+            bound, result, _ReturnAddress());
+    return result;
+}
 extern unsigned char ref_misjump_table[];
 extern unsigned char ref_pl_keys[0x60];
 static int misjump_mode;
@@ -6461,6 +6476,12 @@ int main(int argc, char **argv)
         char *end;
         limit = strtoul(count, &end, 10);
         if (*end || limit < 3 || limit > 10000) fail("invalid frame count");
+    }
+    if (getenv("FFE_RNG_TRACE")) {
+        rng_log = fopen(getenv("FFE_RNG_TRACE"), "w");
+        if (!rng_log) fail("cannot open FFE_RNG_TRACE file");
+        rng_original = ref_rnd_func;
+        ref_rnd_func = rng_hook;
     }
     if (state_mode) fprintf(stderr, "bounded-new-game-v1: Y then intro choice 1; synthetic clock, selected numeric state only, no flight/save validation.\n");
     asmmain(0, NULL);

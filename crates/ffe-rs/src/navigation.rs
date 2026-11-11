@@ -4387,8 +4387,10 @@ impl Navigator {
         let code = self.entries[self.current].params.code;
         let details = tables.details(code);
         let mut system = npc::System::new(details, thargoids);
-        // F686: the new game's own pass (the first spawn of a new game).
-        system.start = self.new_game.is_some() && self.spawned.is_none();
+        // The executed original's new game draws F688's ordinary pass (pirates
+        // RND(4 * danger), F691's bay roll, F699), not F686's `start` variant.
+        // Only the port's patrol is left out of the new game's spawn.
+        system.new_game = self.new_game.is_some() && self.spawned.is_none();
         let allegiance = details.allegiance >> 6;
         let anchors: Vec<Anchor> = self
             .bodies

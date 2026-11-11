@@ -2816,10 +2816,15 @@ pub struct System {
     /// `F35(0x16)` (`ffe.asm:45858`): the exclusive limit of F688's Thargoid
     /// draw, not the number of ships.
     pub thargoids: usize,
-    /// F686's flag (`DATA_009046` bit 0): the new game's own F688 pass. It
-    /// drops the patrol roll's `* 4`, so a system with danger byte 1 starts
-    /// with no pirates (`RND(1)` is always 0).
+    /// F686's flag (`DATA_009046` bit 0): F688's first-pass variant. It drops
+    /// the patrol roll's `* 4` and skips F691/F699. The executed original's
+    /// new game does **not** run it (every start key draws RND(4 * danger) for
+    /// pirates and runs F691's bay roll), so the port never sets it.
     pub start: bool,
+    /// Port only: the new game's own spawn. The executed original holds no
+    /// police ship at its start and F688 has no police draw, so the port's
+    /// patrol is not added to it.
+    pub new_game: bool,
 }
 
 impl System {
@@ -2828,6 +2833,7 @@ impl System {
             details,
             thargoids,
             start: false,
+            new_game: false,
         }
     }
 }
@@ -3172,7 +3178,7 @@ pub fn spawn(
     }
     // F688 has no police draw, and the executed original's default start holds
     // no police ship (type 0xe) at all: the new game's pass spawns none.
-    counts.police = if system.start {
+    counts.police = if system.new_game {
         0
     } else {
         counts.police.min(1)
@@ -3810,7 +3816,7 @@ mod tests {
         let anchors = [anchor(4), anchor(7)];
         let run = |start: bool| {
             let mut system = system(0);
-            system.start = start;
+            system.new_game = start;
             spawn(
                 [0, 0, 0],
                 [0.0, 0.0, 1.0],
@@ -3860,7 +3866,7 @@ mod tests {
     }
 
     #[test]
-    fn f686s_new_game_pass_rolls_no_pirates_at_danger_one() {
+    fn f686s_pass_rolls_no_pirates_at_danger_one() {
         let mut start = system(0);
         start.start = true;
         assert_eq!(start.details.bytes[1], 1);

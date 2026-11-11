@@ -623,3 +623,7 @@ GLOBAL _ref_misjump_table
 _ref_hyper_arrive equ FUNC_000909
 _ref_random_func equ DATA_007752
 _ref_misjump_table equ DATA_007190
+
+; F922 (RND) pointer: the adapter wraps it to log every bounded draw (FFE_RNG_TRACE).
+GLOBAL _ref_rnd_func
+_ref_rnd_func equ DATA_007217

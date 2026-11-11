@@ -728,6 +728,17 @@ before F688 matches the original (PAR-17). The reference adapter cannot trace
 F922's calls yet: `DATA_007217` is not exported, so it needs a NASM rebuild
 with a hook.
 
+**Correction (2026-11-11, PAR-16).** The paragraph above is wrong about the new
+game. The executed original, with an F922 trace (`FFE_RNG_TRACE`, below) on all
+five start keys, runs F688 once, with `DATA_009046` bit 0 **clear**: pirates draw
+`RND(4 * danger)`, F691's bay roll and F699's aux roll run. The default start
+(Old Blackelk) draws traders RND(5)=2, Thargoids RND(0), bay RND(48)=6, aux
+RND(5)=1, pirate attempts RND(4)=3, then F692's draw (an empty stub). The
+other starts: key 0x02 draws 2/0/3/2/0, key 0x03 3/0/4/8/0, key 0x04 3/0/3/4/13.
+F686's variant therefore does not belong to the new game; the port no longer
+sets `System::start` there. The port-only `System::new_game` omits the port's
+police patrol (the original has none at its start).
+
 ## Removed: Advanced NPCs (2026-11-11)
 
 The port addition Advanced NPCs (`npc::Life`: approach lanes, convoys,

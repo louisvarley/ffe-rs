@@ -253,6 +253,15 @@ no aux trader and a police ship 3 km off. The new game's F688 pass
 (`MAX_SHIPS` 9 to 40, `MAX_BAY_SHIPS` 3 to F691's own 25, no trader, pirate or
 aux limits): F688's rolls stand. Two unit tests pin both. Workspace tests pass.
 
+Follow-up (same day, NASM installed): the reference adapter now logs every F922
+draw (`FFE_RNG_TRACE=<file>` with any state mode; row = frame, sequence, state
+before, limit, result, caller). Findings: the default start's F688 is draws
+1711..1874 of 1876 in the new-game frame, entered with state
+`a3e751f9 1df3aaed` after 1,711 earlier F922 draws; the port enters with the
+untouched F147 seed. Every start key runs F688 once with the first-pass bit
+**clear**, so the port's `System::start` for the new game was wrong and is no
+longer set (a port-only `new_game` flag omits the police). F692 is an empty stub.
+
 Not done: the draw ledger. The port's new game rolls 0 traders, 13 bay ships and
 0 aux traders over 12 places; the original rolled 1, 6 and 1, so the same ships
 do not appear until every draw before F688 matches (PAR-17). Tracing F922 in the

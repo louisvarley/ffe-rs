@@ -207,6 +207,13 @@ nineteen records.
 
 ## Mis-jump probe
 
+`FFE_RNG_TRACE=<file>` with any `jjffe-smoke` state mode (for example
+`--npc-trace 210 0x39`) writes one text row per F922 (bounded RNG) call:
+`frame sequence state_a_before state_b_before limit result caller`. It needs the
+`_ref_rnd_func` export (`exports.inc`), so rebuild with `build-smoke.ps1`. The
+caller is the return address in the executable; F688's draws are the rows whose
+callers fall in `0082BDxx`/`0082BExx`.
+
 `jjffe-smoke --misjump <outcome index 0-15> <forced 0|1> <frames>` runs the new
 game, launches, and at the first free-flight frame makes F908/F909's jump a
 mis-jump with the chosen `DATA_007190` entry (random mis-jump for forced 0,
