@@ -1,5 +1,5 @@
 use ffe_core::model_dot::{
-    particle, particle_clipped, point_dot, DotShape, DotTables, Span, TABLE_BYTES,
+    particle, particle_clipped, point_dot, sprite, DotShape, DotTables, Span, TABLE_BYTES,
 };
 
 fn tables() -> DotTables {
@@ -140,4 +140,46 @@ fn an_unlit_point_is_a_dot_by_its_size() {
         [0; 3]
     )
     .is_err());
+}
+
+#[test]
+fn a_sprite_is_vertically_symmetric_and_ends_on_a_negative_byte() {
+    let at = |x, y, width| Span { x, y, width };
+    // F1609 reads each byte before stepping out a row: centre 3, then 2 on
+    // rows 4 and 6, then 1 on rows 3 and 7; -1 ends it. The routine's x + 1
+    // with runs of 2h - 1 from x + 1 - h centres every row on x.
+    let mut spans = sprite(10, 5, &[3, 2, 1, -1]);
+    spans.sort_by_key(|span| span.y);
+    assert_eq!(
+        spans,
+        [
+            at(10, 3, 1),
+            at(9, 4, 3),
+            at(8, 5, 5),
+            at(9, 6, 3),
+            at(10, 7, 1)
+        ]
+    );
+    // DATA_007784's first record, a cross-shaped glint: a 9-pixel centre row,
+    // two empty steps (0), then single pixels two rows further out each way.
+    let mut glint = sprite(100, 50, &[5, 0, 0, 1, 1, -1, 0, 0, 0]);
+    glint.sort_by_key(|span| span.y);
+    assert_eq!(
+        glint,
+        [
+            at(100, 46, 1),
+            at(100, 47, 1),
+            at(96, 50, 9),
+            at(100, 53, 1),
+            at(100, 54, 1)
+        ]
+    );
+    // Rows outside the view (y >= 0x9e, or negative) are skipped; runs clip.
+    assert!(sprite(10, 200, &[2, -1]).is_empty());
+    let edge = sprite(0, 157, &[3, 2, -1]);
+    assert!(edge.iter().all(|span| span.x >= 0 && span.y < 158));
+    assert_eq!(edge.len(), 2, "row 158 is outside the view");
+    // A non-positive centre draws nothing; empty data draws nothing.
+    assert!(sprite(10, 5, &[-1]).is_empty());
+    assert!(sprite(10, 5, &[]).is_empty());
 }

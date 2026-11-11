@@ -387,3 +387,40 @@ pub fn point_dot(
         sky,
     )
 }
+
+/// F1609 (`ffe.asm:95877`): a sprite from a record of signed half-widths,
+/// vertically symmetric about `y`. The original picks the 18-byte record
+/// `size` of `DATA_007784`, or of `DATA_007785` when its flag is set; this
+/// takes the record's bytes. The x centre is one pixel right of `x` (the
+/// routine's `inc`). `data[0]` is the centre row's half-width. Each later byte
+/// is read first and then draws the pair of rows one further out above and
+/// below; a byte of 0 moves out a row without drawing, and a negative byte ends
+/// the sprite. Each row is a clipped run (F1600) of `2 * halfwidth - 1` pixels
+/// from `x + 1 - halfwidth`, for rows inside the view (`y < 0x9e`, unsigned).
+pub fn sprite(x: i32, y: i32, data: &[i8]) -> Vec<Span> {
+    let mut spans = Vec::new();
+    let mut bytes = data.iter().map(|&byte| i32::from(byte));
+    let Some(centre) = bytes.next() else {
+        return spans;
+    };
+    let x = x + 1;
+    let draw = |spans: &mut Vec<Span>, row: i32, half: i32| {
+        if (row as u32) < HEIGHT as u32 {
+            run(spans, x - half, row, 2 * half - 1, true);
+        }
+    };
+    draw(&mut spans, y, centre);
+    let (mut below, mut above) = (y, y);
+    for half in bytes {
+        if half < 0 {
+            break;
+        }
+        below += 1;
+        above -= 1;
+        if half > 0 {
+            draw(&mut spans, below, half);
+            draw(&mut spans, above, half);
+        }
+    }
+    spans
+}
