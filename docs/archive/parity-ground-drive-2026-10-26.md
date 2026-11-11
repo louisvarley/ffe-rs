@@ -1,3 +1,5 @@
+> **Archived 2026-11-11:** a dated implementation record; the live items are in the parity audit. Kept as history; see `docs/archive/README.md`.
+
 # Source-parity implementation, 26 October 2026
 
 The source remains JJFFE 2.8a7. This entry supersedes earlier claims that launch,

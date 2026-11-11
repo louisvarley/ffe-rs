@@ -1,3 +1,5 @@
+> **Archived 2026-11-11:** the Phase 0 inventory of the FFED3D tree; the current baseline is JJFFE 2.8a7. Kept as history; see `docs/archive/README.md`.
+
 # Phase 0 inventory — FFED3D / First Encounters
 
 Status: **Phase 0 study complete; port not started.** This document is the inventory required before the Rust port. It describes what is in `legacy/ffed3d/`, what the engine does, what the player-supplied game files contain, and where the numerical and behavioural risks are.
@@ -236,7 +238,7 @@ verification finds **96 primary and 251 secondary** slots in JJFFE: 345 ordinary
 images plus two 32768-byte texture blocks (primary 94/95, zero encoded height).
 All payload bytes match both supplied floppy/CD executables. Header words at
 4/6 are signed drawing offsets, not merely padding; flag bit 0 masks index zero.
-The actual partial Rust cache/layout contract is in [FORMATS.md](FORMATS.md).
+The actual partial Rust cache/layout contract is in [../FORMATS.md](../FORMATS.md).
 
 The bitmap index table is `DATA_008240` (96 entries) followed by `DATA_008241` (261 entries) in `ffebmp.asm`. `F1620_BmpIndexToPtr` returns `DATA_008240[index]`; `DATA_008241` is the second sprite set used by `F1609_DrawSprite` (flag switch).
 
@@ -425,7 +427,7 @@ The original code uses x87 in 170 instructions. Most are in audio/volume, text/p
 
 ### 6.3 World scale and units
 
-`KM_DIST = 999539.7368756` game units per kilometre (`win/misc.h`). Therefore 1 unit ≈ 1.00046 mm. A 100 m ship is ~100,000 units; a 6,000 km planet is ~6×10⁹ units. Object positions are 64-bit with an exponent; distances are frequently stored as an exponent byte (`dist_cam`, `dist_3face`) rather than a float. The renderer must use camera-relative coordinates and split near/far passes; see `docs/RENDERING_DESIGN.md`.
+`KM_DIST = 999539.7368756` game units per kilometre (`win/misc.h`). Therefore 1 unit ≈ 1.00046 mm. A 100 m ship is ~100,000 units; a 6,000 km planet is ~6×10⁹ units. Object positions are 64-bit with an exponent; distances are frequently stored as an exponent byte (`dist_cam`, `dist_3face`) rather than a float. The renderer must use camera-relative coordinates and split near/far passes; see `docs/archive/RENDERING_DESIGN.md`.
 
 ### 6.4 RNG
 
@@ -547,7 +549,7 @@ The golden traces must be recorded from **one** engine. The practical choice is 
 
 **Recommendation:** treat the FFED3D/JJFFE build as the simulation oracle (frozen), document every known deviation from DOS 1.02 here and in `docs/KNOWN_ISSUES.md`, and offer DOS-original behaviour later only as explicit opt-in toggles if requested. This is the only way to satisfy “golden traces define the simulation” with the source we have. **This needs your explicit approval** (see §10).
 
-The *look*, by contrast, should be the original DOS look, not FFED3D’s D3D look. FFED3D’s renderer is a source of knowledge about the original assets/HD work, not the Classic target. This distinction is central to `docs/RENDERING_DESIGN.md`.
+The *look*, by contrast, should be the original DOS look, not FFED3D’s D3D look. FFED3D’s renderer is a source of knowledge about the original assets/HD work, not the Classic target. This distinction is central to `docs/archive/RENDERING_DESIGN.md`.
 
 ---
 
@@ -620,4 +622,4 @@ Result: `ffed3d_test.exe` (2.47 MB) builds and runs. It displays the JJFFE/Aniso
 
 The source is a complete, working 32-bit Windows program with a reverse-engineered assembly core and a substantial C++/D3D9 layer. The game logic, content tables, models and most art are embedded in `FIRSTENC.EXE`; the floppy also supplies cabin art, samples, music and the journal archive. The simulation is integer/fixed-point and event/frame driven, with a 50 Hz input cadence and a wrapping 32-bit day fraction (see the corrected timing section). The largest risks are (a) FFED3D's behavioural changes relative to DOS 1.02, (b) x87/fixed-point exactness, and (c) reconstructing the original software renderer and palette look.
 
-The recommended next step is Phase 1: add a deterministic trace harness to a local copy of the reference engine, record golden traces against `legacy/Elite3/`, and use those to pin the numeric model before writing `ffe-core`. **Do not start the port until the questions in §10 are answered and the rendering design in `docs/RENDERING_DESIGN.md` is approved.**
+The recommended next step is Phase 1: add a deterministic trace harness to a local copy of the reference engine, record golden traces against `legacy/Elite3/`, and use those to pin the numeric model before writing `ffe-core`. **Do not start the port until the questions in §10 are answered and the rendering design in `docs/archive/RENDERING_DESIGN.md` is approved.**

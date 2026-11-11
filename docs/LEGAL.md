@@ -128,7 +128,7 @@ The project is provided for preservation, research and personal use. It comes wi
 
 ## 8. Trademarks and attribution
 
-“Frontier: First Encounters”, “Elite”, “Frontier” and related marks belong to their owners. This project is unofficial and is not endorsed by Frontier Developments, David Braben, John Jordan, the FFED3D authors or the Anisotropic mod authors. Attribution to the original creators and the reverse-engineering community is given in `README.md` and `docs/INVENTORY.md`; it does not imply endorsement.
+“Frontier: First Encounters”, “Elite”, “Frontier” and related marks belong to their owners. This project is unofficial and is not endorsed by Frontier Developments, David Braben, John Jordan, the FFED3D authors or the Anisotropic mod authors. Attribution to the original creators and the reverse-engineering community is given in `README.md` and `docs/archive/PHASE0_INVENTORY.md`; it does not imply endorsement.
 
 ## 9. Reporting concerns
 

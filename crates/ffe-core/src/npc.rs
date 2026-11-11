@@ -2413,7 +2413,7 @@ impl Legal {
 /// F942 adds a destroyed ship's statistics `+0x16` word to the Elite score;
 /// F300's mission rewards call F304/F305, which add a signed amount to the
 /// military points and print F306's promotion or demotion notice when the rank
-/// word changes. `docs/notes/status.md` has the call sites.
+/// word changes. `docs/notes/rank-and-fines.md` has the call sites.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Career {
     pub federal: u32,

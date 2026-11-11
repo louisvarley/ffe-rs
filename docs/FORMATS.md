@@ -1,5 +1,11 @@
 # Data formats (`data.bin`, `upscaled.bin`, mods)
 
+> **Scope (2026-11-11):** the content cache contract (cache versions, asset ids,
+> manifest) and the model helper semantics below are current; the game itself
+> reads its content straight from the game files and builds the same cache in
+> memory. The `upscaled.bin` image packs and mods are out of scope in this Classic
+> checkout and are kept as the original design.
+
 Status: **partial base cache implemented; full archive/pack design below remains proposed.**
 A separate partial external
 export now exists (see [README.md](../README.md)); its manifest is not the

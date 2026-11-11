@@ -1,5 +1,11 @@
 # Proposed workspace architecture and data pipeline
 
+> **Scope (2026-11-11):** this is the original proposal. The workspace that exists
+> is `ffe-core`, `ffe-rs`, `ffe-content`, `ffe-convert`, `ffe-audio`,
+> `ffe-launcher` and `ffe-tools` (see the README's layout). The render, platform,
+> graphics-pack and mod parts below are not built and the pack and mod parts are
+> out of scope in this Classic checkout. The determinism rules still apply.
+
 Status: **design; owner-approved direction recorded in [CLAUDE.MD](../CLAUDE.MD).**
 The workspace contains `ffe-tools` with read-only inspection and partial external
 export/cache commands, `ffe-convert` with verified PE bitmap tables, BMP/PNG,
@@ -75,7 +81,7 @@ it does not emulate original allocator words or nested child-model queues.
 These helpers are now composed in `model_execute::execute_live` (v0.11), including
 live view-space vertex state (v0.10) and the abstract `Order` token queue. The
 executor still stops at point/text, submodels, other transform forms and colour;
-see `docs/MODEL_EXECUTION_PLAN.md` §8 for the next task.
+see `docs/archive/MODEL_EXECUTION_PLAN.md` §8 for the next task.
 Experimental input now uses a release-to-rearm latch: blocked keys cannot become
 flight controls merely because focus or a modal state changes. Modern is the
 owner-selected startup input preset; F3 retains the Classic alternative

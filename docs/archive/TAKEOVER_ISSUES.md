@@ -1,3 +1,5 @@
+> **Archived 2026-11-11:** the 25 October takeover audit; its items were worked through since. Kept as history; see `docs/archive/README.md`.
+
 # Takeover issue report — 25 October 2026
 
 Reviewed the current Rust port, JJFFE assembly, handoff, dashboard and supplied screenshots. Existing uncommitted documentation was preserved. Several handoff paragraphs describe older states; the current code and executed checks take precedence.

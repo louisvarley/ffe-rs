@@ -42,7 +42,7 @@ than 11); a planet is its parent's name and a counter (digits at the first level
 at the second, digits again below), the counters being F897's own parameters copied down
 by value to the next level; anything whose parent is already a generated name (moons of
 named planets, starports, stations) goes through F893 and the name generator
-(`docs/notes/names.md`). Compared up to the NUL (the original leaves stale bytes after
+(`docs/notes/name-generation.md`). Compared up to the NUL (the original leaves stale bytes after
 it). Not reproducible: F877 keeps its counters in uninitialised locals, so the first star
 of a pair whose mass is below a star's (possible when the total mass is under twice a
 star's) gets a counter from stack garbage; the port starts them at zero, records those

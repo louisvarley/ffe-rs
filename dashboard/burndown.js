@@ -530,7 +530,7 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-10-25",
       remaining: 79,
-      note: "Intro implementation plan merged (docs/notes/intro-todo.md): the remaining front-end, starport-takeoff, combat and mission work is now written down step by step. Documentation only, so no item changes."
+      note: "Intro implementation plan merged (docs/archive/intro-todo.md): the remaining front-end, starport-takeoff, combat and mission work is now written down step by step. Documentation only, so no item changes."
     },
     {
       date: "2026-10-25",
@@ -825,7 +825,7 @@ window.FFE_BURNDOWN = {
     {
       date: "2026-10-25",
       remaining: 63,
-      note: "Takeover audit: fixed intro Space rearm, empty object-registration text, invented death log and PAUSED overlay; existing intro/boot/takeoff regressions pass. Added explicit missing space-dust lifecycle item; game-over fidelity remains partial. See docs/TAKEOVER_ISSUES.md."
+      note: "Takeover audit: fixed intro Space rearm, empty object-registration text, invented death log and PAUSED overlay; existing intro/boot/takeoff regressions pass. Added explicit missing space-dust lifecycle item; game-over fidelity remains partial. See docs/archive/TAKEOVER_ISSUES.md."
     },
     {
       date: "2026-10-25",

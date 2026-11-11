@@ -422,7 +422,7 @@ added `classic-split` (83 open of 202). See [BURNDOWN.md](BURNDOWN.md).
 
 ## 2026-11-08 — Modern world rendering audit
 
-The [Modern worlds roadmap](MODERN_WORLDS.md) separates original game data
+The Modern worlds roadmap (`docs/MODERN_WORLDS.md`, removed with the Modern engine) separates original game data
 and collision queries from Classic draw execution. Modern already streams
 indexed ground but still obtains shells and rings from model execution.
 FFED3D facility replacements also depend on executed root and child models.
@@ -505,7 +505,7 @@ Fixed model-to-world terrain scaling from source scale offsets; restored the
 original F1868/F1869 culling and F1877 atmosphere record. Near-pad original
 oracle matches 168 triangles and all four queues; the Saker rises and ground
 stays visible through 0/1/3 s with orbital updates. The starting seat is unchanged.
-See [launch-ground](notes/launch-ground.md).
+See [launch-ground](archive/launch-ground-2026-10-26.md).
 
 ## 2026-10-26 — source autopilot guidance audit
 
@@ -529,7 +529,7 @@ resolve current motion before the pad-world hand-off. Capture-start is now a
 fixed 20 ms step. Near-port range and no-teleport hand-off assertions pass.
 The empty Hope terrain/horizon is still unresolved: a terrain-only view emits
 no planet shapes; previous tests counted buildings. No guessed core culling or
-radius changes retained. Details in TAKEOVER_ISSUES.md.
+radius changes retained. Details in archive/TAKEOVER_ISSUES.md.
 
 
 ## 2026-10-25 — services return-to-ship icon
@@ -547,7 +547,7 @@ F938 recharge ran before ensure_damage and changed an uninitialised hull from
 [0,0] to [0,full], which the late initialiser preserved as destroyed. Initialise
 both words to full; leave existing damage intact. Regression reproduced red
 before the fix, green after it; 13 damage and 8 death tests pass. Earlier boot
-safety checks skipped this live-loop call order. See TAKEOVER_ISSUES.md.
+safety checks skipped this live-loop call order. See archive/TAKEOVER_ISSUES.md.
 
 
 ## 2026-10-25 — takeover issue audit
@@ -556,7 +556,7 @@ Laser input now uses HeldControls, disarmed at entry; release then press fires
 normally. Object text no longer substitutes a catalogue name for an empty
 registration. Removed the invented destruction sentence and PAUSED overlay.
 Existing intro/boot/planet/death checks pass. Dust remains missing and game-over
-pixel fidelity remains partial. See [TAKEOVER_ISSUES.md](TAKEOVER_ISSUES.md).
+pixel fidelity remains partial. See [archive/TAKEOVER_ISSUES.md](archive/TAKEOVER_ISSUES.md).
 
 
 Running record of decisions, discrepancies and open questions. Newest entries at the top; append rather than rewrite, unless a decision supersedes an earlier one (mark it).
@@ -825,7 +825,7 @@ Running record of decisions, discrepancies and open questions. Newest entries at
   semantics are in, with a `message_log` scan and `messages_view` evidence.
   Conflicts: `main.rs` (kept `pad_board` and the transient-note comment; routed
   the lock text through `pending_log.replace(Source::Target, ...)`) and
-  `docs/notes/dashboard.md` (F4 services, F5 transient note). Escape/pause
+  `docs/notes/cockpit-dashboard.md` (F4 services, F5 transient note). Escape/pause
   messages stay off the log and the places list still wins. Owner decisions:
   DOS start-line inference, target-lock wording, unported-click feedback and
   DATA_008810/scroll actions; `docs/notes/message-log.md`.
@@ -1518,7 +1518,7 @@ Running record of decisions, discrepancies and open questions. Newest entries at
   work was dropped.
 - The target hull/shield readout and the model-157 shield flash are now
   reachable in a generated system; the notes' "unreachable" wording is
-  corrected in `docs/notes/dashboard.md`. Full AI, police response, ship fire,
+  corrected in `docs/notes/cockpit-dashboard.md`. Full AI, police response, ship fire,
   missiles, F942's own explosion, station-bay ships and persistence remain
   (`docs/notes/npc.md` §4).
 - Checks: `cargo test --workspace --locked`, clippy `-D warnings`,
@@ -1557,7 +1557,7 @@ Running record of decisions, discrepancies and open questions. Newest entries at
   (`new_game_starts_at_ross_154`, `new_game_takes_off_from_the_pad_into_free_flight`)
   pass.
 - Docs: EXP-010 rewritten (takeoff ported, refusal removed); `STATUS.md`,
-  `NAVIGATION.md`, `docs/notes/dashboard.md` and `docs/notes/intro.md` no
+  `NAVIGATION.md`, `docs/notes/cockpit-dashboard.md` and `docs/notes/intro.md` no
   longer call takeoff blocked; the 2026-10-24 PORT_LOG bullet is marked
   superseded.
 
@@ -1589,7 +1589,7 @@ Running record of decisions, discrepancies and open questions. Newest entries at
 - Two stale port messages fixed while integrating: the F2 status page said
   "F2 or F1 returns" (only F2 toggles it) and the pause overlay still offered
   "F2 SCENARIOS" after the branch removed the scenario selector.
-- Docs: `docs/notes/dashboard.md` now ticks the message log/clock, HUD readouts,
+- Docs: `docs/notes/cockpit-dashboard.md` now ticks the message log/clock, HUD readouts,
   lamps/engines page and the 82-record table; the Set/Act position is corrected
   to x=2 (not 15); the audit records what remains (player damage and equipment
   words, `F991` 0x10-0x14, altitude/F1393 speed units, scanner contacts, the F3
@@ -1614,7 +1614,7 @@ Running record of decisions, discrepancies and open questions. Newest entries at
   kept the space colour/stars block and added F1100's target HUD; `screen.rs`
   kept the dock, prefs and marker icons and added the gauge bitmaps plus
   `lock_external` and the gauge draw call. No stream's work was dropped.
-- **Corrected the dashboard audit** (`docs/notes/dashboard.md`): bitmap 98 is
+- **Corrected the dashboard audit** (`docs/notes/cockpit-dashboard.md`): bitmap 98 is
   the velocity/prograde marker (`F1112`), not a target X; bitmap 97 is the
   gunsight at (129,48), drawn per mount and never in views 4/6; the gauges and
   F1100 range are now drawn; the target hull/shield readout and model 157's
@@ -1711,7 +1711,7 @@ Owner decision: the default flight background is the original's, not the old
 
 ## 2026-10-25 - Intro implementation plan merged (docs only)
 
-- Merged `intro-plan` (b6c0e16): `docs/notes/intro-todo.md` records the complete
+- Merged `intro-plan` (b6c0e16): `docs/archive/intro-todo.md` records the complete
   remaining intro/front-end plan. No code or dashboard item changes.
 
 ---
@@ -2138,7 +2138,7 @@ Notes: `docs/notes/sysgen.md`.
 
 ## 2026-10-23 — Galaxy table and system parameters, cache v15 (v0.50a)
 
-Notes: `docs/notes/galaxy.md`. Start of the world milestone (system generation).
+Notes: `docs/notes/galaxy-table.md`. Start of the world milestone (system generation).
 
 - Cache v15 adds `base:world/system-tables`: the galaxy table and the system
   generator's tables, imported raw from the executable (RVA `0xe71d8`, floppy
@@ -2238,7 +2238,7 @@ Next step toward flying near a planet. Notes: `docs/notes/physics.md`.
 
 ## 2026-10-23 — Surface plumbing: entries, dispatch and queued words (v0.48e)
 
-Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.
+Milestone v0.48 step 2, continuing. Notes: `docs/notes/curved-surfaces.md`.
 
 - **F1823** builds a small hash map from the 16-byte entries (key word +0,
   FindMSB normalisation, `>> 11` bucket, two 16-byte records per bucket). It is
@@ -2261,7 +2261,7 @@ Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.
 
 ## 2026-10-23 — Surface helper ports (v0.48d)
 
-Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.
+Milestone v0.48 step 2, continuing. Notes: `docs/notes/curved-surfaces.md`.
 
 - **F1875, F1824 and F1825 ported** (`ffe_core::model_surface`):
   `cross_sign` (sign of the 64-bit 2D cross product, 0 or -1), `mix32` (the
@@ -2277,7 +2277,7 @@ Milestone v0.48 step 2, continuing. Notes: `docs/notes/surfaces.md`.
 
 ## 2026-10-23 — Curved surface resolution (v0.48c)
 
-Milestone v0.48 step 2, first part. Notes: `docs/notes/surfaces.md`.
+Milestone v0.48 step 2, first part. Notes: `docs/notes/curved-surfaces.md`.
 
 - **F1874's geometry is ported.** The executor resolves the surface's origin
   through F1470 (view) and each axis through F1472 (object), and records the
@@ -3476,7 +3476,7 @@ atomic failure. Total is 116 runnable synthetic tests on Windows (131 `#[test]`
 with 14 `#[ignore]` and one `#[cfg(unix)]`). No external/screen/random vertices,
 submodels, clipping or pixels are validated. This is not yet composed into the
 model executor: `model_execute` still rejects opcode 6 until the composition in
-`docs/MODEL_EXECUTION_PLAN.md` lands. F4, synthetic flight and cache v6/385 are
+`docs/archive/MODEL_EXECUTION_PLAN.md` lands. F4, synthetic flight and cache v6/385 are
 unchanged; no owner playtest is required for this internal milestone.
 
 ## 2026-10-21 — Original depth commands and flat group ordering (v0.9)
@@ -4229,7 +4229,7 @@ Phase 0 entry below. Current authority: [CLAUDE.MD](../CLAUDE.MD).
 
 ### Open questions
 
-See `docs/INVENTORY.md` §10 and `docs/PHASE0_SUMMARY.md`. The blocking ones are: simulation oracle, Classic look/aspect/palette, music synth, CD version, legacy submodule, rule-4 gate, trace-harness patches, and reference build toolchain.
+See `docs/archive/PHASE0_INVENTORY.md` §10 and `docs/archive/PHASE0_SUMMARY.md`. The blocking ones are: simulation oracle, Classic look/aspect/palette, music synth, CD version, legacy submodule, rule-4 gate, trace-harness patches, and reference build toolchain.
 
 ---
 
@@ -4430,7 +4430,7 @@ Notes: `docs/notes/terrain.md`, `surface.md`, `objects.md`.
 
 ## 2026-10-23 — Name generation, cache v18 (v0.51g)
 
-Notes: `docs/notes/names.md`. Cache v18 adds `base:text/names`. `ffe_core::names`
+Notes: `docs/notes/name-generation.md`. Cache v18 adds `base:text/names`. `ffe_core::names`
 ports F791 (types 1 to 0x14), F793/F794, F795-F799 and F921; `--names` matches 8,130
 names. Wiring names into system generation (F893) is next.
 

@@ -4,7 +4,7 @@
 //! (a child model at a vertex), F581 (the terrain record), F582 (the collision
 //! stream) and F583 (a sphere against one of a model's surfaces). The shapes come
 //! from the cache: each model's vertices, normals and collision stream.
-//! Verified against the executed original (`docs/notes/surface.md`).
+//! Verified against the executed original (`docs/notes/collision-shapes.md`).
 
 use crate::model::multiply;
 use crate::model_math::{fraction, length, transform_rows};

@@ -3,13 +3,13 @@
 Current source-parity correction (2026-10-26): the default Saker has **1 t free
 hold**, source bay 0 via F994's temporary bay-1 reservation, and F998/F997's
 half-turn after pad placement. Older 7 t/EXP-019 statements below are historical.
-See [implementation record](parity-ground-drive-2026-10-26.md).
+See [implementation record](../archive/parity-ground-drive-2026-10-26.md).
 
 
 Current source-parity correction (2026-10-26): the default Saker has **1 t free
 hold**, source bay 0 via F994's temporary bay-1 reservation, and F998/F997's
 half-turn after pad placement. Older 7 t/EXP-019 statements below are historical.
-See [implementation record](parity-ground-drive-2026-10-26.md).
+See [implementation record](../archive/parity-ground-drive-2026-10-26.md).
 
 
 Record for the intro screens and the original's new-game state. The DOS FFE
@@ -244,7 +244,7 @@ first row when F1740 leaves a left-handed frame (`cmp [..+0xf8],0; jnl`,
 (`docs/evidence/visuals/intro-*-before/after.png`). The letters are the
 original's fixed grey, matching the executed frame at animation 63
 (`(192,192,192)` on `(64,64,64)`). The executed JJFFE reference draws its own
-`FRONTIER` string for this model (`intro-todo.md` D5); the port keeps the DOS
+`FRONTIER` string for this model (`../archive/intro-todo.md` D5); the port keeps the DOS
 cache's GAME!TEK.
 
 **Depth order (2026-10-25).** F1840/F1841 emit curved-surface entries through

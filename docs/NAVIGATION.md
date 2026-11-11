@@ -3,7 +3,7 @@
 Current source-parity correction (2026-10-26): the default Saker has **1 t free
 hold**, source bay 0 via F994's temporary bay-1 reservation, and F998/F997's
 half-turn after pad placement. Older 7 t/EXP-019 statements below are historical.
-See [implementation record](notes/parity-ground-drive-2026-10-26.md).
+See [implementation record](archive/parity-ground-drive-2026-10-26.md).
 
 
 > 2026-10-26: the player path now uses integer source guidance rather than the
@@ -264,7 +264,7 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   without a hull push. An open-air starport target is flown to F741's point 6,144,000
   mm above the port and asks F655 there; F745's grant keeps the target and marks
   `final_leg`, then F650's pad/F746's descent/F744/F652's touch reach F1048's `0x30`
-  (`starport_autopilot_lands_on_the_pad`; `docs/notes/autoland.md`). The port's `0x59`
+  (`starport_autopilot_lands_on_the_pad`; `docs/archive/autoland-prototype.md`). The port's `0x59`
   collision geometry imports and the pad scan runs F576/F580 in F994's three-body
   frame (`step_starport_landing`).
 - **Long legs and cancel.** The long leg is the port's own convenience (the source has
@@ -388,7 +388,7 @@ orbit and in the starport approach (`surface_frame_shows_a_starport`, frame
   `follow` drift) can pass the pad ~100 m to the side and clip a building, so the
   end-to-end test places the ship at F650's seat for the touch. F596/F597's exact
   distance law and the rotating frame's velocity are the next step
-  (`docs/notes/autoland.md`).
+  (`docs/archive/autoland-prototype.md`).
 - **Landed dressing.** F253's undercarriage word (`+0x9e`) animation, the sounds and the
   player's AI mode byte (`player+0xff = 0x24`) are not modelled; the console is the flight one
   F1116 selects, as the original's is.

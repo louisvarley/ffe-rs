@@ -1,7 +1,7 @@
 //! Rank, reputation and legal-status tests: `DATA_005110`/`DATA_005114`'s
 //! thresholds, the twelve military words, F307's medals, F311's five legal
 //! words and F544/F545's fine payment. Every string and threshold is cited in
-//! `docs/notes/status.md`.
+//! `docs/notes/rank-and-fines.md`.
 
 use ffe_core::npc::{Career, Legal};
 use ffe_core::status::{

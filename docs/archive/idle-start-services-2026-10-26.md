@@ -1,3 +1,5 @@
+> **Archived 2026-11-11:** a dated incident fix. Kept as history; see `docs/archive/README.md`.
+
 # Enter at intro, idle pad, and services — 26 October 2026
 
 Start remains F998 type 0: Gateway / Hope / Old Blackelk. The owner reported

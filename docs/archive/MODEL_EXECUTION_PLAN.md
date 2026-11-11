@@ -1,3 +1,5 @@
+> **Archived 2026-11-11:** the v0.11 design record, implemented; the live map is `docs/MODEL_COMMANDS.md`. Kept as history; see `docs/archive/README.md`.
+
 # Model execution plan — compose depth commands/groups into the executor
 
 Status: **implemented in v0.11; extended in v0.12 (composed-order oracle) and

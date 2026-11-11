@@ -1,6 +1,8 @@
+> **Archived 2026-11-11:** the prototype auto-landing; the live record is `docs/notes/autopilot-source-audit.md`. Kept as history; see `docs/archive/README.md`.
+
 > 2026-10-26: historical prototype evidence below. The live player now uses the
 > source arithmetic and collision path documented in
-> [the source audit](autopilot-source-audit.md).
+> [the source audit](../notes/autopilot-source-audit.md).
 
 # Starport auto-landing and the pad touch (2026-10-25)
 

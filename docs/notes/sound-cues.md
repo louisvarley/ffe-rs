@@ -232,4 +232,4 @@ device and their output is unchanged.
    1..16.
 
 No dashboard, `docs/PORT_LOG.md`, `docs/STATUS.md` or
-`docs/notes/agent-streams.md` edits were made by this stream.
+`docs/archive/agent-streams.md` edits were made by this stream.

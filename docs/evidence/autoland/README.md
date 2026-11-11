@@ -13,4 +13,4 @@ The default new game (Gateway, Hope, Old Blackelk, model 0x56) is the target.
 | `manual-9999-pad.png` | `manual_pad_contact_reaches_0x30` | the same view after F1019's `0x2e` and F1048's `0x30` |
 
 The source map and the F576 model-data fix are in
-[`docs/notes/autoland.md`](../../notes/autoland.md).
+[`docs/archive/autoland-prototype.md`](../../archive/autoland-prototype.md).

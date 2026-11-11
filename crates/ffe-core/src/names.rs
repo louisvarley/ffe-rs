@@ -2,7 +2,7 @@
 //! with the part of the string expander F1348 the name strings use): first names
 //! and surnames, planet, station and starport names, and ship identifiers. The
 //! strings come from the cache's `base:text/names`. Verified against the executed
-//! original (`docs/notes/names.md`).
+//! original (`docs/notes/name-generation.md`).
 
 /// Name types F791 takes.
 pub mod kind {

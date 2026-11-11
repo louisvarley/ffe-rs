@@ -1,12 +1,14 @@
+> **Archived 2026-11-11:** the Phase 0 rendering proposal; its Enhanced and pack parts are out of scope here. Kept as history; see `docs/archive/README.md`.
+
 # Rendering design proposal (Phase 0)
 
 Status: **design; no renderer code written.** The owner approved original-style
 Classic graphics, 4:3 presentation and live switching to image-based Enhanced
-graphics. [CLAUDE.MD](../CLAUDE.MD) is authoritative. Prioritize native resolution,
+graphics. [CLAUDE.MD](../../CLAUDE.MD) is authoritative. Prioritize native resolution,
 HD images, filtering and MSAA, then modest bloom; advanced effects below are a
 backlog, not first-slice requirements. JJFFE 2.8a7 is the gameplay reference.
 
-This document defines the Classic target, the Enhanced feature set and build order, the performance budget, dependency/capability rules, the master Enhanced button, the render-description contract, large-scene strategy, and the test plan. It is based on `docs/INVENTORY.md` and `docs/FFED3D_RENDERING_NOTES.md`.
+This document defines the Classic target, the Enhanced feature set and build order, the performance budget, dependency/capability rules, the master Enhanced button, the render-description contract, large-scene strategy, and the test plan. It is based on `docs/archive/PHASE0_INVENTORY.md` and `docs/archive/FFED3D_RENDERING_NOTES.md`.
 
 ---
 
@@ -42,7 +44,7 @@ This document defines the Classic target, the Enhanced feature set and build ord
 | Audio-visual timing | 50 Hz simulation cadence; no interpolation, no smoothing |
 | Enhancements | None |
 
-The exact presentation of the 6-bit palette and 4:3 vs 16:10 is an open question in `INVENTORY.md` §10. The software reference stores **indexed** pixels, so palette expansion is a display-only decision and can be tested separately.
+The exact presentation of the 6-bit palette and 4:3 vs 16:10 is an open question in `PHASE0_INVENTORY.md` §10. The software reference stores **indexed** pixels, so palette expansion is a display-only decision and can be tested separately.
 
 ### 2.1 Classic renderer paths
 
@@ -388,7 +390,7 @@ framebuffer/presentation settings, not a separate simulation or reloaded save.
 
 1. **Classic GPU exactness.** GPU rasterisation edge rules may prevent bit-exact 3D geometry. Mitigation: CPU fixed-point projection/snap, no MSAA/depth effects, nearest sampling, and a documented tolerance. If a scene cannot meet it, keep the software path as the Classic renderer for that scene (performance is trivial at 320×200) or implement a GPU compute rasteriser that matches the original fixed-point rules. This is a design decision for Phase 5.
 2. **Planets.** The original procedural planet algorithm is complex; a GPU Classic planet that exactly matches software may be harder than ships/HUD. Fallback: CPU tessellation into a vertex buffer (Classic only), GPU shading with palette lookup. This preserves exactness at the cost of CPU.
-3. **Aspect/palette choices** (see `INVENTORY.md` §10).
+3. **Aspect/palette choices** (see `PHASE0_INVENTORY.md` §10).
 4. **Widescreen semantics.** Presentation-only widescreen must not reveal more of the scene; the “fill” variant that does is gameplay-affecting. Confirm the grouping.
 5. **HDR output** on Linux/Windows varies; capability detection and fallback.
 6. **Frame interpolation** can expose simulation discreteness (e.g. hit/explosion) if applied to the wrong state; interpolate only continuous transforms/camera, and keep event-driven effects at the tick.
@@ -403,11 +405,11 @@ The owner approved original-style Classic and live image-based enhancements.
 Do not request those decisions again. Before declaring the renderer complete:
 
 - Implement the selected v1 subset; advanced features remain deferred.
-- Test the live master switch and config against [CLAUDE.MD](../CLAUDE.MD).
+- Test the live master switch and config against [CLAUDE.MD](../../CLAUDE.MD).
 - Validate the one-way render contract and shared semantic interpretation.
 - Measure palette/projection/raster behavior against JJFFE; keep exact CPU
   Classic pixels as the first presentation baseline.
 - Measure budgets on identified hardware; do not turn proposed numbers into
   evidence or require a separate GPU Classic rasterizer for the first slice.
 
-Follow the current phase gates in [CLAUDE.MD](../CLAUDE.MD).
+Follow the current phase gates in [CLAUDE.MD](../../CLAUDE.MD).

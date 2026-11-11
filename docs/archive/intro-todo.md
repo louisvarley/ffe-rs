@@ -1,3 +1,5 @@
+> **Archived 2026-11-11:** the October intro plan; the live record is `docs/notes/intro.md`. Kept as history; see `docs/archive/README.md`.
+
 # Intro: complete-implementation TODO
 
 > **Status 2026-10-25:** the drawing and timing slice is implemented: the boot
@@ -403,7 +405,7 @@ Every item has: **what**, **touch**, **depends**, **accept**, **size**
     the bitmap appears at 0x795cd not 0x795cc.
   - **Size:** M (plus the frame probe). **Unblocks:** C2, F2.
   - **Risk:** model 176's children 347..360 read locals 1/2; the original's
-    `F1683` leaves them as stale stack (animation.md §1.2). Confirm the logo
+    `F1683` leaves them as stale stack (../notes/animation.md §1.2). Confirm the logo
     with a DOS screenshot; if it depends on those values, document the
     undefined-stack deviation.
 - [ ] **C2. Boot state machine.**
@@ -609,7 +611,7 @@ Also capture the first in-game frame after the choice (C4).
 - **Music playback** (no audio capture; HMP hashes are known, synthesis is not).
 - **Start types 2-5** until the state adapter is extended and a DOS/JJFFE
   comparison is made.
-- **Model 176's stale-stack locals** (animation.md §1.2) and any behaviour that
+- **Model 176's stale-stack locals** (../notes/animation.md §1.2) and any behaviour that
   depends on undefined original memory.
 - **The dynamic upper palette** if the intro turns out to need `F1330`; the
   current port has only the fixed low palette.
@@ -668,4 +670,4 @@ Open questions for the owner:
   `crates/ffe-content/src/lib.rs`.
 - Docs: `docs/STATUS.md`, `docs/FORMATS.md`, `docs/REFERENCE_HARNESS.md`,
   `docs/notes/animation.md` (model inputs), `docs/notes/text.md` (F1344/F1747),
-  `docs/GAME_FILES.md` (HMP hashes), `docs/INVENTORY.md` §3, `docs/LEGAL.md`.
+  `docs/GAME_FILES.md` (HMP hashes), `docs/archive/PHASE0_INVENTORY.md` §3, `docs/LEGAL.md`.

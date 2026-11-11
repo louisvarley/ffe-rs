@@ -1,3 +1,5 @@
+> **Archived 2026-11-11:** a dated incident fix. Kept as history; see `docs/archive/README.md`.
+
 # Hope launch ground — 26 October 2026
 
 The missing planet in the owner's screenshot was reproduced without station

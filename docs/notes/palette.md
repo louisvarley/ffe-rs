@@ -193,7 +193,7 @@ frames that cross 64 (the galaxy and the in-game surfaces).
 `docs/evidence/visuals/intro-palette-after.txt` is the frame's six-bit bank.
 
 **Logo text.** Model 177's child 361 text (DOS `0x408a` = `GAME!TEK`; JJFFE's
-string is `FRONTIER`, `intro-todo.md` D5) read mirrored on every animation
+string is `FRONTIER`, `../archive/intro-todo.md` D5) read mirrored on every animation
 frame. F1747's handedness flip fixes it; the before/after pair is
 `docs/evidence/visuals/game-tek-letters-*.png`, and
 `the_game_tek_logo_text_is_not_mirrored` pins the assembled frame hash.

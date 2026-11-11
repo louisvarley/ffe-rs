@@ -2,7 +2,7 @@
 //! `ffe.asm:24749`).
 //!
 //! The strings are `DATA_005189`-`DATA_005257` in `ffedat.asm`; the page's
-//! layout and its selector table are cited in `docs/notes/status.md`. Nothing
+//! layout and its selector table are cited in `docs/notes/rank-and-fines.md`. Nothing
 //! here invents a rank or a threshold: the eleven military thresholds are
 //! `DATA_005114` (`ffedat.asm:5514`), the nine Elite-rating thresholds are
 //! `DATA_005110` (`ffedat.asm:5491`) and the five legal-status bands are F311's

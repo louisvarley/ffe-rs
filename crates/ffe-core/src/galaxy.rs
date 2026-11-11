@@ -2,7 +2,7 @@
 //! from `csystem.txt` and `ffe.asm` (F868-F871). The table is game data: it is
 //! imported from the player's executable into the content cache (v15, the
 //! `SystemTables` asset) and read here through a borrowed view.
-//! Verified against the executed original (`docs/notes/galaxy.md`).
+//! Verified against the executed original (`docs/notes/galaxy-table.md`).
 
 /// Bytes of the imported block: from `DATA_007106` to the end of `DATA_007138`,
 /// with floppy 1.02's 329 galaxy records. A release with more records (Elite

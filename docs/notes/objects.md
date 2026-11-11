@@ -33,7 +33,7 @@ The physics list is a flag byte per object (indexes 0 to 0x72) followed by
 F879 measures the planet's surface with F574 twice (at the nominal radius and at
 the radius less 7/8 of the first altitude), then places the starport from the
 second result. For a planet (a complex collision shape) F574 runs F575, which sends
-the pair through F576 (`surface.md`) and the terrain query (`terrain.md`). When the
+the pair through F576 (`collision-shapes.md`) and the terrain query (`terrain.md`). When the
 second query lands inside the terrain F575's contact code settles the body: it is
 moved up by the difference between its inner radius and the altitude, its second row
 becomes the surface's up, the matrix is rotated (F571), re-orthogonalised (F1520) and

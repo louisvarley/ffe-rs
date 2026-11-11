@@ -11,7 +11,7 @@ use ffe_rs::console::{
 fn the_table_has_all_82_records_in_the_documented_order() {
     let table = buttons();
     assert_eq!(table.len(), 82);
-    // The dump in docs/notes/dashboard.md §4.2, spot-checked at both ends and
+    // The dump in docs/notes/cockpit-dashboard.md §4.2, spot-checked at both ends and
     // through the pages this slice draws.
     assert_eq!(
         (table[0].x, table[0].y, table[0].image(), table[0].radio),

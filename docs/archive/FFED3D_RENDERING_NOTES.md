@@ -1,3 +1,5 @@
+> **Archived 2026-11-11:** a Phase 0 study of FFED3D rendering; FFED3D is out of scope in this Classic checkout. Kept as history; see `docs/archive/README.md`.
+
 # FFED3D rendering notes (Phase 0 study)
 
 Purpose: understand how the original First Encounters software renderer composed the screen, how the FFED3D D3D9 port reproduces/replaces it, how the earlier HD work was done, and which quirks the Classic renderer must reproduce. This is **knowledge**, not code to copy. The Classic target is the original DOS look, not FFED3D's smoothed D3D look.
@@ -16,7 +18,7 @@ Sources: `ffe.asm` (2D/3D software routines and data), `ffedat.asm` (buffers/pal
   - **HUD/console:** the remaining **42 rows** (158 + 42 = 200) hold the cockpit panel, scanner, text and buttons.
 - FFED3D's `Render` reproduces the split: `ViewPort(true)` sets the 3D viewport height to `viewport.Height * 0.795` (158/200 ≈ 0.79) and the 2D panel uses the full viewport. The clear rectangle for the HUD starts at `curheight/200*157`.
 - FFED3D doubles the *software* back buffer to **640 × 400** (`DATA_009226` is 256,000 bytes = 640×400; `F1601_DrawHLine` uses a 640-byte stride; `F1882_FlipScreenLow` blits 640×400). The logical UI remains 320×200 and is scaled. **DOS used 320×200; this is a FFED3D deviation.**
-- The original VGA mode is 320×200 displayed on a 4:3 monitor, i.e. non-square pixels (pixel aspect 1.2). FFED3D's `aspectfix` uses 1.6 (16:10, square pixels). **Classic should use the original 4:3 presentation** (see the open question in `INVENTORY.md`).
+- The original VGA mode is 320×200 displayed on a 4:3 monitor, i.e. non-square pixels (pixel aspect 1.2). FFED3D's `aspectfix` uses 1.6 (16:10, square pixels). **Classic should use the original 4:3 presentation** (see the open question in `PHASE0_INVENTORY.md`).
 
 ### 1.2 Buffers
 
@@ -103,7 +105,7 @@ The triangle/quad routines use fixed-point edge walking (`F1602/F1603`). Heights
 
 ### 3.1 Model representation
 
-Models are command streams, not meshes (see `INVENTORY.md` §3.5). The interpreter (`sendToRender` in FFED3D; the corresponding asm routines around `0x5xxxx–0x63xxx`) does:
+Models are command streams, not meshes (see `PHASE0_INVENTORY.md` §3.5). The interpreter (`sendToRender` in FFED3D; the corresponding asm routines around `0x5xxxx–0x63xxx`) does:
 
 1. Read the model header and select the command stream (`Model_t.Mesh_ptr`).
 2. For each command, select vertices/normals, apply local matrix/scale/mirror/rotation, optionally skip based on visibility or flags, set material/texture, and emit polygons.
@@ -223,7 +225,7 @@ Loading screens (`textures/loading/Loadscreen.png`, `loading_models/textures/eff
 
 - `KM_DIST = 999539.7368756` units per km ⇒ 1 unit ≈ 1.00046 mm. A Cobra (~65 m) is ~65,000 units; a planet (6,371 km) is ~6.37×10⁹ units; a star is much larger. `Point64` positions and exponent bytes carry this range.
 - Model vertices are integer units divided by `DIVIDER = 10000` in FFED3D; the original fixed-point scale uses `Model_t.Scale`/`Scale2`. A model's `Radius`/`interract_radius`/`collision_radius` are in the same units.
-- Projection near/far in FFED3D are 0.1/50,000 (near) and 1/100,000 (far) in *model-space after scaling*, not world units; the renderer converts to camera-relative floats. For planet-scale rendering, a single f32 depth range is insufficient. The design will use camera-relative f64 transforms, reversed-Z, and near/far splits; see `docs/RENDERING_DESIGN.md`.
+- Projection near/far in FFED3D are 0.1/50,000 (near) and 1/100,000 (far) in *model-space after scaling*, not world units; the renderer converts to camera-relative floats. For planet-scale rendering, a single f32 depth range is insufficient. The design will use camera-relative f64 transforms, reversed-Z, and near/far splits; see `docs/archive/RENDERING_DESIGN.md`.
 - Original object `dist_cam`/`dist_3face` are exponent bytes, not distances; the renderer uses them to choose LOD/detail and culling, not as depth values.
 
 ---
@@ -234,19 +236,19 @@ Loading screens (`textures/loading/Loadscreen.png`, `loading_models/textures/eff
 |---|---|---|
 | 320×200, 8-bit indexed | 320×158 3D + 42-row HUD | `DATA_007773/74`, `F1618`, `F1637` |
 | 6-bit palette | 256 × 3 × 6-bit; `<<2` expansion in FFED3D | `DATA_009252`, `VideoSetPalValue` |
-| Non-square pixels / 4:3 | DOS 320×200 on 4:3 (pixel aspect 1.2) | `INVENTORY.md` §10 question |
+| Non-square pixels / 4:3 | DOS 320×200 on 4:3 (pixel aspect 1.2) | `PHASE0_INVENTORY.md` §10 question |
 | Bitmap font | Proportional glyphs, shadow, palette colours | `F1586–F1598` |
 | Affine texture mapping | `F1642–F1649`, no perspective correction | `ffe.asm` |
 | Flat/quantised shading | `Ambient2[7][8][3]`, 8 intensity levels | `gfx.cpp` |
 | Face-normal backface test | `checkOrientation` sign test | `gfx.cpp`, asm |
 | Draw-order transparency | Transparent list after opaque; no per-pixel z in DOS | `drawModelPrimitives` |
-| Command-stream models | Submodels, mirror/rotate bits, conditional skips | `INVENTORY.md` §3.5 |
+| Command-stream models | Submodels, mirror/rotate bits, conditional skips | `PHASE0_INVENTORY.md` §3.5 |
 | Procedural planets | Icosahedron LOD, noise colours, no texture files | `planet.cpp`, asm |
 | Procedural starfield | Palette points/sprites, 11 star colours | `starColors` |
 | HUD panel bitmaps | Embedded panel/icons, not TTF/3D panel | `ffebmp.asm` |
 | Cockpit bitmaps | `CABIN0..5.BMP` 320×158 | game files |
 | Mouse pointer | Software pointer, 320×200 coords | `F1630–F1636` |
-| 50 Hz input cadence | `TimerAdvance`, 20 ms nominal | `INVENTORY.md` §7 |
+| 50 Hz input cadence | `TimerAdvance`, 20 ms nominal | `PHASE0_INVENTORY.md` §7 |
 | Frame pacing | `maxfps` cap, variable render vs fixed sim | `F1416/F1418` |
 
 ## 8. FFED3D quirks that must **not** leak into Classic
@@ -259,7 +261,7 @@ Loading screens (`textures/loading/Loadscreen.png`, `loading_models/textures/eff
 - `.X` models/skins, `texNNN` HD textures, skybox TGA, shader planets.
 - BASS/MP3 music, Lua console, loading screens/tips.
 - 32-bit colour back buffer, `pWinPal32` expansion, `<<2` palette.
-- Any FFED3D-added UI/menu text or gameplay fixes (see `INVENTORY.md` §9).
+- Any FFED3D-added UI/menu text or gameplay fixes (see `PHASE0_INVENTORY.md` §9).
 
 ## 9. Implications for the Rust renderer
 
@@ -271,4 +273,4 @@ Loading screens (`textures/loading/Loadscreen.png`, `loading_models/textures/eff
 6. **Planet rendering is the hardest fidelity case**: the original is procedural and LOD-driven; a GPU replacement must either reproduce the CPU tessellation/colours exactly (Classic) or be an opt-in Enhanced effect (atmosphere/clouds/HD). Do not silently replace the Classic planet.
 7. **Audio/visual timing is separable**: the simulation runs at 50 Hz with integer tics; frame interpolation/animations are presentation and must not feed back.
 
-See `docs/RENDERING_DESIGN.md` for the proposed feature order, budgets, dependencies and Classic comparison plan.
+See `docs/archive/RENDERING_DESIGN.md` for the proposed feature order, budgets, dependencies and Classic comparison plan.

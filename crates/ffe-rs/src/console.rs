@@ -337,7 +337,7 @@ pub fn click(x: i32, y: i32) -> Option<Click> {
 /// The player ship's equipment/status bytes the console routines read. The
 /// equipment words now come from [`ffe_core::equipment::Loadout`] through
 /// [`ShipSystems::with_loadout`]; the engine, target and GUI bytes stay
-/// explicit runtime inputs with new-game defaults. `docs/notes/dashboard.md`
+/// explicit runtime inputs with new-game defaults. `docs/notes/cockpit-dashboard.md`
 /// §6.10 lists every condition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShipSystems {

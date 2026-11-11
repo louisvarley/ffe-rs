@@ -23,7 +23,7 @@ Sources read for this note:
 - `jjffe-master/win32/w32dir.cpp`, `ffewin.cfg` (sample/song directories).
 - `jjffe-master/hmp.cpp` and FFED3D's copy (HMP -> SMF converter).
 - `game/FX/*.RAW`, `game/MUSIC/*.HMP` (the player's files; not committed).
-- `docs/INVENTORY.md`, `docs/GAME_FILES.md`, `docs/FORMATS.md`, and
+- `docs/archive/PHASE0_INVENTORY.md`, `docs/GAME_FILES.md`, `docs/FORMATS.md`, and
   `CLAUDE.MD` §5 "Audio decision".
 
 JJFFE differences from the DOS release are called out explicitly. The DOS

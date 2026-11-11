@@ -1,7 +1,7 @@
 //! Curved-surface helpers (opcode 31, F1874/F1876). F1874's resolution lives in
 //! [`crate::model_execute::SurfaceEmission`]; the helpers F1876 uses are ported
 //! here as their use is established. F1876's patch rendering itself is not
-//! ported yet; see `docs/notes/surfaces.md`.
+//! ported yet; see `docs/notes/curved-surfaces.md`.
 
 /// F1875: the sign of the 2D cross product `a.x * b.y - a.y * b.x`, computed in
 /// exact 64-bit arithmetic and returned as the original does — `-1` when the

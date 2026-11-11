@@ -1,14 +1,16 @@
+> **Archived 2026-11-11:** the Phase 0 summary, superseded by the approved direction in `CLAUDE.MD`. Kept as history; see `docs/archive/README.md`.
+
 # Phase 0 summary — stop and review
 
 Status: **historical FFED3D study; current direction and first slice approved.**
 The owner selected the separate JJFFE 2.8a7 reference, Windows x64, original
 visuals, allowed bug fixes, live image-only packs, legacy save import and short
-owner tests. See [CLAUDE.MD](../CLAUDE.MD) and the latest
-[PORT_LOG.md](PORT_LOG.md) entry. Historical recommendations below are not current
+owner tests. See [CLAUDE.MD](../../CLAUDE.MD) and the latest
+[../PORT_LOG.md](../PORT_LOG.md) entry. Historical recommendations below are not current
 instructions or implemented features. New CD/floppy inputs have since been
 inspected; the reference build described here was not reproduced in that work.
 
-This is the short version. Details are in `docs/INVENTORY.md`, `docs/FFED3D_RENDERING_NOTES.md`, `docs/RENDERING_DESIGN.md`, `docs/ARCHITECTURE.md` and `docs/FORMATS.md`.
+This is the short version. Details are in `docs/archive/PHASE0_INVENTORY.md`, `docs/archive/FFED3D_RENDERING_NOTES.md`, `docs/archive/RENDERING_DESIGN.md`, `docs/ARCHITECTURE.md` and `docs/FORMATS.md`.
 
 ---
 
@@ -19,7 +21,7 @@ This is the short version. Details are in `docs/INVENTORY.md`, `docs/FFED3D_REND
 - Identified the oracle: **First Encounters English 1.02 (21/04/95)**, PE32, image base `0x400000`; the reference source is **JJFFE 2.8a6 + Anisotropic mod 0.9c + FFED3D**.
 - Decoded the installer metadata: `BLD_INFO.CFG` build dir `eng-fp`, `GAMETEK.1` is the compressed installer payload, `IMAGE.DAT` its manifest, `PATCHES.INI` is AIL sound configuration (not the FFE patch).
 - Studied the original software renderer, the FFED3D D3D9 path, the model command streams, indexed bitmaps, palette, font, planets, starfield, HUD, input, audio, timing and saves.
-- Built a local **study binary** of the legacy engine (VS 2026 + NASM 3.02 + D3DX9 NuGet + Wine `d3d9.h` + a DirectInput shim) and ran it against `legacy/Elite3/`. It shows the JJFFE/Aniso splash and the Frontier copyright intro; the render loop is live. Details and caveats in `docs/INVENTORY.md` §11.
+- Built a local **study binary** of the legacy engine (VS 2026 + NASM 3.02 + D3DX9 NuGet + Wine `d3d9.h` + a DirectInput shim) and ran it against `legacy/Elite3/`. It shows the JJFFE/Aniso splash and the Frontier copyright intro; the render loop is live. Details and caveats in `docs/archive/PHASE0_INVENTORY.md` §11.
 - Produced the proposed workspace layout, data formats, `data.bin`/`upscaled.bin` contracts, mod design and rendering feature order/budgets.
 - Set up repository hygiene: `.gitignore`, `.gitattributes` (Git LFS for `upscaled.bin`), `ci/check_forbidden.py`, CI job, `LICENSE` placeholder, `docs/LEGAL.md`, `docs/TAKEDOWN.md`, `docs/KNOWN_ISSUES.md`, `docs/DEVIATIONS.md`, `docs/PORT_LOG.md`.
 
@@ -43,7 +45,7 @@ I did **not** write Rust game code, commit game data, or commit any legacy/FFED3
 4. **Palette expansion:** indexed reference; GPU display rule `v<<2` (FFED3D-compatible) or full-range `round(v*255/63)` — please choose.
 5. **Content format:** RON for content, TOML for mod/config, JSON for manifests/schema; indexed PNG + palette sidecar; glTF GLB + lossless `ffe.ron` command stream; WAV + MIDI. See `docs/FORMATS.md`.
 6. **Workspace:** `ffe-core`, `ffe-content`, `ffe-convert`, `ffe-render`, `ffe-platform`, `ffe-tools`, `ffe-rs`. See `docs/ARCHITECTURE.md`.
-7. **Rendering order:** HD textures → native-res → filtering → AA → HDR → bloom → shadows → AO → atmosphere/clouds → starfield → particles → material maps → widescreen presentation → frame interpolation. See `docs/RENDERING_DESIGN.md`.
+7. **Rendering order:** HD textures → native-res → filtering → AA → HDR → bloom → shadows → AO → atmosphere/clouds → starfield → particles → material maps → widescreen presentation → frame interpolation. See `docs/archive/RENDERING_DESIGN.md`.
 8. **Master button:** flips all presentation-only features between off (Classic) and the saved selection; gameplay-affecting group (extended FOV, fill-widescreen, input smoothing, aim assist) is never touched; “Reset to Classic”; hotkey configurable.
 9. **No scripting in v1**; reserve `ScriptHost`; recommend Rhai later. See `docs/MODDING.md`.
 10. **Legacy source as submodule?** Recommend a pinned submodule to upstream rather than vendoring. The same for `legacy/Elite3/` (or keep both local-only ignored).
@@ -64,5 +66,5 @@ I did **not** write Rust game code, commit game data, or commit any legacy/FFED3
 
 Then Phase 2 (`ffe-convert` + `build-data`) and Phase 3 (`ffe-core`).
 
-The owner has now answered the questions. Follow [CLAUDE.MD](../CLAUDE.MD),
+The owner has now answered the questions. Follow [CLAUDE.MD](../../CLAUDE.MD),
 not the superseded approval request or FFED3D oracle recommendation above.

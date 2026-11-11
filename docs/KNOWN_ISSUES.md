@@ -16,7 +16,7 @@ port task. See [CLAUDE.MD](../CLAUDE.MD).
 
 ## 1. Historical FFED3D behaviour vs DOS 1.02 (not the selected baseline)
 
-These are explicit changes in `ffe.asm`/the C++ modules. They are **not** bugs in the port; they are differences from the original DOS release. `docs/INVENTORY.md` §9 has the full context.
+These are explicit changes in `ffe.asm`/the C++ modules. They are **not** bugs in the port; they are differences from the original DOS release. `docs/archive/PHASE0_INVENTORY.md` §9 has the full context.
 
 | Area | Reference change | Source marker | Notes |
 |---|---|---|---|

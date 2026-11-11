@@ -1,10 +1,10 @@
 # Classic port burndown
 
 What is still to implement for a like-for-like Rust reimplementation of
-Frontier: First Encounters, as of 2026-11-10 (updated after PAR-01, PAR-04 and PAR-14 progress, PAR-06 done and a reconciliation with the parity audit and the split cleanup). This checkout is Classic only: the
-Modern GPU engine, the FFED3D integration, `assets.bin` art packs, the
-launcher and the Enhanced renderer and graphics-pack plans are out of scope and
-have been removed.
+Frontier: First Encounters, as of 2026-11-11 (after PAR-16 closed). This checkout
+is Classic only: the Modern GPU engine, the FFED3D integration, `assets.bin` art
+packs and the Enhanced renderer and graphics-pack plans are out of scope and have
+been removed. (The launcher was rebuilt as a Classic launcher.)
 
 The source of truth is [`dashboard/burndown.js`](../dashboard/burndown.js)
 (open `dashboard/index.html` for the chart). This page is a summary of it. Update
