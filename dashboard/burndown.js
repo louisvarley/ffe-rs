@@ -131,7 +131,7 @@ window.FFE_BURNDOWN = {
         { id: "v0.48-14", title: "Pixel-level whole-frame oracle (framebuffer mode, station and three ships)", status: "todo" },
         { id: "v0.48-15", title: "Upper runtime palette", status: "done", version: "v0.71" },
         { id: "v0.48-16", title: "Sprites, particles and circles (F1609-F1612)", status: "todo" },
-        { id: "v0.48-17", title: "Remaining 17 of 466 model slots and the CD 1.01 census", status: "todo" },
+        { id: "v0.48-17", title: "Remaining 17 of 466 model slots and the CD 1.01 census", status: "in-progress" },
         { id: "v0.48-18", title: "A planet in the flight scenario", status: "done", version: "v0.48j" },
         { id: "v0.48-19", title: "Planet approach draws the whole surface (surface queue, EXP-009)", status: "done", version: "v0.48n" }
       ]
@@ -1372,6 +1372,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-11",
       remaining: 78,
       note: "content-7 done: the CD videos play as JJFFE does. F333/F382/F384/F442's clip choices are ported with their F922 draws (ffe_core::fmv_select); the player shows the 120x120 picture at (1,17) at 15 fps with its sound on a new mixer stream voice, holds the clock, and ends on any key or click. 135 of 323 clips are reachable; JJFFE never selects the bulletin-board, p and st clips."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 78,
+      note: "Review of twelve closures another session left uncommitted. Eleven (flight-13, world-13, gameplay-3, gameplay-18, gameplay-25, gameplay-26, gameplay-34, gameplay-38, gameplay-39, gameplay-40, ui-12) rested on 2026-10-25/26 notes that the parity audit superseded when it reopened or tied them to its items, which remain open, so they stay in progress. v0.48-17 moves to in progress, not done: the CD 1.01 census now runs and matches the floppy (448 of 466 at top level; 16 child-only models, model 0x59's truncated block and the null slot 149 remain)."
     }
   ]
 };

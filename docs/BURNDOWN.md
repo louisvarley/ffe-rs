@@ -12,7 +12,7 @@ the dashboard first, then regenerate or edit this page to match.
 
 ## Summary
 
-**78 of 203 work items are open: 63 in progress, 15 not started.** The foundation,
+**78 of 203 work items are open: 64 in progress, 14 not started.** The foundation,
 model-engine, visible-slice and audio milestones are complete (45 items).
 
 | Area | Open | In progress | Not started | Done / total |
@@ -21,13 +21,13 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 | Flight core | 11 | 10 | 1 | 3/14 |
 | Galaxy and systems | 7 | 7 | 0 | 6/13 |
 | Gameplay systems | 21 | 20 | 1 | 22/43 |
-| Original drawing: models | 5 | 1 | 4 | 14/19 |
+| Original drawing: models | 5 | 2 | 3 | 14/19 |
 | Original drawing: screens and effects | 5 | 5 | 0 | 19/24 |
 | Content import | 2 | 2 | 0 | 5/7 |
 | Saves | 2 | 0 | 2 | 3/5 |
 | Classic split cleanup | 0 | 0 | 0 | 2/2 |
 | Release and sign-off | 5 | 0 | 5 | 2/7 |
-| **Total** | **78** | **63** | **15** | **125 / 203** |
+| **Total** | **78** | **64** | **14** | **125 / 203** |
 
 ## Critical path
 
@@ -124,7 +124,7 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 - [ ] `v0.48-8` Surface quad oracle at a planet-scale distance
 - [ ] `v0.48-14` Pixel-level whole-frame oracle (framebuffer mode, station and three ships)
 - [ ] `v0.48-16` Sprites, particles and circles (F1609-F1612)
-- [ ] `v0.48-17` Remaining 17 of 466 model slots and the CD 1.01 census
+- [~] `v0.48-17` Remaining 17 of 466 model slots and the CD 1.01 census
 
 ### Original drawing: screens and effects (5 open)
 
