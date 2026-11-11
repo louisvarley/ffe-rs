@@ -1371,8 +1371,15 @@ impl Screen {
                         let rows = disc
                             .orientation
                             .map(|axis| camera.direction(axis).map(|v| v * shrunk));
+                        // F1777's key is the depth times 2^(scale - 3): the
+                        // shrunk position keeps its key with the shrink added.
                         if let Ok(frame) = viewer.render_scene_with_instance(
-                            model, rows, position, light, &inputs, key_scale,
+                            model,
+                            rows,
+                            position,
+                            light,
+                            &inputs,
+                            key_scale + shrink as i32,
                         ) {
                             self.draw_frame(viewer, &frame);
                             continue;
@@ -2392,6 +2399,13 @@ impl Screen {
                 if let Some(scene) = scene {
                     scene.clear_haze_sky();
                 }
+                // F1536 queues every object of the frame, the planets and
+                // the star with the stations and ships, and F1789 draws the
+                // one queue by depth key: the setting star at Hope draws over
+                // the starport's buildings, as in the original's start frame.
+                if state.system_flight && scene.is_some() {
+                    self.object_queue = Some(Vec::new());
+                }
                 self.draw_discs(&camera, scene);
                 self.surface_sky = scene.and_then(|scene| scene.haze_sky()).map(|colour| {
                     u32::from(colour[0]) << 16 | u32::from(colour[1]) << 8 | u32::from(colour[2])
@@ -3253,7 +3267,7 @@ impl Screen {
         // Classic draws the objects as the original does: each only queues its primitives,
         // and one sort by depth key draws them, so a ship hides the dust behind it and a
         // station hides the ships behind it, whichever class is drawn first.
-        self.object_queue = Some(Vec::new());
+        self.object_queue.get_or_insert_with(Vec::new);
         self.queue_system_objects(scene, state, camera, own_ship);
         self.flush_object_queue(scene);
     }
