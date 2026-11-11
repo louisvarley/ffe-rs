@@ -45,12 +45,6 @@ pub struct Config {
     /// Port addition: the Docking Options page's indices.
     pub station_approach: usize,
     pub starport_approach: usize,
-    /// Port addition: the World Options page's choices.
-    pub traffic: usize,
-    pub police: bool,
-    pub pirates: bool,
-    pub advanced_traffic: bool,
-    pub combat_improved: bool,
     pub remap: BTreeMap<String, String>,
 }
 
@@ -67,11 +61,6 @@ impl Default for Config {
             sound: prefs.sound,
             station_approach: prefs.station_approach,
             starport_approach: prefs.starport_approach,
-            traffic: prefs.traffic,
-            police: prefs.police,
-            pirates: prefs.pirates,
-            advanced_traffic: prefs.advanced_traffic,
-            combat_improved: prefs.combat_improved,
             remap: BTreeMap::new(),
         }
     }
@@ -100,21 +89,6 @@ impl Config {
         }
         out.push_str(&format!("station_approach={}\n", self.station_approach));
         out.push_str(&format!("starport_approach={}\n", self.starport_approach));
-        out.push_str(&format!("traffic={}\n", self.traffic));
-        out.push_str(&format!("police={}\n", on_off(self.police)));
-        out.push_str(&format!("pirates={}\n", on_off(self.pirates)));
-        out.push_str(&format!(
-            "advanced_traffic={}\n",
-            on_off(self.advanced_traffic)
-        ));
-        out.push_str(&format!(
-            "combat={}\n",
-            if self.combat_improved {
-                "improved"
-            } else {
-                "classic"
-            }
-        ));
         out.push_str(&self.display.to_config());
         for (action, key) in &self.remap {
             out.push_str(&format!("bind.{action}={key}\n"));
@@ -170,32 +144,15 @@ impl Config {
                     }
                     config.starport_approach = parsed;
                 }
-                "traffic" => {
-                    let parsed: usize = value.parse().ok()?;
-                    if parsed >= crate::prefs::TRAFFIC_LABELS.len() {
-                        return None;
-                    }
-                    config.traffic = parsed;
-                }
-                "police" => config.police = parse_on_off(value)?,
-                "pirates" => config.pirates = parse_on_off(value)?,
-                "advanced_traffic" => config.advanced_traffic = parse_on_off(value)?,
                 // Older builds stored a Modern-graphics font and launcher backend; ignored.
                 "font" => {}
                 "backend" => {}
-                // The earlier single choice sets both.
-                "police_pirates" => {
-                    let on = parse_on_off(value)?;
-                    config.police = on;
-                    config.pirates = on;
-                }
-                "combat" => {
-                    config.combat_improved = match value {
-                        "classic" => false,
-                        "improved" => true,
-                        _ => return None,
-                    }
-                }
+                // The retired World Options page (extra traffic, the police and
+                // pirate switches, Advanced NPCs and the Improved combat aids,
+                // removed 2026-11-11): older files still load, the values are
+                // dropped and the original's traffic is used.
+                "traffic" | "police" | "pirates" | "advanced_traffic" | "police_pirates"
+                | "combat" => {}
                 "shape_detail" => {
                     let parsed: usize = value.parse().ok()?;
                     if parsed > 3 {
@@ -420,33 +377,21 @@ mod tests {
     }
 
     #[test]
-    fn world_options_default_to_the_original_and_round_trip() {
-        let config = Config::default();
-        assert_eq!(
-            (
-                config.traffic,
-                config.police,
-                config.pirates,
-                config.combat_improved
-            ),
-            (0, true, true, false)
-        );
-        let config = Config {
-            traffic: 3,
-            police: false,
-            combat_improved: true,
-            ..Config::default()
-        };
-        let text = config.to_config();
-        assert!(text.contains(
-            "traffic=3\npolice=off\npirates=on\nadvanced_traffic=off\ncombat=improved\n"
-        ));
-        assert_eq!(Config::from_config(&text), Some(config));
-        assert_eq!(Config::from_config("version=2\ntraffic=4\n"), None);
-        assert_eq!(Config::from_config("version=2\ncombat=arcade\n"), None);
-        // The earlier single police-and-pirates choice sets both.
-        let old = Config::from_config("version=2\npolice_pirates=off\n").unwrap();
-        assert_eq!((old.police, old.pirates), (false, false));
+    fn retired_world_options_load_and_are_dropped() {
+        let text = "version=2\ntraffic=3\npolice=off\npirates=on\nadvanced_traffic=on\n\
+                    police_pirates=off\ncombat=improved\n";
+        let config = Config::from_config(text).unwrap();
+        assert_eq!(config, Config::default());
+        let written = config.to_config();
+        for key in [
+            "traffic=",
+            "police=",
+            "pirates=",
+            "advanced_traffic=",
+            "combat=",
+        ] {
+            assert!(!written.contains(key), "{key} is no longer written");
+        }
     }
 
     #[test]

@@ -106,16 +106,15 @@ fn the_new_game_pad_is_not_attacked() {
 fn capital_ships_keep_clear_of_hope_and_follow_orbital_stations() {
     let cache = cache();
     let mut nav = Navigator::new_game(&cache, 0).unwrap();
-    nav.apply_world_options(
-        &cache,
-        ffe_rs::prefs::TRAFFIC_EXTRA[3],
-        false,
-        true,
-        true,
-        true,
-    );
     let port = nav.docked.unwrap();
     assert_eq!(nav.bodies[port].kind, Kind::Starport);
+    // Only F688's traffic: the retired World Options (extra traders, Advanced
+    // NPCs' lanes, convoys and patrols) no longer add ships.
+    assert!(
+        nav.ships.len() <= ffe_core::npc::SpawnOptions::default().cap(),
+        "{} ships at the start",
+        nav.ships.len()
+    );
     let mut holding = Vec::new();
     for (index, ship) in nav
         .ships
@@ -138,8 +137,7 @@ fn capital_ships_keep_clear_of_hope_and_follow_orbital_stations() {
             holding.push((index, anchor, offset));
         }
     }
-    assert!(!holding.is_empty(), "Gateway has orbital capital traffic");
-
+    // F699's aux trader is a roll: Gateway may have none at the start.
     nav.advance(&cache, 1.1);
     for (index, anchor, offset) in holding {
         let position = nav.bodies[anchor].position;

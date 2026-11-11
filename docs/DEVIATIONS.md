@@ -253,6 +253,22 @@ cancels) instead of drawing F348's entries; the fit/remove rules (0x98ff,
 the single-mounting shortcut, the chosen slot) follow F428/F434/F435 and are
 tested by `f428_asks_which_mounting`.
 
+## 2026-11-11 — World Options, Advanced NPCs and Improved combat removed (owner requested)
+
+The owner asked for the modern combat changes that add traffic, ships and
+pirates to be removed. Removed: the World Options page (Medium/Heavy ambient
+traders, the Off level, the police and pirate switches), Advanced NPCs
+(`npc::Life`: approach lanes, convoys, hyperspace arrivals and departures,
+ships fighting each other, busy surface ports, population and danger caps),
+the extra police patrol at every other place, and the Improved combat aids
+(brackets, off-view arrow, contacts list). Every system has F688's traffic
+alone. `config.cfg` files that still carry `traffic=`, `police=`, `pirates=`,
+`advanced_traffic=`, `police_pirates=` or `combat=` load with those keys
+ignored (`settings.rs`, `retired_world_options_load_and_are_dropped`). The
+2026-10-28 entry below is superseded where it describes those features. Still
+present and owner requested: the autopilot flying to a selected ship
+(`Navigator::engage_ship`).
+
 ## 2026-10-28 — NPC combat, Advanced NPCs and Modern art (owner requested)
 
 Re-applied on 2026-11-03 on top of the PAR-15 object physics. The port's

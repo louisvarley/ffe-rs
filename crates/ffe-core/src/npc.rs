@@ -2928,87 +2928,11 @@ pub struct SpawnOptions {
     /// fixtures turn them off so their frames keep the ships they were built
     /// against.
     pub station_traffic: bool,
-    /// Port addition (World Options' space traffic): ambient traders added to
-    /// F688's, each starting near one place and flying to another to dock.
-    /// They are allowed past [`MAX_SHIPS`].
-    pub extra_traders: usize,
-    /// Port addition (World Options): the system's police fly.
-    pub police: bool,
-    /// Port addition (World Options): pirates fly, alone or in F698's groups.
-    pub pirates: bool,
-    /// Port addition (World Options' Advanced traffic): approach lanes,
-    /// convoys, hyperspace arrivals and the rest of [`Life`].
-    pub advanced: Option<Life>,
 }
 
-/// Port addition: the system's character for Advanced traffic, from F870's
-/// population (0..9) and danger (0..7) bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Life {
-    pub population: u32,
-    pub danger: u32,
-}
-
-impl Life {
-    /// Traders already queued on the approach to the nearest place: two, and
-    /// one more for every three population steps.
-    pub fn lane_traders(self) -> usize {
-        2 + (self.population / 3) as usize
-    }
-
-    /// Ships Advanced traffic may add beyond [`MAX_SHIPS`].
-    pub fn extra(self) -> usize {
-        self.lane_traders() + MAX_CONVOY_SHIPS + self.trader_cap()
-    }
-
-    /// Busier rich systems: F688's trader roll is kept between a third of the
-    /// population and two plus half of it (the original cap is two).
-    pub fn trader_floor(self) -> usize {
-        (self.population / 3) as usize
-    }
-
-    pub fn trader_cap(self) -> usize {
-        2 + (self.population / 2) as usize
-    }
-
-    /// Police patrols by danger: four in the safest systems, none in the
-    /// most dangerous ([`MAX_POLICE_PATROLS`] without Advanced traffic).
-    pub fn police_patrols(self) -> usize {
-        match self.danger {
-            0..=1 => 4,
-            2..=3 => 3,
-            4..=5 => 2,
-            6 => 1,
-            _ => 0,
-        }
-    }
-
-    /// Pirate groups by danger: none in the safest systems, up to four in
-    /// the most dangerous (the original cap is two).
-    pub fn pirate_cap(self) -> usize {
-        self.danger.div_ceil(2) as usize
-    }
-}
-
-/// Port addition (Advanced traffic): game seconds between hyperspace
-/// arrivals or departures in an empty system; each population step takes
-/// [`LIFE_STEP_SECONDS`] off.
-pub const LIFE_SECONDS: f64 = 90.0;
-pub const LIFE_STEP_SECONDS: f64 = 6.0;
-/// How far off the place's surface a hyperspace arrival appears.
-pub const ARRIVAL_DISTANCE: f64 = 25.0e6;
-
-impl Life {
-    /// The wait before the next arrival or departure, with up to half again
-    /// at random (`roll` in 0..1).
-    pub fn interval(self, roll: f64) -> f64 {
-        let base = (LIFE_SECONDS - LIFE_STEP_SECONDS * f64::from(self.population)).max(20.0);
-        base * (1.0 + 0.5 * roll.clamp(0.0, 1.0))
-    }
-}
-
-/// Port addition (Advanced traffic): a trader out of hyperspace, `id` its
-/// stable id, flying to `station` (a place at `anchor`) for a bay.
+/// A trader out of hyperspace, `id` its stable id, flying to `station` (a
+/// place at `anchor`) for a bay: the assassination contract's target
+/// ([`contract_target`]) and its escorts.
 pub fn hyperspace_arrival(
     spec: &Spec,
     id: u32,
@@ -3025,6 +2949,23 @@ pub fn hyperspace_arrival(
     ship.id = id;
     ship.forward = normalise(sub(anchor, position));
     ship.begin_transit(station, anchor);
+    ship
+}
+
+/// A ship docked at a place's pad or bay (its bay is the caller's to grant),
+/// leaving after `seconds`: F672's mission-script ship at a starport.
+pub fn pad_trader(
+    spec: &Spec,
+    id: u32,
+    anchor: [i64; 3],
+    station: usize,
+    seconds: f64,
+    rng: &mut Random,
+) -> NpcShip {
+    let mut ship = hyperspace_arrival(spec, id, anchor, anchor, station, rng);
+    ship.state = State::Docked;
+    ship.dock_span = seconds;
+    ship.dock_timer = seconds;
     ship
 }
 
@@ -3133,47 +3074,13 @@ pub fn contract_target(
     ship
 }
 
-/// Port addition (Advanced traffic): a trader waiting on a surface port's
-/// pad (its bay is the caller's to grant), launching after `seconds`.
-pub fn pad_trader(
-    spec: &Spec,
-    id: u32,
-    anchor: [i64; 3],
-    station: usize,
-    seconds: f64,
-    rng: &mut Random,
-) -> NpcShip {
-    let mut ship = hyperspace_arrival(spec, id, anchor, anchor, station, rng);
-    ship.state = State::Docked;
-    ship.dock_span = seconds;
-    ship.dock_timer = seconds;
-    ship
-}
-
-/// Port addition (Advanced traffic): surface ports kept busy, the nearest
-/// this many to the player...
-pub const BUSY_PORTS: usize = 3;
-/// ...each with this many traders on its pads...
-pub const PAD_TRADERS: usize = 2;
-/// ...one coming in to land from this high...
-pub const LANDING_HEIGHT: f64 = 15.0e6;
-/// ...and pad waits of this many game seconds, plus up to as many again.
-pub const PAD_SECONDS: f64 = 120.0;
-
-/// Port addition: the most ships one convoy (a bulk carrier and its escorts)
-/// adds.
-pub const MAX_CONVOY_SHIPS: usize = 3;
-/// Port addition: the approach lane's queue, from this far out from the
-/// place's surface...
-pub const LANE_NEAR: f64 = 6.0e6;
-/// ...to this far.
-pub const LANE_FAR: f64 = 20.0e6;
+/// The port's capital-ship orbit off a station's surface (F699's aux trader).
+pub const CAPITAL_ORBIT: f64 = 20.0e6;
 
 impl SpawnOptions {
-    /// The most ships a spawn keeps: [`MAX_SHIPS`], the World Options'
-    /// extra traders and Advanced traffic, and the police patrols.
+    /// The most ships a spawn keeps: [`MAX_SHIPS`] and the police patrol.
     pub fn cap(&self) -> usize {
-        MAX_SHIPS + self.extra_traders + self.advanced.map_or(0, Life::extra) + MAX_POLICE_PATROLS
+        MAX_SHIPS + 1
     }
 }
 
@@ -3183,10 +3090,6 @@ impl Default for SpawnOptions {
             guarantee: false,
             near_player: false,
             station_traffic: true,
-            extra_traders: 0,
-            police: true,
-            pirates: true,
-            advanced: None,
         }
     }
 }
@@ -3199,10 +3102,6 @@ impl SpawnOptions {
         guarantee: true,
         near_player: true,
         station_traffic: false,
-        extra_traders: 0,
-        police: true,
-        pirates: true,
-        advanced: None,
     };
 }
 
@@ -3256,7 +3155,6 @@ pub fn spawn(
         .min_by(|a, b| {
             distance_between(a.position, player).total_cmp(&distance_between(b.position, player))
         });
-    let rolled = counts;
     if options.guarantee {
         // The capture/test guarantee: a fresh system has something to label and
         // shoot and the F953 damage path is reachable.
@@ -3269,19 +3167,6 @@ pub fn spawn(
         counts.traders = counts.traders.min(2);
         counts.pirates = counts.pirates.min(2);
     }
-    // Port addition (Advanced traffic): the system's population and danger
-    // set the trader and pirate caps, and police come by danger rather than
-    // the record's +7 byte.
-    if let Some(life) = options.advanced {
-        counts.traders = rolled
-            .traders
-            .max(life.trader_floor())
-            .min(life.trader_cap());
-        if !options.guarantee {
-            counts.pirates = rolled.pirates.min(life.pirate_cap());
-        }
-        counts.police = (life.police_patrols() > 0) as usize;
-    }
     counts.thargoids = counts.thargoids.min(MAX_SHIPS);
     counts.bay_ships = counts.bay_ships.min(MAX_BAY_SHIPS);
     if options.station_traffic {
@@ -3291,13 +3176,7 @@ pub fn spawn(
         counts.aux_traders = 0;
     }
     counts.police = counts.police.min(1);
-    if !options.police {
-        counts.police = 0;
-    }
-    if !options.pirates {
-        counts.pirates = 0;
-    }
-    let limit = MAX_SHIPS + options.extra_traders + options.advanced.map_or(0, Life::extra);
+    let limit = MAX_SHIPS;
 
     let orbit = (anchor.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
     let mut ships: Vec<NpcShip> = Vec::new();
@@ -3371,105 +3250,6 @@ pub fn spawn(
             ships.push(ship);
         }
     }
-    // The port's ambient traffic: traders between the system's places. Each
-    // starts on an orbit of one place and flies to a different one, so the
-    // F745/F746 docking cycle carries it on from port to port.
-    let all_places: Vec<Anchor> = anchors
-        .iter()
-        .copied()
-        .filter(|anchor| anchor.station.is_some())
-        .collect();
-    for i in 0..options.extra_traders {
-        let Some(from) = all_places
-            .get(rng.bounded(all_places.len().max(1) as u32) as usize)
-            .copied()
-        else {
-            break;
-        };
-        let to = if all_places.len() > 1 {
-            let mut pick = rng.bounded(all_places.len() as u32 - 1) as usize;
-            if all_places[pick].station == from.station {
-                pick = all_places.len() - 1;
-            }
-            all_places[pick]
-        } else {
-            from
-        };
-        let radius = (from.radius as f64 * 1.5).max(ANCHOR_ORBIT);
-        let angle = i as f64 * 2.4 + f64::from(rng.bounded(16_384)) / 16_384.0;
-        let position = [
-            from.position[0] + (angle.cos() * radius) as i64,
-            from.position[1] + (f64::from(rng.bounded(1_000_000)) * 0.4) as i64,
-            from.position[2] + (angle.sin() * radius) as i64,
-        ];
-        if let Some(mut ship) = add(Role::Trader, 1, position, from.position, rng) {
-            if let Some(station) = to.station {
-                ship.begin_transit(station, to.position);
-            }
-            ships.push(ship);
-        }
-    }
-    // Port addition (Advanced traffic): traders already queued on the
-    // approach to the nearest place, spread from LANE_NEAR to LANE_FAR off
-    // its surface, each flying in to ask for a bay.
-    if let (Some(life), Some(station)) = (options.advanced, anchor.station) {
-        let count = life.lane_traders();
-        for i in 0..count {
-            let along = LANE_NEAR + (LANE_FAR - LANE_NEAR) * (i as f64 + 0.5) / count as f64;
-            let radius = anchor.radius as f64 + along;
-            let angle = 0.9 + i as f64 * 0.35 + f64::from(rng.bounded(16_384)) / 16_384.0 * 0.2;
-            let position = [
-                anchor.position[0] + (angle.cos() * radius) as i64,
-                anchor.position[1] + (f64::from(rng.bounded(1_000_000)) * 1.5) as i64,
-                anchor.position[2] + (angle.sin() * radius) as i64,
-            ];
-            if let Some(mut ship) = add(Role::Trader, 1, position, anchor.position, rng) {
-                ship.begin_transit(station, anchor.position);
-                ships.push(ship);
-            }
-        }
-    }
-    // Port addition (Advanced traffic): a convoy. A bulk carrier (F699's
-    // Lynx/LRC list) flies between orbital stations and holds well clear of
-    // the destination. Two military escorts keep formation with the carrier.
-    let capital_orbit = |place: &Anchor, ship: &NpcShip| {
-        place.radius as f64 + LANE_FAR.max(2.0 * ship.radius as f64)
-    };
-    let convoy_route = options.advanced.and(orbital_station).and_then(|origin| {
-        all_places
-            .iter()
-            .find(|place| place.orbital_station && place.position != origin.position)
-            .map(|destination| (origin, destination))
-    });
-    if let Some((origin, destination)) = convoy_route {
-        let toward = normalise(sub(destination.position, origin.position));
-        if let Some(mut carrier) = add(
-            Role::Shuttle,
-            0xf,
-            origin.position,
-            destination.position,
-            rng,
-        ) {
-            let start = capital_orbit(origin, &carrier);
-            let position = self::add(origin.position, toward.map(|value| (value * start) as i64));
-            carrier.position = position;
-            carrier.state = State::Transit;
-            carrier.forward = toward;
-            carrier.orbit_radius = capital_orbit(destination, &carrier);
-            let leader = carrier.id;
-            ships.push(carrier);
-            for formation in [[600_000, 0, -500_000], [-600_000, 0, -500_000]] {
-                let at = self::add(position, formation);
-                if let Some(mut escort) = add(Role::Military, 0x0, at, destination.position, rng) {
-                    escort.state = State::Escort;
-                    escort.leader = Some(leader);
-                    escort.formation = formation;
-                    escort.forward = toward;
-                    ships.push(escort);
-                }
-            }
-        }
-    }
     // F690: F689's setup with type 0x11 (DATA_006197's models). The source uses
     // the same anchor/orbit placement and departure timer, then calls script
     // event 0x17; the port starts them hostile (see `Role::hostile`).
@@ -3517,6 +3297,11 @@ pub fn spawn(
     // F699: F701 requires a station, F772(0xf) creates the aux trader, F702 puts
     // it on the 0x5000/0x18 orbit and state 0x0d is a hold row (no control or
     // movement routine). The source gives it no station target or dock request.
+    // The port's orbit for a capital ship: 20 km off the station's surface, or
+    // twice the ship's radius if larger.
+    let capital_orbit = |place: &Anchor, ship: &NpcShip| {
+        place.radius as f64 + CAPITAL_ORBIT.max(2.0 * ship.radius as f64)
+    };
     if let Some(place) = orbital_station {
         for i in 0..counts.aux_traders {
             if let Some(mut ship) = add(Role::Shuttle, 0xf, place.position, place.position, rng) {
@@ -3597,26 +3382,6 @@ pub fn spawn(
             };
         }
         ships.push(ship);
-    }
-    // Port addition: a police patrol at each other place, after the source's
-    // draws so the rest of the traffic is as F688 rolled it.
-    if counts.police > 0 {
-        let others = places
-            .iter()
-            .filter(|place| place.position != anchor.position)
-            .take(
-                options
-                    .advanced
-                    .map_or(MAX_POLICE_PATROLS, Life::police_patrols)
-                    .saturating_sub(counts.police),
-            );
-        for (index, place) in others.enumerate() {
-            let radius = (place.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
-            let position = offset(place.position, 2.6 + index as f64 * 1.7, radius);
-            if let Some(ship) = add(Role::Police, 0xe, position, place.position, rng) {
-                ships.push(ship);
-            }
-        }
     }
     ships
 }
@@ -4225,59 +3990,6 @@ mod tests {
     /// in `State::Docked`, each with a random place as `+0xfe` and no bay yet
     /// (F650 belongs to the traffic record). The port caps the branch at
     /// [`MAX_BAY_SHIPS`].
-    #[test]
-    fn world_options_add_traders_between_places_and_drop_hostiles() {
-        let anchors = [anchor(4), anchor(7)];
-        let run = |options: SpawnOptions| {
-            spawn(
-                [0, 0, 0],
-                [0.0, 0.0, 1.0],
-                &anchors,
-                &system(0),
-                0,
-                &mut Random::new(21, 22),
-                SpawnOptions {
-                    guarantee: true,
-                    ..options
-                },
-                spec,
-            )
-        };
-        let original = run(SpawnOptions::default());
-        assert!(original.iter().any(|ship| ship.role == Role::Pirate));
-        let heavy = run(SpawnOptions {
-            extra_traders: 16,
-            ..SpawnOptions::default()
-        });
-        let extra = heavy.len() - original.len();
-        assert_eq!(extra, 16, "{} vs {}", heavy.len(), original.len());
-        // Every ambient trader is bound for one of the places.
-        let bound = heavy
-            .iter()
-            .filter(|ship| ship.state == State::Transit && matches!(ship.station, Some(4 | 7)))
-            .count();
-        assert!(bound >= 16, "{bound}");
-        let calm = run(SpawnOptions {
-            police: false,
-            pirates: false,
-            ..SpawnOptions::default()
-        });
-        assert!(calm
-            .iter()
-            .all(|ship| !matches!(ship.role, Role::Pirate | Role::Police)));
-        let unpoliced = run(SpawnOptions {
-            police: false,
-            ..SpawnOptions::default()
-        });
-        assert!(unpoliced.iter().all(|ship| ship.role != Role::Police));
-        assert!(unpoliced.iter().any(|ship| ship.role == Role::Pirate));
-        let no_pirates = run(SpawnOptions {
-            pirates: false,
-            ..SpawnOptions::default()
-        });
-        assert!(no_pirates.iter().all(|ship| ship.role != Role::Pirate));
-    }
-
     #[test]
     fn f691_spawns_docked_traders_from_the_place_table() {
         let places = 2;

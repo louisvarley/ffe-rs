@@ -172,7 +172,10 @@ fn a_pirate_fires_and_the_player_takes_f953_damage() {
     // A second 1MW pulse uses up a 25 t hull (F953 then F942).
     assert_eq!(state.take_damage(50, mass), laser::Damage::Destroyed);
     assert!(state.destroyed());
-    // The hull line the HUD draws is the damaged one, not the model's default.
+    // The hull line the HUD draws is the damaged one, not the model's default;
+    // the hits started F1102's 30-second line.
+    assert_eq!(state.hull_display, 30);
+    screen.hud.hull_shown = state.hull_display != 0;
     screen.hud.hull = [0, full];
     frame(&mut screen, &viewer, &state, &nav, "Hull damaged.");
     let damaged = screen.logical_pixels().to_vec();
@@ -428,24 +431,4 @@ fn the_combat_computer_reads_out_the_pirate() {
         .filter(|pixel| **pixel == amber)
         .count();
     assert!(lit > 20, "no F1109 readout drawn ({lit} amber pixels)");
-}
-
-#[test]
-#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
-fn with_advanced_traffic_a_pirate_turns_on_a_player_who_comes_near() {
-    let cache = cache();
-    let (mut nav, viewer, _, _) = setup(&cache);
-    nav.advanced_traffic = true;
-    let radius = i64::from(viewer.model_radius(NEW_GAME_SHIP).unwrap());
-    let pirate = nav.ships.iter().find(|s| s.role == Role::Pirate).unwrap();
-    let (id, at) = (pirate.id, pirate.position);
-    let player = [at[0] + 5_000_000, at[1], at[2]];
-    for _ in 0..(20 * 50) {
-        nav.tick_ships(0.02, 994, player, radius);
-    }
-    let ship = nav.ships.iter().find(|s| s.id == id).unwrap();
-    assert_eq!(
-        ship.npc_target, None,
-        "the pirate kept its prey with the player beside it"
-    );
 }

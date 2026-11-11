@@ -693,21 +693,11 @@ every system the player is in now has its traffic from the first frame (the
 main loop asks `spawn_traffic`, which runs once per system); before this a
 starport take-off never spawned any.
 
-**World Options** (Preferences → Advanced Options → World Options, saved as
-`traffic=`, `police=` and `pirates=` in `config.cfg`; an older
-`police_pirates=` line sets both):
-
-- *Space traffic*: **Original** (default) is F688's traffic alone. **Off**
-  spawns none. **Medium** and **Heavy** add 8 or 16 ambient traders
-  (`SpawnOptions::extra_traders`), each starting on an orbit of one place and
-  flying to a different one, where F745/F746's docking cycle takes over and
-  sends it on to the next. They may exceed `MAX_SHIPS`.
-- *Police* and *Pirates*, each **Enabled (original)** by default.
-  **Disabled** police spawns no patrols; **Disabled** pirates spawns none of
-  F698's pirate groups. Either drops carried-over ships of that kind at a jump.
-
-The choices apply to the next system entered (and to a new game's start
-system, which `apply_world_options` respawns once).
+**World Options: removed (2026-11-11).** The port once had a World Options
+page (extra ambient traders at Medium/Heavy, an Off level, switches for police
+and pirates, and Advanced NPCs). It was removed with the rest of the modern
+combat additions: every system has F688's traffic alone, police and pirates
+always fly, and older `config.cfg` files load with those keys ignored.
 
 **Safe start systems (F686/F688).** F688 rolls `RND(byte +6 << 2)` pirate
 patrols (F698: a lone pirate or a group). The new game's own pass comes
@@ -721,35 +711,13 @@ capture (`SpawnOptions::guarantee`) keeps the record's count so its frames
 stay the same. Pirate groups from a real entry spawn `PIRATE_LURK` (25 km)
 outside the anchor orbit.
 
-## Port addition: Advanced NPCs (formerly Advanced traffic)
+## Removed: Advanced NPCs (2026-11-11)
 
-World Options → **Advanced NPCs** (`advanced_traffic=` in `config.cfg`, off
-by default). It reads F870's population (0..9) and danger (0..7) for the
-system (`npc::Life`) and adds:
+The port addition Advanced NPCs (`npc::Life`: approach lanes, convoys,
+hyperspace arrivals and departures, ships fighting each other, busy surface
+ports, population-scaled trader caps and danger-scaled police and pirates) and
+the extra police patrol at every other place were removed. They added ships the
+original does not have. Mission scripts' ship-against-ship orders (F41's
+`set_ai`) and the assassination contract's target and escorts are original
+paths and stay.
 
-1. **Approach lanes:** traders queued 6-20 km off the place nearest the
-   player, each flying in to ask for a bay (2 + population/3).
-2. **Convoy:** a Lynx/LRC carrier flying from the nearest place to another,
-   with two military escorts in its frame. Escorts that are not hostile keep
-   formation instead of turning toward the player.
-3. **Hyperspace arrivals and departures:** every 90 s of game time, less 6 s
-   per population step (at least 20 s), plus up to half again at random,
-   either a trader arrives 25 km beyond the nearest place (exit cloud) and
-   flies in, or an idle trader away from the player jumps out (departure
-   cloud) (`Navigator::tick_life`).
-5. **Ships fight each other:** a pirate more than 15 km from the player (or
-   any pirate while the player is docked or landed) takes the nearest trader
-   within 20 km; the trader runs and jumps out when the pirate is within 6 km;
-   idle police take a pirate that is attacking someone; escorts join their
-   leader's fight; a pirate drops its prey and turns on the player when the
-   player, in flight, is within 10 km. These hits use F953 and the hit/explosion
-   effects but never the player's legal record, rating or bounty
-   (`Navigator::pick_fights`, `npc_hit`).
-7. **Busy surface ports:** the three starports nearest the player get
-   traders on their pads (2 + population/4) that take off after 2-4 minutes,
-   and one trader landing from 15 km up.
-9. **Rich systems are busier:** the trader roll is kept between
-   population/3 and 2 + population/2.
-10. **Law by danger:** police patrols 4/3/2/1/0 for danger 0-1/2-3/4-5/6/7
-    (replacing the `+7` byte test), and pirate groups capped at
-    `ceil(danger/2)`.

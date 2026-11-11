@@ -459,25 +459,6 @@ fn mining_action(
     ]
 }
 
-/// The Improved combat aids' contacts list ([`ffe_rs::enhanced_combat`]):
-/// the visible ships, hostiles first, then the nearest.
-fn combat_contacts(nav: &Navigator, player_at: [i64; 3]) -> Vec<ffe_rs::enhanced_combat::Contact> {
-    ffe_rs::enhanced_combat::order(
-        nav.ships
-            .iter()
-            .filter(|ship| ship.visible())
-            .map(|ship| ffe_rs::enhanced_combat::Contact {
-                id: ship.id,
-                name: ship.name.clone(),
-                range: range_label(player_at, ship.position),
-                hostile: ship.is_hostile(),
-                locked: nav.ship_lock == Some(ship.id),
-                distance: distance(player_at, ship.position),
-            })
-            .collect(),
-    )
-}
-
 fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Config {
     settings::Config {
         modern: prefs.modern,
@@ -489,11 +470,6 @@ fn config_from_prefs(prefs: &Prefs, previous: &settings::Config) -> settings::Co
         sound: prefs.sound,
         station_approach: prefs.station_approach,
         starport_approach: prefs.starport_approach,
-        traffic: prefs.traffic,
-        police: prefs.police,
-        pirates: prefs.pirates,
-        advanced_traffic: prefs.advanced_traffic,
-        combat_improved: prefs.combat_improved,
         remap: previous.remap.clone(),
     }
 }
@@ -955,7 +931,6 @@ fn run() -> Result<(), String> {
             (MAPS, "prefs-maps.ppm"),
             (PORT, "prefs-port.ppm"),
             (ffe_rs::prefs::DISPLAY, "prefs-display.ppm"),
-            (ffe_rs::prefs::WORLD, "prefs-world.ppm"),
         ] {
             shown.page = page;
             shown.selected = 0;
@@ -1033,11 +1008,6 @@ fn run() -> Result<(), String> {
     prefs.sound = config.sound;
     prefs.station_approach = config.station_approach;
     prefs.starport_approach = config.starport_approach;
-    prefs.traffic = config.traffic;
-    prefs.police = config.police;
-    prefs.pirates = config.pirates;
-    prefs.advanced_traffic = config.advanced_traffic;
-    prefs.combat_improved = config.combat_improved;
     // The `bind.*` entries of config.cfg (the file is the remapping screen).
     let bindings = ffe_rs::session::bindings(&config.remap);
     let mut gamepads = ffe_rs::gamepad::Gamepads::new();
@@ -1270,16 +1240,6 @@ fn run() -> Result<(), String> {
             }
         },
     );
-    if let Some(nav) = nav.as_mut() {
-        nav.apply_world_options(
-            &cache,
-            ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic],
-            prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF,
-            prefs.police,
-            prefs.pirates,
-            prefs.advanced_traffic,
-        );
-    }
     if loaded.is_none() {
         if let Some(nav) = nav.as_ref().filter(|nav| nav.new_game.is_some()) {
             let (new_state, model) = OriginalFlight::new_commander(&cache, nav)?;
@@ -1536,16 +1496,6 @@ fn run() -> Result<(), String> {
                             Boot::NewGame(start_type) => Navigator::new_game(&cache, start_type)?,
                             Boot::Sandbox => Navigator::new(&cache)?,
                         });
-                        if let Some(nav) = nav.as_mut() {
-                            nav.apply_world_options(
-                                &cache,
-                                ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic],
-                                prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF,
-                                prefs.police,
-                                prefs.pirates,
-                                prefs.advanced_traffic,
-                            );
-                        }
                         let new_nav = nav.as_ref().ok_or("New-game navigation is unavailable.")?;
                         let (new_state, model) = OriginalFlight::new_commander(&cache, new_nav)?;
                         state = new_state;
@@ -1758,12 +1708,6 @@ fn run() -> Result<(), String> {
                     .then(|| ffe_rs::prefs::STATION_APPROACH_KM[prefs.station_approach]);
                 nav.starport_approach_km = (prefs.starport_approach > 0)
                     .then(|| ffe_rs::prefs::STARPORT_APPROACH_KM[prefs.starport_approach]);
-                // World Options: read when the next system's traffic spawns.
-                nav.traffic_extra = ffe_rs::prefs::TRAFFIC_EXTRA[prefs.traffic];
-                nav.traffic_off = prefs.traffic == ffe_rs::prefs::TRAFFIC_OFF;
-                nav.police = prefs.police;
-                nav.pirates = prefs.pirates;
-                nav.advanced_traffic = prefs.advanced_traffic;
                 if nav.transit.is_some() {
                     // F908's mode 4: the clock runs at the hyperspace rate until
                     // the arrival time, which ends the transit (F1066/F1094).
@@ -3046,29 +2990,11 @@ fn run() -> Result<(), String> {
                             };
                         }
                     }
-                    // The Improved combat aids' contacts list (shown while the
-                    // console's left display is on its combat page): a click
-                    // on a row locks that ship, as a click on the ship does.
-                    let contact_click = click_point
-                        .filter(|_| {
-                            prefs.combat_improved
-                                && engines_page
-                                && console_click.is_none()
-                                && nav.view == NavView::Closed
-                                && views.mode != ViewMode::Missile
-                        })
-                        .and_then(|(x, y)| ffe_rs::enhanced_combat::contact_row(x, y))
-                        .and_then(|row| {
-                            combat_contacts(nav, ship_position(&original, &state))
-                                .get(row)
-                                .map(|contact| contact.id)
-                        });
                     // Port change (owner requested): clicking anything in the
-                    // view or the contacts list while the autopilot flies ends
-                    // it, as the lamp does (F1018).
+                    // view while the autopilot flies ends it, as the lamp does
+                    // (F1018).
                     let view_click = click_point
-                        .is_some_and(|(_, y)| console_click.is_none() && (12..118).contains(&y))
-                        || contact_click.is_some();
+                        .is_some_and(|(_, y)| console_click.is_none() && (12..118).contains(&y));
                     if view_click && nav.autopilot_engaged() && nav.cancel() {
                         if let Some(model) = original.as_mut() {
                             model.halt();
@@ -3076,25 +3002,9 @@ fn run() -> Result<(), String> {
                         message = "Autopilot off.".to_owned();
                         pending_log.clear(Source::Autopilot);
                     }
-                    if let Some(id) = contact_click {
-                        if nav.ship_lock == Some(id) {
-                            // A second click on the selected ship clears it.
-                            nav.ship_lock = None;
-                            if nav.missile_lock == Some(id) {
-                                nav.missile_lock = None;
-                            }
-                            sound.play(Cue::UiBeep2);
-                        } else {
-                            nav.locked = None;
-                            if nav.lock_ship(id).is_some() {
-                                nav.missile_lock = Some(id);
-                                sound.play(Cue::UiBeep2);
-                            }
-                        }
-                    }
-                    if let Some(point) = click_point.filter(|(_, y)| {
-                        contact_click.is_none() && console_click.is_none() && (12..118).contains(y)
-                    }) {
+                    if let Some(point) = click_point
+                        .filter(|(_, y)| console_click.is_none() && (12..118).contains(y))
+                    {
                         let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
                         let body_count = nav.bodies.len();
                         let mut candidates: Vec<(usize, [f64; 3], f64)> = nav
@@ -5975,7 +5885,6 @@ fn run() -> Result<(), String> {
                         .map_or(10_000, i64::from)
                 };
                 let events = nav.tick_ships(frame.seconds(), frame.tics, player, radius);
-                nav.tick_life(&cache, frame.seconds());
                 // F714: canisters the ship's scoop takes into the hold.
                 if nav.sequence.is_none() && nav.docked.is_none() && !nav.landed_view() {
                     let hold = trade::hold_of(&state, trade::capacity(nav, &cache, &state));
@@ -8088,71 +7997,6 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        // Port addition: the World Options page's Improved combat aids.
-        screen.combat_overlay = nav
-            .as_ref()
-            .filter(|nav| {
-                prefs.combat_improved
-                    && state.mode == ffe_rs::flight::Mode::Flight
-                    && nav.view == NavView::Closed
-                    && views.mode != ViewMode::Missile
-            })
-            .map(|nav| {
-                use ffe_rs::enhanced_combat as aids;
-                let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
-                // The list only while the console's left display is on its
-                // combat (missile) page.
-                let contacts = if engines_page {
-                    combat_contacts(nav, player_at)
-                } else {
-                    Vec::new()
-                };
-                let (bracket, arrow) = match locked_ship {
-                    Some(ship) => {
-                        let centre = ship.position.map(|v| v as f64 / unit);
-                        let bracket = Screen::body_screen(
-                            &state,
-                            &views,
-                            scene.as_ref(),
-                            centre,
-                            ship.radius as f64 / unit,
-                        )
-                        .map(|(x, y, radius)| {
-                            // F931's own test: the firing mount's ray against
-                            // the ship's box, as a shot would make it now.
-                            let on_target = ffe_rs::combat::mount(views.mode).is_some_and(|_| {
-                                let stats = scene
-                                    .as_ref()
-                                    .and_then(|scene| scene.ship_stats(state.ship));
-                                let beam = ffe_rs::combat::beam(
-                                    &state,
-                                    stats.as_ref(),
-                                    views.mode,
-                                    [views.turret.yaw, views.turret.pitch],
-                                );
-                                let origin = beam.origin.map(|v| (v * unit).round() as i64);
-                                laser::hit(origin, beam.axes[2], &[ship.target(0)]).is_some()
-                            });
-                            aids::Bracket {
-                                x,
-                                y,
-                                half: aids::bracket_half(radius),
-                                name: ship.name.clone(),
-                                on_target,
-                                in_range: distance(player_at, ship.position) <= laser::RANGE,
-                            }
-                        });
-                        let point = Screen::camera_point(&state, &views, scene.as_ref(), centre);
-                        (bracket, aids::edge_arrow(point))
-                    }
-                    None => (None, None),
-                };
-                aids::Overlay {
-                    bracket,
-                    arrow,
-                    contacts,
-                }
-            });
         // DATA_007252: F1023 takes `DATA_008799 / 0xc22e` (accelerated game
         // tics / tics per second) and keeps its low bit, so the targetter cursor
         // blinks once per game second.

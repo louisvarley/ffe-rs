@@ -1441,20 +1441,9 @@ pub struct Navigator {
     /// Port addition: the starport approach altitude in km, `None` for F741's
     /// 0x1770 word.
     pub starport_approach_km: Option<u32>,
-    /// Port addition (World Options): ambient traders added to each system's
-    /// F688 traffic, and whether police and pirates fly. `traffic_off` spawns
-    /// no traffic at all.
-    pub traffic_extra: usize,
-    pub traffic_off: bool,
-    pub police: bool,
-    pub pirates: bool,
-    /// World Options' Advanced traffic ([`npc::Life`]).
-    pub advanced_traffic: bool,
     /// Assassination contracts whose target this system's spawn already
     /// placed (cleared at each system's spawn).
     contract_spawned: Vec<u32>,
-    /// Game seconds to Advanced traffic's next hyperspace arrival or departure.
-    life_clock: f64,
     autopilot_notice: Option<String>,
     /// The body the player has locked on (clicked in the view or cycled to): what the
     /// autopilot button flies to.
@@ -2494,13 +2483,7 @@ impl Navigator {
             target: None,
             station_approach_km: None,
             starport_approach_km: None,
-            traffic_extra: 0,
-            traffic_off: false,
-            police: true,
-            pirates: true,
-            advanced_traffic: false,
             contract_spawned: Vec::new(),
-            life_clock: npc::LIFE_SECONDS,
             autopilot_notice: None,
             locked: None,
             destination: None,
@@ -2688,47 +2671,6 @@ impl Navigator {
         // but no capture guarantee and no pirate placed at the pad.
         nav.spawn_traffic(cache, seat, launch_axis);
         Ok(nav)
-    }
-
-    /// Port addition (World Options): set the traffic choices and, for a new
-    /// game, respawn the start system's F687/F686 traffic with them (the
-    /// navigator spawns it before the preferences are known). Original
-    /// choices change nothing.
-    pub fn apply_world_options(
-        &mut self,
-        cache: &VerifiedCache,
-        extra: usize,
-        off: bool,
-        police: bool,
-        pirates: bool,
-        advanced: bool,
-    ) {
-        self.traffic_extra = extra;
-        self.traffic_off = off;
-        self.police = police;
-        self.pirates = pirates;
-        self.advanced_traffic = advanced;
-        let Some(seat) = self.new_game.as_ref().map(|state| state.seat) else {
-            return;
-        };
-        if extra == 0 && !off && police && pirates && !advanced {
-            return;
-        }
-        let held: Vec<(usize, u8)> = self
-            .ships
-            .iter()
-            .filter(|ship| ship.bay.is_some())
-            .filter_map(|ship| Some((ship.station?, npc::traffic_id(ship.id))))
-            .collect();
-        for (station, id) in held {
-            self.starport(station).release(id);
-        }
-        self.ships.clear();
-        self.spawned = None;
-        let forward = self
-            .docked
-            .map_or([0.0, 0.0, 1.0], |index| self.bodies[index].orientation[2]);
-        self.spawn_traffic(cache, seat, forward);
     }
 
     /// This navigator's serialisable state. The system is identified by its
@@ -3148,83 +3090,6 @@ impl Navigator {
         Ok(self.conditions(cache)?.2)
     }
 
-    /// Port addition (Advanced traffic): now and then a trader drops out of
-    /// hyperspace (with F1094's exit cloud) beyond the place nearest the
-    /// player and flies in to dock, or an idle trader jumps out (the
-    /// `Escaped` departure cloud). Busier systems do this more often.
-    pub fn tick_life(&mut self, cache: &VerifiedCache, seconds: f64) {
-        if !self.advanced_traffic
-            || self.traffic_off
-            || self.transit.is_some()
-            || self.spawned != Some(self.current)
-        {
-            return;
-        }
-        self.life_clock -= seconds;
-        if self.life_clock > 0.0 {
-            return;
-        }
-        let life = self.life(cache);
-        self.life_clock = life.interval(f64::from(self.random.bounded(1000)) / 1000.0);
-        let player = self.player_at;
-        let options = npc::SpawnOptions {
-            extra_traders: self.traffic_extra,
-            advanced: Some(life),
-            ..npc::SpawnOptions::default()
-        };
-        let alive = self.ships.iter().filter(|ship| ship.alive()).count();
-        if self.random.bounded(2) == 0 && alive < options.cap() {
-            // An arrival at the place nearest the player.
-            let Some((index, place)) = self
-                .bodies
-                .iter()
-                .enumerate()
-                .filter(|(_, body)| body.kind.is_place())
-                .min_by(|a, b| {
-                    distance(player, a.1.position).total_cmp(&distance(player, b.1.position))
-                })
-                .map(|(index, body)| (index, body.position))
-            else {
-                return;
-            };
-            let radius = self.bodies[index].radius as f64 + npc::ARRIVAL_DISTANCE;
-            let angle = f64::from(self.random.bounded(65_536)) / 65_536.0 * std::f64::consts::TAU;
-            let lift = (f64::from(self.random.bounded(65_536)) / 65_536.0 - 0.5) * 0.6;
-            let position = [
-                place[0] + (angle.cos() * radius) as i64,
-                place[1] + (lift * radius) as i64,
-                place[2] + (angle.sin() * radius) as i64,
-            ];
-            let Some(tables) = cache
-                .asset("base:world/system-tables")
-                .and_then(|blob| Tables::new(blob).ok())
-            else {
-                return;
-            };
-            let allegiance = tables
-                .details(self.entries[self.current].params.code)
-                .allegiance
-                >> 6;
-            let model = npc::model_for(npc::Role::Trader, allegiance, &mut self.random);
-            let Some(spec) = crate::ships::npc_spec(cache, model) else {
-                return;
-            };
-            let id = self.ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
-            let ship = npc::hyperspace_arrival(&spec, id, position, place, index, &mut self.random);
-            self.effects.push(effects::exit_cloud(position, 4 * 49_710));
-            self.ships.push(ship);
-        } else if let Some(ship) = self.ships.iter_mut().find(|ship| {
-            // A departure: an idle trader or shuttle out of the player's way.
-            matches!(ship.role, npc::Role::Trader)
-                && !ship.hostile
-                && ship.state == npc::State::Hold
-                && ship.station.is_none()
-                && distance(player, ship.position) > 5.0e6
-        }) {
-            ship.state = npc::State::Escaped;
-        }
-    }
-
     /// A military photograph/bombing contract's base, placed once per visit to
     /// its system: an installation (the port's stand-in, a parked military
     /// hull named after the contract's target) 15 km off the place nearest
@@ -3460,16 +3325,6 @@ impl Navigator {
             }
         }
         placed
-    }
-
-    /// Advanced traffic's view of this system: F870's population and danger.
-    fn life(&self, cache: &VerifiedCache) -> npc::Life {
-        self.conditions(cache)
-            .map(|(population, danger, _)| npc::Life {
-                population: population.clamp(0, 9) as u32,
-                danger: danger.clamp(0, 7) as u32,
-            })
-            .unwrap_or_default()
     }
 
     /// What this system's stock string, population and danger say (F870).
@@ -4480,14 +4335,7 @@ impl Navigator {
         player: [i64; 3],
         forward: [f64; 3],
     ) -> bool {
-        let options = npc::SpawnOptions {
-            extra_traders: self.traffic_extra,
-            police: self.police,
-            pirates: self.pirates,
-            advanced: self.advanced_traffic.then(|| self.life(cache)),
-            ..npc::SpawnOptions::default()
-        };
-        self.spawn_traffic_with(cache, player, forward, options, 0)
+        self.spawn_traffic_with(cache, player, forward, npc::SpawnOptions::default(), 0)
     }
 
     /// F690's Thargoid branch with an explicit `F35(0x16)` limit: the hook a
@@ -4545,26 +4393,17 @@ impl Navigator {
         let mut rng = self.random;
         let mut ships = npc::restore(&self.persisted, player, 0);
         self.persisted.clear();
-        ships.retain(|ship| match ship.role {
-            npc::Role::Police => options.police,
-            npc::Role::Pirate => options.pirates,
-            _ => true,
-        });
         let base = ships.len() as u32;
-        let spawned = if self.traffic_off {
-            Vec::new()
-        } else {
-            npc::spawn(
-                player,
-                forward,
-                &anchors,
-                &system,
-                allegiance,
-                &mut rng,
-                options,
-                |model| crate::ships::npc_spec(cache, model),
-            )
-        };
+        let spawned = npc::spawn(
+            player,
+            forward,
+            &anchors,
+            &system,
+            allegiance,
+            &mut rng,
+            options,
+            |model| crate::ships::npc_spec(cache, model),
+        );
         for mut ship in spawned {
             ship.id += base;
             ship.leader = ship.leader.map(|leader| leader + base);
@@ -4583,9 +4422,6 @@ impl Navigator {
             .collect();
         for (station, id) in held {
             self.starport(station).release(id);
-        }
-        if let Some(life) = options.advanced.filter(|_| !self.traffic_off) {
-            self.busy_surface_ports(cache, player, allegiance, life, &mut ships, &mut rng);
         }
         self.random = rng;
         self.occupy_station_bays(&mut ships);
@@ -4744,9 +4580,6 @@ impl Navigator {
         self.tick_effects(seconds, tics);
         if self.ships.is_empty() {
             return events;
-        }
-        if self.advanced_traffic {
-            self.pick_fights(player, exposed);
         }
         // F695's escorts hold a station in their leader's frame: right*+0x102 +
         // up*+0x104 + forward*+0x106 (F743's F610 target). F751 then hands the
@@ -5511,77 +5344,6 @@ impl Navigator {
         Some(attack)
     }
 
-    /// Port addition (Advanced traffic): the surface starports nearest the
-    /// player get traders waiting on their pads (they take off when their
-    /// wait is over) and one coming down to land, more in populous systems.
-    fn busy_surface_ports(
-        &self,
-        cache: &VerifiedCache,
-        player: [i64; 3],
-        allegiance: u32,
-        life: npc::Life,
-        ships: &mut Vec<NpcShip>,
-        rng: &mut npc::Random,
-    ) {
-        let mut ports: Vec<(usize, &Body)> = self
-            .bodies
-            .iter()
-            .enumerate()
-            .filter(|(_, body)| body.kind == Kind::Starport)
-            .collect();
-        ports.sort_by(|a, b| {
-            distance(player, a.1.position).total_cmp(&distance(player, b.1.position))
-        });
-        let mut next = ships.iter().map(|ship| ship.id + 1).max().unwrap_or(0);
-        let waiting = npc::PAD_TRADERS + (life.population / 4) as usize;
-        for (index, port) in ports.into_iter().take(npc::BUSY_PORTS) {
-            let spec = |rng: &mut npc::Random| {
-                let model = npc::model_for(npc::Role::Trader, allegiance, rng);
-                crate::ships::npc_spec(cache, model)
-            };
-            for _ in 0..waiting {
-                let Some(found) = spec(rng) else { continue };
-                let wait = npc::PAD_SECONDS * (1.0 + f64::from(rng.bounded(1000)) / 1000.0);
-                ships.push(npc::pad_trader(
-                    &found,
-                    next,
-                    port.position,
-                    index,
-                    wait,
-                    rng,
-                ));
-                next += 1;
-            }
-            // The landing trader comes down along the port's local up.
-            let up = port
-                .parent
-                .and_then(|parent| self.bodies.get(parent))
-                .map(|planet| {
-                    let to = [
-                        (port.position[0] - planet.position[0]) as f64,
-                        (port.position[1] - planet.position[1]) as f64,
-                        (port.position[2] - planet.position[2]) as f64,
-                    ];
-                    let length = to.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0);
-                    to.map(|v| v / length)
-                })
-                .unwrap_or([0.0, 1.0, 0.0]);
-            let Some(found) = spec(rng) else { continue };
-            let above = std::array::from_fn(|axis| {
-                port.position[axis] + (up[axis] * npc::LANDING_HEIGHT) as i64
-            });
-            ships.push(npc::hyperspace_arrival(
-                &found,
-                next,
-                above,
-                port.position,
-                index,
-                rng,
-            ));
-            next += 1;
-        }
-    }
-
     /// Port addition: the port's NPC flight has no terrain or gravity, so a ship
     /// flying straight at its target (or placed round a surface port) could pass
     /// into a world. A ship outside the docking cycle that ends a step inside a
@@ -5618,103 +5380,6 @@ impl Navigator {
                     // Drop the speed into the ground.
                     let into = dot3(ship.velocity, up).min(0.0);
                     ship.velocity = std::array::from_fn(|k| ship.velocity[k] - up[k] * into);
-                }
-            }
-        }
-    }
-
-    /// Port addition (Advanced traffic): who fights whom. A pirate away from
-    /// the player (or with the player docked or landed) goes for the nearest
-    /// trader; one the player comes within `PLAYER_NEAR` of drops its prey
-    /// and turns on the player. A trader under attack runs and jumps out;
-    /// police not chasing the player go for a pirate that is attacking someone.
-    fn pick_fights(&mut self, player: [i64; 3], exposed: bool) {
-        // A ship as the fight picker sees it: id, position, role, hostile, target.
-        type FightEntry = (u32, [i64; 3], npc::Role, bool, Option<u32>);
-        const PREY_RANGE: f64 = 20.0e6;
-        const PLAYER_NEAR: f64 = 10.0e6;
-        const PLAYER_FAR: f64 = 15.0e6;
-        const RUN_RANGE: f64 = 6.0e6;
-        let snapshot: Vec<FightEntry> = self
-            .ships
-            .iter()
-            .filter(|ship| ship.visible())
-            .map(|ship| {
-                (
-                    ship.id,
-                    ship.position,
-                    ship.role,
-                    ship.hostile,
-                    ship.npc_target,
-                )
-            })
-            .collect();
-        let find = |id: u32| snapshot.iter().find(|entry| entry.0 == id);
-        let nearest = |from: [i64; 3], keep: &dyn Fn(&FightEntry) -> bool| {
-            snapshot
-                .iter()
-                .filter(|entry| keep(entry))
-                .map(|entry| (entry.0, distance(from, entry.1)))
-                .filter(|(_, range)| *range <= PREY_RANGE)
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(id, _)| id)
-        };
-        let mut runners: Vec<(u32, u32)> = Vec::new();
-        for ship in &mut self.ships {
-            if !ship.visible() {
-                continue;
-            }
-            // Drop a fight whose other ship has gone.
-            if ship.npc_target.is_some_and(|id| find(id).is_none()) {
-                ship.npc_target = None;
-                if ship.hostile && ship.state == npc::State::Hold {
-                    ship.state = npc::State::Attack;
-                }
-            }
-            let to_player = distance(player, ship.position);
-            match ship.role {
-                npc::Role::Pirate if ship.hostile && ship.leader.is_none() => {
-                    if exposed && to_player < PLAYER_NEAR {
-                        ship.npc_target = None;
-                    } else if ship.npc_target.is_none() && (!exposed || to_player > PLAYER_FAR) {
-                        ship.npc_target = nearest(ship.position, &|entry| {
-                            matches!(entry.2, npc::Role::Trader | npc::Role::Shuttle)
-                        });
-                        if ship.npc_target.is_some() {
-                            ship.state = npc::State::Attack;
-                        }
-                    }
-                    if let Some(prey) = ship.npc_target {
-                        if find(prey)
-                            .is_some_and(|entry| distance(entry.1, ship.position) < RUN_RANGE)
-                        {
-                            runners.push((prey, ship.id));
-                        }
-                    }
-                }
-                npc::Role::Police if !ship.hostile && ship.npc_target.is_none() => {
-                    ship.npc_target = nearest(ship.position, &|entry| {
-                        entry.2 == npc::Role::Pirate && entry.4.is_some()
-                    });
-                    if ship.npc_target.is_some() {
-                        ship.state = npc::State::Attack;
-                    }
-                }
-                _ => {}
-            }
-        }
-        for (prey, attacker) in runners {
-            if let Some(ship) = self.ships.iter_mut().find(|ship| ship.id == prey) {
-                if ship.npc_target.is_none()
-                    && !matches!(
-                        ship.state,
-                        npc::State::Docked | npc::State::Launch | npc::State::Flee
-                    )
-                {
-                    ship.npc_target = Some(attacker);
-                    ship.station = None;
-                    ship.state = npc::State::Flee;
-                    ship.flee = npc::FLEE_SECONDS * 4.0;
                 }
             }
         }
