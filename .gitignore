@@ -124,3 +124,10 @@ ffe-rs.toml.local
 *.ffe-input
 tools/redraw-swarmui.ps1
 /ffed3d
+
+# Local original CD videos and matching stills; never commit.
+/FMVs/
+/.FMVs-*.tmp/
+
+# A local copy of the Elite Club shareware distribution (original game files); never commit.
+/firstenc.zip

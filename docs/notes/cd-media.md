@@ -1,0 +1,19 @@
+# Original CD media
+
+The supplied English CD 1.01 contains 323 AVI videos and 323 matching BMP stills in DATA (533,312,426 bytes). Both formats are preserved byte-for-byte in an ignored FMVs folder; no transcoding or original content is committed.
+
+`cargo run -p ffe-tools -- export-media --game <CD-install-directory> --out FMVs` copies DATA/*.AVI and DATA/*.BMP and writes FMVs/manifest.json with each filename, size and SHA-256. Source filenames are matched without case sensitivity and output uses the original uppercase names. Every copied payload is read back and compared before the staging folder is published. Identical existing outputs are accepted; changed, incomplete or mixed outputs fail rather than silently retaining stale media. A failed staging folder is left for inspection. No source files are renamed or modified.
+
+`ffe-tools build-data --game <CD-install-directory> --out <directory>/data.bin` also creates/verifies `<directory>/FMVs`. The videos stay outside the bounded 64 MiB data.bin cache so playback can stream individual files. Keep data.bin and its FMVs folder together. A floppy installation without DATA needs no media folder. When switching versions, use a fresh output directory so another CD's media cannot be mixed with the selected source.
+
+The sibling ffe-rs extracted CD's DATA folder is the source used for this checkout's root FMVs copy. For an unextracted local MODE1/2352 disc, `python tools/extract-cd.py <disc.bin> <new-install-directory>` extracts the ISO9660 files to a new directory; the supplied disc image is read-only. The CUE must describe MODE1/2352; the helper validates the primary volume descriptor and bounds/filenames and never executes disc contents.
+
+Playback is tracked by content-7 in dashboard/burndown.js: determine the original game-event/actor/filename mapping; decode the actual AVI codecs and audio; draw at the original size/palette/aspect; preserve audio/video timing, input and skip semantics; select matching BMPs when videos are unavailable; retain the floppy-only behaviour. Test representative BBS, station/service and story interactions against the original, missing/corrupt media, skip, and pause/resume. Packaging alone does not enable playback. The in-memory game startup path does not currently load FMVs.
+
+## Loading in the game (2026-11-11)
+
+The game loads the videos when its content was built from CD 1.01 (`ffe-cd-1.01-en`) and `FMVs/manifest.json` is beside the data root (`--root`, the checkout for `play.bat`). `ffe_rs::fmv::Library` lists the manifest's AVI files, checks each is present at its recorded size, and decodes a clip on request with `ffe_convert::avi::decode_avi`. A floppy installation never uses them. The start-up log reports the clip count, or why a folder that does not match its manifest is not used.
+
+Every supplied clip has the same form: RIFF AVI, an uncompressed bottom-up 8-bit DIB stream of 120 x 120 at 15 frames a second (66,666 us) with its 256-colour palette in the format block, and 22,050 Hz 16-bit mono PCM interleaved in `rec ` lists. The decoder accepts only that form and checks every chunk. All 323 clips decode (1,983 seconds; `tests/fmv.rs`, local-only with `FFE_FMV_ROOT`).
+
+**Not played yet.** Which game event shows which clip is decided by CD-only code: the CD executable builds each path from `%c:`, `\DATA` and a name with the `AVI` extension, and the names (`BB`, `C`, `F`, `FR`, `FSH`, `G`, `I`, `ISH`, `ISY`, `M`, `P`, `R`, `SH`, `ST` with numbers) are chosen in routines that JJFFE 2.8a7, built from the floppy release, does not contain. Wiring them needs that selection code (a disassembly of the CD executable's video routines), which the project rules leave to the owner to supply; no mapping is guessed. The 120 x 120 area, audio timing, skip and the matching BMP stills follow once it is known.

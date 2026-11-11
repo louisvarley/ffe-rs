@@ -11,6 +11,7 @@ pub mod death;
 pub mod display;
 pub mod docking;
 pub mod flight;
+pub mod fmv;
 pub mod front_end;
 pub mod galaxy_map;
 pub mod gameover;

@@ -158,7 +158,7 @@ pub fn model_census(root: &Path) -> Result<Census, String> {
     let record = inspection
         .files
         .iter()
-        .find(|record| record.path == "FIRSTENC.EXE")
+        .find(|record| crate::is_executable(&record.path))
         .ok_or("FIRSTENC.EXE was not fingerprinted")?;
     let bytes = recorded_bytes(&root, record)?;
     let table = SineTable::from_bytes(&decode_sine_table(&bytes, sine_rva)?.bytes)?;

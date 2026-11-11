@@ -1,5 +1,6 @@
 use std::io::Write;
 
+pub mod avi;
 pub mod embedded;
 pub mod model_extents;
 

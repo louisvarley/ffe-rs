@@ -8,11 +8,22 @@ pub mod cache;
 pub mod census;
 pub mod external;
 pub mod images;
+pub mod media;
 pub mod reference;
 
 const MAX_EXECUTABLE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The game executable's file names: `FIRSTENC.EXE`, or the Elite Club
+/// shareware's `FIRSTENC.DAT` (its batch file renames it at launch).
+pub const EXECUTABLE_NAMES: [&str; 2] = ["FIRSTENC.EXE", "FIRSTENC.DAT"];
+
+/// Whether an inspected file is the game executable.
+pub fn is_executable(path: &str) -> bool {
+    EXECUTABLE_NAMES.contains(&path)
+}
 const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 const FLOPPY_SHA256: &str = "d919566140abfc298bc9929bc9141d92526586821f017be1336253a04bca1e72";
+const SHAREWARE_SHA256: &str = "86f2d54feac4701c4bb4b45d6551edd9ecc63fbd839d3745962b745daf73830d";
 const CD_SHA256: &str = "9957dc34aa9ef93d9a69c5f5be8e13d243046e758ad83c8a35241e31b7e6e616";
 const JOURNAL_SHA256: &str = "3cf36755c7420f12281ca8a55f11dbc9787bacaeef49edc4584338f77dc94afc";
 const CABIN_SHA256: [&str; 6] = [
@@ -50,6 +61,10 @@ pub fn identify_executable(size: u64, sha256: &str) -> Option<SourceProfile> {
         (2_093_056, CD_SHA256) => Some(SourceProfile {
             id: "ffe-cd-1.01-en",
             release: "English Release 1.01 - 13/04/95",
+        }),
+        (2_101_248, SHAREWARE_SHA256) => Some(SourceProfile {
+            id: "ffe-shareware-1.06-en",
+            release: "English Elite Club shareware (2001, floppy 1.06)",
         }),
         _ => None,
     }
@@ -263,18 +278,27 @@ pub fn inspect_game(root: &Path) -> Result<Inspection, String> {
         },
         diagnostics: Vec::new(),
     };
+    // Elite Club's original batch file renames FIRSTENC.DAT at launch.
+    // Inspect it in place; never modify a player's installation.
+    let executable_name = if find_child(root, "FIRSTENC.EXE")?.is_some() {
+        "FIRSTENC.EXE"
+    } else if find_child(root, "FIRSTENC.DAT")?.is_some() {
+        "FIRSTENC.DAT"
+    } else {
+        "FIRSTENC.EXE"
+    };
     if let Some(bytes) = read_required(
         &mut report,
         root,
-        "FIRSTENC.EXE",
-        "FIRSTENC.EXE",
+        executable_name,
+        executable_name,
         MAX_EXECUTABLE_BYTES,
     ) {
         let digest = format!("{:x}", Sha256::digest(&bytes));
         report.source_profile = identify_executable(bytes.len() as u64, &digest);
         if report.source_profile.is_none() {
-            report.error("unsupported_executable", "FIRSTENC.EXE", format!(
-                "Unrecognized executable: {} bytes, SHA-256 {digest}. Recognized inputs: English floppy 1.02 and CD 1.01. Patched outputs need separate validation; no offsets will be guessed.",
+            report.error("unsupported_executable", executable_name, format!(
+                "Unrecognized executable: {} bytes, SHA-256 {digest}. Recognized inputs: English floppy 1.02, CD 1.01 and Elite Club shareware 1.06. Patched outputs need separate validation; no offsets will be guessed.",
                 bytes.len()
             ));
         }
@@ -389,12 +413,35 @@ mod tests {
 
     #[test]
     fn profile_hashes_are_valid_sha256_strings() {
-        for hash in [FLOPPY_SHA256, CD_SHA256, JOURNAL_SHA256]
+        for hash in [FLOPPY_SHA256, CD_SHA256, SHAREWARE_SHA256, JOURNAL_SHA256]
             .into_iter()
             .chain(CABIN_SHA256)
         {
             assert_eq!(hash.len(), 64);
             assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
         }
+    }
+}
+
+#[cfg(test)]
+mod shareware_tests {
+    use super::*;
+    #[test]
+    fn shareware_requires_exact_size_and_hash() {
+        assert_eq!(
+            identify_executable(2_101_248, SHAREWARE_SHA256).unwrap().id,
+            "ffe-shareware-1.06-en"
+        );
+        assert!(identify_executable(2_097_152, SHAREWARE_SHA256).is_none());
+        assert!(identify_executable(2_101_248, FLOPPY_SHA256).is_none());
+    }
+    #[test]
+    fn dat_is_inspected_without_renaming() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("FIRSTENC.DAT"), b"unrecognized fixture").unwrap();
+        let report = inspect_game(dir.path()).unwrap();
+        assert!(report.files.iter().any(|f| f.path == "FIRSTENC.DAT"));
+        assert!(!report.inspection_passed);
+        assert!(!dir.path().join("FIRSTENC.EXE").exists());
     }
 }

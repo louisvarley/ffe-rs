@@ -291,7 +291,11 @@ fn options() -> Result<Options, String> {
             beside
                 .ancestors()
                 .take(5)
-                .find(|dir| dir.join("game").join("FIRSTENC.EXE").is_file())
+                .find(|dir| {
+                    ffe_tools::EXECUTABLE_NAMES
+                        .iter()
+                        .any(|name| dir.join("game").join(name).is_file())
+                })
                 .map_or(beside.clone(), Path::to_path_buf)
         }
     };
@@ -325,7 +329,10 @@ fn options() -> Result<Options, String> {
 /// fingerprint checks and conversion as `ffe-tools build-data`, about a
 /// quarter of a second). There is no separate cache file to keep in step.
 fn load_content(game: &Path) -> Result<ffe_content::VerifiedCache, String> {
-    if !game.join("FIRSTENC.EXE").is_file() {
+    if !ffe_tools::EXECUTABLE_NAMES
+        .iter()
+        .any(|name| game.join(name).is_file())
+    {
         return Err(format!(
             "The Frontier: First Encounters game files were not found in {}.\n\
              Put the game files in a `game` folder beside the checkout (play.bat), or start \
@@ -914,6 +921,18 @@ const NEAR_WORLD_ACCELERATION: usize = 2;
 fn run() -> Result<(), String> {
     let options = options()?;
     let cache = std::sync::Arc::new(load_content(&options.game)?);
+    // The CD release's videos, when the launcher has copied them to FMVs. They
+    // are indexed and checked here; no game event plays one yet (content-7:
+    // the CD executable's clip selection is not in the JJFFE source).
+    match ffe_rs::fmv::Library::find(&options.root, &cache.manifest().source_profile) {
+        Ok(Some(library)) => eprintln!(
+            "CD videos: {} clips in {} (playback is not wired to game events yet).",
+            library.len(),
+            library.dir().display()
+        ),
+        Ok(None) => {}
+        Err(error) => eprintln!("CD videos not used: {error}"),
+    }
     let mut screen = Screen::new(&cache)?;
     // Diagnostic frames of the preference pages and of the space colour, for
     // the port's screenshot comparisons. No window is opened.

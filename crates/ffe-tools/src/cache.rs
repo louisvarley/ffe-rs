@@ -16,10 +16,18 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+// The data locations of each supported executable. Floppy 1.02's come from
+// the JJFFE declarations; CD 1.01's and Elite Club shareware 1.06's were found
+// in those executables by content (each table's bytes, or a pointer table's
+// pattern of differences, matched uniquely) and every table decodes through the
+// same checked decoders (`tools/reference/map-layouts.py`). The builds' data is
+// shifted by a few bytes per region, so no single offset is assumed.
+
 /// Model table and sine table RVAs for an exact-hash release.
 pub(crate) fn model_layout(profile: &str) -> Result<(u32, u32), String> {
     match profile {
         "ffe-floppy-1.02-en" => Ok((0x0d0cfc, 0x106390)),
+        "ffe-shareware-1.06-en" => Ok((0x0d0e68, 0x1066e0)),
         "ffe-cd-1.01-en" => Ok((0x0d0cf8, 0x105334)),
         _ => Err("no verified model layout for this source profile".to_owned()),
     }
@@ -35,6 +43,11 @@ pub(crate) fn bitmap_layout(profile: &str) -> Result<BitmapLayout, String> {
             secondary_rva: 0x1b081c,
             low_palette_rva: 0x101990,
         }),
+        "ffe-shareware-1.06-en" => Ok(BitmapLayout {
+            primary_rva: 0x1b09ec,
+            secondary_rva: 0x1b0b6c,
+            low_palette_rva: 0x101ce4,
+        }),
         "ffe-cd-1.01-en" => Ok(BitmapLayout {
             primary_rva: 0x1af640,
             secondary_rva: 0x1af7c0,
@@ -48,17 +61,20 @@ pub(crate) fn bitmap_layout(profile: &str) -> Result<BitmapLayout, String> {
 pub(crate) fn font_layout(profile: &str) -> Result<u32, String> {
     match profile {
         "ffe-floppy-1.02-en" => Ok(0x1013b0),
+        "ffe-shareware-1.06-en" => Ok(0x101704),
         "ffe-cd-1.01-en" => Ok(0x1003d0),
         _ => Err("no verified font layout for this source profile".to_owned()),
     }
 }
 
 /// Texture descriptor (`DATA_007811`) and 12-bit colour map (`DATA_007770`) RVAs
-/// (v8). Verified byte for byte against JJFFE 2.8a7 for floppy 1.02 only; the CD
-/// 1.01 executable was not available, so its cache omits both tables.
+/// (v8). Verified byte for byte against JJFFE 2.8a7 for floppy 1.02; the CD and
+/// shareware locations hold the same bytes.
 pub(crate) fn texture_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0x102da8, 0x101b10)),
+        "ffe-cd-1.01-en" => Some((0x101dc8, 0x100b30)),
+        "ffe-shareware-1.06-en" => Some((0x1030fc, 0x101e64)),
         _ => None,
     }
 }
@@ -81,8 +97,36 @@ pub(crate) fn message_layout(profile: &str) -> Option<&'static [(u8, u32, usize)
         (19, 0x9aa18, 7),   // DATA_002245 (F84)
         (20, 0x8e4bc, 468), // DATA_001699 (F62, the bulletin board and missions)
     ];
+    // The same tables in CD 1.01 and shareware 1.06, found by their pointer
+    // patterns (`tools/reference/map-layouts.py`).
+    const CD: [(u8, u32, usize); 10] = [
+        (0, 0xeb930, 44),
+        (3, 0xeeef0, 59),
+        (5, 0xeecec, 2),
+        (10, 0xd2834, 46),
+        (12, 0xd8200, 486),
+        (14, 0xd5d48, 129),
+        (15, 0xd40b4, 13),
+        (17, 0xd4308, 30),
+        (19, 0x9a9e4, 7),
+        (20, 0x8e488, 468),
+    ];
+    const SHAREWARE: [(u8, u32, usize); 10] = [
+        (0, 0xebc8c, 44),
+        (3, 0xef244, 59),
+        (5, 0xef044, 2),
+        (10, 0xd2968, 46),
+        (12, 0xd8340, 486),
+        (14, 0xd5e88, 129),
+        (15, 0xd41f4, 13),
+        (17, 0xd4448, 30),
+        (19, 0x9abac, 7),
+        (20, 0x8e650, 468),
+    ];
     match profile {
         "ffe-floppy-1.02-en" => Some(&FLOPPY),
+        "ffe-cd-1.01-en" => Some(&CD),
+        "ffe-shareware-1.06-en" => Some(&SHAREWARE),
         _ => None,
     }
 }
@@ -92,6 +136,10 @@ pub(crate) fn message_layout(profile: &str) -> Option<&'static [(u8, u32, usize)
 pub(crate) fn scripts_layout(profile: &str) -> Option<(u32, u32, usize, u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0x801c4, 0x8e0f8, ffe_core::script::MISSIONS, 0x20bde0, 10)),
+        "ffe-cd-1.01-en" => Some((0x80190, 0x8e0c4, ffe_core::script::MISSIONS, 0x20ad80, 10)),
+        "ffe-shareware-1.06-en" => {
+            Some((0x801c4, 0x8e28c, ffe_core::script::MISSIONS, 0x20c134, 10))
+        }
         _ => None,
     }
 }
@@ -101,6 +149,8 @@ pub(crate) fn scripts_layout(profile: &str) -> Option<(u32, u32, usize, u32, u32
 pub(crate) fn journal_layout(profile: &str) -> Option<(u32, usize)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0x9c0c4, ffe_core::journal::ARTICLES + 1)),
+        "ffe-cd-1.01-en" => Some((0x9c090, ffe_core::journal::ARTICLES + 1)),
+        "ffe-shareware-1.06-en" => Some((0x9c258, ffe_core::journal::ARTICLES + 1)),
         _ => None,
     }
 }
@@ -109,6 +159,8 @@ pub(crate) fn journal_layout(profile: &str) -> Option<(u32, usize)> {
 pub(crate) fn queries_layout(profile: &str) -> Option<(u32, usize)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0x8e29c, ffe_core::script::QUERIES)),
+        "ffe-cd-1.01-en" => Some((0x8e268, ffe_core::script::QUERIES)),
+        "ffe-shareware-1.06-en" => Some((0x8e430, ffe_core::script::QUERIES)),
         _ => None,
     }
 }
@@ -117,6 +169,8 @@ pub(crate) fn queries_layout(profile: &str) -> Option<(u32, usize)> {
 pub(crate) fn stories_layout(profile: &str) -> Option<(u32, usize)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0x9b59c, ffe_core::journal::STORIES)),
+        "ffe-cd-1.01-en" => Some((0x9b568, ffe_core::journal::STORIES)),
+        "ffe-shareware-1.06-en" => Some((0x9b730, ffe_core::journal::STORIES)),
         _ => None,
     }
 }
@@ -127,6 +181,8 @@ pub(crate) fn stories_layout(profile: &str) -> Option<(u32, usize)> {
 pub(crate) fn names_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xd1444),
+        "ffe-cd-1.01-en" => Some(0xd1440),
+        "ffe-shareware-1.06-en" => Some(0xd15b0),
         _ => None,
     }
 }
@@ -136,6 +192,8 @@ pub(crate) fn names_layout(profile: &str) -> Option<u32> {
 pub(crate) fn lighting_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0xeec60, 0x101858)),
+        "ffe-cd-1.01-en" => Some((0xeec60, 0x100878)),
+        "ffe-shareware-1.06-en" => Some((0xeefb8, 0x101bac)),
         _ => None,
     }
 }
@@ -145,6 +203,8 @@ pub(crate) fn lighting_layout(profile: &str) -> Option<(u32, u32)> {
 pub(crate) fn system_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xe71d8),
+        "ffe-cd-1.01-en" => Some(0xe71d4),
+        "ffe-shareware-1.06-en" => Some(0xe7314),
         _ => None,
     }
 }
@@ -154,6 +214,8 @@ pub(crate) fn system_layout(profile: &str) -> Option<u32> {
 pub(crate) fn market_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0xdde08, 0xde970)),
+        "ffe-cd-1.01-en" => Some((0xdde04, 0xde96c)),
+        "ffe-shareware-1.06-en" => Some((0xddf44, 0xdeaac)),
         _ => None,
     }
 }
@@ -163,6 +225,8 @@ pub(crate) fn market_layout(profile: &str) -> Option<(u32, u32)> {
 pub(crate) fn galaxy_layout(profile: &str) -> Option<(u32, u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0xe094c, 0xe1154, 0xee224)),
+        "ffe-cd-1.01-en" => Some((0xe0948, 0xe1150, 0xee220)),
+        "ffe-shareware-1.06-en" => Some((0xe0a88, 0xe1290, 0xee57c)),
         _ => None,
     }
 }
@@ -171,6 +235,8 @@ pub(crate) fn galaxy_layout(profile: &str) -> Option<(u32, u32, u32)> {
 pub(crate) fn dot_table_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0x10415c),
+        "ffe-cd-1.01-en" => Some(0x10317c),
+        "ffe-shareware-1.06-en" => Some(0x1044b0),
         _ => None,
     }
 }
@@ -179,6 +245,8 @@ pub(crate) fn dot_table_layout(profile: &str) -> Option<u32> {
 pub(crate) fn star_point_layout(profile: &str) -> Option<[u32; 4]> {
     match profile {
         "ffe-floppy-1.02-en" => Some([0x104038, 0x104070, 0x1040a8, 0x10410c]),
+        "ffe-cd-1.01-en" => Some([0x103058, 0x103090, 0x1030c8, 0x10312c]),
+        "ffe-shareware-1.06-en" => Some([0x10438c, 0x1043c4, 0x1043fc, 0x104460]),
         _ => None,
     }
 }
@@ -187,6 +255,8 @@ pub(crate) fn star_point_layout(profile: &str) -> Option<[u32; 4]> {
 pub(crate) fn system_strings_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xe0cf4),
+        "ffe-cd-1.01-en" => Some(0xe0cf0),
+        "ffe-shareware-1.06-en" => Some(0xe0e30),
         _ => None,
     }
 }
@@ -195,6 +265,8 @@ pub(crate) fn system_strings_layout(profile: &str) -> Option<u32> {
 pub(crate) fn gameplay_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xee98c),
+        "ffe-cd-1.01-en" => Some(0xee988),
+        "ffe-shareware-1.06-en" => Some(0xeece4),
         _ => None,
     }
 }
@@ -206,6 +278,8 @@ pub(crate) fn gameplay_layout(profile: &str) -> Option<u32> {
 pub(crate) fn pad_layout(profile: &str) -> Option<u32> {
     match profile {
         "ffe-floppy-1.02-en" => Some(0xde20c),
+        "ffe-cd-1.01-en" => Some(0xde208),
+        "ffe-shareware-1.06-en" => Some(0xde348),
         _ => None,
     }
 }
@@ -216,6 +290,8 @@ pub(crate) fn pad_layout(profile: &str) -> Option<u32> {
 pub(crate) fn intro_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0xd3761, 0xffd98)),
+        "ffe-cd-1.01-en" => Some((0xd375d, 0xfeda0)),
+        "ffe-shareware-1.06-en" => Some((0xd3891, 0x1000ec)),
         _ => None,
     }
 }
@@ -225,6 +301,8 @@ pub(crate) fn intro_layout(profile: &str) -> Option<(u32, u32)> {
 pub(crate) fn name_text_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0xdf174, 0xec3d0)),
+        "ffe-cd-1.01-en" => Some((0xdf170, 0xec3cc)),
+        "ffe-shareware-1.06-en" => Some((0xdf2b0, 0xec728)),
         _ => None,
     }
 }
@@ -235,6 +313,8 @@ pub(crate) fn name_text_layout(profile: &str) -> Option<(u32, u32)> {
 pub(crate) fn terrain_layout(profile: &str) -> Option<(u32, u32)> {
     match profile {
         "ffe-floppy-1.02-en" => Some((0x104165, 0xf7d6c)),
+        "ffe-cd-1.01-en" => Some((0x103185, 0xf6d74)),
+        "ffe-shareware-1.06-en" => Some((0x1044b9, 0xf80c0)),
         _ => None,
     }
 }
@@ -279,7 +359,7 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
     let stats_bytes = ffe_convert::embedded::SHIP_STATS_BYTES;
     let mut stats_table = vec![0u8; ffe_convert::model_extents::MODEL_COUNT * stats_bytes];
     for record in &inspection.files {
-        if record.path == "FIRSTENC.EXE" {
+        if crate::is_executable(&record.path) {
             let bytes = recorded_bytes(&root, record)?;
             let table = decode_sine_table(&bytes, sine_table_rva)?;
             assets.push(Asset {
@@ -702,7 +782,18 @@ pub fn build_bytes(root: &Path) -> Result<Vec<u8>, String> {
                 });
             }
             if let Some(tables_rva) = system_layout(profile.id) {
-                let table = decode_system_tables(&bytes, tables_rva)?;
+                let table = decode_system_tables(&bytes, tables_rva).map_err(|error| {
+                    if profile.id == "ffe-shareware-1.06-en" {
+                        format!(
+                            "{error} Elite Club shareware 1.06 lists 339 star systems (its \
+                             1.06 patch added ten to the 329 of floppy 1.02, CD 1.01 and \
+                             JJFFE 2.8a7); the port's system tables hold 329, so this \
+                             release cannot be loaded yet."
+                        )
+                    } else {
+                        error
+                    }
+                })?;
                 assets.push(Asset {
                     id: "base:world/system-tables".to_owned(),
                     path: "world/system-tables.bin".to_owned(),
@@ -894,6 +985,13 @@ pub fn build_data(root: &Path, output: &Path) -> Result<Manifest, String> {
     let destination = output_destination(&canonical, output)?;
     let bytes = build_bytes(&canonical)?;
     let verified = ffe_content::read(&bytes)?;
+    crate::media::export_media(
+        &canonical,
+        &destination
+            .parent()
+            .ok_or("cache output needs parent")?
+            .join("FMVs"),
+    )?;
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)

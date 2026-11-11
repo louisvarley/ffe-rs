@@ -1,5 +1,31 @@
 # Port log
 
+## 2026-11-11 — CD 1.01 imports; shareware assessed; CD videos load
+
+**CD 1.01 said "no system tables".** The importer had CD locations only for
+the models, bitmaps and font; every other table (system, galaxy, market,
+messages, scripts, journal, names, lighting, terrain and the rest) was mapped
+for floppy 1.02 alone, so a CD cache had none and the game stopped.
+`tools/reference/map-layouts.py` found each floppy table in the CD executable
+by content (its bytes with pointer dwords as wildcards, or a pointer table's
+pattern of differences), each match unique; the decoders then check every
+table. The script statics sit in zeroed memory, where the content match was
+false, and were taken from the scripts' own pointers. The CD cache matches
+the floppy one in 1,816 of 1,820 assets; the other four differ only in the
+version string and code addresses the port does not read, and the CD start
+frame is pixel-identical (content-5 done).
+
+**Elite Club shareware (floppy 1.06).** Its locations map the same way, and
+`FIRSTENC.DAT` is accepted wherever the executable is read. Every table
+decodes except the system tables: 1.06 lists 339 star systems against 329, so
+it is refused with that reason. It is not a drop-in for the JJFFE 2.8a7
+baseline.
+
+**CD videos.** `ffe_convert::avi` decodes the CD's 8-bit DIB/PCM AVIs and
+`ffe_rs::fmv::Library` loads them from `FMVs` for CD content only; all 323
+decode. No event plays one yet: the clip selection is CD-only code
+(content-7, `docs/notes/cd-media.md`).
+
 ## 2026-11-11 — PAR-07: the Hope start frame's text matches the original
 
 The port's `--capture-start` frame, diffed against the executed original's

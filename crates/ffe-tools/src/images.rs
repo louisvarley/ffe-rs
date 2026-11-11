@@ -216,7 +216,7 @@ pub fn export_images(root: &Path, output: &Path) -> Result<ImageManifest, String
     let executable = inspection
         .files
         .iter()
-        .find(|record| record.path == "FIRSTENC.EXE")
+        .find(|record| crate::is_executable(&record.path))
         .ok_or("inspection did not fingerprint FIRSTENC.EXE")?;
     let exe = recorded_bytes(&root, executable)?;
     let decoded = decode_bitmaps(&exe, bitmap_layout(profile.id)?)?;

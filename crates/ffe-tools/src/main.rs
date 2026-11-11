@@ -11,6 +11,7 @@ Usage:
   ffe-tools inspect-game [--game <directory>] [--json]
   ffe-tools export-external --game <directory> --out <new-directory> [--json]
   ffe-tools export-images --game <directory> --out <new-directory> [--json]
+  ffe-tools export-media --game <directory> --out <FMVs-directory> [--json]
   ffe-tools build-data --game <directory> --out <new-file> [--json]
   ffe-tools inspect-data --data <file> [--json]
   ffe-tools verify-reference --vectors <jsonl> --state <jsonl> [--json]
@@ -44,6 +45,7 @@ enum Command {
     InspectGame,
     ExportExternal,
     ExportImages,
+    ExportMedia,
     BuildData,
     InspectData,
     VerifyReference,
@@ -77,6 +79,8 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
         Command::ExportExternal
     } else if command == "export-images" {
         Command::ExportImages
+    } else if command == "export-media" {
+        Command::ExportMedia
     } else if command == "build-data" {
         Command::BuildData
     } else if command == "inspect-data" {
@@ -90,7 +94,7 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
     };
     let exporting = matches!(
         command,
-        Command::ExportExternal | Command::ExportImages | Command::BuildData
+        Command::ExportExternal | Command::ExportImages | Command::ExportMedia | Command::BuildData
     );
     while let Some(arg) = args.next() {
         if arg == "--game"
@@ -98,6 +102,7 @@ fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
                 command,
                 Command::InspectGame
                     | Command::ExportExternal
+                    | Command::ExportMedia
                     | Command::ExportImages
                     | Command::BuildData
                     | Command::ModelCensus
@@ -268,9 +273,18 @@ fn run() -> Result<u8, String> {
                 .map_err(|error| error.to_string())?;
             writeln!(output).map_err(|error| error.to_string())?;
         } else {
-            writeln!(output, "Verified content cache v{}: {}\nAssets: {}; source fingerprints: {}\nPartial content only; not a complete game cache. Runtime upper palette, full model-command execution/submodels, gameplay tables, other fonts, journal macro expansion and CD media remain unresolved.",
+            writeln!(output, "Verified content cache v{}: {}\nAssets: {}; source fingerprints: {}\nPartial content only; not a complete game cache. Runtime upper palette, full model-command execution/submodels, gameplay tables, other fonts, journal macro expansion and CD media playback remain unresolved. CD AVI/BMP files, when present, are copied losslessly into FMVs beside the output cache.",
                 manifest.format_version, manifest.source_profile, manifest.files.len(), manifest.source_files.len()).map_err(|error| error.to_string())?;
         }
+        return Ok(0);
+    }
+    if options.command == Command::ExportMedia {
+        let manifest = ffe_tools::media::export_media(
+            &options.game,
+            options.output.as_deref().ok_or("missing --out")?,
+        )?;
+        serde_json::to_writer_pretty(&mut output, &manifest).map_err(|e| e.to_string())?;
+        writeln!(output).map_err(|e| e.to_string())?;
         return Ok(0);
     }
     if options.command == Command::ExportImages {

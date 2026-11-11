@@ -16,7 +16,7 @@
 window.FFE_BURNDOWN = {
   project: "ffe-rs",
   unit: "work items",
-  updated: "2026-11-10",
+  updated: "2026-11-11",
   milestones: [
     {
       id: "parity-audit",
@@ -290,8 +290,9 @@ window.FFE_BURNDOWN = {
         { id: "content-1", title: "Gameplay tables (ships, equipment, economy)", status: "in-progress", version: "market-v20" },
         { id: "content-2", title: "Message strings, journal and remaining fonts", status: "in-progress" },
         { id: "content-3", title: "Music data (HMP) cached losslessly (17 songs, cache v29)", status: "done", version: "v0.86" },
-        { id: "content-4", title: "Optional CD media inventory (videos and stills)", status: "todo" },
-        { id: "content-5", title: "Import verification on CD 1.01 as well as floppy 1.02", status: "todo" },
+        { id: "content-4", title: "Optional CD media inventory and lossless packaging (videos and stills)", status: "done", version: "cd-media" },
+        { id: "content-5", title: "Import verification on CD 1.01 as well as floppy 1.02", status: "done" },
+        { id: "content-7", title: "Wire original CD FMVs into game events: AVI decoding, audio sync, timing, skip and still/floppy fallback", status: "in-progress" },
         { id: "content-6", title: "Statistics +0xe name codes resolved through DATA_004682 (58 hulls, LAST_SHIP)", status: "done", version: "v1.00" }
       ]
     },
@@ -1356,6 +1357,16 @@ window.FFE_BURNDOWN = {
       date: "2026-11-10",
       remaining: 80,
       note: "Reconciled with docs/audits/gameplay-parity-work-items.json: parity-02 (refuelling and fuel bookkeeping) was finished on 2026-11-04 but still listed in progress; parity-09 (station docking contacts) and parity-10 (indoor departure placement) have had source work since 2026-11-02 and move from todo to in progress."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 80,
+      note: "content-4 done: supplied CD inventoried and all 323 AVI + 323 BMP files (533,312,426 bytes) copied losslessly to ignored FMVs with verified SHA-256 manifest. build-data now exports/verifies FMVs beside its cache; actual CD 1.01 cache build passed (1,797 assets). Added content-7 for runtime FMV decoding, audio sync, source game-event selection, timing/skip, matching stills and floppy fallback; packaging does not implement playback. One closure and one new task leave the remaining count unchanged."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 79,
+      note: "content-5 done: every floppy table location was found in CD 1.01 by content (tools/reference/map-layouts.py) and decodes; 1,816 of 1,820 assets match the floppy cache byte for byte, the other four differ only in the version string and code addresses the port does not read, and the CD start frame is identical. The CD version reported no system tables before. content-7 in progress: an 8-bit DIB/PCM AVI decoder and the runtime FMV library (CD profile plus FMVs folder) decode all 323 clips; the clip-to-event mapping is in CD-only code. Elite Club shareware 1.06 also maps but lists 339 star systems against 329, so it is refused with that reason."
     }
   ]
 };

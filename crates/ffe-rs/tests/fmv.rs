@@ -1,0 +1,35 @@
+//! The CD 1.01 videos decode: every clip in a real `FMVs` folder (set
+//! `FFE_FMV_ROOT` to the folder that contains `FMVs`). Local-only: the
+//! videos are the player's own files and are never committed.
+
+use ffe_rs::fmv::{Library, CD_PROFILE};
+use std::path::PathBuf;
+
+#[test]
+#[ignore = "Local-only: needs the CD videos (FFE_FMV_ROOT)"]
+fn every_cd_video_decodes_as_8_bit_dib_with_pcm_audio() {
+    let root = PathBuf::from(std::env::var_os("FFE_FMV_ROOT").expect("FFE_FMV_ROOT"));
+    let library = Library::find(&root, CD_PROFILE)
+        .expect("the FMVs folder matches its manifest")
+        .expect("an FMVs folder with videos");
+    assert_eq!(library.len(), 323, "the CD's DATA folder has 323 clips");
+    let mut seconds = 0.0;
+    for name in library.names() {
+        let video = library.load(name).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!((video.width, video.height), (120, 120), "{name}");
+        assert_eq!(video.frame_micros, 66_666, "{name}: 15 frames a second");
+        assert!(!video.frames.is_empty(), "{name}");
+        let audio = video
+            .audio
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name}: no audio"));
+        assert_eq!(
+            (audio.channels, audio.rate, audio.bits),
+            (1, 22_050, 16),
+            "{name}"
+        );
+        assert!(!audio.pcm.is_empty(), "{name}");
+        seconds += video.seconds();
+    }
+    println!("{} clips, {seconds:.0} s of video", library.len());
+}
