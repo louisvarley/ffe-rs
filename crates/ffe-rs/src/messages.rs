@@ -35,7 +35,12 @@ pub const ENTRY_WRAP: usize = 0x78;
 pub const WRAP: usize = 0x7c;
 /// `F1586`'s line height for the console (8 pixels).
 pub const LINE_HEIGHT: usize = 8;
-/// The header/text origin: x 196, y 159, with the shadow one pixel left and up.
+/// `F272`'s two `F1586` passes: colour 0 at x 196, y 159 (`0xc4`,
+/// `DATA_008684`), then the text in its colours (colour 4 through
+/// `DATA_007778`'s remaps: the header's 17, the entries' 15) one pixel left
+/// and up at x 195, y 158 (`0xc3`, `DATA_008684 - 1`). The visible text is the
+/// second pass; the first is its black shadow right and down (the executed
+/// original's Hope start frame: colour 17 at (195,158), colour 0 at (196,159)).
 pub const TEXT_X: usize = 196;
 pub const TEXT_Y: usize = 159;
 pub const SHADOW_X: usize = 195;

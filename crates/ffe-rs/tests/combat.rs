@@ -157,10 +157,13 @@ fn f953_damages_the_players_shields_then_hull() {
     assert_eq!(state.hit(1000), Damage::Destroyed);
     assert_eq!(state.hull, [0, 400]);
     assert!(state.destroyed());
-    // The HUD then reads the real words, not a default full hull.
+    // The HUD then reads the real words, not a default full hull, and each
+    // hit started F1102's 30-second hull line.
+    assert_eq!(state.hull_display, 30);
     let hud = ffe_rs::hud::PlayerHud {
         shields: state.shields,
         hull: state.hull,
+        hull_shown: state.hull_display != 0,
         ..Default::default()
     };
     assert_eq!(hud.shield_text().as_deref(), Some("Shields: 0%"));

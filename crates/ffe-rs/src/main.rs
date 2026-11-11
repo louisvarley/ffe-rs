@@ -6558,6 +6558,9 @@ fn run() -> Result<(), String> {
                 original.as_ref().map_or(0, |model| model.player().mode),
             );
             state.combat.tick(frame_tics, f938);
+            // F1007 first counts F1102's hull-line time down by the events
+            // (their low word), in every mode.
+            state.hull_display = state.hull_display.saturating_sub(event_seconds & 0xffff);
             if let Some(stats) = player_stats {
                 state.ensure_thrusters(&stats);
                 // F938: shield recharge and the Hull Auto-Repair System.
@@ -8240,6 +8243,7 @@ fn run() -> Result<(), String> {
         screen.hud = PlayerHud {
             shields: state.shields,
             hull: state.hull,
+            hull_shown: state.hull_display != 0,
             set_speed: views
                 .console
                 .set_speed

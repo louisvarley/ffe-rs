@@ -2,8 +2,7 @@ use crate::camera::{ship_axes, Camera, ViewMode, ViewState};
 use crate::console::{Console, ShipSystems};
 use crate::flight::{Flight, Mode};
 use crate::hud::{
-    PlayerHud, AUTOPILOT_POS, HUD_COLOUR, HULL_POS, SHIELDS_POS, SPEED_POS, TURRET_COLOUR,
-    TURRET_POS,
+    PlayerHud, AUTOPILOT_POS, HUD_COLOUR, HULL_POS, SHIELDS_POS, TURRET_COLOUR, TURRET_POS,
 };
 use crate::indexed::{palette_rgb6, BitmapFont, IndexedImage, LOGICAL_HEIGHT, LOGICAL_WIDTH};
 use crate::intro_text::IntroText;
@@ -1846,8 +1845,8 @@ impl Screen {
     }
 
     /// `F272`'s message window at x 196, y 159: the date/time header, the newest
-    /// entry and the older dated entries, 8-pixel lines, a colour-4 shadow one
-    /// pixel left and up, clipped to the console (y 158..199). `F273`'s scroll
+    /// entry and the older dated entries, 8-pixel lines, the text one pixel left
+    /// and up of its colour-0 shadow, clipped to the console (y 158..199). `F273`'s scroll
     /// moves the whole block up from the header (`ffe.asm:21075-21097`).
     /// F312's profile page: the title at (30, 5), the two-column status block at
     /// (2, 20) with F1399's `0xfd` tab stops (114 and 150), the current
@@ -2142,17 +2141,19 @@ impl Screen {
                 break;
             }
             let colour = if line.header { 17 } else { HUD_COLOUR };
-            self.text_clipped(
-                crate::messages::SHADOW_X,
-                y - 1,
-                &line.text,
-                4,
-                crate::messages::CLIP_TOP as i32,
-                crate::messages::CLIP_BOTTOM as i32,
-            );
+            // F272's first pass: colour 0 at (0xc4, y), the shadow.
             self.text_clipped(
                 crate::messages::TEXT_X,
                 y,
+                &line.text,
+                0,
+                crate::messages::CLIP_TOP as i32,
+                crate::messages::CLIP_BOTTOM as i32,
+            );
+            // The second: the text's own colours at (0xc3, y - 1).
+            self.text_clipped(
+                crate::messages::SHADOW_X,
+                y - 1,
                 &line.text,
                 colour,
                 crate::messages::CLIP_TOP as i32,
@@ -2163,8 +2164,8 @@ impl Screen {
 
     /// The player's `F1099` text at its original spots. Shields and hull are only
     /// drawn under the original's conditions; the Autopilot line only while the
-    /// autopilot flies; the Set/Act/Alt block at (2,148) and the turret angles at
-    /// (5,76) in turret views.
+    /// autopilot flies; the Set/Act/Alt block ending on row 149 and the turret
+    /// angles at (5,76) in turret views.
     fn draw_player_hud(&mut self, view: ViewMode) {
         // F1099 jumps to JUMP_004541 in the missile view: only the combat
         // target's range text is drawn there.
@@ -2173,45 +2174,36 @@ impl Screen {
         }
         let hud = self.hud.clone();
         if let Some(text) = hud.shield_text() {
-            self.text(SHIELDS_POS.0, SHIELDS_POS.1, &text, HUD_COLOUR);
+            self.hud_text(SHIELDS_POS, &text, HUD_COLOUR);
         }
         if let Some(text) = hud.hull_text() {
-            self.text(HULL_POS.0, HULL_POS.1, &text, HUD_COLOUR);
+            self.hud_text(HULL_POS, &text, HUD_COLOUR);
         }
         if hud.autopilot {
-            self.text(AUTOPILOT_POS.0, AUTOPILOT_POS.1, "Autopilot", HUD_COLOUR);
+            self.hud_text(AUTOPILOT_POS, "Autopilot", HUD_COLOUR);
         }
-        // F1099's `0x8622`: Set/Act at (2,148), then the position code puts
-        // Alt and the parent body's name at (266,139).
-        let (left, right) = hud.speed_columns(&self.font);
-        for (index, line) in left.iter().enumerate() {
-            self.text(
-                SPEED_POS.0,
-                SPEED_POS.1 + index * crate::messages::LINE_HEIGHT,
-                line,
-                HUD_COLOUR,
-            );
-        }
-        for (index, line) in right.iter().enumerate() {
-            self.text(
-                crate::hud::SPEED_RIGHT_POS.0,
-                crate::hud::SPEED_RIGHT_POS.1 + index * crate::messages::LINE_HEIGHT,
-                line,
-                HUD_COLOUR,
-            );
+        // F1099's `0x8620`..`0x8623`: the strings' own position codes put
+        // both columns' last line on row 149, ten rows a line.
+        for (x, y, line) in hud.speed_layout(&self.font) {
+            self.hud_text((x, y), &line, HUD_COLOUR);
         }
         if view.is_turret() {
             if let Some(lines) = hud.turret_lines() {
                 for (index, line) in lines.iter().enumerate() {
-                    self.text(
-                        TURRET_POS.0,
-                        TURRET_POS.1 + index * crate::messages::LINE_HEIGHT,
+                    self.hud_text(
+                        (TURRET_POS.0, TURRET_POS.1 + index * crate::hud::LINE_HEIGHT),
                         line,
                         TURRET_COLOUR,
                     );
                 }
             }
         }
+    }
+
+    /// F1399's text: F1589 draws every glyph through F1588, colour 0 one pixel
+    /// right and down, then the glyph in its colour.
+    fn hud_text(&mut self, (x, y): (usize, usize), message: &str, colour: u8) {
+        self.shadow_text(x as i32, y as i32, message, colour);
     }
 
     /// F961 + F962 at one `GameTics`: clear to F961's F1575 background, draw

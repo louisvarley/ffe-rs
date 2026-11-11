@@ -138,6 +138,10 @@ pub struct Flight {
     /// The hull temperature (`DATA_008804+0x1ec`, see `damage::HEAT_LIMIT`).
     #[serde(default)]
     pub hull_heat: u32,
+    /// `DATA_008886` (`player+0x10e`): seconds left of F1099's hull line. F1102
+    /// sets 30 on every F953 hit on the player's ship; F1007 counts it down.
+    #[serde(default)]
+    pub hull_display: u32,
     /// The original's shared random stream (`DATA_008818`/`DATA_008820`) for
     /// the damage and servicing rolls.
     #[serde(skip, default = "default_rng")]
@@ -216,6 +220,7 @@ impl Default for Flight {
             last_service_day: None,
             scoop_cooldown: 0.0,
             hull_heat: 0,
+            hull_display: 0,
             rng: default_rng(),
             death: None,
             missions: ffe_core::missions::State::default(),
@@ -953,6 +958,9 @@ impl Flight {
     }
 
     fn apply_hit(&mut self, damage: u32) -> ffe_core::laser::Damage {
+        // F953's message 11 (event 1) reaches F1102, which shows the hull line
+        // for 30 seconds whenever the player's own ship is hit.
+        self.hull_display = crate::hud::HULL_DISPLAY_SECONDS;
         let mut state = ffe_core::laser::DamageState {
             shields: self.shields[0].min(self.shields[1]),
             shields_max: self.shields[1],
@@ -998,6 +1006,17 @@ mod tests {
     use super::*;
     use ffe_core::collision::Contact;
     use ffe_core::laser::Damage;
+
+    /// F1102: any F953 hit on the player's ship, shield-only included, starts
+    /// the 30-second hull line; a new game has none (`DATA_008886 == 0`).
+    #[test]
+    fn a_hit_shows_the_hull_line_for_thirty_seconds() {
+        let mut flight = Flight::default();
+        assert_eq!(flight.hull_display, 0);
+        flight.shields = [100, 100];
+        assert_eq!(flight.take_damage(10, 100), Damage::Shields);
+        assert_eq!(flight.hull_display, 30);
+    }
 
     #[test]
     fn f289_refuels_a_tonne_up_to_the_drive_tank() {

@@ -8,23 +8,33 @@
 //! | player shields | `0x8624` (`Shields: %i%%`) | (2,1) | 15 | `80780-80820` |
 //! | player hull | `0x8638` (`Hull: %i.%i%%`) | (2,11) | 15 | `80821-80855` |
 //! | Autopilot | `0x8618` | (2,139) | 15 | `80736-80748` |
-//! | Set/Act/Alt | `0x8620`/`0x8622` | (2,148) and (266,139) | 15 | `80712-80764` |
+//! | Set/Act/Alt | `0x8620`..`0x8623` | ending at (2,149) and (266,149) | 15 | `80712-80764` |
 //! | turret Decn/Rotn | `0x8636` | (5,76) | 18 | `80700-80745` |
 //!
 //! Values: shields are `[ship+0xe0] * 100 / [ship+0xe2]` and are **not** drawn
 //! when the two words are equal; hull is `[ship+0xe4] * 250 / descriptor[+6]`
-//! (one decimal percentage) and only with `player+0x10e != 0`; Set is
+//! (one decimal percentage) and only while `player+0x10e` (`DATA_008886`) is
+//! non-zero: F1102 sets it to 30 when F953 reports a hit on the player's own
+//! ship (message 11, event 1) and F1007 counts it down by the whole-second
+//! events, so the line shows for 30 seconds after each hit. Set is
 //! `player+0x1b8`, Act `player+0xd8`, Alt `player+0xdc / 1000`, and the parent
 //! object's name is `DATA_009124`. Speeds go through F1393:
 //! `speed * 0x156 / 100` with one decimal and the ` km{` unit glyph below
 //! `0x4705d`, else `speed / 0x69` with two decimals and ` km|`.
 //!
-//! The original's string 0x8622 is
-//! `Set:<#>\rAct:<$>\xfe\x85\x8bAlt:<alt> m\r<parent>`: the Set/Act block at
-//! (2,148), then the position code 0xfe 0x85 0x8b puts Alt at x=266, y=139
-//! and the parent name on the next line. The port draws those columns at the
-//! same spots. The port's flight model keeps metres per second, so `main`
-//! converts to the original's ~0.1 m/s words before calling F1393.
+//! F1099 passes y = 0x94, but each of the four strings starts with its own
+//! position code (`0xfe x/2 y`, `ffedat.asm:18946-18952`), and F1589 steps 10
+//! rows per `\r` (its `push 0xa`):
+//!
+//! | string | left column | right column |
+//! |---|---|---|
+//! | `0x8620` | `Set` (2,139), `Act` (2,149) | parent (266,149) |
+//! | `0x8621` | `Act` (2,149) | parent (266,149) |
+//! | `0x8622` | `Set` (2,139), `Act` (2,149) | `Alt` (266,139), parent (266,149) |
+//! | `0x8623` | `Act` (2,149) | `Alt` (266,139), parent (266,149) |
+//!
+//! So both columns end on row 149. The port's flight model keeps metres per
+//! second, so `main` converts to the original's ~0.1 m/s words before F1393.
 //!
 //! The turret angles are `player+0x204` and `+0x206` scaled by `900 / 65536`
 //! (the shifts and multiplies at `80633-80647`); the second is negated.
@@ -35,9 +45,15 @@ use crate::messages::wrap;
 pub const SHIELDS_POS: (usize, usize) = (2, 1);
 pub const HULL_POS: (usize, usize) = (2, 11);
 pub const AUTOPILOT_POS: (usize, usize) = (2, 139);
-pub const SPEED_POS: (usize, usize) = (2, 148);
-/// F1099's position code `0xfe 0x85 0x8b` for the Alt and parent columns.
-pub const SPEED_RIGHT_POS: (usize, usize) = (266, 139);
+/// The left (Set/Act) and right (Alt/parent) columns' last rows: the strings'
+/// position codes `0xfe 0x01 0x95` and `0xfe 0x85 0x95`; a two-line column
+/// starts one line higher (`0x8b`).
+pub const SPEED_POS: (usize, usize) = (2, 149);
+pub const SPEED_RIGHT_POS: (usize, usize) = (266, 149);
+/// F1589's line step for `\r` (`push byte +0xa`).
+pub const LINE_HEIGHT: usize = 10;
+/// F1102's hull-display time in seconds (`mov dword [DATA_008886],0x1e`).
+pub const HULL_DISPLAY_SECONDS: u32 = 0x1e;
 pub const TURRET_POS: (usize, usize) = (5, 76);
 pub const HUD_COLOUR: u8 = 15;
 pub const TURRET_COLOUR: u8 = 18;
@@ -58,6 +74,8 @@ pub struct PlayerHud {
     /// `ship+0xe4` and its full value (descriptor mass * 4). Zero means the port
     /// has no hull state and draws nothing.
     pub hull: [u16; 2],
+    /// `player+0x10e` is non-zero: a hit in the last 30 seconds.
+    pub hull_shown: bool,
     /// `player+0x1b8` set speed, in the original's speed units; `None` while the
     /// original would use the Act-only string (`0x8620`).
     pub set_speed: Option<i32>,
@@ -90,7 +108,7 @@ impl PlayerHud {
     /// full word is mass * 4, so an undamaged hull reads 100.0%.
     pub fn hull_text(&self) -> Option<String> {
         let [current, full] = self.hull;
-        (full != 0).then(|| {
+        (self.hull_shown && full != 0).then(|| {
             let per_mille = u32::from(current) * 1000 / u32::from(full);
             format!("Hull: {}.{}%", per_mille / 10, per_mille % 10)
         })
@@ -120,8 +138,8 @@ impl PlayerHud {
         }
     }
 
-    /// `0x8622` (or the Act-only `0x8621`): the left Set/Act block and the right
-    /// Alt/parent column, both at F1099's spots. Wrapped at F1399's width.
+    /// `0x8620`..`0x8623`: the left Set/Act block and the right Alt/parent
+    /// column, wrapped at F1399's width; [`Self::speed_layout`] places them.
     pub fn speed_columns(&self, font: &BitmapFont) -> (Vec<String>, Vec<String>) {
         let mut left = Vec::new();
         if let Some(set) = self.set_speed.filter(|_| !self.autopilot) {
@@ -144,6 +162,22 @@ impl PlayerHud {
             right.extend(wrap(font, &self.registration, SPEED_WRAP));
         }
         (left, right)
+    }
+
+    /// Every line of the speed block with its position: each column ends on
+    /// row 149 and steps [`LINE_HEIGHT`] rows a line.
+    pub fn speed_layout(&self, font: &BitmapFont) -> Vec<(usize, usize, String)> {
+        let (left, right) = self.speed_columns(font);
+        let place = |(x, last): (usize, usize), lines: Vec<String>| {
+            let first = last.saturating_sub(lines.len().saturating_sub(1) * LINE_HEIGHT);
+            lines
+                .into_iter()
+                .enumerate()
+                .map(move |(index, line)| (x, first + index * LINE_HEIGHT, line))
+        };
+        place(SPEED_POS, left)
+            .chain(place(SPEED_RIGHT_POS, right))
+            .collect()
     }
 
     /// The Act-only speed block, kept for callers that draw one column.
@@ -209,15 +243,24 @@ mod tests {
         let hud = PlayerHud {
             // 1152 * 4 = 4608 full; 2304 is half.
             hull: [2304, 4608],
+            hull_shown: true,
             ..PlayerHud::default()
         };
         assert_eq!(hud.hull_text().as_deref(), Some("Hull: 50.0%"));
         let full = PlayerHud {
             hull: [4608, 4608],
+            hull_shown: true,
             ..PlayerHud::default()
         };
         assert_eq!(full.hull_text().as_deref(), Some("Hull: 100.0%"));
         assert_eq!(PlayerHud::default().hull_text(), None);
+        // No hit in the last 30 seconds (`player+0x10e == 0`): no line, as on
+        // the new game's pad.
+        let quiet = PlayerHud {
+            hull_shown: false,
+            ..full
+        };
+        assert_eq!(quiet.hull_text(), None);
     }
 
     #[test]
@@ -252,9 +295,23 @@ mod tests {
         // so only Act is drawn instead of a frozen `Set:0.0`.
         let no_model = PlayerHud {
             set_speed: None,
-            ..hud
+            ..hud.clone()
         };
         assert_eq!(no_model.speed_columns(&font()).0, ["Act:61.5 km{"]);
+        // The strings' position codes: both columns end on row 149, ten rows
+        // a line (the executed original's Hope start frame).
+        let at = |hud: &PlayerHud| {
+            hud.speed_layout(&font())
+                .into_iter()
+                .map(|(x, y, _)| (x, y))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(at(&hud), [(2, 139), (2, 149), (266, 139), (266, 149)]);
+        let low = PlayerHud {
+            altitude: None,
+            ..no_model
+        };
+        assert_eq!(at(&low), [(2, 149), (266, 149)]);
     }
 
     #[test]

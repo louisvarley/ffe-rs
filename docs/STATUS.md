@@ -54,7 +54,9 @@ depends on them.
   right Shift only, F1037 is off while the F2 status screen or the map shows,
   and a recorded-input chain test covers the release gate, reverse speed,
   engines off and reload); `parity-07` the original Hope start
-  and cockpit view; `parity-08` the full third-person explosion before GAME OVER.
+  and cockpit view (11 November: the start frame's HUD text, message window
+  and hull line now match the executed original pixel for pixel; an orange
+  tower's depth, one small object and the scanner contacts remain); `parity-08` the full third-person explosion before GAME OVER.
 - **P1** `parity-09` the original's docking contacts instead of the corridor
   tests and pushes; `parity-10` the indoor departure placement and moving
   lift/door state; `parity-11` the autopilot's world and target adapters,

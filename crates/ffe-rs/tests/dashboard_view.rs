@@ -123,6 +123,7 @@ fn the_player_hud_texts_are_at_f1099s_positions() {
     screen.hud = PlayerHud {
         shields: [128, 256],
         hull: [2304, 4608],
+        hull_shown: true,
         set_speed: Some(250),
         actual_speed: 180,
         altitude: Some(1200),
@@ -134,12 +135,13 @@ fn the_player_hud_texts_are_at_f1099s_positions() {
     let with_hud = screen.logical_pixels().to_vec();
     save(&screen, "dashboard-hud.ppm");
 
-    // Shields (2,1), hull (2,11), Set/Act (2,148) and its Alt/registration lines.
+    // Shields (2,1), hull (2,11), Set/Act (2,139)/(2,149) and the Alt/parent
+    // column ending on row 149.
     assert!(changed(&without, &with_hud, 2, 150, 1, 10) > 20);
     assert!(changed(&without, &with_hud, 2, 150, 11, 20) > 20);
-    assert!(changed(&without, &with_hud, 2, 150, 148, 176) > 20);
+    assert!(changed(&without, &with_hud, 2, 150, 139, 158) > 20);
     // The port's old SPEED line at (3,13) and status block at (3,120) stay clear.
-    assert_eq!(changed(&without, &with_hud, 0, 195, 118, 147), 0);
+    assert_eq!(changed(&without, &with_hud, 0, 195, 118, 138), 0);
 
     // Autopilot at (2,139).
     screen.hud.autopilot = true;
@@ -244,6 +246,7 @@ fn the_default_start_draws_the_sakers_hull_and_equipment_page() {
     screen.hud = PlayerHud {
         shields: state.shields,
         hull: state.hull,
+        hull_shown: state.hull_display != 0,
         set_speed: Some(0),
         actual_speed: 0,
         altitude: Some(0),
@@ -273,11 +276,14 @@ fn the_default_start_draws_the_sakers_hull_and_equipment_page() {
     let after = screen.logical_pixels().to_vec();
     save(&screen, "dashboard-saker-default.ppm");
 
-    // F1099's hull row draws 100.0% from 112/112; the shields row stays clear
-    // because +0xe0 == +0xe2 (F1099 suppresses a pristine/absent shield).
-    assert!(
-        changed(&before, &after, 2, 150, 11, 20) > 20,
-        "the Saker's hull line did not draw"
+    // A new game has no hit yet, so `player+0x10e` (F1102's 30-second hull
+    // line) is zero and F1099 draws no hull row, as the executed original's
+    // Hope start frame shows; the shields row stays clear because +0xe0 ==
+    // +0xe2 (F1099 suppresses a pristine/absent shield).
+    assert_eq!(
+        changed(&before, &after, 2, 150, 11, 20),
+        0,
+        "a new game draws no hull line"
     );
     assert_eq!(changed(&before, &after, 2, 150, 1, 10), 0);
     // F1120's two missiles are KL760 0x82 words: image 2 on records 0x3b/0x3c.
@@ -286,6 +292,7 @@ fn the_default_start_draws_the_sakers_hull_and_equipment_page() {
         screen.hud = PlayerHud {
             shields: [0, 0],
             hull: [112, 112],
+            hull_shown: false,
             set_speed: Some(0),
             actual_speed: 0,
             altitude: Some(0),

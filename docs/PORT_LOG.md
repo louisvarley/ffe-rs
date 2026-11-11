@@ -1,5 +1,30 @@
 # Port log
 
+## 2026-11-11 — PAR-07: the Hope start frame's text matches the original
+
+The port's `--capture-start` frame, diffed against the executed original's
+Hope start (`--game-frame`, 320x200 indexed): 2187 differing pixels before,
+1003 after, none of them text.
+
+- F1099's four Set/Act/Alt strings (`0x8620`..`0x8623`) start with position
+  codes: Set (2,139) and Act (2,149); Alt (266,139) and the parent (266,149).
+  F1589 steps 10 rows per line (`push 0xa`). The port drew from (2,148) with
+  8-row lines. `PlayerHud::speed_layout` places both columns ending on row
+  149; the turret lines use the same 10-row step.
+- F1399 draws every HUD line through F1588: colour 0 one pixel right and down,
+  then the glyph. The port drew no shadow.
+- F272's message window draws colour 0 at (0xc4, y) first, then the text at
+  (0xc3, y - 1) in its colours. The port had the passes the other way round,
+  with colour 4 as the shadow, so the date sat a pixel right and down.
+- The Hull line shows only while `DATA_008886` (`player+0x10e`) is non-zero.
+  F953 broadcasts message 11 (event 1) on every hit; the flight module's F1103
+  hands it to F1102, which sets 30 seconds for the player's own ship, and
+  F1007 counts it down with the whole-second events. `Flight::hull_display`
+  ports it; a new game shows no Hull line, as the original's frame does.
+- Still different: an orange tower's stem (drawn in front of a dark building
+  in the original), a small red-roofed object at about (52-65, 76-82), and the
+  scanner contacts. Object placement and depth, recorded on PAR-07.
+
 ## 2026-11-10 — PAR-06 done: F1037's module gate and the recorded key chain
 
 F1037 starts `cmp byte [DATA_008630],0x0; jnl` and returns: the set-speed keys
