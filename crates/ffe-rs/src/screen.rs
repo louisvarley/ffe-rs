@@ -2604,8 +2604,10 @@ impl Screen {
         for text in prefs.texts() {
             self.shadow_text(text.x, text.y, text.text, text.colour);
         }
-        if let Some(row) = rows.get(prefs.selected) {
-            self.prefs_bullet(row.x - 9, row.y + 2);
+        if prefs.keyboard {
+            if let Some(row) = rows.get(prefs.selected) {
+                self.prefs_bullet(row.x - 9, row.y + 2);
+            }
         }
         self.present();
     }

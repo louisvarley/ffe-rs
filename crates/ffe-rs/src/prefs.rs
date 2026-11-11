@@ -255,6 +255,9 @@ pub struct Prefs {
     pub page: usize,
     /// The row the port's keyboard navigation marks (not in the original).
     pub selected: usize,
+    /// True once a key has moved the selection; the marker is not drawn for
+    /// a mouse-only user, where it would be a stray dot.
+    pub keyboard: bool,
     pub shape_detail: usize,
     pub space_colour: usize,
     pub others: [bool; 10],
@@ -280,6 +283,7 @@ impl Default for Prefs {
             open: false,
             page: MAIN,
             selected: 0,
+            keyboard: false,
             shape_detail: 2,
             space_colour: 4,
             others: [
@@ -329,6 +333,7 @@ impl Prefs {
             self.open = true;
             self.page = MAIN;
             self.selected = 0;
+            self.keyboard = false;
             Activate::None
         }
     }
@@ -716,12 +721,6 @@ impl Prefs {
                     text: "Space Colour:",
                     colour: 16,
                 });
-                texts.push(Text {
-                    x: 32,
-                    y: 146,
-                    text: "", // Placeholder for empty text
-                    colour: 18,
-                });
             }
             SOUND => {
                 texts.push(Text {
@@ -992,6 +991,7 @@ impl Prefs {
             return Activate::None;
         };
         self.selected = index;
+        self.keyboard = false;
         self.apply(row.action)
     }
 
@@ -1002,6 +1002,9 @@ impl Prefs {
             return Activate::None;
         }
         let rows = self.rows();
+        if key != Key::Escape {
+            self.keyboard = true;
+        }
         match key {
             Key::Up | Key::Left => {
                 if !rows.is_empty() {
