@@ -38,7 +38,7 @@ window.FFE_BURNDOWN = {
         {"id": "parity-13", "title": "[P1] Complete hyperjump initiation, transit, misjump and source arrival", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-13"},
         {"id": "parity-14", "title": "[P1] Verify source fuel scooping gates and capacity changes", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-14"},
         {"id": "parity-15", "title": "[P1] Replace NPC speed caps and simplified flight state transitions", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-15"},
-        {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
+        {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "done", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
         {"id": "parity-17", "title": "[P1] Restore source RNG state and call order for gameplay", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-17"},
         {"id": "parity-18", "title": "[P1] Persist and restore the complete live simulation state", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-18"},
         {"id": "parity-19", "title": "[P1] Remove the non-source 7-tonne starting hold and reconcile fitted capacity", "status": "done", "version": "source-audit", "priority": "P1", "auditId": "PAR-19"},
@@ -1397,6 +1397,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-11",
       remaining: 78,
       note: "PAR-16 advanced (not closed): F688's spawn is the original's draw for draw (ffe_core::spawn). The default start's 17 ships match the executed original slot for slot and its RNG exit state, and Ross 154 matches too. Open: F702 system-wide placement (needs PAR-15's AI), F238 police response, start types 2 and 3."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 77,
+      note: "parity-16 done (owner closed it): F688 spawns the original's ships draw for draw, with the RNG ledger from the F147 seed to the end of F688 matching the executed original on the default start and Ross 154. The leftovers moved to parity-15: F702 system-wide placement (F1506/F1508) and F238's police response; start types 2 and 3 are not traced."
     }
   ]
 };
