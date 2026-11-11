@@ -12,12 +12,12 @@ the dashboard first, then regenerate or edit this page to match.
 
 ## Summary
 
-**78 of 203 work items are open: 64 in progress, 14 not started.** The foundation,
+**78 of 203 work items are open: 65 in progress, 13 not started.** The foundation,
 model-engine, visible-slice and audio milestones are complete (45 items).
 
 | Area | Open | In progress | Not started | Done / total |
 |---|---:|---:|---:|---:|
-| Parity blockers (2026-10-26 audit) | 20 | 18 | 2 | 4/24 |
+| Parity blockers (2026-10-26 audit) | 20 | 19 | 1 | 4/24 |
 | Flight core | 11 | 10 | 1 | 3/14 |
 | Galaxy and systems | 7 | 7 | 0 | 6/13 |
 | Gameplay systems | 21 | 20 | 1 | 22/43 |
@@ -27,7 +27,7 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 | Saves | 2 | 0 | 2 | 3/5 |
 | Classic split cleanup | 0 | 0 | 0 | 2/2 |
 | Release and sign-off | 5 | 0 | 5 | 2/7 |
-| **Total** | **78** | **64** | **14** | **125 / 203** |
+| **Total** | **78** | **65** | **13** | **125 / 203** |
 
 ## Critical path
 
@@ -61,7 +61,7 @@ model-engine, visible-slice and audio milestones are complete (45 items).
 - [~] `parity-13` **P1** Complete hyperjump initiation, transit, misjump and source arrival
 - [~] `parity-14` **P1** Verify source fuel scooping gates and capacity changes
 - [~] `parity-15` **P1** Replace NPC speed caps and simplified flight state transitions
-- [ ] `parity-16` **P1** Restore system-wide encounter, station traffic and police placement rules
+- [~] `parity-16` **P1** Restore system-wide encounter, station traffic and police placement rules
 - [~] `parity-17` **P1** Restore source RNG state and call order for gameplay
 - [~] `parity-18` **P1** Persist and restore the complete live simulation state
 - [~] `parity-20` **P1** Replay market, shipyard, BBS and daily mission events using source state

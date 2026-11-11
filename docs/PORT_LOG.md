@@ -243,6 +243,23 @@ Every scripted capture (intro 13, display 7, start 150, traffic 7, game-over
 35, planet 1) is byte-identical to the build before the split. 867 workspace
 tests pass (three Modern-terrain unit tests went with the code).
 
+## 2026-11-11 — PAR-16: the new game's traffic follows F688 (started)
+
+The executed original's default start (`--npc-trace 260 0x39`, frame 200) holds
+six F691 bay ships at three ports, an F699 aux trader, one F689 trader, two
+pirate-group ships and no police ship. The port's new game had three bay ships,
+no aux trader and a police ship 3 km off. The new game's F688 pass
+(`System::start`) now spawns no police, and the port's traffic caps are lifted
+(`MAX_SHIPS` 9 to 40, `MAX_BAY_SHIPS` 3 to F691's own 25, no trader, pirate or
+aux limits): F688's rolls stand. Two unit tests pin both. Workspace tests pass.
+
+Not done: the draw ledger. The port's new game rolls 0 traders, 13 bay ships and
+0 aux traders over 12 places; the original rolled 1, 6 and 1, so the same ships
+do not appear until every draw before F688 matches (PAR-17). Tracing F922 in the
+reference needs `DATA_007217` exported and a NASM rebuild (NASM is not installed
+here). I could not reproduce the earlier start-frame pixel count, so no frame
+figure is claimed.
+
 ## 2026-11-10 — PAR-01: F152's whole-second events from the day fraction
 
 F938's events (shield recharge, hull repair, thrust energy, laser and hull

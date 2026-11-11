@@ -755,15 +755,14 @@ pub const COMBAT_RANGE: f64 = (1u64 << 23) as f64;
 pub const FLASH_SECONDS: f64 = 0.25;
 /// How long the port keeps a destroyed ship's marker before removing it.
 pub const DEATH_SECONDS: f64 = 0.6;
-/// The port caps the original's traffic count so a system stays legible. The
-/// original's F927 allocates slots from 0x72 down, which is far more than a
-/// player can follow. The cap now also has to hold the station's own traffic
-/// (F691's bay ships and F699's aux traders) alongside F689/F698's ships.
-pub const MAX_SHIPS: usize = 9;
-/// The port's cap on F691's docked traders (the source caps its `RND(4*places)`
-/// roll at 25). Three leaves room for the arriving traders, F699's aux trader
-/// and F698's patrol under [`MAX_SHIPS`].
-pub const MAX_BAY_SHIPS: usize = 3;
+/// The most ships one system keeps: the port's object budget, not F688's rolls.
+/// F688 draws every kind's count itself (the executed original's default start
+/// holds 17 ships: six bay ships, an aux trader, a trader and two pirate
+/// groups), so this only bounds a rare high roll: four traders, thirty pirate
+/// attempts of several ships and 25 bay ships can exceed the object array.
+pub const MAX_SHIPS: usize = 40;
+/// F691's cap on its `RND(4 * places)` roll (`cmp ebx,0x19`, `ffe.asm:45956`).
+pub const MAX_BAY_SHIPS: usize = 25;
 /// Station traffic's cruise floor. [`Spec::top_speed`]'s thrust/mass ratio
 /// clamps a heavy freighter to 2,000 mm/s, which would put F745's five-kilometre
 /// approach half an hour away; FFE's own units do not scale to the port's
@@ -3163,19 +3162,21 @@ pub fn spawn(
         // its pirate group is the same every run.
         counts.pirates = (system.details.bytes[1] as usize).clamp(1, 2);
     } else {
-        // F688 can roll zero of every kind. Keep only the port's per-kind caps.
-        counts.traders = counts.traders.min(2);
-        counts.pirates = counts.pirates.min(2);
+        // F688 can roll zero of every kind; its draws stand.
     }
     counts.thargoids = counts.thargoids.min(MAX_SHIPS);
     counts.bay_ships = counts.bay_ships.min(MAX_BAY_SHIPS);
-    if options.station_traffic {
-        counts.aux_traders = counts.aux_traders.min(1);
-    } else {
+    if !options.station_traffic {
         counts.bay_ships = 0;
         counts.aux_traders = 0;
     }
-    counts.police = counts.police.min(1);
+    // F688 has no police draw, and the executed original's default start holds
+    // no police ship (type 0xe) at all: the new game's pass spawns none.
+    counts.police = if system.start {
+        0
+    } else {
+        counts.police.min(1)
+    };
     let limit = MAX_SHIPS;
 
     let orbit = (anchor.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
@@ -3799,6 +3800,63 @@ mod tests {
         assert_eq!(restored[0].damage.hull, 5);
         assert!(restored[0].is_hostile());
         assert_eq!(restored[0].state, State::Attack);
+    }
+
+    /// The executed original's default start (`--npc-trace 260 0x39`) holds no
+    /// police ship (type 0xe) and F688 has no police draw, so the new game's
+    /// pass spawns none; a later entry keeps the port's patrol.
+    #[test]
+    fn the_new_game_pass_spawns_no_police() {
+        let anchors = [anchor(4), anchor(7)];
+        let run = |start: bool| {
+            let mut system = system(0);
+            system.start = start;
+            spawn(
+                [0, 0, 0],
+                [0.0, 0.0, 1.0],
+                &anchors,
+                &system,
+                0,
+                &mut Random::new(7, 0x1234),
+                SpawnOptions::default(),
+                spec,
+            )
+        };
+        assert!(run(true).iter().all(|ship| ship.role != Role::Police));
+        assert!(run(false).iter().any(|ship| ship.role == Role::Police));
+    }
+
+    /// F688's rolls stand: the old per-kind caps (two traders, three bay
+    /// ships, one aux trader) are gone, and only F691's own 25 and the object
+    /// budget bound a spawn. A seed that rolls more than three bay ships keeps
+    /// them all.
+    #[test]
+    fn f688s_rolls_are_not_capped_below_the_source() {
+        let places = 12;
+        let anchors: Vec<Anchor> = (0..places).map(anchor).collect();
+        let found = (1..20_000u32).find_map(|a| {
+            let b = a.wrapping_mul(0x9e37_79b9);
+            let counts = counts_with_places(&system(0), places, &mut Random::new(a, b));
+            (counts.bay_ships > 3).then_some((a, b, counts))
+        });
+        let (a, b, counts) = found.expect("a seed rolls more than three bay ships");
+        assert!(counts.bay_ships <= 0x19);
+        let ships = spawn(
+            [0, 0, 0],
+            [0.0, 0.0, 1.0],
+            &anchors,
+            &system(0),
+            0,
+            &mut Random::new(a, b),
+            SpawnOptions::default(),
+            spec,
+        );
+        let docked = ships
+            .iter()
+            .filter(|ship| ship.state == State::Docked)
+            .count();
+        assert_eq!(docked, counts.bay_ships);
+        assert!(ships.len() <= MAX_SHIPS + 1);
     }
 
     #[test]

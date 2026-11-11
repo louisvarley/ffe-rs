@@ -38,7 +38,7 @@ window.FFE_BURNDOWN = {
         {"id": "parity-13", "title": "[P1] Complete hyperjump initiation, transit, misjump and source arrival", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-13"},
         {"id": "parity-14", "title": "[P1] Verify source fuel scooping gates and capacity changes", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-14"},
         {"id": "parity-15", "title": "[P1] Replace NPC speed caps and simplified flight state transitions", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-15"},
-        {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "todo", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
+        {"id": "parity-16", "title": "[P1] Restore system-wide encounter, station traffic and police placement rules", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-16"},
         {"id": "parity-17", "title": "[P1] Restore source RNG state and call order for gameplay", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-17"},
         {"id": "parity-18", "title": "[P1] Persist and restore the complete live simulation state", "status": "in-progress", "version": "source-audit", "priority": "P1", "auditId": "PAR-18"},
         {"id": "parity-19", "title": "[P1] Remove the non-source 7-tonne starting hold and reconcile fitted capacity", "status": "done", "version": "source-audit", "priority": "P1", "auditId": "PAR-19"},
@@ -1377,6 +1377,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-11",
       remaining: 78,
       note: "Review of twelve closures another session left uncommitted. Eleven (flight-13, world-13, gameplay-3, gameplay-18, gameplay-25, gameplay-26, gameplay-34, gameplay-38, gameplay-39, gameplay-40, ui-12) rested on 2026-10-25/26 notes that the parity audit superseded when it reopened or tied them to its items, which remain open, so they stay in progress. v0.48-17 moves to in progress, not done: the CD 1.01 census now runs and matches the floppy (448 of 466 at top level; 16 child-only models, model 0x59's truncated block and the null slot 149 remain)."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 78,
+      note: "PAR-16 started (no new closure): the new game's F688 pass spawns no police (the executed original's default start holds none) and the port's per-kind traffic caps are lifted so F688's rolls stand within F691's 25 and a 40-ship budget. The draw ledger still differs (port 0 traders, 13 bay ships, 0 aux; original 1, 6, 1), which needs PAR-17 and an F922 trace in the reference."
     }
   ]
 };

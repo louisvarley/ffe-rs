@@ -111,8 +111,8 @@ resume transit, instead of orbiting for ever.
   `b = rotl5(b_old)`, result `(a & 0xffff) * limit >> 16`).
 - F688's count fields (`Details::bytes[3]` for traders/F699's aux count,
   `bytes[1]`
-  for patrol groups, `bytes[2]` for the port's police group) with a cap of
-  `MAX_SHIPS = 9` (`MAX_BAY_SHIPS = 3` for the F691 branch). A
+  for patrol groups, `bytes[2]` for the port's police group) with an object
+  budget of `MAX_SHIPS = 40` and F691's own cap `MAX_BAY_SHIPS = 25`. A
   normal system entry asks F688 for its own counts and **can spawn none**: the
   original may roll zero traffic. The port's old "at least one trader and one
   pirate group" guarantee is now `SpawnOptions::CAPTURE`, used only by
@@ -637,10 +637,10 @@ there), and launch straight into F733's countdown.
 - **Fleeing trigger.** The 25 % hull jump-out is the port's; the original has
   the states but no trigger. Keep it, remove it, or replace it with the
   original's position-based F737 condition.
-- **Traffic cap.** This slice raised `MAX_SHIPS` from 5 to 9 and added
-  `MAX_BAY_SHIPS = 3` so a station's own F691/F699 ships do not crowd out F689/
-  F698's traffic. The original's F927 has far more slots. Keep these caps, or
-  let F688's counts and F927's slot rules produce the source's many more ships.
+- **Traffic cap (superseded 2026-11-11).** The caps (`MAX_SHIPS` 9, two traders,
+  two pirate groups, one aux trader, `MAX_BAY_SHIPS` 3) are lifted: F688's rolls
+  stand, bounded by F691's own 25 and a 40-ship object budget. The executed
+  original's default start holds 17 ships.
 - **F699 semantics.** The source's `F772(0xf)` is the Lynx/LRC bulk carrier
   list, and state 0x0d holds, so the port spawns no "shuttle route": the previous
   port versions sent these ships to a station, which was an invention. Decide
@@ -710,6 +710,23 @@ now rolls it, with `System::start` for the new game's pass. The scripted
 capture (`SpawnOptions::guarantee`) keeps the record's count so its frames
 stay the same. Pirate groups from a real entry spawn `PIRATE_LURK` (25 km)
 outside the anchor orbit.
+
+## Start pass: no police, F688's counts uncapped (PAR-16, 2026-11-11)
+
+The executed original (`--npc-trace 260 0x39`, frame 200) holds, at the
+default start: six F691 bay ships parked at three ports (one model 44 on an
+Old Blackelk pad), an F699 aux trader (model 71, type 0xf), one F689 trader in
+transit and two pirate-group ships (type 0xfb), and **no police ship** (type
+0xe). F688 has no police draw, so the new game's pass (`System::start`) now
+spawns none; a later entry keeps the port's patrol until F238/F783's response
+is ported. The per-kind caps were lifted (see the traffic cap above).
+
+Still open: the draw ledger. With the port's RNG the new game rolls
+traders 0, bay 13, aux 0, pirates 0 over 12 places; the original rolled one
+trader, six bay ships and an aux trader. They only agree once every draw
+before F688 matches the original (PAR-17). The reference adapter cannot trace
+F922's calls yet: `DATA_007217` is not exported, so it needs a NASM rebuild
+with a hook.
 
 ## Removed: Advanced NPCs (2026-11-11)
 

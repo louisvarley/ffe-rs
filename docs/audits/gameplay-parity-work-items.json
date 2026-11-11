@@ -197,13 +197,14 @@
   "id": "PAR-16",
   "priority": "P1",
   "title": "Restore system-wide encounter, station traffic and police placement rules",
-  "status": "todo",
+  "status": "in-progress",
   "certainty": "Confirmed gameplay substitute",
   "finding": "F688 counts/model tables are present, but spawn placement, anchor orbit, station selection, police reconstruction and reduced traffic give-up/cruise rules change who appears and how encounters unfold.",
   "source": "F688/F691/F702/F762/F783/F238",
   "implementation": "crates/ffe-core/src/npc.rs:760,2510,2671,2804; crates/ffe-rs/src/navigation.rs:3197",
   "acceptance": "For a fixed source seed compare all live object slots/roles/positions, station bay occupancy, launch times, arrivals, police responses and persistence through a jump; include mission-gated Thargoids.",
-  "dependencies": "PAR-15, PAR-17, gameplay-7, gameplay-11"
+  "dependencies": "PAR-15, PAR-17, gameplay-7, gameplay-11",
+  "progress": "2026-11-11: the executed original's default start (--npc-trace 260 0x39, frame 200) holds six F691 bay ships at three ports, an F699 aux trader, one F689 trader, two pirate-group ships (type 0xfb) and no police. The new game's F688 pass now spawns no police, and the port's per-kind caps (two traders, two pirate groups, one aux trader, three bay ships, nine ships) are lifted: F688's rolls stand within F691's 25 and a 40-ship budget. Open: the draw ledger (the port's new game rolls 0 traders, 13 bay ships and 0 aux over 12 places; the original rolled 1, 6 and 1), which needs PAR-17's exact call order and an F922 trace in the reference (DATA_007217 is not exported, and NASM is needed to rebuild it); F702's system-wide placement; the police response after F238/F783."
  },
  {
   "id": "PAR-17",
