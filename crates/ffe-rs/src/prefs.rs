@@ -719,7 +719,7 @@ impl Prefs {
                 texts.push(Text {
                     x: 32,
                     y: 146,
-                    text: "This port always draws full shape detail.",
+                    text: "", // Placeholder for empty text
                     colour: 18,
                 });
             }
