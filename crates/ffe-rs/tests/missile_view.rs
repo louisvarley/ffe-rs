@@ -92,11 +92,16 @@ fn lock_launch_hit_and_kill_with_frames() {
     let viewer = ModelViewer::new(&cache).unwrap();
     let mut screen = Screen::new(&cache).unwrap();
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
+    // The new game's own F688 roll has no pirates (F686's safe start), so the
+    // scripted frame asks for the capture's guaranteed pirate (as `npc_view`).
+    let at = nav.station().map(|(_, at)| at).expect("a start station");
+    let forward = nav.bodies[nav.docked.expect("docked")].orientation[2];
+    nav.respawn_traffic(&cache, at, forward);
     let index = nav
         .ships
         .iter()
         .position(|ship| ship.role == Role::Pirate)
-        .unwrap_or(0);
+        .expect("the capture's pirate");
     let target = nav.ships[index].position;
     let target_id = nav.ships[index].id;
     // Inside F758's 131 m proximity fuse, 120 m behind the ship.

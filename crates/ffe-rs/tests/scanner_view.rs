@@ -114,15 +114,20 @@ fn scanner_view(
 fn setup(
     cache: &ffe_content::VerifiedCache,
 ) -> (Navigator, ModelViewer, Screen, Flight, ViewState, usize) {
-    let nav = Navigator::new_game(cache, 1).unwrap();
+    let mut nav = Navigator::new_game(cache, 1).unwrap();
     let viewer = ModelViewer::new(cache).unwrap();
     let screen = Screen::new(cache).unwrap();
+    // The new game's own F688 roll has no pirates (F686's safe start), so the
+    // scripted frame asks for the capture's guaranteed pirate (as `npc_view`).
+    let at = nav.station().map(|(_, at)| at).expect("a start station");
+    let forward = nav.bodies[nav.docked.expect("docked")].orientation[2];
+    nav.respawn_traffic(cache, at, forward);
     let unit = ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT;
     let index = nav
         .ships
         .iter()
         .position(|ship| ship.role == ffe_core::npc::Role::Pirate)
-        .unwrap_or(0);
+        .expect("the capture's pirate");
     let target = nav.ships[index].position;
     let from_mm = [target[0], target[1], target[2] - 200_000];
     let from = from_mm.map(|v| v as f64 / unit);
@@ -176,10 +181,17 @@ fn system_traffic_contacts_tunnels_and_targeter_blink() {
     screen.draw(&state, views, Some(&viewer), true, "");
     save(&screen, "scanner-system-empty.ppm");
     let no_contacts = screen.logical_pixels().to_vec();
-    assert!(
-        changed(&with_contacts, &no_contacts, SCANNER_AREA) > 20,
-        "the traffic contact did not draw on the scanner"
-    );
+    // F1569's mark is two 2-pixel-wide bars from one row above the contact
+    // down to it, plus the stalk: a level contact (stalk 0) is two 2x2 boxes.
+    let drawn = changed(&with_contacts, &no_contacts, SCANNER_AREA);
+    if mark.stalk == 0 {
+        assert_eq!(drawn, 8, "the level contact's two 2x2 bars ({mark:?})");
+    } else {
+        assert!(
+            drawn > 8,
+            "the contact and its stalk ({drawn} pixels, {mark:?})"
+        );
+    }
 
     // The globe/rings: the orientation overlay changes the scanner art.
     screen.scanner = Some(scanner::View {
