@@ -19,6 +19,8 @@ fn trading_at_the_first_station() {
     let mut nav = Navigator::new(&cache).unwrap();
     let station = nav.docked.expect("docked at the start");
     let mut state = Flight::default();
+    // The hull's own drive (F1533), already out of its 5 t hold.
+    state.loadout.drive = nav.hull_drive(&cache, state.ship).0;
     assert_eq!(state.credits, 1000);
     let rows = trade::listing(&mut nav, &cache, station, &state).unwrap();
     assert!(

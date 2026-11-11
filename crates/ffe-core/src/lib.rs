@@ -56,6 +56,7 @@ pub mod second_events;
 pub mod sector;
 pub mod shipyard;
 mod shipyard_table;
+pub mod spawn;
 pub mod star_points;
 pub mod status;
 pub mod surface;

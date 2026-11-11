@@ -243,6 +243,37 @@ Every scripted capture (intro 13, display 7, start 150, traffic 7, game-over
 35, planet 1) is byte-identical to the build before the split. 867 workspace
 tests pass (three Modern-terrain unit tests went with the code).
 
+## 2026-11-11 — PAR-16: F688's ships are the original's
+
+`ffe_core::spawn` ports F688's own draws call for call: F635/F658 (the model),
+F772/F773/F774 (the hull's outfit: drive, fuel, laser, shield, pylons, gadgets),
+F689/F690 (traders and Thargoids with F775/F776's destination and fuel check,
+F857/F870/F852/F903), F691 (bay ships), F699/F701 (the aux carrier) and F694-F697
+(pirate groups). With `bbs` (F622) the shared pair now follows the executed
+original from the F147 seed through the whole new-game frame.
+
+- Default start (Old Blackelk): 2 traders (one survives: its destination search
+  fails four times for the first, once-and-done for the second), 6 bay ships,
+  1 aux carrier, 3 pirate groups; the 17 models are the original's object table
+  slot for slot (trader 65; bays 65, 44, 44, 45, 64, 59; aux 71; pirates 36,
+  28, 48, 22, 43 and four 23). The pair leaves F688 in `654ec13e 08573e56`.
+- Ross 154 (start type 1): enters F688 in `c1ff509f 1f7a567d` and leaves in
+  `8eb9e749 d2cc2b66`, both the original's.
+- `npc::spawn_plan` builds the port's `NpcShip`s from the plan (models, roles,
+  places, bounty rows); positions and flight state are still the port's. The
+  scripted capture (`respawn_traffic`) keeps the old guaranteed-trader spawn.
+- The bays are counted `0..=bays` per place (F650), the player's own taken.
+- Markets are no longer created for every place at system entry:
+  `Navigator::peek_market` reads a station's stock for F641 without recording it
+  (saves and market tests expect only visited markets).
+- Tests: `bbs_reference.rs` (default start twice, Ross 154). Old ignored tests
+  that assumed police at the new game (`firing_at_hope...`) now describe a start
+  with none; the F783 part uses the capture spawn.
+- Still open on PAR-16: F702's system-wide placement (F1506/F1508 put ships on
+  a sphere near 1e15 units; the port's AI cannot fly at those distances yet,
+  PAR-15), F238's police response (the port's patrol outside the new game is a
+  reconstruction), and start types 2 and 3 (the port maps them to Ross 154).
+
 ## 2026-11-11 — Play-through bugs: ship change, drives and station time
 
 Found by replaying the owner's recording (`--replay` with `FFE_TRACE=1`).

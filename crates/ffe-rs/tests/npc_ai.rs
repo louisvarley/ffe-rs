@@ -346,14 +346,18 @@ fn firing_at_hope_is_fined_and_shows_f236s_message() {
     assert_eq!(report.offence.fine, 600);
     assert_eq!(report.offence.charged, 6_000);
     assert!(nav.legal.wanted);
-    assert!(nav.legal.alert);
+    // F236 sets only the wanted bit (`DATA_008646`). The chase flag
+    // (`DATA_008647`) is F238's, set while a police object exists, and the
+    // executed original's default start has none, so nothing is alerted.
+    assert!(!nav.legal.alert);
     // F236's ledger index is DATA_008996, the system's jurisdiction (not the
     // witness ordinal used by the proximity check above).
     assert_eq!(nav.legal.fines[nav.jurisdiction], 6_000);
     // F236 is a debt: cash is untouched (10,000 CR on the default start).
     assert_eq!(state.credits, u32::try_from(DEFAULT_CASH).unwrap());
-    // The recorded offence turns the police and military ships hostile.
-    assert!(report.police);
+    // The recorded offence turns any police and military ships hostile (the
+    // default start has none, so no ship answers).
+    assert!(!report.police);
     assert!(nav
         .ships
         .iter()
@@ -373,7 +377,14 @@ fn firing_at_hope_is_fined_and_shows_f236s_message() {
     frame(&mut screen, &viewer, &state, &nav, &report.offence.message);
     save(&screen, "legal-hope.ppm");
 
-    // F783: the police object is removed and clears the alert.
+    // F783: the police object is removed and clears the alert. The default
+    // start has no police, so the scripted capture spawn supplies one, in
+    // pursuit as F238 would leave it.
+    nav.respawn_traffic(&cache, seat, [0.0, 0.0, 1.0]);
+    for ship in &mut nav.ships {
+        ship.provoke();
+    }
+    nav.legal.alert = true;
     let police = nav
         .ships
         .iter_mut()

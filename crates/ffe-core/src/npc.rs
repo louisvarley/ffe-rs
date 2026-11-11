@@ -3393,6 +3393,178 @@ pub fn spawn(
     ships
 }
 
+/// F688's ships as [`crate::spawn::run`] drew them: the original's roles,
+/// models and places, with the port's own positions and flight state (F702's
+/// placement hashes its own explicit state, so it is not part of the shared
+/// pair). The ships' private streams are seeded from each object's seed (the
+/// pair word F703 stored), never from the shared pair.
+///
+/// `anchors` are the system's places in the order [`crate::spawn::World`]
+/// numbers them; `player` picks the anchor the system-wide ships orbit.
+pub fn spawn_plan(
+    player: [i64; 3],
+    anchors: &[Anchor],
+    plan: &[crate::spawn::Spawned],
+    police: Option<u32>,
+    spec: impl Fn(u32) -> Option<Spec>,
+) -> Vec<NpcShip> {
+    use crate::spawn::Role as Planned;
+    let nearest = anchors
+        .iter()
+        .copied()
+        .min_by(|a, b| {
+            distance_between(a.position, player).total_cmp(&distance_between(b.position, player))
+        })
+        .unwrap_or(Anchor {
+            position: player,
+            radius: 1_000_000,
+            station: None,
+            orbital_station: false,
+        });
+    let orbit_of =
+        |anchor: &Anchor| (anchor.radius as f64 * 1.2).clamp(ANCHOR_ORBIT, laser::RANGE * 0.75);
+    let spread = |centre: [i64; 3], rng: &mut Random, angle: f64, radius: f64| {
+        let a = angle + (rng.bounded(16_384) as f64 / 16_384.0 - 0.5) * 0.8;
+        let lift = (rng.bounded(1_000_000) as f64) / 1_000_000.0 * 0.4e6;
+        [
+            centre[0] + (a.cos() * radius) as i64,
+            centre[1] + lift as i64,
+            centre[2] + (a.sin() * radius) as i64,
+        ]
+    };
+    let mut ships: Vec<NpcShip> = Vec::new();
+    let mut leader: Option<u32> = None;
+    let mut escorts = 0usize;
+    for (n, planned) in plan.iter().enumerate() {
+        let Some(mut spec) = spec(planned.outfit.model) else {
+            continue;
+        };
+        spec.model = planned.outfit.model;
+        let id = ships.len() as u32;
+        let type_name = spec.name.clone();
+        spec.name = format!("{} {}", spec.name, id + 1);
+        let mut rng = Random::new(
+            planned.outfit.seed ^ 0x5bd1_e995,
+            (n as u32 + 1).wrapping_mul(0x9e37_79b9),
+        );
+        let anchor = planned
+            .place
+            .and_then(|place| anchors.get(place as usize).copied());
+        let (role, position, holder) = match planned.role {
+            Planned::Trader | Planned::Thargoid => {
+                let home = anchor.unwrap_or(nearest);
+                let position = spread(home.position, &mut rng, n as f64 * 2.1, orbit_of(&home));
+                (
+                    if planned.role == Planned::Trader {
+                        Role::Trader
+                    } else {
+                        Role::Thargoid
+                    },
+                    position,
+                    home.position,
+                )
+            }
+            Planned::Bay => {
+                let home = anchor.unwrap_or(nearest);
+                (Role::Trader, home.position, home.position)
+            }
+            Planned::Aux => {
+                let home = anchor.unwrap_or(nearest);
+                (Role::Shuttle, home.position, home.position)
+            }
+            Planned::PirateLeader | Planned::PirateEscort => {
+                let position = spread(
+                    nearest.position,
+                    &mut rng,
+                    3.6 + n as f64 * 2.1,
+                    orbit_of(&nearest) + PIRATE_LURK,
+                );
+                (Role::Pirate, position, nearest.position)
+            }
+        };
+        let mut ship = NpcShip::new(&spec, role, position, holder, &mut rng);
+        ship.type_name = type_name;
+        ship.id = id;
+        if !role.hostile() {
+            ship.orbit_radius = orbit_of(&anchor.unwrap_or(nearest));
+        }
+        if matches!(role, Role::Trader | Role::Shuttle) {
+            ship.max_speed = ship.max_speed.max(STATION_CRUISE_SPEED);
+            ship.accel = ship.accel.max(STATION_ACCEL);
+        }
+        match planned.role {
+            Planned::Trader => {
+                // F689: it flies to a station for a bay.
+                if let Some(station) = anchor.and_then(|home| home.station) {
+                    ship.begin_transit(station, anchor.map_or(holder, |home| home.position));
+                }
+            }
+            Planned::Bay => {
+                // F691: parked in a bay the caller grants (F650).
+                ship.state = State::Docked;
+                ship.station = anchor.and_then(|home| home.station);
+                ship.bay = None;
+                ship.pad = None;
+                ship.dock_span = docked_object_seconds(rng.advance());
+                ship.dock_timer = ship.dock_span;
+                ship.dock_retry = 0.0;
+                ship.dock_wait = 0.0;
+            }
+            Planned::Aux => {
+                if let Some(home) = anchor {
+                    let around = home.radius as f64 + CAPITAL_ORBIT.max(2.0 * ship.radius as f64);
+                    ship.orbit_radius = around;
+                    ship.position = spread(home.position, &mut rng, 1.0 + n as f64 * 2.1, around);
+                }
+            }
+            Planned::PirateLeader => {
+                ship.bounty = planned
+                    .bounty_group
+                    .and_then(|row| PIRATE_BOUNTIES.get(usize::from(row)).copied())
+                    .unwrap_or(ship.bounty);
+                leader = Some(id);
+                escorts = 0;
+            }
+            Planned::PirateEscort => {
+                ship.bounty = planned
+                    .bounty_group
+                    .and_then(|row| PIRATE_BOUNTIES.get(usize::from(row)).copied())
+                    .unwrap_or(ship.bounty);
+                escorts += 1;
+                ship.state = State::Escort;
+                ship.leader = leader;
+                ship.formation = match escorts {
+                    1 => [400_000, 0, -400_000],
+                    2 => [-400_000, 0, -600_000],
+                    _ => [0, 0, -800_000],
+                };
+            }
+            Planned::Thargoid => {}
+        }
+        ships.push(ship);
+    }
+    // The port's one police patrol (F688 draws none; the response to a wanted
+    // player is the port's reconstruction, see EXP-015). `police` is the
+    // allegiance; the new game's spawn passes `None`.
+    if let Some(allegiance) = police {
+        let mut rng = Random::new(0x504f_4c49, anchors.len() as u32 + 1);
+        let model = model_for(Role::Police, allegiance, &mut rng);
+        if let Some(mut spec) = spec(model) {
+            spec.model = model;
+            let id = ships.len() as u32;
+            let type_name = spec.name.clone();
+            spec.name = format!("{} {}", spec.name, id + 1);
+            let position = spread(nearest.position, &mut rng, 2.6, orbit_of(&nearest));
+            let mut ship = NpcShip::new(&spec, Role::Police, position, nearest.position, &mut rng);
+            ship.type_name = type_name;
+            ship.id = id;
+            ship.orbit_radius = orbit_of(&nearest);
+            ships.push(ship);
+        }
+    }
+    ships
+}
+
 fn offset(anchor: [i64; 3], phase: f64, radius: f64) -> [i64; 3] {
     [
         anchor[0] + (phase.cos() * radius) as i64,

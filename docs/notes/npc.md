@@ -739,6 +739,25 @@ F686's variant therefore does not belong to the new game; the port no longer
 sets `System::start` there. The port-only `System::new_game` omits the port's
 police patrol (the original has none at its start).
 
+## F688 draw for draw (PAR-16, 2026-11-11)
+
+`ffe_core::spawn` replaces the port's count-and-cap spawner for a normal system
+entry. Order, as the executed original traces it: traders `RND(+8)` each with
+F772 (`RND(model list)`, three F1530 steps, F774's `RND(0x33)`, the outfit's
+shield, pylon and gadget draws), F702's F1530 step, F700's `RND(places)`, one
+F1530 step and F775's four destination tries (two of one sector, two within it);
+`RND(F35(0x16))` Thargoids; `RND(4 * places)` bay ships (F772, F700, F650, one
+F1530); `RND(+8)` aux carriers (F701's `RND(orbital stations)`, F772(0xf), F702);
+`RND(+6 << 2)` pirate groups (F698's `RND(4)`: lone pirate, group of one model,
+group of fresh models, nothing; F697's bounty step, and bit 14 of an F1530 word
+ending a group early); and a final `RND(+6)` for F692's empty stub.
+
+The default start's 165 draws, 17 ships and exit state, and Ross 154's exit
+state, equal the original's (`tests/bbs_reference.rs`). Positions are not part
+of the shared pair (F1507 hashes its own explicit state); the port keeps its
+anchor orbits for them. F773's equipment is held in `spawn::Outfit`; the port's
+`NpcShip` still derives its own weapons from the model.
+
 ## Removed: Advanced NPCs (2026-11-11)
 
 The port addition Advanced NPCs (`npc::Life`: approach lanes, convoys,

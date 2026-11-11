@@ -4457,7 +4457,8 @@ impl Navigator {
         // The executed original's new game draws F688's ordinary pass (pirates
         // RND(4 * danger), F691's bay roll, F699), not F686's `start` variant.
         // Only the port's patrol is left out of the new game's spawn.
-        system.new_game = self.new_game.is_some() && self.spawned.is_none();
+        // The scripted capture keeps the police patrol its frames were built with.
+        system.new_game = self.new_game.is_some() && self.spawned.is_none() && !options.guarantee;
         let allegiance = details.allegiance >> 6;
         let anchors: Vec<Anchor> = self
             .bodies
@@ -4481,16 +4482,30 @@ impl Navigator {
         let mut ships = npc::restore(&self.persisted, player, 0);
         self.persisted.clear();
         let base = ships.len() as u32;
-        let spawned = npc::spawn(
-            player,
-            forward,
-            &anchors,
-            &system,
-            allegiance,
-            &mut rng,
-            options,
-            |model| crate::ships::npc_spec(cache, model),
-        );
+        // A normal entry is the original's F688; the scripted capture keeps the
+        // port's guaranteed trader and pirate group.
+        let planned = if options == npc::SpawnOptions::default() {
+            self.plan_traffic(cache, thargoids, &mut rng)
+        } else {
+            None
+        };
+        let spawned = if let Some(plan) = planned {
+            let police = (!system.new_game && details.bytes[2] > 0).then_some(allegiance);
+            npc::spawn_plan(player, &anchors, &plan, police, |model| {
+                crate::ships::npc_spec(cache, model)
+            })
+        } else {
+            npc::spawn(
+                player,
+                forward,
+                &anchors,
+                &system,
+                allegiance,
+                &mut rng,
+                options,
+                |model| crate::ships::npc_spec(cache, model),
+            )
+        };
         for mut ship in spawned {
             ship.id += base;
             ship.leader = ship.leader.map(|leader| leader + base);
@@ -4523,6 +4538,33 @@ impl Navigator {
         self.spawned = Some(self.current);
         self.contract_spawned.clear();
         !self.ships.is_empty()
+    }
+
+    /// The market of station `index` as [`Self::market`] would first make it,
+    /// without recording it: F622 reads each place's stock for the board
+    /// (F641), but a station's market is only kept once it is visited.
+    fn peek_market(
+        &self,
+        cache: &VerifiedCache,
+        index: usize,
+    ) -> Result<[ffe_core::market::Entry; ffe_core::market::GOODS], String> {
+        let code = self.entries[self.current].params.code;
+        if let Some(station) = self.markets.get(&(code, index)) {
+            return Ok(station.market.entries);
+        }
+        let (population, danger, flags) = self.conditions(cache)?;
+        let conditions = Conditions {
+            population,
+            danger,
+            flags: &flags,
+        };
+        let tables = MarketTables::new(&self.market_tables)
+            .map_err(|_| "this cache has no market tables (cache v20)".to_owned())?;
+        let mut rng = RandomState::new(
+            code ^ 0x4d41_524b,
+            (index as u32 + 1).wrapping_mul(0x9e37_79b9),
+        );
+        Ok(Market::generate(&tables, &conditions, &mut rng)?.entries)
     }
 
     /// F622 on entering a system: for each place in order, the market's draws
@@ -4569,10 +4611,7 @@ impl Navigator {
             for _ in 0..99 {
                 rng.advance();
             }
-            let Ok(entries) = self
-                .market(cache, index)
-                .map(|station| station.market.entries)
-            else {
+            let Ok(entries) = self.peek_market(cache, index) else {
                 continue;
             };
             let ctx = bbs::Context {
@@ -4621,6 +4660,103 @@ impl Navigator {
         );
         self.bbs_remembered = remembered;
         self.random = rng;
+    }
+
+    /// F688's ships as the original draws them (`ffe_core::spawn`): the counts
+    /// and every ship's model, role, place and destination, from the shared
+    /// pair. `thargoids` is F35(0x16)'s limit. The bays are counted against each
+    /// place's capacity (F650), the player's own bay already taken.
+    fn plan_traffic(
+        &self,
+        cache: &VerifiedCache,
+        thargoids: usize,
+        rng: &mut npc::Random,
+    ) -> Option<Vec<ffe_core::spawn::Spawned>> {
+        use ffe_core::spawn;
+        let galaxy = Tables::new(cache.asset("base:world/system-tables")?).ok()?;
+        let sectors =
+            ffe_core::sector::Tables::new(cache.asset("base:world/galaxy-tables")?).ok()?;
+        let records = cache.asset("base:model/records")?;
+        let stats = cache.asset("base:ship/stats")?;
+        let gameplay = cache.asset("base:gameplay/tables")?;
+        let models = ShipModels {
+            records,
+            stats,
+            gameplay,
+        };
+        let hull = |model: u32| {
+            let at = 48 * model as usize;
+            let block = stats.get(at..at + 48)?;
+            let word = |a: usize| i16::from_le_bytes([block[a], block[a + 1]]);
+            Some(spawn::Hull {
+                mass: i32::from(word(6)),
+                cargo: models.cargo_space(model)?,
+                missiles: i32::from(word(0x12)),
+                drive_word: word(0x14),
+            })
+        };
+        let code = self.entries[self.current].params.code;
+        let market = galaxy.market(code);
+        let details = galaxy.details(code);
+        let places: Vec<usize> = self
+            .bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, body)| body.kind.is_place())
+            .map(|(index, _)| index)
+            .collect();
+        let orbital: Vec<u32> = places
+            .iter()
+            .enumerate()
+            .filter(|(_, index)| self.bodies[**index].kind == Kind::Station)
+            .map(|(k, _)| k as u32)
+            .collect();
+        let reference_empty: &[u32] = if std::env::var_os("FFE_REFERENCE_GALAXY").is_some() {
+            &ffe_core::bbs::REFERENCE_EMPTY
+        } else {
+            &[]
+        };
+        let world = spawn::World {
+            code,
+            allegiance: details.allegiance >> 6,
+            population: market.population,
+            tech: u32::from(galaxy.tech_level(code)),
+            places: places.len() as u32,
+            orbital: &orbital,
+            galaxy: &galaxy,
+            sectors: &sectors,
+            hull: &hull,
+            empty: reference_empty,
+        };
+        let mut used = vec![0u32; places.len()];
+        if let Some(docked) = self.docked {
+            if let Some(k) = places.iter().position(|index| *index == docked) {
+                used[k] = 1;
+            }
+        }
+        let bays: Vec<u32> = places
+            .iter()
+            .map(|index| u32::from(self.bodies[*index].bays))
+            .collect();
+        let (_, plan) = spawn::run(
+            &world,
+            details.bytes[1],
+            details.bytes[3],
+            u32::try_from(thargoids).unwrap_or(u32::MAX),
+            false,
+            rng,
+            &mut |place| {
+                let k = place as usize;
+                // F650 numbers a station's bays 0..=bays.
+                if used[k] <= bays[k] {
+                    used[k] += 1;
+                    true
+                } else {
+                    false
+                }
+            },
+        );
+        Some(plan)
     }
 
     /// F691/F650: give every initial station-bay ship its bay and start F747's

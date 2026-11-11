@@ -1392,6 +1392,11 @@ window.FFE_BURNDOWN = {
       date: "2026-11-11",
       remaining: 78,
       note: "Play-through fixes (gameplay-2, gameplay-3; no closure): a bought hull carries its own stock drive and a hold net of it (F1533/F441), the start pad is kept after a ship purchase so F4 services work, and time acceleration is held lower near stations and starports (EXP-021) after a 10000x autopilot arrival destroyed the ship."
+    },
+    {
+      date: "2026-11-11",
+      remaining: 78,
+      note: "PAR-16 advanced (not closed): F688's spawn is the original's draw for draw (ffe_core::spawn). The default start's 17 ships match the executed original slot for slot and its RNG exit state, and Ross 154 matches too. Open: F702 system-wide placement (needs PAR-15's AI), F238 police response, start types 2 and 3."
     }
   ]
 };
