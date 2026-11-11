@@ -122,3 +122,45 @@ fn an_integral_drive_is_already_out_of_the_hold() {
     assert_eq!(state.loadout.drive, 0x0d);
     assert_eq!(trade::capacity(&nav, &cache, &state), 1207);
 }
+
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn the_panther_clipper_comes_with_its_class_8_hyperdrive_built_in() {
+    let cache = cache();
+    let mut nav = Navigator::new_game(&cache, 0).unwrap();
+    let mut state = bought(&cache, &mut nav, 62);
+    // Model 62: a negative drive word, class 9 (the Class 8 Hyperdrive).
+    assert_eq!(nav.hull_drive(&cache, 62), (9, true));
+    assert_eq!(state.loadout.drive, 9);
+    let free = trade::capacity(&nav, &cache, &state);
+    assert!(
+        free > 1_000,
+        "the hold is the cargo statistic, net of the drive"
+    );
+    // It cannot be sold (F411) and nothing else fits beside it (F409).
+    let class_eight = record("Class 8 Hyperdrive");
+    let sold = outfitting::remove(
+        class_eight,
+        0xff,
+        &mut state.loadout,
+        &mut state.combat,
+        &mut state.credits,
+        limits(free, false),
+    );
+    assert_eq!(
+        sold,
+        Err("The drive is an integral part of your ship.".to_owned())
+    );
+    let fitted = outfitting::fit(
+        record("Class 1 Hyperdrive"),
+        0xff,
+        &mut state.loadout,
+        &mut state.combat,
+        &mut state.credits,
+        limits(free, false),
+    );
+    assert_eq!(
+        fitted,
+        Err("You may have only one drive system.".to_owned())
+    );
+}
