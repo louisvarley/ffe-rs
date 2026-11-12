@@ -622,7 +622,7 @@ impl Prefs {
                     };
                     rows.push(row(
                         176,
-                        70 + 10 * index as i32,
+                        66 + 10 * index as i32,
                         label,
                         Action::DisplayFilter(filter),
                         Mark::Radio(self.display.filter == filter),
@@ -632,7 +632,7 @@ impl Prefs {
                 }
                 rows.push(row(
                     32,
-                    104,
+                    96,
                     "Fullscreen",
                     Action::Fullscreen,
                     Mark::Toggle(self.fullscreen),
@@ -647,7 +647,7 @@ impl Prefs {
                     };
                     rows.push(row(
                         176,
-                        124 + 10 * index as i32,
+                        126 + 10 * index as i32,
                         label,
                         Action::DisplayAspect(aspect),
                         Mark::Radio(self.display.aspect == aspect),
@@ -657,7 +657,7 @@ impl Prefs {
                 }
                 rows.push(row(
                     32,
-                    124,
+                    106,
                     "Scanlines",
                     Action::Scanlines,
                     Mark::Toggle(self.display.scanlines),
@@ -667,8 +667,8 @@ impl Prefs {
                 // Show intensity slider when scanlines are enabled
                 if self.display.scanlines {
                     rows.push(row(
-                        176,
-                        124,
+                        32,
+                        116,
                         "Intensity",
                         Action::ScanlineIntensity,
                         Mark::Action,
@@ -676,7 +676,7 @@ impl Prefs {
                         15,
                     ));
                 }
-                rows.push(main_menu(32, 156));
+                rows.push(main_menu(32, 136));
             }
             _ => {}
         }
@@ -845,13 +845,13 @@ impl Prefs {
                 });
                 texts.push(Text {
                     x: 176,
-                    y: 60,
+                    y: 56,
                     text: "Filter:",
                     colour: 16,
                 });
                 texts.push(Text {
                     x: 176,
-                    y: 94,
+                    y: 116,
                     text: "Pixels:",
                     colour: 16,
                 });
@@ -859,8 +859,8 @@ impl Prefs {
                 if self.display.scanlines {
                     let intensity_pct = (self.display.scanline_intensity * 100.0) as i32;
                     texts.push(Text {
-                        x: 220,
-                        y: 124,
+                        x: 132,
+                        y: 116,
                         text: match intensity_pct {
                             20 => "20%",
                             30 => "30%",
@@ -874,14 +874,14 @@ impl Prefs {
                 }
                 texts.push(Text {
                     x: 32,
-                    y: 142,
+                    y: 148,
                     text: "Alt+Enter: fullscreen. Choices apply at once.",
                     colour: 15,
                 });
                 texts.push(Text {
                     x: 32,
-                    y: 166,
-                    text: "Port extension; the 320x200 game screen is unchanged.",
+                    y: 126,
+                    text: "Port extension.",
                     colour: 18,
                 });
             }
@@ -1163,12 +1163,12 @@ mod tests {
         assert_eq!(prefs.display.fit, FitMode::FillWindow);
         prefs.click(178, 80);
         assert_eq!(prefs.display.filter, Filter::Linear);
-        prefs.click(178, 134);
+        prefs.click(178, 136);
         assert_eq!(prefs.display.aspect, PixelAspect::Square);
         // Fullscreen is a session-only toggle.
-        prefs.click(34, 104);
+        prefs.click(34, 96);
         assert!(prefs.fullscreen);
-        prefs.click(34, 104);
+        prefs.click(34, 96);
         assert!(!prefs.fullscreen);
         // The main page keeps its original rows; the Port Options page opens
         // the display page from the port-only row at y 104.
@@ -1176,7 +1176,7 @@ mod tests {
         assert_eq!(prefs.click(34, 104), Activate::None);
         assert_eq!(prefs.page, DISPLAY);
         // The Main Menu row returns.
-        prefs.click(34, 156);
+        prefs.click(34, 136);
         assert_eq!(prefs.page, MAIN);
     }
 }

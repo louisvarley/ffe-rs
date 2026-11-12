@@ -25,7 +25,7 @@ full-screen key.
 |---|---|---|---|
 | `DisplaySettings::scale` | 1..=6 | 4 | initial window size: 320x240 (4:3) or 320x200 (square) times this |
 | `FitMode` | `PixelPerfect`, `FillWindow` | `PixelPerfect` | largest integer multiple with black bars, or the whole frame fitted by aspect |
-| `Filter` | `Nearest`, `Linear` | `Nearest` | linear only differs when the fit is fractional |
+| `Filter` | `Nearest`, `Linear`, `XbrzX2`, `XbrzX3`, `Scale2x` | `Nearest` | linear only differs when the fit is fractional |
 | `PixelAspect` | `Dos43`, `Square` | `Dos43` | 320x200 shown as 320x240, or as a square-pixel 16:10 image |
 | `Prefs::fullscreen` | on/off | off | borderless monitor-sized window via `Alt+Enter`; session-only |
 
