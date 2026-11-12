@@ -85,6 +85,18 @@ Hope start (`--game-frame`, 320x200 indexed): 2187 differing pixels before,
 - Still different: an orange tower's stem (drawn in front of a dark building
   in the original), a small red-roofed object at about (52-65, 76-82), and the
   scanner contacts. Object placement and depth, recorded on PAR-07.
+- Update 2026-11-12: the "orange tower" is the setting star, and its depth
+  against the buildings is right (the star queue, above). What was left in its
+  top outline (rows 44-52) was the corona ring's colour: F1877 fades the ring's
+  seven colours from the material to the sky colour it reads from
+  `DATA_008815..8817` on entry, and that colour persists from the last call
+  that set it. The port started every surface with a zero sky colour, so the
+  ring faded to black and drew a dark outline where the original blends into
+  the sky (palette entries 145-184). `ModelViewer::sky_colour` now carries it
+  between calls and frames. Against the executed original (`jjffe-smoke
+  --start-key=0x39 --game-frame 180 0xff`), the star's rim pixels now match
+  index for index; seven pixels on the disc's right edge (rows 49-52,
+  x 167-169) still differ by a vertex rounding.
 
 ## 2026-11-10 — PAR-06 done: F1037's module gate and the recorded key chain
 

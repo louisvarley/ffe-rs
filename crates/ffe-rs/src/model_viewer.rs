@@ -271,6 +271,9 @@ pub struct ModelViewer {
     /// background flag and colour the original clears the next upper view to.
     /// [`ModelViewer::clear_haze_sky`] begins a frame's scene.
     pub haze_sky: std::cell::Cell<Option<[u8; 3]>>,
+    /// `DATA_008815..8817`: the sky colour F1877 last stored. It persists
+    /// across frames, and the next F1877 call reads it on entry.
+    sky_colour: std::cell::Cell<[u8; 3]>,
     /// The longest axis vector of the last surface drawn: the planet's radius in
     /// the model's units.
     pub surface_extent: std::cell::Cell<f64>,
@@ -649,6 +652,7 @@ impl ModelViewer {
             surface_seed: std::cell::Cell::new(0),
             surface_detail: std::cell::Cell::new(1),
             haze_sky: std::cell::Cell::new(None),
+            sky_colour: std::cell::Cell::new([0; 3]),
             surface_extent: std::cell::Cell::new(0.0),
             world_units: Vec::new(),
             descriptors: Vec::new(),
@@ -1667,7 +1671,13 @@ impl ModelViewer {
                 material,
                 ..shading
             };
-            let mut sky = Sky::default();
+            // F1877 reads `DATA_008815..8817` on entry: the sky colour an
+            // earlier call left, which only F1052's flag clear leaves alone. A
+            // star's corona ring fades into it.
+            let mut sky = Sky {
+                colour: self.sky_colour.get(),
+                flag: 0,
+            };
             let outcome = draw_planet(
                 &mut terrain,
                 &scene,
@@ -1686,6 +1696,7 @@ impl ModelViewer {
             // the atmosphere: the original's F1052 clears the next upper view to
             // it (`DATA_008814..8817`), and only draws stars when the flag is 0.
             if sky.flag != 0 {
+                self.sky_colour.set(sky.colour);
                 let [red, green, blue] = sky.colour;
                 haze = Some(u16::from(red) << 8 | u16::from(green) << 4 | u16::from(blue));
             }
