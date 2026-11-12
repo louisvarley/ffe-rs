@@ -1371,15 +1371,12 @@ impl Screen {
                         let rows = disc
                             .orientation
                             .map(|axis| camera.direction(axis).map(|v| v * shrunk));
-                        // F1777's key is the depth times 2^(scale - 3): the
-                        // shrunk position keeps its key with the shrink added.
+                        // The shrink is already in the matrix, which every child call
+                        // inherits. The instance key scale must stay F1680's: adding the
+                        // shrink to it would shrink the ring child a second time (F1750
+                        // subtracts it from the child scale) and collapse the rings.
                         if let Ok(frame) = viewer.render_scene_with_instance(
-                            model,
-                            rows,
-                            position,
-                            light,
-                            &inputs,
-                            key_scale + shrink as i32,
+                            model, rows, position, light, &inputs, key_scale,
                         ) {
                             self.draw_frame(viewer, &frame);
                             continue;

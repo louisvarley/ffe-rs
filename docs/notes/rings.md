@@ -83,6 +83,21 @@ does `e` go negative; `draw_discs` does not render the surface that far out.
   63 px** at the F1680 key scale, versus **1 degenerate entry at 0 px** with the
   old 0. The `saturn_draws_its_ring` numbers are from the current `data.bin`.
 
+## Ross 154 / Merlin start fix (2026-11-12)
+
+At the Ross 154 start, Aster (model 135, seed `0x78ff8d40`, global 2 >> 14 = 2)
+is about 6.7 radii from Merlin. The 2026-10-28 fix was applied, but rings still
+did not show: `draw_discs` shrinks the matrix and position by 2^5 there and passed
+`key_scale + shrink` as the instance key scale. The matrix shrink is inherited by
+the ring child, and F1750 then subtracted the shrink from the child scale again,
+so the ring was shrunk twice (8 degenerate polygons about 4 px wide at y = 79).
+`draw_discs` now passes F1680's key scale unchanged (Aster's descriptor offset is 6,
+Saturn's 10). The ring draws at full size and the globe occludes its far side.
+Regression: `planet_view.rs::ross_154_giant_draws_its_rings_from_merlin`
+(local-only, `FFE_WORLD_CACHE`, 3011 pixels differ with and without the ring).
+The shrink no longer touches the depth key; this only orders shapes within the one
+planet's frame, which `draw_discs` draws on its own.
+
 ## Still open
 
 - A frame-level comparison (Saturn through the reference and the port) would
@@ -90,7 +105,7 @@ does `e` go negative; `draw_discs` does not render the surface that far out.
   child runs with sane geometry, not pixel equality.
 - `draw_discs` still shrinks a distant planet's matrix by a power of two instead
   of using F1680's full `e`/`+0x148` adjustment. That is now independent of the
-  ring's child scale, so it no longer breaks the ring, but a very distant
+  ring's child scale (the shrink is no longer added to the key scale), but a very distant
   planet's ring size may still differ slightly. Visible planets keep
   `key_scale = descriptor offset`, so the difference starts beyond the range
   where the surface renderer is used.

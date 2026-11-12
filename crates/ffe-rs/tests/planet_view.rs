@@ -1936,3 +1936,71 @@ fn saturn_draws_its_ring() {
         broken.0
     );
 }
+
+/// Ross 154's start: Aster (model 135, seed global 2 >> 14 = 2) seen from Merlin at
+/// about 7 radii. `draw_discs` shrinks the matrix by 2^5 there; adding that shrink to
+/// the instance key scale collapsed the ring child to a few pixels (no visible ring).
+#[test]
+#[ignore = "Local-only: needs the content cache (FFE_WORLD_CACHE)"]
+fn ross_154_giant_draws_its_rings_from_merlin() {
+    use ffe_rs::camera::ViewState;
+    use ffe_rs::flight::{Flight, Mode};
+    use ffe_rs::navigation::Navigator;
+    use ffe_rs::original_flight::UNITS_PER_FLIGHT_UNIT as UNIT;
+    use ffe_rs::screen::Disc;
+    let cache =
+        ffe_content::read(&std::fs::read(std::env::var_os("FFE_WORLD_CACHE").unwrap()).unwrap())
+            .unwrap();
+    let viewer = ModelViewer::new(&cache).unwrap();
+    let nav = Navigator::new_game(&cache, 1).unwrap();
+    let merlin = nav.bodies.iter().find(|b| b.name == "Merlin").unwrap();
+    let giant = &nav.bodies[merlin.parent.expect("Merlin's planet")];
+    eprintln!("giant {} model {} seed {:#x}", giant.name, giant.model, giant.seed);
+    let to: [f64; 3] = std::array::from_fn(|k| (giant.position[k] - merlin.position[k]) as f64);
+    let dist = to.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let forward = to.map(|v| v / dist);
+    let mut right = [forward[2], 0.0, -forward[0]];
+    let l = right.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-9);
+    right = right.map(|v| v / l);
+    let up = [
+        forward[1] * right[2] - forward[2] * right[1],
+        forward[2] * right[0] - forward[0] * right[2],
+        forward[0] * right[1] - forward[1] * right[0],
+    ];
+    let state = Flight {
+        mode: Mode::Flight,
+        system_flight: true,
+        axes: Some([right, up, forward]),
+        position: merlin.position.map(|v| v as f64 / UNIT),
+        ..Flight::default()
+    };
+    eprintln!("distance {:.2} giant radii", dist / giant.radius as f64);
+    let draw = |seed: u32, tag: &str| {
+        let mut screen = Screen::new(&cache).unwrap();
+        screen.discs = vec![Disc {
+            system_type: None,
+            centre: giant.position.map(|v| v as f64 / UNIT),
+            radius: ffe_rs::navigation::surface_radius(giant, false),
+            light: [1.0, 0.0, 0.0],
+            colours: (12, 4),
+            star: false,
+            temperature: None,
+            model: Some((giant.model, seed)),
+            orientation: giant.orientation,
+        }];
+        screen.draw(&state, ViewState::default(), Some(&viewer), false, "");
+        if let Some(dir) = std::env::var_os("FFE_SHOT_DIR") {
+            let mut ppm = b"P6\n320 200\n255\n".to_vec();
+            for p in screen.logical_pixels() {
+                ppm.extend([(p >> 16) as u8, (p >> 8) as u8, *p as u8]);
+            }
+            std::fs::write(std::path::Path::new(&dir).join(format!("ross-{tag}.ppm")), ppm).unwrap();
+        }
+        screen.logical_pixels()[..320 * 158].to_vec()
+    };
+    let with = draw(giant.seed, "ring");
+    let without = draw(giant.seed & !0xc000, "noring");
+    let changed = with.iter().zip(&without).filter(|(a, b)| a != b).count();
+    eprintln!("ring changes {changed} pixels");
+    assert!(changed > 200, "the ring must draw ({changed} pixels)");
+}
