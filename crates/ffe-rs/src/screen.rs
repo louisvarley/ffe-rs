@@ -2489,7 +2489,14 @@ impl Screen {
                 self.lift = Some(lift);
             }
             // F1776's muzzle beam, drawn with the scene on the firing frame.
-            if let (Some(beam), Some(scene)) = (self.beam, scene) {
+            // The executed original changes no pixel of a cockpit view when
+            // the player fires (Eagle at Merlin and Saker at Hope, front
+            // view; `FFE_FIRE_AT`, `docs/notes/combat.md` §6.2), so the ray
+            // is only drawn from the external camera. Drawing it from the
+            // Eagle's gun, 25 units behind its eye, spread a near-clipped
+            // wedge over the whole view.
+            let beam = beam_visible(view).then_some(self.beam).flatten();
+            if let (Some(beam), Some(scene)) = (beam, scene) {
                 self.draw_beam(scene, state, &beam, &camera);
             }
             // Text labels (`l`): the original's F989 walks the live objects and
@@ -3781,6 +3788,13 @@ const STATION_SPEED: i8 = ffe_core::model_animation::ORBITAL_CITY_SPEED;
 pub fn flight_tics(state: &Flight) -> u32 {
     ffe_core::model_animation::START_TICS
         .wrapping_add((state.ticks as u32).wrapping_mul(ffe_core::model_animation::TICS_PER_FRAME))
+}
+
+/// Whether F1776's beam model is drawn in `view`: only from the external
+/// camera, where the gun is in front of the eye. The original's cockpit views
+/// show no beam pixel when the player fires.
+fn beam_visible(view: ViewMode) -> bool {
+    view == ViewMode::External
 }
 
 /// Model units per flight unit: station 74's extent fills the old 40-unit

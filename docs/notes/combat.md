@@ -425,6 +425,31 @@ Owner report: "lasers do not seem to fire quite right." Reproduced and fixed:
   and F1099's readout). `verify-combat.py` now runs `--laser-probe` and the new
   view test.
 
+### 6.2 The wide beam at Merlin / Ross 154 (2026-11-12)
+
+Report: at the Ross 154 start the laser beam is much wider than at Hope.
+
+- **Not a laser type.** Both starts fit `ship+0xd2 = 0x88` (1MW pulse). The
+  hulls differ: the Eagle (model 23, `--start 1`, Merlin) has eye `1500/30` and
+  front gun `1300/0`, so the gun is 25 units **behind** the eye; the Saker
+  (model 31, Hope) has eye `1800/400` and gun `2200/0`, 50 units ahead of it.
+- **Cause in the port.** `Screen::draw_beam` drew model 156's ray from the gun.
+  With the gun behind the eye the ray's polygon is near-clipped and fans out
+  into a red wedge over the whole front view (about 500 px wide at the bottom);
+  the Saker's gun in front of the eye gives a thin line.
+- **Original.** `jjffe-smoke --game-frame 902 0xff` with `FFE_TAKEOFF=1`
+  (Tab launch, Return/keypad 8 thrust) and `FFE_FIRE_AT=900` (real F931 on the
+  player's front mount at the end of frame 900) was run for `--start-key=0x02`
+  (Merlin/Eagle) and `0x39` (Hope/Saker), against the same run without the
+  shot. In both, **no pixel of the 320x158 view differs**; only the message log
+  and heat bar change. F1536 does clear `+0x151` bit 1 (fired) on the next
+  frame, but bit 4 (front mount, cleared by F1776) stays set; why F1776 leaves
+  it is not explained, so this is evidence from the probe, not a reading of the
+  model program.
+- **Fix.** The beam model is drawn only from the external camera
+  (`screen::beam_visible`). The earlier "ray from the gun" in cockpit views was
+  not in the original (it agrees with §2.2). The external view is unprobed.
+
 ## 7. Reachability and what remains
 
 **Reachable today:** the crosshair in the front view of the new-game Eagle, the

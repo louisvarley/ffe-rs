@@ -869,7 +869,7 @@ void InputKeybReadStates(UCHAR *keys)
     }
     /* F1037 reads Return (0x1c) to raise the set speed; F1043 reads numpad 8
        (0x48) for forward thrust. Both are raw scancodes. */
-    if (((flight_mode && flight_scenario != 0) || (misjump_mode && !misjump_frame)) &&
+    if (((flight_mode && flight_scenario != 0) || (misjump_mode && !misjump_frame) || (game_frame_mode && getenv("FFE_TAKEOFF"))) &&
         frames >= flight_thrust_frame) {
         keys[0x1c] = 0;
         keys[0x48] = 0;
@@ -888,7 +888,7 @@ long InputKeybGetLastKey(void)
     }
     /* Action 9 (launch): the scancode table maps plain Tab (0x0f) to it. One
        edge is enough; F1056's JUMP_004417 handles it. */
-    if (((flight_mode && flight_scenario != 0) || misjump_mode) && !flight_launch_sent && frames >= flight_launch_frame) {
+    if (((flight_mode && flight_scenario != 0) || misjump_mode || (game_frame_mode && getenv("FFE_TAKEOFF"))) && !flight_launch_sent && frames >= flight_launch_frame) {
         flight_launch_sent = 1;
         return 0x0f;
     }
@@ -910,6 +910,19 @@ void TimerFrameUpdate(void)
 {
     if (vector_mode) return;
     if (game_frame_mode) {
+        /* FFE_FIRE_AT=<frame>: the real F931 on the player's front mount at
+           the end of that frame, so the next frame draws F1776's beam. */
+        const char *fire_at = getenv("FFE_FIRE_AT");
+        unsigned long fire_player = state_u32(0xc8);
+        if (fire_at && frames == strtoul(fire_at, 0, 0) && fire_player != 0)
+            ref_laser_fire((unsigned char *)fire_player, 0);
+        if (fire_at && fire_player != 0 && frames >= strtoul(fire_at, 0, 0) && frames < strtoul(fire_at, 0, 0) + 4)
+        {
+            unsigned char *o = (unsigned char *)fire_player;
+            unsigned long model_index = o[0x82] | o[0x83] << 8 | o[0x84] << 16 | o[0x85] << 24;
+            unsigned long *descriptor = model_index < 600 ? ref_model((int)model_index) : 0;
+            fprintf(stderr, "frame %lu flags %02x model %lu descriptor %p stats %08lx\n", frames, o[0x151], model_index, (void *)descriptor, descriptor ? descriptor[0x38 / 4] : 0);
+        }
         /* a frame hash only: the trace stays small */
         if (no_intro_start)
             printf("{\"frame\":%lu,\"tics\":%lu,\"pixels_fnv1a64\":\"%016llx\"}\n", frames, state_u32(0), (unsigned long long)fingerprint(pixels, sizeof(pixels)));

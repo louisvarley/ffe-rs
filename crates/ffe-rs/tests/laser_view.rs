@@ -225,9 +225,8 @@ fn a_60hz_pulse_sequence_aims_fires_and_damages_an_npc() {
             laser::Damage::Hull
         ]
     );
-    // F1776's model 0x9c draws the ray from the gun to the target (global 37,
-    // F931's length) in the front view; its muzzle sits behind the eye.
-    assert!(ray_changed > 0, "the front view did not draw the ray");
+    // The executed original shows no beam in a cockpit view (combat.md §6.2).
+    assert_eq!(ray_changed, 0, "the front view drew a ray");
     let ship = nav.ships.iter().find(|ship| ship.id == id).unwrap();
     assert_eq!(ship.damage.shields, 0);
     assert_eq!(ship.damage.hull, 50);

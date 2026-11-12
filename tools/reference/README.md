@@ -205,6 +205,17 @@ nineteen records.
   uninitialised base handedness); read that oracle by its counts (440 compared,
   0 mismatched).
 
+## Firing in the real game (`--game-frame`)
+
+With `--game-frame <frames> 0xff` (no key), two environment variables script
+the real game: `FFE_TAKEOFF=1` sends the launch key at frame 170 and holds
+Return/keypad 8 from frame 260 (as `--flight takeoff`), and `FFE_FIRE_AT=<frame>`
+calls the real F931 on the player's front mount at the end of that frame and
+prints `+0x151`, the model and its statistics pointer to stderr. Use
+`--start-key=0x02` (Ross 154/Eagle) or `0x39` (Hope/Saker). The final frame is
+`game-frame.bin`; compare a run with and without `FFE_FIRE_AT`
+(`docs/notes/combat.md` §6.2).
+
 ## Mis-jump probe
 
 `FFE_RNG_TRACE=<file>` with any `jjffe-smoke` state mode (for example

@@ -478,12 +478,13 @@ fn beam_is_model_156_at_the_gun_only_where_it_is_in_front() {
     screen.beam = Some(beam);
     draw(&mut screen, &state, views, Some(&viewer));
     save(&screen, "combat-beam-front.ppm");
-    // The cone itself stays culled (above), but F1776 also reads F931's shot
-    // length (global 37) and draws the ray from the gun forward, which is in
-    // front of the eye.
-    assert!(
-        changed(&before, screen.logical_pixels(), 0, 320, 0, 158) > 0,
-        "the front view did not draw the ray"
+    // The executed original changes no pixel of the cockpit view when the
+    // player fires (FFE_FIRE_AT probe, combat.md §6.2), so the Eagle's ray,
+    // which starts behind its eye, must not spread a wedge over the view.
+    assert_eq!(
+        changed(&before, screen.logical_pixels(), 0, 320, 0, 158),
+        0,
+        "the front view drew a beam the original does not"
     );
 
     // The external camera is 49 m behind the ship, so the gun is in front of it
