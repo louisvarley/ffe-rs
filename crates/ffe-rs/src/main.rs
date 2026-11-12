@@ -922,7 +922,7 @@ const NEAR_WORLD_ACCELERATION: usize = 2;
 /// at near a station or starport, with the station's name. `moved` is the
 /// distance the ship covered in one frame at 1x. The step may not carry it more
 /// than an eighth of the way to the nearest one in a frame, and is held to 100x
-/// within 2000 station radii, 10x within 200 and 1x within 20. `None` when no
+/// within 50 station radii, 10x within 10 and 1x within 2. `None` when no
 /// step needs holding.
 fn station_acceleration_cap(
     bodies: &[ffe_rs::navigation::Body],
@@ -939,11 +939,11 @@ fn station_acceleration_cap(
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))?;
     let mut cap = ffe_rs::console::TIME_ACCELERATION.len() - 1;
-    let floor = if gap < 20.0 * radius {
+    let floor = if gap < 2.0 * radius {
         0
-    } else if gap < 200.0 * radius {
+    } else if gap < 10.0 * radius {
         1
-    } else if gap < 2000.0 * radius {
+    } else if gap < 50.0 * radius {
         2
     } else {
         cap
